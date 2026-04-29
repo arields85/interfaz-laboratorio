@@ -91,6 +91,47 @@ Si WebGL no está disponible o el shader falla:
 
 ---
 
+## Boot & Reload Shield
+
+Para cubrir el hueco entre el HTML inicial, el mount de React y el teardown por reload, la shell ahora usa un **shield estático** (`#hmi-shield`) definido en [`hmi-app/index.html`](../hmi-app/index.html).
+
+### Secuencia de boot
+
+1. El navegador parsea `index.html` y pinta inmediatamente un fondo oscuro con `var(--color-industrial-bg, #05070a)`.
+2. `#hmi-shield` queda visible por encima de todo el documento con el mensaje fijo `ACTUALIZANDO DATOS`, un cursor-loader monocromático CSS-only y fallback `Consolas, monospace`.
+3. [`useBootShield`](../hmi-app/src/hooks/useBootShield.ts) espera:
+   - `document.fonts.ready` si el navegador soporta FontFaceSet,
+   - validación adicional con `document.fonts.check(...)` para las fuentes reales de la app cuando está disponible,
+   - la señal real `webgl-first-draw` del canvas shader cuando existe,
+   - múltiples `requestAnimationFrame` para garantizar un frame compuesto estable,
+   - un tiempo mínimo visible conservador para no destapar tipografías/layout todavía inestables,
+   - y un timeout acotado de 5s para no dejar la HMI bloqueada si algo no resuelve.
+4. Cuando la shell está lista, el shield hace fade-out, queda oculto/inerte y se reutiliza si después hay un reload por teclado.
+
+### Secuencia de reload por teclado
+
+[`useReloadShield`](../hmi-app/src/hooks/useReloadShield.ts) vive en [`App`](../hmi-app/src/App.tsx) porque esto es lifecycle global de shell y debe cubrir tanto viewer como `/admin`, no solo `MainLayout`:
+
+1. Intercepta en capture phase `Ctrl+R`, `Ctrl+Shift+R`, `F5` y también `Meta+R`.
+2. Si el evento es cancelable y el documento tiene foco, hace `preventDefault()`.
+3. Re-muestra `#hmi-shield`, oculta el canvas marcado con `data-hmi-shader-canvas` y espera un `requestAnimationFrame`.
+4. Recién ahí dispara `location.reload()` para que el último frame visible siga siendo oscuro.
+
+### Hardening WebGL
+
+El canvas pide el contexto con `alpha: false`. Eso vuelve opaco el backbuffer y evita que el compositor muestre un frame blanco detrás del shader durante descartes/transiciones de unload.
+
+- No cambia el output visual: el fragment shader ya escribe `gl_FragColor = vec4(col, 1.0)`.
+- El canvas marca `data-hmi-webgl-ready="true"` y emite `webgl-first-draw` después del draw sincrónico inicial para que el gate de boot pueda resolver incluso si el evento ocurrió antes de enganchar el listener.
+
+### Limitaciones conocidas
+
+- **Toolbar / browser chrome reload**: no se puede interceptar desde JavaScript de página. Ahí solo ayudan el fondo oscuro temprano y `alpha: false`.
+- **`location.reload()` no preserva hard-reload cache bypass**: visualmente protege, pero semánticamente se comporta como reload programático normal.
+- **Si el JS no carga**: el shield queda visible en forma permanente. Es aceptable porque muestra un estado oscuro y legible en vez de UI rota o flash blanco.
+
+---
+
 ## Panel de Control (Shader Tweaks)
 
 Botón de engranaje en la esquina inferior izquierda. Permite ajustar TODOS los parámetros en tiempo real:

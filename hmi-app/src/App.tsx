@@ -5,7 +5,12 @@
 // Arquitectura Técnica v1.3 §7.1
 // =============================================================================
 import AppRouter from './app/router';
+import { useBootShield } from './hooks/useBootShield';
+import { useReloadShield } from './hooks/useReloadShield';
 
 export default function App() {
+    useBootShield();
+    useReloadShield();
+
     return <AppRouter />;
 }

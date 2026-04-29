@@ -5,6 +5,7 @@
 import { useEffect, useRef } from 'react';
 import { useShaderParamsStore, UNIFORM_MAP } from '../../store/shaderParams.store';
 import type { ShaderParams } from '../../store/shaderParams.store';
+import { SHADER_READY_ATTRIBUTE, WEBGL_FIRST_DRAW_EVENT } from '../../hooks/useBootShield';
 
 // ---------------------------------------------------------------------------
 // Shaders
@@ -344,6 +345,7 @@ export default function EventHorizonBackground() {
         // --- Full GL init (called on mount AND on context restore) ---
         function initGL(): boolean {
             gl = canvas!.getContext('webgl', {
+                alpha: false,
                 antialias: false,
                 premultipliedAlpha: false,
                 powerPreference: 'high-performance',
@@ -394,6 +396,8 @@ export default function EventHorizonBackground() {
                 }
                 if (uClicks) gl.uniform4fv(uClicks, new Float32Array(32));
                 gl.drawArrays(gl.TRIANGLES, 0, 3);
+                canvas!.setAttribute(SHADER_READY_ATTRIBUTE, 'true');
+                canvas!.dispatchEvent(new CustomEvent(WEBGL_FIRST_DRAW_EVENT, { bubbles: true }));
             }
 
             return true;
@@ -525,6 +529,7 @@ export default function EventHorizonBackground() {
         <canvas
             ref={canvasRef}
             className="fixed inset-0 w-full h-full"
+            data-hmi-shader-canvas="true"
             style={{ zIndex: 1, pointerEvents: 'none', backgroundColor: 'var(--color-industrial-bg)' }}
             aria-hidden="true"
         />
