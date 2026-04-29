@@ -13,7 +13,7 @@ describe('dataOverview.service', () => {
                 return null;
             }
 
-            return `${baseUrl.replace(/\/+$/, '')}/api/hmi/overview`;
+            return `${baseUrl.replace(/\/+$/, '')}/api/hmi-data`;
         });
     });
 
@@ -61,7 +61,7 @@ describe('dataOverview.service', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         await expect(fetchDataOverview()).resolves.toEqual(payload);
-        expect(fetchMock).toHaveBeenCalledWith('https://node-red.local/api/hmi/overview', {
+        expect(fetchMock).toHaveBeenCalledWith('https://node-red.local/api/hmi-data', {
             method: 'GET',
             headers: { Accept: 'application/json' },
         });

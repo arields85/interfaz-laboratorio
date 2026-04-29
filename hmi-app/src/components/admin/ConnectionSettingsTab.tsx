@@ -4,6 +4,7 @@ import AdminActionButton from './AdminActionButton';
 import { ADMIN_SIDEBAR_LABEL_CLS, ADMIN_SIDEBAR_INPUT_CLS, ADMIN_SIDEBAR_HINT_CLS } from './adminSidebarStyles';
 import {
     DATA_DEFAULT_ENDPOINT,
+    DATA_DEFAULT_HISTORY_ENDPOINT,
     clearDataEndpoint,
     clearDataHistoryEndpoint,
     getDataBaseUrl,
@@ -33,11 +34,11 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
     const queryClient = useQueryClient();
     const [draftUrl, setDraftUrl] = useState('');
     const [draftEndpoint, setDraftEndpoint] = useState(DATA_DEFAULT_ENDPOINT);
-    const [draftHistoryEndpoint, setDraftHistoryEndpoint] = useState('');
+    const [draftHistoryEndpoint, setDraftHistoryEndpoint] = useState(DATA_DEFAULT_HISTORY_ENDPOINT);
     useEffect(() => {
         setDraftUrl(getSavedDataBaseUrl() || (getDataBaseUrl() ?? ''));
         setDraftEndpoint(getSavedDataEndpoint() || DATA_DEFAULT_ENDPOINT);
-        setDraftHistoryEndpoint(getSavedDataHistoryEndpoint());
+        setDraftHistoryEndpoint(getSavedDataHistoryEndpoint() || DATA_DEFAULT_HISTORY_ENDPOINT);
     }, []);
 
     const previewSnapshotUrl = useMemo(() => {
@@ -101,7 +102,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
         clearDataHistoryEndpoint();
         setDraftUrl('');
         setDraftEndpoint(DATA_DEFAULT_ENDPOINT);
-        setDraftHistoryEndpoint('');
+        setDraftHistoryEndpoint(DATA_DEFAULT_HISTORY_ENDPOINT);
         queryClient.invalidateQueries({ queryKey: DATA_OVERVIEW_QUERY_KEY });
         queryClient.invalidateQueries({ queryKey: DATA_HISTORY_QUERY_KEY_PREFIX });
         onStatusChange?.(true);
@@ -142,7 +143,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                         setDraftEndpoint(e.target.value);
                         onDirtyChange?.(true);
                     }}
-                    placeholder="/api/hmi/overview"
+                    placeholder="/api/hmi-data"
                     className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
                 />
                 <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>

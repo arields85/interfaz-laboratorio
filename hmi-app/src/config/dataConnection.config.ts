@@ -13,7 +13,8 @@
 
 export const DATA_DEFAULT_REFETCH_INTERVAL = 5_000;
 export const DATA_DEFAULT_STALE_TIME = 4_000;
-export const DATA_DEFAULT_ENDPOINT = '/api/hmi/overview';
+export const DATA_DEFAULT_ENDPOINT = '/api/hmi-data';
+export const DATA_DEFAULT_HISTORY_ENDPOINT = '/api/hmi-data/history';
 
 const LS_KEY_BASE_URL = 'hmi:node-red-base-url';
 const LS_KEY_ENDPOINT = 'hmi:node-red-endpoint';
@@ -114,7 +115,7 @@ export function getDataHistoryEndpoint(): string | null {
     } catch {
         // localStorage unavailable
     }
-    return null;
+    return DATA_DEFAULT_HISTORY_ENDPOINT;
 }
 
 export function saveDataHistoryEndpoint(endpoint: string): void {
