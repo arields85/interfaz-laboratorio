@@ -50,7 +50,7 @@ export default function DashboardViewer({
     cols = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
 }: DashboardViewerProps) {
-    const { containerRef, width, height, rowHeight } = useCanvasReference({
+    const { containerRef, width, height, rowHeight, hasFirstValidMeasurement } = useCanvasReference({
         cols,
         rows,
     });
@@ -63,55 +63,57 @@ export default function DashboardViewer({
             data-testid="dashboard-viewer-root"
             className="flex h-full w-full items-center justify-center overflow-hidden"
         >
-            <div
-                className="grid shrink-0"
-                style={{
-                    ...getGridTemplateStyle(cols),
-                    gridTemplateRows: `repeat(${rows}, ${rowHeight}px)`,
-                    width: `${width}px`,
-                    height: `${height}px`,
-                    gap: 0,
-                }}
-            >
-                {layout.map((item) => {
-                    // Excluir del grid los widgets asignados al header
-                    if (headerWidgetIds?.has(item.widgetId)) return null;
+            {hasFirstValidMeasurement ? (
+                <div
+                    data-testid="dashboard-viewer-frame"
+                    className="grid shrink-0"
+                    style={{
+                        ...getGridTemplateStyle(cols),
+                        gridTemplateRows: `repeat(${rows}, ${rowHeight}px)`,
+                        width: `${width}px`,
+                        height: `${height}px`,
+                        gap: 0,
+                    }}
+                >
+                    {layout.map((item) => {
+                        if (headerWidgetIds?.has(item.widgetId)) return null;
 
-                    const widget = widgetMap.get(item.widgetId);
-                    if (!widget) return null;
+                        const widget = widgetMap.get(item.widgetId);
+                        if (!widget) return null;
 
-                    return (
-                        <div
-                            key={widget.id}
-                            data-testid={`dashboard-viewer-item-${widget.id}`}
-                            className="h-full relative"
-                            style={{
-                                gridColumnStart: item.x + 1,
-                                gridColumnEnd: `span ${item.w}`,
-                                gridRowStart: item.y + 1,
-                                gridRowEnd: `span ${item.h}`,
-                            }}
-                        >
+                        return (
                             <div
-                                data-testid={`dashboard-viewer-item-surface-${widget.id}`}
-                                className="relative z-0 h-full w-full box-border"
-                                style={{ padding: 'var(--widget-spacing)' }}
+                                key={widget.id}
+                                data-testid={`dashboard-viewer-item-${widget.id}`}
+                                className="h-full relative"
+                                style={{
+                                    gridColumnStart: item.x + 1,
+                                    gridColumnEnd: `span ${item.w}`,
+                                    gridRowStart: item.y + 1,
+                                    gridRowEnd: `span ${item.h}`,
+                                }}
                             >
-                                <WidgetRenderer 
-                                    widget={widget} 
-                                    equipmentMap={equipmentMap} 
-                                    machines={machines}
-                                    connection={connection}
-                                    isLoadingData={false} 
-                                    siblingWidgets={widgets}
-                                    hierarchyContext={hierarchyContext}
-                                    className="w-full h-full"
-                                />
+                                <div
+                                    data-testid={`dashboard-viewer-item-surface-${widget.id}`}
+                                    className="relative z-0 h-full w-full box-border"
+                                    style={{ padding: 'var(--widget-spacing)' }}
+                                >
+                                    <WidgetRenderer 
+                                        widget={widget} 
+                                        equipmentMap={equipmentMap} 
+                                        machines={machines}
+                                        connection={connection}
+                                        isLoadingData={false} 
+                                        siblingWidgets={widgets}
+                                        hierarchyContext={hierarchyContext}
+                                        className="w-full h-full"
+                                    />
+                                </div>
                             </div>
-                        </div>
-                    );
-                })}
-            </div>
+                        );
+                    })}
+                </div>
+            ) : null}
         </div>
     );
 }

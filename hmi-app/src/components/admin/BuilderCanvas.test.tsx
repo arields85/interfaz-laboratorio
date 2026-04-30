@@ -143,6 +143,44 @@ async function renderInteractiveCanvas(overrides?: {
     };
 }
 
+function renderBuilderCanvasWithoutMeasurement(overrides?: {
+    cols?: number;
+    rows?: number;
+    layout?: ReturnType<typeof makeLayout>[];
+    widgets?: WidgetConfig[];
+}) {
+    const dashboard = makeDashboard({
+        cols: overrides?.cols ?? 20,
+        rows: overrides?.rows ?? 12,
+        widgets: overrides?.widgets ?? [makeWidget({ id: 'widget-1', title: 'Widget 1' })],
+        layout: overrides?.layout ?? [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+    });
+
+    const view = render(
+        <div style={{ width: '1200px', height: '675px' }}>
+            <BuilderCanvas
+                widgets={dashboard.widgets}
+                layout={dashboard.layout}
+                equipmentMap={new Map()}
+                cols={dashboard.cols}
+                rows={dashboard.rows}
+            />
+        </div>,
+    );
+
+    const builderRoot = view.container.querySelector('[data-testid="builder-canvas-root"]');
+
+    if (!builderRoot) {
+        throw new Error('Builder root was not rendered.');
+    }
+
+    return {
+        ...view,
+        builderRoot,
+        dashboard,
+    };
+}
+
 vi.mock('../../widgets', () => ({
     WidgetRenderer: ({ widget }: { widget: { id: string; title?: string } }) => (
         widget.title === 'Editable Input'
@@ -170,6 +208,27 @@ describe('BuilderCanvas', () => {
         resizeCallbacks.clear();
         useUIStore.setState(useUIStore.getInitialState());
         vi.unstubAllGlobals();
+    });
+
+    it('keeps the builder root as a neutral shell until the first valid canvas measurement arrives', () => {
+        const { builderRoot } = renderBuilderCanvasWithoutMeasurement();
+
+        expect(builderRoot).toBeInTheDocument();
+        expect(screen.queryByTestId('builder-canvas-frame')).toBeNull();
+        expect(screen.queryByTestId('builder-canvas-item-widget-1')).toBeNull();
+    });
+
+    it('renders the builder frame and widget layout after the first valid canvas measurement arrives', async () => {
+        const { builderRoot } = renderBuilderCanvasWithoutMeasurement();
+
+        expect(screen.queryByTestId('builder-canvas-frame')).toBeNull();
+
+        await syncCanvasMetrics(builderRoot, 1200, 675);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('builder-canvas-frame')).toBeInTheDocument();
+            expect(screen.getByTestId('builder-canvas-item-widget-1')).toBeInTheDocument();
+        });
     });
 
     it('positions widgets by persisted x/y coordinates, toggles the grid overlay, and matches viewer placement', async () => {
@@ -221,11 +280,16 @@ describe('BuilderCanvas', () => {
         await syncCanvasMetrics(builderRoot, 1200, 675);
         await syncCanvasMetrics(viewerRoot, 1200, 675);
 
+        const builderFrame = screen.getByTestId('builder-canvas-frame');
+        const viewerFrame = screen.getByTestId('dashboard-viewer-frame');
+
         await waitFor(() => {
             expect(screen.getByTestId('builder-canvas-item-widget-origin').style.gridColumnStart).toBe('1');
             expect(screen.getByTestId('builder-canvas-item-widget-origin').style.gridRowStart).toBe('1');
             expect(screen.getByTestId('builder-canvas-item-widget-lower-right').style.gridColumnStart).toBe('9');
             expect(screen.getByTestId('builder-canvas-item-widget-lower-right').style.gridRowStart).toBe('6');
+            expect(builderFrame.style.width).toBe(viewerFrame.style.width);
+            expect(builderFrame.style.height).toBe(viewerFrame.style.height);
         });
 
         expect(builderRoot.className).toContain('w-full');
@@ -236,9 +300,6 @@ describe('BuilderCanvas', () => {
 
         const overlay = screen.getByTestId('builder-canvas-grid-overlay');
         const majorOverlay = screen.getByTestId('builder-canvas-grid-major-overlay');
-        const majorEraserOverlay = screen.getByTestId('builder-canvas-grid-major-eraser-overlay');
-        const majorEraserVerticalOverlay = screen.getByTestId('builder-canvas-grid-major-eraser-vertical-overlay');
-        const majorEraserHorizontalOverlay = screen.getByTestId('builder-canvas-grid-major-eraser-horizontal-overlay');
         const majorVerticalOverlay = screen.getByTestId('builder-canvas-grid-major-vertical-overlay');
         const majorHorizontalOverlay = screen.getByTestId('builder-canvas-grid-major-horizontal-overlay');
         const minorOverlay = screen.getByTestId('builder-canvas-grid-minor-overlay');
@@ -261,6 +322,10 @@ describe('BuilderCanvas', () => {
         expect(screen.getByTestId('builder-canvas-item-widget-lower-right').style.gridRowStart).toBe(
             screen.getByTestId('dashboard-viewer-item-widget-lower-right').style.gridRowStart,
         );
+        expect(builderFrame.style.width).toBe('1200px');
+        expect(builderFrame.style.height).toBe('675px');
+        expect(viewerFrame.style.width).toBe('1200px');
+        expect(viewerFrame.style.height).toBe('675px');
 
         useUIStore.setState({ ...useUIStore.getState(), isGridVisible: false });
 

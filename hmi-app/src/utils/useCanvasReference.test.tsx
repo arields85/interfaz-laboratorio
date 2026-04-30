@@ -78,7 +78,18 @@ function readMetric(testId: string, attribute: string): number {
 }
 
 function HookHarness({ testId, ...options }: UseCanvasReferenceOptions & { testId: string }) {
-    const { containerRef, width, height, cols, rows, rowHeight, offsetX, offsetY, cellWidth } = useCanvasReference(options);
+    const {
+        containerRef,
+        width,
+        height,
+        cols,
+        rows,
+        rowHeight,
+        offsetX,
+        offsetY,
+        cellWidth,
+        hasFirstValidMeasurement,
+    } = useCanvasReference(options);
 
     return (
         <div
@@ -92,6 +103,7 @@ function HookHarness({ testId, ...options }: UseCanvasReferenceOptions & { testI
             data-offset-x={offsetX}
             data-offset-y={offsetY}
             data-cell-width={cellWidth}
+            data-has-first-valid-measurement={hasFirstValidMeasurement ? 'true' : 'false'}
         />
     );
 }
@@ -172,6 +184,7 @@ describe('useCanvasReference', () => {
             expect(readMetric('measured-canvas', 'data-offset-x')).toBe(0);
             expect(readMetric('measured-canvas', 'data-offset-y')).toBe(0);
             expect(readMetric('measured-canvas', 'data-cell-width')).toBe(40);
+            expect(document.querySelector('[data-testid="measured-canvas"]')).toHaveAttribute('data-has-first-valid-measurement', 'true');
         });
 
         act(() => {
@@ -209,5 +222,75 @@ describe('useCanvasReference', () => {
             expect(readMetric('configured-canvas', 'data-offset-x')).toBe(0);
             expect(readMetric('configured-canvas', 'data-offset-y')).toBe(0);
         });
+    });
+
+    it('retains the last valid metrics when a transient zero measurement arrives and replaces them with the next valid size', async () => {
+        render(<HookHarness testId="guarded-canvas" cols={20} rows={10} />);
+
+        const container = document.querySelector('[data-testid="guarded-canvas"]');
+        if (!container) {
+            throw new Error('Guarded canvas harness did not render.');
+        }
+
+        act(() => {
+            emitResize(container, 800, 500);
+        });
+
+        await waitFor(() => {
+            expect(readMetric('guarded-canvas', 'data-width')).toBe(800);
+            expect(readMetric('guarded-canvas', 'data-height')).toBe(500);
+            expect(readMetric('guarded-canvas', 'data-row-height')).toBe(50);
+            expect(readMetric('guarded-canvas', 'data-cell-width')).toBe(40);
+            expect(document.querySelector('[data-testid="guarded-canvas"]')).toHaveAttribute('data-has-first-valid-measurement', 'true');
+        });
+
+        act(() => {
+            emitResize(container, 0, 500);
+        });
+
+        await waitFor(() => {
+            expect(readMetric('guarded-canvas', 'data-width')).toBe(800);
+            expect(readMetric('guarded-canvas', 'data-height')).toBe(500);
+            expect(readMetric('guarded-canvas', 'data-row-height')).toBe(50);
+            expect(readMetric('guarded-canvas', 'data-cell-width')).toBe(40);
+        });
+
+        act(() => {
+            emitResize(container, 1000, 600);
+        });
+
+        await waitFor(() => {
+            expect(readMetric('guarded-canvas', 'data-width')).toBe(1000);
+            expect(readMetric('guarded-canvas', 'data-height')).toBe(600);
+            expect(readMetric('guarded-canvas', 'data-row-height')).toBe(60);
+            expect(readMetric('guarded-canvas', 'data-cell-width')).toBe(50);
+        });
+    });
+
+    it('keeps the initial zero metrics when the first observed resize is also invalid', async () => {
+        render(<HookHarness testId="initial-guarded-canvas" cols={20} rows={10} />);
+
+        const container = document.querySelector('[data-testid="initial-guarded-canvas"]');
+        if (!container) {
+            throw new Error('Initial guarded canvas harness did not render.');
+        }
+
+        act(() => {
+            emitResize(container, 0, 0);
+        });
+
+        await waitFor(() => {
+            expect(readMetric('initial-guarded-canvas', 'data-width')).toBe(0);
+            expect(readMetric('initial-guarded-canvas', 'data-height')).toBe(0);
+            expect(readMetric('initial-guarded-canvas', 'data-row-height')).toBe(0);
+            expect(readMetric('initial-guarded-canvas', 'data-cell-width')).toBe(0);
+            expect(document.querySelector('[data-testid="initial-guarded-canvas"]')).toHaveAttribute('data-has-first-valid-measurement', 'false');
+        });
+    });
+
+    it('starts with first-valid readiness disabled before any valid resize arrives', () => {
+        render(<HookHarness testId="first-valid-readiness" cols={20} rows={10} />);
+
+        expect(document.querySelector('[data-testid="first-valid-readiness"]')).toHaveAttribute('data-has-first-valid-measurement', 'false');
     });
 });

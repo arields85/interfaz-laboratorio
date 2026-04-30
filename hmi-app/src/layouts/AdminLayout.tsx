@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { LogOut, Settings } from 'lucide-react';
 import GlobalSettingsDialog from '../components/admin/GlobalSettingsDialog';
 import { HmiButton } from '../components/ui';
@@ -17,7 +17,6 @@ import { useAuthStore } from '../store/auth.store';
 
 export default function AdminLayout() {
     const location = useLocation();
-    const navigate = useNavigate();
     const activeSectionKey = getAdminSectionByPath(location.pathname)?.key;
     const [isNodeRedSettingsOpen, setIsNodeRedSettingsOpen] = useState(false);
     const session = useAuthStore((state) => state.session);
@@ -72,7 +71,6 @@ export default function AdminLayout() {
                         size="sm"
                         onClick={() => {
                             logout();
-                            navigate('/');
                         }}
                     >
                         Cerrar sesion

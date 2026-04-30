@@ -175,7 +175,7 @@ export default function BuilderCanvas({
     const rightEdgeUsesMajorLine = cols % GRID_MAJOR_INTERVAL_CELLS === 0;
     const bottomEdgeUsesMajorLine = rows % GRID_MAJOR_INTERVAL_CELLS === 0;
     const isGridVisible = useUIStore((state) => state.isGridVisible);
-    const { containerRef, width, height, rowHeight, cellWidth } = useCanvasReference({
+    const { containerRef, width, height, rowHeight, cellWidth, hasFirstValidMeasurement } = useCanvasReference({
         cols,
         rows,
     });
@@ -332,6 +332,8 @@ export default function BuilderCanvas({
         ? resolveCommittedLayout({ interaction, metrics, cols, rows })
         : null;
 
+    const visibleLayout = layout.filter((item) => !headerWidgetIds?.has(item.widgetId));
+
     return (
         <div
             ref={containerRef}
@@ -348,134 +350,136 @@ export default function BuilderCanvas({
                 outline: 'none',
             }}
         >
-            <div
-                className="relative shrink-0"
-                style={{
-                    width: `${width}px`,
-                    height: `${height}px`,
-                }}
-            >
+            {hasFirstValidMeasurement ? (
                 <div
-                    data-testid="builder-canvas-grid-overlay"
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 transition-opacity"
+                    data-testid="builder-canvas-frame"
+                    className="relative shrink-0"
                     style={{
-                        opacity: isGridVisible ? 1 : 0,
-                        ['--canvas-cols' as string]: String(cols),
-                        ['--canvas-rows' as string]: String(rows),
-                        ['--cell-width-px' as string]: `${cellWidth}px`,
-                        ['--row-height-px' as string]: `${rowHeight}px`,
-                        ['--canvas-major-interval-cols' as string]: String(GRID_MAJOR_INTERVAL_CELLS),
-                        ['--canvas-major-dash-length' as string]: `${GRID_MAJOR_DASH_LENGTH_PX}px`,
-                        ['--canvas-major-dash-gap' as string]: `${GRID_MAJOR_DASH_GAP_PX}px`,
+                        width: `${width}px`,
+                        height: `${height}px`,
                     }}
                 >
                     <div
-                        data-testid="builder-canvas-grid-minor-overlay"
-                        className="absolute inset-0"
-                        style={{
-                            backgroundImage: [
-                                'repeating-linear-gradient(to right, var(--color-canvas-grid-minor) 0px, var(--color-canvas-grid-minor) 1px, transparent 1px, transparent var(--cell-width-px))',
-                                'repeating-linear-gradient(to bottom, var(--color-canvas-grid-minor) 0px, var(--color-canvas-grid-minor) 1px, transparent 1px, transparent var(--row-height-px))',
-                            ].join(', '),
-                            opacity: isGridVisible ? 1 : 0,
-                        }}
-                    />
-
-                    <div
-                        data-testid="builder-canvas-grid-major-eraser-overlay"
-                        className="absolute inset-0"
+                        data-testid="builder-canvas-grid-overlay"
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 transition-opacity"
                         style={{
                             opacity: isGridVisible ? 1 : 0,
+                            ['--canvas-cols' as string]: String(cols),
+                            ['--canvas-rows' as string]: String(rows),
+                            ['--cell-width-px' as string]: `${cellWidth}px`,
+                            ['--row-height-px' as string]: `${rowHeight}px`,
+                            ['--canvas-major-interval-cols' as string]: String(GRID_MAJOR_INTERVAL_CELLS),
+                            ['--canvas-major-dash-length' as string]: `${GRID_MAJOR_DASH_LENGTH_PX}px`,
+                            ['--canvas-major-dash-gap' as string]: `${GRID_MAJOR_DASH_GAP_PX}px`,
                         }}
                     >
                         <div
-                            data-testid="builder-canvas-grid-major-eraser-vertical-overlay"
+                            data-testid="builder-canvas-grid-minor-overlay"
                             className="absolute inset-0"
                             style={{
-                                backgroundImage: 'repeating-linear-gradient(to right, var(--color-canvas-bg) 0px, var(--color-canvas-bg) 1px, transparent 1px, transparent calc(var(--cell-width-px) * var(--canvas-major-interval-cols)))',
+                                backgroundImage: [
+                                    'repeating-linear-gradient(to right, var(--color-canvas-grid-minor) 0px, var(--color-canvas-grid-minor) 1px, transparent 1px, transparent var(--cell-width-px))',
+                                    'repeating-linear-gradient(to bottom, var(--color-canvas-grid-minor) 0px, var(--color-canvas-grid-minor) 1px, transparent 1px, transparent var(--row-height-px))',
+                                ].join(', '),
+                                opacity: isGridVisible ? 1 : 0,
                             }}
                         />
+
                         <div
-                            data-testid="builder-canvas-grid-major-eraser-horizontal-overlay"
+                            data-testid="builder-canvas-grid-major-eraser-overlay"
                             className="absolute inset-0"
                             style={{
-                                backgroundImage: 'repeating-linear-gradient(to bottom, var(--color-canvas-bg) 0px, var(--color-canvas-bg) 1px, transparent 1px, transparent calc(var(--row-height-px) * var(--canvas-major-interval-cols)))',
+                                opacity: isGridVisible ? 1 : 0,
+                            }}
+                        >
+                            <div
+                                data-testid="builder-canvas-grid-major-eraser-vertical-overlay"
+                                className="absolute inset-0"
+                                style={{
+                                    backgroundImage: 'repeating-linear-gradient(to right, var(--color-canvas-bg) 0px, var(--color-canvas-bg) 1px, transparent 1px, transparent calc(var(--cell-width-px) * var(--canvas-major-interval-cols)))',
+                                }}
+                            />
+                            <div
+                                data-testid="builder-canvas-grid-major-eraser-horizontal-overlay"
+                                className="absolute inset-0"
+                                style={{
+                                    backgroundImage: 'repeating-linear-gradient(to bottom, var(--color-canvas-bg) 0px, var(--color-canvas-bg) 1px, transparent 1px, transparent calc(var(--row-height-px) * var(--canvas-major-interval-cols)))',
+                                }}
+                            />
+                        </div>
+
+                        <div
+                            data-testid="builder-canvas-grid-major-overlay"
+                            className="absolute inset-0"
+                            style={{
+                                opacity: isGridVisible ? 1 : 0,
+                            }}
+                        >
+                            <div
+                                data-testid="builder-canvas-grid-major-vertical-overlay"
+                                className="absolute inset-0"
+                                style={{
+                                    backgroundImage: 'repeating-linear-gradient(to right, var(--color-canvas-grid-major) 0px, var(--color-canvas-grid-major) 1px, transparent 1px, transparent calc(var(--cell-width-px) * var(--canvas-major-interval-cols)))',
+                                    maskImage: 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
+                                    WebkitMaskImage: 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
+                                }}
+                            />
+                            <div
+                                data-testid="builder-canvas-grid-major-horizontal-overlay"
+                                className="absolute inset-0"
+                                style={{
+                                    backgroundImage: 'repeating-linear-gradient(to bottom, var(--color-canvas-grid-major) 0px, var(--color-canvas-grid-major) 1px, transparent 1px, transparent calc(var(--row-height-px) * var(--canvas-major-interval-cols)))',
+                                    maskImage: 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
+                                    WebkitMaskImage: 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
+                                }}
+                            />
+                        </div>
+
+                        <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute top-0 right-0 h-full w-px"
+                            style={{
+                                opacity: isGridVisible ? 1 : 0,
+                                backgroundColor: rightEdgeUsesMajorLine
+                                    ? 'var(--color-canvas-grid-major)'
+                                    : 'var(--color-canvas-grid-minor)',
+                                maskImage: rightEdgeUsesMajorLine
+                                    ? 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
+                                    : undefined,
+                                WebkitMaskImage: rightEdgeUsesMajorLine
+                                    ? 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
+                                    : undefined,
+                            }}
+                        />
+
+                        <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute right-0 bottom-0 left-0 h-px"
+                            style={{
+                                opacity: isGridVisible ? 1 : 0,
+                                backgroundColor: bottomEdgeUsesMajorLine
+                                    ? 'var(--color-canvas-grid-major)'
+                                    : 'var(--color-canvas-grid-minor)',
+                                maskImage: bottomEdgeUsesMajorLine
+                                    ? 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
+                                    : undefined,
+                                WebkitMaskImage: bottomEdgeUsesMajorLine
+                                    ? 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
+                                    : undefined,
                             }}
                         />
                     </div>
 
                     <div
-                        data-testid="builder-canvas-grid-major-overlay"
-                        className="absolute inset-0"
+                        className="relative z-10 grid h-full w-full"
                         style={{
-                            opacity: isGridVisible ? 1 : 0,
+                            ...getGridTemplateStyle(cols),
+                            gridTemplateRows: `repeat(${rows}, ${rowHeight}px)`,
+                            gap: 0,
                         }}
                     >
-                        <div
-                            data-testid="builder-canvas-grid-major-vertical-overlay"
-                            className="absolute inset-0"
-                            style={{
-                                backgroundImage: 'repeating-linear-gradient(to right, var(--color-canvas-grid-major) 0px, var(--color-canvas-grid-major) 1px, transparent 1px, transparent calc(var(--cell-width-px) * var(--canvas-major-interval-cols)))',
-                                maskImage: 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
-                                WebkitMaskImage: 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
-                            }}
-                        />
-                        <div
-                            data-testid="builder-canvas-grid-major-horizontal-overlay"
-                            className="absolute inset-0"
-                            style={{
-                                backgroundImage: 'repeating-linear-gradient(to bottom, var(--color-canvas-grid-major) 0px, var(--color-canvas-grid-major) 1px, transparent 1px, transparent calc(var(--row-height-px) * var(--canvas-major-interval-cols)))',
-                                maskImage: 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
-                                WebkitMaskImage: 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))',
-                            }}
-                        />
-                    </div>
-
-                    <div
-                        aria-hidden="true"
-                        className="pointer-events-none absolute top-0 right-0 h-full w-px"
-                        style={{
-                            opacity: isGridVisible ? 1 : 0,
-                            backgroundColor: rightEdgeUsesMajorLine
-                                ? 'var(--color-canvas-grid-major)'
-                                : 'var(--color-canvas-grid-minor)',
-                            maskImage: rightEdgeUsesMajorLine
-                                ? 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
-                                : undefined,
-                            WebkitMaskImage: rightEdgeUsesMajorLine
-                                ? 'repeating-linear-gradient(to bottom, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
-                                : undefined,
-                        }}
-                    />
-
-                    <div
-                        aria-hidden="true"
-                        className="pointer-events-none absolute right-0 bottom-0 left-0 h-px"
-                        style={{
-                            opacity: isGridVisible ? 1 : 0,
-                            backgroundColor: bottomEdgeUsesMajorLine
-                                ? 'var(--color-canvas-grid-major)'
-                                : 'var(--color-canvas-grid-minor)',
-                            maskImage: bottomEdgeUsesMajorLine
-                                ? 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
-                                : undefined,
-                            WebkitMaskImage: bottomEdgeUsesMajorLine
-                                ? 'repeating-linear-gradient(to right, #000 0px, #000 var(--canvas-major-dash-length), transparent var(--canvas-major-dash-length), transparent calc(var(--canvas-major-dash-length) + var(--canvas-major-dash-gap)))'
-                                : undefined,
-                        }}
-                    />
-                </div>
-
-                <div
-                    className="relative z-10 grid h-full w-full"
-                    style={{
-                        ...getGridTemplateStyle(cols),
-                        gridTemplateRows: `repeat(${rows}, ${rowHeight}px)`,
-                        gap: 0,
-                    }}
-                >
-                    {layout.map((item) => {
+                        {visibleLayout.map((item) => {
                         if (headerWidgetIds?.has(item.widgetId)) {
                             return null;
                         }
@@ -568,33 +572,34 @@ export default function BuilderCanvas({
                                 </div>
                             </div>
                         );
-                    })}
+                        })}
+                    </div>
 
-                    {layout.filter((item) => !headerWidgetIds?.has(item.widgetId)).length === 0 && (
-                        <div style={{ gridColumn: '1 / -1' }} className="h-64 px-6">
-                            <AdminEmptyState
-                                icon={LayoutDashboard}
-                                message="El dashboard está vacío"
+                    {resizeTooltipLayout && interaction && (() => {
+                        const isLeftHandle = interaction.type === 'resize-nw' || interaction.type === 'resize-sw';
+                        const isTopHandle = interaction.type === 'resize-nw' || interaction.type === 'resize-ne';
+                        return (
+                            <CursorTooltip
+                                data-testid="builder-canvas-resize-tooltip"
+                                data-offset-px={RESIZE_TOOLTIP_OFFSET_PX}
+                                label={`${resizeTooltipLayout.w} × ${resizeTooltipLayout.h}`}
+                                x={interaction.currentPointer.x}
+                                y={interaction.currentPointer.y}
+                                anchor={isLeftHandle ? (isTopHandle ? 'nw' : 'sw') : (isTopHandle ? 'ne' : 'se')}
                             />
-                        </div>
-                    )}
+                        );
+                    })()}
                 </div>
+            ) : null}
 
-                {resizeTooltipLayout && interaction && (() => {
-                    const isLeftHandle = interaction.type === 'resize-nw' || interaction.type === 'resize-sw';
-                    const isTopHandle = interaction.type === 'resize-nw' || interaction.type === 'resize-ne';
-                    return (
-                        <CursorTooltip
-                            data-testid="builder-canvas-resize-tooltip"
-                            data-offset-px={RESIZE_TOOLTIP_OFFSET_PX}
-                            label={`${resizeTooltipLayout.w} × ${resizeTooltipLayout.h}`}
-                            x={interaction.currentPointer.x}
-                            y={interaction.currentPointer.y}
-                            anchor={isLeftHandle ? (isTopHandle ? 'nw' : 'sw') : (isTopHandle ? 'ne' : 'se')}
-                        />
-                    );
-                })()}
-            </div>
+            {visibleLayout.length === 0 && (
+                <div className="w-full px-6" data-testid="builder-canvas-empty-shell">
+                    <AdminEmptyState
+                        icon={LayoutDashboard}
+                        message="El dashboard está vacío"
+                    />
+                </div>
+            )}
         </div>
     );
 }

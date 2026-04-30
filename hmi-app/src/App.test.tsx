@@ -15,6 +15,10 @@ vi.mock('./hooks/useReloadShield', () => ({
     useReloadShield: useReloadShieldMock,
 }));
 
+vi.mock('./hooks/useResumeShield', () => {
+    throw new Error('App must not import useResumeShield for warm resumes.');
+});
+
 vi.mock('./app/router', () => ({
     default: () => <div>Router shell</div>,
 }));
@@ -22,7 +26,7 @@ vi.mock('./app/router', () => ({
 import App from './App';
 
 describe('App', () => {
-    it('owns shield lifecycle hooks at the root and still renders the router shell', () => {
+    it('owns only boot and reload shield hooks at the root and still renders the router shell', () => {
         render(<App />);
 
         expect(useBootShieldMock).toHaveBeenCalledTimes(1);

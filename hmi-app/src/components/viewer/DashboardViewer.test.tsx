@@ -148,6 +148,8 @@ describe('DashboardViewer', () => {
             throw new Error('Dashboard viewer root was not rendered.');
         }
 
+        expect(screen.queryByTestId('dashboard-viewer-frame')).not.toBeInTheDocument();
+
         emitResize(observedContainer, 1200, 675);
 
         await waitFor(() => {
@@ -187,6 +189,8 @@ describe('DashboardViewer', () => {
         if (!observedContainer) {
             throw new Error('Dashboard viewer root was not rendered.');
         }
+
+        expect(screen.queryByTestId('dashboard-viewer-frame')).not.toBeInTheDocument();
 
         emitResize(observedContainer, 1200, 800);
 
@@ -235,6 +239,8 @@ describe('DashboardViewer', () => {
             throw new Error('Dashboard viewer root was not rendered.');
         }
 
+        expect(screen.queryByTestId('dashboard-viewer-frame')).not.toBeInTheDocument();
+
         emitResize(observedContainer, 1200, 800);
 
         await waitFor(() => {
@@ -246,6 +252,29 @@ describe('DashboardViewer', () => {
                 machines,
             }),
         );
+    });
+
+    it('keeps the viewer root as a neutral shell until the first valid canvas measurement arrives', () => {
+        const dashboard = makeDashboard({
+            widgets: [makeWidget({ id: 'widget-1', title: 'Origin' })],
+            layout: [makeLayout({ widgetId: 'widget-1', x: 0, y: 0, w: 4, h: 3 })],
+        });
+
+        render(
+            <div style={{ width: '1200px', height: '800px' }}>
+                <DashboardViewer
+                    widgets={dashboard.widgets}
+                    layout={dashboard.layout}
+                    equipmentMap={new Map()}
+                    cols={dashboard.cols}
+                    rows={dashboard.rows}
+                />
+            </div>,
+        );
+
+        expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        expect(screen.queryByTestId('dashboard-viewer-frame')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('widget-renderer-widget-1')).not.toBeInTheDocument();
     });
 
     it('keeps viewer header widgets in their persisted slot columns', () => {

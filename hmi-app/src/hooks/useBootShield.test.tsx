@@ -9,6 +9,7 @@ import {
     BOOT_SHIELD_TRANSITION_FALLBACK_MS,
     SHADER_CANVAS_SELECTOR,
     WEBGL_FIRST_DRAW_EVENT,
+    getRequiredFontChecks,
     useBootShield,
 } from './useBootShield';
 
@@ -99,6 +100,33 @@ describe('useBootShield', () => {
         vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => {
             cancelled.add(id);
         }));
+
+        vi.stubGlobal('getComputedStyle', vi.fn(() => ({
+            getPropertyValue: (property: string) => {
+                switch (property) {
+                    case '--font-system':
+                        return '"JetBrainsMono", monospace';
+                    case '--font-weight-system':
+                        return '400';
+                    case '--font-size-system':
+                        return '11px';
+                    case '--font-mono':
+                        return '"IBMPlexMono", monospace';
+                    case '--font-weight-mono':
+                        return '400';
+                    case '--font-size-mono':
+                        return '10px';
+                    case '--font-dashboard-title':
+                        return '"Magistral", sans-serif';
+                    case '--font-weight-dashboard-title':
+                        return '400';
+                    case '--font-size-dashboard-title':
+                        return '48px';
+                    default:
+                        return '';
+                }
+            },
+        })));
     });
 
     afterEach(() => {
@@ -183,6 +211,94 @@ describe('useBootShield', () => {
         });
 
         expect(document.getElementById(BOOT_SHIELD_ID)).toBe(shield);
+    });
+
+    it('resolves the runtime typography font checks from canonical CSS tokens before releasing the shield', async () => {
+        const check = vi.fn(() => true);
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                ready: Promise.resolve(),
+                check,
+            },
+        });
+
+        mountShield();
+        mountShaderCanvas({ 'data-hmi-webgl-ready': 'true' });
+
+        renderHook(() => useBootShield());
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(getRequiredFontChecks()).toEqual([
+            '400 11px "JetBrainsMono"',
+            '400 10px "IBMPlexMono"',
+            '400 48px "Magistral"',
+        ]);
+        expect(check.mock.calls.map(([font]) => font)).toEqual(getRequiredFontChecks());
+    });
+
+    it('uses the typography selected through runtime admin design tokens instead of fixed font names', () => {
+        vi.stubGlobal('getComputedStyle', vi.fn(() => ({
+            getPropertyValue: (property: string) => {
+                switch (property) {
+                    case '--font-system':
+                        return '"Poppins"';
+                    case '--font-weight-system':
+                        return '300';
+                    case '--font-size-system':
+                        return '14px';
+                    case '--font-mono':
+                        return '"IBMPlexSans"';
+                    case '--font-weight-mono':
+                        return '600';
+                    case '--font-size-mono':
+                        return '12px';
+                    case '--font-dashboard-title':
+                        return '"SpaceGrotesk"';
+                    case '--font-weight-dashboard-title':
+                        return '700';
+                    case '--font-size-dashboard-title':
+                        return '56px';
+                    default:
+                        return '';
+                }
+            },
+        })));
+
+        expect(getRequiredFontChecks()).toEqual([
+            '300 14px "Poppins"',
+            '600 12px "IBMPlexSans"',
+            '700 56px "SpaceGrotesk"',
+        ]);
+    });
+
+    it('returns an empty runtime font-check list when canonical CSS tokens are unresolvable', () => {
+        vi.stubGlobal('getComputedStyle', vi.fn(() => ({
+            getPropertyValue: () => '',
+        })));
+
+        expect(getRequiredFontChecks()).toEqual([]);
+    });
+
+    it('treats missing runtime font tokens as ready so the bounded timeout path stays unchanged', () => {
+        const check = vi.fn(() => false);
+        vi.stubGlobal('getComputedStyle', vi.fn(() => ({
+            getPropertyValue: () => '',
+        })));
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                check,
+            },
+        });
+
+        expect(getRequiredFontChecks()).toEqual([]);
+        expect(check).not.toHaveBeenCalled();
+        expect(() => renderHook(() => useBootShield())).not.toThrow();
     });
 
     it('falls back without FontFaceSet support and leaves the hidden shield reusable after the transition timeout', async () => {

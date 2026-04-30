@@ -18,12 +18,67 @@ type FontsReadyDocument = Document & {
     };
 };
 
+interface FontCheckToken {
+    family: string;
+    weight: string;
+    size: string;
+}
+
 const SHIELD_STATE_ATTRIBUTE = 'data-hmi-shield-state';
-const REQUIRED_FONT_CHECKS = ['16px "Plus Jakarta Sans"', '16px "Roboto Mono"'];
+const FONT_CHECK_TOKENS: FontCheckToken[] = [
+    {
+        family: '--font-system',
+        weight: '--font-weight-system',
+        size: '--font-size-system',
+    },
+    {
+        family: '--font-mono',
+        weight: '--font-weight-mono',
+        size: '--font-size-mono',
+    },
+    {
+        family: '--font-dashboard-title',
+        weight: '--font-weight-dashboard-title',
+        size: '--font-size-dashboard-title',
+    },
+];
 const SHIELD_SHELL_ATTRIBUTE = 'data-hmi-shield-shell';
 const SHIELD_TYPEWRITER_ATTRIBUTE = 'data-hmi-shield-typewriter';
 const SHIELD_TYPED_ATTRIBUTE = 'data-hmi-shield-typed';
 const SHIELD_CARET_ATTRIBUTE = 'data-hmi-shield-caret';
+
+function normalizeFontFamilyValue(value: string): string {
+    const primaryFamily = value.split(',')[0]?.trim() ?? '';
+
+    if (!primaryFamily) {
+        return '';
+    }
+
+    return primaryFamily.replace(/^(['"])(.*)\1$/, '$1$2$1');
+}
+
+function resolveFontCheck(token: FontCheckToken): string | null {
+    if (!document.documentElement) {
+        return null;
+    }
+
+    const style = getComputedStyle(document.documentElement);
+    const family = normalizeFontFamilyValue(style.getPropertyValue(token.family).trim());
+    const weight = style.getPropertyValue(token.weight).trim() || '400';
+    const size = style.getPropertyValue(token.size).trim() || '16px';
+
+    if (!family) {
+        return null;
+    }
+
+    return `${weight} ${size} ${family}`;
+}
+
+export function getRequiredFontChecks(): string[] {
+    return FONT_CHECK_TOKENS
+        .map(resolveFontCheck)
+        .filter((font): font is string => font !== null);
+}
 
 function getBootShield(): HTMLElement | null {
     return document.getElementById(BOOT_SHIELD_ID);
@@ -86,7 +141,7 @@ export function revealBootShield(shield: HTMLElement | null = getBootShield()): 
     shield.removeAttribute('inert');
 }
 
-function hideBootShield(shield: HTMLElement): void {
+export function hideBootShield(shield: HTMLElement): void {
     shield.classList.add(BOOT_SHIELD_HIDDEN_CLASS);
     shield.setAttribute(SHIELD_STATE_ATTRIBUTE, 'hidden');
     shield.setAttribute('aria-hidden', 'true');
@@ -115,14 +170,20 @@ async function waitForFontsReady(): Promise<void> {
     }
 }
 
-function areRequiredFontsReady(): boolean {
+export function areRequiredFontsReady(): boolean {
     const fonts = (document as FontsReadyDocument).fonts;
 
     if (!fonts?.check) {
         return true;
     }
 
-    return REQUIRED_FONT_CHECKS.every((font) => fonts.check?.(font) ?? true);
+    const requiredFontChecks = getRequiredFontChecks();
+
+    if (requiredFontChecks.length === 0) {
+        return true;
+    }
+
+    return requiredFontChecks.every((font) => fonts.check?.(font) ?? true);
 }
 
 function waitForDelay(delayMs: number): Promise<void> {

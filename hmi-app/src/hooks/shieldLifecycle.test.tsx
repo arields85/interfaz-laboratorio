@@ -28,6 +28,14 @@ describe('shield lifecycle', () => {
             value: vi.fn(() => true),
         });
 
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                ready: Promise.resolve(),
+                check: vi.fn(() => true),
+            },
+        });
+
         vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
             const id = nextRafId++;
             rafQueue.push({ id, callback });
@@ -44,7 +52,6 @@ describe('shield lifecycle', () => {
         vi.unstubAllGlobals();
         vi.useRealTimers();
         document.body.innerHTML = '';
-        Reflect.deleteProperty(document, 'fonts');
     });
 
     function flushAnimationFrames(count = 1) {
@@ -58,12 +65,7 @@ describe('shield lifecycle', () => {
         }
     }
 
-    it('lets the boot shield hide, then reuses the same node for keyboard reload shielding', async () => {
-        Object.defineProperty(document, 'fonts', {
-            configurable: true,
-            value: { ready: Promise.resolve() },
-        });
-
+    it('keeps the boot shield hidden during warm resume events and only reveals it again for keyboard reload', async () => {
         renderHook(() => {
             useBootShield();
             useReloadShield();
@@ -100,6 +102,24 @@ describe('shield lifecycle', () => {
         });
 
         expect(document.getElementById(BOOT_SHIELD_ID)).toBe(shield);
+        expect(shield).toHaveClass('hmi-shield--hidden');
+
+        act(() => {
+            Object.defineProperty(document, 'hasFocus', {
+                configurable: true,
+                value: vi.fn(() => false),
+            });
+            document.dispatchEvent(new Event('visibilitychange'));
+            Object.defineProperty(document, 'hasFocus', {
+                configurable: true,
+                value: vi.fn(() => true),
+            });
+            window.dispatchEvent(new Event('focus'));
+            window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+        });
+
+        expect(shield).toHaveClass('hmi-shield--hidden');
+        expect(shield).toHaveAttribute('data-hmi-shield-state', 'hidden');
 
         const reloadEvent = new KeyboardEvent('keydown', {
             key: 'r',

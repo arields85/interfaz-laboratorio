@@ -20,6 +20,7 @@ export interface UseCanvasReferenceOptions {
 
 export interface UseCanvasReferenceResult extends CanvasReferenceMetrics {
     containerRef: RefObject<HTMLDivElement | null>;
+    hasFirstValidMeasurement: boolean;
 }
 
 export function computeCanvasMetrics(input: {
@@ -51,12 +52,18 @@ function getInitialMetrics(cols?: number, rows?: number): CanvasReferenceMetrics
     return computeCanvasMetrics({ width: 0, height: 0, cols, rows });
 }
 
+function isValidMeasurement(width: number, height: number): boolean {
+    return width > 0 && height > 0;
+}
+
 export function useCanvasReference(options: UseCanvasReferenceOptions = {}): UseCanvasReferenceResult {
     const { cols = DEFAULT_COLS, rows = DEFAULT_ROWS } = options;
 
     const containerRef = useRef<HTMLDivElement>(null);
     const frameRef = useRef<number | null>(null);
+    const hasReceivedValidRef = useRef(false);
     const [metrics, setMetrics] = useState<CanvasReferenceMetrics>(() => getInitialMetrics(cols, rows));
+    const [hasFirstValidMeasurement, setHasFirstValidMeasurement] = useState(false);
 
     useEffect(() => {
         const cancelScheduledFrame = () => {
@@ -69,6 +76,11 @@ export function useCanvasReference(options: UseCanvasReferenceOptions = {}): Use
         const scheduleMetricsUpdate = (nextMetrics: CanvasReferenceMetrics) => {
             cancelScheduledFrame();
             frameRef.current = requestAnimationFrame(() => {
+                if (!hasReceivedValidRef.current) {
+                    hasReceivedValidRef.current = true;
+                    setHasFirstValidMeasurement(true);
+                }
+
                 setMetrics(nextMetrics);
                 frameRef.current = null;
             });
@@ -82,6 +94,10 @@ export function useCanvasReference(options: UseCanvasReferenceOptions = {}): Use
         const observer = new ResizeObserver((entries) => {
             const entry = entries[0];
             if (!entry) {
+                return;
+            }
+
+            if (!isValidMeasurement(entry.contentRect.width, entry.contentRect.height)) {
                 return;
             }
 
@@ -105,6 +121,7 @@ export function useCanvasReference(options: UseCanvasReferenceOptions = {}): Use
 
     return {
         containerRef,
+        hasFirstValidMeasurement,
         ...metrics,
     };
 }
