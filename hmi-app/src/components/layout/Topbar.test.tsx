@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../../config/loaderOptions.config';
 import type { AuthSession } from '../../domain';
 import { AUTH_SESSION_STORAGE_KEY, useAuthStore } from '../../store/auth.store';
 import Topbar from './Topbar';
@@ -33,6 +34,16 @@ const adminSession: AuthSession = {
     loginTimestamp: '2026-04-28T18:00:00.000Z',
 };
 
+function mountBootShield() {
+    const shield = document.createElement('div');
+    shield.id = 'hmi-shield';
+    shield.className = 'hmi-shield--hidden';
+    shield.setAttribute('data-hmi-shield-state', 'hidden');
+    shield.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(shield);
+    return shield;
+}
+
 function LocationIndicator() {
     const location = useLocation();
 
@@ -51,6 +62,7 @@ function renderTopbar(initialEntry = '/') {
 describe('Topbar', () => {
     beforeEach(() => {
         localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+        clearLoaderOptionsConfig();
         useAuthStore.setState({
             session: unauthenticatedSession,
             isHydrated: true,
@@ -97,6 +109,7 @@ describe('Topbar', () => {
         const user = userEvent.setup();
         const revealRequestSpy = vi.fn();
         const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+        mountBootShield();
 
         document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
         useAuthStore.setState({
@@ -124,5 +137,32 @@ describe('Topbar', () => {
 
         document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
         windowOpenSpy.mockRestore();
+    });
+
+    it('continues admin navigation immediately when runtime short is disabled', async () => {
+        saveLoaderOptionsConfig({
+            short: { enabled: false, durationSeconds: 2 },
+            long: { enabled: true, durationSeconds: 8 },
+        });
+
+        const user = userEvent.setup();
+        const revealRequestSpy = vi.fn();
+        mountBootShield();
+        document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+        useAuthStore.setState({
+            session: adminSession,
+            isHydrated: true,
+            isAuthenticating: false,
+            error: null,
+        });
+
+        renderTopbar('/explorer');
+
+        await user.click(screen.getByTitle('Administracion'));
+
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/admin');
+        expect(revealRequestSpy).not.toHaveBeenCalled();
+
+        document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 });

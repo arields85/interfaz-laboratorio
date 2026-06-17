@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { Palette, Wifi } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Palette, SlidersHorizontal, Wifi } from 'lucide-react';
 import AdminDialog from './AdminDialog';
 import AdminActionButton from './AdminActionButton';
 import ConnectionSettingsTab from './ConnectionSettingsTab';
 import DesignSettingsTab from './DesignSettingsTab';
+import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
 
 const TABS = [
     { id: 'connection', label: 'Conexion', icon: Wifi },
     { id: 'design', label: 'Diseno', icon: Palette },
+    { id: 'options', label: 'Opciones', icon: SlidersHorizontal },
 ] as const;
 
 type GlobalSettingsDialogProps = {
@@ -20,31 +22,31 @@ type TabId = (typeof TABS)[number]['id'];
 export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDialogProps) {
     const [activeTab, setActiveTab] = useState<TabId>(() => {
         const stored = localStorage.getItem('hmi-global-settings-tab');
-        return (stored as TabId | null) ?? 'connection';
+        return TABS.some((tab) => tab.id === stored) ? (stored as TabId) : 'connection';
     });
 
     const [connectionDirty, setConnectionDirty] = useState(false);
     const [designDirty, setDesignDirty] = useState(false);
-    const dirty = connectionDirty || designDirty;
+    const [optionsDirty, setOptionsDirty] = useState(false);
+    const dirty = connectionDirty || designDirty || optionsDirty;
 
     const connectionSaveRef = useRef<(() => void) | null>(null);
     const designSaveRef = useRef<(() => void) | null>(null);
     const designRevertRef = useRef<(() => void) | null>(null);
-
-    // Reset dirty state each time the dialog opens
-    useEffect(() => {
-        if (open) {
-            setConnectionDirty(false);
-            setDesignDirty(false);
-        }
-    }, [open]);
+    const optionsSaveRef = useRef<(() => void) | null>(null);
 
     const handleSave = () => {
         if (activeTab === 'connection') {
             connectionSaveRef.current?.();
-        } else {
-            designSaveRef.current?.();
+            return;
         }
+
+        if (activeTab === 'design') {
+            designSaveRef.current?.();
+            return;
+        }
+
+        optionsSaveRef.current?.();
     };
 
     const handleClose = () => {
@@ -53,29 +55,8 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         }
         setConnectionDirty(false);
         setDesignDirty(false);
+        setOptionsDirty(false);
         onClose();
-    };
-
-    const renderTabContent = () => {
-        switch (activeTab) {
-            case 'connection':
-                return (
-                    <ConnectionSettingsTab
-                        onDirtyChange={setConnectionDirty}
-                        saveRef={connectionSaveRef}
-                    />
-                );
-            case 'design':
-                return (
-                    <DesignSettingsTab
-                        onDirtyChange={setDesignDirty}
-                        saveRef={designSaveRef}
-                        revertRef={designRevertRef}
-                    />
-                );
-            default:
-                return null;
-        }
     };
 
     return (
@@ -127,7 +108,29 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                 </div>
             </div>
 
-            <div className="min-h-[520px]">{renderTabContent()}</div>
+            <div className="min-h-[520px]">
+                <div hidden={activeTab !== 'connection'}>
+                    <ConnectionSettingsTab
+                        onDirtyChange={setConnectionDirty}
+                        saveRef={connectionSaveRef}
+                    />
+                </div>
+
+                <div hidden={activeTab !== 'design'}>
+                    <DesignSettingsTab
+                        onDirtyChange={setDesignDirty}
+                        saveRef={designSaveRef}
+                        revertRef={designRevertRef}
+                    />
+                </div>
+
+                <div hidden={activeTab !== 'options'}>
+                    <LoaderOptionsSettingsTab
+                        onDirtyChange={setOptionsDirty}
+                        saveRef={optionsSaveRef}
+                    />
+                </div>
+            </div>
         </AdminDialog>
     );
 }

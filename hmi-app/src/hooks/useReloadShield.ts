@@ -58,13 +58,16 @@ export function useReloadShield(): void {
             reloadScheduled = true;
 
             const shield = document.getElementById(BOOT_SHIELD_ID);
-            requestShieldReveal({
+            const visualized = requestShieldReveal({
                 profileId: 'long',
                 runner: 'original-long',
                 allowNoContentExtension: true,
                 restartCycle: true,
             }, shield);
-            hiddenTargets = hideReloadTargets();
+
+            if (visualized) {
+                hiddenTargets = hideReloadTargets();
+            }
 
             reloadFrameId = window.requestAnimationFrame(() => {
                 reloadController.reload();

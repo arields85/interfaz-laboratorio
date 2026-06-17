@@ -1,3 +1,5 @@
+import { LOADER_OPTIONS_DEFAULTS, toLoaderDurationMs } from '../config/loaderOptions.config';
+
 export type ShieldProfileId = 'long' | 'short';
 
 export interface ShieldProfile {
@@ -14,7 +16,7 @@ export const SHIELD_PROFILES: Record<ShieldProfileId, ShieldProfile> = {
     long: {
         id: 'long',
         message: 'ACTUALIZANDO DATOS',
-        minVisibleMs: 8000,
+        minVisibleMs: toLoaderDurationMs(LOADER_OPTIONS_DEFAULTS.long.durationSeconds),
         typingDurationMs: 800,
         typingDelayMs: 300,
         caretBlinkDelayMs: 1100,
@@ -23,7 +25,7 @@ export const SHIELD_PROFILES: Record<ShieldProfileId, ShieldProfile> = {
     short: {
         id: 'short',
         message: 'CARGANDO',
-        minVisibleMs: 1000,
+        minVisibleMs: toLoaderDurationMs(LOADER_OPTIONS_DEFAULTS.short.durationSeconds),
         typingDurationMs: 180,
         typingDelayMs: 80,
         caretBlinkDelayMs: 260,

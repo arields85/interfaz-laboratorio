@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../config/loaderOptions.config';
 import AdminLayout from './AdminLayout';
 import { SHIELD_REVEAL_REQUEST_EVENT } from '../hooks/useBootShield';
 
@@ -40,9 +41,46 @@ vi.mock('../store/auth.store', () => ({
     }),
 }));
 
+function mountBootShield() {
+    const shield = document.createElement('div');
+    shield.id = 'hmi-shield';
+    shield.className = 'hmi-shield--hidden';
+    shield.setAttribute('data-hmi-shield-state', 'hidden');
+    shield.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(shield);
+    return shield;
+}
+
 describe('AdminLayout', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        clearLoaderOptionsConfig();
+        document.body.innerHTML = '';
+    });
+
+    it('logs out immediately without revealing the runtime long loader when that profile is disabled', () => {
+        saveLoaderOptionsConfig({
+            short: { enabled: true, durationSeconds: 2 },
+            long: { enabled: false, durationSeconds: 8 },
+        });
+
+        const revealRequestSpy = vi.fn();
+        mountBootShield();
+        document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+
+        render(<AdminLayout />);
+
+        fireEvent.click(screen.getByRole('button', { name: /cerrar sesion/i }));
+
+        expect(logoutMock).toHaveBeenCalledTimes(1);
+        expect(revealRequestSpy).not.toHaveBeenCalled();
+
+        document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+    });
+
     it('logs out without imperatively navigating because the auth guard owns the redirect', () => {
         const revealRequestSpy = vi.fn();
+        mountBootShield();
         document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
 
         render(<AdminLayout />);

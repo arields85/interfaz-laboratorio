@@ -8,13 +8,13 @@ Proteger boot y keyboard reload con un único shield root-owned para que la HMI 
 
 ### Requirement: Root-owned shield continuity
 
-The system MUST reuse the existing root-owned `#hmi-shield` as the only visual shield for boot and supported keyboard reload. The shield MUST NOT be revealed again for `visibilitychange`, window focus recovery, `pageshow`, or any other warm-resume event over an already-rendered UI. Boot and supported keyboard reload MUST run the restored `long` profile contract by default and MUST NOT switch to a different long lifecycle because of generic viewer-readiness or repeat-cycle orchestration.
+The system MUST reuse the existing root-owned `#hmi-shield` as the only visual shield for boot and supported keyboard reload. The shield MUST NOT be revealed again for `visibilitychange`, window focus recovery, `pageshow`, or any other warm-resume event over an already-rendered UI. Boot and supported keyboard reload MUST enter through the static pre-hydration `long` shield and continue the normal boot path once runtime takes over. Persisted runtime loader options MUST NOT suppress that initial pre-hydration shield because app config is unavailable then.
 
-#### Scenario: Boot and reload use the restored long contract
+#### Scenario: Initial boot ignores runtime disable
 
-- GIVEN the HMI boots or the user triggers the supported keyboard reload flow
-- WHEN the shield lifecycle runs
-- THEN the existing root-owned shield follows the restored default `long` contract before hiding
+- GIVEN persisted runtime settings disable `long`
+- WHEN the browser loads or reloads the app from the static HTML shield
+- THEN the initial pre-hydration shield still appears and boot continues through the normal boot path
 
 #### Scenario: Warm resume does not re-cover live UI
 

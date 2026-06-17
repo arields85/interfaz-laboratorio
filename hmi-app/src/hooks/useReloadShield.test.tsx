@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../config/loaderOptions.config';
 import {
     BOOT_SHIELD_ID,
     BOOT_SHIELD_MESSAGE,
@@ -46,6 +47,7 @@ describe('useReloadShield', () => {
         vi.restoreAllMocks();
         vi.unstubAllGlobals();
         document.body.innerHTML = '';
+        clearLoaderOptionsConfig();
     });
 
     function flushAnimationFrame() {
@@ -180,5 +182,35 @@ describe('useReloadShield', () => {
         expect(shield).toHaveClass('hmi-shield--hidden');
         expect(shaderCanvas).not.toHaveAttribute('data-hmi-reload-hidden');
         expect(reloadCount).toBe(0);
+    });
+
+    it('continues reload immediately without hiding the shader canvas when runtime long is disabled', () => {
+        saveLoaderOptionsConfig({
+            short: { enabled: true, durationSeconds: 2 },
+            long: { enabled: false, durationSeconds: 8 },
+        });
+        const revealRequestSpy = vi.fn();
+        document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+
+        renderHook(() => reloadShieldModule.useReloadShield());
+
+        const event = new KeyboardEvent('keydown', {
+            key: 'F5',
+            cancelable: true,
+        });
+
+        document.dispatchEvent(event);
+        flushAnimationFrame();
+
+        const shield = document.getElementById(BOOT_SHIELD_ID);
+        const shaderCanvas = document.querySelector(reloadShieldModule.RELOAD_HIDE_SELECTOR);
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(revealRequestSpy).not.toHaveBeenCalled();
+        expect(shield).toHaveClass('hmi-shield--hidden');
+        expect(shaderCanvas).not.toHaveAttribute('data-hmi-reload-hidden');
+        expect(reloadCount).toBe(1);
+
+        document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 });

@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../config/loaderOptions.config';
 import {
     BOOT_SHIELD_ID,
     BOOT_SHIELD_MESSAGE,
@@ -12,6 +13,7 @@ import {
     SHIELD_REVEAL_REQUEST_EVENT,
     WEBGL_FIRST_DRAW_EVENT,
     getRequiredFontChecks,
+    requestShieldReveal,
     useBootShield,
 } from './useBootShield';
 import { SHIELD_PROFILES } from '../shield/shieldProfiles';
@@ -145,6 +147,7 @@ describe('useBootShield', () => {
         vi.useRealTimers();
         document.body.innerHTML = '';
         Reflect.deleteProperty(document, 'fonts');
+        clearLoaderOptionsConfig();
     });
 
     function flushAnimationFrames(count = 1) {
@@ -225,7 +228,7 @@ describe('useBootShield', () => {
     });
 
     it('resolves the runtime typography font checks from canonical CSS tokens before releasing the shield', async () => {
-        const check = vi.fn(() => true);
+        const check = vi.fn<(font: string) => boolean>(() => true);
         Object.defineProperty(document, 'fonts', {
             configurable: true,
             value: {
@@ -347,6 +350,40 @@ describe('useBootShield', () => {
         expect(BOOT_SHIELD_MIN_VISIBLE_MS).toBe(SHIELD_PROFILES.long.minVisibleMs);
     });
 
+    it('keeps the initial pre-hydration boot shield on the static long timing even when runtime long is disabled', async () => {
+        saveLoaderOptionsConfig({
+            short: { enabled: true, durationSeconds: 2 },
+            long: { enabled: false, durationSeconds: 1 },
+        });
+
+        const shield = mountShield();
+        mountShaderCanvas({ 'data-hmi-webgl-ready': 'true' });
+        renderHook(() => useBootShield());
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        flushAnimationFrames(4);
+
+        await act(async () => {
+            vi.advanceTimersByTime(BOOT_SHIELD_MIN_VISIBLE_MS - 1);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(shield).not.toHaveClass('hmi-shield--hidden');
+
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(shield).toHaveClass('hmi-shield--hidden');
+    });
+
     it('restarts the restored original-long contract when a long reveal request is dispatched after the initial boot hide', async () => {
         const shield = mountShield();
         const fontsReady = createDeferred<void>();
@@ -449,6 +486,93 @@ describe('useBootShield', () => {
 
         await act(async () => {
             vi.advanceTimersByTime(1);
+            await Promise.resolve();
+        });
+
+        expect(shield).toHaveClass('hmi-shield--hidden');
+    });
+
+    it('skips runtime visualization immediately when the requested loader profile is disabled', async () => {
+        saveLoaderOptionsConfig({
+            short: { enabled: false, durationSeconds: 2 },
+            long: { enabled: true, durationSeconds: 8 },
+        });
+
+        const shield = mountShield('hmi-shield--hidden');
+        const revealListener = vi.fn();
+        document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealListener as EventListener);
+
+        renderHook(() => useBootShield());
+
+        const visualized = requestShieldReveal({
+            profileId: 'short',
+            runner: 'short',
+            allowNoContentExtension: false,
+            restartCycle: true,
+        }, shield);
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(visualized).toBe(false);
+        expect(revealListener).not.toHaveBeenCalled();
+        expect(shield).toHaveClass('hmi-shield--hidden');
+        expect(shield).toHaveTextContent('texto viejo');
+
+        document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealListener as EventListener);
+    });
+
+    it('keeps an active runtime reveal on its original duration snapshot after later config saves', async () => {
+        saveLoaderOptionsConfig({
+            short: { enabled: true, durationSeconds: 2 },
+            long: { enabled: true, durationSeconds: 5 },
+        });
+
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                ready: Promise.resolve(),
+                check: vi.fn(() => true),
+            },
+        });
+
+        const shield = mountShield('hmi-shield--hidden');
+        mountShaderCanvas({ 'data-hmi-webgl-ready': 'true' });
+        renderHook(() => useBootShield());
+
+        const visualized = requestShieldReveal({
+            profileId: 'long',
+            runner: 'original-long',
+            allowNoContentExtension: false,
+            restartCycle: true,
+        }, shield);
+
+        expect(visualized).toBe(true);
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        flushAnimationFrames(4);
+
+        saveLoaderOptionsConfig({
+            short: { enabled: true, durationSeconds: 2 },
+            long: { enabled: true, durationSeconds: 9 },
+        });
+
+        await act(async () => {
+            vi.advanceTimersByTime(4_999);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(shield).not.toHaveClass('hmi-shield--hidden');
+
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+            await Promise.resolve();
             await Promise.resolve();
         });
 

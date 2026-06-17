@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
+import { LOADER_OPTIONS_DEFAULTS, resolveRuntimeLoaderRequest, toLoaderDurationMs } from '../config/loaderOptions.config';
 import { isShieldContentReady, waitForShieldContentReady } from '../shield/shieldContentReadiness';
+import type { ShieldRevealRequest } from '../shield/shieldEvents';
 import { SHIELD_PROFILES } from '../shield/shieldProfiles';
 
 export const BOOT_SHIELD_ID = 'hmi-shield';
 export const BOOT_SHIELD_MESSAGE = 'ACTUALIZANDO DATOS';
 export const BOOT_SHIELD_HIDDEN_CLASS = 'hmi-shield--hidden';
-export const BOOT_SHIELD_MIN_VISIBLE_MS = SHIELD_PROFILES.long.minVisibleMs;
-export const BOOT_SHIELD_SHORT_VISIBLE_MS = SHIELD_PROFILES.short.minVisibleMs;
+export const BOOT_SHIELD_MIN_VISIBLE_MS = toLoaderDurationMs(LOADER_OPTIONS_DEFAULTS.long.durationSeconds);
+export const BOOT_SHIELD_SHORT_VISIBLE_MS = toLoaderDurationMs(LOADER_OPTIONS_DEFAULTS.short.durationSeconds);
 export const BOOT_SHIELD_TIMEOUT_MS = 10000;
 export const BOOT_SHIELD_TRANSITION_FALLBACK_MS = 300;
 export const BOOT_SHIELD_STABLE_FRAME_COUNT = 4;
@@ -14,16 +16,6 @@ export const SHADER_CANVAS_SELECTOR = '[data-hmi-shader-canvas="true"]';
 export const SHADER_READY_ATTRIBUTE = 'data-hmi-webgl-ready';
 export const WEBGL_FIRST_DRAW_EVENT = 'webgl-first-draw';
 export const SHIELD_REVEAL_REQUEST_EVENT = 'hmi-shield-profile-change';
-
-export type ShieldRunner = 'original-long' | 'short';
-
-export interface ShieldRevealRequest {
-    profileId: 'long' | 'short';
-    runner: ShieldRunner;
-    allowNoContentExtension: boolean;
-    restartCycle: boolean;
-    changed?: boolean;
-}
 
 type FontsReadyDocument = Document & {
     fonts?: {
@@ -193,14 +185,23 @@ export function revealBootShield(
 export function requestShieldReveal(
     request: ShieldRevealRequest,
     shield: HTMLElement | null = getBootShield(),
-): void {
-    if (shield) {
-        revealBootShield(shield, { message: SHIELD_PROFILES[request.profileId].message });
+): boolean {
+    const runtimeRequest = resolveRuntimeLoaderRequest(request.profileId);
+
+    if (!shield || !runtimeRequest.enabled) {
+        return false;
     }
 
+    revealBootShield(shield, { message: SHIELD_PROFILES[request.profileId].message });
+
     document.dispatchEvent(new CustomEvent<ShieldRevealRequest>(SHIELD_REVEAL_REQUEST_EVENT, {
-        detail: request,
+        detail: {
+            ...request,
+            resolvedMinVisibleMs: runtimeRequest.minVisibleMs,
+        },
     }));
+
+    return true;
 }
 
 export function hideBootShield(shield: HTMLElement): void {
@@ -256,6 +257,16 @@ function waitForDelay(delayMs: number): Promise<void> {
     return new Promise((resolve) => {
         window.setTimeout(resolve, delayMs);
     });
+}
+
+function resolveRequestMinVisibleMs(request: ShieldRevealRequest): number {
+    if (typeof request.resolvedMinVisibleMs === 'number' && Number.isFinite(request.resolvedMinVisibleMs)) {
+        return Math.max(0, request.resolvedMinVisibleMs);
+    }
+
+    return request.runner === 'short'
+        ? BOOT_SHIELD_SHORT_VISIBLE_MS
+        : BOOT_SHIELD_MIN_VISIBLE_MS;
 }
 
 async function waitForRequiredFonts(deadline: number): Promise<void> {
@@ -358,6 +369,7 @@ export function useBootShield(): void {
             const cycleId = activeCycleId;
             const mountedAt = Date.now();
             const deadline = mountedAt + BOOT_SHIELD_TIMEOUT_MS;
+            const minVisibleMs = resolveRequestMinVisibleMs(request);
 
             revealBootShield(shield, { message: SHIELD_PROFILES[request.profileId].message });
 
@@ -380,7 +392,7 @@ export function useBootShield(): void {
 
             if (request.runner === 'short') {
                 void (async () => {
-                    await waitForDelay(BOOT_SHIELD_SHORT_VISIBLE_MS);
+                    await waitForDelay(minVisibleMs);
 
                     if (!ensureActive()) {
                         return;
@@ -429,7 +441,7 @@ export function useBootShield(): void {
                 }
 
                 const minimumVisibleTimeReady = await raceWithRemainingTimeout(
-                    waitForDelay(Math.max(0, BOOT_SHIELD_MIN_VISIBLE_MS - (Date.now() - mountedAt))),
+                    waitForDelay(Math.max(0, minVisibleMs - (Date.now() - mountedAt))),
                 );
 
                 if (!ensureActive()) {
@@ -470,6 +482,7 @@ export function useBootShield(): void {
                 profileId: 'long',
                 runner: 'original-long',
                 allowNoContentExtension: false,
+                resolvedMinVisibleMs: BOOT_SHIELD_MIN_VISIBLE_MS,
                 restartCycle: true,
             });
         }

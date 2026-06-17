@@ -1,3 +1,4 @@
+import { resolveRuntimeLoaderRequest } from '../config/loaderOptions.config';
 import { BOOT_SHIELD_ID, normalizeBootShieldContent, revealBootShield } from '../hooks/useBootShield';
 import { SHIELD_PROFILE_CHANGE_EVENT, type ShieldProfileChangeDetail, type ShieldRunner } from './shieldEvents';
 import { logShieldDebug, logShieldDebugFromShield } from './shieldDebug';
@@ -64,22 +65,31 @@ export const shieldController = {
     revealWithProfile(
         profileId: ShieldProfileId,
         options?: { allowNoContentExtension?: boolean },
-    ): void {
+    ): boolean {
         const shield = getShield();
         const runner = resolveRunner(profileId);
         const allowNoContentExtension = resolveAllowNoContentExtension(profileId, options);
+        const runtimeRequest = resolveRuntimeLoaderRequest(profileId);
 
         if (!shield) {
             logShieldDebug('shield:reveal-requested', {
                 profile: profileId,
-                detail: { runner, allowNoContentExtension, result: 'shield-missing' },
+                detail: { runner, allowNoContentExtension, result: 'shield-missing', resolvedMinVisibleMs: runtimeRequest.minVisibleMs },
             });
-            return;
+            return false;
+        }
+
+        if (!runtimeRequest.enabled) {
+            logShieldDebugFromShield('shield:reveal-request-skipped', shield, {
+                profile: profileId,
+                detail: { runner, allowNoContentExtension, reason: 'runtime-profile-disabled' },
+            });
+            return false;
         }
 
         logShieldDebugFromShield('shield:reveal-requested', shield, {
             profile: profileId,
-            detail: { runner, allowNoContentExtension },
+            detail: { runner, allowNoContentExtension, resolvedMinVisibleMs: runtimeRequest.minVisibleMs },
         });
 
         const wasVisible = isShieldVisible(shield);
@@ -88,9 +98,9 @@ export const shieldController = {
         if (wasVisible && previousProfile === profileId) {
             logShieldDebugFromShield('shield:reveal-request-ignored', shield, {
                 profile: profileId,
-                detail: { runner, allowNoContentExtension, reason: 'already-visible-same-profile' },
+                detail: { runner, allowNoContentExtension, reason: 'already-visible-same-profile', resolvedMinVisibleMs: runtimeRequest.minVisibleMs },
             });
-            return;
+            return true;
         }
 
         this.applyProfile(shield, profileId);
@@ -104,13 +114,16 @@ export const shieldController = {
                 profileId,
                 runner,
                 allowNoContentExtension,
+                resolvedMinVisibleMs: runtimeRequest.minVisibleMs,
                 changed: previousProfile !== profileId,
                 restartCycle: !wasVisible,
             },
         }));
         logShieldDebugFromShield('shield:profile-change-event-dispatched', shield, {
-            detail: { profileId, runner, allowNoContentExtension, restartCycle: !wasVisible },
+            detail: { profileId, runner, allowNoContentExtension, resolvedMinVisibleMs: runtimeRequest.minVisibleMs, restartCycle: !wasVisible },
         });
+
+        return true;
     },
 
     getActiveProfile(): ShieldProfileId {

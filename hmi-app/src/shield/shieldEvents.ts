@@ -8,6 +8,7 @@ export interface ShieldRevealRequest {
     profileId: ShieldProfileId;
     runner: ShieldRunner;
     allowNoContentExtension: boolean;
+    resolvedMinVisibleMs?: number;
     changed?: boolean;
     restartCycle?: boolean;
 }

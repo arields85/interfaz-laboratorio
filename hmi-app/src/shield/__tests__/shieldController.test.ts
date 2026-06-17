@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../../config/loaderOptions.config';
 import * as bootShieldModule from '../../hooks/useBootShield';
 import { DEFAULT_PROFILE, SHIELD_PROFILES } from '../shieldProfiles';
 import { SHIELD_PROFILE_CHANGE_EVENT, shieldController } from '../shieldController';
@@ -19,10 +20,20 @@ function mountShield() {
     return document.getElementById('hmi-shield') as HTMLDivElement;
 }
 
+function registerProfileChangeListener(eventSpy: ReturnType<typeof vi.fn<(event: CustomEvent<ShieldRevealRequest>) => void>>) {
+    const listener: EventListener = (event) => {
+        eventSpy(event as CustomEvent<ShieldRevealRequest>);
+    };
+
+    document.addEventListener(SHIELD_PROFILE_CHANGE_EVENT, listener);
+    return listener;
+}
+
 describe('shieldController', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
         document.body.innerHTML = '';
+        localStorage.clear();
         window.history.replaceState({}, '', '/');
     });
 
@@ -57,7 +68,7 @@ describe('shieldController', () => {
     it('reveals long with the final original-long request contract and no compatibility fields', () => {
         const revealSpy = vi.spyOn(bootShieldModule, 'revealBootShield').mockImplementation(() => undefined);
         const eventSpy = vi.fn<(event: CustomEvent<ShieldRevealRequest>) => void>();
-        document.addEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        const listener = registerProfileChangeListener(eventSpy);
 
         mountShield();
         shieldController.revealWithProfile('long');
@@ -75,12 +86,12 @@ describe('shieldController', () => {
         expect(shieldController.getActiveProfile()).toBe('long');
         expect(shieldController.getProfileConfig(DEFAULT_PROFILE)).toEqual(SHIELD_PROFILES.long);
 
-        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, listener);
     });
 
     it('allows explicit long no-content extension without reviving compatibility fields', () => {
         const eventSpy = vi.fn<(event: CustomEvent<ShieldRevealRequest>) => void>();
-        document.addEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        const listener = registerProfileChangeListener(eventSpy);
 
         mountShield();
         shieldController.revealWithProfile('long', { allowNoContentExtension: true });
@@ -95,12 +106,12 @@ describe('shieldController', () => {
         });
         expect(eventSpy.mock.calls[0]?.[0].detail).not.toHaveProperty('waitForViewerReady');
 
-        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, listener);
     });
 
     it('reveals short as an isolated fast-path request even when the caller asks for long-only extension', () => {
         const eventSpy = vi.fn<(event: CustomEvent<ShieldRevealRequest>) => void>();
-        document.addEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        const listener = registerProfileChangeListener(eventSpy);
 
         mountShield();
         shieldController.revealWithProfile('short', { allowNoContentExtension: true });
@@ -114,13 +125,13 @@ describe('shieldController', () => {
             changed: true,
         });
 
-        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, listener);
     });
 
     it('ignores duplicate reveal requests for the same visible profile without restarting the lifecycle', () => {
         const revealSpy = vi.spyOn(bootShieldModule, 'revealBootShield');
-        const eventSpy = vi.fn();
-        document.addEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        const eventSpy = vi.fn<(event: CustomEvent<ShieldRevealRequest>) => void>();
+        const listener = registerProfileChangeListener(eventSpy);
 
         mountShield();
 
@@ -130,6 +141,54 @@ describe('shieldController', () => {
         expect(revealSpy).toHaveBeenCalledTimes(1);
         expect(eventSpy).toHaveBeenCalledTimes(1);
 
-        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, eventSpy as EventListener);
+        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, listener);
+    });
+
+    it('captures the runtime duration snapshot per future request', () => {
+        const eventSpy = vi.fn<(event: CustomEvent<ShieldRevealRequest>) => void>();
+        const shield = mountShield();
+        const listener = registerProfileChangeListener(eventSpy);
+
+        saveLoaderOptionsConfig({
+            short: { enabled: true, durationSeconds: 2 },
+            long: { enabled: true, durationSeconds: 5 },
+        });
+
+        shieldController.revealWithProfile('long');
+
+        saveLoaderOptionsConfig({
+            short: { enabled: true, durationSeconds: 2 },
+            long: { enabled: true, durationSeconds: 9 },
+        });
+
+        shield.setAttribute('data-hmi-shield-state', 'hidden');
+        shield.classList.add('hmi-shield--hidden');
+        shieldController.revealWithProfile('long');
+
+        expect(eventSpy).toHaveBeenCalledTimes(2);
+        expect(eventSpy.mock.calls[0]?.[0].detail.resolvedMinVisibleMs).toBe(5_000);
+        expect(eventSpy.mock.calls[1]?.[0].detail.resolvedMinVisibleMs).toBe(9_000);
+
+        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, listener);
+        clearLoaderOptionsConfig();
+    });
+
+    it('skips visualization immediately when the runtime profile is disabled', () => {
+        const revealSpy = vi.spyOn(bootShieldModule, 'revealBootShield').mockImplementation(() => undefined);
+        const eventSpy = vi.fn<(event: CustomEvent<ShieldRevealRequest>) => void>();
+        const listener = registerProfileChangeListener(eventSpy);
+
+        mountShield();
+        saveLoaderOptionsConfig({
+            short: { enabled: false, durationSeconds: 2 },
+            long: { enabled: true, durationSeconds: 8 },
+        });
+
+        expect(shieldController.revealWithProfile('short')).toBe(false);
+        expect(revealSpy).not.toHaveBeenCalled();
+        expect(eventSpy).not.toHaveBeenCalled();
+
+        document.removeEventListener(SHIELD_PROFILE_CHANGE_EVENT, listener);
+        clearLoaderOptionsConfig();
     });
 });

@@ -1,10 +1,6 @@
-# shield-reveal-profiles Specification
+# Delta for shield-reveal-profiles
 
-## Purpose
-
-Define one product contract for `long` and `short` shield reveals across the HMI.
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: Saved loader changes apply to future requests only
 
@@ -22,9 +18,12 @@ The system MUST resolve `long` and `short` settings per new reveal request. Savi
 - WHEN a later flow requests `short`
 - THEN that new request skips visualization immediately
 
+## MODIFIED Requirements
+
 ### Requirement: Long profile uses one restored ceremonial contract
 
 The system MUST treat every runtime reveal requested with the `long` profile as one configurable contract. When `long` is enabled, the reveal SHALL keep the same premium sequence and use the configured minimum visible duration. When `long` is disabled for runtime, the request MUST show nothing and continue immediately. This runtime contract SHALL apply to admin/logout and other post-load `long` requests unless the boot-shield limitation or the no-content safety exception applies.
+(Previously: Every `long` request always used one fixed restored sequence.)
 
 #### Scenario: Admin or other explicit long reveals stay consistent
 
@@ -41,6 +40,7 @@ The system MUST treat every runtime reveal requested with the `long` profile as 
 ### Requirement: Short profile remains an independent fast path
 
 The system MUST keep `short` independent from `long`. When `short` is enabled, a `short` reveal SHALL use its configured minimum visible duration and MUST NOT wait on long-only gates such as font readiness, first draw, stable frames, generic viewer-readiness, or repeat-cycle orchestration. When `short` is disabled, the request MUST show nothing and continue immediately.
+(Previously: `short` always used a fixed fast-path duration.)
 
 #### Scenario: Short transition hides without long-only waits
 
@@ -53,35 +53,3 @@ The system MUST keep `short` independent from `long`. When `short` is enabled, a
 - GIVEN a reveal requests `short` and `short` is disabled
 - WHEN the request is executed
 - THEN no loader is shown and navigation continues immediately
-
-### Requirement: No-content safety exception is narrow
-
-The system MAY extend a `long` reveal beyond the restored original sequence only when the destination cannot render a useful, stable, recognizable visual structure. Mounted loading, empty, and error states count as content and SHALL allow the `long` reveal to hide. Blank, broken, or unmounted destinations MUST keep the shield visible until coherent structure exists or a bounded fallback ends the wait.
-
-#### Scenario: Mounted loading state counts as content
-
-- GIVEN the destination mounts a coherent loading, empty, or error layout
-- WHEN the restored original `long` sequence finishes
-- THEN the shield hides even if data continues resolving
-
-#### Scenario: Blank destination allows extension
-
-- GIVEN the destination is blank, broken, or unmounted
-- WHEN the restored original `long` sequence finishes
-- THEN the shield may remain visible until recognizable structure appears or fallback releases it
-
-### Requirement: Long duration is not driven by generic orchestration
-
-The system MUST NOT change `long` duration because of generic viewer-readiness signals, repeated typewriter cycles, or repeat-cycle orchestration. Those signals MAY only support the narrow no-content safety decision and MUST NOT redefine the default `long` timeline.
-
-#### Scenario: Late viewer-ready signal does not prolong normal long hide
-
-- GIVEN a `long` reveal already has coherent destination content
-- WHEN a generic viewer-ready signal arrives after the restored original sequence
-- THEN the shield hide timing is unchanged
-
-#### Scenario: Repeated long cycles are prohibited
-
-- GIVEN a `long` reveal is waiting only on normal default gates
-- WHEN generic orchestration would restart or repeat the cycle
-- THEN the system does not add another long cycle
