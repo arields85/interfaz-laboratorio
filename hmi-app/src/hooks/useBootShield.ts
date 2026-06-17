@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { LOADER_OPTIONS_DEFAULTS, resolveRuntimeLoaderRequest, toLoaderDurationMs } from '../config/loaderOptions.config';
 import { isShieldContentReady, waitForShieldContentReady } from '../shield/shieldContentReadiness';
 import type { ShieldRevealRequest } from '../shield/shieldEvents';
-import { SHIELD_PROFILES } from '../shield/shieldProfiles';
+import { SHIELD_PROFILES, type ShieldProfileId } from '../shield/shieldProfiles';
 
 export const BOOT_SHIELD_ID = 'hmi-shield';
 export const BOOT_SHIELD_MESSAGE = 'ACTUALIZANDO DATOS';
@@ -54,6 +54,10 @@ const SHIELD_TYPED_ATTRIBUTE = 'data-hmi-shield-typed';
 const SHIELD_CARET_ATTRIBUTE = 'data-hmi-shield-caret';
 const SHIELD_CURSOR_LOADER_ATTRIBUTE = 'data-hmi-shield-cursor-loader';
 const SHIELD_TRAIL_ATTRIBUTE = 'data-hmi-shield-trail';
+const SHIELD_SHORT_SHELL_ATTRIBUTE = 'data-hmi-shield-short-shell';
+const SHIELD_SHORT_TYPEWRITER_ATTRIBUTE = 'data-hmi-shield-short-typewriter';
+const SHIELD_SHORT_TYPED_ATTRIBUTE = 'data-hmi-shield-short-typed';
+const SHIELD_SHORT_CARET_ATTRIBUTE = 'data-hmi-shield-short-caret';
 const SHIELD_TRAIL_SEGMENTS = ['g5', 'g4', 'g3', 'g2', 'g1', 'head'] as const;
 
 function normalizeFontFamilyValue(value: string): string {
@@ -93,7 +97,16 @@ function getBootShield(): HTMLElement | null {
     return document.getElementById(BOOT_SHIELD_ID);
 }
 
-function createShieldTypewriter(message = BOOT_SHIELD_MESSAGE): HTMLSpanElement {
+function resolveShieldProfileId(shield: HTMLElement, profileId?: ShieldProfileId): ShieldProfileId {
+    if (profileId) {
+        return profileId;
+    }
+
+    const activeProfile = shield.getAttribute('data-hmi-shield-profile');
+    return activeProfile === 'short' ? 'short' : 'long';
+}
+
+function createLongShieldTypewriter(message = BOOT_SHIELD_MESSAGE): HTMLSpanElement {
     const typewriter = document.createElement('span');
     typewriter.setAttribute(SHIELD_TYPEWRITER_ATTRIBUTE, 'true');
 
@@ -110,7 +123,7 @@ function createShieldTypewriter(message = BOOT_SHIELD_MESSAGE): HTMLSpanElement 
     return typewriter;
 }
 
-function createShieldCursorLoader(): HTMLDivElement {
+function createLongShieldCursorLoader(): HTMLDivElement {
     const cursorLoader = document.createElement('div');
     cursorLoader.setAttribute(SHIELD_CURSOR_LOADER_ATTRIBUTE, 'true');
 
@@ -124,18 +137,66 @@ function createShieldCursorLoader(): HTMLDivElement {
     return cursorLoader;
 }
 
-function createShieldShell(message = BOOT_SHIELD_MESSAGE): HTMLDivElement {
+function createLongShieldShell(message = BOOT_SHIELD_MESSAGE): HTMLDivElement {
     const shell = document.createElement('div');
     shell.setAttribute(SHIELD_SHELL_ATTRIBUTE, 'true');
-    shell.replaceChildren(createShieldTypewriter(message), createShieldCursorLoader());
+    shell.replaceChildren(createLongShieldTypewriter(message), createLongShieldCursorLoader());
+    return shell;
+}
+
+function createShortShieldTypewriter(message: string): HTMLSpanElement {
+    const typewriter = document.createElement('span');
+    typewriter.setAttribute(SHIELD_SHORT_TYPEWRITER_ATTRIBUTE, 'true');
+
+    const typed = document.createElement('span');
+    typed.setAttribute(SHIELD_SHORT_TYPED_ATTRIBUTE, 'true');
+    typed.textContent = message;
+
+    const caret = document.createElement('span');
+    caret.setAttribute(SHIELD_SHORT_CARET_ATTRIBUTE, 'true');
+    caret.setAttribute('aria-hidden', 'true');
+    caret.textContent = '_';
+
+    typewriter.replaceChildren(typed, caret);
+    return typewriter;
+}
+
+function createShortShieldShell(message: string): HTMLDivElement {
+    const shell = document.createElement('div');
+    shell.setAttribute(SHIELD_SHORT_SHELL_ATTRIBUTE, 'true');
+    shell.replaceChildren(createShortShieldTypewriter(message));
     return shell;
 }
 
 export function normalizeBootShieldContent(
     shield: HTMLElement,
-    options?: { message?: string },
+    options?: { message?: string; profileId?: ShieldProfileId },
 ): void {
-    const message = options?.message ?? BOOT_SHIELD_MESSAGE;
+    const profileId = resolveShieldProfileId(shield, options?.profileId);
+    const message = options?.message ?? SHIELD_PROFILES[profileId].message;
+
+    if (profileId === 'short') {
+        const shortShell = shield.querySelector<HTMLElement>(`[${SHIELD_SHORT_SHELL_ATTRIBUTE}]`);
+        const shortTypewriter = shield.querySelector<HTMLElement>(`[${SHIELD_SHORT_TYPEWRITER_ATTRIBUTE}]`);
+        const shortTyped = shield.querySelector<HTMLElement>(`[${SHIELD_SHORT_TYPED_ATTRIBUTE}]`);
+        const shortCaret = shield.querySelector<HTMLElement>(`[${SHIELD_SHORT_CARET_ATTRIBUTE}]`);
+        const hasExpectedShortTypewriter = shortTypewriter
+            && shortTypewriter.tagName === 'SPAN'
+            && shortTypewriter.childElementCount === 2
+            && shortTyped?.parentElement === shortTypewriter
+            && shortTyped.textContent === message
+            && shortCaret?.parentElement === shortTypewriter
+            && shortCaret.textContent === '_'
+            && shortCaret.getAttribute('aria-hidden') === 'true';
+
+        if (shortShell && shortShell.childElementCount === 1 && hasExpectedShortTypewriter && shield.childElementCount === 1) {
+            return;
+        }
+
+        shield.replaceChildren(createShortShieldShell(message));
+        return;
+    }
+
     const shell = shield.querySelector<HTMLElement>(`[${SHIELD_SHELL_ATTRIBUTE}]`);
     const typewriter = shield.querySelector<HTMLElement>(`[${SHIELD_TYPEWRITER_ATTRIBUTE}]`);
     const typed = shield.querySelector<HTMLElement>(`[${SHIELD_TYPED_ATTRIBUTE}]`);
@@ -164,12 +225,12 @@ export function normalizeBootShieldContent(
         return;
     }
 
-    shield.replaceChildren(createShieldShell(message));
+    shield.replaceChildren(createLongShieldShell(message));
 }
 
 export function revealBootShield(
     shield: HTMLElement | null = getBootShield(),
-    options?: { message?: string },
+    options?: { message?: string; profileId?: ShieldProfileId },
 ): void {
     if (!shield) {
         return;
@@ -192,7 +253,7 @@ export function requestShieldReveal(
         return false;
     }
 
-    revealBootShield(shield, { message: SHIELD_PROFILES[request.profileId].message });
+    revealBootShield(shield, { profileId: request.profileId, message: SHIELD_PROFILES[request.profileId].message });
 
     document.dispatchEvent(new CustomEvent<ShieldRevealRequest>(SHIELD_REVEAL_REQUEST_EVENT, {
         detail: {
@@ -371,7 +432,7 @@ export function useBootShield(): void {
             const deadline = mountedAt + BOOT_SHIELD_TIMEOUT_MS;
             const minVisibleMs = resolveRequestMinVisibleMs(request);
 
-            revealBootShield(shield, { message: SHIELD_PROFILES[request.profileId].message });
+            revealBootShield(shield, { profileId: request.profileId, message: SHIELD_PROFILES[request.profileId].message });
 
             const raceWithRemainingTimeout = async (work: Promise<void>): Promise<boolean> => {
                 const remaining = Math.max(0, deadline - Date.now());

@@ -13,6 +13,14 @@ function mountShield() {
                 <span data-hmi-shield-typewriter>
                     <span data-hmi-shield-typed>ACTUALIZANDO DATOS</span><span data-hmi-shield-caret aria-hidden="true">_</span>
                 </span>
+                <div data-hmi-shield-cursor-loader>
+                    <span data-hmi-shield-trail="g5" aria-hidden="true"></span>
+                    <span data-hmi-shield-trail="g4" aria-hidden="true"></span>
+                    <span data-hmi-shield-trail="g3" aria-hidden="true"></span>
+                    <span data-hmi-shield-trail="g2" aria-hidden="true"></span>
+                    <span data-hmi-shield-trail="g1" aria-hidden="true"></span>
+                    <span data-hmi-shield-trail="head" aria-hidden="true"></span>
+                </div>
             </div>
         </div>
     `;
@@ -42,27 +50,45 @@ describe('shieldController', () => {
 
         shieldController.applyProfile(shield, 'short');
 
+        expect(SHIELD_PROFILES.short.typingDurationMs).toBe(320);
+        expect(SHIELD_PROFILES.short.typingDelayMs).toBe(300);
+        expect(SHIELD_PROFILES.short.caretBlinkDelayMs).toBe(620);
         expect(shield.dataset.hmiShieldProfile).toBe('short');
         expect(shield).toHaveClass('hmi-shield--profile-short');
-        expect(shield.style.getPropertyValue('--hmi-shield-shell-width')).toBe(`${SHIELD_PROFILES.short.shellWidthCh}ch`);
-        expect(shield.style.getPropertyValue('--hmi-shield-typing-duration')).toBe(`${SHIELD_PROFILES.short.typingDurationMs}ms`);
-        expect(shield.style.getPropertyValue('--hmi-shield-typing-delay')).toBe(`${SHIELD_PROFILES.short.typingDelayMs}ms`);
-        expect(shield.style.getPropertyValue('--hmi-shield-caret-blink-delay')).toBe(`${SHIELD_PROFILES.short.caretBlinkDelayMs}ms`);
-        expect(shield.querySelector('[data-hmi-shield-typed]')).toHaveTextContent(SHIELD_PROFILES.short.message);
+        expect(shield.style.getPropertyValue('--hmi-shield-short-shell-width')).toBe(`${SHIELD_PROFILES.short.shellWidthCh}ch`);
+        expect(shield.style.getPropertyValue('--hmi-shield-short-typing-duration')).toBe(`${SHIELD_PROFILES.short.typingDurationMs}ms`);
+        expect(shield.style.getPropertyValue('--hmi-shield-short-typing-delay')).toBe(`${SHIELD_PROFILES.short.typingDelayMs}ms`);
+        expect(shield.style.getPropertyValue('--hmi-shield-short-caret-blink-delay')).toBe(`${SHIELD_PROFILES.short.caretBlinkDelayMs}ms`);
+        expect(shield.querySelector('[data-hmi-shield-short-typed]')).toHaveTextContent(SHIELD_PROFILES.short.message);
+        expect(shield.querySelector('[data-hmi-shield-cursor-loader]')).toBeNull();
     });
 
-    it('is idempotent for the same profile and resets typewriter markup for a different profile', () => {
+    it('is idempotent for the same profile and swaps the visual root between long and short markup', () => {
         const shield = mountShield();
 
         shieldController.applyProfile(shield, 'long');
+        const firstShell = shield.querySelector('[data-hmi-shield-shell]');
         const firstTypewriter = shield.querySelector('[data-hmi-shield-typewriter]');
+        const firstCursorLoader = shield.querySelector('[data-hmi-shield-cursor-loader]');
 
         shieldController.applyProfile(shield, 'long');
+        expect(shield.querySelector('[data-hmi-shield-shell]')).toBe(firstShell);
         expect(shield.querySelector('[data-hmi-shield-typewriter]')).toBe(firstTypewriter);
+        expect(shield.querySelector('[data-hmi-shield-cursor-loader]')).toBe(firstCursorLoader);
 
         shieldController.applyProfile(shield, 'short');
-        expect(shield.querySelector('[data-hmi-shield-typewriter]')).not.toBe(firstTypewriter);
-        expect(shield.querySelector('[data-hmi-shield-typed]')).toHaveTextContent(SHIELD_PROFILES.short.message);
+        const shortShell = shield.querySelector('[data-hmi-shield-short-shell]');
+        expect(shortShell).not.toBeNull();
+        expect(shortShell).not.toBe(firstShell);
+        expect(shield.querySelector('[data-hmi-shield-short-typewriter]')).not.toBe(firstTypewriter);
+        expect(shield.querySelector('[data-hmi-shield-short-typed]')).toHaveTextContent(SHIELD_PROFILES.short.message);
+        expect(shield.querySelector('[data-hmi-shield-cursor-loader]')).toBeNull();
+
+        shieldController.applyProfile(shield, 'long');
+        expect(shield.querySelector('[data-hmi-shield-shell]')).not.toBeNull();
+        expect(shield.querySelector('[data-hmi-shield-typed]')).toHaveTextContent(SHIELD_PROFILES.long.message);
+        expect(shield.querySelectorAll('[data-hmi-shield-trail]')).toHaveLength(6);
+        expect(shield.querySelector('[data-hmi-shield-short-shell]')).toBeNull();
     });
 
     it('reveals long with the final original-long request contract and no compatibility fields', () => {

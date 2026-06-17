@@ -49,13 +49,13 @@ function mountShield(className = ''): HTMLDivElement {
     return document.getElementById(BOOT_SHIELD_ID) as HTMLDivElement;
 }
 
-function expectShieldMarkup(shield: HTMLElement) {
+function expectLongShieldMarkup(shield: HTMLElement, message = BOOT_SHIELD_MESSAGE) {
     const typewriter = shield.querySelector<HTMLElement>('[data-hmi-shield-typewriter]');
     expect(typewriter).not.toBeNull();
 
     const typed = shield.querySelector<HTMLElement>('[data-hmi-shield-typed]');
     expect(typed).not.toBeNull();
-    expect(typed).toHaveTextContent(BOOT_SHIELD_MESSAGE);
+    expect(typed).toHaveTextContent(message);
 
     const caret = shield.querySelector<HTMLElement>('[data-hmi-shield-caret]');
     expect(caret).not.toBeNull();
@@ -77,7 +77,37 @@ function expectShieldMarkup(shield: HTMLElement) {
     expect(shield.querySelector('[data-hmi-shield-loader-row]')).toBeNull();
     expect(shield.querySelector('[data-hmi-shield-loader-variant]')).toBeNull();
     expect(shield.querySelector('[data-hmi-shield-loader-segment]')).toBeNull();
-    expect(shield).toHaveTextContent(BOOT_SHIELD_MESSAGE);
+    expect(shield.querySelector('[data-hmi-shield-short-shell]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-short-typewriter]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-short-typed]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-short-caret]')).toBeNull();
+    expect(shield).toHaveTextContent(message);
+}
+
+function expectShortShieldMarkup(shield: HTMLElement, message = SHIELD_PROFILES.short.message) {
+    const shortShell = shield.querySelector<HTMLElement>('[data-hmi-shield-short-shell]');
+    expect(shortShell).not.toBeNull();
+
+    const typewriter = shield.querySelector<HTMLElement>('[data-hmi-shield-short-typewriter]');
+    expect(typewriter).not.toBeNull();
+
+    const typed = shield.querySelector<HTMLElement>('[data-hmi-shield-short-typed]');
+    expect(typed).not.toBeNull();
+    expect(typed).toHaveTextContent(message);
+
+    const caret = shield.querySelector<HTMLElement>('[data-hmi-shield-short-caret]');
+    expect(caret).not.toBeNull();
+    expect(caret).toHaveAttribute('aria-hidden', 'true');
+    expect(caret).toHaveTextContent('_');
+
+    expect(shield.querySelector('[data-hmi-shield-cursor-loader]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-trail]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-shell]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-typewriter]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-typed]')).toBeNull();
+    expect(shield.querySelector('[data-hmi-shield-caret]')).toBeNull();
+    expect(typewriter?.querySelectorAll('span')).toHaveLength(2);
+    expect(shield).toHaveTextContent(message);
 }
 
 function mountShaderCanvas(attributes: Record<string, string> = {}): HTMLCanvasElement {
@@ -179,7 +209,7 @@ describe('useBootShield', () => {
 
         flushAnimationFrames(2);
         expect(shield).not.toHaveClass('hmi-shield--hidden');
-        expectShieldMarkup(shield);
+        expectLongShieldMarkup(shield);
 
         await act(async () => {
             fontsReady.resolve(undefined);
@@ -218,7 +248,7 @@ describe('useBootShield', () => {
         expect(shield).toHaveClass('hmi-shield--hidden');
         expect(shield).toHaveAttribute('data-hmi-shield-state', 'hidden');
         expect(shield).toHaveAttribute('aria-hidden', 'true');
-        expectShieldMarkup(shield);
+        expectLongShieldMarkup(shield);
 
         act(() => {
             shield.dispatchEvent(new Event('transitionend'));
@@ -320,7 +350,7 @@ describe('useBootShield', () => {
 
         renderHook(() => useBootShield());
 
-        expectShieldMarkup(shield);
+        expectLongShieldMarkup(shield);
 
         await act(async () => {
             await Promise.resolve();
@@ -475,7 +505,7 @@ describe('useBootShield', () => {
         });
 
         expect(shield).not.toHaveClass('hmi-shield--hidden');
-        expect(shield.querySelector('[data-hmi-shield-typed]')).toHaveTextContent(SHIELD_PROFILES.short.message);
+        expectShortShieldMarkup(shield, SHIELD_PROFILES.short.message);
 
         await act(async () => {
             vi.advanceTimersByTime(BOOT_SHIELD_SHORT_VISIBLE_MS - 1);

@@ -7,16 +7,28 @@ import { DEFAULT_PROFILE, SHIELD_PROFILES, type ShieldProfile, type ShieldProfil
 const SHIELD_PROFILE_ATTRIBUTE = 'data-hmi-shield-profile';
 const SHIELD_STATE_ATTRIBUTE = 'data-hmi-shield-state';
 const SHORT_PROFILE_CLASS = 'hmi-shield--profile-short';
+const SHORT_SHELL_WIDTH_VARIABLE = '--hmi-shield-short-shell-width';
+const SHORT_TYPING_DURATION_VARIABLE = '--hmi-shield-short-typing-duration';
+const SHORT_TYPING_DELAY_VARIABLE = '--hmi-shield-short-typing-delay';
+const SHORT_CARET_BLINK_DELAY_VARIABLE = '--hmi-shield-short-caret-blink-delay';
 
 function getShield(): HTMLElement | null {
     return document.getElementById(BOOT_SHIELD_ID);
 }
 
 function applyProfileVariables(shield: HTMLElement, profile: ShieldProfile): void {
-    shield.style.setProperty('--hmi-shield-shell-width', `${profile.shellWidthCh}ch`);
-    shield.style.setProperty('--hmi-shield-typing-duration', `${profile.typingDurationMs}ms`);
-    shield.style.setProperty('--hmi-shield-typing-delay', `${profile.typingDelayMs}ms`);
-    shield.style.setProperty('--hmi-shield-caret-blink-delay', `${profile.caretBlinkDelayMs}ms`);
+    if (profile.id === 'short') {
+        shield.style.setProperty(SHORT_SHELL_WIDTH_VARIABLE, `${profile.shellWidthCh}ch`);
+        shield.style.setProperty(SHORT_TYPING_DURATION_VARIABLE, `${profile.typingDurationMs}ms`);
+        shield.style.setProperty(SHORT_TYPING_DELAY_VARIABLE, `${profile.typingDelayMs}ms`);
+        shield.style.setProperty(SHORT_CARET_BLINK_DELAY_VARIABLE, `${profile.caretBlinkDelayMs}ms`);
+        return;
+    }
+
+    shield.style.removeProperty(SHORT_SHELL_WIDTH_VARIABLE);
+    shield.style.removeProperty(SHORT_TYPING_DURATION_VARIABLE);
+    shield.style.removeProperty(SHORT_TYPING_DELAY_VARIABLE);
+    shield.style.removeProperty(SHORT_CARET_BLINK_DELAY_VARIABLE);
 }
 
 function isShieldVisible(shield: HTMLElement): boolean {
@@ -58,7 +70,7 @@ export const shieldController = {
         shield.setAttribute(SHIELD_PROFILE_ATTRIBUTE, profileId);
         shield.classList.toggle(SHORT_PROFILE_CLASS, profileId === 'short');
         applyProfileVariables(shield, profile);
-        normalizeBootShieldContent(shield, profile);
+        normalizeBootShieldContent(shield, { profileId, message: profile.message });
         logShieldDebugFromShield('shield:profile-applied', shield);
     },
 
@@ -106,7 +118,7 @@ export const shieldController = {
         this.applyProfile(shield, profileId);
 
         if (!wasVisible) {
-            revealBootShield(shield);
+            revealBootShield(shield, { profileId, message: SHIELD_PROFILES[profileId].message });
         }
 
         document.dispatchEvent(new CustomEvent<ShieldProfileChangeDetail>(SHIELD_PROFILE_CHANGE_EVENT, {

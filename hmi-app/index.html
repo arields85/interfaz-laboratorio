@@ -16,6 +16,10 @@
 
     #hmi-shield {
       --hmi-shield-ink: currentColor;
+      --hmi-shield-short-shell-width: 8ch;
+      --hmi-shield-short-typing-duration: 320ms;
+      --hmi-shield-short-typing-delay: 300ms;
+      --hmi-shield-short-caret-blink-delay: 620ms;
       position: fixed;
       inset: 0;
       z-index: 99999;
@@ -77,6 +81,47 @@
       animation: caret-idle 0.6s steps(1) 0s 1,
         caret-move 0.8s steps(1) 0.6s forwards,
         caret-blink 0.6s steps(1) 1.4s 1 forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-short-shell] {
+      display: inline-flex;
+      width: min(var(--hmi-shield-short-shell-width), 100%);
+      align-items: center;
+      justify-content: center;
+    }
+
+    #hmi-shield [data-hmi-shield-short-typewriter] {
+      position: relative;
+      display: block;
+      width: var(--hmi-shield-short-shell-width);
+      max-width: 100%;
+      overflow: visible;
+      text-align: left;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    #hmi-shield [data-hmi-shield-short-typed] {
+      display: inline-block;
+      overflow: hidden;
+      width: 0;
+      vertical-align: bottom;
+      text-align: left;
+      letter-spacing: 0;
+      white-space: nowrap;
+      animation: short-typing var(--hmi-shield-short-typing-duration) steps(1) var(--hmi-shield-short-typing-delay) forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-short-caret] {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      color: var(--hmi-shield-ink);
+      text-align: left;
+      letter-spacing: 0;
+      animation: short-caret-idle 0.6s steps(1) 0s 1,
+        short-caret-move var(--hmi-shield-short-typing-duration) steps(1) var(--hmi-shield-short-typing-delay) forwards,
+        short-caret-blink 0.6s steps(1) var(--hmi-shield-short-caret-blink-delay) infinite;
     }
 
     #hmi-shield [data-hmi-shield-cursor-loader] {
@@ -197,6 +242,40 @@
       100% { left: 18ch; }
     }
 
+    @keyframes short-typing {
+      0% { width: 0; }
+      17.5% { width: 1ch; }
+      27.5% { width: 2ch; }
+      37.5% { width: 3ch; }
+      47.5% { width: 4ch; }
+      57.5% { width: 5ch; }
+      67.5% { width: 6ch; }
+      80% { width: 7ch; }
+      100% { width: 8ch; }
+    }
+
+    @keyframes short-caret-move {
+      0% { left: 0; }
+      17.5% { left: 1ch; }
+      27.5% { left: 2ch; }
+      37.5% { left: 3ch; }
+      47.5% { left: 4ch; }
+      57.5% { left: 5ch; }
+      67.5% { left: 6ch; }
+      80% { left: 7ch; }
+      100% { left: 8ch; }
+    }
+
+    @keyframes short-caret-blink {
+      0%, 49% { color: var(--hmi-shield-ink); }
+      50%, 100% { color: var(--color-industrial-bg, #05070a); }
+    }
+
+    @keyframes short-caret-idle {
+      0%, 49% { color: var(--hmi-shield-ink); }
+      50%, 100% { color: var(--color-industrial-bg, #05070a); }
+    }
+
     @keyframes caret-blink {
       0%, 49% { color: var(--hmi-shield-ink); }
       50%, 100% { color: var(--color-industrial-bg, #05070a); }
@@ -236,6 +315,8 @@
       #hmi-shield,
       #hmi-shield [data-hmi-shield-typed],
       #hmi-shield [data-hmi-shield-caret],
+      #hmi-shield [data-hmi-shield-short-typed],
+      #hmi-shield [data-hmi-shield-short-caret],
       #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail]::before {
         animation: none !important;
         transition: none;
@@ -247,6 +328,15 @@
 
       #hmi-shield [data-hmi-shield-caret] {
         left: 18ch;
+        color: var(--hmi-shield-ink);
+      }
+
+      #hmi-shield [data-hmi-shield-short-typed] {
+        width: var(--hmi-shield-short-shell-width);
+      }
+
+      #hmi-shield [data-hmi-shield-short-caret] {
+        left: var(--hmi-shield-short-shell-width);
         color: var(--hmi-shield-ink);
       }
 

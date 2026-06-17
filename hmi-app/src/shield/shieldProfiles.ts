@@ -26,9 +26,9 @@ export const SHIELD_PROFILES: Record<ShieldProfileId, ShieldProfile> = {
         id: 'short',
         message: 'CARGANDO',
         minVisibleMs: toLoaderDurationMs(LOADER_OPTIONS_DEFAULTS.short.durationSeconds),
-        typingDurationMs: 180,
-        typingDelayMs: 80,
-        caretBlinkDelayMs: 260,
+        typingDurationMs: 320,
+        typingDelayMs: 300,
+        caretBlinkDelayMs: 620,
         shellWidthCh: 8,
     },
 };
