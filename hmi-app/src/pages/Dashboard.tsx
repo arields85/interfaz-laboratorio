@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Loader2, Link2Off } from 'lucide-react';
+import { AlertTriangle, Loader2, Link2Off } from 'lucide-react';
 import { dashboardStorage } from '../services/DashboardStorageService';
 import { hierarchyStorage } from '../services/HierarchyStorageService';
 import type { Dashboard, HierarchyNode } from '../domain/admin.types';
@@ -9,6 +9,7 @@ import { mockEquipmentList } from '../mocks/equipment.mock';
 import type { EquipmentSummary } from '../domain/equipment.types';
 import { useDataOverview } from '../queries/useDataOverview';
 import type { HierarchyContext } from '../widgets/resolvers/hierarchyResolver';
+import { resetShieldContentReady, signalShieldContentReady } from '../shield/shieldContentReadiness';
 
 // =============================================================================
 // Dashboard Público (Visor)
@@ -27,6 +28,7 @@ export default function Dashboard() {
     const [publishedDashboards, setPublishedDashboards] = useState<Dashboard[]>([]);
     const [allNodes, setAllNodes] = useState<HierarchyNode[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
     const { connection, machines } = useDataOverview();
 
@@ -39,11 +41,11 @@ export default function Dashboard() {
             name: eq.name, 
             status: eq.status, 
             type: eq.type, 
-            primaryMetrics: eq.primaryMetrics.map((m: any) => ({
-                id: m.label,
-                label: m.label,
-                value: m.value,
-                unit: m.unit,
+            primaryMetrics: eq.primaryMetrics.map((metric) => ({
+                id: metric.label,
+                label: metric.label,
+                value: metric.value,
+                unit: metric.unit,
                 status: 'normal',
                 timestamp: new Date().toISOString()
             })),
@@ -53,8 +55,11 @@ export default function Dashboard() {
     }, []);
 
     useEffect(() => {
+        resetShieldContentReady();
+
         const loadPublished = async () => {
             setIsLoading(true);
+            setLoadFailed(false);
             try {
                 const [all, nodes] = await Promise.all([
                     dashboardStorage.getDashboards(),
@@ -65,12 +70,20 @@ export default function Dashboard() {
                 setPublishedDashboards(published);
                 setAllNodes(nodes);
             } catch (error) {
+                setLoadFailed(true);
+                setAllDashboards([]);
+                setPublishedDashboards([]);
+                setAllNodes([]);
                 console.error("Error cargando dashboards públicos:", error);
             } finally {
                 setIsLoading(false);
             }
         };
         loadPublished();
+
+        return () => {
+            resetShieldContentReady();
+        };
     }, []);
 
     // Si la cantidad de tabs publicados cambia y el índice actual queda fuera
@@ -105,6 +118,20 @@ export default function Dashboard() {
         };
     }, [rawActiveDashboard]);
 
+    const dashboardViewState = isLoading
+        ? 'loading'
+        : loadFailed
+            ? 'error'
+            : publishedDashboards.length === 0 || !activeDashboard
+            ? 'empty'
+            : 'viewer';
+
+    useEffect(() => {
+        if (dashboardViewState === 'loading' || dashboardViewState === 'empty' || dashboardViewState === 'error' || dashboardViewState === 'viewer') {
+            signalShieldContentReady();
+        }
+    }, [dashboardViewState]);
+
     // Calcular los IDs de widgets asignados al header (para excluirlos del grid)
     // Hook ubicado en la zona superior del componente para mantener el orden
     // consistente entre renders (Rules of Hooks).
@@ -132,6 +159,21 @@ export default function Dashboard() {
         </div>
     );
 
+    const renderLoadErrorState = () => (
+        <div
+            role="alert"
+            className="h-full flex flex-col items-center justify-center text-industrial-muted space-y-4"
+        >
+            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-2">
+                <AlertTriangle size={32} className="text-industrial-muted/50" />
+            </div>
+            <h2 className="text-white">No se pudieron cargar los dashboards públicos.</h2>
+            <p className="text-center max-w-sm">
+                Reintentá desde el navegador o contactá a un administrador si el problema persiste.
+            </p>
+        </div>
+    );
+
     if (isLoading) {
         return (
             <div className="h-full flex items-center justify-center text-industrial-muted gap-3">
@@ -139,6 +181,10 @@ export default function Dashboard() {
                 <span className="uppercase">Iniciando Visor Operativo...</span>
             </div>
         );
+    }
+
+    if (loadFailed) {
+        return renderLoadErrorState();
     }
 
     if (publishedDashboards.length === 0) {

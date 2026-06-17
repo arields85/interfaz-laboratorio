@@ -93,7 +93,8 @@ describe('shield lifecycle', () => {
         expect(shield?.querySelector('[data-hmi-shield-caret]')).toHaveTextContent('_');
         expect(shield?.querySelector('[data-hmi-shield-caret]')).toHaveAttribute('aria-hidden', 'true');
         expect(shield?.querySelector('[data-hmi-shield-label]')).toBeNull();
-        expect(shield?.querySelector('[data-hmi-shield-cursor-loader]')).toBeNull();
+        expect(shield?.querySelector('[data-hmi-shield-cursor-loader]')).not.toBeNull();
+        expect(shield?.querySelectorAll('[data-hmi-shield-trail]')).toHaveLength(6);
         expect(shield?.querySelector('[data-hmi-shield-loader-variant]')).toBeNull();
         expect((shield?.textContent?.match(/ACTUALIZANDO DATOS/g) ?? [])).toHaveLength(1);
 

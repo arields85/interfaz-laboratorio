@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import AdminLayout from './AdminLayout';
+import { SHIELD_REVEAL_REQUEST_EVENT } from '../hooks/useBootShield';
 
 const { logoutMock, navigateMock } = vi.hoisted(() => ({
     logoutMock: vi.fn(),
@@ -41,12 +42,26 @@ vi.mock('../store/auth.store', () => ({
 
 describe('AdminLayout', () => {
     it('logs out without imperatively navigating because the auth guard owns the redirect', () => {
+        const revealRequestSpy = vi.fn();
+        document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+
         render(<AdminLayout />);
 
         fireEvent.click(screen.getByRole('button', { name: /cerrar sesion/i }));
 
         expect(logoutMock).toHaveBeenCalledTimes(1);
         expect(navigateMock).not.toHaveBeenCalled();
+        expect(revealRequestSpy).toHaveBeenCalledTimes(1);
+        expect(revealRequestSpy.mock.calls[0]?.[0]).toMatchObject({
+            detail: {
+                profileId: 'long',
+                runner: 'original-long',
+                allowNoContentExtension: true,
+                restartCycle: true,
+            },
+        });
+
+        document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 
     it('opens the global settings dialog from the admin toolbar and renders inactive sections separately', () => {
@@ -55,6 +70,7 @@ describe('AdminLayout', () => {
         fireEvent.click(screen.getByRole('button', { name: /configuracion general/i }));
 
         expect(screen.getByTestId('global-settings-dialog')).toBeInTheDocument();
+        expect(screen.getByTestId('admin-layout-outlet')).toBeInTheDocument();
         expect(screen.getByText('Dashboards')).toBeInTheDocument();
         expect(screen.getByText('Settings')).toBeInTheDocument();
     });

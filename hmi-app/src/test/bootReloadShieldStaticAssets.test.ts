@@ -6,7 +6,7 @@ const shieldMarkupMatch = indexHtml.match(/<div id="hmi-shield"[\s\S]*?<\/div>/)
 const shieldMarkup = shieldMarkupMatch?.[0] ?? '';
 
 describe('boot reload shield static assets', () => {
-    it('defines pre-React shield markup with fixed typewriter message and fallback font', () => {
+    it('defines pre-React shield markup with fixed typewriter message, bottom trail, and fallback font', () => {
         expect(shieldMarkup).toContain('<div id="hmi-shield" data-hmi-shield-state="visible" role="status" aria-live="polite">');
         expect(shieldMarkup).toContain('data-hmi-shield-typewriter');
         expect(shieldMarkup).toContain('data-hmi-shield-typed');
@@ -20,18 +20,13 @@ describe('boot reload shield static assets', () => {
         expect(shieldMarkup).not.toContain('Interfaz Laboratorio');
         expect(shieldMarkup).not.toContain('HMI');
         expect(shieldMarkup).not.toContain('data-hmi-shield-label');
-        expect(shieldMarkup).not.toContain('data-hmi-shield-cursor-loader');
-        expect(shieldMarkup).not.toContain('class="cursor-loader"');
-        expect(shieldMarkup).not.toContain('<span class="g5"></span>');
-        expect(shieldMarkup).not.toContain('<span class="g4"></span>');
-        expect(shieldMarkup).not.toContain('<span class="g3"></span>');
-        expect(shieldMarkup).not.toContain('<span class="g2"></span>');
-        expect(shieldMarkup).not.toContain('<span class="g1"></span>');
-        expect(shieldMarkup).not.toContain('<span class="head"></span>');
-        expect(shieldMarkup).not.toContain('data-hmi-shield-loader-rows');
-        expect(shieldMarkup).not.toContain('data-hmi-shield-loader-row');
-        expect(shieldMarkup).not.toContain('data-hmi-shield-loader-variant');
-        expect(shieldMarkup).not.toContain('data-hmi-shield-loader-segment');
+        expect(shieldMarkup).toContain('data-hmi-shield-cursor-loader');
+        expect(shieldMarkup).toContain('data-hmi-shield-trail="g5"');
+        expect(shieldMarkup).toContain('data-hmi-shield-trail="g4"');
+        expect(shieldMarkup).toContain('data-hmi-shield-trail="g3"');
+        expect(shieldMarkup).toContain('data-hmi-shield-trail="g2"');
+        expect(shieldMarkup).toContain('data-hmi-shield-trail="g1"');
+        expect(shieldMarkup).toContain('data-hmi-shield-trail="head"');
         expect(indexHtml).toContain('--hmi-shield-ink: currentColor;');
         expect(indexHtml).toContain('background-color: var(--color-industrial-bg, #05070a);');
         expect(indexHtml).toContain('font-family: Consolas, monospace;');
@@ -39,14 +34,29 @@ describe('boot reload shield static assets', () => {
         expect(indexHtml).toContain('visibility: visible;');
         expect(indexHtml).toContain('pointer-events: none;');
         expect(indexHtml).toContain('width: 18ch;');
-        expect(indexHtml).toContain('justify-content: flex-start;');
+        expect(indexHtml).toContain('justify-content: center;');
         expect(indexHtml).toContain('text-align: left;');
         expect(indexHtml).toContain('letter-spacing: 0;');
-        expect(indexHtml).toContain('animation: typing 0.8s steps(1) 0.3s forwards;');
-        expect(indexHtml).toContain('caret-blink 0.6s steps(1) 1.1s infinite;');
+        expect(indexHtml).toContain('animation: typing 0.8s steps(1) 0.6s forwards;');
+        expect(indexHtml).toContain('caret-idle 0.6s steps(1) 0s 1,');
+        expect(indexHtml).toContain('caret-blink 0.6s steps(1) 1.4s 1 forwards;');
         expect(indexHtml).toContain('@keyframes typing');
         expect(indexHtml).toContain('@keyframes caret-move');
         expect(indexHtml).toContain('@keyframes caret-blink');
+        expect(indexHtml).toContain('@keyframes caret-idle');
+        expect(indexHtml).toContain('@keyframes walk');
+        expect(indexHtml).toContain('width: 10ch;');
+        expect(indexHtml).toContain('letter-spacing: 0.05em;');
+        expect(indexHtml).toContain('animation: walk 1.8s steps(1) 1.7s infinite;');
+        expect(indexHtml).toContain('animation: walk 1.8s steps(1) 2.2s infinite;');
+        expect(indexHtml).toContain('--hmi-shield-trail-color: #f0f0f0;');
+        expect(indexHtml).toContain('--hmi-shield-trail-color: #898989;');
+        expect(indexHtml).toContain('--hmi-shield-trail-color: #5b5b5b;');
+        expect(indexHtml).toContain('--hmi-shield-trail-color: #3d3d3d;');
+        expect(indexHtml).toContain('--hmi-shield-trail-color: #282828;');
+        expect(indexHtml).toContain('--hmi-shield-trail-color: #1a1a1a;');
+        expect(indexHtml).toContain('content: "_         ";');
+        expect(indexHtml).toContain('content: "         _";');
         expect(indexHtml).toContain('7% { width: 1ch; }');
         expect(indexHtml).toContain('40% { width: 8ch; }');
         expect(indexHtml).toContain('72% { width: 13ch; }');
@@ -68,9 +78,11 @@ describe('boot reload shield static assets', () => {
         expect(indexHtml).toContain('#hmi-shield.hmi-shield--hidden');
         expect(indexHtml).toContain('font-size: 0.875rem;');
         expect(indexHtml).toContain('letter-spacing: 0.08em;');
+        expect(indexHtml).toContain('font: inherit;');
         expect(indexHtml).toContain('color: var(--color-industrial-bg, #05070a);');
         expect(indexHtml).toContain('width: 18ch;');
         expect(indexHtml).toContain('max-width: 100%;');
+        expect(indexHtml).toContain('align-items: center;');
         expect(indexHtml).not.toContain('translate');
         expect(indexHtml).not.toContain('scaleY');
         expect(indexHtml).not.toContain('scaleX');

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthSession } from '../../domain';
 import { AUTH_SESSION_STORAGE_KEY, useAuthStore } from '../../store/auth.store';
 import Topbar from './Topbar';
+import { SHIELD_REVEAL_REQUEST_EVENT } from '../../hooks/useBootShield';
 
 vi.mock('./ShaderSettingsPanel', () => ({
     default: () => null,
@@ -90,5 +91,38 @@ describe('Topbar', () => {
         expect(screen.getByTitle('Administracion')).toBeInTheDocument();
         expect(screen.getByTestId('current-path')).toHaveTextContent('/explorer');
         expect(screen.queryByLabelText('Usuario')).not.toBeInTheDocument();
+    });
+
+    it('uses the short loader and same-tab routing when entering admin from a viewer route', async () => {
+        const user = userEvent.setup();
+        const revealRequestSpy = vi.fn();
+        const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+        document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+        useAuthStore.setState({
+            session: adminSession,
+            isHydrated: true,
+            isAuthenticating: false,
+            error: null,
+        });
+
+        renderTopbar('/explorer');
+
+        await user.click(screen.getByTitle('Administracion'));
+
+        expect(windowOpenSpy).not.toHaveBeenCalled();
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/admin');
+        expect(revealRequestSpy).toHaveBeenCalledTimes(1);
+        expect(revealRequestSpy.mock.calls[0]?.[0]).toMatchObject({
+            detail: {
+                profileId: 'short',
+                runner: 'short',
+                allowNoContentExtension: false,
+                restartCycle: true,
+            },
+        });
+
+        document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+        windowOpenSpy.mockRestore();
     });
 });

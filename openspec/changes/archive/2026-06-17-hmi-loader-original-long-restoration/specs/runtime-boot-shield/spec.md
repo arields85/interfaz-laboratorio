@@ -1,14 +1,12 @@
-# runtime-boot-shield Specification
+# Delta for runtime-boot-shield
 
-## Purpose
-
-Proteger boot y keyboard reload con un único shield root-owned para que la HMI no exponga frames intermedios corruptos, sin volver a cubrir una UI ya renderizada durante warm resume.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Root-owned shield continuity
 
 The system MUST reuse the existing root-owned `#hmi-shield` as the only visual shield for boot and supported keyboard reload. The shield MUST NOT be revealed again for `visibilitychange`, window focus recovery, `pageshow`, or any other warm-resume event over an already-rendered UI. Boot and supported keyboard reload MUST run the restored `long` profile contract by default and MUST NOT switch to a different long lifecycle because of generic viewer-readiness or repeat-cycle orchestration.
+
+(Previously: Boot and reload preserved the approved long sequence, but the spec did not explicitly bind them to one restored long contract across mixed runtime orchestration.)
 
 #### Scenario: Boot and reload use the restored long contract
 
@@ -25,6 +23,8 @@ The system MUST reuse the existing root-owned `#hmi-shield` as the only visual s
 ### Requirement: Runtime typography-aligned readiness
 
 The system MUST keep the boot/reload shield visible until the canonical runtime typography source for the viewer reports the active fonts are ready, and the restored original `long` sequence then continues through first draw, stable frames, minimum visible, and hide, or until the bounded timeout releases it as the safety net. Boot/reload MUST NOT stay visible longer because of generic viewer-readiness signals or repeated long-cycle orchestration once those restored original gates have completed.
+
+(Previously: Font readiness gated shield exit, but the spec did not prohibit later generic viewer-readiness or repeat-cycle delays.)
 
 #### Scenario: Active viewer fonts gate the start of shield exit
 

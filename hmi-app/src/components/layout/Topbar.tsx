@@ -4,6 +4,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import LoginOverlay from '../auth/LoginOverlay';
 import ShaderSettingsPanel from './ShaderSettingsPanel';
 import { useAuthStore } from '../../store/auth.store';
+import { requestShieldReveal } from '../../hooks/useBootShield';
 
 const navLeftItems = [
     { icon: Home, label: 'Visión General', path: '/' },
@@ -48,6 +49,16 @@ export default function Topbar() {
     const shouldShowAdminActions = isHydrated && hasAdminAccess;
 
     const iconButtonClassName = 'relative rounded-lg p-2 text-industrial-muted transition-colors hover:bg-industrial-hover hover:text-industrial-text';
+
+    const handleAdminNavigation = () => {
+        requestShieldReveal({
+            profileId: 'short',
+            runner: 'short',
+            allowNoContentExtension: false,
+            restartCycle: true,
+        });
+        navigate('/admin');
+    };
 
     return (
         <>
@@ -104,7 +115,7 @@ export default function Topbar() {
                         <button
                             title="Administracion"
                             className={iconButtonClassName}
-                            onClick={() => window.open('/admin', '_blank')}
+                            onClick={handleAdminNavigation}
                         >
                             <Settings size={20} />
                         </button>

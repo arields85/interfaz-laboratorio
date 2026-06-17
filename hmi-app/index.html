@@ -38,8 +38,11 @@
 
     #hmi-shield [data-hmi-shield-shell] {
       display: inline-flex;
+      flex-direction: column;
+      gap: 0;
       width: min(18ch, 100%);
-      justify-content: flex-start;
+      align-items: center;
+      justify-content: center;
     }
 
     #hmi-shield [data-hmi-shield-typewriter] {
@@ -54,24 +57,100 @@
     }
 
     #hmi-shield [data-hmi-shield-typed] {
-      display: block;
+      display: inline-block;
       overflow: hidden;
       width: 0;
       vertical-align: bottom;
       text-align: left;
       letter-spacing: 0;
       white-space: nowrap;
-      animation: typing 0.8s steps(1) 0.3s forwards;
+      animation: typing 0.8s steps(1) 0.6s forwards;
     }
 
     #hmi-shield [data-hmi-shield-caret] {
       position: absolute;
-      inset: 0 auto 0 0;
+      bottom: 0;
+      left: 0;
       color: var(--hmi-shield-ink);
       text-align: left;
       letter-spacing: 0;
-      animation: caret-move 0.8s steps(1) 0.3s forwards,
-        caret-blink 0.6s steps(1) 1.1s infinite;
+      animation: caret-idle 0.6s steps(1) 0s 1,
+        caret-move 0.8s steps(1) 0.6s forwards,
+        caret-blink 0.6s steps(1) 1.4s 1 forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] {
+      position: relative;
+      display: inline-block;
+      width: 10ch;
+      height: 1.2em;
+      font: inherit;
+      letter-spacing: 0.05em;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail] {
+      position: absolute;
+      inset: 0 auto auto 0;
+      white-space: pre;
+      color: var(--color-industrial-bg, #05070a);
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail]::before {
+      content: "_         ";
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="head"] {
+      --hmi-shield-trail-color: #f0f0f0;
+      animation: trail-show 0.1s step-start 1.7s forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="head"]::before {
+      animation: walk 1.8s steps(1) 1.7s infinite;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g1"] {
+      --hmi-shield-trail-color: #898989;
+      animation: trail-show 0.1s step-start 1.8s forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g1"]::before {
+      animation: walk 1.8s steps(1) 1.8s infinite;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g2"] {
+      --hmi-shield-trail-color: #5b5b5b;
+      animation: trail-show 0.1s step-start 1.9s forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g2"]::before {
+      animation: walk 1.8s steps(1) 1.9s infinite;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g3"] {
+      --hmi-shield-trail-color: #3d3d3d;
+      animation: trail-show 0.1s step-start 2s forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g3"]::before {
+      animation: walk 1.8s steps(1) 2s infinite;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g4"] {
+      --hmi-shield-trail-color: #282828;
+      animation: trail-show 0.1s step-start 2.1s forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g4"]::before {
+      animation: walk 1.8s steps(1) 2.1s infinite;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g5"] {
+      --hmi-shield-trail-color: #1a1a1a;
+      animation: trail-show 0.1s step-start 2.2s forwards;
+    }
+
+    #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="g5"]::before {
+      animation: walk 1.8s steps(1) 2.2s infinite;
     }
 
     @keyframes typing {
@@ -123,10 +202,41 @@
       50%, 100% { color: var(--color-industrial-bg, #05070a); }
     }
 
+    @keyframes caret-idle {
+      0%, 49% { color: var(--hmi-shield-ink); }
+      50%, 100% { color: var(--color-industrial-bg, #05070a); }
+    }
+
+    @keyframes walk {
+      0% { content: "_         "; }
+      5.556% { content: " _        "; }
+      11.111% { content: "  _       "; }
+      16.667% { content: "   _      "; }
+      22.222% { content: "    _     "; }
+      27.778% { content: "     _    "; }
+      33.333% { content: "      _   "; }
+      38.889% { content: "       _  "; }
+      44.444% { content: "        _ "; }
+      50% { content: "         _"; }
+      55.556% { content: "        _ "; }
+      61.111% { content: "       _  "; }
+      66.667% { content: "      _   "; }
+      72.222% { content: "     _    "; }
+      77.778% { content: "    _     "; }
+      83.333% { content: "   _      "; }
+      88.889% { content: "  _       "; }
+      94.444% { content: " _        "; }
+    }
+
+    @keyframes trail-show {
+      to { color: var(--hmi-shield-trail-color); }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       #hmi-shield,
       #hmi-shield [data-hmi-shield-typed],
-      #hmi-shield [data-hmi-shield-caret] {
+      #hmi-shield [data-hmi-shield-caret],
+      #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail]::before {
         animation: none !important;
         transition: none;
       }
@@ -138,6 +248,18 @@
       #hmi-shield [data-hmi-shield-caret] {
         left: 18ch;
         color: var(--hmi-shield-ink);
+      }
+
+      #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail] {
+        color: var(--color-industrial-bg, #05070a);
+      }
+
+      #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="head"] {
+        color: #f0f0f0;
+      }
+
+      #hmi-shield [data-hmi-shield-cursor-loader] [data-hmi-shield-trail="head"]::before {
+        content: "         _";
       }
     }
 
@@ -177,6 +299,14 @@
       <span data-hmi-shield-typewriter>
         <span data-hmi-shield-typed>ACTUALIZANDO DATOS</span><span data-hmi-shield-caret aria-hidden="true">_</span>
       </span>
+      <div data-hmi-shield-cursor-loader>
+        <span data-hmi-shield-trail="g5" aria-hidden="true"></span>
+        <span data-hmi-shield-trail="g4" aria-hidden="true"></span>
+        <span data-hmi-shield-trail="g3" aria-hidden="true"></span>
+        <span data-hmi-shield-trail="g2" aria-hidden="true"></span>
+        <span data-hmi-shield-trail="g1" aria-hidden="true"></span>
+        <span data-hmi-shield-trail="head" aria-hidden="true"></span>
+      </div>
     </div>
   </div>
 

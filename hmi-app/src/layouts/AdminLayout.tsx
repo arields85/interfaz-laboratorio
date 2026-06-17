@@ -3,6 +3,7 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { LogOut, Settings } from 'lucide-react';
 import GlobalSettingsDialog from '../components/admin/GlobalSettingsDialog';
 import { HmiButton } from '../components/ui';
+import { requestShieldReveal } from '../hooks/useBootShield';
 import { ADMIN_SECTIONS, getAdminSectionByPath } from '../utils/adminNavigation';
 import { useAuthStore } from '../store/auth.store';
 
@@ -70,6 +71,12 @@ export default function AdminLayout() {
                         variant="secondary"
                         size="sm"
                         onClick={() => {
+                            requestShieldReveal({
+                                profileId: 'long',
+                                runner: 'original-long',
+                                allowNoContentExtension: true,
+                                restartCycle: true,
+                            });
                             logout();
                         }}
                     >

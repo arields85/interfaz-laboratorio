@@ -1,7 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BOOT_SHIELD_ID, BOOT_SHIELD_MESSAGE } from './useBootShield';
+import {
+    BOOT_SHIELD_ID,
+    BOOT_SHIELD_MESSAGE,
+    SHIELD_REVEAL_REQUEST_EVENT,
+} from './useBootShield';
 import * as reloadShieldModule from './useReloadShield';
 
 function mountDom() {
@@ -59,12 +63,16 @@ describe('useReloadShield', () => {
         expect(shield?.querySelector('[data-hmi-shield-caret]')).toHaveTextContent('_');
         expect(shield?.querySelector('[data-hmi-shield-caret]')).toHaveAttribute('aria-hidden', 'true');
         expect(shield?.querySelector('[data-hmi-shield-label]')).toBeNull();
-        expect(shield?.querySelector('[data-hmi-shield-cursor-loader]')).toBeNull();
+        expect(shield?.querySelector('[data-hmi-shield-cursor-loader]')).not.toBeNull();
+        expect(shield?.querySelectorAll('[data-hmi-shield-trail]')).toHaveLength(6);
         expect(shield?.querySelector('[data-hmi-shield-loader-variant]')).toBeNull();
         expect((shield?.textContent?.match(/ACTUALIZANDO DATOS/g) ?? [])).toHaveLength(1);
     }
 
     it('intercepts Ctrl+Shift+R, reveals the shield, hides the shader canvas, and reloads after one frame', () => {
+        const revealRequestSpy = vi.fn();
+        document.addEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
+
         renderHook(() => reloadShieldModule.useReloadShield());
 
         const event = new KeyboardEvent('keydown', {
@@ -84,11 +92,22 @@ describe('useReloadShield', () => {
         expect(shield).toHaveAttribute('data-hmi-shield-state', 'visible');
         expectShieldMarkup(shield);
         expect(shaderCanvas).toHaveAttribute('data-hmi-reload-hidden', 'true');
+        expect(revealRequestSpy).toHaveBeenCalledTimes(1);
+        expect(revealRequestSpy.mock.calls[0]?.[0]).toMatchObject({
+            detail: {
+                profileId: 'long',
+                runner: 'original-long',
+                allowNoContentExtension: true,
+                restartCycle: true,
+            },
+        });
         expect(reloadCount).toBe(0);
 
         flushAnimationFrame();
 
         expect(reloadCount).toBe(1);
+
+        document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 
     it('intercepts F5 and ignores repeated reload shortcuts once a reload is in flight', () => {

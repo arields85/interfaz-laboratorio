@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BOOT_SHIELD_ID, revealBootShield } from './useBootShield';
+import { BOOT_SHIELD_ID, requestShieldReveal } from './useBootShield';
 
 export const RELOAD_HIDE_SELECTOR = '[data-hmi-shader-canvas]';
 
@@ -58,7 +58,12 @@ export function useReloadShield(): void {
             reloadScheduled = true;
 
             const shield = document.getElementById(BOOT_SHIELD_ID);
-            revealBootShield(shield);
+            requestShieldReveal({
+                profileId: 'long',
+                runner: 'original-long',
+                allowNoContentExtension: true,
+                restartCycle: true,
+            }, shield);
             hiddenTargets = hideReloadTargets();
 
             reloadFrameId = window.requestAnimationFrame(() => {

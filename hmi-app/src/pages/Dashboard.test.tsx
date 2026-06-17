@@ -4,6 +4,8 @@ import Dashboard from './Dashboard';
 import { makeDashboard } from '../test/fixtures/dashboard.fixture';
 import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.types';
 
+const CONTENT_READY_ATTRIBUTE = 'data-hmi-content-ready';
+
 const { dashboardStorageMock, hierarchyStorageMock, dashboardViewerMock, dashboardHeaderMock, useDataOverviewMock } = vi.hoisted(() => ({
     dashboardStorageMock: {
         getDashboards: vi.fn(),
@@ -184,5 +186,72 @@ describe('Dashboard page layout', () => {
                 machines,
             }),
         );
+    });
+
+    it('signals loading and empty dashboard layouts as coherent content and clears readiness on unmount', async () => {
+        let resolveDashboards!: (value: ReturnType<typeof makeDashboard>[]) => void;
+        let resolveNodes!: (value: never[]) => void;
+
+        dashboardStorageMock.getDashboards.mockReturnValue(new Promise((resolve) => {
+            resolveDashboards = resolve;
+        }));
+        hierarchyStorageMock.getNodes.mockReturnValue(new Promise((resolve) => {
+            resolveNodes = resolve;
+        }));
+
+        document.body.innerHTML = '<div id="root"></div>';
+        const root = document.getElementById('root') as HTMLDivElement;
+
+        const { unmount } = render(<Dashboard />, { container: root });
+
+        await waitFor(() => {
+            expect(root).toHaveAttribute(CONTENT_READY_ATTRIBUTE, 'true');
+        });
+
+        resolveDashboards([]);
+        resolveNodes([]);
+
+        await waitFor(() => {
+            expect(screen.getByText('Sin Vistas Publicadas')).toBeInTheDocument();
+        });
+
+        expect(root).toHaveAttribute(CONTENT_READY_ATTRIBUTE, 'true');
+
+        unmount();
+
+        expect(root).not.toHaveAttribute(CONTENT_READY_ATTRIBUTE);
+    });
+
+    it('signals the published viewer layout as coherent content once the dashboard shell mounts', async () => {
+        document.body.innerHTML = '<div id="root"></div>';
+        const root = document.getElementById('root') as HTMLDivElement;
+
+        render(<Dashboard />, { container: root });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        });
+
+        expect(root).toHaveAttribute(CONTENT_READY_ATTRIBUTE, 'true');
+        expect(screen.getByTestId('dashboard-header-title')).toBeInTheDocument();
+    });
+
+    it('signals the post-error dashboard shell as coherent content after storage load failures', async () => {
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        dashboardStorageMock.getDashboards.mockRejectedValue(new Error('storage offline'));
+        hierarchyStorageMock.getNodes.mockResolvedValue([]);
+
+        document.body.innerHTML = '<div id="root"></div>';
+        const root = document.getElementById('root') as HTMLDivElement;
+
+        render(<Dashboard />, { container: root });
+
+        await waitFor(() => {
+            expect(screen.getByRole('alert')).toHaveTextContent('No se pudieron cargar los dashboards públicos.');
+        });
+
+        expect(root).toHaveAttribute(CONTENT_READY_ATTRIBUTE, 'true');
+        expect(screen.getByText('Reintentá desde el navegador o contactá a un administrador si el problema persiste.')).toBeInTheDocument();
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Error cargando dashboards públicos:', expect.any(Error));
     });
 });

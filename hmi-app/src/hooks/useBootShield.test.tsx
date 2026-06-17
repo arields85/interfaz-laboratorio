@@ -5,13 +5,16 @@ import {
     BOOT_SHIELD_ID,
     BOOT_SHIELD_MESSAGE,
     BOOT_SHIELD_MIN_VISIBLE_MS,
+    BOOT_SHIELD_SHORT_VISIBLE_MS,
     BOOT_SHIELD_TIMEOUT_MS,
     BOOT_SHIELD_TRANSITION_FALLBACK_MS,
     SHADER_CANVAS_SELECTOR,
+    SHIELD_REVEAL_REQUEST_EVENT,
     WEBGL_FIRST_DRAW_EVENT,
     getRequiredFontChecks,
     useBootShield,
 } from './useBootShield';
+import { SHIELD_PROFILES } from '../shield/shieldProfiles';
 
 type Deferred<T> = {
     promise: Promise<T>;
@@ -57,8 +60,16 @@ function expectShieldMarkup(shield: HTMLElement) {
     expect(caret).toHaveAttribute('aria-hidden', 'true');
     expect(caret).toHaveTextContent('_');
 
+    const cursorLoader = shield.querySelector<HTMLElement>('[data-hmi-shield-cursor-loader]');
+    expect(cursorLoader).not.toBeNull();
+    expect(cursorLoader?.querySelectorAll('[data-hmi-shield-trail]')).toHaveLength(6);
+    expect(cursorLoader?.querySelector('[data-hmi-shield-trail="g5"]')).not.toBeNull();
+    expect(cursorLoader?.querySelector('[data-hmi-shield-trail="g4"]')).not.toBeNull();
+    expect(cursorLoader?.querySelector('[data-hmi-shield-trail="g3"]')).not.toBeNull();
+    expect(cursorLoader?.querySelector('[data-hmi-shield-trail="g2"]')).not.toBeNull();
+    expect(cursorLoader?.querySelector('[data-hmi-shield-trail="g1"]')).not.toBeNull();
+    expect(cursorLoader?.querySelector('[data-hmi-shield-trail="head"]')).not.toBeNull();
     expect(shield.querySelector('[data-hmi-shield-label]')).toBeNull();
-    expect(shield.querySelector('[data-hmi-shield-cursor-loader]')).toBeNull();
     expect(typewriter?.querySelectorAll('span')).toHaveLength(2);
     expect(shield.querySelector('[data-hmi-shield-loader-rows]')).toBeNull();
     expect(shield.querySelector('[data-hmi-shield-loader-row]')).toBeNull();
@@ -328,6 +339,192 @@ describe('useBootShield', () => {
         });
 
         expect(document.getElementById(BOOT_SHIELD_ID)).toBe(shield);
+        expect(shield).toHaveClass('hmi-shield--hidden');
+    });
+
+    it('keeps the long shield visible long enough to expose the bottom trail cycle', () => {
+        expect(BOOT_SHIELD_MIN_VISIBLE_MS).toBe(8000);
+        expect(BOOT_SHIELD_MIN_VISIBLE_MS).toBe(SHIELD_PROFILES.long.minVisibleMs);
+    });
+
+    it('restarts the restored original-long contract when a long reveal request is dispatched after the initial boot hide', async () => {
+        const shield = mountShield();
+        const fontsReady = createDeferred<void>();
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                ready: Promise.resolve(),
+                check: vi.fn(() => true),
+            },
+        });
+        mountShaderCanvas({ 'data-hmi-webgl-ready': 'true' });
+
+        renderHook(() => useBootShield());
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        flushAnimationFrames(4);
+
+        await act(async () => {
+            vi.advanceTimersByTime(BOOT_SHIELD_MIN_VISIBLE_MS);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(shield).toHaveClass('hmi-shield--hidden');
+
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                ready: fontsReady.promise,
+                check: vi.fn(() => true),
+            },
+        });
+
+        act(() => {
+            document.dispatchEvent(new CustomEvent(SHIELD_REVEAL_REQUEST_EVENT, {
+                detail: {
+                    profileId: 'long',
+                    runner: 'original-long',
+                    allowNoContentExtension: false,
+                    restartCycle: true,
+                },
+            }));
+        });
+
+        expect(shield).not.toHaveClass('hmi-shield--hidden');
+
+        await act(async () => {
+            fontsReady.resolve(undefined);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        flushAnimationFrames(4);
+
+        await act(async () => {
+            vi.advanceTimersByTime(BOOT_SHIELD_MIN_VISIBLE_MS);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(shield).toHaveClass('hmi-shield--hidden');
+    });
+
+    it('hides short reveal requests after the short budget without waiting for long-only readiness gates', async () => {
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                ready: new Promise<void>(() => undefined),
+                check: vi.fn(() => false),
+            },
+        });
+        const shield = mountShield('hmi-shield--hidden');
+
+        renderHook(() => useBootShield());
+
+        act(() => {
+            document.dispatchEvent(new CustomEvent(SHIELD_REVEAL_REQUEST_EVENT, {
+                detail: {
+                    profileId: 'short',
+                    runner: 'short',
+                    allowNoContentExtension: false,
+                    restartCycle: true,
+                },
+            }));
+        });
+
+        expect(shield).not.toHaveClass('hmi-shield--hidden');
+        expect(shield.querySelector('[data-hmi-shield-typed]')).toHaveTextContent(SHIELD_PROFILES.short.message);
+
+        await act(async () => {
+            vi.advanceTimersByTime(BOOT_SHIELD_SHORT_VISIBLE_MS - 1);
+            await Promise.resolve();
+        });
+
+        expect(shield).not.toHaveClass('hmi-shield--hidden');
+
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+            await Promise.resolve();
+        });
+
+        expect(shield).toHaveClass('hmi-shield--hidden');
+    });
+
+    it('extends long reveal requests only while the destination root is still blank', async () => {
+        document.body.innerHTML = `<div id="root"></div>`;
+        const shield = document.createElement('div');
+        shield.id = BOOT_SHIELD_ID;
+        shield.setAttribute('data-hmi-shield-state', 'hidden');
+        shield.className = 'hmi-shield--hidden';
+        document.body.appendChild(shield);
+
+        Object.defineProperty(document, 'fonts', {
+            configurable: true,
+            value: {
+                ready: Promise.resolve(),
+                check: vi.fn(() => true),
+            },
+        });
+        mountShaderCanvas({ 'data-hmi-webgl-ready': 'true' });
+
+        renderHook(() => useBootShield());
+
+        act(() => {
+            document.dispatchEvent(new CustomEvent(SHIELD_REVEAL_REQUEST_EVENT, {
+                detail: {
+                    profileId: 'long',
+                    runner: 'original-long',
+                    allowNoContentExtension: true,
+                    restartCycle: true,
+                },
+            }));
+        });
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        flushAnimationFrames(4);
+
+        await act(async () => {
+            vi.advanceTimersByTime(BOOT_SHIELD_MIN_VISIBLE_MS);
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(shield).not.toHaveClass('hmi-shield--hidden');
+
+        act(() => {
+            const root = document.getElementById('root');
+            const viewer = document.createElement('section');
+            viewer.textContent = 'Viewer shell';
+            root?.appendChild(viewer);
+        });
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(shield).not.toHaveClass('hmi-shield--hidden');
+
+        act(() => {
+            const root = document.getElementById('root');
+            root?.setAttribute('data-hmi-content-ready', 'true');
+            root?.dispatchEvent(new CustomEvent('hmi-content-ready', { bubbles: true }));
+        });
+
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
         expect(shield).toHaveClass('hmi-shield--hidden');
     });
 
