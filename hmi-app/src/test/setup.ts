@@ -7,5 +7,4 @@ class ResizeObserverMock {
   disconnect = vi.fn();
 }
 
-// @ts-expect-error -- polyfill ResizeObserver in jsdom for component tests
 globalThis.ResizeObserver = ResizeObserverMock;

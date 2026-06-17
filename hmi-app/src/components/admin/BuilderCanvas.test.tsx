@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -12,12 +13,16 @@ import type { WidgetConfig } from '../../domain/admin.types';
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
 const resizeCallbacks = new Map<Element, Set<ResizeObserverCallback>>();
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 class MockResizeObserver implements ResizeObserver {
     public readonly boxOptions = '';
     private readonly observedElements = new Set<Element>();
+    private readonly callback: ResizeObserverCallback;
 
-    public constructor(private readonly callback: ResizeObserverCallback) {}
+    public constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+    }
 
     public observe(target: Element): void {
         this.observedElements.add(target);
@@ -458,7 +463,7 @@ describe('BuilderCanvas', () => {
         expect(leftSurface.getAttribute('style')).toContain('padding: var(--widget-spacing);');
         expect(rightSurface.getAttribute('style')).toContain('padding: var(--widget-spacing);');
 
-        const indexCss = fs.readFileSync(path.resolve(__dirname, '../../index.css'), 'utf-8');
+        const indexCss = fs.readFileSync(path.resolve(currentDir, '../../index.css'), 'utf-8');
         expect(indexCss).toContain('--widget-spacing: 0.5rem;');
     });
 
