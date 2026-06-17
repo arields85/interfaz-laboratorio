@@ -9,6 +9,7 @@ export default defineConfig({
     react()
   ],
   test: {
+    allowOnly: false,
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
