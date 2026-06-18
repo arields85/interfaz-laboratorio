@@ -197,8 +197,12 @@ function resolveAutoDomain(values: number[], minPadding: number, maxClamp?: numb
     return [nextMin, nextMax];
 }
 
-function isValidManualDomain(min?: number, max?: number): boolean {
-    return Number.isFinite(min) && Number.isFinite(max) && min < max;
+function resolveManualDomain(min?: number, max?: number): [number, number] | null {
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min === undefined || max === undefined || min >= max) {
+        return null;
+    }
+
+    return [min, max];
 }
 
 function resolveDomains(
@@ -211,14 +215,16 @@ function resolveDomains(
     const oeeAuto = showOee
         ? resolveAutoDomain(points.map((point) => point.oee), 3, 100)
         : [0, 100] as [number, number];
+    const productionManual = !autoScale
+        ? resolveManualDomain(manualBounds.productionAxisMin, manualBounds.productionAxisMax)
+        : null;
+    const oeeManual = !autoScale
+        ? resolveManualDomain(manualBounds.oeeAxisMin, manualBounds.oeeAxisMax)
+        : null;
 
-    const productionDomain = !autoScale && isValidManualDomain(manualBounds.productionAxisMin, manualBounds.productionAxisMax)
-        ? [manualBounds.productionAxisMin, manualBounds.productionAxisMax]
-        : productionAuto;
+    const productionDomain = productionManual ?? productionAuto;
 
-    const oeeDomain = !autoScale && isValidManualDomain(manualBounds.oeeAxisMin, manualBounds.oeeAxisMax)
-        ? [manualBounds.oeeAxisMin, manualBounds.oeeAxisMax]
-        : oeeAuto;
+    const oeeDomain = oeeManual ?? oeeAuto;
 
     return { productionDomain, oeeDomain };
 }
