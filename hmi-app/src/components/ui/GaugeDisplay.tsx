@@ -184,9 +184,7 @@ export default function GaugeDisplay({
             const segmentArcLength = visibleSegmentLength > 0
                 ? Math.min(visibleSegmentLength + CIRCULAR_SEGMENT_OVERLAP, circumference)
                 : 0;
-            const mixPercent = CIRCULAR_SEGMENT_COUNT === 1
-                ? 0
-                : Math.round((index / (CIRCULAR_SEGMENT_COUNT - 1)) * 100);
+            const mixPercent = Math.round((index / (CIRCULAR_SEGMENT_COUNT - 1)) * 100);
 
             segments.push({
                 key: index,
@@ -204,7 +202,14 @@ export default function GaugeDisplay({
         '--gauge-circular-scale': String(circularScale),
         transitionDuration: `${animationDuration}ms`,
     };
-    const lastVisibleSegmentIndex = circularSegments.findLastIndex((segment) => segment.hasVisibleArc);
+    let lastVisibleSegmentIndex = -1;
+
+    for (let index = circularSegments.length - 1; index >= 0; index -= 1) {
+        if (circularSegments[index]?.hasVisibleArc) {
+            lastVisibleSegmentIndex = index;
+            break;
+        }
+    }
 
     return (
         <svg
