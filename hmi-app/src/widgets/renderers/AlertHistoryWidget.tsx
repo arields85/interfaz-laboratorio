@@ -69,6 +69,7 @@ export default function AlertHistoryWidget({
     className,
 }: AlertHistoryWidgetProps) {
     const dashboardId = widget.displayOptions?.dashboardId ?? 'unknown';
+    const maxVisible = widget.displayOptions?.maxVisible ?? 5;
     const pollInterval = widget.displayOptions?.pollInterval ?? DEFAULT_POLL_INTERVAL;
 
     // El ícono del header es NEUTRAL (no dinámico). El único elemento dinámico
@@ -208,11 +209,11 @@ export default function AlertHistoryWidget({
             />
 
             {/* ── Lista de eventos ── */}
-            <div ref={listRef} className="flex-1 overflow-hidden flex flex-col gap-1.5 min-h-0 justify-center">
+            <div ref={listRef} role={entries.length > 0 ? 'list' : undefined} className="flex-1 overflow-hidden flex flex-col gap-1.5 min-h-0 justify-center">
                 {entries.length === 0 ? (
                     <EmptyState />
                 ) : (
-                    entries.slice(0, visibleCount).map((entry, i) => (
+                    entries.slice(0, Math.min(visibleCount, maxVisible)).map((entry, i) => (
                         <AlertEntryRow key={entry.id} entry={entry} ref={i === 0 ? entryRef : undefined} />
                     ))
                 )}
@@ -271,6 +272,7 @@ function AlertEntryRow({ entry }, ref) {
     return (
         <div
             ref={ref}
+            role="listitem"
             className="rounded-xl px-3 py-1.5 flex flex-col gap-0.5"
             style={bgStyle}
         >
