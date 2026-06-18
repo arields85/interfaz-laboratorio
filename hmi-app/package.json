@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:focused": "vitest run --mode coverage-focused --coverage"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
