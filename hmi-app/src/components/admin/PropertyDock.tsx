@@ -65,6 +65,10 @@ const SECTION_HEADER_CLS = ADMIN_SIDEBAR_SECTION_HEADER_CLS;
 const FIELD_ROW_CLS = 'flex items-center gap-2';
 const FIELD_LABEL_CLS = `${LABEL_CLS} shrink-0`;
 const PRESET_UNITS = ['°C', '°F', 'RPM', '%', 'bar', 'psi', 'kW', 'A', 'V', 'Hz', 'mm', 'kg', 'L/min', 'm³/h', 'N', 'kN'] as const;
+type PresetUnit = (typeof PRESET_UNITS)[number];
+type ConnectionStatusTextFieldKey = 'onlineText' | 'degradadoText' | 'offlineText' | 'unknownText';
+
+const isPresetUnit = (value: string): value is PresetUnit => PRESET_UNITS.some(unit => unit === value);
 
 const STATUS_TEXT_FIELDS: Array<{ key: keyof StatusDisplayOptions; label: string; placeholder: string }> = [
     { key: 'runningText', label: 'Running', placeholder: DEFAULT_STATUS_LABELS.running },
@@ -77,7 +81,7 @@ const STATUS_TEXT_FIELDS: Array<{ key: keyof StatusDisplayOptions; label: string
 ];
 
 const CONNECTION_STATUS_TEXT_FIELDS: Array<{
-    key: keyof ConnectionStatusDisplayOptions;
+    key: ConnectionStatusTextFieldKey;
     label: string;
     placeholder: string;
 }> = [
@@ -191,7 +195,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         const normalizedValue = value?.trim() ?? '';
         const baseOptions = PRESET_UNITS.map(unitOption => ({ value: unitOption, label: unitOption }));
 
-        if (!normalizedValue || PRESET_UNITS.includes(normalizedValue as (typeof PRESET_UNITS)[number])) {
+        if (!normalizedValue || isPresetUnit(normalizedValue)) {
             return baseOptions;
         }
 
@@ -282,27 +286,6 @@ export default function PropertyDock(props: PropertyDockProps) {
                 catalogVariableId,
                 unit: selectedCatalogVariable?.unit ?? binding.unit,
             },
-        });
-    };
-
-    const handleConnectionScopeChange = (scope: 'global' | 'machine') => {
-        if (!selectedWidget || (selectedWidget.type !== 'connection-status')) {
-            return;
-        }
-
-        const currentOptions = (selectedWidget.displayOptions ?? {}) as ConnectionStatusDisplayOptions;
-        const nextOptions: ConnectionStatusDisplayOptions = {
-            ...currentOptions,
-            scope,
-        };
-
-        if (scope === 'global') {
-            delete nextOptions.machineId;
-        }
-
-        onUpdateWidget({
-            ...selectedWidget,
-            displayOptions: nextOptions,
         });
     };
 
@@ -454,7 +437,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         && selectedWidget.type !== 'machine-activity'
         ? (() => {
             const currentUnit = selectedWidget?.binding?.unit || '';
-            const isPreset = PRESET_UNITS.includes(currentUnit);
+            const isPreset = isPresetUnit(currentUnit);
             const showCustom = isCustomUnit || (!isPreset && currentUnit !== '');
             const selectValue = showCustom ? '__custom__' : currentUnit;
 

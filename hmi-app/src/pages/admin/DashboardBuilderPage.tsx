@@ -1252,7 +1252,6 @@ export default function DashboardBuilderPage() {
                 onUpdateLayout={handleUpdateLayout}
                 equipmentMap={equipmentMap}
                 machines={machines}
-                connection={connection}
                 dataLoading={dataLoading}
                 dataError={dataError}
                 dataEnabled={dataEnabled}
