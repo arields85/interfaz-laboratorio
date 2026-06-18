@@ -331,8 +331,9 @@ export default function HeaderWidgetCanvas({
     ) => {
         const payload = getDragPayload(event);
 
-        if (!canDropHeaderWidget && payload?.source !== 'header-canvas') return;
+        if (!payload) return;
         if (payload?.source === 'header-canvas') return;
+        if (!canDropHeaderWidget) return;
 
         event.preventDefault();
         event.stopPropagation();
@@ -361,10 +362,11 @@ export default function HeaderWidgetCanvas({
         const rawPayload = event.dataTransfer.getData(HEADER_WIDGET_DRAG_MIME);
         const payload = rawPayload ? parseHeaderWidgetDragPayload(rawPayload) : null;
 
+        if (!canDropHeaderWidget) return;
         if (!payload || payload.source === 'header-canvas') return;
 
         onDropWidgetAtSlot?.(payload.widgetId, realSlotIndex);
-    }, [onDropWidgetAtSlot]);
+    }, [canDropHeaderWidget, onDropWidgetAtSlot]);
 
     return (
         <div
