@@ -21,7 +21,9 @@ export const DEFAULT_CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
     unknown: 'Sin datos',
 };
 
-const STATUS_TEXT_KEY: Record<ContractStatus, keyof ConnectionStatusDisplayOptions> = {
+type ConnectionStatusTextKey = 'onlineText' | 'degradadoText' | 'offlineText' | 'unknownText';
+
+const STATUS_TEXT_KEY: Record<ContractStatus, ConnectionStatusTextKey> = {
     online: 'onlineText',
     degradado: 'degradadoText',
     offline: 'offlineText',
@@ -70,7 +72,7 @@ export function resolveContractStatusLabel(
     options?: ConnectionStatusDisplayOptions,
 ): string {
     const key = STATUS_TEXT_KEY[status];
-    const custom = key ? (options?.[key] as string | undefined) : undefined;
+    const custom = options?.[key];
     return custom?.trim() || DEFAULT_CONTRACT_STATUS_LABELS[status];
 }
 

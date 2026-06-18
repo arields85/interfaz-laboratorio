@@ -26,20 +26,22 @@ export async function migrateLegacyBindings(
                 continue;
             }
 
-            const cacheKey = buildCatalogKey(binding.variableKey, binding.unit);
+            const { variableKey, unit } = binding;
+
+            const cacheKey = buildCatalogKey(variableKey, unit);
             let catalogVariable = catalogCache.get(cacheKey);
 
             if (!catalogVariable) {
-                const unitVariables = await catalogService.getByUnit(binding.unit);
+                const unitVariables = await catalogService.getByUnit(unit);
                 catalogVariable = unitVariables.find((variable) =>
-                    matchesLegacyBinding(variable, binding.variableKey, binding.unit),
+                    matchesLegacyBinding(variable, variableKey, unit),
                 );
 
                 if (!catalogVariable) {
                     catalogVariable = await catalogService.create({
-                        id: createCatalogVariableId(binding.variableKey, binding.unit),
-                        name: binding.variableKey,
-                        unit: binding.unit,
+                        id: createCatalogVariableId(variableKey, unit),
+                        name: variableKey,
+                        unit,
                     });
                 }
 
