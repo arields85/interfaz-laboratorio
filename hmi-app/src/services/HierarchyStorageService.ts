@@ -102,9 +102,13 @@ class HierarchyStorageService {
         if (nodeId === newParentId) return false;
 
         const nodes = await this.readStorage();
+        const nodeExists = nodes.some(n => n.id === nodeId);
+        if (!nodeExists) return false;
         
         // Si se asigna a un padre, verificar que el padre no sea el propio nodo o uno de sus descendientes
         if (newParentId) {
+            if (!nodes.some(n => n.id === newParentId)) return false;
+
             let currentCheckId: string | null = newParentId;
             while (currentCheckId) {
                 if (currentCheckId === nodeId) return false; // Ciclo detectado
@@ -114,7 +118,6 @@ class HierarchyStorageService {
         }
 
         const idx = nodes.findIndex(n => n.id === nodeId);
-        if (idx === -1) return false;
 
         nodes[idx].parentId = newParentId;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(nodes));
