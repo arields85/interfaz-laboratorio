@@ -44,4 +44,59 @@ describe('dataHistory.adapter', () => {
             summary: { last: null, min: null, max: null, avg: null },
         });
     });
+
+    it('returns safe defaults for null payloads and invalid summaries', () => {
+        expect(adaptDataHistory(null)).toEqual({
+            contractVersion: '1.0.0',
+            machineId: 0,
+            variableKey: '',
+            range: 'hora',
+            unit: null,
+            series: [],
+            summary: { last: null, min: null, max: null, avg: null },
+        });
+
+        expect(adaptDataHistory({ summary: null }).summary).toEqual({
+            last: null,
+            min: null,
+            max: null,
+            avg: null,
+        });
+    });
+
+    it('normalizes parseable numeric values and malformed ranges', () => {
+        expect(
+            adaptDataHistory({
+                range: 24,
+                series: [
+                    { timestamp: '2026-04-22T10:00:00Z', value: '11.2' },
+                    { timestamp: '2026-04-22T10:05:00Z', value: '' },
+                    { timestamp: '2026-04-22T10:10:00Z', value: Infinity },
+                ],
+                summary: {
+                    last: '18.4',
+                    min: '',
+                    max: Infinity,
+                    avg: '17',
+                },
+            })
+        ).toEqual({
+            contractVersion: '1.0.0',
+            machineId: 0,
+            variableKey: '',
+            range: 'hora',
+            unit: null,
+            series: [
+                { timestamp: '2026-04-22T10:00:00Z', value: 11.2 },
+                { timestamp: '2026-04-22T10:05:00Z', value: null },
+                { timestamp: '2026-04-22T10:10:00Z', value: null },
+            ],
+            summary: {
+                last: 18.4,
+                min: null,
+                max: null,
+                avg: 17,
+            },
+        });
+    });
 });
