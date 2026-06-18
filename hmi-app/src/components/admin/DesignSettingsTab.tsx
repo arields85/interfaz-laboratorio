@@ -58,6 +58,38 @@ import {
 const FONT_STORAGE_KEY = 'hmi-theme-fonts';
 const COLOR_STORAGE_KEY = 'hmi-theme-colors';
 
+const FONT_SIZE_TOKEN_KEYS = [
+    '--font-size-system',
+    '--font-size-mono',
+    '--font-size-chart',
+    '--font-size-dashboard-title',
+    '--font-size-widget-value',
+    '--font-size-widget-unit',
+    '--font-size-widget-value-gauge',
+    '--font-size-widget-unit-gauge',
+] as const;
+
+const TRACKING_TOKEN_KEYS = [
+    '--tracking-system',
+    '--tracking-mono',
+    '--tracking-chart',
+    '--tracking-dashboard-title',
+    '--tracking-widget-value',
+    '--tracking-widget-value-gauge',
+] as const;
+
+type FontSizeTokenKey = (typeof FONT_SIZE_TOKEN_KEYS)[number];
+type TrackingTokenKey = (typeof TRACKING_TOKEN_KEYS)[number];
+type FontTokenKey = '--font-system' | '--font-mono' | '--font-chart' | '--font-dashboard-title' | '--font-widget-value' | '--font-widget-value-gauge';
+type InlineFontSizeTokenKey = Extract<FontSizeTokenKey, '--font-size-system' | '--font-size-mono' | '--font-size-chart' | '--font-size-dashboard-title' | '--font-size-widget-value'>;
+type FontToken = {
+    key: FontTokenKey;
+    label: string;
+    weightKey: string;
+    trackingKey: TrackingTokenKey;
+    sizeKey?: InlineFontSizeTokenKey;
+};
+
 const FONT_TOKENS = [
     { key: '--font-system', label: 'TEXTOS EN GENERAL', weightKey: '--font-weight-system', sizeKey: '--font-size-system', trackingKey: '--tracking-system' },
     { key: '--font-mono', label: 'TEXTOS TÉCNICOS', weightKey: '--font-weight-mono', sizeKey: '--font-size-mono', trackingKey: '--tracking-mono' },
@@ -65,7 +97,7 @@ const FONT_TOKENS = [
     { key: '--font-dashboard-title', label: 'TÍTULOS DE DASHBOARD', weightKey: '--font-weight-dashboard-title', sizeKey: '--font-size-dashboard-title', trackingKey: '--tracking-dashboard-title' },
     { key: '--font-widget-value', label: 'VALORES NUMERICOS MOSTRADOS POR:', weightKey: '--font-weight-widget-value', sizeKey: '--font-size-widget-value', trackingKey: '--tracking-widget-value' },
     { key: '--font-widget-value-gauge', label: 'VALORES NUMERICOS MOSTRADOS POR:', weightKey: '--font-weight-widget-value-gauge', trackingKey: '--tracking-widget-value-gauge' },
-] as const;
+] as const satisfies readonly FontToken[];
 
 const COLOR_GROUPS = [
     {
@@ -130,10 +162,7 @@ const COLOR_GROUPS = [
     },
 ] as const;
 
-type FontTokenKey = (typeof FONT_TOKENS)[number]['key'];
 type ColorTokenKey = (typeof COLOR_GROUPS)[number]['colors'][number]['key'];
-type FontSizeTokenKey = Extract<(typeof FONT_TOKENS)[number]['sizeKey'], string> | '--font-size-widget-unit' | '--font-size-widget-value-gauge' | '--font-size-widget-unit-gauge';
-type TrackingTokenKey = Extract<(typeof FONT_TOKENS)[number]['trackingKey'], string> | '--tracking-widget-value-gauge';
 
 const DEFAULT_FONT_VALUES: Record<FontTokenKey, FontName> = {
     '--font-system': 'JetBrainsMono',
@@ -395,14 +424,16 @@ function buildFontStorageOverrides(
         return accumulator;
     }, {} as Record<string, string>);
 
-    for (const [sizeKey, config] of Object.entries(FONT_SIZE_FIELD_CONFIG) as [FontSizeTokenKey, (typeof FONT_SIZE_FIELD_CONFIG)[FontSizeTokenKey]][]) {
+    for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
+        const config = FONT_SIZE_FIELD_CONFIG[sizeKey];
         const normalizedSize = config.normalize(fontSizeValues[sizeKey] || config.defaultValue);
         if (normalizedSize !== config.normalize(config.defaultValue)) {
             overrides[sizeKey] = normalizedSize;
         }
     }
 
-    for (const [trackingKey, config] of Object.entries(TRACKING_FIELD_CONFIG) as [TrackingTokenKey, (typeof TRACKING_FIELD_CONFIG)[TrackingTokenKey]][]) {
+    for (const trackingKey of TRACKING_TOKEN_KEYS) {
+        const config = TRACKING_FIELD_CONFIG[trackingKey];
         const normalizedTracking = config.normalize(trackingValues[trackingKey] || config.defaultValue);
         if (normalizedTracking !== config.normalize(config.defaultValue)) {
             overrides[trackingKey] = normalizedTracking;
@@ -439,12 +470,14 @@ export function applyThemeOverrides(): void {
             }
 
             const resolvedFontSizeValues = { ...DEFAULT_FONT_SIZE_VALUES };
-            for (const [sizeKey, config] of Object.entries(FONT_SIZE_FIELD_CONFIG) as [FontSizeTokenKey, (typeof FONT_SIZE_FIELD_CONFIG)[FontSizeTokenKey]][]) {
+            for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
+                const config = FONT_SIZE_FIELD_CONFIG[sizeKey];
                 resolvedFontSizeValues[sizeKey] = String(config.parse(parsed[sizeKey]));
             }
 
             const resolvedTrackingValues = { ...DEFAULT_TRACKING_VALUES };
-            for (const [trackingKey, config] of Object.entries(TRACKING_FIELD_CONFIG) as [TrackingTokenKey, (typeof TRACKING_FIELD_CONFIG)[TrackingTokenKey]][]) {
+            for (const trackingKey of TRACKING_TOKEN_KEYS) {
+                const config = TRACKING_FIELD_CONFIG[trackingKey];
                 resolvedTrackingValues[trackingKey] = String(config.parse(parsed[trackingKey]));
             }
 
@@ -532,12 +565,14 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
         }
 
         const nextFontSizeValues = { ...DEFAULT_FONT_SIZE_VALUES };
-        for (const [sizeKey, config] of Object.entries(FONT_SIZE_FIELD_CONFIG) as [FontSizeTokenKey, (typeof FONT_SIZE_FIELD_CONFIG)[FontSizeTokenKey]][]) {
+        for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
+            const config = FONT_SIZE_FIELD_CONFIG[sizeKey];
             nextFontSizeValues[sizeKey] = String(config.parse(storedFonts[sizeKey]));
         }
 
         const nextTrackingValues = { ...DEFAULT_TRACKING_VALUES };
-        for (const [trackingKey, config] of Object.entries(TRACKING_FIELD_CONFIG) as [TrackingTokenKey, (typeof TRACKING_FIELD_CONFIG)[TrackingTokenKey]][]) {
+        for (const trackingKey of TRACKING_TOKEN_KEYS) {
+            const config = TRACKING_FIELD_CONFIG[trackingKey];
             nextTrackingValues[trackingKey] = String(config.parse(storedFonts[trackingKey]));
         }
 
@@ -754,10 +789,10 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
                 document.documentElement.style.removeProperty(fontToken.weightKey);
             }
         }
-        for (const sizeKey of Object.keys(FONT_SIZE_FIELD_CONFIG) as FontSizeTokenKey[]) {
+        for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
             document.documentElement.style.removeProperty(sizeKey);
         }
-        for (const trackingKey of Object.keys(TRACKING_FIELD_CONFIG) as TrackingTokenKey[]) {
+        for (const trackingKey of TRACKING_TOKEN_KEYS) {
             document.documentElement.style.removeProperty(trackingKey);
         }
         setFontValues(DEFAULT_FONT_VALUES);
@@ -790,10 +825,10 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
                 document.documentElement.style.removeProperty(fontToken.weightKey);
             }
         }
-        for (const sizeKey of Object.keys(FONT_SIZE_FIELD_CONFIG) as FontSizeTokenKey[]) {
+        for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
             document.documentElement.style.removeProperty(sizeKey);
         }
-        for (const trackingKey of Object.keys(TRACKING_FIELD_CONFIG) as TrackingTokenKey[]) {
+        for (const trackingKey of TRACKING_TOKEN_KEYS) {
             document.documentElement.style.removeProperty(trackingKey);
         }
 
