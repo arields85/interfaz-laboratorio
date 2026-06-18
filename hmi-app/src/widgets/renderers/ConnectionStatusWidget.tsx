@@ -67,7 +67,7 @@ const STATUS_VISUAL: Record<ContractStatus, StatusVisualConfig> = {
 
 export default function ConnectionStatusWidget({
     widget,
-    equipmentMap,
+    equipmentMap: _equipmentMap,
     machines,
     connection,
     className,

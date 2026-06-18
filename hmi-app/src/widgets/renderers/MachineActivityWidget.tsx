@@ -61,10 +61,10 @@ const CIRCULAR_WIDGET_UNIT_TEXT_STYLE = {
     letterSpacing: 'var(--tracking-widget-value-gauge)',
 } as const;
 
-const DEFAULT_CIRCULAR_TEXT_SIZING = {
+const DEFAULT_CIRCULAR_TEXT_SIZING: { value: number; unit: number } = {
     value: 0,
     unit: 0,
-} as const;
+};
 
 const CALIBRATING_VISUALS = getStateVisuals('calibrating');
 
@@ -230,9 +230,6 @@ export default function MachineActivityWidget({
             intensity: 'none',
             durationMs: 0,
         } as const;
-    const thresholdStopped = opts.thresholdStopped ?? 0.15;
-    const thresholdProducing = opts.thresholdProducing ?? 0.25;
-
     if (productiveState === 'calibrating' && prevProductiveStateRef.current === 'stopped' && expandAnim === null) {
         justEnteredSetupRef.current = true;
     }

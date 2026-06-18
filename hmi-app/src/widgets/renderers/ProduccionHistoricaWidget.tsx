@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Activity,
     Droplet,
@@ -18,7 +18,7 @@ import {
     Wifi,
     Wind,
     Zap,
-    type LucideProps,
+    type LucideIcon,
 } from 'lucide-react';
 import type {
     ProductionChartMode,
@@ -46,15 +46,12 @@ import {
     computeVisibleLabelIndices,
     getChartLetterSpacingPx,
     getChartTextFont,
-    type Point,
 } from '../../utils/chartHelpers';
 
 // Resolución de ícono del header por nombre declarado en `displayOptions.icon`.
 // El set disponible coincide con el selector de íconos del PropertyDock, así que
 // lo que el usuario elige en el dock siempre resuelve a un componente válido.
 // `null` explícito = sin ícono. `undefined` = default semántico del widget (History).
-type LucideIcon = ComponentType<LucideProps>;
-
 const HEADER_ICON_MAP: Record<string, LucideIcon> = {
     Gauge,
     Activity,

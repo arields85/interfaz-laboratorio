@@ -228,23 +228,18 @@ export default function AlertHistoryWidget({
                 >
                     Ver historial completo
                 </button>
-                <Trash2
-                    size={14}
-                    title="Limpiar historial visible"
-                    className={
-                        entries.length === 0
-                            ? 'text-industrial-muted/30 cursor-not-allowed pointer-events-none'
-                            : 'text-industrial-muted hover:text-white transition-colors cursor-pointer'
-                    }
-                    onClick={
-                        entries.length > 0
-                            ? () => {
-                                  alertHistoryStorage.clearEntries(dashboardId);
-                                  refreshState();
-                              }
-                            : undefined
-                    }
-                />
+                <button
+                    type="button"
+                    aria-label="Limpiar historial visible"
+                    disabled={entries.length === 0}
+                    className={entries.length === 0 ? 'text-industrial-muted/30 cursor-not-allowed' : 'text-industrial-muted hover:text-white transition-colors cursor-pointer'}
+                    onClick={() => {
+                        alertHistoryStorage.clearEntries(dashboardId);
+                        refreshState();
+                    }}
+                >
+                    <Trash2 size={14} aria-hidden="true" />
+                </button>
             </div>
         </div>
     );
