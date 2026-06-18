@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
+import type { EquipmentSummary } from '../../domain/equipment.types';
 import PropertyDock from './PropertyDock';
 
 vi.mock('../ui/AnchoredOverlay', () => ({
@@ -42,6 +43,18 @@ const DEFAULT_LAYOUT: WidgetLayout = {
     h: 3,
 };
 
+const PROD_HISTORY_ASSET: EquipmentSummary = {
+    id: 'asset-1',
+    name: 'Línea 1',
+    type: 'comprimidora',
+    status: 'running',
+    connectionState: 'online',
+    primaryMetrics: [
+        { label: 'Producción', value: 240, unit: 'kg' },
+        { label: 'OEE', value: 86, unit: '%' },
+    ],
+};
+
 function makeWidget(binding: WidgetConfig['binding'] = { mode: 'real_variable' }): WidgetConfig {
     return {
         id: 'widget-1',
@@ -61,6 +74,7 @@ function renderPropertyDock(options?: {
     title?: string;
     displayOptions?: WidgetConfig['displayOptions'];
     machines?: ContractMachine[];
+    equipmentMap?: Map<string, EquipmentSummary>;
     dataLoading?: boolean;
     dataError?: boolean;
     dataEnabled?: boolean;
@@ -79,7 +93,7 @@ function renderPropertyDock(options?: {
             <PropertyDock
                 selectedWidget={widget}
                 selectedLayout={DEFAULT_LAYOUT}
-                equipmentMap={new Map()}
+                equipmentMap={options?.equipmentMap ?? new Map()}
                 catalogVariables={[]}
                 usedCatalogVariableIds={[]}
                 machines={options?.machines ?? MACHINES}
@@ -838,5 +852,216 @@ describe('PropertyDock machine-activity', () => {
         expect(smoothingInput).toBeDisabled();
         expect(screen.getByLabelText('Mostrar valor en subtexto')).toBeChecked();
         expect(screen.queryByLabelText('Mostrar variable en subtexto')).not.toBeInTheDocument();
+    });
+});
+
+describe('PropertyDock prod-history', () => {
+    it('renders prod-history sections and updates general, data, series, scales and layout controls', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'prod-history',
+            title: 'Histórico de producción',
+            binding: {
+                mode: 'simulated_value',
+                simulatedValue: 0,
+            },
+            displayOptions: {
+                productionChartMode: 'bars',
+            },
+        });
+
+        expect(screen.getByRole('button', { name: /general/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /datos/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /series/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /escalas/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /layout/i })).toBeInTheDocument();
+
+        expect(getFieldButtonInSection('General', 'Producción')).toHaveTextContent('Barras');
+        expect(getFieldButtonInSection('Datos', 'Unidad')).toHaveTextContent('unidades');
+        expect(getFieldButtonInSection('Datos', 'Origen')).toHaveTextContent('Simulado');
+
+        await user.click(getFieldButtonInSection('General', 'Producción'));
+        await user.click(screen.getByRole('button', { name: 'Área' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            productionChartMode: 'area',
+        });
+
+        await user.click(screen.getByLabelText('Relleno bajo línea OEE'));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            oeeShowArea: true,
+        });
+
+        await user.click(screen.getByLabelText('Puntos en OEE'));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            oeeShowPoints: true,
+        });
+
+        const barWidthSlider = screen.getByRole('slider');
+        fireEvent.change(barWidthSlider, { target: { value: '1.4' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            productionBarWidth: 1.4,
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Unidad'));
+        await user.click(screen.getByRole('button', { name: 'kg' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            productionUnit: 'kg',
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Origen'));
+        await user.click(screen.getByRole('button', { name: 'Real' }));
+
+        expect(updates.at(-1)?.binding).toMatchObject({
+            mode: 'real_variable',
+        });
+
+        const productionInput = screen.getByPlaceholderText('Clave variable producción');
+        await user.type(productionInput, 'prod_total');
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            productionVariableKey: 'prod_total',
+        });
+
+        const oeeInput = screen.getByPlaceholderText('Clave variable OEE');
+        await user.type(oeeInput, 'oee_pct');
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            oeeVariableKey: 'oee_pct',
+        });
+
+        await user.click(screen.getByLabelText('Mostrar OEE'));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            defaultShowOee: false,
+        });
+
+        await user.click(screen.getByLabelText('Usar eje secundario para OEE'));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            useSecondaryAxis: false,
+        });
+
+        const autoScaleToggle = screen.getByLabelText('Autoescala');
+        await user.click(autoScaleToggle);
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            autoScale: false,
+        });
+
+        const scalesSection = getSection('Escalas');
+        const [prodMinInput, prodMaxInput, oeeMinInput, oeeMaxInput] = within(scalesSection).getAllByRole('textbox');
+
+        await user.clear(prodMinInput);
+        await user.type(prodMinInput, '10');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ productionAxisMin: 10 });
+
+        await user.clear(prodMaxInput);
+        await user.type(prodMaxInput, '320');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ productionAxisMax: 320 });
+
+        await user.clear(oeeMinInput);
+        await user.type(oeeMinInput, '15');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ oeeAxisMin: 15 });
+
+        await user.clear(oeeMaxInput);
+        await user.type(oeeMaxInput, '95');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ oeeAxisMax: 95 });
+
+        await user.click(screen.getByLabelText('Mostrar grilla'));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            showGrid: false,
+        });
+    });
+
+    it('uses prod-history metric selectors when the selected asset is available', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'prod-history',
+            title: 'Histórico de producción',
+            binding: {
+                mode: 'real_variable',
+                assetId: 'asset-1',
+            },
+            equipmentMap: new Map([[PROD_HISTORY_ASSET.id, PROD_HISTORY_ASSET]]),
+            displayOptions: {},
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Var. Prod.'));
+
+        expect(screen.getByRole('button', { name: 'Producción' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'OEE' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Producción' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            productionVariableKey: 'Producción',
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Var. OEE'));
+        await user.click(screen.getByRole('button', { name: 'OEE' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            oeeVariableKey: 'OEE',
+        });
+    });
+});
+
+describe('PropertyDock KPI thresholds', () => {
+    it('enables, edits and disables KPI thresholds with deadband', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'kpi',
+            title: 'Potencia',
+            binding: {
+                mode: 'simulated_value',
+                simulatedValue: 42,
+                unit: 'kW',
+            },
+        });
+
+        const thresholdsSection = getSection('Umbrales');
+        const toggle = screen.getByLabelText('Activar Umbrales');
+        const [warningInput, criticalInput, deadbandInput] = within(thresholdsSection).getAllByRole('textbox');
+
+        expect(toggle).not.toBeChecked();
+        expect(warningInput).toBeDisabled();
+        expect(criticalInput).toBeDisabled();
+        expect(deadbandInput).toBeDisabled();
+
+        await user.click(toggle);
+
+        expect(updates.at(-1)).toMatchObject({
+            thresholds: [
+                { severity: 'warning', value: 0 },
+                { severity: 'critical', value: 0 },
+            ],
+            deadbandPercent: 5,
+        });
+
+        await user.clear(warningInput);
+        await user.type(warningInput, '60');
+        await user.tab();
+        expect(updates.at(-1)?.thresholds).toEqual([
+            { severity: 'warning', value: 60 },
+            { severity: 'critical', value: 0 },
+        ]);
+
+        await user.clear(criticalInput);
+        await user.type(criticalInput, '85');
+        await user.tab();
+        expect(updates.at(-1)?.thresholds).toEqual([
+            { severity: 'warning', value: 60 },
+            { severity: 'critical', value: 85 },
+        ]);
+
+        await user.clear(deadbandInput);
+        await user.type(deadbandInput, '7');
+        await user.tab();
+        expect(updates.at(-1)).toMatchObject({
+            deadbandPercent: 7,
+        });
+
+        await user.click(toggle);
+
+        expect(updates.at(-1)?.thresholds).toEqual([]);
     });
 });
