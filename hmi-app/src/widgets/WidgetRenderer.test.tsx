@@ -2,9 +2,10 @@ import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine, DataHistoryResponseV2 } from '../domain/dataContract.types';
-import type { MachineActivityWidgetConfig, TrendChartV2WidgetConfig } from '../domain/admin.types';
+import type { ActivityAnalyticsWidgetConfig, MachineActivityWidgetConfig, TrendChartV2WidgetConfig } from '../domain/admin.types';
 import { isDataHistoryEnabled } from '../config/dataConnection.config';
 import { useTemporalSettings } from '../hooks/useTemporalSettings';
+import { useActivitySeries } from '../queries/useActivitySeries';
 import { useDataHistory } from '../queries/useDataHistory';
 import WidgetRenderer from './WidgetRenderer';
 
@@ -37,10 +38,15 @@ class MockResizeObserver implements ResizeObserver {
 
 vi.mock('../config/dataConnection.config', () => ({
     isDataHistoryEnabled: vi.fn(),
+    isDataActivitySeriesEnabled: vi.fn(() => true),
 }));
 
 vi.mock('../queries/useDataHistory', () => ({
     useDataHistory: vi.fn(),
+}));
+
+vi.mock('../queries/useActivitySeries', () => ({
+    useActivitySeries: vi.fn(),
 }));
 
 vi.mock('../hooks/useTemporalSettings', () => ({
@@ -139,6 +145,13 @@ describe('WidgetRenderer', () => {
             error: null,
             isEnabled: true,
         });
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: null,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
     });
 
     it('dispatches machine-activity widgets to the dedicated renderer', () => {
@@ -184,5 +197,67 @@ describe('WidgetRenderer', () => {
 
         expect(screen.getByText('Trend Chart V2')).toBeInTheDocument();
         expect(screen.getByText('12:00')).toBeInTheDocument();
+    });
+
+    it('dispatches activity-analytics widgets to the dedicated runtime renderer', () => {
+        const activityAnalyticsWidget: ActivityAnalyticsWidgetConfig = {
+            id: 'activity-analytics-1',
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+            },
+            displayOptions: {
+                range: '24h',
+                groupBy: 'day',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        };
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'Total kW',
+                range: '24h',
+                unit: 'kW',
+                purpose: 'activity-analytics',
+                window: {
+                    start: '2026-06-18T12:00:00.000Z',
+                    end: '2026-06-18T14:00:00.000Z',
+                    timezone: 'UTC',
+                    bucket: '5m',
+                    bucketMs: 300000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 0.3 },
+                    { timestamp: '2026-06-18T13:00:00.000Z', timestampMs: Date.parse('2026-06-18T13:00:00.000Z'), value: 0.05 },
+                ],
+                summary: { hidden: true },
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(
+            <WidgetRenderer
+                widget={activityAnalyticsWidget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                isLoadingData={false}
+            />,
+        );
+
+        expect(screen.getByText('Análisis de Actividad')).toBeInTheDocument();
+        expect(screen.getByText('% Prod.')).toBeInTheDocument();
+        expect(screen.queryByText('hidden')).not.toBeInTheDocument();
     });
 });

@@ -9,6 +9,7 @@ import TrendChartWidget from './renderers/TrendChartWidget';
 import TrendChartV2Widget from './renderers/TrendChartV2Widget';
 import KpiWidget from './renderers/KpiWidget';
 import MachineActivityWidget from './renderers/MachineActivityWidget';
+import ActivityAnalyticsWidget from './renderers/ActivityAnalyticsWidget';
 import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
@@ -94,6 +95,16 @@ export default function WidgetRenderer({
                 <MachineActivityWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
+                    machines={machines}
+                    isLoadingData={isLoadingData}
+                    className={className}
+                />
+            );
+
+        case 'activity-analytics':
+            return (
+                <ActivityAnalyticsWidget
+                    widget={widget}
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}

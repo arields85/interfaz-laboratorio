@@ -212,7 +212,7 @@ vi.mock('../../components/admin/AdminWorkspaceLayout', () => ({
 }));
 
 vi.mock('../../components/admin/WidgetCatalogRail', () => ({
-    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart-v2') => void }) => (
+    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart-v2' | 'activity-analytics') => void }) => (
         <div data-testid="widget-catalog-rail">
             <button type="button" onClick={() => onAddWidget('kpi')}>
                 Agregar KPI
@@ -225,6 +225,9 @@ vi.mock('../../components/admin/WidgetCatalogRail', () => ({
             </button>
             <button type="button" onClick={() => onAddWidget('trend-chart-v2')}>
                 Agregar Trend Chart V2
+            </button>
+            <button type="button" onClick={() => onAddWidget('activity-analytics')}>
+                Agregar Análisis de Actividad
             </button>
         </div>
     ),
@@ -572,6 +575,48 @@ describe('DashboardBuilderPage', () => {
                     binding: { mode: 'simulated_value', simulatedValue: 50 },
                     displayOptions: {
                         historicalDensity: 'normal',
+                    },
+                },
+            });
+        });
+    });
+
+    it('adds activity-analytics widgets with activity-series defaults for slice 3', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [],
+            layout: [],
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Agregar Análisis de Actividad' }));
+
+        await waitFor(() => {
+            const snapshot = getBuilderCanvasSnapshot();
+            expect(snapshot.layout).toHaveLength(1);
+            expect(snapshot.layout[0]).toMatchObject({ x: 0, y: 0, w: 11, h: 9 });
+        });
+
+        await waitFor(() => {
+            expect(propertyDockMock).toHaveBeenCalled();
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: {
+                    type: 'activity-analytics',
+                    title: 'Análisis de Actividad',
+                    size: { w: 11, h: 9 },
+                    binding: {
+                        mode: 'real_variable',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        range: '24h',
+                        groupBy: 'day',
+                        setupThresholdKw: 0.15,
+                        prodThresholdKw: 0.25,
+                        displayMode: 'kpis-and-bars',
                     },
                 },
             });

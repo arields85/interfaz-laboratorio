@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions } from '../../domain/admin.types';
+import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsDisplayOptions } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
 import {
@@ -35,6 +35,7 @@ import {
 } from './adminSidebarStyles';
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
+import { resolveActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
 
 // =============================================================================
 // PropertyDock
@@ -115,7 +116,12 @@ export default function PropertyDock(props: PropertyDockProps) {
         onUpdateWidget,
     } = props;
     const [isCustomUnit, setIsCustomUnit] = useState(false);
+    const [activityAnalyticsThresholdWarning, setActivityAnalyticsThresholdWarning] = useState<string | null>(null);
     void selectedLayout;
+
+    useEffect(() => {
+        setActivityAnalyticsThresholdWarning(null);
+    }, [selectedWidget?.id]);
 
     // -------------------------------------------------------------------------
     // handleDisplayOptionChange
@@ -143,6 +149,41 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     const handleNumericDisplayOptionChange = (key: string, value: string) => {
         handleDisplayOptionChange(key, value === '' ? '' : Number(value));
+    };
+
+    const handleActivityAnalyticsThresholdChange = (
+        key: 'setupThresholdKw' | 'prodThresholdKw',
+        value: string,
+    ) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const nextValue = value === '' ? 0 : Number(value);
+
+        if (!Number.isFinite(nextValue) || nextValue < 0) {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const nextSetupThresholdKw = key === 'setupThresholdKw' ? nextValue : currentOptions.setupThresholdKw;
+        const nextProdThresholdKw = key === 'prodThresholdKw' ? nextValue : currentOptions.prodThresholdKw;
+
+        if (nextProdThresholdKw <= nextSetupThresholdKw) {
+            setActivityAnalyticsThresholdWarning('Prod. debe ser mayor que Setup.');
+            onUpdateWidget({
+                ...selectedWidget,
+                displayOptions: {
+                    ...selectedWidget.displayOptions,
+                    setupThresholdKw: currentOptions.setupThresholdKw,
+                    prodThresholdKw: currentOptions.prodThresholdKw,
+                },
+            });
+            return;
+        }
+
+        setActivityAnalyticsThresholdWarning(null);
+        handleDisplayOptionChange(key, nextValue);
     };
 
     const handleUnitChange = (val: string) => {
@@ -372,6 +413,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         : binding.mode;
     const isKpi = selectedWidget?.type === 'kpi';
     const isMachineActivity = selectedWidget?.type === 'machine-activity';
+    const isActivityAnalytics = selectedWidget?.type === 'activity-analytics';
     const isDashboardTitle = selectedWidget?.type === 'text-title';
     const widgetType = selectedWidget?.type ?? '';
     const hasCatalogSupport = supportsCatalogVariable(widgetType);
@@ -394,6 +436,9 @@ export default function PropertyDock(props: PropertyDockProps) {
     const machineActivityOptions = isMachineActivity
         ? (selectedWidget.displayOptions as MachineActivityDisplayOptions | undefined)
         : undefined;
+    const activityAnalyticsOptions = isActivityAnalytics
+        ? resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined)
+        : null;
     const isTrendChartV2 = selectedWidget ? isTrendChartV2Widget(selectedWidget) : false;
     const trendChartV2Options = isTrendChartV2
         ? (selectedWidget?.displayOptions as TrendChartV2DisplayOptions | undefined)
@@ -439,13 +484,15 @@ export default function PropertyDock(props: PropertyDockProps) {
     const shouldShowGeneralIconField = selectedWidget
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'text-title'
-        && selectedWidget.type !== 'status';
+        && selectedWidget.type !== 'status'
+        && selectedWidget.type !== 'activity-analytics';
     const genericDataUnitField = selectedWidget
         && selectedWidget.type !== 'alert-history'
         && selectedWidget.type !== 'prod-history'
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'kpi'
         && selectedWidget.type !== 'machine-activity'
+        && selectedWidget.type !== 'activity-analytics'
         ? (() => {
             const currentUnit = selectedWidget?.binding?.unit || '';
             const isPreset = isPresetUnit(currentUnit);
@@ -832,9 +879,62 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     </DockFieldRow>
                                 )}
 
-                                {genericDataUnitField}
+                                {isActivityAnalytics ? (
+                                    <>
+                                        <DockFieldRow label="Equipo">
+                                            {dataLoading ? (
+                                                <div className={`${INPUT_CLS} flex items-center gap-2 text-industrial-muted`}>
+                                                    <Loader2 size={12} className="animate-spin" />
+                                                    <span>Cargando equipos...</span>
+                                                </div>
+                                            ) : dataError ? (
+                                                <div className={`${INPUT_CLS} flex items-center text-status-critical`}>
+                                                    Error cargando equipos
+                                                </div>
+                                            ) : !dataEnabled ? (
+                                                <div className={`${INPUT_CLS} flex items-center text-industrial-muted`}>
+                                                    No configurado
+                                                </div>
+                                            ) : machines.length === 0 ? (
+                                                <AdminSelect
+                                                    disabled
+                                                    value=""
+                                                    onChange={() => undefined}
+                                                    placeholder="Sin equipos"
+                                                    options={[]}
+                                                />
+                                            ) : (
+                                                <AdminSelect
+                                                    value={binding.machineId != null ? String(binding.machineId) : ''}
+                                                    onChange={handleMachineChange}
+                                                    placeholder="Seleccione..."
+                                                    options={machines.map(machine => ({
+                                                        value: String(machine.unitId),
+                                                        label: machine.name,
+                                                    }))}
+                                                />
+                                            )}
+                                        </DockFieldRow>
 
-                                {hasCatalogSupport && (
+                                        <DockFieldRow label="Rango">
+                                            <AdminSelect
+                                                value={activityAnalyticsOptions?.range ?? '24h'}
+                                                onChange={val => handleDisplayOptionChange('range', val)}
+                                                options={[
+                                                    { value: '1h', label: '1 hora' },
+                                                    { value: '24h', label: '24 horas' },
+                                                    { value: '7d', label: '7 días' },
+                                                    { value: '30d', label: '30 días' },
+                                                    { value: '12m', label: '12 meses' },
+                                                ]}
+                                            />
+                                        </DockFieldRow>
+                                    </>
+                                ) : (
+                                    <>
+                                        {genericDataUnitField}
+
+                                        {hasCatalogSupport && (
                                     <>
                                         <DockFieldRow label={<><span>Variable{isCatalogVariableRequired ? <span className="text-status-warning">*</span> : null}</span></>}>
                                             <CatalogVariableSelector
@@ -880,9 +980,9 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             />
                                         </DockFieldRow>
                                     </>
-                                )}
-                                
-                                <>
+                                        )}
+
+                                        <>
                                         <DockFieldRow label="Origen">
                                             {isConnectionWidget ? (
                                                 <AdminSelect
@@ -1128,7 +1228,26 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 </span>
                                             </label>
                                         )}
-                                </>
+                                        </>
+                                    </>
+                                )}
+                            </DockSection>
+                        )}
+
+                        {isActivityAnalytics && (
+                            <DockSection icon={<BarChart2 size={11} />} title="Agrupación">
+                                <DockFieldRow label="Grupo">
+                                    <AdminSelect
+                                        value={activityAnalyticsOptions?.groupBy ?? 'day'}
+                                        onChange={val => handleDisplayOptionChange('groupBy', val)}
+                                        options={[
+                                            { value: 'shift', label: 'Turno' },
+                                            { value: 'day', label: 'Día' },
+                                            { value: 'week', label: 'Semana' },
+                                            { value: 'month', label: 'Mes' },
+                                        ]}
+                                    />
+                                </DockFieldRow>
                             </DockSection>
                         )}
 
@@ -1217,6 +1336,32 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         onChange={val => handleNumericDisplayOptionChange('smoothingWindow', val)}
                                     />
                                 </DockFieldRow>
+                            </DockSection>
+                        )}
+
+                        {isActivityAnalytics && (
+                            <DockSection icon={<Activity size={11} />} title="Estados Productivos">
+                                <DockFieldRow label="Setup ≥">
+                                    <AdminNumberInput
+                                        value={activityAnalyticsOptions?.setupThresholdKw ?? 0.15}
+                                        min={0}
+                                        step={0.01}
+                                        commitOnBlur
+                                        onChange={val => handleActivityAnalyticsThresholdChange('setupThresholdKw', val)}
+                                    />
+                                </DockFieldRow>
+                                <DockFieldRow label="Prod. ≥">
+                                    <AdminNumberInput
+                                        value={activityAnalyticsOptions?.prodThresholdKw ?? 0.25}
+                                        min={0}
+                                        step={0.01}
+                                        commitOnBlur
+                                        onChange={val => handleActivityAnalyticsThresholdChange('prodThresholdKw', val)}
+                                    />
+                                </DockFieldRow>
+                                {activityAnalyticsThresholdWarning && (
+                                    <DockInfoBox variant="warning" text={activityAnalyticsThresholdWarning} />
+                                )}
                             </DockSection>
                         )}
 

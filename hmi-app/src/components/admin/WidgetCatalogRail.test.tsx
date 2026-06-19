@@ -36,4 +36,19 @@ describe('WidgetCatalogRail', () => {
 
         expect(onAddWidget).toHaveBeenCalledWith('trend-chart-v2');
     });
+
+    it('shows activity analytics in the catalog and dispatches the widget type on click', async () => {
+        const user = userEvent.setup();
+        const onAddWidget = vi.fn();
+
+        render(<WidgetCatalogRail onAddWidget={onAddWidget} />);
+
+        const button = screen.getByRole('button', { name: 'Análisis de Actividad' });
+
+        expect(button).toBeInTheDocument();
+
+        await user.click(button);
+
+        expect(onAddWidget).toHaveBeenCalledWith('activity-analytics');
+    });
 });

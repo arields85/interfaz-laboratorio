@@ -855,6 +855,116 @@ describe('PropertyDock machine-activity', () => {
     });
 });
 
+describe('PropertyDock activity-analytics', () => {
+    it('renders dedicated machine, range, grouping and threshold controls without variable or generic unit controls', () => {
+        renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '24h',
+                groupBy: 'day',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        });
+
+        expect(screen.getByRole('button', { name: /general/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /datos/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /agrupación/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /estados productivos/i })).toBeInTheDocument();
+        expect(screen.queryByText('Variable')).not.toBeInTheDocument();
+        expect(screen.queryByText('Origen')).not.toBeInTheDocument();
+        expect(screen.queryByText('Unidad')).not.toBeInTheDocument();
+
+        expect(getFieldButtonInSection('Datos', 'Equipo')).toHaveTextContent('Seleccione...');
+        expect(getFieldButtonInSection('Datos', 'Rango')).toHaveTextContent('24 horas');
+        expect(getFieldButtonInSection('Agrupación', 'Grupo')).toHaveTextContent('Día');
+        expect(within(getSection('Agrupación')).queryByText('Layout')).not.toBeInTheDocument();
+
+        const productiveStatesSection = getSection('Estados Productivos');
+        expect(within(productiveStatesSection).getByText('Setup ≥')).toBeInTheDocument();
+        expect(within(productiveStatesSection).getByText('Prod. ≥')).toBeInTheDocument();
+        expect(within(productiveStatesSection).getByDisplayValue('0.15')).toBeInTheDocument();
+        expect(within(productiveStatesSection).getByDisplayValue('0.25')).toBeInTheDocument();
+    });
+
+    it('updates machine, range and grouping controls with activity-analytics-specific values', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '24h',
+                groupBy: 'day',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Equipo'));
+        await user.click(screen.getByRole('button', { name: 'Extrusora 101' }));
+
+        expect(updates.at(-1)?.binding).toMatchObject({
+            machineId: 101,
+            bindingVersion: 'node-red-v1',
+        });
+        expect(updates.at(-1)?.binding?.variableKey).toBeUndefined();
+
+        await user.click(getFieldButtonInSection('Datos', 'Rango'));
+        await user.click(screen.getByRole('button', { name: '30 días' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            range: '30d',
+        });
+
+        await user.click(getFieldButtonInSection('Agrupación', 'Grupo'));
+        await user.click(screen.getByRole('button', { name: 'Semana' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            groupBy: 'week',
+        });
+    });
+
+    it('prevents invalid threshold ordering and shows a clear warning', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '24h',
+                groupBy: 'day',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        });
+
+        const productiveStatesSection = getSection('Estados Productivos');
+        const prodInput = within(productiveStatesSection).getByDisplayValue('0.25');
+
+        await user.clear(prodInput);
+        await user.type(prodInput, '0.10');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            prodThresholdKw: 0.25,
+        });
+        expect(screen.getByText('Prod. debe ser mayor que Setup.')).toBeInTheDocument();
+    });
+});
+
 describe('PropertyDock prod-history', () => {
     it('renders prod-history sections and updates general, data, series, scales and layout controls', async () => {
         const { user, updates } = renderPropertyDock({

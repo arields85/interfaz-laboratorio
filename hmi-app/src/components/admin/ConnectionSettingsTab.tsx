@@ -1,22 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import AdminActionButton from './AdminActionButton';
 import { ADMIN_SIDEBAR_LABEL_CLS, ADMIN_SIDEBAR_INPUT_CLS, ADMIN_SIDEBAR_HINT_CLS } from './adminSidebarStyles';
 import {
+    DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT,
     DATA_DEFAULT_ENDPOINT,
     DATA_DEFAULT_HISTORY_ENDPOINT,
+    clearDataActivitySeriesEndpoint,
     clearDataEndpoint,
     clearDataHistoryEndpoint,
     getDataBaseUrl,
+    getSavedDataActivitySeriesEndpoint,
     getSavedDataEndpoint,
     getSavedDataBaseUrl,
     getSavedDataHistoryEndpoint,
     clearDataBaseUrl,
     saveDataBaseUrl,
+    saveDataActivitySeriesEndpoint,
     saveDataEndpoint,
     saveDataHistoryEndpoint,
 } from '../../config/dataConnection.config';
 import { DATA_OVERVIEW_QUERY_KEY } from '../../queries/useDataOverview';
+import { ACTIVITY_SERIES_QUERY_KEY_PREFIX } from '../../queries/useActivitySeries';
 import { DATA_HISTORY_QUERY_KEY_PREFIX } from '../../queries/useDataHistory';
 
 // =============================================================================
@@ -32,14 +37,10 @@ interface ConnectionSettingsTabProps {
 
 export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, saveRef }: ConnectionSettingsTabProps) {
     const queryClient = useQueryClient();
-    const [draftUrl, setDraftUrl] = useState('');
-    const [draftEndpoint, setDraftEndpoint] = useState(DATA_DEFAULT_ENDPOINT);
-    const [draftHistoryEndpoint, setDraftHistoryEndpoint] = useState(DATA_DEFAULT_HISTORY_ENDPOINT);
-    useEffect(() => {
-        setDraftUrl(getSavedDataBaseUrl() || (getDataBaseUrl() ?? ''));
-        setDraftEndpoint(getSavedDataEndpoint() || DATA_DEFAULT_ENDPOINT);
-        setDraftHistoryEndpoint(getSavedDataHistoryEndpoint() || DATA_DEFAULT_HISTORY_ENDPOINT);
-    }, []);
+    const [draftUrl, setDraftUrl] = useState(() => getSavedDataBaseUrl() || (getDataBaseUrl() ?? ''));
+    const [draftEndpoint, setDraftEndpoint] = useState(() => getSavedDataEndpoint() || DATA_DEFAULT_ENDPOINT);
+    const [draftHistoryEndpoint, setDraftHistoryEndpoint] = useState(() => getSavedDataHistoryEndpoint() || DATA_DEFAULT_HISTORY_ENDPOINT);
+    const [draftActivitySeriesEndpoint, setDraftActivitySeriesEndpoint] = useState(() => getSavedDataActivitySeriesEndpoint() ?? DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT);
 
     const previewSnapshotUrl = useMemo(() => {
         const baseUrl = draftUrl.trim().replace(/\/+$/, '');
@@ -67,10 +68,26 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
         return `${baseUrl}/${historyEndpoint}`;
     }, [draftHistoryEndpoint, draftUrl]);
 
-    const handleSave = () => {
+    const previewActivitySeriesUrl = useMemo(() => {
+        const baseUrl = draftUrl.trim().replace(/\/+$/, '');
+        const activitySeriesEndpoint = draftActivitySeriesEndpoint.trim().replace(/^\/+/, '');
+
+        if (!activitySeriesEndpoint) {
+            return 'No configurado';
+        }
+
+        if (!baseUrl) {
+            return 'Sin URL base configurada';
+        }
+
+        return `${baseUrl}/${activitySeriesEndpoint}`;
+    }, [draftActivitySeriesEndpoint, draftUrl]);
+
+    const handleSave = useCallback(() => {
         const trimmed = draftUrl.trim();
         const trimmedEndpoint = draftEndpoint.trim();
         const trimmedHistoryEndpoint = draftHistoryEndpoint.trim();
+        const trimmedActivitySeriesEndpoint = draftActivitySeriesEndpoint.trim();
 
         if (trimmed) {
             saveDataBaseUrl(trimmed);
@@ -90,28 +107,44 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
             clearDataHistoryEndpoint();
         }
 
+        saveDataActivitySeriesEndpoint(trimmedActivitySeriesEndpoint);
+
         queryClient.invalidateQueries({ queryKey: DATA_OVERVIEW_QUERY_KEY });
         queryClient.invalidateQueries({ queryKey: DATA_HISTORY_QUERY_KEY_PREFIX });
+        queryClient.invalidateQueries({ queryKey: ACTIVITY_SERIES_QUERY_KEY_PREFIX });
         onStatusChange?.(true);
         onDirtyChange?.(false);
-    };
+    }, [draftActivitySeriesEndpoint, draftEndpoint, draftHistoryEndpoint, draftUrl, onDirtyChange, onStatusChange, queryClient]);
 
-    const handleClear = () => {
+    const handleClear = useCallback(() => {
         clearDataBaseUrl();
         clearDataEndpoint();
         clearDataHistoryEndpoint();
+        clearDataActivitySeriesEndpoint();
         setDraftUrl('');
         setDraftEndpoint(DATA_DEFAULT_ENDPOINT);
         setDraftHistoryEndpoint(DATA_DEFAULT_HISTORY_ENDPOINT);
+        setDraftActivitySeriesEndpoint(DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT);
         queryClient.invalidateQueries({ queryKey: DATA_OVERVIEW_QUERY_KEY });
         queryClient.invalidateQueries({ queryKey: DATA_HISTORY_QUERY_KEY_PREFIX });
+        queryClient.invalidateQueries({ queryKey: ACTIVITY_SERIES_QUERY_KEY_PREFIX });
         onStatusChange?.(true);
         onDirtyChange?.(false);
-    };
+    }, [onDirtyChange, onStatusChange, queryClient]);
 
-    if (saveRef) {
+    useEffect(() => {
+        if (!saveRef) {
+            return;
+        }
+
         saveRef.current = handleSave;
-    }
+
+        return () => {
+            if (saveRef.current === handleSave) {
+                saveRef.current = null;
+            }
+        };
+    }, [handleSave, saveRef]);
 
     return (
         <div className="space-y-4">
@@ -120,6 +153,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     URL Base de Node-RED
                 </label>
                 <input
+                    aria-label="URL Base de Node-RED"
                     value={draftUrl}
                     onChange={(e) => {
                         setDraftUrl(e.target.value);
@@ -138,6 +172,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     Endpoint Snapshot
                 </label>
                 <input
+                    aria-label="Endpoint Snapshot"
                     value={draftEndpoint}
                     onChange={(e) => {
                         setDraftEndpoint(e.target.value);
@@ -156,6 +191,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     Endpoint Histórico
                 </label>
                 <input
+                    aria-label="Endpoint Histórico"
                     value={draftHistoryEndpoint}
                     onChange={(e) => {
                         setDraftHistoryEndpoint(e.target.value);
@@ -166,6 +202,25 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                 />
                 <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                     Ruta del endpoint de datos históricos. Dejar vacío para deshabilitar.
+                </p>
+            </div>
+
+            <div>
+                <label className={`${ADMIN_SIDEBAR_LABEL_CLS} mb-1.5 block w-auto`}>
+                    Endpoint Activity-Series
+                </label>
+                <input
+                    aria-label="Endpoint Activity-Series"
+                    value={draftActivitySeriesEndpoint}
+                    onChange={(e) => {
+                        setDraftActivitySeriesEndpoint(e.target.value);
+                        onDirtyChange?.(true);
+                    }}
+                    placeholder="/api/hmi-data/activity-series"
+                    className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
+                />
+                <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    Ruta del endpoint de activity-series. Dejar vacío para deshabilitar.
                 </p>
             </div>
 
@@ -184,6 +239,14 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     </p>
                     <p className="mt-0.5 break-all text-white/70">
                         {previewHistoryUrl}
+                    </p>
+                </div>
+                <div className="mt-3">
+                    <p className="uppercase text-industrial-muted">
+                        URL ACTIVITY-SERIES
+                    </p>
+                    <p className="mt-0.5 break-all text-white/70">
+                        {previewActivitySeriesUrl}
                     </p>
                 </div>
             </div>

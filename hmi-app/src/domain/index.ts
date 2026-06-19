@@ -8,6 +8,7 @@ export * from './alert.types';
 export * from './alertHistory.types';
 export * from './assistant.types';
 export * from './admin.types';
+export * from './activityAnalytics.types';
 export * from './dataContract.types';
 export * from './auth';
 export type { CatalogVariable } from './variableCatalog.types';

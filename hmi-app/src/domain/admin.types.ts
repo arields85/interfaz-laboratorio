@@ -1,3 +1,9 @@
+import type {
+    ActivityAnalyticsDisplayMode,
+    ActivityAnalyticsGroupBy,
+    ActivityAnalyticsPresetRange,
+} from './activityAnalytics.types';
+
 // =============================================================================
 // DOMAIN: Admin (Modo Administrador)
 // Entidades para el builder de jerarquía, dashboards, widgets y bindings.
@@ -184,7 +190,8 @@ export type WidgetType =
     | 'ai-summary'
     | 'section-title'
     | 'text-title'
-    | 'machine-activity';
+    | 'machine-activity'
+    | 'activity-analytics';
 
 // --- AGREGACIÓN JERÁRQUICA ---
 
@@ -374,6 +381,14 @@ export interface MachineActivityDisplayOptions {
     labelProducing?: string;
 }
 
+export interface ActivityAnalyticsDisplayOptions {
+    range?: ActivityAnalyticsPresetRange;
+    groupBy?: ActivityAnalyticsGroupBy;
+    setupThresholdKw?: number;
+    prodThresholdKw?: number;
+    displayMode?: ActivityAnalyticsDisplayMode;
+}
+
 export type TemporalBucket = 'hour' | 'shift' | 'day' | 'month';
 export type ProductionChartMode = 'bars' | 'area';
 
@@ -551,6 +566,11 @@ export interface MachineActivityWidgetConfig extends WidgetConfigBase {
     displayOptions?: MachineActivityDisplayOptions;
 }
 
+export interface ActivityAnalyticsWidgetConfig extends WidgetConfigBase {
+    type: 'activity-analytics';
+    displayOptions?: ActivityAnalyticsDisplayOptions;
+}
+
 export interface TextTitleWidgetConfig extends WidgetConfigBase {
     type: 'text-title';
     displayOptions?: TextTitleDisplayOptions;
@@ -558,7 +578,7 @@ export interface TextTitleWidgetConfig extends WidgetConfigBase {
 
 /** Variante genérica para todos los tipos de widget sin displayOptions específicos. */
 export interface GenericWidgetConfig extends WidgetConfigBase {
-    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'text-title'>;
+    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'activity-analytics' | 'text-title'>;
     displayOptions?: BaseDisplayOptions;
 }
 
@@ -576,6 +596,7 @@ export type WidgetConfig =
     | ConnectionStatusWidgetConfig
     | StatusWidgetConfig
     | MachineActivityWidgetConfig
+    | ActivityAnalyticsWidgetConfig
     | TextTitleWidgetConfig
     | GenericWidgetConfig;
 
@@ -601,6 +622,10 @@ export function isTrendChartV2Widget(w: WidgetConfig): w is TrendChartV2WidgetCo
 
 export function isAlertHistoryWidget(w: WidgetConfig): w is AlertHistoryWidgetConfig {
     return w.type === 'alert-history';
+}
+
+export function isActivityAnalyticsWidget(w: WidgetConfig): w is ActivityAnalyticsWidgetConfig {
+    return w.type === 'activity-analytics';
 }
 
 // --- TEMPLATE ---

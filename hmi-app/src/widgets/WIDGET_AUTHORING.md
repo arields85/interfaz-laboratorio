@@ -67,6 +67,7 @@ Todo widget nuevo debe:
 ### Diseño y semántica
 - Usar tokens de `index.css`.
 - Usar solo íconos de Lucide React.
+- Toda tipografía interna del widget debe consumir las categorías configurables del Builder (`Textos en general`, `Textos técnicos`, `Textos widget gráficos`, `Títulos de dashboard`, `Valores numéricos...`) mediante los CSS vars canónicos (`--font-*`, `--font-size-*`, `--font-weight-*`, `--tracking-*`). No hardcodear utilidades tipográficas como `text-xs`, `text-sm`, `text-lg`, `font-*`, tamaños, pesos ni tracking cuando ese texto deba responder al panel Design. Las utilidades semánticas de color de texto (por ejemplo `text-industrial-muted`) sí pueden usarse cuando corresponden al sistema de diseño.
 - Mantener separados:
   - `EquipmentStatus`
   - `ConnectionState`

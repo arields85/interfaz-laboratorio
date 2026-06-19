@@ -20,6 +20,7 @@ export interface WidgetCapabilities {
 const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
     'kpi': { catalogVariable: false, hierarchy: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'Gauge' },
     'machine-activity': { catalogVariable: false, hierarchy: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'HeartPulse' },
+    'activity-analytics': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: null },
     'metric-card': { catalogVariable: true, hierarchy: true, defaultSize: { w: 6, h: 5 }, defaultIcon: 'BarChart2' },
     'trend-chart': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
     'trend-chart-v2': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },

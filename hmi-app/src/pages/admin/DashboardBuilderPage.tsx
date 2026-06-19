@@ -38,6 +38,7 @@ import { createDefaultStatusDisplayOptions } from '../../utils/statusWidget';
 import {
     createDefaultConnectionStatusDisplayOptions,
 } from '../../utils/connectionWidget';
+import { createDefaultActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
 import { getAncestors } from '../../utils/hierarchyTree';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
@@ -671,6 +672,19 @@ export default function DashboardBuilderPage() {
                         displayOptions: {
                             historicalDensity: 'normal',
                         },
+                    }
+                : type === 'activity-analytics'
+                    ? {
+                        id: newId,
+                        type,
+                        title: 'Análisis de Actividad',
+                        position: { x: 0, y: 0 },
+                        size: { w: defaultWidth, h: defaultHeight },
+                        binding: {
+                            mode: 'real_variable',
+                            bindingVersion: 'node-red-v1',
+                        },
+                        displayOptions: createDefaultActivityAnalyticsDisplayOptions(),
                     }
                 : type === 'kpi'
                     ? {

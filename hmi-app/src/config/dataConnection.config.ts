@@ -15,10 +15,12 @@ export const DATA_DEFAULT_REFETCH_INTERVAL = 5_000;
 export const DATA_DEFAULT_STALE_TIME = 4_000;
 export const DATA_DEFAULT_ENDPOINT = '/api/hmi-data';
 export const DATA_DEFAULT_HISTORY_ENDPOINT = '/api/hmi-data/history';
+export const DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT = '/api/hmi-data/activity-series';
 
 const LS_KEY_BASE_URL = 'hmi:node-red-base-url';
 const LS_KEY_ENDPOINT = 'hmi:node-red-endpoint';
 const LS_KEY_HISTORY_ENDPOINT = 'hmi:data-history-endpoint';
+const LS_KEY_ACTIVITY_SERIES_ENDPOINT = 'hmi:activity-series-endpoint';
 
 function stripTrailingSlashes(raw: string): string {
     return raw.replace(/\/+$/, '');
@@ -141,6 +143,41 @@ export function isDataHistoryEnabled(): boolean {
     return getDataBaseUrl() !== null && getDataHistoryEndpoint() !== null;
 }
 
+export function getDataActivitySeriesEndpoint(): string | null {
+    try {
+        const stored = localStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+
+        if (stored !== null) {
+            const trimmed = stored.trim();
+            return trimmed === '' ? null : '/' + stripLeadingSlashes(trimmed);
+        }
+    } catch {
+        // localStorage unavailable
+    }
+
+    return DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT;
+}
+
+export function saveDataActivitySeriesEndpoint(endpoint: string): void {
+    localStorage.setItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT, endpoint.trim());
+}
+
+export function clearDataActivitySeriesEndpoint(): void {
+    localStorage.removeItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+}
+
+export function getSavedDataActivitySeriesEndpoint(): string | null {
+    try {
+        return localStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+    } catch {
+        return null;
+    }
+}
+
+export function isDataActivitySeriesEnabled(): boolean {
+    return getDataBaseUrl() !== null && getDataActivitySeriesEndpoint() !== null;
+}
+
 // --- Full URLs ---
 
 export function getDataFullUrl(): string | null {
@@ -156,4 +193,12 @@ export function getDataHistoryUrl(): string | null {
     const historyEndpoint = getDataHistoryEndpoint();
     if (!historyEndpoint) return null;
     return `${base}/${stripLeadingSlashes(historyEndpoint)}`;
+}
+
+export function getDataActivitySeriesUrl(): string | null {
+    const base = getDataBaseUrl();
+    if (!base) return null;
+    const activitySeriesEndpoint = getDataActivitySeriesEndpoint();
+    if (!activitySeriesEndpoint) return null;
+    return `${base}/${stripLeadingSlashes(activitySeriesEndpoint)}`;
 }
