@@ -6,6 +6,7 @@ import MetricWidget from './renderers/MetricWidget';
 import StatusWidget from './renderers/StatusWidget';
 import ConnectionStatusWidget from './renderers/ConnectionStatusWidget';
 import TrendChartWidget from './renderers/TrendChartWidget';
+import TrendChartV2Widget from './renderers/TrendChartV2Widget';
 import KpiWidget from './renderers/KpiWidget';
 import MachineActivityWidget from './renderers/MachineActivityWidget';
 import AlertHistoryWidget from './renderers/AlertHistoryWidget';
@@ -23,7 +24,7 @@ import TextTitleWidget from './renderers/TextTitleWidget';
 //   'metric-card', 'kpi'        → MetricWidget / KpiWidget
 //   'status'                    → StatusWidget
 //   'connection-status'         → ConnectionStatusWidget
-//   'trend-chart'               → TrendChartWidget
+//   'trend-chart', 'trend-chart-v2' → TrendChartWidget / TrendChartV2Widget
 //   'prod-history'              → ProdHistoryWidget
 //   'alert-history'             → AlertHistoryWidget
 //
@@ -122,6 +123,17 @@ export default function WidgetRenderer({
         case 'trend-chart':
             return (
                 <TrendChartWidget
+                    widget={widget}
+                    equipmentMap={equipmentMap}
+                    machines={machines}
+                    isLoadingData={isLoadingData}
+                    className={className}
+                />
+            );
+
+        case 'trend-chart-v2':
+            return (
+                <TrendChartV2Widget
                     widget={widget}
                     equipmentMap={equipmentMap}
                     machines={machines}

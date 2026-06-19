@@ -99,4 +99,46 @@ describe('dataHistory.adapter', () => {
             },
         });
     });
+
+    it('preserves V2 window metadata, timestampMs, and null gaps for richer history responses', () => {
+        expect(
+            adaptDataHistory({
+                contractVersion: '1.1.0',
+                machineId: 7,
+                variableKey: 'pressure',
+                range: '24h',
+                unit: 'bar',
+                window: {
+                    start: '2026-06-17T12:00:00.000Z',
+                    end: '2026-06-18T12:00:00.000Z',
+                    timezone: 'America/Argentina/Buenos_Aires',
+                    bucket: '5m',
+                    bucketMs: 300000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T10:00:00.000Z', timestampMs: 1750240800000, value: 11.2 },
+                    { timestamp: '2026-06-18T10:05:00.000Z', timestampMs: 1750241100000, value: null },
+                ],
+                summary: { last: 11.2, min: 9.8, max: 14.1, avg: 12 },
+            })
+        ).toEqual({
+            contractVersion: '1.1.0',
+            machineId: 7,
+            variableKey: 'pressure',
+            range: '24h',
+            unit: 'bar',
+            window: {
+                start: '2026-06-17T12:00:00.000Z',
+                end: '2026-06-18T12:00:00.000Z',
+                timezone: 'America/Argentina/Buenos_Aires',
+                bucket: '5m',
+                bucketMs: 300000,
+            },
+            series: [
+                { timestamp: '2026-06-18T10:00:00.000Z', timestampMs: 1750240800000, value: 11.2 },
+                { timestamp: '2026-06-18T10:05:00.000Z', timestampMs: 1750241100000, value: null },
+            ],
+            summary: { last: 11.2, min: 9.8, max: 14.1, avg: 12 },
+        });
+    });
 });

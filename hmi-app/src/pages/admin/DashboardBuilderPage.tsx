@@ -660,6 +660,18 @@ export default function DashboardBuilderPage() {
                         icon: defaultIcon,
                     },
                 }
+                : type === 'trend-chart-v2'
+                    ? {
+                        id: newId,
+                        type,
+                        title: 'Trend Chart V2',
+                        position: { x: 0, y: 0 },
+                        size: { w: defaultWidth, h: defaultHeight },
+                        binding: { mode: 'simulated_value', simulatedValue: 50 },
+                        displayOptions: {
+                            historicalDensity: 'normal',
+                        },
+                    }
                 : type === 'kpi'
                     ? {
                         id: newId,

@@ -80,10 +80,27 @@ export function getChartTextFont(): string {
     return `${fontWeight} ${fontSize} ${fontFamily}`;
 }
 
+export function getChartFontSizePx(): number {
+    const fontSize = getRootCssVariableValue('--font-size-chart', '12px');
+    const parsedValue = Number.parseFloat(fontSize);
+    return Number.isFinite(parsedValue) ? parsedValue : 12;
+}
+
 export function getChartLetterSpacingPx(): number {
     const letterSpacing = getRootCssVariableValue('--tracking-chart', '0px');
     const parsedValue = Number.parseFloat(letterSpacing);
     return Number.isFinite(parsedValue) ? parsedValue : 0;
+}
+
+export function measureChartTextWidthPx(
+    text: string,
+    font: string = getChartTextFont(),
+    letterSpacing: number = getChartLetterSpacingPx(),
+): number {
+    const baseWidth = getTextWidth(text, font);
+    const spacingWidth = Math.max(text.length - 1, 0) * letterSpacing;
+
+    return Math.max(baseWidth + spacingWidth, 0);
 }
 
 /**

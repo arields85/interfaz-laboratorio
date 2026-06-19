@@ -22,6 +22,7 @@ const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
     'machine-activity': { catalogVariable: false, hierarchy: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'HeartPulse' },
     'metric-card': { catalogVariable: true, hierarchy: true, defaultSize: { w: 6, h: 5 }, defaultIcon: 'BarChart2' },
     'trend-chart': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
+    'trend-chart-v2': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
     'prod-history': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'LineChart' },
     'status': { catalogVariable: false, hierarchy: false, defaultSize: { w: 4, h: 4 }, defaultIcon: null },
     'connection-status': { catalogVariable: false, hierarchy: false, defaultSize: { w: 5, h: 5 }, defaultIcon: null },

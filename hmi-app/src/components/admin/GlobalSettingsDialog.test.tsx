@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const CONNECTION_STORAGE_KEY = 'test:global-settings:connection';
 const DESIGN_STORAGE_KEY = 'test:global-settings:design';
 const LOADER_STORAGE_KEY = 'test:global-settings:loader';
+const TEMPORAL_STORAGE_KEY = 'test:global-settings:temporal';
 
 vi.mock('./ConnectionSettingsTab', async () => {
     const React = await vi.importActual<typeof import('react')>('react');
@@ -113,6 +114,40 @@ vi.mock('./LoaderOptionsSettingsTab', async () => {
     };
 });
 
+vi.mock('./TemporalSettingsTab', async () => {
+    const React = await vi.importActual<typeof import('react')>('react');
+
+    return {
+        default: function MockTemporalSettingsTab({ onDirtyChange, saveRef }: { onDirtyChange?: (dirty: boolean) => void; saveRef?: { current: (() => void) | null } }) {
+            const [timezone, setTimezone] = React.useState(() => localStorage.getItem(TEMPORAL_STORAGE_KEY) ?? 'Persisted timezone');
+
+            if (saveRef) {
+                saveRef.current = () => {
+                    localStorage.setItem(TEMPORAL_STORAGE_KEY, timezone);
+                    document.dispatchEvent(new CustomEvent('hmi:temporal-settings-changed', {
+                        detail: { plantTimezone: timezone, shifts: [] },
+                    }));
+                    onDirtyChange?.(false);
+                };
+            }
+
+            return (
+                <div>
+                    <label htmlFor="temporal-timezone">Temporal draft</label>
+                    <input
+                        id="temporal-timezone"
+                        value={timezone}
+                        onChange={(event) => {
+                            setTimezone(event.target.value);
+                            onDirtyChange?.(true);
+                        }}
+                    />
+                </div>
+            );
+        },
+    };
+});
+
 import GlobalSettingsDialog from './GlobalSettingsDialog';
 
 function Harness() {
@@ -138,7 +173,7 @@ describe('GlobalSettingsDialog', () => {
         delete document.documentElement.dataset.designPreview;
     });
 
-    it('keeps Conexion, Diseno, and Opciones drafts alive while switching tabs in the open dialog', async () => {
+    it('keeps Conexion, Diseno, Opciones, and Ajustes drafts alive while switching tabs in the open dialog', async () => {
         const user = userEvent.setup();
 
         render(<Harness />);
@@ -154,6 +189,10 @@ describe('GlobalSettingsDialog', () => {
         await user.clear(screen.getByLabelText('Loader draft'));
         await user.type(screen.getByLabelText('Loader draft'), 'Loader unsaved');
 
+        await user.click(screen.getByRole('button', { name: 'Ajustes' }));
+        await user.clear(screen.getByLabelText('Temporal draft'));
+        await user.type(screen.getByLabelText('Temporal draft'), 'Temporal unsaved');
+
         await user.click(screen.getByRole('button', { name: 'Conexion' }));
         expect(screen.getByLabelText('Connection draft')).toHaveValue('Connection unsaved');
 
@@ -162,6 +201,9 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Opciones' }));
         expect(screen.getByLabelText('Loader draft')).toHaveValue('Loader unsaved');
+
+        await user.click(screen.getByRole('button', { name: 'Ajustes' }));
+        expect(screen.getByLabelText('Temporal draft')).toHaveValue('Temporal unsaved');
     });
 
     it('discards mounted drafts on close without save and restores persisted values on reopen', async () => {
@@ -170,6 +212,7 @@ describe('GlobalSettingsDialog', () => {
         localStorage.setItem(CONNECTION_STORAGE_KEY, 'Persisted connection');
         localStorage.setItem(DESIGN_STORAGE_KEY, 'Persisted design');
         localStorage.setItem(LOADER_STORAGE_KEY, 'Persisted loader');
+        localStorage.setItem(TEMPORAL_STORAGE_KEY, 'Persisted timezone');
         document.documentElement.dataset.designPreview = 'Persisted design';
 
         render(<Harness />);
@@ -185,6 +228,10 @@ describe('GlobalSettingsDialog', () => {
         await user.clear(screen.getByLabelText('Loader draft'));
         await user.type(screen.getByLabelText('Loader draft'), 'Loader unsaved');
 
+        await user.click(screen.getByRole('button', { name: 'Ajustes' }));
+        await user.clear(screen.getByLabelText('Temporal draft'));
+        await user.type(screen.getByLabelText('Temporal draft'), 'Temporal unsaved');
+
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
 
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -192,6 +239,7 @@ describe('GlobalSettingsDialog', () => {
         expect(localStorage.getItem(CONNECTION_STORAGE_KEY)).toBe('Persisted connection');
         expect(localStorage.getItem(DESIGN_STORAGE_KEY)).toBe('Persisted design');
         expect(localStorage.getItem(LOADER_STORAGE_KEY)).toBe('Persisted loader');
+        expect(localStorage.getItem(TEMPORAL_STORAGE_KEY)).toBe('Persisted timezone');
 
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
 
@@ -203,6 +251,9 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Opciones' }));
         expect(screen.getByLabelText('Loader draft')).toHaveValue('Persisted loader');
+
+        await user.click(screen.getByRole('button', { name: 'Ajustes' }));
+        expect(screen.getByLabelText('Temporal draft')).toHaveValue('Persisted timezone');
     });
 
     it('saves the active connection draft through the connection save branch only', async () => {
@@ -246,5 +297,29 @@ describe('GlobalSettingsDialog', () => {
         expect(localStorage.getItem(DESIGN_STORAGE_KEY)).toBe('Design saved');
         expect(document.documentElement.dataset.designPreview).toBe('Design saved');
         expect(getSaveButton()).toBeDisabled();
+    });
+
+    it('saves the active Ajustes draft through the temporal settings save branch', async () => {
+        const user = userEvent.setup();
+        const eventSpy = vi.fn();
+        document.addEventListener('hmi:temporal-settings-changed', eventSpy);
+
+        localStorage.setItem(TEMPORAL_STORAGE_KEY, 'Persisted timezone');
+
+        render(<Harness />);
+
+        await user.click(screen.getByRole('button', { name: 'Ajustes' }));
+        await user.clear(screen.getByLabelText('Temporal draft'));
+        await user.type(screen.getByLabelText('Temporal draft'), 'UTC');
+
+        expect(getSaveButton()).toBeEnabled();
+
+        await user.click(getSaveButton());
+
+        expect(localStorage.getItem(TEMPORAL_STORAGE_KEY)).toBe('UTC');
+        expect(eventSpy).toHaveBeenCalledTimes(1);
+        expect(getSaveButton()).toBeDisabled();
+
+        document.removeEventListener('hmi:temporal-settings-changed', eventSpy);
     });
 });

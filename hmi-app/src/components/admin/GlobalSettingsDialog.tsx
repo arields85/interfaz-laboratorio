@@ -1,15 +1,17 @@
 import { useRef, useState } from 'react';
-import { Palette, SlidersHorizontal, Wifi } from 'lucide-react';
+import { Clock3, Palette, SlidersHorizontal, Wifi } from 'lucide-react';
 import AdminDialog from './AdminDialog';
 import AdminActionButton from './AdminActionButton';
 import ConnectionSettingsTab from './ConnectionSettingsTab';
 import DesignSettingsTab from './DesignSettingsTab';
 import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
+import TemporalSettingsTab from './TemporalSettingsTab';
 
 const TABS = [
     { id: 'connection', label: 'Conexion', icon: Wifi },
     { id: 'design', label: 'Diseno', icon: Palette },
     { id: 'options', label: 'Opciones', icon: SlidersHorizontal },
+    { id: 'temporal', label: 'Ajustes', icon: Clock3 },
 ] as const;
 
 type GlobalSettingsDialogProps = {
@@ -28,12 +30,14 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     const [connectionDirty, setConnectionDirty] = useState(false);
     const [designDirty, setDesignDirty] = useState(false);
     const [optionsDirty, setOptionsDirty] = useState(false);
-    const dirty = connectionDirty || designDirty || optionsDirty;
+    const [temporalDirty, setTemporalDirty] = useState(false);
+    const dirty = connectionDirty || designDirty || optionsDirty || temporalDirty;
 
     const connectionSaveRef = useRef<(() => void) | null>(null);
     const designSaveRef = useRef<(() => void) | null>(null);
     const designRevertRef = useRef<(() => void) | null>(null);
     const optionsSaveRef = useRef<(() => void) | null>(null);
+    const temporalSaveRef = useRef<(() => void) | null>(null);
 
     const handleSave = () => {
         if (activeTab === 'connection') {
@@ -43,6 +47,11 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
 
         if (activeTab === 'design') {
             designSaveRef.current?.();
+            return;
+        }
+
+        if (activeTab === 'temporal') {
+            temporalSaveRef.current?.();
             return;
         }
 
@@ -56,6 +65,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         setConnectionDirty(false);
         setDesignDirty(false);
         setOptionsDirty(false);
+        setTemporalDirty(false);
         onClose();
     };
 
@@ -128,6 +138,13 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <LoaderOptionsSettingsTab
                         onDirtyChange={setOptionsDirty}
                         saveRef={optionsSaveRef}
+                    />
+                </div>
+
+                <div hidden={activeTab !== 'temporal'}>
+                    <TemporalSettingsTab
+                        onDirtyChange={setTemporalDirty}
+                        saveRef={temporalSaveRef}
                     />
                 </div>
             </div>

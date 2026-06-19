@@ -173,6 +173,7 @@ export type WidgetType =
     | 'badge'
     | 'sparkline'
     | 'trend-chart'
+    | 'trend-chart-v2'
     | 'prod-history'
     | 'table'
     | 'alert-list'
@@ -292,9 +293,30 @@ export interface MetricCardDisplayOptions {
  * del binding como subtítulo (derivado de `resolved.unit`), no de displayOptions.
  * Se reserva la interfaz para extensión futura (intervalo, tipo de línea, etc.)
  */
-export interface TrendChartDisplayOptions {
-    // Reservado para configuración futura del gráfico.
-    // No se aceptan subtitle ni subtext aquí.
+export type TrendChartDisplayOptions = Record<never, never>;
+
+export type HistoricalDensity = 'low' | 'normal' | 'high';
+export type TrendChartV2ShiftDisplayMode = 'auto' | 'bands' | 'lines';
+
+export interface TrendChartV2DisplayOptions {
+    icon?: string | null;
+    historicalDensity?: HistoricalDensity;
+    shiftDisplayMode?: TrendChartV2ShiftDisplayMode;
+    showShifts?: boolean;
+    /** @deprecated Visual summaries now always follow the visible range like legacy trend-chart. */
+    showShiftSummary?: boolean;
+}
+
+export interface ShiftDefinition {
+    id: string;
+    label: string;
+    start: string;
+    end: string;
+}
+
+export interface TemporalSettingsConfig {
+    plantTimezone: string | null;
+    shifts: ShiftDefinition[];
 }
 
 /**
@@ -420,9 +442,7 @@ export interface ProdHistoryDisplayOptions {
  * Opciones de visualización para widgets sin opciones específicas tipadas.
  * Extensible, pero deliberadamente vacío — no es un Record<string, unknown> abierto.
  */
-export interface BaseDisplayOptions {
-    // Sin opciones activas para este tipo de widget en esta versión.
-}
+export type BaseDisplayOptions = Record<never, never>;
 
 export type TextTitleColor = 'white' | 'soft' | 'muted';
 
@@ -501,6 +521,11 @@ export interface TrendChartWidgetConfig extends WidgetConfigBase {
     displayOptions?: TrendChartDisplayOptions;
 }
 
+export interface TrendChartV2WidgetConfig extends WidgetConfigBase {
+    type: 'trend-chart-v2';
+    displayOptions?: TrendChartV2DisplayOptions;
+}
+
 export interface ProdHistoryWidgetConfig extends WidgetConfigBase {
     type: 'prod-history';
     displayOptions?: ProdHistoryDisplayOptions;
@@ -533,7 +558,7 @@ export interface TextTitleWidgetConfig extends WidgetConfigBase {
 
 /** Variante genérica para todos los tipos de widget sin displayOptions específicos. */
 export interface GenericWidgetConfig extends WidgetConfigBase {
-    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'text-title'>;
+    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'text-title'>;
     displayOptions?: BaseDisplayOptions;
 }
 
@@ -545,6 +570,7 @@ export type WidgetConfig =
     | KpiWidgetConfig
     | MetricCardWidgetConfig
     | TrendChartWidgetConfig
+    | TrendChartV2WidgetConfig
     | ProdHistoryWidgetConfig
     | AlertHistoryWidgetConfig
     | ConnectionStatusWidgetConfig
@@ -567,6 +593,10 @@ export function isMetricCardWidget(w: WidgetConfig): w is MetricCardWidgetConfig
 
 export function isTrendChartWidget(w: WidgetConfig): w is TrendChartWidgetConfig {
     return w.type === 'trend-chart';
+}
+
+export function isTrendChartV2Widget(w: WidgetConfig): w is TrendChartV2WidgetConfig {
+    return w.type === 'trend-chart-v2';
 }
 
 export function isAlertHistoryWidget(w: WidgetConfig): w is AlertHistoryWidgetConfig {

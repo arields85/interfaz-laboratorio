@@ -10,7 +10,8 @@
 // =============================================================================
 
 import { getDataHistoryUrl } from '../config/dataConnection.config';
-import type { HistoryQueryParams } from '../domain/dataContract.types';
+import type { HistoryQueryParamsAny } from '../domain/dataContract.types';
+import { validateAndNormalizeHistoryQueryParams } from '../utils/historyQueryValidation';
 import { DataServiceError } from './dataOverview.service';
 
 /**
@@ -18,7 +19,14 @@ import { DataServiceError } from './dataOverview.service';
  * Devuelve el JSON tal cual viene — sin transformar ni validar.
  * El adapter downstream es responsable de mapear al dominio.
  */
-export async function fetchDataHistory(params: HistoryQueryParams): Promise<unknown> {
+export async function fetchDataHistory(params: HistoryQueryParamsAny): Promise<unknown> {
+    const validation = validateAndNormalizeHistoryQueryParams(params);
+
+    if (!validation.ok) {
+        throw createHistoryQueryError(validation.error);
+    }
+
+    const normalizedParams = validation.params;
     const baseUrl = getDataHistoryUrl();
 
     if (!baseUrl) {
@@ -26,9 +34,22 @@ export async function fetchDataHistory(params: HistoryQueryParams): Promise<unkn
     }
 
     const url = new URL(baseUrl);
-    url.searchParams.set('machineId', String(params.machineId));
-    url.searchParams.set('variableKey', params.variableKey);
-    url.searchParams.set('range', params.range);
+    url.searchParams.set('machineId', String(normalizedParams.machineId));
+    url.searchParams.set('variableKey', normalizedParams.variableKey);
+    url.searchParams.set('range', normalizedParams.range);
+
+    if ('start' in normalizedParams) {
+        url.searchParams.set('start', normalizedParams.start);
+        url.searchParams.set('end', normalizedParams.end);
+    }
+
+    const normalizedMaxPoints = 'maxPoints' in normalizedParams
+        ? normalizedParams.maxPoints ?? null
+        : null;
+
+    if (normalizedMaxPoints !== null) {
+        url.searchParams.set('maxPoints', String(normalizedMaxPoints));
+    }
 
     let response: Response;
 
@@ -53,4 +74,21 @@ export async function fetchDataHistory(params: HistoryQueryParams): Promise<unkn
     }
 
     return response.json();
+}
+
+function createHistoryQueryError(reason: 'invalid-machine-id' | 'invalid-variable-key' | 'invalid-range' | 'invalid-timestamp' | 'start-not-before-end' | 'duration-too-large'): DataServiceError {
+    switch (reason) {
+    case 'invalid-machine-id':
+        return new DataServiceError('History query must use a non-negative integer machineId');
+    case 'invalid-variable-key':
+        return new DataServiceError('History query must use a safe non-empty variableKey');
+    case 'invalid-range':
+        return new DataServiceError('History query must use a supported range');
+    case 'invalid-timestamp':
+        return new DataServiceError('Custom history window must use valid timestamps');
+    case 'start-not-before-end':
+        return new DataServiceError('Custom history window must have start before end');
+    case 'duration-too-large':
+        return new DataServiceError('Custom history window must be 365 days or less');
+    }
 }

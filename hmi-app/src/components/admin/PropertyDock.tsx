@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor } from '../../domain/admin.types';
+import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions } from '../../domain/admin.types';
+import { isTrendChartV2Widget } from '../../domain/admin.types';
+import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
+import {
+    normalizeTrendChartV2ShiftDisplayMode,
+    TREND_CHART_V2_SHIFT_DISPLAY_MODE_LABELS,
+} from '../../utils/trendChartV2Shifts';
 import type { CatalogVariable } from '../../domain';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
@@ -62,6 +68,8 @@ interface PropertyDockProps {
 const INPUT_CLS = ADMIN_SIDEBAR_INPUT_CLS;
 const LABEL_CLS = ADMIN_SIDEBAR_LABEL_CLS;
 const SECTION_HEADER_CLS = ADMIN_SIDEBAR_SECTION_HEADER_CLS;
+const TREND_CHART_V2_TOGGLE_TRACK_CLS = "w-7 h-4 rounded-full border border-industrial-border bg-industrial-hover transition-all peer peer-checked:border-admin-accent/40 peer-checked:bg-admin-accent/20 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:h-3 after:w-3 after:rounded-full after:bg-industrial-text after:transition-all";
+const TREND_CHART_V2_TOGGLE_LABEL_CLS = 'whitespace-nowrap text-industrial-text-soft transition-all peer-checked:text-industrial-text group-hover:text-industrial-text group-hover:drop-shadow-[0_0_5px_var(--color-admin-accent)]';
 const FIELD_ROW_CLS = 'flex items-center gap-2';
 const FIELD_LABEL_CLS = `${LABEL_CLS} shrink-0`;
 const PRESET_UNITS = ['°C', '°F', 'RPM', '%', 'bar', 'psi', 'kW', 'A', 'V', 'Hz', 'mm', 'kg', 'L/min', 'm³/h', 'N', 'kN'] as const;
@@ -119,7 +127,6 @@ export default function PropertyDock(props: PropertyDockProps) {
     // -------------------------------------------------------------------------
     const handleDisplayOptionChange = (key: string, value: string | number | boolean | null) => {
         if (!selectedWidget) return;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const current = (selectedWidget.displayOptions ?? {}) as Record<string, unknown>;
         const displayOptions = { ...current };
         if (value === null) {
@@ -387,6 +394,10 @@ export default function PropertyDock(props: PropertyDockProps) {
     const machineActivityOptions = isMachineActivity
         ? (selectedWidget.displayOptions as MachineActivityDisplayOptions | undefined)
         : undefined;
+    const isTrendChartV2 = selectedWidget ? isTrendChartV2Widget(selectedWidget) : false;
+    const trendChartV2Options = isTrendChartV2
+        ? (selectedWidget?.displayOptions as TrendChartV2DisplayOptions | undefined)
+        : undefined;
     const kpiDisplayOptions = isKpi
         ? (selectedWidget.displayOptions as KpiDisplayOptions | undefined)
         : undefined;
@@ -562,6 +573,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 ? (selectedWidget.displayOptions as AlertHistoryDisplayOptions | undefined)?.icon
                                                 : selectedWidget.type === 'prod-history'
                                                     ? prodHistoryOptions?.icon
+                                                    : selectedWidget.type === 'trend-chart-v2'
+                                                        ? trendChartV2Options?.icon
                                                     : selectedWidget.type === 'machine-activity'
                                                         ? machineActivityOptions?.icon
                                                     : (selectedWidget.displayOptions as KpiDisplayOptions | MetricCardDisplayOptions | undefined)?.icon;
@@ -617,6 +630,50 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         ]}
                                     />
                                 </DockFieldRow>
+                            )}
+                            {isTrendChartV2 && (
+                                <>
+                                    <DockFieldRow label="Densidad">
+                                        <AdminSelect
+                                            value={normalizeHistoricalDensity(trendChartV2Options?.historicalDensity)}
+                                            onChange={val => handleDisplayOptionChange('historicalDensity', val)}
+                                            options={[
+                                                { value: 'low', label: HISTORICAL_DENSITY_LABELS.low },
+                                                { value: 'normal', label: HISTORICAL_DENSITY_LABELS.normal },
+                                                { value: 'high', label: HISTORICAL_DENSITY_LABELS.high },
+                                            ]}
+                                        />
+                                    </DockFieldRow>
+
+                                    <DockFieldRow label="Turnos">
+                                        <AdminSelect
+                                            value={normalizeTrendChartV2ShiftDisplayMode(trendChartV2Options?.shiftDisplayMode)}
+                                            onChange={val => handleDisplayOptionChange('shiftDisplayMode', val)}
+                                            options={[
+                                                { value: 'auto', label: TREND_CHART_V2_SHIFT_DISPLAY_MODE_LABELS.auto },
+                                                { value: 'bands', label: TREND_CHART_V2_SHIFT_DISPLAY_MODE_LABELS.bands },
+                                                { value: 'lines', label: TREND_CHART_V2_SHIFT_DISPLAY_MODE_LABELS.lines },
+                                            ]}
+                                        />
+                                    </DockFieldRow>
+
+                                    <label className="flex items-center gap-2 cursor-pointer group mt-1">
+                                        <div className="relative flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                aria-label="Mostrar turnos"
+                                                className="sr-only peer"
+                                                checked={trendChartV2Options?.showShifts === true}
+                                                onChange={e => handleDisplayOptionChange('showShifts', e.target.checked)}
+                                            />
+                                            <div className={TREND_CHART_V2_TOGGLE_TRACK_CLS}></div>
+                                        </div>
+                                        <span className={TREND_CHART_V2_TOGGLE_LABEL_CLS}>
+                                            Mostrar turnos
+                                        </span>
+                                    </label>
+
+                                </>
                             )}
                             {selectedWidget.type === 'prod-history' && (
                                 <>

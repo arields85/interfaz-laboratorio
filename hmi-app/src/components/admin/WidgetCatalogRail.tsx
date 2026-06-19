@@ -18,6 +18,7 @@ const ACTIONS: RailAction[] = [
     { type: 'machine-activity', label: 'Actividad de Máquina', icon: HeartPulse },
     { type: 'metric-card', label: 'Tarjeta de Métrica', icon: BarChart2 },
     { type: 'trend-chart', label: 'Gráfico de Tendencia', icon: TrendingUp },
+    { type: 'trend-chart-v2', label: 'Trend-Chart-V2', icon: TrendingUp },
     { type: 'prod-history', label: 'Producción Histórica', icon: LineChart },
     { type: 'status', label: 'Estado de Equipo', icon: Activity },
     { type: 'connection-status', label: 'Estado de Conexión', icon: Wifi },

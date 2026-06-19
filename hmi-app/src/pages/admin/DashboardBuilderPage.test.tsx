@@ -212,7 +212,7 @@ vi.mock('../../components/admin/AdminWorkspaceLayout', () => ({
 }));
 
 vi.mock('../../components/admin/WidgetCatalogRail', () => ({
-    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity') => void }) => (
+    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart-v2') => void }) => (
         <div data-testid="widget-catalog-rail">
             <button type="button" onClick={() => onAddWidget('kpi')}>
                 Agregar KPI
@@ -222,6 +222,9 @@ vi.mock('../../components/admin/WidgetCatalogRail', () => ({
             </button>
             <button type="button" onClick={() => onAddWidget('machine-activity')}>
                 Agregar Actividad de Máquina
+            </button>
+            <button type="button" onClick={() => onAddWidget('trend-chart-v2')}>
+                Agregar Trend Chart V2
             </button>
         </div>
     ),
@@ -534,6 +537,41 @@ describe('DashboardBuilderPage', () => {
                     type: 'metric-card',
                     displayOptions: {
                         icon: 'BarChart2',
+                    },
+                },
+            });
+        });
+    });
+
+    it('adds trend-chart-v2 widgets with normal historical density while keeping legacy trend-chart untouched', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [makeWidget({ id: 'legacy-trend', type: 'trend-chart', title: 'Legacy Trend' })],
+            layout: [{ widgetId: 'legacy-trend', x: 1, y: 1, w: 11, h: 9 }],
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Agregar Trend Chart V2' }));
+
+        await waitFor(() => {
+            const snapshot = getBuilderCanvasSnapshot();
+            expect(snapshot.layout).toHaveLength(2);
+            expect(snapshot.layout[1]).toMatchObject({ x: 0, y: 0, w: 11, h: 9 });
+        });
+
+        await waitFor(() => {
+            expect(propertyDockMock).toHaveBeenCalled();
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: {
+                    type: 'trend-chart-v2',
+                    title: 'Trend Chart V2',
+                    size: { w: 11, h: 9 },
+                    binding: { mode: 'simulated_value', simulatedValue: 50 },
+                    displayOptions: {
+                        historicalDensity: 'normal',
                     },
                 },
             });

@@ -107,6 +107,12 @@ export interface ContractVariable {
  */
 export type HistoryRange = 'minuto' | 'hora' | 'dia' | 'semana' | 'mes';
 
+/** Preset/custom V2 history ranges for the separate Trend Chart V2 contract. */
+export type HistoryRangeV2 = '1h' | '24h' | '7d' | '30d' | '12m' | 'custom';
+
+/** Shared union while legacy and V2 widgets coexist. */
+export type HistoryRangeAny = HistoryRange | HistoryRangeV2;
+
 /** Labels visibles para cada rango. */
 export const HISTORY_RANGE_LABELS: Record<HistoryRange, string> = {
     minuto: 'Minuto',
@@ -119,10 +125,37 @@ export const HISTORY_RANGE_LABELS: Record<HistoryRange, string> = {
 /** Todas las claves de rango en orden de menor a mayor escala. */
 export const HISTORY_RANGES: HistoryRange[] = ['minuto', 'hora', 'dia', 'semana', 'mes'];
 
-/** Punto individual de una serie histórica. */
+/** V2 range labels stay transport-aligned for the new history contract. */
+export const HISTORY_RANGE_V2_LABELS: Record<HistoryRangeV2, string> = {
+    '1h': '1h',
+    '24h': '24h',
+    '7d': '7d',
+    '30d': '30d',
+    '12m': '12m',
+    custom: 'Custom',
+};
+
+/** All V2 ranges in transport order. */
+export const HISTORY_RANGES_V2: HistoryRangeV2[] = ['1h', '24h', '7d', '30d', '12m', 'custom'];
+
+/** Optional window metadata returned by the richer V2 history contract. */
+export interface HistoryWindow {
+    start: string;
+    end: string;
+    timezone?: string;
+    bucket?: string;
+    bucketMs?: number;
+}
+
+/** Punto individual de una serie histórica legacy. */
 export interface HistoryDataPoint {
     timestamp: string;   // ISO 8601
     value: number | null;
+}
+
+/** Punto individual de la respuesta enriquecida V2. */
+export interface HistoryDataPointV2 extends HistoryDataPoint {
+    timestampMs: number;
 }
 
 /** Resumen estadístico de la serie. */
@@ -147,9 +180,44 @@ export interface DataHistoryResponse {
     summary: HistorySummary;
 }
 
+/** V2-only response contract reserved for Slice 2+ history adaptation. */
+export interface DataHistoryResponseV2 {
+    contractVersion: string;
+    machineId: number;
+    variableKey: string;
+    range: HistoryRangeV2;
+    unit: string | null;
+    window?: HistoryWindow;
+    series: HistoryDataPointV2[];
+    summary: HistorySummary;
+}
+
+export type DataHistoryResponseAny = DataHistoryResponse | DataHistoryResponseV2;
+
 /** Parámetros para solicitar histórico. */
 export interface HistoryQueryParams {
     machineId: number;
     variableKey: string;
     range: HistoryRange;
 }
+
+interface HistoryQueryParamsV2Base {
+    machineId: number;
+    variableKey: string;
+    maxPoints?: number;
+}
+
+export interface HistoryPresetQueryParamsV2 extends HistoryQueryParamsV2Base {
+    range: Exclude<HistoryRangeV2, 'custom'>;
+}
+
+export interface HistoryCustomQueryParamsV2 extends HistoryQueryParamsV2Base {
+    range: 'custom';
+    start: string;
+    end: string;
+}
+
+/** Query parameters for Trend Chart V2 preset/custom history requests. */
+export type HistoryQueryParamsV2 = HistoryPresetQueryParamsV2 | HistoryCustomQueryParamsV2;
+
+export type HistoryQueryParamsAny = HistoryQueryParams | HistoryQueryParamsV2;

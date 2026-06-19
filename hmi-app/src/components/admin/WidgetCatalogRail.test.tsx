@@ -22,4 +22,18 @@ describe('WidgetCatalogRail', () => {
 
         expect(onAddWidget).toHaveBeenCalledWith('machine-activity');
     });
+
+    it('keeps legacy trend-chart and Trend-Chart-V2 insertable at the same time', async () => {
+        const user = userEvent.setup();
+        const onAddWidget = vi.fn();
+
+        render(<WidgetCatalogRail onAddWidget={onAddWidget} />);
+
+        expect(screen.getByRole('button', { name: 'Gráfico de Tendencia' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Trend-Chart-V2' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Trend-Chart-V2' }));
+
+        expect(onAddWidget).toHaveBeenCalledWith('trend-chart-v2');
+    });
 });

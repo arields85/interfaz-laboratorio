@@ -974,6 +974,92 @@ describe('PropertyDock prod-history', () => {
         });
     });
 
+    it('shows builder-only density labels for trend-chart-v2 without exposing raw maxPoints', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            displayOptions: {},
+        });
+
+        expect(getFieldButtonInSection('General', 'Densidad')).toHaveTextContent('Normal');
+        expect(screen.queryByText('400')).not.toBeInTheDocument();
+        expect(screen.queryByText('800')).not.toBeInTheDocument();
+        expect(screen.queryByText('1500')).not.toBeInTheDocument();
+
+        await user.click(getFieldButtonInSection('General', 'Densidad'));
+        await user.click(screen.getByRole('button', { name: 'Alta' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ historicalDensity: 'high' });
+        expect(getFieldButtonInSection('General', 'Densidad')).toHaveTextContent('Alta');
+    });
+
+    it('lets admins configure the shared header icon for trend-chart-v2 widgets', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            displayOptions: {},
+        });
+
+        expect(getFieldButtonInSection('General', 'Ícono')).toHaveTextContent('(Ícono pendiente)');
+
+        await user.click(getFieldButtonInSection('General', 'Ícono'));
+        await user.click(screen.getByRole('button', { name: 'Líneas' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ icon: 'LineChart' });
+        expect(getFieldButtonInSection('General', 'Ícono')).toHaveTextContent('Líneas');
+    });
+
+    it('lets admins choose the trend-chart-v2 shift display mode with auto as the default', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            displayOptions: {},
+        });
+
+        expect(getFieldButtonInSection('General', 'Turnos')).toHaveTextContent('Auto');
+
+        await user.click(getFieldButtonInSection('General', 'Turnos'));
+        await user.click(screen.getByRole('button', { name: 'Líneas' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ shiftDisplayMode: 'lines' });
+        expect(getFieldButtonInSection('General', 'Turnos')).toHaveTextContent('Líneas');
+    });
+
+    it('lets admins toggle trend-chart-v2 shift overlays without exposing a removed shift-summary toggle', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            displayOptions: {},
+        });
+
+        const showShiftsToggle = screen.getByLabelText('Mostrar turnos');
+
+        expect(showShiftsToggle).not.toBeChecked();
+        expect(screen.queryByLabelText('Mostrar resumen de turnos')).not.toBeInTheDocument();
+
+        await user.click(showShiftsToggle);
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ showShifts: true });
+    });
+
+    it('renders trend-chart-v2 toggle controls with semantic admin tokens instead of hardcoded white utilities', () => {
+        renderPropertyDock({
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            displayOptions: {},
+        });
+
+        const showShiftsToggle = screen.getByLabelText('Mostrar turnos');
+        const showShiftsTrack = showShiftsToggle.nextElementSibling;
+        const showShiftsLabel = screen.getByText('Mostrar turnos');
+
+        expect(showShiftsTrack).toHaveClass('bg-industrial-hover', 'border-industrial-border', 'peer-checked:bg-admin-accent/20');
+        expect(showShiftsLabel).toHaveClass('text-industrial-text-soft', 'peer-checked:text-industrial-text', 'group-hover:text-industrial-text');
+
+        expect(showShiftsTrack?.className).not.toMatch(/bg-white\/|border-white\/|after:bg-white/);
+        expect(showShiftsLabel.className).not.toMatch(/text-white|hover:text-white|rgba\(255,255,255/);
+        expect(screen.queryByText('Mostrar resumen de turnos')).not.toBeInTheDocument();
+    });
+
     it('uses prod-history metric selectors when the selected asset is available', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'prod-history',
