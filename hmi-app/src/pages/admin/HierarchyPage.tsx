@@ -62,15 +62,7 @@ function NodeDetailPanel({
 
     // Estados de UI locales
     const [isEditingName, setIsEditingName] = useState(false);
-    const [editNameValue, setEditNameValue] = useState('');
-
-    // Sincronizar nombre al cambiar de nodo
-    useEffect(() => {
-        if (node) {
-            setEditNameValue(node.name);
-            setIsEditingName(false);
-        }
-    }, [node?.id, node?.name]);
+    const [editNameValue, setEditNameValue] = useState(() => node?.name ?? '');
 
     if (!node) {
         return (
@@ -147,7 +139,13 @@ function NodeDetailPanel({
                                     </button>
                                 </div>
                             ) : (
-                                <div className="flex items-center gap-3 group cursor-pointer" onClick={() => setIsEditingName(true)}>
+                                <div
+                                    className="flex items-center gap-3 group cursor-pointer"
+                                    onClick={() => {
+                                        setEditNameValue(node.name);
+                                        setIsEditingName(true);
+                                    }}
+                                >
                                     <h1 className="text-white group-hover:text-admin-accent transition-colors">
                                         {node.name}
                                     </h1>
@@ -608,6 +606,7 @@ export default function HierarchyPage() {
         >
             <>
                 <NodeDetailPanel
+                    key={selectedNode?.id ?? 'empty-node'}
                     node={selectedNode}
                     dashboards={dashboards}
                     allNodes={allNodes}
@@ -654,6 +653,7 @@ export default function HierarchyPage() {
                 </AdminDialog>
 
                 <NodeTypeConfigDialog
+                    key={`${showNodeTypeConfigDialog ? 'open' : 'closed'}-${nodeTypes.map((type) => `${type.key}:${type.label}:${type.icon}:${type.color}`).join('|')}`}
                     open={showNodeTypeConfigDialog}
                     onClose={() => setShowNodeTypeConfigDialog(false)}
                     nodeTypes={nodeTypes}

@@ -188,17 +188,10 @@ export default function MachineActivityWidget({
     const [retractingFromSetup, setRetractingFromSetup] = useState(false);
     const [expandAnim, setExpandAnim] = useState<{ value: number; opacity: number } | null>(null);
     const [retractAnim, setRetractAnim] = useState<{ value: number; opacity: number } | null>(null);
+    const shouldTrackAnimationState = !isLoadingData && resolved.value !== null;
 
-    if (isLoadingData) {
-        return (
-            <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
-                <div className="h-4 w-24 bg-industrial-hover rounded mb-6" />
-                <div className="h-20 w-full bg-industrial-hover rounded-full" />
-            </div>
-        );
-    }
-
-    if (productiveState === 'calibrating') {
+    /* eslint-disable react-hooks/refs -- animation refs intentionally track previous frame state without rerendering. */
+    if (shouldTrackAnimationState && productiveState === 'calibrating') {
         lastSetupNormalizedRef.current = activityIndex / 100;
     }
     const isRetractingFromSetup = (retractingFromSetup && productiveState === 'stopped')
@@ -230,11 +223,11 @@ export default function MachineActivityWidget({
             intensity: 'none',
             durationMs: 0,
         } as const;
-    if (productiveState === 'calibrating' && prevProductiveStateRef.current === 'stopped' && expandAnim === null) {
+    if (shouldTrackAnimationState && productiveState === 'calibrating' && prevProductiveStateRef.current === 'stopped' && expandAnim === null) {
         justEnteredSetupRef.current = true;
     }
 
-    if (expandAnim !== null) {
+    if (shouldTrackAnimationState && expandAnim !== null) {
         justEnteredSetupRef.current = false;
     }
 
@@ -251,6 +244,7 @@ export default function MachineActivityWidget({
     const gaugeGradientNormalized = (isRetractingFromSetup || retractAnim !== null)
         ? lastSetupNormalizedRef.current
         : undefined;
+    /* eslint-enable react-hooks/refs */
     const activityIndexLabel = isValid ? String(Math.round(activityIndex)) : '--';
 
     useEffect(() => {
@@ -304,6 +298,10 @@ export default function MachineActivityWidget({
     }, [mode]);
 
     useEffect(() => {
+        if (!shouldTrackAnimationState) {
+            return undefined;
+        }
+
         if (!isRetractingFromSetup) {
             setRetractAnim(null);
             return undefined;
@@ -338,9 +336,13 @@ export default function MachineActivityWidget({
         frameId = requestAnimationFrame(animate);
 
         return () => cancelAnimationFrame(frameId);
-    }, [isRetractingFromSetup, stateVisuals.animationDuration]);
+    }, [isRetractingFromSetup, shouldTrackAnimationState, stateVisuals.animationDuration]);
 
     useEffect(() => {
+        if (!shouldTrackAnimationState) {
+            return undefined;
+        }
+
         const enteringSetup = productiveState === 'calibrating' && prevProductiveStateRef.current === 'stopped';
 
         if (!enteringSetup) {
@@ -378,9 +380,13 @@ export default function MachineActivityWidget({
         frameId = requestAnimationFrame(animate);
 
         return () => cancelAnimationFrame(frameId);
-    }, [productiveState, activityIndex, stateVisuals.animationDuration]);
+    }, [productiveState, activityIndex, shouldTrackAnimationState, stateVisuals.animationDuration]);
 
     useEffect(() => {
+        if (!shouldTrackAnimationState) {
+            return undefined;
+        }
+
         const prevState = prevProductiveStateRef.current;
 
         if (prevState === 'calibrating' && productiveState === 'stopped') {
@@ -395,7 +401,16 @@ export default function MachineActivityWidget({
         }
 
         prevProductiveStateRef.current = productiveState;
-    }, [productiveState, stateVisuals.animationDuration]);
+    }, [productiveState, shouldTrackAnimationState, stateVisuals.animationDuration]);
+
+    if (isLoadingData) {
+        return (
+            <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
+                <div className="h-4 w-24 bg-industrial-hover rounded mb-6" />
+                <div className="h-20 w-full bg-industrial-hover rounded-full" />
+            </div>
+        );
+    }
 
     return (
         <div className={`p-5 glass-panel group relative w-full h-full ${className ?? ''}`} data-state={productiveState}>

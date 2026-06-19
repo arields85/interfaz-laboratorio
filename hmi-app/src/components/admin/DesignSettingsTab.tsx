@@ -443,6 +443,7 @@ function buildFontStorageOverrides(
     return overrides;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- App bootstrap imports this initializer.
 export function applyThemeOverrides(): void {
     try {
         const fonts = localStorage.getItem('hmi-theme-fonts');
@@ -525,23 +526,7 @@ interface DesignSettingsTabProps {
 }
 
 export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }: DesignSettingsTabProps) {
-    const [fontValues, setFontValues] = useState<Record<FontTokenKey, FontName>>(DEFAULT_FONT_VALUES);
-    const [weightValues, setWeightValues] = useState<Record<string, string>>(DEFAULT_WEIGHT_VALUES);
-    const [fontSizeValues, setFontSizeValues] = useState<Record<FontSizeTokenKey, string>>(DEFAULT_FONT_SIZE_VALUES);
-    const [trackingValues, setTrackingValues] = useState<Record<TrackingTokenKey, string>>(DEFAULT_TRACKING_VALUES);
-    const [colorValues, setColorValues] = useState<Record<ColorTokenKey, string>>(DEFAULT_COLOR_VALUES);
-
-    const snapshotRef = useRef<{
-        fontValues: Record<FontTokenKey, FontName>;
-        weightValues: Record<string, string>;
-        fontSizeValues: Record<FontSizeTokenKey, string>;
-        trackingValues: Record<TrackingTokenKey, string>;
-        colorValues: Record<ColorTokenKey, string>;
-    } | null>(null);
-
-    useEffect(() => {
-        applyThemeOverrides();
-
+    const initialThemeState = useMemo(() => {
         const storedFonts = normalizeStoredFontOverrides(readStoredOverrides(FONT_STORAGE_KEY));
         const storedColors = readStoredOverrides(COLOR_STORAGE_KEY);
 
@@ -581,22 +566,39 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             ...(storedColors as Partial<Record<ColorTokenKey, string>>),
         };
 
-        setFontValues(nextFontValues);
-        setWeightValues(nextWeightValues);
-        setFontSizeValues(nextFontSizeValues);
-        setTrackingValues(nextTrackingValues);
-        setColorValues(nextColorValues);
-
-        snapshotRef.current = {
+        return {
             fontValues: nextFontValues,
             weightValues: nextWeightValues,
             fontSizeValues: nextFontSizeValues,
             trackingValues: nextTrackingValues,
             colorValues: nextColorValues,
         };
-
-        writeStoredOverrides(FONT_STORAGE_KEY, buildFontStorageOverrides(nextFontValues, nextWeightValues, nextFontSizeValues, nextTrackingValues));
     }, []);
+    const [fontValues, setFontValues] = useState<Record<FontTokenKey, FontName>>(initialThemeState.fontValues);
+    const [weightValues, setWeightValues] = useState<Record<string, string>>(initialThemeState.weightValues);
+    const [fontSizeValues, setFontSizeValues] = useState<Record<FontSizeTokenKey, string>>(initialThemeState.fontSizeValues);
+    const [trackingValues, setTrackingValues] = useState<Record<TrackingTokenKey, string>>(initialThemeState.trackingValues);
+    const [colorValues, setColorValues] = useState<Record<ColorTokenKey, string>>(initialThemeState.colorValues);
+
+    const snapshotRef = useRef<{
+        fontValues: Record<FontTokenKey, FontName>;
+        weightValues: Record<string, string>;
+        fontSizeValues: Record<FontSizeTokenKey, string>;
+        trackingValues: Record<TrackingTokenKey, string>;
+        colorValues: Record<ColorTokenKey, string>;
+    } | null>({
+        ...initialThemeState,
+    });
+
+    useEffect(() => {
+        applyThemeOverrides();
+        writeStoredOverrides(FONT_STORAGE_KEY, buildFontStorageOverrides(
+            initialThemeState.fontValues,
+            initialThemeState.weightValues,
+            initialThemeState.fontSizeValues,
+            initialThemeState.trackingValues,
+        ));
+    }, [initialThemeState]);
 
     const fontStorageOverrides = useMemo(() => {
         return buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues);
@@ -854,17 +856,28 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
         onDirtyChange?.(false);
     };
 
-    // Expose save and revert functions via refs — reassigned on every render so closures stay current
-    if (saveRef) {
+    useEffect(() => {
+        if (!saveRef) {
+            return;
+        }
+
         saveRef.current = () => {
             writeStoredOverrides(FONT_STORAGE_KEY, buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues));
             writeStoredOverrides(COLOR_STORAGE_KEY, colorStorageOverrides);
             snapshotRef.current = { fontValues, weightValues, fontSizeValues, trackingValues, colorValues };
             onDirtyChange?.(false);
         };
-    }
 
-    if (revertRef) {
+        return () => {
+            saveRef.current = null;
+        };
+    }, [colorStorageOverrides, colorValues, fontSizeValues, fontValues, onDirtyChange, saveRef, trackingValues, weightValues]);
+
+    useEffect(() => {
+        if (!revertRef) {
+            return;
+        }
+
         revertRef.current = () => {
             if (!snapshotRef.current) return;
             const snap = snapshotRef.current;
@@ -876,7 +889,11 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             applyThemeOverrides();
             onDirtyChange?.(false);
         };
-    }
+
+        return () => {
+            revertRef.current = null;
+        };
+    }, [onDirtyChange, revertRef]);
 
     return (
         <div className="max-h-[55vh] overflow-y-auto hmi-scrollbar pr-1">

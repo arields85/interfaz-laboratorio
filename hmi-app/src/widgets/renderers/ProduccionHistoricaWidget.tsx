@@ -135,7 +135,7 @@ interface ProdHistoryBarsSvgProps {
     onHoverChange: (index: number | null, x?: number) => void;
 }
 
-interface ProdHistoryBarsContainerProps extends Omit<ProdHistoryBarsSvgProps, 'width' | 'height' | 'hoveredIndex' | 'onHoverChange'> {}
+type ProdHistoryBarsContainerProps = Omit<ProdHistoryBarsSvgProps, 'width' | 'height' | 'hoveredIndex' | 'onHoverChange'>;
 
 function stepBackByBucket(now: Date, bucket: TemporalBucket, steps: number): Date {
     const date = new Date(now.getTime());
@@ -243,8 +243,6 @@ function ProdHistoryBarsSvg({
     barWidthFactor,
     productionDomain,
     oeeDomain,
-    productionLabel: _productionLabel,
-    oeeLabel: _oeeLabel,
     productionUnit,
     hoveredIndex,
     onHoverChange,
@@ -636,7 +634,6 @@ function ProdHistoryBarsContainer(props: ProdHistoryBarsContainerProps) {
 
 export default function ProdHistoryWidget({
     widget,
-    equipmentMap: _equipmentMap,
     isLoadingData = false,
     className,
 }: ProdHistoryWidgetProps) {
@@ -657,11 +654,7 @@ export default function ProdHistoryWidget({
 
     const [bucket, setBucket] = useState<TemporalBucket>(() => displayOptions?.defaultTemporalGrouping ?? 'hour');
     const [showOee, setShowOee] = useState<boolean>(() => displayOptions?.defaultShowOee ?? true);
-    const [rawSeries, setRawSeries] = useState<TemporalTrendPoint[]>([]);
-
-    useEffect(() => {
-        setRawSeries(generateHistoricalSeries(bucket, new Date()));
-    }, [bucket]);
+    const rawSeries = useMemo(() => generateHistoricalSeries(bucket, new Date()), [bucket]);
 
     const groupedData = useMemo(() => groupByTemporalBucket(rawSeries, bucket), [rawSeries, bucket]);
 

@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, type ReactNode, type RefObject } from 'react';
+import { useCallback, useRef, useEffect, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { resolveAnchoredOverlayStyle } from './anchoredOverlayStyle';
 
 // =============================================================================
 // AnchoredOverlay — primitive reutilizable para menús flotantes / overlays
@@ -46,61 +47,6 @@ export interface AnchoredOverlayProps {
     children: ReactNode;
 }
 
-interface ResolvedStyle {
-    position: 'fixed';
-    left: number;
-    zIndex: number;
-    minWidth: number | string;
-    maxWidth: number | string;
-    top?: number;
-    bottom?: number;
-}
-
-function resolveStyle(
-    trigger: HTMLElement,
-    estimatedHeight: number,
-    minWidth: number | 'trigger',
-    align: AnchoredOverlayAlign,
-    gap: number,
-): ResolvedStyle {
-    const rect = trigger.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const viewportPadding = 8;
-
-    // Alineación horizontal
-    let left: number;
-    if (align === 'start') {
-        left = rect.left;
-    } else if (align === 'end') {
-        const overlayWidth = typeof minWidth === 'number' ? minWidth : rect.width;
-        left = rect.right - overlayWidth;
-    } else {
-        // center
-        const overlayWidth = typeof minWidth === 'number' ? minWidth : rect.width;
-        left = rect.left + rect.width / 2 - overlayWidth / 2;
-    }
-
-    const resolvedMinWidth = minWidth === 'trigger' ? rect.width : minWidth;
-    const overlayWidth = typeof resolvedMinWidth === 'number' ? resolvedMinWidth : rect.width;
-    const clampedLeft = Math.min(
-        Math.max(left, viewportPadding),
-        window.innerWidth - overlayWidth - viewportPadding,
-    );
-
-    const base: ResolvedStyle = {
-        position: 'fixed',
-        left: clampedLeft,
-        zIndex: 9999,
-        minWidth: resolvedMinWidth,
-        maxWidth: `calc(100vw - ${viewportPadding * 2}px)`,
-    };
-
-    if (spaceBelow < estimatedHeight + gap) {
-        return { ...base, bottom: window.innerHeight - rect.top + gap };
-    }
-    return { ...base, top: rect.bottom + gap };
-}
-
 export default function AnchoredOverlay({
     triggerRef,
     isOpen,
@@ -112,18 +58,31 @@ export default function AnchoredOverlay({
     children,
 }: AnchoredOverlayProps) {
     const overlayRef = useRef<HTMLDivElement>(null);
-    const [style, setStyle] = useState<ResolvedStyle | null>(null);
-
-    // Calcular posición cada vez que se abre
-    useEffect(() => {
-        if (!isOpen) {
-            setStyle(null);
+    const applyResolvedStyle = useCallback((element: HTMLDivElement | null) => {
+        if (!element || !isOpen || !triggerRef.current) {
             return;
         }
-        if (triggerRef.current) {
-            setStyle(resolveStyle(triggerRef.current, estimatedHeight, minWidth, align, gap));
+
+        const resolvedStyle = resolveAnchoredOverlayStyle(triggerRef.current, estimatedHeight, minWidth, align, gap);
+        element.style.position = resolvedStyle.position;
+        element.style.left = `${resolvedStyle.left}px`;
+        element.style.zIndex = String(resolvedStyle.zIndex);
+        element.style.minWidth = typeof resolvedStyle.minWidth === 'number' ? `${resolvedStyle.minWidth}px` : resolvedStyle.minWidth;
+        element.style.maxWidth = String(resolvedStyle.maxWidth);
+
+        if (resolvedStyle.top !== undefined) {
+            element.style.top = `${resolvedStyle.top}px`;
+            element.style.bottom = '';
+        } else if (resolvedStyle.bottom !== undefined) {
+            element.style.top = '';
+            element.style.bottom = `${resolvedStyle.bottom}px`;
+        } else {
+            element.style.top = '';
+            element.style.bottom = '';
         }
-    }, [isOpen, triggerRef, estimatedHeight, minWidth, align, gap]);
+
+        element.style.visibility = 'visible';
+    }, [align, estimatedHeight, gap, isOpen, minWidth, triggerRef]);
 
     // Cerrar al hacer click afuera o presionar Escape
     useEffect(() => {
@@ -153,10 +112,16 @@ export default function AnchoredOverlay({
         };
     }, [isOpen, triggerRef, onClose]);
 
-    if (!isOpen || !style) return null;
+    if (!isOpen) return null;
 
     return createPortal(
-        <div ref={overlayRef} style={style}>
+        <div
+            ref={(node) => {
+                overlayRef.current = node;
+                applyResolvedStyle(node);
+            }}
+            style={{ position: 'fixed', left: 0, zIndex: 9999, visibility: 'hidden' }}
+        >
             {children}
         </div>,
         document.body,

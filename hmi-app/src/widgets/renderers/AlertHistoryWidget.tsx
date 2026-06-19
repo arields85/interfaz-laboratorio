@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, forwardRef } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, forwardRef } from 'react';
 import { AlertTriangle, AlertCircle, Clock, History, Gauge, Activity, Thermometer, Zap, Droplet, Wind, Settings, Fan, FoldVertical, HelpCircle, Trash2, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 import type { AlertHistoryWidgetConfig, WidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
@@ -133,6 +133,7 @@ export default function AlertHistoryWidget({
 
     // Evaluación inicial al montar + polling
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the first alert evaluation must happen in the initial effect tick to avoid a visible delayed severity state.
         runEvaluation();
 
         intervalRef.current = setInterval(runEvaluation, pollInterval);
@@ -356,11 +357,14 @@ function EmptyState() {
 // RelativeTime — timestamp relativo tipo "hace 5 min"
 // =============================================================================
 function RelativeTime({ iso }: { iso: string }) {
-    const [label, setLabel] = useState(() => formatRelative(iso));
+    const [refreshTick, setRefreshTick] = useState(0);
+    const label = useMemo(() => {
+        void refreshTick;
+        return formatRelative(iso);
+    }, [iso, refreshTick]);
 
     useEffect(() => {
-        setLabel(formatRelative(iso));
-        const timer = setInterval(() => setLabel(formatRelative(iso)), 30_000);
+        const timer = setInterval(() => setRefreshTick((tick) => tick + 1), 30_000);
         return () => clearInterval(timer);
     }, [iso]);
 

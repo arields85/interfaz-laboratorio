@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, useRef, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import AnchoredOverlay from '../ui/AnchoredOverlay';
 import { ADMIN_SIDEBAR_INPUT_CLS } from './adminSidebarStyles';
@@ -32,10 +32,18 @@ export default function AdminSelect({ value, options, onChange, className = '', 
     const triggerRef = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
-        if (disabled) {
-            setIsOpen(false);
+        if (!disabled || !isOpen) {
+            return;
         }
-    }, [disabled]);
+
+        const timeoutId = window.setTimeout(() => {
+            setIsOpen(false);
+        }, 0);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [disabled, isOpen]);
 
     const handleToggle = () => {
         if (disabled) {
@@ -46,6 +54,7 @@ export default function AdminSelect({ value, options, onChange, className = '', 
     };
 
     const estimatedHeight = Math.min(options.length * 30 + 8, 300);
+    const resolvedIsOpen = disabled ? false : isOpen;
     const selected = options.find(o => o.value === value);
     const selectedLabel = selected?.label || placeholder || '—';
 
@@ -66,12 +75,12 @@ export default function AdminSelect({ value, options, onChange, className = '', 
                     {selected?.icon && <span className="shrink-0 opacity-60">{selected.icon}</span>}
                     {selectedLabel}
                 </span>
-                <ChevronDown size={10} className={`shrink-0 text-white/40 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown size={10} className={`shrink-0 text-white/40 transition-transform ${resolvedIsOpen ? 'rotate-180' : ''}`} />
             </button>
 
             <AnchoredOverlay
                 triggerRef={triggerRef}
-                isOpen={isOpen}
+                isOpen={resolvedIsOpen}
                 onClose={() => setIsOpen(false)}
                 estimatedHeight={estimatedHeight}
                 minWidth="trigger"

@@ -149,6 +149,46 @@ describe('NodeTypeConfigDialog', () => {
         expect(screen.queryByRole('dialog', { name: /tipo de nodo en uso/i })).not.toBeInTheDocument();
     });
 
+    it('clears any pending destructive delete when the dialog closes and reopens', async () => {
+        const onClose = vi.fn();
+        const onSave = vi.fn();
+        const user = userEvent.setup();
+        const { rerender } = render(
+            <NodeTypeConfigDialog
+                open
+                onClose={onClose}
+                nodeTypes={BASE_NODE_TYPES}
+                onSave={onSave}
+                nodeCountByType={{ plant: 2 }}
+            />,
+        );
+
+        await user.click(screen.getAllByRole('button', { name: /^eliminar$/i })[0]);
+        expect(screen.getByRole('dialog', { name: /tipo de nodo en uso/i })).toBeInTheDocument();
+
+        rerender(
+            <NodeTypeConfigDialog
+                open={false}
+                onClose={onClose}
+                nodeTypes={BASE_NODE_TYPES}
+                onSave={onSave}
+                nodeCountByType={{ plant: 2 }}
+            />,
+        );
+
+        rerender(
+            <NodeTypeConfigDialog
+                open
+                onClose={onClose}
+                nodeTypes={BASE_NODE_TYPES}
+                onSave={onSave}
+                nodeCountByType={{ area: 1 }}
+            />,
+        );
+
+        expect(screen.queryByRole('dialog', { name: /tipo de nodo en uso/i })).not.toBeInTheDocument();
+    });
+
     it('disables save and shows the warning when duplicate keys are present', () => {
         renderDialog({
             nodeTypes: [

@@ -5,6 +5,10 @@ import { MemoryRouter } from 'react-router-dom';
 import { HIERARCHY_EXPANDED_STORAGE_KEY } from '../../utils/legacyStorageCleanup';
 
 const mockedData = vi.hoisted(() => ({
+    initialNodes: [
+        { id: 'node-plant-01', name: 'Planta Demo', type: 'plant', parentId: null, order: 0 },
+        { id: 'node-area-comp', name: 'Área Compresión', type: 'area', parentId: 'node-plant-01', order: 0 },
+    ],
     nodes: [
         { id: 'node-plant-01', name: 'Planta Demo', type: 'plant', parentId: null, order: 0 },
         { id: 'node-area-comp', name: 'Área Compresión', type: 'area', parentId: 'node-plant-01', order: 0 },
@@ -18,7 +22,12 @@ const mockedData = vi.hoisted(() => ({
 
 vi.mock('../../services/HierarchyStorageService', () => ({
     hierarchyStorage: {
-        getNodes: vi.fn().mockResolvedValue(mockedData.nodes),
+        getNodes: vi.fn().mockImplementation(async () => mockedData.nodes.map((node) => ({ ...node }))),
+        updateNode: vi.fn().mockImplementation(async (id: string, partial: Record<string, unknown>) => {
+            mockedData.nodes = mockedData.nodes.map((node) => (
+                node.id === id ? { ...node, ...partial } : node
+            ));
+        }),
     },
 }));
 
@@ -44,6 +53,7 @@ import HierarchyPage from './HierarchyPage';
 describe('HierarchyPage', () => {
     beforeEach(() => {
         localStorage.clear();
+        mockedData.nodes = mockedData.initialNodes.map((node) => ({ ...node }));
     });
 
     afterEach(() => {
@@ -71,5 +81,31 @@ describe('HierarchyPage', () => {
         await waitFor(() => {
             expect(localStorage.getItem(HIERARCHY_EXPANDED_STORAGE_KEY)).toBe(JSON.stringify([]));
         });
+    });
+
+    it('starts each name edit session from the current visible node name', async () => {
+        const user = userEvent.setup();
+
+        render(
+            <MemoryRouter>
+                <HierarchyPage />
+            </MemoryRouter>,
+        );
+
+        const nodeButton = await screen.findByRole('button', { name: /Planta Demo/i });
+        await user.click(nodeButton);
+
+        await user.click(screen.getByRole('heading', { name: 'Planta Demo' }));
+
+        const input = screen.getByDisplayValue('Planta Demo');
+        await user.clear(input);
+        await user.type(input, '  Planta Norte  ');
+        await user.tab();
+
+        await screen.findByRole('heading', { name: 'Planta Norte' });
+
+        await user.click(screen.getByRole('heading', { name: 'Planta Norte' }));
+
+        expect(screen.getByDisplayValue('Planta Norte')).toBeInTheDocument();
     });
 });

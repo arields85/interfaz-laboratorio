@@ -163,6 +163,7 @@ function aggregate(values: number[], mode: AggregationMode): number {
     }
 }
 
-function noDataResult(_reason?: string): ResolvedBinding {
+function noDataResult(reason?: string): ResolvedBinding {
+    void reason;
     return { value: null, status: 'no-data', source: 'error' };
 }

@@ -1,5 +1,5 @@
 import { Edit2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import type { Dashboard, WidgetType } from '../../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
@@ -41,12 +41,6 @@ function InlineEditableText({
 }: InlineEditableTextProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [draftValue, setDraftValue] = useState(value ?? '');
-
-    useEffect(() => {
-        if (!isEditing) {
-            setDraftValue(value ?? '');
-        }
-    }, [value, isEditing]);
 
     const displayValue = value ?? fallback ?? '';
 
@@ -101,7 +95,10 @@ function InlineEditableText({
     return (
         <button
             type="button"
-            onClick={() => setIsEditing(true)}
+            onClick={() => {
+                setDraftValue(value ?? '');
+                setIsEditing(true);
+            }}
             className="group flex items-center gap-2 text-left"
             title="Editar directamente en el preview"
         >

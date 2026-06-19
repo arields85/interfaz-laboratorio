@@ -170,20 +170,28 @@ export default function NodeTypeConfigDialog({
     onSave,
     nodeCountByType,
 }: NodeTypeConfigDialogProps) {
-    const [draftTypes, setDraftTypes] = useState<EditableNodeTypeDefinition[]>([]);
-    const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+    const [draftTypes, setDraftTypes] = useState<EditableNodeTypeDefinition[]>(() => nodeTypes.map((type) => ({ ...type, isNew: false })));
+    const [pendingDeleteState, setPendingDeleteState] = useState<{ key: string; version: number } | null>(null);
+    const [dialogSyncVersion, setDialogSyncVersion] = useState(0);
+
+    const activePendingDeleteKey = open && pendingDeleteState?.version === dialogSyncVersion
+        ? pendingDeleteState.key
+        : null;
+
+    const pendingDeleteType = useMemo(
+        () => draftTypes.find((type) => type.key === activePendingDeleteKey) ?? null,
+        [activePendingDeleteKey, draftTypes],
+    );
+    const pendingDeleteCount = pendingDeleteType ? (nodeCountByType[pendingDeleteType.key] ?? 0) : 0;
 
     useEffect(() => {
         if (!open) return;
-        setDraftTypes(nodeTypes.map((type) => ({ ...type, isNew: false })));
-        setPendingDeleteKey(null);
-    }, [open, nodeTypes]);
 
-    const pendingDeleteType = useMemo(
-        () => draftTypes.find((type) => type.key === pendingDeleteKey) ?? null,
-        [draftTypes, pendingDeleteKey],
-    );
-    const pendingDeleteCount = pendingDeleteType ? (nodeCountByType[pendingDeleteType.key] ?? 0) : 0;
+        /* eslint-disable react-hooks/set-state-in-effect -- opening or prop-resyncing the dialog must refresh local draft state and invalidate stale destructive confirmation state in the same sync pass. */
+        setDraftTypes(nodeTypes.map((type) => ({ ...type, isNew: false })));
+        setDialogSyncVersion((current) => current + 1);
+        /* eslint-enable react-hooks/set-state-in-effect */
+    }, [nodeTypes, open]);
 
     const sanitizedTypes = useMemo(() => buildSanitizedTypes(draftTypes), [draftTypes]);
 
@@ -236,7 +244,7 @@ export default function NodeTypeConfigDialog({
         const usageCount = nodeCountByType[type.key] ?? 0;
 
         if (usageCount > 0) {
-            setPendingDeleteKey(type.key);
+            setPendingDeleteState({ key: type.key, version: dialogSyncVersion });
             return;
         }
 
@@ -244,10 +252,10 @@ export default function NodeTypeConfigDialog({
     };
 
     const handleConfirmDelete = () => {
-        if (!pendingDeleteKey) return;
+        if (!activePendingDeleteKey) return;
 
-        setDraftTypes((current) => current.filter((type) => type.key !== pendingDeleteKey));
-        setPendingDeleteKey(null);
+        setDraftTypes((current) => current.filter((type) => type.key !== activePendingDeleteKey));
+        setPendingDeleteState(null);
     };
 
     const handleSave = () => {
@@ -390,7 +398,7 @@ export default function NodeTypeConfigDialog({
             <AdminDestructiveDialog
                 open={Boolean(pendingDeleteType)}
                 title="TIPO DE NODO EN USO"
-                onClose={() => setPendingDeleteKey(null)}
+                onClose={() => setPendingDeleteState(null)}
                 onConfirm={handleConfirmDelete}
                 warningMessage="Este tipo está siendo usado por nodos de la jerarquía. Si seguís adelante, esos nodos mantendrán su key actual pero perderán la definición administrable de label, ícono y color."
                 affectedLabel="Tipo afectado"

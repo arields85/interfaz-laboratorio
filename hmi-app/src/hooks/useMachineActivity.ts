@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { MachineActivityDisplayOptions, ProductiveState } from '../domain/admin.types';
 import {
     calculateActivityIndex,
@@ -21,6 +21,15 @@ export interface MachineActivityResult {
 export interface UseMachineActivityOptions {
     readonly sourceKey?: string;
     readonly simulated?: boolean;
+}
+
+interface MachineActivityInitialization {
+    valueBuffer: number[];
+    confirmedState: ProductiveState;
+    pendingState: ProductiveState | null;
+    pendingSince: number | null;
+    lastProcessedRawPower: number | null;
+    result: MachineActivityResult;
 }
 
 const DEFAULTS = {
@@ -166,52 +175,138 @@ function buildResult(
     };
 }
 
+function initializeMachineActivity(
+    rawValue: number | string | null | undefined,
+    displayOptions: MachineActivityDisplayOptions,
+    options: UseMachineActivityOptions,
+): MachineActivityInitialization {
+    const rawPower = coerceRawValue(rawValue);
+    const isSimulated = options.simulated === true;
+
+    if (rawPower === null) {
+        return {
+            valueBuffer: [],
+            confirmedState: 'stopped',
+            pendingState: null,
+            pendingSince: null,
+            lastProcessedRawPower: null,
+            result: {
+                activityIndex: 0,
+                productiveState: 'stopped',
+                stateLabel: 'Sin datos',
+                stateVisuals: getStateVisuals('stopped'),
+                smoothedPower: 0,
+                rawPower: null,
+                isValid: false,
+            },
+        };
+    }
+
+    const smoothingWindow = isSimulated
+        ? 1
+        : Math.max(1, displayOptions.smoothingWindow ?? DEFAULTS.smoothingWindow);
+    const valueBuffer = [rawPower].slice(-smoothingWindow);
+    const smoothedPower = isSimulated
+        ? rawPower
+        : smoothValue(valueBuffer, smoothingWindow);
+    let confirmedState: ProductiveState = 'stopped';
+    let pendingState: ProductiveState | null = null;
+    let pendingSince: number | null = null;
+
+    const candidateState = determineProductiveState(
+        smoothedPower,
+        {
+            stopped: displayOptions.thresholdStopped ?? DEFAULTS.thresholdStopped,
+            producing: displayOptions.thresholdProducing ?? DEFAULTS.thresholdProducing,
+        },
+        displayOptions.hysteresis ?? DEFAULTS.hysteresis,
+        confirmedState,
+    );
+
+    if (isSimulated) {
+        confirmedState = candidateState;
+    } else if (candidateState !== confirmedState) {
+        pendingState = candidateState;
+        pendingSince = Date.now();
+    }
+
+    const activityIndex = calculateActivityIndex(
+        smoothedPower,
+        displayOptions.powerMin ?? DEFAULTS.powerMin,
+        displayOptions.powerMax ?? DEFAULTS.powerMax,
+    );
+    const productiveState = confirmedState;
+
+    return {
+        valueBuffer,
+        confirmedState,
+        pendingState,
+        pendingSince,
+        lastProcessedRawPower: rawPower,
+        result: {
+            activityIndex: productiveState === 'stopped' ? 0 : activityIndex,
+            productiveState,
+            stateLabel: resolveStateLabel(productiveState, displayOptions),
+            stateVisuals: getStateVisuals(productiveState),
+            smoothedPower,
+            rawPower,
+            isValid: true,
+        },
+    };
+}
+
 export function useMachineActivity(
     rawValue: number | string | null | undefined,
     displayOptions: MachineActivityDisplayOptions,
     options: UseMachineActivityOptions = {},
 ): MachineActivityResult {
-    const valueBufferRef = useRef<number[]>([]);
-    const confirmedStateRef = useRef<ProductiveState>('stopped');
-    const pendingStateRef = useRef<ProductiveState | null>(null);
-    const pendingSinceRef = useRef<number | null>(null);
-    const lastProcessedRawPowerRef = useRef<number | null>(null);
-    const hasMountedRef = useRef(false);
-    const sourceKeyRef = useRef<string | undefined>(options.sourceKey);
-
-    if (sourceKeyRef.current !== options.sourceKey) {
-        valueBufferRef.current = [];
-        confirmedStateRef.current = 'stopped';
-        pendingStateRef.current = null;
-        pendingSinceRef.current = null;
-        lastProcessedRawPowerRef.current = null;
-        sourceKeyRef.current = options.sourceKey;
-    }
-
-    const [result, setResult] = useState<MachineActivityResult>(() => buildResult(
+    const simulated = options.simulated;
+    const sourceKey = options.sourceKey;
+    const [initialState] = useState<MachineActivityInitialization>(() => initializeMachineActivity(
         rawValue,
         displayOptions,
-        options,
+        { simulated, sourceKey },
+    ));
+    const valueBufferRef = useRef<number[]>(initialState.valueBuffer);
+    const confirmedStateRef = useRef<ProductiveState>(initialState.confirmedState);
+    const pendingStateRef = useRef<ProductiveState | null>(initialState.pendingState);
+    const pendingSinceRef = useRef<number | null>(initialState.pendingSince);
+    const lastProcessedRawPowerRef = useRef<number | null>(initialState.lastProcessedRawPower);
+    const hasMountedRef = useRef(false);
+    const sourceKeyRef = useRef<string | undefined>(sourceKey);
+    const computeResult = useCallback(() => buildResult(
+        rawValue,
+        displayOptions,
+        { simulated, sourceKey },
         valueBufferRef,
         confirmedStateRef,
         pendingStateRef,
         pendingSinceRef,
         lastProcessedRawPowerRef,
-    ));
+    ), [displayOptions, rawValue, simulated, sourceKey]);
+
+    const [result, setResult] = useState<MachineActivityResult>(initialState.result);
+
+    useEffect(() => {
+        if (sourceKeyRef.current === sourceKey) {
+            return;
+        }
+
+        valueBufferRef.current = [];
+        confirmedStateRef.current = 'stopped';
+        pendingStateRef.current = null;
+        pendingSinceRef.current = null;
+        lastProcessedRawPowerRef.current = null;
+        sourceKeyRef.current = sourceKey;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- source changes must reset the activity state immediately.
+        setResult(computeResult());
+    }, [computeResult, sourceKey]);
 
     useEffect(() => {
         if (hasMountedRef.current) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- derived activity state is recomputed from async/value changes.
             setResult((previous) => {
-                const next = buildResult(
-                    rawValue,
-                    displayOptions,
-                    options,
-                    valueBufferRef,
-                    confirmedStateRef,
-                    pendingStateRef,
-                    pendingSinceRef,
-                    lastProcessedRawPowerRef,
-                );
+                const next = computeResult();
 
                 return areResultsEqual(previous, next) ? previous : next;
             });
@@ -223,44 +318,21 @@ export function useMachineActivity(
             return undefined;
         }
 
-        const confirmationTime = options.simulated === true
+        const confirmationTime = simulated === true
             ? 0
             : (displayOptions.confirmationTime ?? DEFAULTS.confirmationTime);
         const elapsed = Date.now() - pendingSinceRef.current;
         const remaining = Math.max(confirmationTime - elapsed, 0);
         const timeoutId = window.setTimeout(() => {
             setResult((previous) => {
-                const next = buildResult(
-                    rawValue,
-                    displayOptions,
-                    options,
-                    valueBufferRef,
-                    confirmedStateRef,
-                    pendingStateRef,
-                    pendingSinceRef,
-                    lastProcessedRawPowerRef,
-                );
+                const next = computeResult();
 
                 return areResultsEqual(previous, next) ? previous : next;
             });
         }, remaining);
 
         return () => window.clearTimeout(timeoutId);
-    }, [
-        rawValue,
-        displayOptions.confirmationTime,
-        displayOptions.hysteresis,
-        displayOptions.labelCalibrating,
-        displayOptions.labelProducing,
-        displayOptions.labelStopped,
-        displayOptions.powerMax,
-        displayOptions.powerMin,
-        displayOptions.smoothingWindow,
-        displayOptions.thresholdProducing,
-        displayOptions.thresholdStopped,
-        options.simulated,
-        options.sourceKey,
-    ]);
+    }, [computeResult, displayOptions.confirmationTime, simulated]);
 
     return result;
 }

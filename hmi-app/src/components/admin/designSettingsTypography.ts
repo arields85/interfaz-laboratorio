@@ -96,7 +96,7 @@ const FONT_WEIGHT_REGISTRY: Record<FontName, readonly WeightOption['value'][]> =
     PixelArial: ['400'],
 };
 
-const FONT_STACKS_BY_TOKEN = {
+export const FONT_STACKS_BY_TOKEN = {
     '--font-system': 'sans',
     '--font-mono': 'mono',
     '--font-chart': 'mono',

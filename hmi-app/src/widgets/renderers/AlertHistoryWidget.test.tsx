@@ -57,7 +57,7 @@ class MockResizeObserver implements ResizeObserver {
         resizeObserverCallbacks.add(callback);
     }
 
-    public observe(_target: Element): void {}
+    public observe(): void {}
 
     public unobserve(): void {}
 
@@ -110,6 +110,23 @@ describe('AlertHistoryWidget', () => {
         expect(screen.getByText('Sin alertas recientes')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Limpiar historial visible' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Ver historial completo (funcionalidad pendiente)' })).toHaveAttribute('tabindex', '-1');
+    });
+
+    it('runs the first dashboard evaluation immediately on mount', () => {
+        render(
+            <AlertHistoryWidget
+                widget={makeWidget()}
+                equipmentMap={equipmentMap}
+                siblingWidgets={[makeWidget({ id: 'peer-widget' })]}
+            />,
+        );
+
+        expect(evaluatorMock.evaluateDashboardWidgets).toHaveBeenCalledWith(
+            'dashboard-a',
+            [expect.objectContaining({ id: 'peer-widget' })],
+            equipmentMap,
+            undefined,
+        );
     });
 
     it('renders warning and critical entries with formatted timestamps and values', async () => {

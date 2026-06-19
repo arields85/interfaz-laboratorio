@@ -206,6 +206,67 @@ describe('MachineActivityWidget', () => {
         consoleError.mockRestore();
     });
 
+    it('preserves the setup-to-stopped transition state across an in-place loading rerender', () => {
+        const requestAnimationFrameSpy = vi.fn(() => 1);
+        const cancelAnimationFrameSpy = vi.fn();
+        vi.stubGlobal('requestAnimationFrame', requestAnimationFrameSpy);
+        vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrameSpy);
+
+        const renderWidget = (simulatedValue: number, isLoadingData = false) => (
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                isLoadingData={isLoadingData}
+            />
+        );
+
+        const readArcSignature = (sequence: Array<{ simulatedValue: number; isLoadingData?: boolean }>) => {
+            const { rerender, unmount } = render(
+                renderWidget(sequence[0]?.simulatedValue ?? 0.1, sequence[0]?.isLoadingData ?? false),
+            );
+
+            sequence.slice(1).forEach(({ simulatedValue, isLoadingData }) => {
+                rerender(renderWidget(simulatedValue, isLoadingData ?? false));
+            });
+
+            const signature = screen
+                .getAllByTestId('gauge-circular-arc-segment')
+                .map((segment) => segment.getAttribute('stroke-dasharray') ?? '')
+                .join('|');
+
+            unmount();
+            return signature;
+        };
+
+        const stoppedFromFreshRenderSignature = readArcSignature([{ simulatedValue: 0.1 }]);
+        const loadingTransitionSignature = readArcSignature([
+            { simulatedValue: 0.2 },
+            { simulatedValue: 0.2, isLoadingData: true },
+            { simulatedValue: 0.1 },
+        ]);
+
+        expect(loadingTransitionSignature).not.toBe(stoppedFromFreshRenderSignature);
+        expect(requestAnimationFrameSpy).toHaveBeenCalled();
+    });
+
     it('uses the custom unit only for the center value when unitOverride is enabled', () => {
         render(
             <MachineActivityWidget

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { ADMIN_SIDEBAR_INPUT_CLS } from './adminSidebarStyles';
 
@@ -49,12 +49,7 @@ export default function AdminNumberInput({
     const [localValue, setLocalValue] = useState(String(value ?? ''));
     const [isFocused, setIsFocused] = useState(false);
 
-    // Sync external value → localValue ONLY when NOT focused
-    useEffect(() => {
-        if (!isFocused) {
-            setLocalValue(String(value ?? ''));
-        }
-    }, [value, isFocused]);
+    const resolvedValue = String(value ?? '');
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setLocalValue(e.target.value);
@@ -64,6 +59,7 @@ export default function AdminNumberInput({
     };
 
     const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+        setLocalValue(resolvedValue);
         setIsFocused(true);
         e.target.select();
     };
@@ -93,7 +89,8 @@ export default function AdminNumberInput({
     };
 
     const nudge = (delta: number) => {
-        const current = parseFloat(localValue) || 0;
+        const effectiveValue = isFocused ? localValue : resolvedValue;
+        const current = parseFloat(effectiveValue) || 0;
         let next = parseFloat((current + delta).toFixed(10));
         if (min !== undefined) next = Math.max(min, next);
         if (max !== undefined) next = Math.min(max, next);
@@ -115,7 +112,7 @@ export default function AdminNumberInput({
                 type="text"
                 inputMode="decimal"
                 disabled={disabled}
-                value={localValue}
+                value={isFocused ? localValue : resolvedValue}
                 onChange={handleChange}
                 onFocus={handleFocus}
                 onBlur={handleBlur}

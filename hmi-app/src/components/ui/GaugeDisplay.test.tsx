@@ -98,7 +98,7 @@ describe('GaugeDisplay', () => {
         );
 
         let segments = screen.queryAllByTestId('gauge-circular-arc-segment');
-        let svg = screen.getByTestId('gauge-circular');
+        const svg = screen.getByTestId('gauge-circular');
         expect(segments).toHaveLength(SEGMENT_COUNT);
         expect(segments[0]).toHaveAttribute('stroke-dasharray', `0 ${LG_CIRCUMFERENCE}`);
         expect(svg).toHaveAttribute('viewBox', '-10 -10 160 160');

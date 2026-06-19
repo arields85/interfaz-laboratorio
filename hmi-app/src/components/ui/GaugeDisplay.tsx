@@ -111,37 +111,6 @@ export default function GaugeDisplay({
         return () => observer.disconnect();
     }, [mode]);
 
-    if (mode === 'bar') {
-        const backgroundStyle = `linear-gradient(90deg, ${gradientColors[0]}, ${gradientColors[1]})`;
-        const barHeight = typeof size === 'number'
-            ? size
-            : size
-                ? BAR_HEIGHT_PRESETS[size]
-                : BAR_HEIGHT;
-
-        return (
-            <div className={`w-full ${className ?? ''}`.trim()}>
-                <div
-                    className="h-2 w-full bg-white/5 rounded-full relative"
-                    data-testid="gauge-bar-track"
-                    style={{ height: `${barHeight}px` }}
-                >
-                    <div
-                        className="absolute top-0 left-0 h-full rounded-full transition-all duration-500 ease-out"
-                        data-testid="gauge-bar-fill"
-                        style={{
-                            width: `${normalized * 100}%`,
-                            background: backgroundStyle,
-                            transitionDuration: `${animationDuration}ms`,
-                            boxShadow: showGlow ? `0 0 15px ${primaryColor}` : undefined,
-                            opacity: arcOpacity,
-                        }}
-                    />
-                </div>
-            </div>
-        );
-    }
-
     const circularSize = typeof size === 'number'
         ? size
         : size
@@ -197,6 +166,37 @@ export default function GaugeDisplay({
 
         return segments;
     }, [circumference, gradientColors, gradientNorm, normalized]);
+
+    if (mode === 'bar') {
+        const backgroundStyle = `linear-gradient(90deg, ${gradientColors[0]}, ${gradientColors[1]})`;
+        const barHeight = typeof size === 'number'
+            ? size
+            : size
+                ? BAR_HEIGHT_PRESETS[size]
+                : BAR_HEIGHT;
+
+        return (
+            <div className={`w-full ${className ?? ''}`.trim()}>
+                <div
+                    className="h-2 w-full bg-white/5 rounded-full relative"
+                    data-testid="gauge-bar-track"
+                    style={{ height: `${barHeight}px` }}
+                >
+                    <div
+                        className="absolute top-0 left-0 h-full rounded-full transition-all duration-500 ease-out"
+                        data-testid="gauge-bar-fill"
+                        style={{
+                            width: `${normalized * 100}%`,
+                            background: backgroundStyle,
+                            transitionDuration: `${animationDuration}ms`,
+                            boxShadow: showGlow ? `0 0 15px ${primaryColor}` : undefined,
+                            opacity: arcOpacity,
+                        }}
+                    />
+                </div>
+            </div>
+        );
+    }
 
     const circularStyle: CSSProperties & { '--gauge-circular-scale': string } = {
         '--gauge-circular-scale': String(circularScale),
