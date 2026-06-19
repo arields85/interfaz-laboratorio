@@ -49,6 +49,7 @@ const WIDGET_VALUE_TYPOGRAPHY_STYLE: CSSProperties = {
     letterSpacing: 'var(--tracking-widget-value)',
 };
 
+const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden p-5';
 const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border bg-[color:color-mix(in_srgb,var(--color-industrial-hover)_72%,transparent)]';
 const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border bg-[color:color-mix(in_srgb,var(--color-industrial-surface)_88%,var(--color-industrial-hover))]';
 
@@ -96,14 +97,14 @@ export default function ActivityAnalyticsWidget({
     ]);
 
     const header = (
-        <div className="px-5 pt-5">
-            <WidgetHeader
-                title={widget.title ?? 'Análisis de Actividad'}
-                icon={BarChart2}
-                iconColor="var(--color-widget-icon)"
-                subtitle={machineBinding.selectedMachine?.name ?? 'Activity-Series'}
-            />
-        </div>
+        <WidgetHeader
+            title={widget.title ?? 'Análisis de Actividad'}
+            icon={BarChart2}
+            iconColor="var(--color-widget-icon)"
+            iconPosition="right"
+            subtitle={machineBinding.selectedMachine?.name ?? 'Activity-Series'}
+            className="min-w-0 shrink-0"
+        />
     );
 
     if (machineBinding.status === 'missing') {
@@ -200,16 +201,13 @@ export default function ActivityAnalyticsWidget({
     }
 
     return (
-        <div className={`h-full rounded-3xl border border-industrial-border bg-industrial-surface ${className ?? ''}`}>
-            <WidgetCenteredContentLayout
-                header={header}
-                contentClassName="px-5 pt-16 pb-5"
-            >
-                <div className="flex h-full w-full flex-col gap-4">
-                    <MetricsGrid analytics={computedAnalytics.analytics} />
-                    <GroupedAnalyticsPanel grouped={computedAnalytics.grouped} />
-                </div>
-            </WidgetCenteredContentLayout>
+        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
+            {header}
+
+            <div className="mt-3 flex min-h-0 flex-1 flex-col gap-4">
+                <MetricsGrid analytics={computedAnalytics.analytics} />
+                <GroupedAnalyticsPanel grouped={computedAnalytics.grouped} />
+            </div>
         </div>
     );
 }
@@ -343,8 +341,8 @@ function renderStateCard({
     icon: React.ReactNode;
 }) {
     return (
-        <div className={`h-full rounded-3xl border border-industrial-border bg-industrial-surface ${className ?? ''}`}>
-            <WidgetCenteredContentLayout header={header} contentClassName="px-5 pt-16 pb-5">
+        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
+            <WidgetCenteredContentLayout header={header} contentClassName="pt-14">
                 <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
                     {icon}
                     <div className="uppercase text-industrial-text" style={GENERAL_TYPOGRAPHY_STYLE}>{title}</div>
