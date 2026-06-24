@@ -20,4 +20,40 @@ describe('activityAnalyticsWidgetDefaults', () => {
             displayMode: 'kpis-and-bars',
         });
     });
+
+    it('normalizes legacy 1h and invalid grouped combinations through the shared rules contract', () => {
+        expect(
+            resolveActivityAnalyticsDisplayOptions({
+                range: '1h',
+                groupBy: 'month',
+            }),
+        ).toMatchObject({
+            range: '24h',
+            groupBy: 'day',
+        });
+
+        expect(
+            resolveActivityAnalyticsDisplayOptions({
+                range: 'custom',
+                start: '2026-06-01T10:00:00.000Z',
+                end: '2026-06-01T18:00:00.000Z',
+                groupBy: 'week',
+            }),
+        ).toMatchObject({
+            range: 'custom',
+            groupBy: 'day',
+        });
+
+        expect(
+            resolveActivityAnalyticsDisplayOptions({
+                range: 'custom',
+                start: '2026-06-01T10:00:00.000Z',
+                end: '2026-06-11T10:00:00.000Z',
+                groupBy: 'shift',
+            }),
+        ).toMatchObject({
+            range: 'custom',
+            groupBy: 'shift',
+        });
+    });
 });

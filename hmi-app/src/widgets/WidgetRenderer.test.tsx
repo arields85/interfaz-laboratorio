@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine, DataHistoryResponseV2 } from '../domain/dataContract.types';
 import type { ActivityAnalyticsWidgetConfig, MachineActivityWidgetConfig, TrendChartV2WidgetConfig } from '../domain/admin.types';
@@ -257,7 +258,143 @@ describe('WidgetRenderer', () => {
         );
 
         expect(screen.getByText('Análisis de Actividad')).toBeInTheDocument();
-        expect(screen.getByText('% Prod.')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-summary-text')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-runtime-secondary-controls')).toBeInTheDocument();
         expect(screen.queryByText('hidden')).not.toBeInTheDocument();
+    });
+
+    it('forwards activity-analytics persistence callbacks to the dedicated runtime renderer', () => {
+        const onPersistWidgetDisplayOptions = vi.fn();
+        const activityAnalyticsWidget: ActivityAnalyticsWidgetConfig = {
+            id: 'activity-analytics-1',
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+            },
+            displayOptions: {
+                range: 'custom',
+                start: '2026-06-18T10:00:00.000Z',
+                end: '2026-06-18T12:00:00.000Z',
+                groupBy: 'shift',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        };
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'Total kW',
+                range: 'custom',
+                unit: 'kW',
+                purpose: 'activity-analytics',
+                window: {
+                    start: '2026-06-18T10:00:00.000Z',
+                    end: '2026-06-18T12:00:00.000Z',
+                    timezone: 'UTC',
+                    bucket: '5m',
+                    bucketMs: 300000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T10:00:00.000Z', timestampMs: Date.parse('2026-06-18T10:00:00.000Z'), value: 0.3 },
+                ],
+                summary: { hidden: true },
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(
+            <WidgetRenderer
+                widget={activityAnalyticsWidget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                isLoadingData={false}
+                onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('keeps runtime grouping local in the dispatched activity-analytics renderer while preserving the runtime control row', async () => {
+        const user = userEvent.setup();
+        const onPersistWidgetDisplayOptions = vi.fn();
+        const activityAnalyticsWidget: ActivityAnalyticsWidgetConfig = {
+            id: 'activity-analytics-1',
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+            },
+            displayOptions: {
+                range: '24h',
+                groupBy: 'week',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        };
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'Total kW',
+                range: '24h',
+                unit: 'kW',
+                purpose: 'activity-analytics',
+                window: {
+                    start: '2026-06-18T12:00:00.000Z',
+                    end: '2026-06-18T14:00:00.000Z',
+                    timezone: 'UTC',
+                    bucket: '5m',
+                    bucketMs: 300000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 0.3 },
+                    { timestamp: '2026-06-18T13:00:00.000Z', timestampMs: Date.parse('2026-06-18T13:00:00.000Z'), value: 0.05 },
+                ],
+                summary: { hidden: true },
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(
+            <WidgetRenderer
+                widget={activityAnalyticsWidget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                isLoadingData={false}
+                onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'Semana' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Mes' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
+
+        await user.click(screen.getByRole('button', { name: 'Turno' }));
+
+        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(onPersistWidgetDisplayOptions).not.toHaveBeenCalled();
     });
 });

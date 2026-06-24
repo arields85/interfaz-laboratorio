@@ -1,5 +1,5 @@
 import { WidgetRenderer } from '../../widgets';
-import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
+import type { ActivityAnalyticsPersistedDisplayPatch, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
@@ -21,6 +21,7 @@ interface DashboardViewerProps {
     hierarchyContext?: HierarchyContext;
     cols?: number;
     rows?: number;
+    onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
 }
 
 // =============================================================================
@@ -49,6 +50,7 @@ export default function DashboardViewer({
     hierarchyContext,
     cols = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
+    onPersistWidgetDisplayOptions,
 }: DashboardViewerProps) {
     const { containerRef, width, height, rowHeight, hasFirstValidMeasurement } = useCanvasReference({
         cols,
@@ -104,10 +106,11 @@ export default function DashboardViewer({
                                         machines={machines}
                                         connection={connection}
                                         isLoadingData={false} 
-                                        siblingWidgets={widgets}
-                                        hierarchyContext={hierarchyContext}
-                                        className="w-full h-full"
-                                    />
+                                     siblingWidgets={widgets}
+                                     hierarchyContext={hierarchyContext}
+                                     className="w-full h-full"
+                                     onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                                 />
                                 </div>
                             </div>
                         );

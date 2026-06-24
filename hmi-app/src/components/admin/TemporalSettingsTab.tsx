@@ -7,6 +7,8 @@ import {
     readTemporalSettingsConfig,
     saveTemporalSettingsConfig,
 } from '../../config/temporalSettings.config';
+import { ALL_WEEKDAY_KEYS, normalizeWeekdays, validateWeeklyShiftSchedule } from '../../utils/weeklyShiftSchedule';
+import type { WeekdayKey } from '../../domain/admin.types';
 import {
     ADMIN_SIDEBAR_HINT_CLS,
     ADMIN_SIDEBAR_INPUT_CLS,
@@ -24,6 +26,7 @@ type ShiftDraft = {
     label: string;
     start: string;
     end: string;
+    weekdays: WeekdayKey[];
 };
 
 type TemporalSettingsDraft = {
@@ -34,11 +37,20 @@ type TemporalSettingsDraft = {
 const SHIFT_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const TEMPORAL_SETTINGS_ACTION_BUTTON_CLS = 'rounded-md px-3 py-2 text-sm transition-colors admin-accent-ghost';
 const TEMPORAL_SETTINGS_SHIFT_CARD_CLS = 'rounded-md border border-industrial-border bg-industrial-hover p-3';
+const WEEKDAY_LABELS: Record<WeekdayKey, string> = {
+    mon: 'Lunes',
+    tue: 'Martes',
+    wed: 'Miercoles',
+    thu: 'Jueves',
+    fri: 'Viernes',
+    sat: 'Sabado',
+    sun: 'Domingo',
+};
 
 function toDraft(config: TemporalSettingsConfig): TemporalSettingsDraft {
     return {
         plantTimezone: config.plantTimezone ?? '',
-        shifts: config.shifts.map((shift) => ({ ...shift })),
+        shifts: config.shifts.map((shift) => ({ ...shift, weekdays: normalizeWeekdays(shift.weekdays) })),
     };
 }
 
@@ -50,6 +62,7 @@ function toConfig(draft: TemporalSettingsDraft): TemporalSettingsConfig {
             label: shift.label,
             start: shift.start,
             end: shift.end,
+            weekdays: [...shift.weekdays],
         })),
     };
 }
@@ -60,6 +73,7 @@ function createShiftDraft(index: number): ShiftDraft {
         label: '',
         start: '06:00',
         end: '14:00',
+        weekdays: [...ALL_WEEKDAY_KEYS],
     };
 }
 
@@ -100,6 +114,48 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
         onDirtyChange?.(true);
     };
 
+    const toggleWeekday = (index: number, weekday: WeekdayKey) => {
+        setSaveError(null);
+        setDraft((currentDraft) => ({
+            ...currentDraft,
+            shifts: currentDraft.shifts.map((shift, currentIndex) => {
+                if (currentIndex !== index) {
+                    return shift;
+                }
+
+                return {
+                    ...shift,
+                    weekdays: shift.weekdays.includes(weekday)
+                        ? shift.weekdays.filter((entry) => entry !== weekday)
+                        : [...shift.weekdays, weekday].sort((left, right) => ALL_WEEKDAY_KEYS.indexOf(left) - ALL_WEEKDAY_KEYS.indexOf(right)),
+                };
+            }),
+        }));
+        onDirtyChange?.(true);
+    };
+
+    const moveShift = (index: number, direction: -1 | 1) => {
+        const nextIndex = index + direction;
+
+        setSaveError(null);
+        setDraft((currentDraft) => {
+            if (nextIndex < 0 || nextIndex >= currentDraft.shifts.length) {
+                return currentDraft;
+            }
+
+            const shifts = [...currentDraft.shifts];
+            const [shift] = shifts.splice(index, 1);
+
+            if (!shift) {
+                return currentDraft;
+            }
+
+            shifts.splice(nextIndex, 0, shift);
+            return { ...currentDraft, shifts };
+        });
+        onDirtyChange?.(true);
+    };
+
     useEffect(() => {
         if (!saveRef) {
             return;
@@ -116,7 +172,11 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
             const saved = saveTemporalSettingsConfig(normalizedDraft);
 
             if (!saved.ok) {
-                setSaveError('No se pudieron guardar los ajustes temporales.');
+                setSaveError(saved.error.message === 'Each shift must apply to at least one weekday.'
+                    ? 'Selecciona al menos un dia para cada turno antes de guardar.'
+                    : saved.error.message === 'Shift windows cannot overlap after weekly expansion.'
+                        ? 'Los turnos configurados no pueden superponerse en la semana.'
+                        : 'No se pudieron guardar los ajustes temporales.');
                 return;
             }
 
@@ -233,7 +293,42 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
                                     </div>
                                 </div>
 
-                                <div className="mt-3 flex justify-end">
+                                <div className="mt-3 space-y-2">
+                                    <p className={ADMIN_SIDEBAR_LABEL_CLS}>Dias de inicio</p>
+                                    <div className="flex flex-wrap gap-3">
+                                        {ALL_WEEKDAY_KEYS.map((weekday) => (
+                                            <label key={`${shift.id}-${weekday}`} className="flex items-center gap-2 text-sm text-industrial-text">
+                                                <input
+                                                    type="checkbox"
+                                                    aria-label={`${WEEKDAY_LABELS[weekday]} turno ${rowNumber}`}
+                                                    checked={shift.weekdays.includes(weekday)}
+                                                    onChange={() => toggleWeekday(index, weekday)}
+                                                />
+                                                <span>{WEEKDAY_LABELS[weekday]}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="mt-3 flex items-center justify-between gap-3">
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => moveShift(index, -1)}
+                                            disabled={index === 0}
+                                            className="text-sm text-industrial-muted transition-colors hover:text-industrial-text disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {`Mover arriba turno ${rowNumber}`}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => moveShift(index, 1)}
+                                            disabled={index === draft.shifts.length - 1}
+                                            className="text-sm text-industrial-muted transition-colors hover:text-industrial-text disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {`Mover abajo turno ${rowNumber}`}
+                                        </button>
+                                    </div>
                                     <button
                                         type="button"
                                         onClick={() => handleRemoveShift(index)}
@@ -258,7 +353,21 @@ function validateTemporalSettingsDraft(draft: TemporalSettingsDraft): string | n
             || !SHIFT_TIME_PATTERN.test(shift.end);
     });
 
-    return hasInvalidShift
-        ? 'Completa todos los campos de cada turno antes de guardar.'
-        : null;
+    if (hasInvalidShift) {
+        return 'Completa todos los campos de cada turno antes de guardar.';
+    }
+
+    const weeklyValidation = validateWeeklyShiftSchedule(draft.shifts);
+
+    if (!weeklyValidation.ok) {
+        if (weeklyValidation.error === 'Each shift must apply to at least one weekday.') {
+            return 'Selecciona al menos un dia para cada turno antes de guardar.';
+        }
+
+        if (weeklyValidation.error === 'Shift windows cannot overlap after weekly expansion.') {
+            return 'Los turnos configurados no pueden superponerse en la semana.';
+        }
+    }
+
+    return null;
 }

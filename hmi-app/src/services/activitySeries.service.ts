@@ -1,5 +1,5 @@
 import { getDataActivitySeriesUrl } from '../config/dataConnection.config';
-import type { ActivityAnalyticsQueryDraft, ActivityAnalyticsPresetQueryParams } from '../domain/activityAnalytics.types';
+import type { ActivityAnalyticsQueryDraft, ActivityAnalyticsQueryParams } from '../domain/activityAnalytics.types';
 import { validateAndNormalizeActivitySeriesQueryParams } from '../utils/activitySeriesQueryValidation';
 import { DataServiceError } from './dataOverview.service';
 
@@ -42,10 +42,16 @@ export async function fetchActivitySeries(params: ActivityAnalyticsQueryDraft): 
     return response.json();
 }
 
-function buildActivitySeriesUrl(baseUrl: string, params: ActivityAnalyticsPresetQueryParams): URL {
+function buildActivitySeriesUrl(baseUrl: string, params: ActivityAnalyticsQueryParams): URL {
     const url = new URL(baseUrl);
     url.searchParams.set('machineId', String(params.machineId));
     url.searchParams.set('range', params.range);
+
+    if (params.range === 'custom') {
+        url.searchParams.set('start', params.start);
+        url.searchParams.set('end', params.end);
+    }
+
     return url;
 }
 
@@ -73,11 +79,17 @@ function getSanitizedActivitySeriesHttpMessage(statusCode: number): string {
     return `Activity-series request failed with status ${statusCode}`;
 }
 
-function createActivitySeriesQueryError(reason: 'invalid-machine-id' | 'invalid-range'): DataServiceError {
+function createActivitySeriesQueryError(reason: 'invalid-machine-id' | 'invalid-range' | 'invalid-timestamp' | 'start-not-before-end' | 'duration-too-large'): DataServiceError {
     switch (reason) {
     case 'invalid-machine-id':
         return new DataServiceError('Activity-series query must use a positive integer machineId');
     case 'invalid-range':
-        return new DataServiceError('Activity-series query must use a supported preset range');
+        return new DataServiceError('Activity-series query must use a supported range');
+    case 'invalid-timestamp':
+        return new DataServiceError('Custom activity-series window must use valid timestamps');
+    case 'start-not-before-end':
+        return new DataServiceError('Custom activity-series window must have start before end');
+    case 'duration-too-large':
+        return new DataServiceError('Custom activity-series window must be 30 days or less');
     }
 }

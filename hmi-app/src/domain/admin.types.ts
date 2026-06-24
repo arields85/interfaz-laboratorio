@@ -1,7 +1,7 @@
 import type {
     ActivityAnalyticsDisplayMode,
     ActivityAnalyticsGroupBy,
-    ActivityAnalyticsPresetRange,
+    ActivityAnalyticsRange,
 } from './activityAnalytics.types';
 
 // =============================================================================
@@ -319,7 +319,10 @@ export interface ShiftDefinition {
     label: string;
     start: string;
     end: string;
+    weekdays?: WeekdayKey[];
 }
+
+export type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
 export interface TemporalSettingsConfig {
     plantTimezone: string | null;
@@ -382,11 +385,19 @@ export interface MachineActivityDisplayOptions {
 }
 
 export interface ActivityAnalyticsDisplayOptions {
-    range?: ActivityAnalyticsPresetRange;
+    range?: ActivityAnalyticsRange;
+    start?: string;
+    end?: string;
     groupBy?: ActivityAnalyticsGroupBy;
     setupThresholdKw?: number;
     prodThresholdKw?: number;
     displayMode?: ActivityAnalyticsDisplayMode;
+}
+
+export interface ActivityAnalyticsPersistedDisplayPatch {
+    range: ActivityAnalyticsRange;
+    start?: string;
+    end?: string;
 }
 
 export type TemporalBucket = 'hour' | 'shift' | 'day' | 'month';

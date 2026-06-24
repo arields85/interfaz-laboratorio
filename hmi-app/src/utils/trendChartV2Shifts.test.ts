@@ -78,7 +78,7 @@ describe('trendChartV2Shifts', () => {
         })).toBe('bands');
     });
 
-    it('resolves tooltip shift labels and per-shift summaries from visible points only', () => {
+    it('resolves date-aware tooltip shift labels and per-bucket summaries from visible points only', () => {
         const visiblePoints = [
             point('2026-06-18T06:15:00.000Z', 10),
             point('2026-06-18T07:30:00.000Z', 14),
@@ -92,7 +92,7 @@ describe('trendChartV2Shifts', () => {
             timestampMs: Date.parse('2026-06-19T01:00:00.000Z'),
             shifts: SHIFTS,
             timezone: UTC,
-        })).toBe('Turno C');
+        })).toBe('2026-06-18 · Turno C');
 
         expect(buildTrendChartV2VisibleShiftSummary({
             points: visiblePoints,
@@ -101,7 +101,7 @@ describe('trendChartV2Shifts', () => {
         })).toEqual([
             {
                 shiftId: 'shift-a',
-                label: 'Turno A',
+                label: '2026-06-18 · Turno A',
                 count: 2,
                 last: 14,
                 min: 10,
@@ -110,7 +110,7 @@ describe('trendChartV2Shifts', () => {
             },
             {
                 shiftId: 'shift-b',
-                label: 'Turno B',
+                label: '2026-06-18 · Turno B',
                 count: 2,
                 last: 24,
                 min: 20,
@@ -119,7 +119,7 @@ describe('trendChartV2Shifts', () => {
             },
             {
                 shiftId: 'shift-c',
-                label: 'Turno C',
+                label: '2026-06-18 · Turno C',
                 count: 2,
                 last: 26,
                 min: 26,
@@ -129,18 +129,36 @@ describe('trendChartV2Shifts', () => {
         ]);
     });
 
+    it('respects weekday applicability for overnight tooltips and intervals', () => {
+        const fridayNightOnly: ShiftDefinition[] = [
+            { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['fri'] },
+        ];
+
+        expect(resolveTrendChartV2TooltipShiftLabel({
+            timestampMs: Date.parse('2026-06-20T01:00:00.000Z'),
+            shifts: fridayNightOnly,
+            timezone: UTC,
+        })).toBe('2026-06-19 · Turno C');
+
+        expect(resolveTrendChartV2TooltipShiftLabel({
+            timestampMs: Date.parse('2026-06-21T01:00:00.000Z'),
+            shifts: fridayNightOnly,
+            timezone: UTC,
+        })).toBe('2026-06-21 · sin turno');
+    });
+
     it('treats adjacent shift boundaries as belonging to the next shift start', () => {
         expect(resolveTrendChartV2TooltipShiftLabel({
             timestampMs: Date.parse('2026-06-18T14:00:00.000Z'),
             shifts: SHIFTS,
             timezone: UTC,
-        })).toBe('Turno B');
+        })).toBe('2026-06-18 · Turno B');
 
         expect(resolveTrendChartV2TooltipShiftLabel({
             timestampMs: Date.parse('2026-06-18T22:00:00.000Z'),
             shifts: SHIFTS,
             timezone: UTC,
-        })).toBe('Turno C');
+        })).toBe('2026-06-18 · Turno C');
     });
 
     it('returns no intervals or summaries when shift configuration is empty', () => {
@@ -170,7 +188,7 @@ describe('trendChartV2Shifts', () => {
         })).toEqual([
             {
                 shiftId: 'shift-a',
-                label: 'Turno A',
+                label: '2026-06-18 · Turno A',
                 count: 1,
                 last: 14,
                 min: 14,

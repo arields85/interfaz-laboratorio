@@ -50,7 +50,7 @@ describe('temporalSettings.config', () => {
 
         expect(readTemporalSettingsConfig()).toEqual({
             plantTimezone: 'America/Santiago',
-            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00' }],
+            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] }],
         });
         expect(fetchSpy).not.toHaveBeenCalled();
 
@@ -58,7 +58,7 @@ describe('temporalSettings.config', () => {
         expect(event).toBeInstanceOf(CustomEvent);
         expect((event as CustomEvent).detail).toEqual({
             plantTimezone: 'America/Santiago',
-            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00' }],
+            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] }],
         });
 
         clearTemporalSettingsConfig();
@@ -83,6 +83,32 @@ describe('temporalSettings.config', () => {
         expect(readTemporalSettingsConfig()).toEqual({ plantTimezone: null, shifts: [] });
 
         document.removeEventListener(TEMPORAL_SETTINGS_CHANGED_EVENT, eventSpy);
+    });
+
+    it('keeps legacy shifts readable by normalizing missing weekdays to the full week', () => {
+        localStorage.setItem(TEMPORAL_SETTINGS_STORAGE_KEY, JSON.stringify({
+            plantTimezone: 'UTC',
+            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00' }],
+        }));
+
+        expect(readTemporalSettingsConfig()).toEqual({
+            plantTimezone: 'UTC',
+            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] }],
+        });
+    });
+
+    it('rejects invalid weekly schedules before persistence', () => {
+        const result = saveTemporalSettingsConfig({
+            plantTimezone: 'UTC',
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '22:00', end: '06:00', weekdays: ['fri'] },
+                { id: 'shift-b', label: 'Turno B', start: '04:00', end: '12:00', weekdays: ['sat'] },
+            ],
+        });
+
+        expect(result.ok).toBe(false);
+        expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toBeNull();
+        expect(readTemporalSettingsConfig()).toEqual({ plantTimezone: null, shifts: [] });
     });
 
     it('resolves the saved timezone first, then the browser timezone, then the deterministic fallback', () => {

@@ -138,12 +138,12 @@ export function resolveTrendChartV2VisibleWindow({
 }
 
 export function resolveTrendChartV2Timezone(windowTimezone: string | undefined, plantTimezone: string): string {
-    if (isValidTimeZone(windowTimezone)) {
-        return windowTimezone.trim();
-    }
-
     if (isValidTimeZone(plantTimezone)) {
         return plantTimezone.trim();
+    }
+
+    if (isValidTimeZone(windowTimezone)) {
+        return windowTimezone.trim();
     }
 
     return TEMPORAL_SETTINGS_FALLBACK_TIMEZONE;
@@ -162,11 +162,15 @@ export function formatTrendChartV2Timestamp({ timestampMs, range, timezone }: Fo
         return '--';
     }
 
+    const displayTimezone = isValidTimeZone(timezone)
+        ? timezone.trim()
+        : TEMPORAL_SETTINGS_FALLBACK_TIMEZONE;
+
     const options: Intl.DateTimeFormatOptions = range === '12m'
-        ? { month: 'short', timeZone: resolveTrendChartV2Timezone(timezone, TEMPORAL_SETTINGS_FALLBACK_TIMEZONE) }
+        ? { month: 'short', timeZone: displayTimezone }
         : range === '7d' || range === '30d'
-            ? { day: '2-digit', month: '2-digit', timeZone: resolveTrendChartV2Timezone(timezone, TEMPORAL_SETTINGS_FALLBACK_TIMEZONE) }
-            : { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: resolveTrendChartV2Timezone(timezone, TEMPORAL_SETTINGS_FALLBACK_TIMEZONE) };
+            ? { day: '2-digit', month: '2-digit', timeZone: displayTimezone }
+            : { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: displayTimezone };
 
     return new Intl.DateTimeFormat('en-GB', options).format(date);
 }

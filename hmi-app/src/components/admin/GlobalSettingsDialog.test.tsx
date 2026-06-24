@@ -125,7 +125,7 @@ vi.mock('./TemporalSettingsTab', async () => {
                 saveRef.current = () => {
                     localStorage.setItem(TEMPORAL_STORAGE_KEY, timezone);
                     document.dispatchEvent(new CustomEvent('hmi:temporal-settings-changed', {
-                        detail: { plantTimezone: timezone, shifts: [] },
+                        detail: { plantTimezone: timezone, shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon'] }] },
                     }));
                     onDirtyChange?.(false);
                 };

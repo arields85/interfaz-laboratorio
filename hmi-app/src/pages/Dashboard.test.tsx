@@ -114,6 +114,20 @@ describe('Dashboard page layout', () => {
         );
     });
 
+    it('passes a viewer widget persistence callback so published dashboards can restore custom windows on reload', async () => {
+        render(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        });
+
+        expect(dashboardViewerMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                onPersistWidgetDisplayOptions: expect.any(Function),
+            }),
+        );
+    });
+
     it('passes contract machines to the viewer pipeline', async () => {
         const machines: ContractMachine[] = [{
             unitId: 101,

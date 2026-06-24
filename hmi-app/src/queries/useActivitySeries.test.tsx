@@ -108,6 +108,115 @@ describe('useActivitySeries', () => {
         expect(result.isEnabled).toBe(true);
     });
 
+    it('separates custom activity-series queries in the cache key and forwards explicit bounds to the service', async () => {
+        vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: {
+                purpose: 'activity-analytics',
+                range: 'custom',
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+        } as never);
+
+        const params = {
+            machineId: 7,
+            range: 'custom' as const,
+            start: '2026-06-18T10:00:00.000Z',
+            end: '2026-06-18T12:00:00.000Z',
+        };
+        const raw = { ok: true };
+        const adapted = { purpose: 'activity-analytics', window: { bucketMs: 300000 }, series: [], range: 'custom' };
+
+        vi.mocked(fetchActivitySeries).mockResolvedValue(raw);
+        vi.mocked(adaptActivitySeries).mockReturnValue(adapted as never);
+
+        useActivitySeries(params);
+        const queryOptions = vi.mocked(useQuery).mock.calls[0]?.[0];
+
+        expect(queryOptions).toEqual(
+            expect.objectContaining({
+                queryKey: ['data', 'activity-series', 7, 'custom', '2026-06-18T10:00:00.000Z', '2026-06-18T12:00:00.000Z'],
+                enabled: true,
+            }),
+        );
+
+        await expect(queryOptions?.queryFn?.()).resolves.toEqual(adapted);
+        expect(fetchActivitySeries).toHaveBeenCalledWith(params);
+    });
+
+    it('keeps runtime grouping metadata out of the cache key and service params', async () => {
+        vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: {
+                purpose: 'activity-analytics',
+                range: 'custom',
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+        } as never);
+
+        const params = {
+            machineId: 7,
+            range: 'custom' as const,
+            start: '2026-06-18T10:00:00.000Z',
+            end: '2026-06-18T12:00:00.000Z',
+            groupBy: 'month',
+            temporalSettings: { plantTimezone: 'UTC' },
+        } as never;
+        const raw = { ok: true };
+        const adapted = { purpose: 'activity-analytics', window: { bucketMs: 300000 }, series: [], range: 'custom' };
+
+        vi.mocked(fetchActivitySeries).mockResolvedValue(raw);
+        vi.mocked(adaptActivitySeries).mockReturnValue(adapted as never);
+
+        useActivitySeries(params);
+        const queryOptions = vi.mocked(useQuery).mock.calls[0]?.[0];
+
+        expect(queryOptions).toEqual(
+            expect.objectContaining({
+                queryKey: ['data', 'activity-series', 7, 'custom', '2026-06-18T10:00:00.000Z', '2026-06-18T12:00:00.000Z'],
+                enabled: true,
+            }),
+        );
+
+        await expect(queryOptions?.queryFn?.()).resolves.toEqual(adapted);
+        expect(fetchActivitySeries).toHaveBeenCalledWith({
+            machineId: 7,
+            range: 'custom',
+            start: '2026-06-18T10:00:00.000Z',
+            end: '2026-06-18T12:00:00.000Z',
+        });
+    });
+
+    it('disables invalid custom activity-series windows before the service boundary', () => {
+        vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: undefined,
+            isLoading: false,
+            isError: false,
+            error: null,
+        } as never);
+
+        const result = useActivitySeries({
+            machineId: 7,
+            range: 'custom',
+            start: '2026-06-18T12:00:00.000Z',
+            end: '2026-06-18T10:00:00.000Z',
+        });
+
+        expect(vi.mocked(useQuery).mock.calls[0]?.[0]).toEqual(
+            expect.objectContaining({
+                queryKey: [...ACTIVITY_SERIES_QUERY_KEY_PREFIX, null, null, null, null],
+                enabled: false,
+            }),
+        );
+        expect(fetchActivitySeries).not.toHaveBeenCalled();
+        expect(result.isEnabled).toBe(false);
+    });
+
     it('sanitizes ui-facing query errors before returning them to consumers', () => {
         vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
         vi.mocked(useQuery).mockReturnValue({

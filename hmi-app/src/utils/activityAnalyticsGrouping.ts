@@ -5,6 +5,11 @@ import {
     TEMPORAL_SETTINGS_FALLBACK_TIMEZONE,
 } from '../config/temporalSettings.config';
 import type { ActivityAnalyticsDurationsMs, ActivityAnalyticsInterval } from './activityAnalytics';
+import {
+    buildWeeklyShiftIntervals,
+    UNCOVERED_SHIFT_ID,
+    UNCOVERED_SHIFT_LABEL,
+} from './weeklyShiftSchedule';
 
 export interface ActivityAnalyticsGroupedBucket {
     bucketKey: string;
@@ -16,6 +21,10 @@ export interface ActivityAnalyticsGroupedBucket {
     stopCount: number;
     utilizationRatio: number;
     coverageRatio: number;
+    expectedDurationMs: number;
+    productivityRatio: number | null;
+    productivityLabel: string;
+    isInProgress: boolean;
 }
 
 interface ResolveActivityAnalyticsTimezoneOptions {
@@ -28,6 +37,9 @@ interface GroupActivityAnalyticsIntervalsOptions {
     groupBy: ActivityAnalyticsGroupBy;
     timezone: string;
     shifts: ShiftDefinition[];
+    windowStartMs?: number;
+    windowEndMs?: number;
+    nowMs?: number;
 }
 
 export function resolveActivityAnalyticsTimezone({ temporalSettings, windowTimezone }: ResolveActivityAnalyticsTimezoneOptions): string {
@@ -49,7 +61,14 @@ export function groupActivityAnalyticsIntervals({
     groupBy,
     timezone,
     shifts,
+    windowStartMs,
+    windowEndMs,
+    nowMs,
 }: GroupActivityAnalyticsIntervalsOptions): ActivityAnalyticsGroupedBucket[] {
+    if (groupBy === 'shift') {
+        return groupShiftIntervals({ intervals, timezone, shifts, windowStartMs, windowEndMs, nowMs });
+    }
+
     const grouped = new Map<string, ActivityAnalyticsGroupedBucket>();
 
     for (const interval of intervals) {
@@ -69,6 +88,10 @@ export function groupActivityAnalyticsIntervals({
                     stopCount: 0,
                     utilizationRatio: 0,
                     coverageRatio: 0,
+                    expectedDurationMs: segment.bucket.endMs - segment.bucket.startMs,
+                    productivityRatio: 0,
+                    productivityLabel: '0%',
+                    isInProgress: false,
                 });
             }
 
@@ -91,7 +114,106 @@ export function groupActivityAnalyticsIntervals({
             ...bucket,
             utilizationRatio: resolveUtilizationRatio(bucket.durationsMs),
             coverageRatio: resolveCoverageRatio(bucket.durationsMs),
+            productivityRatio: bucket.expectedDurationMs > 0 ? bucket.durationsMs.prod / bucket.expectedDurationMs : 0,
+            productivityLabel: formatProductivityLabel(bucket.expectedDurationMs > 0 ? bucket.durationsMs.prod / bucket.expectedDurationMs : 0),
         }));
+}
+
+function groupShiftIntervals(options: {
+    intervals: ActivityAnalyticsInterval[];
+    timezone: string;
+    shifts: ShiftDefinition[];
+    windowStartMs?: number;
+    windowEndMs?: number;
+    nowMs?: number;
+}): ActivityAnalyticsGroupedBucket[] {
+    if (options.intervals.length === 0) {
+        return [];
+    }
+
+    const startMs = options.windowStartMs ?? Math.min(...options.intervals.map((interval) => interval.timestampMs));
+    const endMs = options.windowEndMs ?? Math.max(...options.intervals.map((interval) => interval.endTimestampMs));
+    const resolvedNowMs = options.nowMs ?? Date.now();
+    const shiftIntervals = buildWeeklyShiftIntervals({
+        shifts: options.shifts,
+        timezone: options.timezone,
+        visibleStartMs: startMs,
+        visibleEndMs: endMs,
+    });
+
+    const timeline = new Array<{ bucketKey: string; label: string; startMs: number; endMs: number; expectedDurationMs: number; isInProgress: boolean }>();
+    let cursorMs = startMs;
+
+    for (const interval of shiftIntervals) {
+        if (interval.startMs > cursorMs) {
+            timeline.push(buildUncoveredBucket(cursorMs, interval.startMs, options.timezone));
+        }
+
+        const isInProgress = resolvedNowMs >= interval.startMs && resolvedNowMs < interval.endMs;
+        const labelBase = `${formatLocalDate(interval.startMs, options.timezone)} · ${interval.label}`;
+
+        timeline.push({
+            bucketKey: interval.bucketKey,
+            label: isInProgress ? `${labelBase} (en curso)` : labelBase,
+            startMs: interval.startMs,
+            endMs: interval.endMs,
+            expectedDurationMs: interval.endMs - interval.startMs,
+            isInProgress,
+        });
+        cursorMs = Math.max(cursorMs, interval.endMs);
+    }
+
+    if (cursorMs < endMs) {
+        timeline.push(buildUncoveredBucket(cursorMs, endMs, options.timezone));
+    }
+
+    return timeline
+        .filter((bucket) => bucket.endMs > bucket.startMs)
+        .map((bucket) => {
+            const durationsMs = createEmptyDurations();
+            let estimatedKwh = 0;
+            let stopCount = 0;
+
+            for (const interval of options.intervals) {
+                const overlapStartMs = Math.max(interval.timestampMs, bucket.startMs);
+                const overlapEndMs = Math.min(interval.endTimestampMs, bucket.endMs);
+                const overlapDurationMs = overlapEndMs - overlapStartMs;
+
+                if (overlapDurationMs <= 0) {
+                    continue;
+                }
+
+                const durationKey = interval.state === 'no-data' ? 'noData' : interval.state;
+                durationsMs[durationKey] += overlapDurationMs;
+                estimatedKwh += interval.estimatedKwh * (overlapDurationMs / interval.durationMs);
+
+                if (interval.stopCountContribution > 0 && interval.timestampMs >= bucket.startMs && interval.timestampMs < bucket.endMs) {
+                    stopCount += interval.stopCountContribution;
+                }
+            }
+
+            const coverageRatio = resolveCoverageRatioForExpectedDuration(durationsMs, bucket.expectedDurationMs);
+            const productivityRatio = bucket.isInProgress || coverageRatio < 1
+                ? null
+                : durationsMs.prod / bucket.expectedDurationMs;
+
+            return {
+                bucketKey: bucket.bucketKey,
+                label: bucket.label,
+                startMs: bucket.startMs,
+                endMs: bucket.endMs,
+                durationsMs,
+                estimatedKwh,
+                stopCount,
+                utilizationRatio: resolveUtilizationRatio(durationsMs),
+                coverageRatio,
+                expectedDurationMs: bucket.expectedDurationMs,
+                productivityRatio,
+                productivityLabel: formatProductivityLabel(productivityRatio),
+                isInProgress: bucket.isInProgress,
+            };
+        })
+        .sort((left, right) => left.startMs - right.startMs);
 }
 
 function resolveGroupingBucket(options: {
@@ -103,34 +225,34 @@ function resolveGroupingBucket(options: {
     const localParts = getZonedDateTimeParts(options.timestampMs, options.timezone);
 
     switch (options.groupBy) {
-        case 'shift':
-            return resolveShiftBucket(options.shifts, options.timezone, localParts);
-        case 'day': {
-            const key = formatDateKey(localParts.year, localParts.month, localParts.day);
-            const startMs = zonedLocalDateTimeToUtcMs({ ...localParts, hour: 0, minute: 0 }, options.timezone);
-            const endMs = zonedLocalDateTimeToUtcMs(addLocalDays({ ...localParts, hour: 0, minute: 0 }, 1), options.timezone);
-            return { bucketKey: `day:${key}`, label: key, startMs, endMs };
-        }
-        case 'week': {
-            const weekStart = resolveWeekStart(localParts);
-            const key = formatDateKey(weekStart.year, weekStart.month, weekStart.day);
-            const startMs = zonedLocalDateTimeToUtcMs({ ...weekStart, hour: 0, minute: 0 }, options.timezone);
-            const endMs = zonedLocalDateTimeToUtcMs(addLocalDays({ ...weekStart, hour: 0, minute: 0 }, 7), options.timezone);
-            return { bucketKey: `week:${key}`, label: `Week ${key}`, startMs, endMs };
-        }
-        case 'month': {
-            const key = `${localParts.year}-${pad(localParts.month)}`;
-            const start = { year: localParts.year, month: localParts.month, day: 1, hour: 0, minute: 0 };
-            const end = localParts.month === 12
-                ? { year: localParts.year + 1, month: 1, day: 1, hour: 0, minute: 0 }
-                : { year: localParts.year, month: localParts.month + 1, day: 1, hour: 0, minute: 0 };
-            return {
-                bucketKey: `month:${key}`,
-                label: key,
-                startMs: zonedLocalDateTimeToUtcMs(start, options.timezone),
-                endMs: zonedLocalDateTimeToUtcMs(end, options.timezone),
-            };
-        }
+    case 'shift':
+        return null;
+    case 'day': {
+        const key = formatDateKey(localParts.year, localParts.month, localParts.day);
+        const startMs = zonedLocalDateTimeToUtcMs({ ...localParts, hour: 0, minute: 0 }, options.timezone);
+        const endMs = zonedLocalDateTimeToUtcMs(addLocalDays({ ...localParts, hour: 0, minute: 0 }, 1), options.timezone);
+        return { bucketKey: `day:${key}`, label: key, startMs, endMs };
+    }
+    case 'week': {
+        const weekStart = resolveWeekStart(localParts);
+        const key = formatDateKey(weekStart.year, weekStart.month, weekStart.day);
+        const startMs = zonedLocalDateTimeToUtcMs({ ...weekStart, hour: 0, minute: 0 }, options.timezone);
+        const endMs = zonedLocalDateTimeToUtcMs(addLocalDays({ ...weekStart, hour: 0, minute: 0 }, 7), options.timezone);
+        return { bucketKey: `week:${key}`, label: `Week ${key}`, startMs, endMs };
+    }
+    case 'month': {
+        const key = `${localParts.year}-${pad(localParts.month)}`;
+        const start = { year: localParts.year, month: localParts.month, day: 1, hour: 0, minute: 0 };
+        const end = localParts.month === 12
+            ? { year: localParts.year + 1, month: 1, day: 1, hour: 0, minute: 0 }
+            : { year: localParts.year, month: localParts.month + 1, day: 1, hour: 0, minute: 0 };
+        return {
+            bucketKey: `month:${key}`,
+            label: key,
+            startMs: zonedLocalDateTimeToUtcMs(start, options.timezone),
+            endMs: zonedLocalDateTimeToUtcMs(end, options.timezone),
+        };
+    }
     }
 }
 
@@ -193,51 +315,6 @@ function splitIntervalAcrossBuckets(options: {
     return segments;
 }
 
-function resolveShiftBucket(
-    shifts: ShiftDefinition[],
-    timezone: string,
-    localParts: { year: number; month: number; day: number; hour: number; minute: number },
-): { bucketKey: string; label: string; startMs: number; endMs: number } | null {
-    const localMinutes = (localParts.hour * 60) + localParts.minute;
-
-    for (const shift of shifts) {
-        const startMinutes = parseShiftMinutes(shift.start);
-        const endMinutes = parseShiftMinutes(shift.end);
-
-        if (startMinutes === null || endMinutes === null) {
-            continue;
-        }
-
-        const crossesMidnight = startMinutes >= endMinutes;
-        const containsPoint = crossesMidnight
-            ? localMinutes >= startMinutes || localMinutes < endMinutes
-            : localMinutes >= startMinutes && localMinutes < endMinutes;
-
-        if (!containsPoint) {
-            continue;
-        }
-
-        const anchorDate = crossesMidnight && localMinutes < endMinutes
-            ? addLocalDays({ ...localParts, hour: 0, minute: 0 }, -1)
-            : { ...localParts, hour: 0, minute: 0 };
-        const [startHour, startMinute] = shift.start.split(':').map(Number);
-        const [endHour, endMinute] = shift.end.split(':').map(Number);
-        const start = { ...anchorDate, hour: startHour, minute: startMinute };
-        const endBase = { ...anchorDate, hour: endHour, minute: endMinute };
-        const end = crossesMidnight ? addLocalDays(endBase, 1) : endBase;
-        const keyDate = formatDateKey(anchorDate.year, anchorDate.month, anchorDate.day);
-
-        return {
-            bucketKey: `shift:${shift.id}:${keyDate}`,
-            label: shift.label,
-            startMs: zonedLocalDateTimeToUtcMs(start, timezone),
-            endMs: zonedLocalDateTimeToUtcMs(end, timezone),
-        };
-    }
-
-    return null;
-}
-
 function resolveWeekStart(localParts: { year: number; month: number; day: number }) {
     const utcMidnight = Date.UTC(localParts.year, localParts.month - 1, localParts.day);
     const day = new Date(utcMidnight).getUTCDay();
@@ -255,6 +332,15 @@ function resolveCoverageRatio(durationsMs: ActivityAnalyticsDurationsMs): number
     return total > 0 ? (total - durationsMs.noData) / total : 0;
 }
 
+function resolveCoverageRatioForExpectedDuration(durationsMs: ActivityAnalyticsDurationsMs, expectedDurationMs: number): number {
+    if (expectedDurationMs <= 0) {
+        return 0;
+    }
+
+    const backedDuration = durationsMs.prod + durationsMs.setup + durationsMs.stopped;
+    return Math.min(1, backedDuration / expectedDurationMs);
+}
+
 function createEmptyDurations(): ActivityAnalyticsDurationsMs {
     return {
         prod: 0,
@@ -264,9 +350,33 @@ function createEmptyDurations(): ActivityAnalyticsDurationsMs {
     };
 }
 
-function parseShiftMinutes(value: string): number | null {
-    const [hour, minute] = value.split(':').map(Number);
-    return Number.isInteger(hour) && Number.isInteger(minute) ? (hour * 60) + minute : null;
+function buildUncoveredBucket(startMs: number, endMs: number, timezone: string) {
+    return {
+        bucketKey: `${UNCOVERED_SHIFT_ID}:${formatLocalDateTime(startMs, timezone)}`,
+        label: `${formatLocalDate(startMs, timezone)} · ${UNCOVERED_SHIFT_LABEL}`,
+        startMs,
+        endMs,
+        expectedDurationMs: endMs - startMs,
+        isInProgress: false,
+    };
+}
+
+function formatProductivityLabel(value: number | null): string {
+    if (value === null || !Number.isFinite(value)) {
+        return 'sin datos';
+    }
+
+    return `${Math.round(value * 100)}%`;
+}
+
+function formatLocalDate(timestampMs: number, timezone: string): string {
+    const parts = getZonedDateTimeParts(timestampMs, timezone);
+    return formatDateKey(parts.year, parts.month, parts.day);
+}
+
+function formatLocalDateTime(timestampMs: number, timezone: string): string {
+    const parts = getZonedDateTimeParts(timestampMs, timezone);
+    return `${formatDateKey(parts.year, parts.month, parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
 }
 
 function formatDateKey(year: number, month: number, day: number): string {

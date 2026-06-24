@@ -254,6 +254,44 @@ describe('DashboardViewer', () => {
         );
     });
 
+    it('passes viewer widget persistence callbacks to widget renderers', async () => {
+        const onPersistWidgetDisplayOptions = vi.fn();
+        const dashboard = makeDashboard({
+            widgets: [makeWidget({ id: 'widget-1', title: 'Origin', type: 'activity-analytics' } as never)],
+            layout: [makeLayout({ widgetId: 'widget-1', x: 0, y: 0, w: 4, h: 3 })],
+        });
+
+        const { container } = render(
+            <div style={{ width: '1200px', height: '800px' }}>
+                <DashboardViewer
+                    widgets={dashboard.widgets}
+                    layout={dashboard.layout}
+                    equipmentMap={new Map()}
+                    cols={dashboard.cols}
+                    rows={dashboard.rows}
+                    onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                />
+            </div>,
+        );
+
+        const observedContainer = container.querySelector('[data-testid="dashboard-viewer-root"]');
+        if (!observedContainer) {
+            throw new Error('Dashboard viewer root was not rendered.');
+        }
+
+        emitResize(observedContainer, 1200, 800);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('widget-renderer-widget-1')).toBeInTheDocument();
+        });
+
+        expect(widgetRendererMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                onPersistWidgetDisplayOptions,
+            }),
+        );
+    });
+
     it('keeps the viewer root as a neutral shell until the first valid canvas measurement arrives', () => {
         const dashboard = makeDashboard({
             widgets: [makeWidget({ id: 'widget-1', title: 'Origin' })],

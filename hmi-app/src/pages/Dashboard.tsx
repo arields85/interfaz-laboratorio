@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, Loader2, Link2Off } from 'lucide-react';
 import { dashboardStorage } from '../services/DashboardStorageService';
 import { hierarchyStorage } from '../services/HierarchyStorageService';
-import type { Dashboard, HierarchyNode } from '../domain/admin.types';
+import type { ActivityAnalyticsPersistedDisplayPatch, Dashboard, HierarchyNode } from '../domain/admin.types';
 import DashboardViewer from '../components/viewer/DashboardViewer';
 import DashboardHeader from '../components/viewer/DashboardHeader';
 import { mockEquipmentList } from '../mocks/equipment.mock';
@@ -146,6 +146,21 @@ export default function Dashboard() {
         currentNodeId: activeDashboard?.ownerNodeId,
     }), [allNodes, allDashboards, activeDashboard?.ownerNodeId]);
 
+    const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => {
+        if (!activeDashboard) {
+            return;
+        }
+
+        const updatedDashboard = await dashboardStorage.persistPublishedWidgetDisplayOptions(activeDashboard.id, widgetId, displayOptions);
+
+        if (!updatedDashboard) {
+            return;
+        }
+
+        setAllDashboards((previous) => previous.map((dashboard) => dashboard.id === updatedDashboard.id ? updatedDashboard : dashboard));
+        setPublishedDashboards((previous) => previous.map((dashboard) => dashboard.id === updatedDashboard.id ? updatedDashboard : dashboard));
+    };
+
     const renderNoPublishedState = () => (
         <div className="h-full flex flex-col items-center justify-center text-industrial-muted space-y-4">
             <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-2">
@@ -219,6 +234,7 @@ export default function Dashboard() {
                     hierarchyContext={hierarchyContext}
                     cols={activeDashboard.cols}
                     rows={activeDashboard.rows}
+                    onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
                 />
             </div>
         </div>

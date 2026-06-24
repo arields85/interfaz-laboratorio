@@ -26,8 +26,8 @@ export function useActivitySeries(params: ActivityAnalyticsQueryDraft): UseActiv
             ...ACTIVITY_SERIES_QUERY_KEY_PREFIX,
             normalizedParams?.machineId ?? null,
             normalizedParams?.range ?? null,
-            null,
-            null,
+            normalizedParams?.range === 'custom' ? normalizedParams.start : null,
+            normalizedParams?.range === 'custom' ? normalizedParams.end : null,
         ],
         queryFn: async () => {
             if (!normalizedParams) {

@@ -1,4 +1,4 @@
-import type { Dashboard, Template, WidgetConfig, WidgetLayout } from '../domain/admin.types';
+import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, Dashboard, Template, WidgetConfig, WidgetLayout } from '../domain/admin.types';
 import { mockDashboards } from '../mocks/admin.mock';
 import { clampWidgetBounds, DEFAULT_COLS, isTemplateApplicable } from '../utils/gridConfig';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
@@ -119,6 +119,34 @@ class DashboardStorageService {
         }
 
         localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
+    }
+
+    async persistPublishedWidgetDisplayOptions(dashboardId: string, widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch): Promise<Dashboard | null> {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const dashboards = await this.readStorage();
+        const dashboard = dashboards.find((currentDashboard) => currentDashboard.id === dashboardId) ?? null;
+
+        if (!dashboard) {
+            return null;
+        }
+
+        dashboard.widgets = dashboard.widgets.map((widget) => (
+            widget.id === widgetId
+                ? applyPersistedActivityAnalyticsDisplayPatch(widget, displayOptions)
+                : widget
+        ));
+
+        if (dashboard.publishedSnapshot) {
+            dashboard.publishedSnapshot.widgets = dashboard.publishedSnapshot.widgets.map((widget) => (
+                widget.id === widgetId
+                    ? applyPersistedActivityAnalyticsDisplayPatch(widget, displayOptions)
+                    : widget
+            ));
+        }
+
+        dashboard.lastUpdateAt = new Date().toISOString();
+        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
+        return dashboard;
     }
 
     async createEmptyDashboard(name: string): Promise<Dashboard> {
@@ -337,6 +365,24 @@ class DashboardStorageService {
         await this.saveDashboard(dashboard);
         return dashboard;
     }
+}
+
+function applyPersistedActivityAnalyticsDisplayPatch(widget: WidgetConfig, displayOptions: ActivityAnalyticsPersistedDisplayPatch): WidgetConfig {
+    if (widget.type !== 'activity-analytics') {
+        return { ...widget, displayOptions: { ...widget.displayOptions, ...displayOptions } } as WidgetConfig;
+    }
+
+    const activityWidget = widget as ActivityAnalyticsWidgetConfig;
+
+    return {
+        ...activityWidget,
+        displayOptions: {
+            ...activityWidget.displayOptions,
+            range: displayOptions.range,
+            start: displayOptions.range === 'custom' ? displayOptions.start : undefined,
+            end: displayOptions.range === 'custom' ? displayOptions.end : undefined,
+        },
+    } satisfies ActivityAnalyticsWidgetConfig;
 }
 
 export const dashboardStorage = new DashboardStorageService();

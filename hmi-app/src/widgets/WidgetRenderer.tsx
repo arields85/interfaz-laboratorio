@@ -1,4 +1,4 @@
-import type { WidgetConfig } from '../domain/admin.types';
+import type { ActivityAnalyticsPersistedDisplayPatch, WidgetConfig } from '../domain/admin.types';
 import type { EquipmentSummary } from '../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../domain/dataContract.types';
 import type { HierarchyContext } from './resolvers/hierarchyResolver';
@@ -54,6 +54,7 @@ interface WidgetRendererProps {
      * Ignorado por renderers que no soportan modo jerárquico.
      */
     hierarchyContext?: HierarchyContext;
+    onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
 }
 
 export default function WidgetRenderer({
@@ -65,6 +66,7 @@ export default function WidgetRenderer({
     className,
     siblingWidgets,
     hierarchyContext,
+    onPersistWidgetDisplayOptions,
 }: WidgetRendererProps) {
     switch (widget.type) {
         case 'metric-card':
@@ -108,6 +110,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
                 />
             );
 

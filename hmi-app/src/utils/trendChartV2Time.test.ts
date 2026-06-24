@@ -144,7 +144,7 @@ describe('trendChartV2Time', () => {
     it('uses resolved timezone formatting and real timestamp scaling', () => {
         vi.setSystemTime(new Date('2026-06-19T00:00:00.000Z'));
 
-        expect(resolveTrendChartV2Timezone('UTC', 'America/Argentina/Buenos_Aires')).toBe('UTC');
+        expect(resolveTrendChartV2Timezone('UTC', 'America/Argentina/Buenos_Aires')).toBe('America/Argentina/Buenos_Aires');
         expect(resolveTrendChartV2Timezone(undefined, 'America/Argentina/Buenos_Aires')).toBe('America/Argentina/Buenos_Aires');
         expect(resolveTrendChartV2Timezone('Invalid/Timezone', 'UTC')).toBe('UTC');
 

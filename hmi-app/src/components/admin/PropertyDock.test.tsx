@@ -934,6 +934,55 @@ describe('PropertyDock activity-analytics', () => {
         });
     });
 
+    it('never offers 1h or custom in admin and keeps long-range Turno summary available in the shared compatibility matrix', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '24h',
+                groupBy: 'shift',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Rango'));
+
+        expect(screen.queryByRole('button', { name: '1 hora' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: '24 horas' }).length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: '7 días' }).length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: '30 días' }).length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: '12 meses' }).length).toBeGreaterThan(0);
+
+        await user.click(screen.getByRole('button', { name: '12 meses' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            range: '12m',
+            groupBy: 'shift',
+        });
+        expect(getFieldButtonInSection('Agrupación', 'Grupo')).toHaveTextContent('Turno');
+
+        await user.click(getFieldButtonInSection('Agrupación', 'Grupo'));
+
+        expect(screen.getAllByRole('button', { name: 'Turno' }).length).toBeGreaterThan(0);
+        expect(screen.queryByRole('button', { name: 'Día' })).not.toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: 'Semana' }).length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: 'Mes' }).length).toBeGreaterThan(0);
+
+        await user.click(screen.getAllByRole('button', { name: 'Turno' })[0]);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            range: '12m',
+            groupBy: 'shift',
+        });
+    });
+
     it('prevents invalid threshold ordering and shows a clear warning', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'activity-analytics',

@@ -910,7 +910,7 @@ describe('TrendChartV2Widget', () => {
         expect(screen.queryByText('Turno B')).not.toBeInTheDocument();
     });
 
-    it('renders overnight shift overlays and tooltip labels when enabled', () => {
+    it('renders overnight shift overlays with the same date-aware Friday rollover label used by activity analytics', () => {
         const widget: TrendChartV2WidgetConfig = {
             ...makeWidget(),
             displayOptions: {
@@ -977,7 +977,148 @@ describe('TrendChartV2Widget', () => {
 
         fireEvent.mouseMove(overlay, { clientX: 252, clientY: 60 });
 
-        expect(screen.getByText('Shift: Turno C')).toBeInTheDocument();
+        expect(screen.getByText('Shift: 2026-06-18 · Turno C')).toBeInTheDocument();
+    });
+
+    it('shows sin turno in the tooltip when the shared weekly schedule leaves Sunday uncovered', () => {
+        const widget: TrendChartV2WidgetConfig = {
+            ...makeWidget(),
+            displayOptions: {
+                historicalDensity: 'high',
+                showShifts: true,
+            },
+        };
+
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: {
+                plantTimezone: 'UTC',
+                shifts: [
+                    { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['fri'] },
+                ],
+            },
+            shifts: [
+                { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['fri'] },
+            ],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: makeHistoryResponse({
+                window: {
+                    start: '2026-06-21T09:00:00.000Z',
+                    end: '2026-06-21T11:00:00.000Z',
+                    timezone: 'UTC',
+                    bucketMs: 60 * 60 * 1000,
+                },
+                series: [
+                    { timestamp: '2026-06-21T10:00:00.000Z', timestampMs: Date.parse('2026-06-21T10:00:00.000Z'), value: 30 },
+                ],
+            }),
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(<TrendChartV2Widget widget={widget} equipmentMap={new Map()} machines={[]} />);
+
+        const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
+        Object.defineProperty(overlay, 'getBoundingClientRect', {
+            configurable: true,
+            value: () => ({
+                x: 38,
+                y: 0,
+                width: 320,
+                height: 180,
+                top: 0,
+                left: 38,
+                right: 358,
+                bottom: 180,
+                toJSON: () => ({}),
+            }),
+        });
+
+        fireEvent.mouseMove(overlay, { clientX: 198, clientY: 60 });
+
+        expect(screen.getByText('Shift: 2026-06-21 · sin turno')).toBeInTheDocument();
+    });
+
+    it('re-renders tooltip shift semantics when the global timezone changes', () => {
+        const widget: TrendChartV2WidgetConfig = {
+            ...makeWidget(),
+            displayOptions: {
+                historicalDensity: 'high',
+                showShifts: true,
+            },
+        };
+
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: {
+                plantTimezone: 'UTC',
+                shifts: [
+                    { id: 'shift-evening', label: 'Turno Tarde', start: '20:00', end: '23:30', weekdays: ['fri'] },
+                ],
+            },
+            shifts: [
+                { id: 'shift-evening', label: 'Turno Tarde', start: '20:00', end: '23:30', weekdays: ['fri'] },
+            ],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: makeHistoryResponse({
+                window: {
+                    start: '2026-06-20T00:00:00.000Z',
+                    end: '2026-06-20T01:00:00.000Z',
+                    timezone: 'UTC',
+                    bucketMs: 30 * 60 * 1000,
+                },
+                series: [
+                    { timestamp: '2026-06-20T00:30:00.000Z', timestampMs: Date.parse('2026-06-20T00:30:00.000Z'), value: 30 },
+                ],
+            }),
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        const { rerender } = render(<TrendChartV2Widget widget={widget} equipmentMap={new Map()} machines={[]} />);
+
+        const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
+        Object.defineProperty(overlay, 'getBoundingClientRect', {
+            configurable: true,
+            value: () => ({
+                x: 38,
+                y: 0,
+                width: 320,
+                height: 180,
+                top: 0,
+                left: 38,
+                right: 358,
+                bottom: 180,
+                toJSON: () => ({}),
+            }),
+        });
+
+        fireEvent.mouseMove(overlay, { clientX: 198, clientY: 60 });
+        expect(screen.getByText('Shift: 2026-06-20 · sin turno')).toBeInTheDocument();
+
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: {
+                plantTimezone: 'America/Argentina/Buenos_Aires',
+                shifts: [
+                    { id: 'shift-evening', label: 'Turno Tarde', start: '20:00', end: '23:30', weekdays: ['fri'] },
+                ],
+            },
+            shifts: [
+                { id: 'shift-evening', label: 'Turno Tarde', start: '20:00', end: '23:30', weekdays: ['fri'] },
+            ],
+            resolvedTimezone: 'America/Argentina/Buenos_Aires',
+        });
+
+        rerender(<TrendChartV2Widget widget={widget} equipmentMap={new Map()} machines={[]} />);
+        fireEvent.mouseMove(screen.getByTestId('trend-chart-v2-interaction-overlay'), { clientX: 198, clientY: 60 });
+
+        expect(screen.getByText('Shift: 2026-06-19 · Turno Tarde')).toBeInTheDocument();
     });
 
     it('suppresses shift labels and summary when shift visibility remains disabled', () => {

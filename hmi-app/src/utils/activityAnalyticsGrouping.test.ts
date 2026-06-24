@@ -10,9 +10,9 @@ import {
 const UTC = 'UTC';
 
 const SHIFTS: ShiftDefinition[] = [
-    { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00' },
-    { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00' },
-    { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00' },
+    { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+    { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+    { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
 ];
 
 function interval(start: string, durationMs: number, state: ActivityAnalyticsInterval['state']): ActivityAnalyticsInterval {
@@ -47,7 +47,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-c:2026-06-18',
-            label: 'Turno C',
+            label: '2026-06-18 · Turno C',
             durationsMs: {
                 prod: 30 * 60 * 1000,
                 setup: 30 * 60 * 1000,
@@ -270,5 +270,33 @@ describe('activityAnalyticsGrouping', () => {
                 stopCount: 0,
             },
         ]);
+    });
+
+    it('labels shift groups with the local date, keeps friday overnight continuity, and emits sin turno gaps', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-19T23:00:00.000Z', 60 * 60 * 1000, 'prod'),
+                interval('2026-06-21T10:00:00.000Z', 30 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: [
+                { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['fri'] },
+            ],
+            windowStartMs: Date.parse('2026-06-19T22:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-21T11:00:00.000Z'),
+        });
+
+        expect(grouped.map((bucket) => ({ bucketKey: bucket.bucketKey, label: bucket.label }))).toEqual([
+            {
+                bucketKey: 'shift:shift-c:2026-06-19',
+                label: '2026-06-19 · Turno C',
+            },
+            {
+                bucketKey: 'sin-turno:2026-06-20T06:00',
+                label: '2026-06-20 · sin turno',
+            },
+        ]);
+        expect(grouped[0]?.expectedDurationMs).toBe(8 * 60 * 60 * 1000);
     });
 });

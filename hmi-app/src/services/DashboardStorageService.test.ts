@@ -308,6 +308,65 @@ describe('DashboardStorageService', () => {
         );
     });
 
+    it('persists viewer activity-analytics custom windows without rewriting the saved builder grouping default', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-activity-analytics',
+            status: 'published',
+            ownerNodeId: 'node-1',
+            widgets: [makeWidget({
+                id: 'activity-widget',
+                type: 'activity-analytics',
+                displayOptions: { range: '24h', groupBy: 'day' },
+            } as never)],
+            publishedSnapshot: {
+                aspect: '16:9',
+                cols: 40,
+                rows: 24,
+                widgets: [makeWidget({
+                    id: 'activity-widget',
+                    type: 'activity-analytics',
+                    displayOptions: { range: '24h', groupBy: 'day' },
+                } as never)],
+                layout: [],
+                publishedAt: '2026-04-16T15:00:00.000Z',
+            },
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(dashboard);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const persistPromise = dashboardStorage.persistPublishedWidgetDisplayOptions(
+            dashboard.id,
+            'activity-widget',
+            {
+                range: 'custom',
+                start: '2026-06-18T10:00:00.000Z',
+                end: '2026-06-18T12:00:00.000Z',
+                groupBy: 'shift',
+            },
+        );
+        await vi.advanceTimersByTimeAsync(600);
+        const updated = await persistPromise;
+
+        expect(updated?.widgets[0]).toEqual(expect.objectContaining({
+            displayOptions: expect.objectContaining({
+                range: 'custom',
+                start: '2026-06-18T10:00:00.000Z',
+                end: '2026-06-18T12:00:00.000Z',
+                groupBy: 'day',
+            }),
+        }));
+        expect(updated?.publishedSnapshot?.widgets[0]).toEqual(expect.objectContaining({
+            displayOptions: expect.objectContaining({
+                range: 'custom',
+                start: '2026-06-18T10:00:00.000Z',
+                end: '2026-06-18T12:00:00.000Z',
+                groupBy: 'day',
+            }),
+        }));
+    });
+
     it('applies matching templates preserving coordinates when rows already fit', () => {
         const dashboard = makeDashboard({
             id: 'dashboard-target',

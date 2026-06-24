@@ -9,9 +9,9 @@ const THRESHOLDS = {
 } as const;
 
 const SHIFTS: ShiftDefinition[] = [
-    { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00' },
-    { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00' },
-    { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00' },
+    { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+    { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+    { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
 ];
 
 function point(timestamp: string, value: number | null) {
@@ -100,5 +100,43 @@ describe('computeActivityAnalytics', () => {
         );
         expect(dayResult.timezone).toBe('UTC');
         expect(shiftResult.timezone).toBe('America/Argentina/Buenos_Aires');
+    });
+
+    it('marks incomplete grouped productivity as sin datos and avoids false-precision rankings on ties', () => {
+        const result = computeActivityAnalytics({
+            series: [
+                point('2026-06-20T22:00:00.000Z', 10),
+                point('2026-06-20T23:00:00.000Z', null),
+                point('2026-06-21T06:00:00.000Z', 10),
+                point('2026-06-23T22:00:00.000Z', 10),
+                point('2026-06-24T06:00:00.000Z', 10),
+            ],
+            thresholds: THRESHOLDS,
+            groupBy: 'shift',
+            shifts: [{ id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['sat', 'mon'] }],
+            timezone: 'UTC',
+            window: {
+                start: '2026-06-20T22:00:00.000Z',
+                end: '2026-06-24T06:00:00.000Z',
+                timezone: 'UTC',
+                bucket: '1h',
+                bucketMs: 60 * 60 * 1000,
+            },
+            nowMs: Date.parse('2026-06-25T00:00:00.000Z'),
+        });
+
+        const shiftRows = result.grouped.filter((bucket) => bucket.label.includes('Turno C'));
+
+        expect(shiftRows).toHaveLength(2);
+        expect(shiftRows[0]).toMatchObject({
+            label: '2026-06-20 · Turno C',
+            productivityLabel: 'sin datos',
+        });
+        expect(result.comparison.best?.label).toBe('sin datos');
+        expect(result.comparison.worst?.label).toBe('sin datos');
+        expect(result.summaryRows.filter((row) => row.label.includes('Turno C')).map((row) => row.label)).toEqual([
+            '2026-06-20 · Turno C',
+            '2026-06-22 · Turno C',
+        ]);
     });
 });

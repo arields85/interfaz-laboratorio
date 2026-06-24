@@ -36,6 +36,10 @@ import {
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
 import { resolveActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    resolveActivityAnalyticsDisplayRules,
+    type ActivityAnalyticsSupportedRange,
+} from '../../utils/activityAnalyticsDisplayRules';
 
 // =============================================================================
 // PropertyDock
@@ -78,6 +82,18 @@ type PresetUnit = (typeof PRESET_UNITS)[number];
 type ConnectionStatusTextFieldKey = 'onlineText' | 'degradadoText' | 'offlineText' | 'unknownText';
 
 const isPresetUnit = (value: string): value is PresetUnit => PRESET_UNITS.some(unit => unit === value);
+const ACTIVITY_ANALYTICS_RANGE_OPTIONS: Array<{ value: ActivityAnalyticsSupportedRange; label: string }> = [
+    { value: '24h', label: '24 horas' },
+    { value: '7d', label: '7 días' },
+    { value: '30d', label: '30 días' },
+    { value: '12m', label: '12 meses' },
+];
+const ACTIVITY_ANALYTICS_GROUP_OPTIONS = [
+    { value: 'shift', label: 'Turno' },
+    { value: 'day', label: 'Día' },
+    { value: 'week', label: 'Semana' },
+    { value: 'month', label: 'Mes' },
+] as const;
 
 const STATUS_TEXT_FIELDS: Array<{ key: keyof StatusDisplayOptions; label: string; placeholder: string }> = [
     { key: 'runningText', label: 'Running', placeholder: DEFAULT_STATUS_LABELS.running },
@@ -184,6 +200,52 @@ export default function PropertyDock(props: PropertyDockProps) {
 
         setActivityAnalyticsThresholdWarning(null);
         handleDisplayOptionChange(key, nextValue);
+    };
+
+    const handleActivityAnalyticsRangeChange = (nextRange: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const nextRules = resolveActivityAnalyticsDisplayRules({
+            range: nextRange,
+            groupBy: currentOptions.groupBy,
+        });
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                range: nextRules.range,
+                groupBy: nextRules.groupBy,
+                start: undefined,
+                end: undefined,
+            },
+        });
+    };
+
+    const handleActivityAnalyticsGroupChange = (nextGroupBy: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const nextRules = resolveActivityAnalyticsDisplayRules({
+            range: currentOptions.range,
+            start: currentOptions.start,
+            end: currentOptions.end,
+            groupBy: nextGroupBy,
+        });
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                range: nextRules.range,
+                groupBy: nextRules.groupBy,
+            },
+        });
     };
 
     const handleUnitChange = (val: string) => {
@@ -438,6 +500,14 @@ export default function PropertyDock(props: PropertyDockProps) {
         : undefined;
     const activityAnalyticsOptions = isActivityAnalytics
         ? resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined)
+        : null;
+    const activityAnalyticsDisplayRules = activityAnalyticsOptions
+        ? resolveActivityAnalyticsDisplayRules({
+            range: activityAnalyticsOptions.range,
+            start: activityAnalyticsOptions.start,
+            end: activityAnalyticsOptions.end,
+            groupBy: activityAnalyticsOptions.groupBy,
+        })
         : null;
     const isTrendChartV2 = selectedWidget ? isTrendChartV2Widget(selectedWidget) : false;
     const trendChartV2Options = isTrendChartV2
@@ -919,14 +989,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         <DockFieldRow label="Rango">
                                             <AdminSelect
                                                 value={activityAnalyticsOptions?.range ?? '24h'}
-                                                onChange={val => handleDisplayOptionChange('range', val)}
-                                                options={[
-                                                    { value: '1h', label: '1 hora' },
-                                                    { value: '24h', label: '24 horas' },
-                                                    { value: '7d', label: '7 días' },
-                                                    { value: '30d', label: '30 días' },
-                                                    { value: '12m', label: '12 meses' },
-                                                ]}
+                                                onChange={handleActivityAnalyticsRangeChange}
+                                                options={ACTIVITY_ANALYTICS_RANGE_OPTIONS}
                                             />
                                         </DockFieldRow>
                                     </>
@@ -1239,13 +1303,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                 <DockFieldRow label="Grupo">
                                     <AdminSelect
                                         value={activityAnalyticsOptions?.groupBy ?? 'day'}
-                                        onChange={val => handleDisplayOptionChange('groupBy', val)}
-                                        options={[
-                                            { value: 'shift', label: 'Turno' },
-                                            { value: 'day', label: 'Día' },
-                                            { value: 'week', label: 'Semana' },
-                                            { value: 'month', label: 'Mes' },
-                                        ]}
+                                        onChange={handleActivityAnalyticsGroupChange}
+                                        options={ACTIVITY_ANALYTICS_GROUP_OPTIONS.filter((option) => activityAnalyticsDisplayRules?.allowedGroups.includes(option.value) ?? false)}
                                     />
                                 </DockFieldRow>
                             </DockSection>

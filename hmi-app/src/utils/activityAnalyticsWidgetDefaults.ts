@@ -3,6 +3,9 @@ import {
     ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS,
     type ActivityAnalyticsDisplayMode,
 } from '../domain/activityAnalytics.types';
+import {
+    resolveActivityAnalyticsDisplayRules,
+} from './activityAnalyticsDisplayRules';
 
 export const DEFAULT_ACTIVITY_ANALYTICS_RANGE = '24h' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY = 'day' as const;
@@ -32,10 +35,19 @@ export function createDefaultActivityAnalyticsDisplayOptions(): ActivityAnalytic
 
 export function resolveActivityAnalyticsDisplayOptions(
     displayOptions?: ActivityAnalyticsDisplayOptions,
-): Required<ActivityAnalyticsDisplayOptions> {
+): Required<Pick<ActivityAnalyticsDisplayOptions, 'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode'>> & Pick<ActivityAnalyticsDisplayOptions, 'start' | 'end'> {
+    const displayRules = resolveActivityAnalyticsDisplayRules({
+        range: displayOptions?.range,
+        start: displayOptions?.start,
+        end: displayOptions?.end,
+        groupBy: displayOptions?.groupBy,
+    });
+
     return {
-        range: displayOptions?.range ?? DEFAULT_ACTIVITY_ANALYTICS_RANGE,
-        groupBy: displayOptions?.groupBy ?? DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY,
+        range: displayRules.range,
+        start: displayOptions?.start,
+        end: displayOptions?.end,
+        groupBy: displayRules.groupBy,
         setupThresholdKw: displayOptions?.setupThresholdKw ?? DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW,
         prodThresholdKw: displayOptions?.prodThresholdKw ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         displayMode: normalizeActivityAnalyticsDisplayMode(displayOptions?.displayMode),

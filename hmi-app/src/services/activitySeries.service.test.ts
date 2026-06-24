@@ -34,7 +34,69 @@ describe('activitySeries.service', () => {
         );
     });
 
-    it('rejects custom activity-series windows before sending a request', async () => {
+    it('serializes custom activity-series windows as read-only GET requests with explicit boundaries', async () => {
+        vi.spyOn(dataConnectionConfig, 'getDataActivitySeriesUrl').mockReturnValue(
+            'https://api.local/api/hmi-data/activity-series'
+        );
+
+        const payload = { ok: true };
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: vi.fn().mockResolvedValue(payload),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(
+            fetchActivitySeries({
+                machineId: 7,
+                range: 'custom',
+                start: '2026-06-18T10:00:00.000Z',
+                end: '2026-06-18T12:00:00.000Z',
+            })
+        ).resolves.toEqual(payload);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            'https://api.local/api/hmi-data/activity-series?machineId=7&range=custom&start=2026-06-18T10%3A00%3A00.000Z&end=2026-06-18T12%3A00%3A00.000Z',
+            {
+                method: 'GET',
+                headers: { Accept: 'application/json' },
+            }
+        );
+    });
+
+    it('never serializes runtime grouping or schedule metadata into Node-RED activity-series params', async () => {
+        vi.spyOn(dataConnectionConfig, 'getDataActivitySeriesUrl').mockReturnValue(
+            'https://api.local/api/hmi-data/activity-series'
+        );
+
+        const payload = { ok: true };
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: vi.fn().mockResolvedValue(payload),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(
+            fetchActivitySeries({
+                machineId: 7,
+                range: 'custom',
+                start: '2026-06-18T10:00:00.000Z',
+                end: '2026-06-18T12:00:00.000Z',
+                groupBy: 'month',
+                shifts: [{ label: 'Night' }],
+            } as never)
+        ).resolves.toEqual(payload);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            'https://api.local/api/hmi-data/activity-series?machineId=7&range=custom&start=2026-06-18T10%3A00%3A00.000Z&end=2026-06-18T12%3A00%3A00.000Z',
+            {
+                method: 'GET',
+                headers: { Accept: 'application/json' },
+            }
+        );
+    });
+
+    it('rejects oversized custom activity-series windows before sending a request', async () => {
         vi.spyOn(dataConnectionConfig, 'getDataActivitySeriesUrl').mockReturnValue(
             'https://api.local/api/hmi-data/activity-series'
         );
@@ -46,10 +108,10 @@ describe('activitySeries.service', () => {
             fetchActivitySeries({
                 machineId: 7,
                 range: 'custom',
-                start: '2026-06-18T10:00:00.000Z',
-                end: '2026-06-18T12:00:00.000Z',
+                start: '2026-06-01T00:00:00.000Z',
+                end: '2026-07-02T00:00:00.001Z',
             })
-        ).rejects.toEqual(new DataServiceError('Activity-series query must use a supported preset range'));
+        ).rejects.toEqual(new DataServiceError('Custom activity-series window must be 30 days or less'));
 
         expect(fetchMock).not.toHaveBeenCalled();
     });

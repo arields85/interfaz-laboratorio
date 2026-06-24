@@ -30,10 +30,10 @@ describe('TemporalSettingsTab', () => {
         await user.type(screen.getByLabelText('Inicio del turno 1'), '22:00');
         await user.clear(screen.getByLabelText('Fin del turno 1'));
         await user.type(screen.getByLabelText('Fin del turno 1'), '06:00');
-
         expect(screen.getByLabelText('Timezone de planta')).toHaveValue('America/Santiago');
         expect(screen.getByLabelText('Nombre del turno 1')).toHaveValue('Turno noche');
         expect(screen.getByLabelText('Fin del turno 1')).toHaveValue('06:00');
+        expect(screen.getByLabelText('Viernes turno 1')).toBeChecked();
         expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toBeNull();
     });
 
@@ -49,6 +49,8 @@ describe('TemporalSettingsTab', () => {
         await user.type(screen.getByLabelText('Timezone de planta'), 'UTC');
         await user.click(screen.getByRole('button', { name: 'Agregar turno' }));
         await user.type(screen.getByLabelText('Nombre del turno 1'), 'Turno A');
+        await user.click(screen.getByLabelText('Sabado turno 1'));
+        await user.click(screen.getByLabelText('Domingo turno 1'));
 
         act(() => {
             saveRef.current?.();
@@ -56,6 +58,7 @@ describe('TemporalSettingsTab', () => {
 
         expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toContain('"plantTimezone":"UTC"');
         expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toContain('"label":"Turno A"');
+        expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toContain('"weekdays":["mon","tue","wed","thu","fri"]');
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(eventSpy).toHaveBeenCalledTimes(1);
 
@@ -85,6 +88,56 @@ describe('TemporalSettingsTab', () => {
         expect(dirtySpy).not.toHaveBeenCalledWith(false);
 
         document.removeEventListener(TEMPORAL_SETTINGS_CHANGED_EVENT, eventSpy);
+    });
+
+    it('blocks save when a shift has no selected weekdays', async () => {
+        const user = userEvent.setup();
+        const saveRef = createSaveRef();
+
+        render(<TemporalSettingsTab saveRef={saveRef} />);
+
+        await user.click(screen.getByRole('button', { name: 'Agregar turno' }));
+        await user.type(screen.getByLabelText('Nombre del turno 1'), 'Turno A');
+        await user.click(screen.getByLabelText('Lunes turno 1'));
+        await user.click(screen.getByLabelText('Martes turno 1'));
+        await user.click(screen.getByLabelText('Miercoles turno 1'));
+        await user.click(screen.getByLabelText('Jueves turno 1'));
+        await user.click(screen.getByLabelText('Viernes turno 1'));
+        await user.click(screen.getByLabelText('Sabado turno 1'));
+        await user.click(screen.getByLabelText('Domingo turno 1'));
+
+        act(() => {
+            saveRef.current?.();
+        });
+
+        expect(screen.getByRole('alert')).toHaveTextContent('Selecciona al menos un dia para cada turno antes de guardar.');
+        expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toBeNull();
+    });
+
+    it('loads legacy shifts as every-weekday drafts and preserves reordered save order', async () => {
+        const user = userEvent.setup();
+        const saveRef = createSaveRef();
+
+        localStorage.setItem(TEMPORAL_SETTINGS_STORAGE_KEY, JSON.stringify({
+            plantTimezone: 'UTC',
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00' },
+                { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00' },
+            ],
+        }));
+
+        render(<TemporalSettingsTab saveRef={saveRef} />);
+
+        expect(screen.getByLabelText('Lunes turno 1')).toBeChecked();
+        expect(screen.getByLabelText('Domingo turno 2')).toBeChecked();
+
+        await user.click(screen.getByRole('button', { name: 'Mover abajo turno 1' }));
+
+        act(() => {
+            saveRef.current?.();
+        });
+
+        expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toContain('"shifts":[{"id":"shift-b"');
     });
 
     it('shows a save error and keeps the draft dirty when local storage fails', async () => {

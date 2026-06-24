@@ -1,4 +1,8 @@
 import type { ShiftDefinition, TemporalSettingsConfig } from '../domain/admin.types';
+import {
+    normalizeWeekdays,
+    validateWeeklyShiftSchedule,
+} from '../utils/weeklyShiftSchedule';
 
 export const TEMPORAL_SETTINGS_STORAGE_KEY = 'hmi:temporal-settings';
 export const TEMPORAL_SETTINGS_CHANGED_EVENT = 'hmi:temporal-settings-changed';
@@ -44,6 +48,11 @@ export function readTemporalSettingsConfig(): TemporalSettingsConfig {
 
 export function saveTemporalSettingsConfig(config: TemporalSettingsConfig): TemporalSettingsSaveResult {
     const normalized = normalizeTemporalSettingsConfig(config);
+    const validation = validateWeeklyShiftSchedule(normalized.shifts);
+
+    if (!validation.ok) {
+        return { ok: false, config: normalized, error: new Error(validation.error) };
+    }
 
     try {
         localStorage.setItem(TEMPORAL_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
@@ -122,12 +131,13 @@ function normalizeShiftDefinition(value: unknown): ShiftDefinition | null {
     const label = normalizeRequiredText(candidate.label);
     const start = normalizeShiftTime(candidate.start);
     const end = normalizeShiftTime(candidate.end);
+    const weekdays = normalizeWeekdays(candidate.weekdays);
 
     if (!id || !label || !start || !end) {
         return null;
     }
 
-    return { id, label, start, end };
+    return { id, label, start, end, weekdays };
 }
 
 function normalizeRequiredText(value: unknown): string | null {
