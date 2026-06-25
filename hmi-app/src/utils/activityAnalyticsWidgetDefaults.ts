@@ -8,7 +8,7 @@ import {
 } from './activityAnalyticsDisplayRules';
 
 export const DEFAULT_ACTIVITY_ANALYTICS_RANGE = '24h' as const;
-export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY = 'day' as const;
+export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY = 'shift' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW = 0.15;
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW = 0.25;
 export const DEFAULT_ACTIVITY_ANALYTICS_DISPLAY_MODE = 'kpis-and-bars' as const;

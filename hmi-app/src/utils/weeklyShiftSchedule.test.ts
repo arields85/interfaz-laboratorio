@@ -62,6 +62,31 @@ describe('weeklyShiftSchedule', () => {
                 bucketKey: 'shift:shift-c:2026-06-19',
                 startMs: Date.parse('2026-06-19T22:00:00.000Z'),
                 endMs: Date.parse('2026-06-20T06:00:00.000Z'),
+                semanticStartMs: Date.parse('2026-06-19T22:00:00.000Z'),
+                semanticEndMs: Date.parse('2026-06-20T06:00:00.000Z'),
+            },
+        ]);
+    });
+
+    it('clips visible bounds while preserving semantic shift extents for overlapping intervals', () => {
+        const shifts: ShiftDefinition[] = [
+            { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['thu'] },
+        ];
+
+        expect(buildWeeklyShiftIntervals({
+            shifts,
+            timezone: UTC,
+            visibleStartMs: Date.parse('2026-06-18T08:00:00.000Z'),
+            visibleEndMs: Date.parse('2026-06-18T10:00:00.000Z'),
+        })).toEqual([
+            {
+                shiftId: 'shift-a',
+                label: 'Turno A',
+                bucketKey: 'shift:shift-a:2026-06-18',
+                startMs: Date.parse('2026-06-18T08:00:00.000Z'),
+                endMs: Date.parse('2026-06-18T10:00:00.000Z'),
+                semanticStartMs: Date.parse('2026-06-18T06:00:00.000Z'),
+                semanticEndMs: Date.parse('2026-06-18T14:00:00.000Z'),
             },
         ]);
     });

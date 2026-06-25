@@ -19,7 +19,7 @@ export interface ActivityAnalyticsDisplayRules {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
-const FALLBACK_GROUP_PREFERENCE: ActivityAnalyticsGroupBy[] = ['day', 'week', 'month', 'shift'];
+const FALLBACK_GROUP_PREFERENCE: ActivityAnalyticsGroupBy[] = ['shift', 'day', 'week', 'month'];
 
 export const ACTIVITY_ANALYTICS_RUNTIME_RANGE_OPTIONS: ActivityAnalyticsSupportedRange[] = ['24h', '7d', '30d', '12m'];
 
@@ -66,13 +66,13 @@ function resolveAllowedGroups(
 ): ActivityAnalyticsGroupBy[] {
     switch (range) {
     case '24h':
-        return ['shift', 'day'];
+        return ['shift'];
     case '7d':
-        return ['shift', 'day', 'week'];
+        return ['shift', 'day'];
     case '30d':
-        return ['shift', 'day', 'week', 'month'];
+        return ['shift', 'day', 'week'];
     case '12m':
-        return ['shift', 'week', 'month'];
+        return ['shift', 'month'];
     case 'custom':
         if (customDurationMs === null) {
             return ['day'];

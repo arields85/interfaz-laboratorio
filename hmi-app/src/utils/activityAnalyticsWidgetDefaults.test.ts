@@ -29,7 +29,7 @@ describe('activityAnalyticsWidgetDefaults', () => {
             }),
         ).toMatchObject({
             range: '24h',
-            groupBy: 'day',
+            groupBy: 'shift',
         });
 
         expect(
@@ -41,7 +41,7 @@ describe('activityAnalyticsWidgetDefaults', () => {
             }),
         ).toMatchObject({
             range: 'custom',
-            groupBy: 'day',
+            groupBy: 'shift',
         });
 
         expect(
@@ -53,6 +53,26 @@ describe('activityAnalyticsWidgetDefaults', () => {
             }),
         ).toMatchObject({
             range: 'custom',
+            groupBy: 'shift',
+        });
+
+        expect(
+            resolveActivityAnalyticsDisplayOptions({
+                range: '30d',
+                groupBy: 'shift',
+            }),
+        ).toMatchObject({
+            range: '30d',
+            groupBy: 'shift',
+        });
+
+        expect(
+            resolveActivityAnalyticsDisplayOptions({
+                range: '12m',
+                groupBy: 'shift',
+            }),
+        ).toMatchObject({
+            range: '12m',
             groupBy: 'shift',
         });
     });

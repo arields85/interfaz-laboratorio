@@ -25,7 +25,10 @@ export interface ActivityAnalyticsGroupedBucket {
     productivityRatio: number | null;
     productivityLabel: string;
     isInProgress: boolean;
+    hasInProgressContribution?: boolean;
 }
+
+const LIVE_CALENDAR_WINDOW_END_TOLERANCE_MS = 15 * 60 * 1000;
 
 interface ResolveActivityAnalyticsTimezoneOptions {
     temporalSettings: Pick<TemporalSettingsConfig, 'plantTimezone'> | null | undefined;
@@ -40,6 +43,9 @@ interface GroupActivityAnalyticsIntervalsOptions {
     windowStartMs?: number;
     windowEndMs?: number;
     nowMs?: number;
+    trimLeadingPartialBucket?: boolean;
+    markTrailingCurrentBucketInProgress?: boolean;
+    trimLeadingPartialShiftBucket?: boolean;
 }
 
 export function resolveActivityAnalyticsTimezone({ temporalSettings, windowTimezone }: ResolveActivityAnalyticsTimezoneOptions): string {
@@ -64,12 +70,24 @@ export function groupActivityAnalyticsIntervals({
     windowStartMs,
     windowEndMs,
     nowMs,
+    trimLeadingPartialBucket,
+    markTrailingCurrentBucketInProgress,
+    trimLeadingPartialShiftBucket,
 }: GroupActivityAnalyticsIntervalsOptions): ActivityAnalyticsGroupedBucket[] {
     if (groupBy === 'shift') {
-        return groupShiftIntervals({ intervals, timezone, shifts, windowStartMs, windowEndMs, nowMs });
+        return groupShiftIntervals({
+            intervals,
+            timezone,
+            shifts,
+            windowStartMs,
+            windowEndMs,
+            nowMs,
+            trimLeadingPartialShiftBucket,
+        });
     }
 
     const grouped = new Map<string, ActivityAnalyticsGroupedBucket>();
+    const resolvedNowMs = nowMs ?? Date.now();
 
     for (const interval of intervals) {
         const segments = splitIntervalAcrossBuckets({ interval, groupBy, timezone, shifts });
@@ -108,15 +126,118 @@ export function groupActivityAnalyticsIntervals({
         }
     }
 
-    return Array.from(grouped.values())
-        .sort((left, right) => left.startMs - right.startMs)
-        .map((bucket) => ({
-            ...bucket,
-            utilizationRatio: resolveUtilizationRatio(bucket.durationsMs),
-            coverageRatio: resolveCoverageRatio(bucket.durationsMs),
-            productivityRatio: bucket.expectedDurationMs > 0 ? bucket.durationsMs.prod / bucket.expectedDurationMs : 0,
-            productivityLabel: formatProductivityLabel(bucket.expectedDurationMs > 0 ? bucket.durationsMs.prod / bucket.expectedDurationMs : 0),
+    return trimLeadingPartialCalendarBuckets({
+        buckets: Array.from(grouped.values()).sort((left, right) => left.startMs - right.startMs),
+        windowStartMs,
+        trimLeadingPartialBucket,
+    })
+        .map((bucket) => finalizeCalendarBucket({
+            bucket,
+            windowStartMs,
+            windowEndMs,
+            nowMs: resolvedNowMs,
+            markTrailingCurrentBucketInProgress,
         }));
+}
+
+function trimLeadingPartialCalendarBuckets(options: {
+    buckets: ActivityAnalyticsGroupedBucket[];
+    windowStartMs?: number;
+    trimLeadingPartialBucket?: boolean;
+}): ActivityAnalyticsGroupedBucket[] {
+    const { buckets, windowStartMs, trimLeadingPartialBucket = false } = options;
+
+    if (!trimLeadingPartialBucket || windowStartMs === undefined || buckets.length <= 1) {
+        return buckets;
+    }
+
+    const [firstBucket] = buckets;
+
+    if (!firstBucket) {
+        return buckets;
+    }
+
+    const windowStartsInsideFirstBucket = windowStartMs > firstBucket.startMs && windowStartMs < firstBucket.endMs;
+
+    if (!windowStartsInsideFirstBucket) {
+        return buckets;
+    }
+
+    return buckets.slice(1);
+}
+
+function finalizeCalendarBucket(options: {
+    bucket: ActivityAnalyticsGroupedBucket;
+    windowStartMs?: number;
+    windowEndMs?: number;
+    nowMs: number;
+    markTrailingCurrentBucketInProgress?: boolean;
+}): ActivityAnalyticsGroupedBucket {
+    const { bucket, windowStartMs, windowEndMs, nowMs, markTrailingCurrentBucketInProgress = false } = options;
+    const visibleWindowEndMs = windowEndMs ?? nowMs;
+    const visibleStartMs = Math.max(bucket.startMs, windowStartMs ?? bucket.startMs);
+    const visibleEndMs = Math.min(nowMs, visibleWindowEndMs, bucket.endMs);
+    const isInProgress = resolveCalendarBucketInProgress({
+        bucket,
+        visibleWindowEndMs,
+        nowMs,
+        markTrailingCurrentBucketInProgress,
+    });
+    const trackedDurationMs = bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped + bucket.durationsMs.noData;
+    const visibleDurationMs = Math.max(0, visibleEndMs - visibleStartMs);
+    const durationsMs = {
+        ...bucket.durationsMs,
+        noData: bucket.durationsMs.noData + Math.max(0, visibleDurationMs - trackedDurationMs),
+    };
+    const productiveDurationMs = durationsMs.prod + durationsMs.setup + durationsMs.stopped;
+    const coverageRatio = visibleDurationMs > 0
+        ? Math.min(1, productiveDurationMs / visibleDurationMs)
+        : 0;
+    const hasIncompleteCoverage = visibleEndMs < bucket.endMs || coverageRatio < 1;
+    const productivityRatio = isInProgress || hasIncompleteCoverage
+        ? null
+        : bucket.expectedDurationMs > 0
+            ? durationsMs.prod / bucket.expectedDurationMs
+            : 0;
+
+    return {
+        ...bucket,
+        label: isInProgress ? `${bucket.label} (en curso)` : bucket.label,
+        durationsMs,
+        utilizationRatio: resolveUtilizationRatio(durationsMs),
+        coverageRatio,
+        productivityRatio,
+        productivityLabel: formatProductivityLabel(productivityRatio, {
+            isInProgress,
+            hasIncompleteCoverage: !isInProgress && hasIncompleteCoverage,
+        }),
+        isInProgress,
+    };
+}
+
+function resolveCalendarBucketInProgress(options: {
+    bucket: ActivityAnalyticsGroupedBucket;
+    visibleWindowEndMs: number;
+    nowMs: number;
+    markTrailingCurrentBucketInProgress: boolean;
+}): boolean {
+    const { bucket, visibleWindowEndMs, nowMs, markTrailingCurrentBucketInProgress } = options;
+
+    if (!markTrailingCurrentBucketInProgress) {
+        return false;
+    }
+
+    if (nowMs < bucket.startMs || nowMs >= bucket.endMs) {
+        return false;
+    }
+
+    if (visibleWindowEndMs >= nowMs) {
+        return true;
+    }
+
+    const isWindowEndInsideSameBucket = visibleWindowEndMs >= bucket.startMs && visibleWindowEndMs < bucket.endMs;
+
+    return isWindowEndInsideSameBucket && (nowMs - visibleWindowEndMs) <= LIVE_CALENDAR_WINDOW_END_TOLERANCE_MS;
 }
 
 function groupShiftIntervals(options: {
@@ -126,6 +247,7 @@ function groupShiftIntervals(options: {
     windowStartMs?: number;
     windowEndMs?: number;
     nowMs?: number;
+    trimLeadingPartialShiftBucket?: boolean;
 }): ActivityAnalyticsGroupedBucket[] {
     if (options.intervals.length === 0) {
         return [];
@@ -141,7 +263,16 @@ function groupShiftIntervals(options: {
         visibleEndMs: endMs,
     });
 
-    const timeline = new Array<{ bucketKey: string; label: string; startMs: number; endMs: number; expectedDurationMs: number; isInProgress: boolean }>();
+    const timeline = new Array<{
+        bucketKey: string;
+        label: string;
+        startMs: number;
+        endMs: number;
+        expectedDurationMs: number;
+        isInProgress: boolean;
+        semanticStartMs: number;
+        semanticEndMs: number;
+    }>();
     let cursorMs = startMs;
 
     for (const interval of shiftIntervals) {
@@ -149,7 +280,7 @@ function groupShiftIntervals(options: {
             timeline.push(buildUncoveredBucket(cursorMs, interval.startMs, options.timezone));
         }
 
-        const isInProgress = resolvedNowMs >= interval.startMs && resolvedNowMs < interval.endMs;
+        const isInProgress = resolvedNowMs >= interval.semanticStartMs && resolvedNowMs < interval.semanticEndMs;
         const labelBase = `${formatLocalDate(interval.startMs, options.timezone)} · ${interval.label}`;
 
         timeline.push({
@@ -157,8 +288,12 @@ function groupShiftIntervals(options: {
             label: isInProgress ? `${labelBase} (en curso)` : labelBase,
             startMs: interval.startMs,
             endMs: interval.endMs,
-            expectedDurationMs: interval.endMs - interval.startMs,
+            expectedDurationMs: isInProgress
+                ? interval.semanticEndMs - interval.semanticStartMs
+                : interval.endMs - interval.startMs,
             isInProgress,
+            semanticStartMs: interval.semanticStartMs,
+            semanticEndMs: interval.semanticEndMs,
         });
         cursorMs = Math.max(cursorMs, interval.endMs);
     }
@@ -167,7 +302,11 @@ function groupShiftIntervals(options: {
         timeline.push(buildUncoveredBucket(cursorMs, endMs, options.timezone));
     }
 
-    return timeline
+    return trimLeadingPartialShiftBuckets({
+        buckets: timeline,
+        windowStartMs: options.windowStartMs,
+        trimLeadingPartialShiftBucket: options.trimLeadingPartialShiftBucket,
+    })
         .filter((bucket) => bucket.endMs > bucket.startMs)
         .map((bucket) => {
             const durationsMs = createEmptyDurations();
@@ -209,11 +348,57 @@ function groupShiftIntervals(options: {
                 coverageRatio,
                 expectedDurationMs: bucket.expectedDurationMs,
                 productivityRatio,
-                productivityLabel: formatProductivityLabel(productivityRatio),
+                productivityLabel: formatProductivityLabel(productivityRatio, {
+                    isInProgress: bucket.isInProgress,
+                }),
                 isInProgress: bucket.isInProgress,
             };
         })
         .sort((left, right) => left.startMs - right.startMs);
+}
+
+function trimLeadingPartialShiftBuckets(options: {
+    buckets: Array<{
+        bucketKey: string;
+        label: string;
+        startMs: number;
+        endMs: number;
+        expectedDurationMs: number;
+        isInProgress: boolean;
+        semanticStartMs: number;
+        semanticEndMs: number;
+    }>;
+    windowStartMs?: number;
+    trimLeadingPartialShiftBucket?: boolean;
+}): Array<{
+    bucketKey: string;
+    label: string;
+    startMs: number;
+    endMs: number;
+    expectedDurationMs: number;
+    isInProgress: boolean;
+    semanticStartMs: number;
+    semanticEndMs: number;
+}> {
+    const { buckets, windowStartMs, trimLeadingPartialShiftBucket = false } = options;
+
+    if (!trimLeadingPartialShiftBucket || windowStartMs === undefined || buckets.length <= 1) {
+        return buckets;
+    }
+
+    const [firstBucket] = buckets;
+
+    if (!firstBucket) {
+        return buckets;
+    }
+
+    const windowStartsInsideFirstBucket = windowStartMs > firstBucket.semanticStartMs && windowStartMs < firstBucket.semanticEndMs;
+
+    if (!windowStartsInsideFirstBucket) {
+        return buckets;
+    }
+
+    return buckets.slice(1);
 }
 
 function resolveGroupingBucket(options: {
@@ -327,11 +512,6 @@ function resolveUtilizationRatio(durationsMs: ActivityAnalyticsDurationsMs): num
     return denominator > 0 ? durationsMs.prod / denominator : 0;
 }
 
-function resolveCoverageRatio(durationsMs: ActivityAnalyticsDurationsMs): number {
-    const total = durationsMs.prod + durationsMs.setup + durationsMs.stopped + durationsMs.noData;
-    return total > 0 ? (total - durationsMs.noData) / total : 0;
-}
-
 function resolveCoverageRatioForExpectedDuration(durationsMs: ActivityAnalyticsDurationsMs, expectedDurationMs: number): number {
     if (expectedDurationMs <= 0) {
         return 0;
@@ -358,12 +538,31 @@ function buildUncoveredBucket(startMs: number, endMs: number, timezone: string) 
         endMs,
         expectedDurationMs: endMs - startMs,
         isInProgress: false,
+        semanticStartMs: startMs,
+        semanticEndMs: endMs,
     };
 }
 
-function formatProductivityLabel(value: number | null): string {
+function formatProductivityLabel(value: number | null, options?: {
+    isInProgress?: boolean;
+    hasIncompleteCoverage?: boolean;
+}): string {
+    const { isInProgress = false, hasIncompleteCoverage = false } = options ?? {};
+
     if (value === null || !Number.isFinite(value)) {
+        if (isInProgress) {
+            return 'en curso';
+        }
+
+        if (hasIncompleteCoverage) {
+            return 'cobertura incompleta';
+        }
+
         return 'sin datos';
+    }
+
+    if (isInProgress) {
+        return 'en curso';
     }
 
     return `${Math.round(value * 100)}%`;

@@ -9,52 +9,92 @@ describe('activityAnalyticsDisplayRules', () => {
         expect(ACTIVITY_ANALYTICS_RUNTIME_RANGE_OPTIONS).toEqual(['24h', '7d', '30d', '12m']);
         expect(resolveActivityAnalyticsDisplayRules({ range: '1h', groupBy: 'month' })).toEqual({
             range: '24h',
-            allowedGroups: ['shift', 'day'],
-            fallbackGroup: 'day',
-            groupBy: 'day',
-            turnoDetailEligible: false,
+            allowedGroups: ['shift'],
+            fallbackGroup: 'shift',
+            groupBy: 'shift',
+            turnoDetailEligible: true,
         });
     });
 
     it('keeps low-range Turno detail eligible only when the effective group stays in shift', () => {
         expect(resolveActivityAnalyticsDisplayRules({ range: '24h', groupBy: 'shift' })).toEqual({
             range: '24h',
-            allowedGroups: ['shift', 'day'],
-            fallbackGroup: 'day',
+            allowedGroups: ['shift'],
+            fallbackGroup: 'shift',
             groupBy: 'shift',
             turnoDetailEligible: true,
         });
 
         expect(resolveActivityAnalyticsDisplayRules({ range: '7d', groupBy: 'week' })).toEqual({
             range: '7d',
-            allowedGroups: ['shift', 'day', 'week'],
-            fallbackGroup: 'day',
-            groupBy: 'week',
+            allowedGroups: ['shift', 'day'],
+            fallbackGroup: 'shift',
+            groupBy: 'shift',
+            turnoDetailEligible: true,
+        });
+
+        expect(resolveActivityAnalyticsDisplayRules({ range: '7d', groupBy: 'day' })).toEqual({
+            range: '7d',
+            allowedGroups: ['shift', 'day'],
+            fallbackGroup: 'shift',
+            groupBy: 'day',
             turnoDetailEligible: false,
         });
     });
 
-    it('keeps Turno available for long-range summaries while preserving stable fallback groups', () => {
+    it('caps grouped choices to the maximum useful coarse buckets for each fixed range', () => {
         expect(resolveActivityAnalyticsDisplayRules({ range: '30d', groupBy: 'shift' })).toEqual({
             range: '30d',
-            allowedGroups: ['shift', 'day', 'week', 'month'],
-            fallbackGroup: 'day',
+            allowedGroups: ['shift', 'day', 'week'],
+            fallbackGroup: 'shift',
+            groupBy: 'shift',
+            turnoDetailEligible: false,
+        });
+
+        expect(resolveActivityAnalyticsDisplayRules({ range: '30d', groupBy: 'week' })).toEqual({
+            range: '30d',
+            allowedGroups: ['shift', 'day', 'week'],
+            fallbackGroup: 'shift',
+            groupBy: 'week',
+            turnoDetailEligible: false,
+        });
+
+        expect(resolveActivityAnalyticsDisplayRules({ range: '30d', groupBy: 'month' })).toEqual({
+            range: '30d',
+            allowedGroups: ['shift', 'day', 'week'],
+            fallbackGroup: 'shift',
             groupBy: 'shift',
             turnoDetailEligible: false,
         });
 
         expect(resolveActivityAnalyticsDisplayRules({ range: '12m', groupBy: 'day' })).toEqual({
             range: '12m',
-            allowedGroups: ['shift', 'week', 'month'],
-            fallbackGroup: 'week',
-            groupBy: 'week',
+            allowedGroups: ['shift', 'month'],
+            fallbackGroup: 'shift',
+            groupBy: 'shift',
             turnoDetailEligible: false,
         });
 
         expect(resolveActivityAnalyticsDisplayRules({ range: '12m', groupBy: 'shift' })).toEqual({
             range: '12m',
-            allowedGroups: ['shift', 'week', 'month'],
-            fallbackGroup: 'week',
+            allowedGroups: ['shift', 'month'],
+            fallbackGroup: 'shift',
+            groupBy: 'shift',
+            turnoDetailEligible: false,
+        });
+
+        expect(resolveActivityAnalyticsDisplayRules({ range: '12m', groupBy: 'month' })).toEqual({
+            range: '12m',
+            allowedGroups: ['shift', 'month'],
+            fallbackGroup: 'shift',
+            groupBy: 'month',
+            turnoDetailEligible: false,
+        });
+
+        expect(resolveActivityAnalyticsDisplayRules({ range: '12m', groupBy: 'week' })).toEqual({
+            range: '12m',
+            allowedGroups: ['shift', 'month'],
+            fallbackGroup: 'shift',
             groupBy: 'shift',
             turnoDetailEligible: false,
         });
@@ -69,8 +109,8 @@ describe('activityAnalyticsDisplayRules', () => {
         })).toEqual({
             range: 'custom',
             allowedGroups: ['shift', 'day'],
-            fallbackGroup: 'day',
-            groupBy: 'day',
+            fallbackGroup: 'shift',
+            groupBy: 'shift',
             turnoDetailEligible: false,
         });
 
@@ -82,7 +122,7 @@ describe('activityAnalyticsDisplayRules', () => {
         })).toEqual({
             range: 'custom',
             allowedGroups: ['shift', 'day', 'week'],
-            fallbackGroup: 'day',
+            fallbackGroup: 'shift',
             groupBy: 'shift',
             turnoDetailEligible: false,
         });
@@ -95,7 +135,7 @@ describe('activityAnalyticsDisplayRules', () => {
         })).toEqual({
             range: 'custom',
             allowedGroups: ['shift', 'day', 'week', 'month'],
-            fallbackGroup: 'day',
+            fallbackGroup: 'shift',
             groupBy: 'shift',
             turnoDetailEligible: false,
         });

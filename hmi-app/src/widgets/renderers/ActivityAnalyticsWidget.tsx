@@ -14,7 +14,11 @@ import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
 import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
-import { computeActivityAnalytics } from '../../utils/activityAnalyticsComputation';
+import {
+    computeActivityAnalytics,
+    resolveActivityAnalyticsComparableProductivityRatio,
+    resolveActivityAnalyticsComparison,
+} from '../../utils/activityAnalyticsComputation';
 import {
     resolveActivityAnalyticsDisplayRules,
 } from '../../utils/activityAnalyticsDisplayRules';
@@ -88,7 +92,14 @@ const SUMMARY_BAR_COLORS = {
     prod: 'var(--color-status-normal)',
     setup: 'var(--color-status-warning)',
     stopped: 'var(--color-status-critical)',
+    noData: 'var(--color-industrial-muted)',
 } as const;
+const COMPARISON_PANEL_TARGET_WIDTH_PX = 272;
+const SUMMARY_CHART_MIN_WIDTH_PX = 320;
+const SUMMARY_CHART_MAX_WIDTH_PX = 440;
+const TOP_REGION_STACK_BREAKPOINT_PX = SUMMARY_CHART_MIN_WIDTH_PX + 256 + 16;
+const COMPARISON_FALLBACK_LABEL = 'sin comparación';
+const INCOMPLETE_COVERAGE_LABEL = 'cobertura incompleta';
 
 export default function ActivityAnalyticsWidget({
     widget,
@@ -129,7 +140,11 @@ export default function ActivityAnalyticsWidget({
         groupBy: activeDisplayRules.groupBy,
     };
     const activeGroupBy = activeDisplayRules.groupBy;
-    const activeTurnoMode = activeDisplayRules.turnoDetailEligible ? runtimeViewState.turnoMode : 'summary';
+    const forceTurnoDetail = activeGroupBy === 'shift' && activeDisplayRules.range === '24h';
+    const showTurnoModeControl = activeGroupBy === 'shift' && activeDisplayRules.range === '7d';
+    const activeTurnoMode = forceTurnoDetail
+        ? 'detail'
+        : activeDisplayRules.turnoDetailEligible ? runtimeViewState.turnoMode : 'summary';
 
     if (runtimeGroupBy !== null && runtimeGroupBy !== activeGroupBy) {
         setRuntimeViewState((current) => ({
@@ -169,6 +184,7 @@ export default function ActivityAnalyticsWidget({
                 setupKw: activeDisplayOptions.setupThresholdKw,
                 prodKw: activeDisplayOptions.prodThresholdKw,
             },
+            range: activeDisplayOptions.range,
             groupBy: activeGroupBy,
             shifts,
             timezone: resolvedTimezone,
@@ -180,34 +196,40 @@ export default function ActivityAnalyticsWidget({
             return [];
         }
 
-        if (activeGroupBy !== 'shift') {
-            return computedAnalytics.grouped;
-        }
+        const resolvedGrouped = (() => {
+            if (activeGroupBy !== 'shift') {
+                return computedAnalytics.grouped;
+            }
 
-        if (activeTurnoMode === 'detail') {
-            return computedAnalytics.grouped;
-        }
+            if (activeTurnoMode === 'detail') {
+                return computedAnalytics.grouped;
+            }
 
-        const turnoSummaryBuckets = buildTurnoSummaryBuckets(computedAnalytics.grouped, shifts);
+            const turnoSummaryBuckets = buildTurnoSummaryBuckets(computedAnalytics.grouped, shifts);
 
-        return turnoSummaryBuckets.length > 0 ? turnoSummaryBuckets : computedAnalytics.grouped;
+            return turnoSummaryBuckets.length > 0 ? turnoSummaryBuckets : computedAnalytics.grouped;
+        })();
+
+        return activeGroupBy === 'shift'
+            ? resolvedGrouped.filter((bucket) => !isTurnoVisualHiddenBucket(bucket))
+            : resolvedGrouped;
     }, [activeGroupBy, activeTurnoMode, computedAnalytics, shifts]);
+    const hasHiddenOnlyTurnoGroups = activeGroupBy === 'shift'
+        && computedAnalytics !== null
+        && computedAnalytics.grouped.length > 0
+        && displayGrouped.length === 0;
     const displayComparison = useMemo(() => {
         if (!computedAnalytics) {
             return {
-                best: { bucketKey: 'best', label: 'sin datos' },
-                worst: { bucketKey: 'worst', label: 'sin datos' },
+                best: { bucketKey: 'best', label: COMPARISON_FALLBACK_LABEL },
+                worst: { bucketKey: 'worst', label: COMPARISON_FALLBACK_LABEL },
             };
         }
 
-        const isAggregatedTurnoSummary = activeGroupBy === 'shift'
-            && activeTurnoMode === 'summary'
-            && displayGrouped !== computedAnalytics.grouped;
-
-        return isAggregatedTurnoSummary
-            ? resolveDisplayComparison(displayGrouped)
+        return activeGroupBy === 'shift'
+            ? resolveActivityAnalyticsComparison(displayGrouped)
             : computedAnalytics.comparison;
-    }, [activeGroupBy, activeTurnoMode, computedAnalytics, displayGrouped]);
+    }, [activeGroupBy, computedAnalytics, displayGrouped]);
     const groupedCount = displayGrouped.length;
 
     useEffect(() => {
@@ -344,7 +366,7 @@ export default function ActivityAnalyticsWidget({
         });
     }
 
-    if (displayGrouped.length === 0) {
+    if (computedAnalytics.grouped.length === 0) {
         return renderStateCard({
             className,
             header,
@@ -419,11 +441,14 @@ export default function ActivityAnalyticsWidget({
                     comparison={displayComparison}
                     grouped={displayGrouped}
                     visualLayout={visualLayout}
-                    chartWidth={analyticsBodySize?.width ?? 640}
-                    showTurnoModeControl={visualLayout.turnoDetailEligible}
-                    turnoMode={activeTurnoMode}
-                    onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
-                />
+                chartWidth={analyticsBodySize?.width ?? 640}
+                showTurnoModeControl={showTurnoModeControl}
+                turnoMode={activeTurnoMode}
+                onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
+                emptyMessage={hasHiddenOnlyTurnoGroups
+                    ? 'Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.'
+                    : null}
+            />
             </div>
         </div>
     );
@@ -606,6 +631,7 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     showTurnoModeControl,
     turnoMode,
     onTurnoModeChange,
+    emptyMessage,
 }: {
     analytics: ReturnType<typeof computeActivityAnalytics>['analytics'];
     comparison: ReturnType<typeof computeActivityAnalytics>['comparison'];
@@ -615,26 +641,40 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     showTurnoModeControl: boolean;
     turnoMode: 'summary' | 'detail';
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
+    emptyMessage: string | null;
 }) {
-    const detailClassName = visualLayout.summary.mode === 'axis-bars'
-        ? 'grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(15rem,0.4fr)_minmax(0,0.6fr)]'
-        : 'flex min-h-0 flex-1 flex-col gap-4';
+    const stackTopRegion = chartWidth < TOP_REGION_STACK_BREAKPOINT_PX;
+    const summaryChartWidth = Math.min(
+        chartWidth,
+        SUMMARY_CHART_MAX_WIDTH_PX,
+        stackTopRegion
+            ? chartWidth
+            : Math.max(chartWidth - COMPARISON_PANEL_TARGET_WIDTH_PX, SUMMARY_CHART_MIN_WIDTH_PX),
+    );
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4">
-            <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={chartWidth} />
-            <div className={detailClassName}>
-                <ComparisonPanel comparison={comparison} grouped={grouped} />
-                <GroupedAnalyticsPanel
-                    grouped={grouped}
-                    groupsLayout={visualLayout.groups}
-                    chartWidth={chartWidth}
-                    showTurnoModeControl={showTurnoModeControl}
-                    turnoMode={turnoMode}
-                    showPartialOutlines={showTurnoModeControl && turnoMode === 'detail'}
-                    onTurnoModeChange={onTurnoModeChange}
-                />
+            <div
+                className={stackTopRegion ? 'flex flex-col gap-4' : 'flex flex-wrap items-start gap-4'}
+                data-testid="activity-analytics-top-region"
+                data-top-layout={stackTopRegion ? 'stacked' : 'side-by-side'}
+            >
+                <div className={stackTopRegion ? 'min-w-0' : 'min-w-0 flex-[1.4_1_20rem]'}>
+                    <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={summaryChartWidth} />
+                </div>
+                <div className={stackTopRegion ? 'min-w-0' : 'min-w-[16rem] flex-1 basis-[16rem] self-stretch'}>
+                    <ComparisonPanel comparison={comparison} grouped={grouped} />
+                </div>
             </div>
+            <GroupedAnalyticsPanel
+                grouped={grouped}
+                groupsLayout={visualLayout.groups}
+                chartWidth={chartWidth}
+                showTurnoModeControl={showTurnoModeControl}
+                turnoMode={turnoMode}
+                onTurnoModeChange={onTurnoModeChange}
+                emptyMessage={emptyMessage}
+            />
         </div>
     );
 });
@@ -648,12 +688,19 @@ const SummaryPanel = memo(function SummaryPanel({
     summaryLayout: ActivityAnalyticsSummaryLayout;
     chartWidth: number;
 }) {
-    const sectionProductivity = analytics.coverageRatio < 1 ? 'sin datos' : formatPercent(analytics.utilizationRatio);
+    const sectionProductivity = analytics.coverageRatio < 1
+        ? INCOMPLETE_COVERAGE_LABEL
+        : formatPercent(analytics.utilizationRatio);
     const coverageLabel = formatPercent(analytics.coverageRatio);
-    const bars = [
-        { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
-        { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
+    const stackedBars = [
         { key: 'stopped', label: 'Detenida', durationMs: analytics.durationsMs.stopped, color: SUMMARY_BAR_COLORS.stopped },
+        { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
+        { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
+    ] as const;
+    const textFallbackMetrics = [
+        { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod },
+        { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup },
+        { key: 'stopped', label: 'Detenida', durationMs: analytics.durationsMs.stopped },
     ] as const;
 
     if (summaryLayout.mode === 'text-fallback') {
@@ -661,8 +708,8 @@ const SummaryPanel = memo(function SummaryPanel({
             <div className={`${ANALYTICS_PANEL_CLASS} p-3`} data-testid="activity-analytics-summary-text">
                 <PanelHeading title="Resumen" value={`% Prod. ${sectionProductivity} · Cob. ${coverageLabel}`} />
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {bars.map((bar) => (
-                        <TextMetricCard key={bar.key} label={bar.label} durationMs={bar.durationMs} productivityLabel={sectionProductivity} />
+                    {textFallbackMetrics.map((metric) => (
+                        <TextMetricCard key={metric.key} label={metric.label} durationMs={metric.durationMs} productivityLabel={sectionProductivity} />
                     ))}
                 </div>
             </div>
@@ -675,7 +722,7 @@ const SummaryPanel = memo(function SummaryPanel({
         <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-col p-3`} data-testid="activity-analytics-summary-bars">
             <PanelHeading title="Resumen" value={`% Prod. ${sectionProductivity} · Cob. ${coverageLabel}`} />
             <div className="mt-3" data-testid="activity-analytics-summary-panel">
-                <SummaryBarsChart bars={bars} width={chartWidth} height={chartHeight} density={summaryLayout.density} />
+                <SummaryBarsChart bars={stackedBars} width={chartWidth} height={chartHeight} density={summaryLayout.density} />
             </div>
         </div>
     );
@@ -687,17 +734,37 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
     chartWidth,
     showTurnoModeControl,
     turnoMode,
-    showPartialOutlines,
     onTurnoModeChange,
+    emptyMessage,
 }: {
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     groupsLayout: ActivityAnalyticsGroupsLayout;
     chartWidth: number;
     showTurnoModeControl: boolean;
     turnoMode: 'summary' | 'detail';
-    showPartialOutlines: boolean;
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
+    emptyMessage: string | null;
 }) {
+    if (grouped.length === 0 && emptyMessage) {
+        return (
+            <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
+                <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
+                    <PanelHeading title="Grupos" value="0" />
+                    {showTurnoModeControl && (
+                        <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                    )}
+                    <div
+                        className="mt-3 flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-industrial-border px-4 py-6 text-center text-industrial-muted"
+                        style={GENERAL_TYPOGRAPHY_STYLE}
+                        data-testid="activity-analytics-groups-empty"
+                    >
+                        {emptyMessage}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     if (groupsLayout.mode === 'text-fallback') {
         return (
             <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
@@ -711,7 +778,7 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
                         <TextMetricCard
                             key={bucket.bucketKey}
                             label={bucket.label}
-                            durationMs={bucket.durationsMs.prod}
+                            durationMs={resolveGroupedVisibleDurationMs(bucket)}
                             productivityLabel={bucket.productivityLabel}
                         />
                     ))}
@@ -721,7 +788,7 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
         );
     }
 
-    const chart = <GroupedStackedBarsChart grouped={grouped} width={chartWidth} layout={groupsLayout} showPartialOutlines={showPartialOutlines} />;
+    const chart = <GroupedStackedBarsChart grouped={grouped} width={chartWidth} layout={groupsLayout} />;
 
     return (
         <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
@@ -824,14 +891,15 @@ function SummaryBarsChart({
     height: number;
     density: ActivityAnalyticsSummaryLayout['density'];
 }) {
+    const totalDurationMs = Math.max(bars.reduce((total, bar) => total + bar.durationMs, 0), 1);
     const margin = density === 'compress'
-        ? { top: 18, right: 12, bottom: 50, left: 50 } as const
-        : { top: 18, right: 18, bottom: 54, left: 58 } as const;
+        ? { top: 18, right: 12, bottom: 86, left: 50 } as const
+        : { top: 18, right: 18, bottom: 92, left: 58 } as const;
     const plotWidth = Math.max(width - margin.left - margin.right, 1);
     const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
-    const maxDurationMs = Math.max(...bars.map((bar) => bar.durationMs), 1);
-    const step = plotWidth / Math.max(bars.length, 1);
-    const barWidth = Math.min(step * (density === 'compress' ? 0.58 : 0.48), density === 'compress' ? 64 : 72);
+    const maxDurationMs = totalDurationMs;
+    const barWidth = Math.min(plotWidth * (density === 'compress' ? 0.3 : 0.24), density === 'compress' ? 92 : 104);
+    const stackX = margin.left + ((plotWidth - barWidth) / 2);
     const axisTicks = Array.from({ length: 5 }, (_, index) => ({
         value: maxDurationMs - ((maxDurationMs * index) / 4),
         y: margin.top + ((index / 4) * plotHeight),
@@ -859,19 +927,85 @@ function SummaryBarsChart({
             <line x1={margin.left} x2={margin.left} y1={margin.top} y2={margin.top + plotHeight} stroke="var(--color-industrial-border)" />
             <line x1={margin.left} x2={margin.left + plotWidth} y1={margin.top + plotHeight} y2={margin.top + plotHeight} stroke="var(--color-industrial-border)" />
 
+            <g data-testid="activity-analytics-summary-stack">
+                {(() => {
+                    let currentY = margin.top + plotHeight;
+
+                    return (
+                        <>
+                            {bars.map((bar, index) => {
+                                const barHeight = (bar.durationMs / maxDurationMs) * plotHeight;
+                                currentY -= barHeight;
+
+                                return (
+                                    <rect
+                                        key={bar.key}
+                                        x={stackX}
+                                        y={currentY}
+                                        width={barWidth}
+                                        height={barHeight}
+                                        rx={index === bars.length - 1 ? 8 : 0}
+                                        fill={bar.color}
+                                        opacity={0.92}
+                                        data-testid="activity-analytics-summary-segment"
+                                    />
+                                );
+                            })}
+
+                            <text
+                                x={stackX + (barWidth / 2)}
+                                y={Math.max(currentY - 8, margin.top + 10)}
+                                textAnchor="middle"
+                                fill="var(--color-industrial-text)"
+                                style={TECHNICAL_TYPOGRAPHY_STYLE}
+                            >
+                                {formatDurationHours(totalDurationMs)}
+                            </text>
+                            <text
+                                x={stackX + (barWidth / 2)}
+                                y={margin.top + plotHeight + 20}
+                                textAnchor="middle"
+                                fill="var(--color-industrial-text)"
+                                style={CHART_TYPOGRAPHY_STYLE}
+                            >
+                                Total
+                            </text>
+                        </>
+                    );
+                })()}
+            </g>
+
             {bars.map((bar, index) => {
-                const x = margin.left + (step * index) + ((step - barWidth) / 2);
-                const barHeight = Math.max((bar.durationMs / maxDurationMs) * plotHeight, 0);
-                const y = margin.top + plotHeight - barHeight;
+                const legendX = margin.left + ((index + 0.5) * (plotWidth / bars.length));
 
                 return (
-                    <g key={bar.key} data-testid="activity-analytics-summary-bar">
-                        <rect x={x} y={y} width={barWidth} height={barHeight} rx={10} fill={bar.color} opacity={0.9} />
-                        <text x={x + (barWidth / 2)} y={Math.max(y - 8, margin.top + 10)} textAnchor="middle" fill="var(--color-industrial-text)" style={TECHNICAL_TYPOGRAPHY_STYLE}>
-                            {formatDurationHours(bar.durationMs)}
-                        </text>
-                        <text x={x + (barWidth / 2)} y={margin.top + plotHeight + 20} textAnchor="middle" fill="var(--color-industrial-text)" style={CHART_TYPOGRAPHY_STYLE}>
+                    <g key={`summary-legend-${bar.key}`} data-testid="activity-analytics-summary-legend-item">
+                        <rect
+                            x={legendX - 26}
+                            y={margin.top + plotHeight + 34}
+                            width={10}
+                            height={10}
+                            rx={3}
+                            fill={bar.color}
+                            opacity={0.92}
+                        />
+                        <text
+                            x={legendX - 10}
+                            y={margin.top + plotHeight + 43}
+                            textAnchor="start"
+                            fill="var(--color-industrial-text)"
+                            style={CHART_TYPOGRAPHY_STYLE}
+                        >
                             {bar.label}
+                        </text>
+                        <text
+                            x={legendX}
+                            y={margin.top + plotHeight + 59}
+                            textAnchor="middle"
+                            fill="var(--color-industrial-muted)"
+                            style={TECHNICAL_TYPOGRAPHY_STYLE}
+                        >
+                            {formatDurationHours(bar.durationMs)}
                         </text>
                     </g>
                 );
@@ -884,12 +1018,10 @@ function GroupedStackedBarsChart({
     grouped,
     width,
     layout,
-    showPartialOutlines,
 }: {
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     width: number;
     layout: ActivityAnalyticsGroupsLayout;
-    showPartialOutlines: boolean;
 }) {
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const [hoverInfo, setHoverInfo] = useState<{ index: number; x: number } | null>(null);
@@ -903,7 +1035,7 @@ function GroupedStackedBarsChart({
         : width;
     const plotWidth = Math.max(chartWidth - margin.left - margin.right, 1);
     const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
-    const maxDurationMs = Math.max(...grouped.map((bucket) => bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped), 1);
+    const maxDurationMs = Math.max(...grouped.map((bucket) => bucket.expectedDurationMs), 1);
     const step = plotWidth / Math.max(grouped.length, 1);
     const barWidth = Math.min(step * (layout.density === 'compress' ? 0.7 : 0.56), layout.density === 'compress' ? 48 : 56);
     const axisTicks = Array.from({ length: 5 }, (_, index) => ({
@@ -945,6 +1077,7 @@ function GroupedStackedBarsChart({
                 {grouped.map((bucket, index) => {
                     const x = margin.left + (step * index) + ((step - barWidth) / 2);
                     const segments = [
+                        { key: 'noData', value: bucket.durationsMs.noData, color: SUMMARY_BAR_COLORS.noData, opacity: 0.5 },
                         { key: 'stopped', value: bucket.durationsMs.stopped, color: SUMMARY_BAR_COLORS.stopped },
                         { key: 'setup', value: bucket.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
                         { key: 'prod', value: bucket.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
@@ -953,7 +1086,7 @@ function GroupedStackedBarsChart({
 
                     return (
                         <g key={bucket.bucketKey} data-testid="activity-analytics-group-stack">
-                            {showPartialOutlines && bucket.isInProgress && bucket.expectedDurationMs > 0 && (
+                            {bucket.isInProgress && bucket.expectedDurationMs > 0 && (
                                 <rect
                                     x={x}
                                     y={margin.top + plotHeight - ((bucket.expectedDurationMs / maxDurationMs) * plotHeight)}
@@ -979,7 +1112,7 @@ function GroupedStackedBarsChart({
                                         height={segmentHeight}
                                         rx={segment.key === 'prod' ? 8 : 0}
                                         fill={segment.color}
-                                        opacity={0.92}
+                                        opacity={segment.opacity ?? 0.92}
                                         data-testid="activity-analytics-group-segment"
                                     />
                                 );
@@ -994,7 +1127,7 @@ function GroupedStackedBarsChart({
                                 </text>
                             )}
                             <text x={x + (barWidth / 2)} y={Math.max(currentY - 8, margin.top + 10)} textAnchor="middle" fill="var(--color-industrial-text)" style={TECHNICAL_TYPOGRAPHY_STYLE}>
-                                {formatDurationHours(bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped)}
+                                {formatDurationHours(resolveGroupedVisibleDurationMs(bucket))}
                             </text>
                         </g>
                     );
@@ -1030,6 +1163,7 @@ function GroupedStackedBarsChart({
                     { name: 'Prod.', value: formatDurationHours(bucket.durationsMs.prod), color: SUMMARY_BAR_COLORS.prod, shape: 'square' },
                     { name: 'Setup', value: formatDurationHours(bucket.durationsMs.setup), color: SUMMARY_BAR_COLORS.setup, shape: 'square' },
                     { name: 'Detenida', value: formatDurationHours(bucket.durationsMs.stopped), color: SUMMARY_BAR_COLORS.stopped, shape: 'square' },
+                    { name: 'Sin datos', value: formatDurationHours(bucket.durationsMs.noData), color: SUMMARY_BAR_COLORS.noData, shape: 'square' },
                 ];
 
                 return (
@@ -1054,11 +1188,13 @@ function buildGroupHighlights({
     maxDurationMs: number;
 }) {
     const scaleY = (value: number) => top + plotHeight - ((value / maxDurationMs) * plotHeight);
-    const stoppedTop = scaleY(bucket.durationsMs.stopped);
-    const setupTop = scaleY(bucket.durationsMs.stopped + bucket.durationsMs.setup);
-    const prodTop = scaleY(bucket.durationsMs.stopped + bucket.durationsMs.setup + bucket.durationsMs.prod);
+    const noDataTop = scaleY(bucket.durationsMs.noData);
+    const stoppedTop = scaleY(bucket.durationsMs.noData + bucket.durationsMs.stopped);
+    const setupTop = scaleY(bucket.durationsMs.noData + bucket.durationsMs.stopped + bucket.durationsMs.setup);
+    const prodTop = scaleY(bucket.durationsMs.noData + bucket.durationsMs.stopped + bucket.durationsMs.setup + bucket.durationsMs.prod);
 
     return [
+        { x, y: noDataTop, color: SUMMARY_BAR_COLORS.noData },
         { x, y: prodTop, color: SUMMARY_BAR_COLORS.prod },
         { x, y: setupTop, color: SUMMARY_BAR_COLORS.setup },
         { x, y: stoppedTop, color: SUMMARY_BAR_COLORS.stopped },
@@ -1074,6 +1210,7 @@ interface ComparisonEntry {
         prod: number;
         setup: number;
         stopped: number;
+        noData: number;
     };
     isEmpty: boolean;
 }
@@ -1081,6 +1218,7 @@ interface ComparisonEntry {
 const ComparisonRow = memo(function ComparisonRow({ entry }: { entry: ComparisonEntry }) {
     const totalDurationMs = Math.max(entry.totalDurationMs, 1);
     const segments = [
+        { key: 'noData', value: entry.durationsMs.noData, color: SUMMARY_BAR_COLORS.noData, opacity: 0.5 },
         { key: 'prod', value: entry.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
         { key: 'setup', value: entry.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
         { key: 'stopped', value: entry.durationsMs.stopped, color: SUMMARY_BAR_COLORS.stopped },
@@ -1104,7 +1242,7 @@ const ComparisonRow = memo(function ComparisonRow({ entry }: { entry: Comparison
                                     backgroundColor: segment.color,
                                     minWidth: segment.value > 0 ? '0.375rem' : '0',
                                     height: '0.5rem',
-                                    opacity: 0.9,
+                                    opacity: segment.opacity ?? 0.9,
                                 }}
                             />
                         ))}
@@ -1115,26 +1253,6 @@ const ComparisonRow = memo(function ComparisonRow({ entry }: { entry: Comparison
     );
 });
 
-function resolveDisplayComparison(grouped: ReturnType<typeof computeActivityAnalytics>['grouped']) {
-    const comparableBuckets = grouped.filter((bucket) => bucket.productivityRatio !== null);
-
-    if (comparableBuckets.length < 2) {
-        return {
-            best: { bucketKey: 'best', label: 'sin datos' },
-            worst: { bucketKey: 'worst', label: 'sin datos' },
-        };
-    }
-
-    const sorted = [...comparableBuckets].sort((left, right) => (right.productivityRatio ?? 0) - (left.productivityRatio ?? 0));
-    const best = sorted[0];
-    const worst = sorted[sorted.length - 1];
-
-    return {
-        best: best ? { bucketKey: best.bucketKey, label: best.label } : { bucketKey: 'best', label: 'sin datos' },
-        worst: worst ? { bucketKey: worst.bucketKey, label: worst.label } : { bucketKey: 'worst', label: 'sin datos' },
-    };
-}
-
 function createComparisonEntry(
     heading: 'Mejor' | 'Peor',
     target: { bucketKey: string; label: string } | null | undefined,
@@ -1142,10 +1260,10 @@ function createComparisonEntry(
 ): ComparisonEntry {
     const fallback: ComparisonEntry = {
         heading,
-        label: target?.label ?? 'sin datos',
-        metadata: 'sin datos',
+        label: target?.label ?? COMPARISON_FALLBACK_LABEL,
+        metadata: COMPARISON_FALLBACK_LABEL,
         totalDurationMs: 0,
-        durationsMs: { prod: 0, setup: 0, stopped: 0 },
+        durationsMs: { prod: 0, setup: 0, stopped: 0, noData: 0 },
         isEmpty: true,
     };
 
@@ -1156,24 +1274,42 @@ function createComparisonEntry(
     const matchedBucket = grouped.find((bucket) => bucket.bucketKey === target.bucketKey)
         ?? grouped.find((bucket) => bucket.label === target.label);
 
-    if (!matchedBucket || matchedBucket.productivityRatio === null) {
+    const comparableProductivityRatio = matchedBucket
+        ? resolveActivityAnalyticsComparableProductivityRatio(matchedBucket)
+        : null;
+
+    if (!matchedBucket || comparableProductivityRatio === null) {
         return fallback;
     }
 
-    const totalDurationMs = matchedBucket.durationsMs.prod + matchedBucket.durationsMs.setup + matchedBucket.durationsMs.stopped;
+    const totalDurationMs = resolveGroupedVisibleDurationMs(matchedBucket);
+    const metadata = matchedBucket.coverageRatio < 1
+        ? `Prod. observada ${formatPercent(comparableProductivityRatio)} · Cob. ${formatPercent(matchedBucket.coverageRatio)} · ${formatDurationHours(totalDurationMs)}`
+        : `% Prod. ${matchedBucket.productivityLabel} · ${formatDurationHours(totalDurationMs)}`;
 
     return {
         heading,
         label: matchedBucket.label,
-        metadata: `% Prod. ${matchedBucket.productivityLabel} · ${formatDurationHours(totalDurationMs)}`,
+        metadata,
         totalDurationMs,
         durationsMs: {
             prod: matchedBucket.durationsMs.prod,
             setup: matchedBucket.durationsMs.setup,
             stopped: matchedBucket.durationsMs.stopped,
+            noData: matchedBucket.durationsMs.noData,
         },
         isEmpty: false,
     };
+}
+
+function resolveGroupedVisibleDurationMs(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    return bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped + bucket.durationsMs.noData;
+}
+
+function isTurnoVisualHiddenBucket(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    const normalizedBucketKey = bucket.bucketKey.toLocaleLowerCase('en-US');
+
+    return normalizedBucketKey.startsWith('sin-turno:') || normalizedBucketKey === 'turno-summary:sin-turno';
 }
 
 function buildTurnoSummaryBuckets(
@@ -1210,6 +1346,8 @@ function buildTurnoSummaryBuckets(
                     ...bucket,
                     bucketKey: `turno-summary:${turnoIdentity.key}`,
                     label: turnoIdentity.label,
+                    isInProgress: false,
+                    hasInProgressContribution: bucket.isInProgress,
                 },
                 sortOrder: turnoIdentity.sortOrder,
             });
@@ -1246,8 +1384,13 @@ function buildTurnoSummaryBuckets(
                 coverageRatio,
                 utilizationRatio: productiveDurationMs <= 0 ? 0 : durationsMs.prod / productiveDurationMs,
                 productivityRatio,
-                productivityLabel: productivityRatio === null ? 'sin datos' : formatPercent(productivityRatio),
-                isInProgress: currentBucket.isInProgress || bucket.isInProgress,
+                productivityLabel: coverageRatio < 1
+                    ? INCOMPLETE_COVERAGE_LABEL
+                    : productivityRatio === null
+                        ? 'sin datos'
+                        : formatPercent(productivityRatio),
+                isInProgress: false,
+                hasInProgressContribution: currentBucket.hasInProgressContribution === true || bucket.isInProgress,
             },
         });
     }

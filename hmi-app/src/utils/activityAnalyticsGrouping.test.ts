@@ -57,6 +57,174 @@ describe('activityAnalyticsGrouping', () => {
         });
     });
 
+    it('keeps shift grouping clipped to the visible slice while preserving the semantic current-shift state', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T06:00:00.000Z', 2 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T06:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T08:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T09:00:00.000Z'),
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'shift:shift-a:2026-06-18',
+            label: '2026-06-18 · Turno A (en curso)',
+            expectedDurationMs: 8 * 60 * 60 * 1000,
+            isInProgress: true,
+            durationsMs: {
+                prod: 2 * 60 * 60 * 1000,
+                setup: 0,
+                stopped: 0,
+                noData: 0,
+            },
+            productivityRatio: null,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('keeps closed incomplete shift buckets on the prior sin datos contract', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T06:00:00.000Z', 2 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T06:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T14:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T15:00:00.000Z'),
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'shift:shift-a:2026-06-18',
+            label: '2026-06-18 · Turno A',
+            isInProgress: false,
+            coverageRatio: 0.25,
+            productivityRatio: null,
+            productivityLabel: 'sin datos',
+        });
+    });
+
+    it('keeps overnight shift labels and expected duration clipped to the visible shift slice', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-19T01:30:00.000Z', 30 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-19T00:30:00.000Z'),
+            windowEndMs: Date.parse('2026-06-19T03:00:00.000Z'),
+            nowMs: Date.parse('2026-06-19T01:45:00.000Z'),
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'shift:shift-c:2026-06-18',
+            label: '2026-06-19 · Turno C (en curso)',
+            startMs: Date.parse('2026-06-19T00:30:00.000Z'),
+            endMs: Date.parse('2026-06-19T03:00:00.000Z'),
+            expectedDurationMs: 8 * 60 * 60 * 1000,
+            isInProgress: true,
+        });
+    });
+
+    it('keeps the current shift in progress when the runtime clock passes the visible window end but remains inside the semantic shift', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T06:00:00.000Z', 2 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] }],
+            windowStartMs: Date.parse('2026-06-18T06:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T08:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T09:00:00.000Z'),
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'shift:shift-a:2026-06-18',
+            label: '2026-06-18 · Turno A (en curso)',
+            startMs: Date.parse('2026-06-18T06:00:00.000Z'),
+            endMs: Date.parse('2026-06-18T08:00:00.000Z'),
+            expectedDurationMs: 8 * 60 * 60 * 1000,
+            isInProgress: true,
+            productivityRatio: null,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('drops the clipped leading shift bucket for rolling Turno detail while keeping only the trailing current shift partial', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T09:00:00.000Z', 25 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+                { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+                { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+            ],
+            windowStartMs: Date.parse('2026-06-18T09:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-19T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-19T10:00:00.000Z'),
+            trimLeadingPartialShiftBucket: true,
+        });
+
+        expect(grouped.map((bucket) => bucket.bucketKey)).toEqual([
+            'shift:shift-b:2026-06-18',
+            'shift:shift-c:2026-06-18',
+            'shift:shift-a:2026-06-19',
+        ]);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'shift:shift-b:2026-06-18',
+            label: '2026-06-18 · Turno B',
+            startMs: Date.parse('2026-06-18T14:00:00.000Z'),
+            endMs: Date.parse('2026-06-18T22:00:00.000Z'),
+            isInProgress: false,
+        });
+        expect(grouped.at(-1)).toMatchObject({
+            bucketKey: 'shift:shift-a:2026-06-19',
+            label: '2026-06-19 · Turno A (en curso)',
+            startMs: Date.parse('2026-06-19T06:00:00.000Z'),
+            endMs: Date.parse('2026-06-19T10:00:00.000Z'),
+            isInProgress: true,
+        });
+    });
+
+    it('preserves the clipped leading shift bucket when Turno rolling trimming is disabled', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T09:00:00.000Z', 25 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+                { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+                { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+            ],
+            windowStartMs: Date.parse('2026-06-18T09:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-19T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-19T10:00:00.000Z'),
+        });
+
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'shift:shift-a:2026-06-18',
+            label: '2026-06-18 · Turno A',
+            startMs: Date.parse('2026-06-18T09:00:00.000Z'),
+            endMs: Date.parse('2026-06-18T14:00:00.000Z'),
+        });
+    });
+
     it('uses the resolved timezone for day boundaries instead of incidental browser-local grouping', () => {
         const grouped = groupActivityAnalyticsIntervals({
             intervals: [
@@ -82,6 +250,7 @@ describe('activityAnalyticsGrouping', () => {
             groupBy: 'day',
             timezone: 'America/Argentina/Buenos_Aires',
             shifts: SHIFTS,
+            nowMs: Date.parse('2026-08-01T00:00:00.000Z'),
         });
 
         expect(grouped).toHaveLength(2);
@@ -92,7 +261,7 @@ describe('activityAnalyticsGrouping', () => {
                     prod: 0,
                     setup: 0,
                     stopped: 30 * 60 * 1000,
-                    noData: 0,
+                    noData: (24 * 60 * 60 * 1000) - (30 * 60 * 1000),
                 },
                 estimatedKwh: 5,
                 stopCount: 1,
@@ -103,7 +272,7 @@ describe('activityAnalyticsGrouping', () => {
                     prod: 0,
                     setup: 0,
                     stopped: 30 * 60 * 1000,
-                    noData: 0,
+                    noData: (24 * 60 * 60 * 1000) - (30 * 60 * 1000),
                 },
                 estimatedKwh: 5,
                 stopCount: 0,
@@ -149,6 +318,7 @@ describe('activityAnalyticsGrouping', () => {
             groupBy: 'week',
             timezone: UTC,
             shifts: SHIFTS,
+            nowMs: Date.parse('2026-08-01T00:00:00.000Z'),
         });
 
         expect(grouped).toHaveLength(2);
@@ -159,7 +329,7 @@ describe('activityAnalyticsGrouping', () => {
                     prod: 0,
                     setup: 0,
                     stopped: 30 * 60 * 1000,
-                    noData: 0,
+                    noData: (7 * 24 * 60 * 60 * 1000) - (30 * 60 * 1000),
                 },
                 estimatedKwh: 5,
                 stopCount: 1,
@@ -170,7 +340,7 @@ describe('activityAnalyticsGrouping', () => {
                     prod: 0,
                     setup: 0,
                     stopped: 90 * 60 * 1000,
-                    noData: 0,
+                    noData: (7 * 24 * 60 * 60 * 1000) - (90 * 60 * 1000),
                 },
                 estimatedKwh: 15,
                 stopCount: 0,
@@ -186,6 +356,7 @@ describe('activityAnalyticsGrouping', () => {
             groupBy: 'month',
             timezone: UTC,
             shifts: SHIFTS,
+            nowMs: Date.parse('2026-08-01T00:00:00.000Z'),
         });
 
         expect(grouped).toHaveLength(2);
@@ -196,7 +367,7 @@ describe('activityAnalyticsGrouping', () => {
                     prod: 0,
                     setup: 0,
                     stopped: 30 * 60 * 1000,
-                    noData: 0,
+                    noData: (30 * 24 * 60 * 60 * 1000) - (30 * 60 * 1000),
                 },
                 estimatedKwh: 5,
                 stopCount: 1,
@@ -207,12 +378,342 @@ describe('activityAnalyticsGrouping', () => {
                     prod: 0,
                     setup: 0,
                     stopped: 60 * 60 * 1000,
-                    noData: 0,
+                    noData: (31 * 24 * 60 * 60 * 1000) - (60 * 60 * 1000),
                 },
                 estimatedKwh: 10,
                 stopCount: 0,
             },
         ]);
+    });
+
+    it('labels closed incomplete calendar buckets as cobertura incompleta while filling the missing duration with noData', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T06:00:00.000Z', 6 * 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T12:00:00.000Z', 3 * 60 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T00:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-19T00:00:00.000Z'),
+            nowMs: Date.parse('2026-06-20T00:00:00.000Z'),
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            expectedDurationMs: 24 * 60 * 60 * 1000,
+            isInProgress: false,
+            durationsMs: {
+                prod: 6 * 60 * 60 * 1000,
+                setup: 3 * 60 * 60 * 1000,
+                stopped: 0,
+                noData: 15 * 60 * 60 * 1000,
+            },
+            productivityRatio: null,
+            productivityLabel: 'cobertura incompleta',
+        });
+    });
+
+    it('clips calendar noData backfill to the visible window start while preserving telemetry gaps inside the visible slice', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T12:00:00.000Z', 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T13:00:00.000Z', 2 * 60 * 60 * 1000, 'no-data'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T12:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-19T00:00:00.000Z'),
+            nowMs: Date.parse('2026-06-20T00:00:00.000Z'),
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            isInProgress: false,
+            durationsMs: {
+                prod: 60 * 60 * 1000,
+                setup: 0,
+                stopped: 0,
+                noData: 11 * 60 * 60 * 1000,
+            },
+            coverageRatio: 1 / 12,
+            productivityRatio: null,
+            productivityLabel: 'cobertura incompleta',
+        });
+    });
+
+    it('marks open calendar buckets as in progress and only fills elapsed time', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T00:00:00.000Z', 4 * 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T04:00:00.000Z', 2 * 60 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T00:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            label: '2026-06-18 (en curso)',
+            expectedDurationMs: 24 * 60 * 60 * 1000,
+            isInProgress: true,
+            durationsMs: {
+                prod: 4 * 60 * 60 * 1000,
+                setup: 2 * 60 * 60 * 1000,
+                stopped: 0,
+                noData: 4 * 60 * 60 * 1000,
+            },
+            coverageRatio: 0.6,
+            productivityRatio: null,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('keeps the current calendar bucket in progress when the rolling window end lags the client clock slightly', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T00:00:00.000Z', 4 * 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T04:00:00.000Z', 6 * 60 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T00:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T10:05:00.000Z'),
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            label: '2026-06-18 (en curso)',
+            isInProgress: true,
+            durationsMs: {
+                prod: 4 * 60 * 60 * 1000,
+                setup: 6 * 60 * 60 * 1000,
+                stopped: 0,
+                noData: 0,
+            },
+            coverageRatio: 1,
+            productivityRatio: null,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('keeps the current calendar bucket in progress at exactly the 15-minute lag boundary', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T00:00:00.000Z', 4 * 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T04:00:00.000Z', 6 * 60 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T00:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T10:15:00.000Z'),
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            label: '2026-06-18 (en curso)',
+            isInProgress: true,
+            productivityRatio: null,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('closes the current calendar bucket once the rolling window end lags by more than 15 minutes', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T00:00:00.000Z', 4 * 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T04:00:00.000Z', 6 * 60 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T00:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T10:15:00.001Z'),
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            label: '2026-06-18',
+            isInProgress: false,
+            productivityRatio: null,
+            productivityLabel: 'cobertura incompleta',
+        });
+    });
+
+    it('drops the clipped leading bucket from rolling 7d Día windows while keeping the current day in progress', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-11T10:00:00.000Z', 7 * 24 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-11T10:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            trimLeadingPartialBucket: true,
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped.map((bucket) => bucket.bucketKey)).toEqual([
+            'day:2026-06-12',
+            'day:2026-06-13',
+            'day:2026-06-14',
+            'day:2026-06-15',
+            'day:2026-06-16',
+            'day:2026-06-17',
+            'day:2026-06-18',
+        ]);
+        expect(grouped.at(-1)).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            label: '2026-06-18 (en curso)',
+            isInProgress: true,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('drops the clipped leading bucket from rolling 30d Semana windows while keeping the current week in progress', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-10T12:00:00.000Z', 30 * 24 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'week',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-10T12:00:00.000Z'),
+            windowEndMs: Date.parse('2026-07-10T12:00:00.000Z'),
+            nowMs: Date.parse('2026-07-10T12:00:00.000Z'),
+            trimLeadingPartialBucket: true,
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped.map((bucket) => bucket.bucketKey)).toEqual([
+            'week:2026-06-15',
+            'week:2026-06-22',
+            'week:2026-06-29',
+            'week:2026-07-06',
+        ]);
+        expect(grouped.at(-1)).toMatchObject({
+            bucketKey: 'week:2026-07-06',
+            label: 'Week 2026-07-06 (en curso)',
+            isInProgress: true,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('drops the clipped leading bucket from rolling 12m Mes windows while keeping the current month in progress', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2025-07-15T00:00:00.000Z', 365 * 24 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'month',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2025-07-15T00:00:00.000Z'),
+            windowEndMs: Date.parse('2026-07-15T00:00:00.000Z'),
+            nowMs: Date.parse('2026-07-15T00:00:00.000Z'),
+            trimLeadingPartialBucket: true,
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped.map((bucket) => bucket.bucketKey)).toEqual([
+            'month:2025-08',
+            'month:2025-09',
+            'month:2025-10',
+            'month:2025-11',
+            'month:2025-12',
+            'month:2026-01',
+            'month:2026-02',
+            'month:2026-03',
+            'month:2026-04',
+            'month:2026-05',
+            'month:2026-06',
+            'month:2026-07',
+        ]);
+        expect(grouped.at(-1)).toMatchObject({
+            bucketKey: 'month:2026-07',
+            label: '2026-07 (en curso)',
+            isInProgress: true,
+            productivityLabel: 'en curso',
+        });
+    });
+
+    it('does not mark calendar buckets as in progress after the selected window already ended inside the same bucket', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T00:00:00.000Z', 4 * 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T04:00:00.000Z', 6 * 60 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-18T00:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-18T18:00:00.000Z'),
+            markTrailingCurrentBucketInProgress: true,
+        });
+
+        expect(grouped).toHaveLength(1);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-18',
+            label: '2026-06-18',
+            isInProgress: false,
+            durationsMs: {
+                prod: 4 * 60 * 60 * 1000,
+                setup: 6 * 60 * 60 * 1000,
+                stopped: 0,
+                noData: 0,
+            },
+            coverageRatio: 1,
+            productivityRatio: null,
+            productivityLabel: 'cobertura incompleta',
+        });
+    });
+
+    it('keeps the leading clipped bucket for custom mid-bucket calendar windows', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-11T10:00:00.000Z', 48 * 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            windowStartMs: Date.parse('2026-06-11T10:00:00.000Z'),
+            windowEndMs: Date.parse('2026-06-13T10:00:00.000Z'),
+            nowMs: Date.parse('2026-06-13T10:00:00.000Z'),
+        });
+
+        expect(grouped.map((bucket) => bucket.bucketKey)).toEqual([
+            'day:2026-06-11',
+            'day:2026-06-12',
+            'day:2026-06-13',
+        ]);
+        expect(grouped[0]).toMatchObject({
+            bucketKey: 'day:2026-06-11',
+            label: '2026-06-11',
+            isInProgress: false,
+        });
     });
 
     it('falls back deterministically to America/Argentina/Buenos_Aires only when no global timezone exists', () => {

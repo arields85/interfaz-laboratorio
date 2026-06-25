@@ -2,6 +2,7 @@ import type { ShiftDefinition } from '../domain/admin.types';
 import type {
     ActivityAnalyticsGroupBy,
     ActivityAnalyticsPoint,
+    ActivityAnalyticsRange,
     ActivityAnalyticsWindow,
 } from '../domain/activityAnalytics.types';
 import {
@@ -14,9 +15,12 @@ import {
     type ActivityAnalyticsGroupedBucket,
 } from './activityAnalyticsGrouping';
 
+export const MIN_ACTIVITY_ANALYTICS_COMPARABLE_COVERAGE_RATIO = 0.95;
+
 interface ComputeActivityAnalyticsOptions {
     series: ActivityAnalyticsPoint[];
     thresholds: ActivityAnalyticsThresholds;
+    range?: ActivityAnalyticsRange;
     groupBy: ActivityAnalyticsGroupBy;
     shifts: ShiftDefinition[];
     timezone: string;
@@ -53,6 +57,15 @@ export function computeActivityAnalytics(options: ComputeActivityAnalyticsOption
         thresholds: options.thresholds,
     });
 
+    const shouldApplyRollingCalendarWindowBehavior = shouldApplyRollingCalendarWindowBehaviorForRange(
+        options.range,
+        options.groupBy,
+    );
+    const shouldTrimLeadingPartialShiftBucket = shouldTrimLeadingPartialShiftBucketForRange(
+        options.range,
+        options.groupBy,
+    );
+
     const grouped = groupActivityAnalyticsIntervals({
         intervals: analytics.intervals,
         groupBy: options.groupBy,
@@ -61,6 +74,9 @@ export function computeActivityAnalytics(options: ComputeActivityAnalyticsOption
         windowStartMs: Date.parse(options.window.start),
         windowEndMs: Date.parse(options.window.end),
         nowMs: options.nowMs,
+        trimLeadingPartialBucket: shouldApplyRollingCalendarWindowBehavior,
+        markTrailingCurrentBucketInProgress: shouldApplyRollingCalendarWindowBehavior,
+        trimLeadingPartialShiftBucket: shouldTrimLeadingPartialShiftBucket,
     });
 
     const comparison = resolveActivityAnalyticsComparison(grouped);
@@ -79,24 +95,76 @@ export function computeActivityAnalytics(options: ComputeActivityAnalyticsOption
     };
 }
 
-function resolveActivityAnalyticsComparison(grouped: ActivityAnalyticsGroupedBucket[]): ComputedActivityAnalytics['comparison'] {
-    const comparableBuckets = grouped.filter((bucket) => bucket.productivityRatio !== null);
+function shouldApplyRollingCalendarWindowBehaviorForRange(
+    range: ActivityAnalyticsRange | undefined,
+    groupBy: ActivityAnalyticsGroupBy,
+): boolean {
+    return (range === '7d' && groupBy === 'day')
+        || (range === '30d' && groupBy === 'day')
+        || (range === '30d' && groupBy === 'week')
+        || (range === '12m' && groupBy === 'month');
+}
+
+function shouldTrimLeadingPartialShiftBucketForRange(
+    range: ActivityAnalyticsRange | undefined,
+    groupBy: ActivityAnalyticsGroupBy,
+): boolean {
+    return groupBy === 'shift' && (range === '24h' || range === '7d');
+}
+
+export function resolveActivityAnalyticsComparableProductivityRatio(bucket: ActivityAnalyticsGroupedBucket): number | null {
+    if (bucket.isInProgress || bucket.hasInProgressContribution === true) {
+        return null;
+    }
+
+    if (bucket.productivityRatio === null && isCalendarGroupedBucket(bucket.bucketKey)) {
+        return null;
+    }
+
+    const observedDurationMs = bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped;
+
+    if (observedDurationMs <= 0) {
+        return null;
+    }
+
+    if (bucket.coverageRatio < 1 && bucket.coverageRatio < MIN_ACTIVITY_ANALYTICS_COMPARABLE_COVERAGE_RATIO) {
+        return null;
+    }
+
+    return bucket.durationsMs.prod / observedDurationMs;
+}
+
+function isCalendarGroupedBucket(bucketKey: string): boolean {
+    return bucketKey.startsWith('day:') || bucketKey.startsWith('week:') || bucketKey.startsWith('month:');
+}
+
+export function resolveActivityAnalyticsComparison(grouped: ActivityAnalyticsGroupedBucket[]): ComputedActivityAnalytics['comparison'] {
+    const comparableBuckets = grouped
+        .map((bucket) => ({
+            bucket,
+            comparableProductivityRatio: resolveActivityAnalyticsComparableProductivityRatio(bucket),
+        }))
+        .filter((entry) => entry.comparableProductivityRatio !== null);
 
     if (comparableBuckets.length < 2) {
         return {
-            best: { bucketKey: 'best', label: 'sin datos' },
-            worst: { bucketKey: 'worst', label: 'sin datos' },
+            best: { bucketKey: 'best', label: 'sin comparación' },
+            worst: { bucketKey: 'worst', label: 'sin comparación' },
         };
     }
 
-    const sorted = [...comparableBuckets].sort((left, right) => (right.productivityRatio ?? 0) - (left.productivityRatio ?? 0));
-    const best = sorted[0];
-    const worst = sorted[sorted.length - 1];
+    const sorted = [...comparableBuckets].sort(
+        (left, right) => (right.comparableProductivityRatio ?? 0) - (left.comparableProductivityRatio ?? 0),
+    );
+    const best = sorted[0]?.bucket;
+    const worst = sorted[sorted.length - 1]?.bucket;
+    const bestComparableRatio = sorted[0]?.comparableProductivityRatio ?? null;
+    const worstComparableRatio = sorted[sorted.length - 1]?.comparableProductivityRatio ?? null;
 
-    if (!best || !worst || best.productivityRatio === null || worst.productivityRatio === null || best.productivityRatio === worst.productivityRatio) {
+    if (!best || !worst || bestComparableRatio === null || worstComparableRatio === null || bestComparableRatio === worstComparableRatio) {
         return {
-            best: { bucketKey: 'best', label: 'sin datos' },
-            worst: { bucketKey: 'worst', label: 'sin datos' },
+            best: { bucketKey: 'best', label: 'sin comparación' },
+            worst: { bucketKey: 'worst', label: 'sin comparación' },
         };
     }
 

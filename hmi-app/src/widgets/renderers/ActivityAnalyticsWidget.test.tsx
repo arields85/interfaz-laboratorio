@@ -9,7 +9,9 @@ import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config'
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
+import type { ActivityAnalyticsInterval } from '../../utils/activityAnalytics';
 import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComputation';
+import { groupActivityAnalyticsIntervals } from '../../utils/activityAnalyticsGrouping';
 import ActivityAnalyticsWidget from './ActivityAnalyticsWidget';
 
 class MockResizeObserver implements ResizeObserver {
@@ -119,7 +121,7 @@ function makeWidget(overrides?: Partial<ActivityAnalyticsWidgetConfig>): Activit
         },
         displayOptions: {
             range: '24h',
-            groupBy: 'day',
+            groupBy: 'shift',
             setupThresholdKw: 0.15,
             prodThresholdKw: 0.25,
             displayMode: 'kpis-and-bars',
@@ -206,6 +208,38 @@ function mockComputedAnalytics(grouped: Array<ReturnType<typeof activityAnalytic
         summaryRows: grouped.map((bucket) => ({ label: bucket.label, productivityLabel: bucket.productivityLabel, bucketKey: bucket.bucketKey })),
         timezone: 'UTC',
     } as never);
+}
+
+function buildInterval(start: string, durationMs: number, state: ActivityAnalyticsInterval['state']): ActivityAnalyticsInterval {
+    const timestampMs = Date.parse(start);
+
+    return {
+        timestamp: start,
+        timestampMs,
+        endTimestamp: new Date(timestampMs + durationMs).toISOString(),
+        endTimestampMs: timestampMs + durationMs,
+        durationMs,
+        state,
+        normalizedKw: state === 'no-data' ? null : 10,
+        estimatedKwh: state === 'no-data' ? 0 : 10 * (durationMs / (60 * 60 * 1000)),
+        stopCountContribution: state === 'stopped' ? 1 : 0,
+        isDataBacked: state !== 'no-data',
+    };
+}
+
+function expectVisibleStackSemantics(
+    segments: HTMLElement[],
+    expectedOrder: Array<{ fill: string; roundedTop: boolean }>,
+) {
+    expect(segments).toHaveLength(expectedOrder.length);
+
+    const yPositions = segments.map((segment) => Number(segment.getAttribute('y')));
+    expect(yPositions).toEqual([...yPositions].sort((left, right) => right - left));
+
+    expectedOrder.forEach((expected, index) => {
+        expect(segments[index]).toHaveAttribute('fill', expected.fill);
+        expect(segments[index]).toHaveAttribute('rx', expected.roundedTop ? '8' : '0');
+    });
 }
 
 describe('ActivityAnalyticsWidget', () => {
@@ -336,7 +370,12 @@ describe('ActivityAnalyticsWidget', () => {
     it('shows an endpoint-not-configured state when activity-series is disabled', () => {
         vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(false);
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.getByText('Endpoint Activity-Series no configurado')).toBeInTheDocument();
     });
@@ -350,7 +389,12 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.getByText('Cargando actividad…')).toBeInTheDocument();
     });
@@ -540,27 +584,24 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getAllByText('Agrupación runtime: day').length).toBeGreaterThan(0);
+        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getAllByText('Agrupación runtime: shift').length).toBeGreaterThan(0);
         expect(screen.getByTestId('activity-analytics-summary-bars')).toHaveTextContent('7.0 h');
-        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('Best day');
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
 
         const runtimeGroupSelector = screen.getByTestId('activity-analytics-runtime-group-selector');
 
         expect(within(runtimeGroupSelector).getByRole('button', { name: 'Turno' })).toBeInTheDocument();
-        expect(within(runtimeGroupSelector).getByRole('button', { name: 'Día' })).toBeInTheDocument();
+        expect(within(runtimeGroupSelector).queryByRole('button', { name: 'Día' })).not.toBeInTheDocument();
         expect(within(runtimeGroupSelector).queryByRole('button', { name: 'Semana' })).not.toBeInTheDocument();
         expect(within(runtimeGroupSelector).queryByRole('button', { name: 'Mes' })).not.toBeInTheDocument();
 
         expect(screen.queryByRole('button', { name: '1h' })).not.toBeInTheDocument();
 
-        await user.click(screen.getByRole('button', { name: 'Turno' }));
-
         expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getAllByText('Agrupación runtime: shift').length).toBeGreaterThan(0);
         expect(screen.getByTestId('activity-analytics-summary-bars')).toHaveTextContent('7.0 h');
-        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('Best shift');
-        expect(screen.getByTestId('activity-analytics-comparison')).not.toHaveTextContent('Best day');
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
         expect(onPersistDisplayOptions).not.toHaveBeenCalled();
 
         rerender(
@@ -582,6 +623,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getAllByText('Agrupación runtime: day').length).toBeGreaterThan(0);
         expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
     });
 
     it('restores persisted custom grouping defaults when the builder refreshes custom display options', () => {
@@ -664,7 +706,8 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Día' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Semana' })).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Desde')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Hasta')).not.toBeInTheDocument();
@@ -679,7 +722,12 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         const runtimeRow = screen.getByTestId('activity-analytics-runtime-secondary-controls');
         const groupSelector = screen.getByTestId('activity-analytics-runtime-group-selector');
@@ -693,9 +741,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
     });
 
-    it('renders shared Friday-night rollover and Sunday sin turno labels from the global weekly schedule in Turno Detalle', async () => {
-        const user = userEvent.setup();
-
+    it('renders shared Friday-night rollover labels while hiding Sunday sin turno in Turno Detalle', () => {
         vi.mocked(useTemporalSettings).mockReturnValue({
             config: {
                 plantTimezone: 'UTC',
@@ -752,14 +798,8 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByText('Turno C')).toBeInTheDocument();
-        expect(screen.getByText('sin turno')).toBeInTheDocument();
-        expect(screen.queryByText('2026-06-19 · Turno C')).not.toBeInTheDocument();
-
-        await user.click(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' }));
-
         expect(screen.getAllByText('2026-06-19 · Turno C').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('2026-06-20 · sin turno').length).toBeGreaterThan(0);
+        expect(screen.queryByText('2026-06-20 · sin turno')).not.toBeInTheDocument();
     });
 
     it('re-renders grouped detail labels when the global timezone changes', async () => {
@@ -813,9 +853,10 @@ describe('ActivityAnalyticsWidget', () => {
 
         const { rerender } = render(<ActivityAnalyticsWidget widget={widget} machines={MACHINES} />);
 
-        await user.click(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' }));
-
-        expect(screen.getAllByText('2026-06-20 · sin turno').length).toBeGreaterThan(0);
+        expect(screen.queryByText('Sin grupos para mostrar')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-groups-empty')).toHaveTextContent('Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.');
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
 
         vi.mocked(useTemporalSettings).mockReturnValue({
             config: {
@@ -832,12 +873,10 @@ describe('ActivityAnalyticsWidget', () => {
 
         rerender(<ActivityAnalyticsWidget widget={widget} machines={MACHINES} />);
 
-        await user.click(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' }));
-
         expect(screen.getAllByText('2026-06-19 · Turno Tarde').length).toBeGreaterThan(0);
     });
 
-    it('renders Resumen as one real axis chart with three duration bars ahead of comparison and Grupos', () => {
+    it('renders Resumen with the same visible stacked order semantics as Grupos', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -909,17 +948,20 @@ describe('ActivityAnalyticsWidget', () => {
             timezone: 'UTC',
         } as never);
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.queryByTestId('activity-analytics-kpis')).not.toBeInTheDocument();
         expect(screen.queryAllByTestId('activity-analytics-vertical-bar-track')).toHaveLength(0);
         expect(screen.getByTestId('activity-analytics-summary-chart')).toBeInTheDocument();
-        expect(screen.getAllByTestId('activity-analytics-summary-bar')).toHaveLength(3);
-        expect(screen.getByText('Prod.')).toBeInTheDocument();
-        expect(screen.getByText('Setup')).toBeInTheDocument();
-        expect(screen.getByText('Detenida')).toBeInTheDocument();
+        expect(screen.getAllByTestId('activity-analytics-summary-stack')).toHaveLength(1);
+        expect(screen.queryByTestId('activity-analytics-summary-bar')).not.toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-y-axis-tick').length).toBeGreaterThan(2);
-        expect(screen.getAllByText('4.0 h').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('7.0 h').length).toBeGreaterThan(0);
         expect(screen.getByTestId('activity-analytics-comparison')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-groups-chart')).toBeInTheDocument();
         expect(screen.queryByText('kWh est.')).not.toBeInTheDocument();
@@ -930,12 +972,102 @@ describe('ActivityAnalyticsWidget', () => {
         const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
         const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
         const groupsPanel = screen.getByTestId('activity-analytics-groups');
+        const topRegion = screen.getByTestId('activity-analytics-top-region');
+        const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
+        const groupSegments = within(screen.getAllByTestId('activity-analytics-group-stack')[0]).getAllByTestId('activity-analytics-group-segment');
+        const legendLabels = screen.getAllByTestId('activity-analytics-summary-legend-item').map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
+        const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
 
-        expect(summaryPanel.compareDocumentPosition(comparisonPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(comparisonPanel.compareDocumentPosition(groupsPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expectVisibleStackSemantics(summarySegments, [
+            { fill: 'var(--color-status-critical)', roundedTop: false },
+            { fill: 'var(--color-status-warning)', roundedTop: false },
+            { fill: 'var(--color-status-normal)', roundedTop: true },
+        ]);
+        expectVisibleStackSemantics(groupSegments, [
+            { fill: 'var(--color-industrial-muted)', roundedTop: false },
+            { fill: 'var(--color-status-critical)', roundedTop: false },
+            { fill: 'var(--color-status-warning)', roundedTop: false },
+            { fill: 'var(--color-status-normal)', roundedTop: true },
+        ]);
+        expect(legendLabels).toEqual([
+            'Detenida1.0 h',
+            'Setup2.0 h',
+            'Prod.4.0 h',
+        ]);
+
+        expect(topRegion).toContainElement(summaryPanel);
+        expect(topRegion).toContainElement(comparisonPanel);
+        expect(topRegion).toHaveAttribute('data-top-layout', 'side-by-side');
+        expect(topRegion).not.toContainElement(groupsPanel);
+        expect(topRegion.compareDocumentPosition(groupsPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(Number(summaryChart.getAttribute('width'))).toBeLessThan(640);
     });
 
-    it('keeps Turno visible for 30d and 12m while exposing Resumen/Detalle only for 24h and 7d runtime shift grouping', async () => {
+    it('intentionally stacks Resumen over Mejor/Peor at compact supported widths instead of wrapping them unpredictably', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics(Array.from({ length: 6 }, (_, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label: `2026-06-${18 + index}`,
+        })));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '24h',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            MockResizeObserver.latest().emit(520, 360);
+        });
+
+        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'stacked');
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-comparison')).toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-summary-text')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'compress');
+    });
+
+    it('keeps the top region side-by-side exactly at the stack breakpoint', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics(Array.from({ length: 6 }, (_, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label: `2026-06-${18 + index}`,
+        })));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            MockResizeObserver.latest().emit(592, 360);
+        });
+
+        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
+    });
+
+    it('caps runtime grouping choices by range, hides the 24h Turno toggle, and keeps the 7d one', async () => {
         const user = userEvent.setup();
 
         vi.mocked(useActivitySeries).mockReturnValue({
@@ -949,46 +1081,404 @@ describe('ActivityAnalyticsWidget', () => {
             buildGroupedBucket({ bucketKey: 'shift-1', label: '2026-06-18 · Turno 1' }),
             buildGroupedBucket({ bucketKey: 'shift-2', label: '2026-06-18 · Turno 2' }),
             buildGroupedBucket({ bucketKey: 'shift-3', label: '2026-06-18 · Turno 3' }),
-            buildGroupedBucket({ bucketKey: 'shift-4', label: '2026-06-19 · Turno 1' }),
+            buildGroupedBucket({
+                bucketKey: 'shift-4',
+                label: '2026-06-19 · Turno 1 (en curso)',
+                durationsMs: { prod: 90 * 60 * 1000, setup: 30 * 60 * 1000, stopped: 0, noData: 0 },
+                expectedDurationMs: 8 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'en curso',
+                isInProgress: true,
+            }),
         ]);
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '24h',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
-
-        await user.click(screen.getByRole('button', { name: 'Turno' }));
-
-        expect(screen.getByTestId('activity-analytics-turno-mode')).toBeInTheDocument();
-        expect(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Resumen' })).toHaveAttribute('aria-pressed', 'true');
-        expect(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.queryByRole('button', { name: 'Día' })).not.toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: '7d' }));
 
         expect(screen.getByTestId('activity-analytics-turno-mode')).toBeInTheDocument();
+        expect(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Resumen' })).toHaveAttribute('aria-pressed', 'true');
+        expect(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Día' })).toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: '30d' }));
 
         expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Día' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Semana' })).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '1h' })).not.toBeInTheDocument();
-
-        await user.click(screen.getByRole('button', { name: 'Turno' }));
-
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
+        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(3);
+        expect(screen.getAllByText('Turno 1').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Turno 2').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Turno 3').length).toBeGreaterThan(0);
+        expect(screen.queryByText('2026-06-19 · Turno 1 (en curso)')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: '12m' }));
 
         expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Día' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Semana' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Mes' })).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
+        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(3);
+        expect(screen.getAllByText('Turno 1').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Turno 2').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Turno 3').length).toBeGreaterThan(0);
+        expect(screen.queryByText('2026-06-19 · Turno 1 (en curso)')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: '24h' }));
-        await user.click(screen.getByRole('button', { name: 'Día' }));
 
+        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.queryByRole('button', { name: 'Día' })).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
     });
 
-    it('keeps Turno Resumen aggregated to three bars and switches to chronological partial-detail bars on demand', async () => {
+    it('renders 24h Turno directly as chronological detail without exposing Resumen', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'shift-1', label: '2026-06-18 · Turno 1', productivityLabel: '75%' }),
+            buildGroupedBucket({ bucketKey: 'shift-2', label: '2026-06-18 · Turno 2', productivityLabel: '55%' }),
+            buildGroupedBucket({ bucketKey: 'shift-3', label: '2026-06-18 · Turno 3', productivityLabel: '70%' }),
+            buildGroupedBucket({
+                bucketKey: 'shift-4',
+                label: '2026-06-19 · Turno 1 (en curso)',
+                durationsMs: { prod: 90 * 60 * 1000, setup: 30 * 60 * 1000, stopped: 0, noData: 0 },
+                expectedDurationMs: 8 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'en curso',
+                isInProgress: true,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '24h',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const groupStacks = screen.getAllByTestId('activity-analytics-group-stack');
+
+        expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
+        expect(groupStacks).toHaveLength(4);
+        expect(screen.getAllByText('2026-06-19 · Turno 1 (en curso)').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('en curso').length).toBeGreaterThan(0);
+        expect(screen.getAllByTestId('activity-analytics-group-partial-outline')).toHaveLength(1);
+        expect(within(groupStacks[0]).queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
+        expect(within(groupStacks[1]).queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
+        expect(within(groupStacks[2]).queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
+        expect(within(groupStacks[3]).getByTestId('activity-analytics-group-partial-outline')).toBeInTheDocument();
+        expect(screen.queryByText(/^Turno 1$/)).not.toBeInTheDocument();
+    });
+
+    it('hides sin turno from 24h Turno detail bars and Mejor/Peor while keeping actionable shift scaling', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-a:2026-06-18',
+                label: '2026-06-18 · Turno 1',
+                durationsMs: { prod: 2 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 0, noData: 0 },
+                expectedDurationMs: 3 * 60 * 60 * 1000,
+                productivityRatio: 2 / 3,
+                productivityLabel: '67%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-b:2026-06-18',
+                label: '2026-06-18 · Turno 2',
+                durationsMs: { prod: 1 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 0, noData: 0 },
+                expectedDurationMs: 2 * 60 * 60 * 1000,
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'sin-turno:2026-06-18T22:00:00.000Z',
+                label: '2026-06-18 · sin turno',
+                durationsMs: { prod: 0, setup: 0, stopped: 0, noData: 24 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: 0,
+                productivityLabel: '0%',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '24h',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+        const yAxisTicks = screen.getAllByTestId('activity-analytics-y-axis-tick').map((tick) => tick.textContent);
+
+        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(2);
+        expect(screen.queryByText('2026-06-18 · sin turno')).not.toBeInTheDocument();
+        expect(within(comparisonPanel).queryByText('2026-06-18 · sin turno')).not.toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('2026-06-18 · Turno 1')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('2026-06-18 · Turno 2')).toBeInTheDocument();
+        expect(yAxisTicks).toContain('3.0h');
+        expect(yAxisTicks).not.toContain('24.0h');
+    });
+
+    it('keeps the widget shell and summary visible when every visible Turno bucket is filtered out as sin turno', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'sin-turno:2026-06-18T00:00:00.000Z',
+                label: '2026-06-18 · sin turno',
+                durationsMs: { prod: 0, setup: 0, stopped: 0, noData: 24 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'en curso',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '24h',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.queryByText('Sin grupos para mostrar')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
+        expect(screen.getByText('% Prod. 57% · Cob. 100%')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
+        expect(screen.getByTestId('activity-analytics-groups-empty')).toHaveTextContent('Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.');
+        expect(screen.queryByText('2026-06-18 · sin turno')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-groups-chart')).not.toBeInTheDocument();
+    });
+
+    it('keeps the 24h Turno current shift outlined when the runtime clock is past the visible window end', () => {
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: { plantTimezone: 'UTC', shifts: [] },
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+            ],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                ...POPULATED_ACTIVITY_SERIES,
+                window: {
+                    start: '2026-06-18T06:00:00.000Z',
+                    end: '2026-06-18T08:00:00.000Z',
+                    timezone: 'UTC',
+                    bucket: '1h',
+                    bucketMs: 60 * 60 * 1000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T06:00:00.000Z', timestampMs: Date.parse('2026-06-18T06:00:00.000Z'), value: 0.3 },
+                    { timestamp: '2026-06-18T07:00:00.000Z', timestampMs: Date.parse('2026-06-18T07:00:00.000Z'), value: 0.3 },
+                ],
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation((options) => {
+            const grouped = groupActivityAnalyticsIntervals({
+                intervals: [
+                    buildInterval('2026-06-18T06:00:00.000Z', 60 * 60 * 1000, 'prod'),
+                    buildInterval('2026-06-18T07:00:00.000Z', 60 * 60 * 1000, 'prod'),
+                ],
+                groupBy: options.groupBy,
+                timezone: options.timezone,
+                shifts: options.shifts,
+                windowStartMs: Date.parse(options.window.start),
+                windowEndMs: Date.parse(options.window.end),
+                nowMs: Date.parse('2026-06-18T09:00:00.000Z'),
+            });
+
+            return {
+                analytics: {
+                    durationsMs: {
+                        prod: 2 * 60 * 60 * 1000,
+                        setup: 0,
+                        stopped: 0,
+                        noData: 0,
+                    },
+                    stopCount: 0,
+                    estimatedKwh: 20,
+                    utilizationRatio: 1,
+                    coverageRatio: 1,
+                    intervals: [],
+                },
+                grouped,
+                comparison: {
+                    best: { label: 'sin datos', bucketKey: 'best' },
+                    worst: { label: 'sin datos', bucketKey: 'worst' },
+                },
+                summaryRows: grouped.map((bucket) => ({ label: bucket.label, productivityLabel: bucket.productivityLabel, bucketKey: bucket.bucketKey })),
+                timezone: options.timezone,
+            } as never;
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '24h',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const groupStack = screen.getByTestId('activity-analytics-group-stack');
+        const outline = within(groupStack).getByTestId('activity-analytics-group-partial-outline');
+        const segmentHeights = within(groupStack)
+            .getAllByTestId('activity-analytics-group-segment')
+            .map((segment) => Number(segment.getAttribute('height') ?? '0'));
+
+        expect(screen.getByText('2026-06-18 · Turno A (en curso)')).toBeInTheDocument();
+        expect(screen.getByText('en curso')).toBeInTheDocument();
+        expect(outline).toBeInTheDocument();
+        expect(Number(outline.getAttribute('height') ?? '0')).toBeGreaterThan(segmentHeights.reduce((sum, value) => sum + value, 0));
+    });
+
+    it('keeps the last 7d Día bucket outlined as en curso when the live window end lags slightly', () => {
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: { plantTimezone: 'UTC', shifts: [] },
+            shifts: [],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                ...POPULATED_ACTIVITY_SERIES,
+                range: '7d',
+                window: {
+                    start: '2026-06-18T00:00:00.000Z',
+                    end: '2026-06-18T10:00:00.000Z',
+                    timezone: 'UTC',
+                    bucket: '1h',
+                    bucketMs: 60 * 60 * 1000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T00:00:00.000Z', timestampMs: Date.parse('2026-06-18T00:00:00.000Z'), value: 0.3 },
+                    { timestamp: '2026-06-18T04:00:00.000Z', timestampMs: Date.parse('2026-06-18T04:00:00.000Z'), value: 0.2 },
+                ],
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation((options) => {
+            const grouped = groupActivityAnalyticsIntervals({
+                intervals: [
+                    buildInterval('2026-06-18T00:00:00.000Z', 4 * 60 * 60 * 1000, 'prod'),
+                    buildInterval('2026-06-18T04:00:00.000Z', 6 * 60 * 60 * 1000, 'setup'),
+                ],
+                groupBy: options.groupBy,
+                timezone: options.timezone,
+                shifts: options.shifts,
+                windowStartMs: Date.parse(options.window.start),
+                windowEndMs: Date.parse(options.window.end),
+                nowMs: Date.parse('2026-06-18T10:05:00.000Z'),
+                markTrailingCurrentBucketInProgress: options.range === '7d' && options.groupBy === 'day',
+            });
+
+            return {
+                analytics: {
+                    durationsMs: {
+                        prod: 4 * 60 * 60 * 1000,
+                        setup: 6 * 60 * 60 * 1000,
+                        stopped: 0,
+                        noData: 0,
+                    },
+                    stopCount: 0,
+                    estimatedKwh: 20,
+                    utilizationRatio: 0.4,
+                    coverageRatio: 1,
+                    intervals: [],
+                },
+                grouped,
+                comparison: {
+                    best: { label: 'sin datos', bucketKey: 'best' },
+                    worst: { label: 'sin datos', bucketKey: 'worst' },
+                },
+                summaryRows: grouped.map((bucket) => ({ label: bucket.label, productivityLabel: bucket.productivityLabel, bucketKey: bucket.bucketKey })),
+                timezone: options.timezone,
+            } as never;
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const groupStack = screen.getByTestId('activity-analytics-group-stack');
+
+        expect(screen.getByText('2026-06-18 (en curso)')).toBeInTheDocument();
+        expect(within(groupStack).getByTestId('activity-analytics-group-partial-outline')).toBeInTheDocument();
+    });
+
+    it('keeps 7d Turno Resumen aggregated to three bars and switches to chronological partial-detail bars on demand', async () => {
         const user = userEvent.setup();
 
         vi.mocked(useActivitySeries).mockReturnValue({
@@ -1008,7 +1498,7 @@ describe('ActivityAnalyticsWidget', () => {
                 durationsMs: { prod: 90 * 60 * 1000, setup: 30 * 60 * 1000, stopped: 0, noData: 0 },
                 expectedDurationMs: 8 * 60 * 60 * 1000,
                 productivityRatio: null,
-                productivityLabel: 'sin datos',
+                productivityLabel: 'en curso',
                 isInProgress: true,
             }),
         ]);
@@ -1018,6 +1508,7 @@ describe('ActivityAnalyticsWidget', () => {
                 widget={makeWidget({
                     displayOptions: {
                         ...makeWidget().displayOptions,
+                        range: '7d',
                         groupBy: 'shift',
                     },
                 })}
@@ -1034,9 +1525,167 @@ describe('ActivityAnalyticsWidget', () => {
 
         await user.click(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' }));
 
-        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(4);
+        const groupStacks = screen.getAllByTestId('activity-analytics-group-stack');
+
+        expect(groupStacks).toHaveLength(4);
         expect(screen.getAllByText('2026-06-19 · Turno 1 (en curso)').length).toBeGreaterThan(0);
-        expect(screen.getByTestId('activity-analytics-group-partial-outline')).toBeInTheDocument();
+        expect(screen.getAllByTestId('activity-analytics-group-productivity').map((node) => node.textContent)).toContain('en curso');
+
+        const currentShiftStack = groupStacks[3];
+        const outline = within(currentShiftStack).getByTestId('activity-analytics-group-partial-outline');
+        const outlineY = Number(outline.getAttribute('y') ?? '0');
+        const outlineHeight = Number(outline.getAttribute('height') ?? '0');
+        const segmentHeights = within(currentShiftStack)
+            .getAllByTestId('activity-analytics-group-segment')
+            .map((segment) => Number(segment.getAttribute('height') ?? '0'));
+        const chart = screen.getByTestId('activity-analytics-groups-chart');
+        const verticalAxis = Array.from(chart.querySelectorAll('line')).find((line) => line.getAttribute('x1') === line.getAttribute('x2'));
+
+        expect(outline).toBeInTheDocument();
+        expect(verticalAxis).not.toBeNull();
+
+        const plotTop = Number(verticalAxis?.getAttribute('y1') ?? '0');
+        const plotBottom = Number(verticalAxis?.getAttribute('y2') ?? '0');
+
+        expect(outlineY).toBe(plotTop);
+        expect(outlineHeight).toBe(plotBottom - plotTop);
+        expect(outlineHeight).toBeGreaterThan(segmentHeights.reduce((sum, value) => sum + value, 0));
+    });
+
+    it('hides sin turno from 7d Turno Resumen bars and Mejor/Peor without changing internal summary coverage', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+            analytics: {
+                durationsMs: {
+                    prod: 4 * 60 * 60 * 1000,
+                    setup: 2 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 24 * 60 * 60 * 1000,
+                },
+                stopCount: 1,
+                estimatedKwh: 18.4,
+                utilizationRatio: 4 / 7,
+                coverageRatio: 1,
+                intervals: [],
+            },
+            grouped: [
+                buildGroupedBucket({
+                    bucketKey: 'shift:shift-a:2026-06-18',
+                    label: '2026-06-18 · Turno 1',
+                    durationsMs: { prod: 2 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                    expectedDurationMs: 4 * 60 * 60 * 1000,
+                    productivityRatio: 0.5,
+                    productivityLabel: '50%',
+                }),
+                buildGroupedBucket({
+                    bucketKey: 'shift:shift-b:2026-06-18',
+                    label: '2026-06-18 · Turno 2',
+                    durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 0, noData: 0 },
+                    expectedDurationMs: 4 * 60 * 60 * 1000,
+                    productivityRatio: 0.75,
+                    productivityLabel: '75%',
+                }),
+                buildGroupedBucket({
+                    bucketKey: 'shift:shift-c:2026-06-18',
+                    label: '2026-06-18 · Turno 3',
+                    durationsMs: { prod: 1 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 2 * 60 * 60 * 1000, noData: 0 },
+                    expectedDurationMs: 4 * 60 * 60 * 1000,
+                    productivityRatio: 0.25,
+                    productivityLabel: '25%',
+                }),
+                buildGroupedBucket({
+                    bucketKey: 'sin-turno:2026-06-22T00:00:00.000Z',
+                    label: '2026-06-22 · sin turno',
+                    durationsMs: { prod: 0, setup: 0, stopped: 0, noData: 24 * 60 * 60 * 1000 },
+                    expectedDurationMs: 24 * 60 * 60 * 1000,
+                    productivityRatio: 0,
+                    productivityLabel: '0%',
+                }),
+            ],
+            comparison: {
+                best: { label: '2026-06-22 · sin turno', bucketKey: 'sin-turno:2026-06-22T00:00:00.000Z' },
+                worst: { label: '2026-06-18 · Turno 3', bucketKey: 'shift:shift-c:2026-06-18' },
+            },
+            summaryRows: [],
+            timezone: 'UTC',
+        } as never);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+        const yAxisTicks = screen.getAllByTestId('activity-analytics-y-axis-tick').map((tick) => tick.textContent);
+
+        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(3);
+        expect(screen.queryByText('sin turno')).not.toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('Turno 2')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('Turno 3')).toBeInTheDocument();
+        expect(within(comparisonPanel).queryByText('2026-06-22 · sin turno')).not.toBeInTheDocument();
+        expect(screen.getByText('% Prod. 57% · Cob. 100%')).toBeInTheDocument();
+        expect(yAxisTicks).toContain('4.0h');
+        expect(yAxisTicks).not.toContain('24.0h');
+    });
+
+    it('keeps the 7d Turno Resumen shell alive when the only summary bucket becomes turno-summary:sin-turno', () => {
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: { plantTimezone: null, shifts: [] },
+            shifts: [],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: { ...POPULATED_ACTIVITY_SERIES, range: '7d' },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'sin-turno:2026-06-22T00:00:00.000Z',
+                label: '2026-06-22 · sin turno',
+                durationsMs: { prod: 0, setup: 0, stopped: 0, noData: 24 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'sin datos',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.queryByText('Sin grupos para mostrar')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-turno-mode')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
+        expect(screen.getByTestId('activity-analytics-groups-empty')).toHaveTextContent('Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.');
+        expect(screen.queryByText('sin turno')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-groups-chart')).not.toBeInTheDocument();
     });
 
     it('aggregates Turno Resumen by stable shift identity even when admin labels are free text', () => {
@@ -1068,6 +1717,7 @@ describe('ActivityAnalyticsWidget', () => {
                 widget={makeWidget({
                     displayOptions: {
                         ...makeWidget().displayOptions,
+                        range: '7d',
                         groupBy: 'shift',
                     },
                 })}
@@ -1092,7 +1742,7 @@ describe('ActivityAnalyticsWidget', () => {
             resolvedTimezone: 'UTC',
         });
         vi.mocked(useActivitySeries).mockReturnValue({
-            data: { ...POPULATED_ACTIVITY_SERIES, range: '30d' },
+            data: { ...POPULATED_ACTIVITY_SERIES, range: '7d' },
             isLoading: false,
             isError: false,
             error: null,
@@ -1108,7 +1758,7 @@ describe('ActivityAnalyticsWidget', () => {
                 widget={makeWidget({
                     displayOptions: {
                         ...makeWidget().displayOptions,
-                        range: '30d',
+                        range: '7d',
                         groupBy: 'shift',
                     },
                 })}
@@ -1117,11 +1767,11 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(2);
-        expect(screen.getAllByText('A').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('C').length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/^A$/).length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/^C$/).length).toBeGreaterThan(0);
         expect(screen.queryByText('2026-06-18 · A')).not.toBeInTheDocument();
         expect(screen.queryByText('2026-06-18 · C')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-turno-mode')).toBeInTheDocument();
     });
 
     it('keeps custom shift windows locked to Turno Resumen without exposing Detalle', () => {
@@ -1162,6 +1812,52 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
     });
 
+    it('never renders the detail-only in-progress outline when Turno Resumen collapses to a single current shift bucket', () => {
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: { plantTimezone: null, shifts: [] },
+            shifts: [
+                { id: 'shift-a', label: 'Turno 1', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+            ],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-a:2026-06-19',
+                label: '2026-06-19 · Turno 1 (en curso)',
+                durationsMs: { prod: 2 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 8 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'sin datos',
+                isInProgress: true,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(1);
+        expect(screen.getByText('Turno 1')).toBeInTheDocument();
+        expect(screen.queryByText('2026-06-19 · Turno 1 (en curso)')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
+    });
+
     it('compresses grouped bars before enabling horizontal scroll', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
@@ -1175,7 +1871,12 @@ describe('ActivityAnalyticsWidget', () => {
             label: `2026-06-${18 + index}`,
         })));
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         act(() => {
             MockResizeObserver.latest().emit(520, 360);
@@ -1238,7 +1939,12 @@ describe('ActivityAnalyticsWidget', () => {
             timezone: 'UTC',
         } as never);
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         act(() => {
             MockResizeObserver.latest().emit(480, 360);
@@ -1248,7 +1954,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'scroll');
         expect(screen.getByTestId('activity-analytics-groups-chart')).toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(6);
-        expect(screen.getAllByTestId('activity-analytics-group-segment')).toHaveLength(18);
+        expect(screen.getAllByTestId('activity-analytics-group-segment')).toHaveLength(24);
         expect(screen.getAllByTestId('activity-analytics-group-productivity')).toHaveLength(6);
         expect(screen.getAllByText('2026-06-18').length).toBeGreaterThan(0);
         expect(screen.getAllByText('2026-06-23').length).toBeGreaterThan(0);
@@ -1259,10 +1965,11 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Prod.');
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Setup');
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Detenida');
-        expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '3');
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Sin datos');
+        expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '4');
     });
 
-    it('falls back to truthful text cards on tight sizes instead of compressed horizontal bars', () => {
+    it('falls back to truthful text cards on tight sizes and keeps grouped cards on full bucket duration semantics', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -1290,18 +1997,18 @@ describe('ActivityAnalyticsWidget', () => {
                 startMs: 0,
                 endMs: 1,
                 durationsMs: {
-                    prod: 3 * 60 * 60 * 1000,
+                    prod: 4 * 60 * 60 * 1000,
                     setup: 1 * 60 * 60 * 1000,
-                    stopped: 1 * 60 * 60 * 1000,
-                    noData: 0,
+                    stopped: 0,
+                    noData: 4 * 60 * 60 * 1000,
                 },
                 estimatedKwh: 9.2,
                 stopCount: 1,
-                utilizationRatio: 0.6,
+                utilizationRatio: 4 / 9,
                 coverageRatio: 1,
-                expectedDurationMs: 5 * 60 * 60 * 1000,
-                productivityRatio: 0.6,
-                productivityLabel: '60%',
+                expectedDurationMs: 9 * 60 * 60 * 1000,
+                productivityRatio: 4 / 9,
+                productivityLabel: '44%',
                 isInProgress: false,
             }],
             comparison: {
@@ -1312,7 +2019,18 @@ describe('ActivityAnalyticsWidget', () => {
             timezone: 'UTC',
         } as never);
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
 
         act(() => {
             MockResizeObserver.latest().emit(360, 210);
@@ -1321,11 +2039,19 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-summary-text')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-groups-text')).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-stacked-bar')).not.toBeInTheDocument();
-        expect(screen.getAllByText('4.0 h').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('60%').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('44%').length).toBeGreaterThan(0);
+        expect(within(screen.getByTestId('activity-analytics-summary-text')).getAllByText(/^(Prod\.|Setup|Detenida)$/).map((item) => item.textContent)).toEqual([
+            'Prod.',
+            'Setup',
+            'Detenida',
+        ]);
+
+        const groupedCard = within(screen.getByTestId('activity-analytics-groups-text')).getByText('2026-06-18').parentElement as HTMLElement;
+
+        expect(within(groupedCard).getByText('9.0 h')).toBeInTheDocument();
     });
 
-    it('preserves sin datos, sin turno, and in-progress labeling in Turno Detalle vertical and fallback views', async () => {
+    it('shows cobertura incompleta for incomplete coverage while preserving en curso, sin turno, and sin comparación', async () => {
         const user = userEvent.setup();
 
         vi.mocked(useActivitySeries).mockReturnValue({
@@ -1367,14 +2093,34 @@ describe('ActivityAnalyticsWidget', () => {
                     coverageRatio: 1,
                     expectedDurationMs: 8 * 60 * 60 * 1000,
                     productivityRatio: null,
-                    productivityLabel: 'sin datos',
+                    productivityLabel: 'en curso',
                     isInProgress: true,
                 },
                 {
                     bucketKey: 'shift-2',
-                    label: '2026-06-20 · sin turno',
+                    label: '2026-06-19 · Turno Tarde',
                     startMs: 1,
                     endMs: 2,
+                    durationsMs: {
+                        prod: 1 * 60 * 60 * 1000,
+                        setup: 0,
+                        stopped: 0,
+                        noData: 3 * 60 * 60 * 1000,
+                    },
+                    estimatedKwh: 2,
+                    stopCount: 0,
+                    utilizationRatio: 1,
+                    coverageRatio: 0.25,
+                    expectedDurationMs: 4 * 60 * 60 * 1000,
+                    productivityRatio: null,
+                    productivityLabel: 'cobertura incompleta',
+                    isInProgress: false,
+                },
+                {
+                    bucketKey: 'shift-3',
+                    label: '2026-06-20 · sin turno',
+                    startMs: 2,
+                    endMs: 3,
                     durationsMs: {
                         prod: 0,
                         setup: 1 * 60 * 60 * 1000,
@@ -1392,8 +2138,8 @@ describe('ActivityAnalyticsWidget', () => {
                 },
             ],
             comparison: {
-                best: { label: 'sin datos', bucketKey: 'best' },
-                worst: { label: 'sin datos', bucketKey: 'worst' },
+                best: { label: 'sin comparación', bucketKey: 'best' },
+                worst: { label: 'sin comparación', bucketKey: 'worst' },
             },
             summaryRows: [],
             timezone: 'UTC',
@@ -1411,20 +2157,159 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        await user.click(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' }));
-
-        expect(screen.getAllByText('sin datos').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('cobertura incompleta').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('en curso').length).toBeGreaterThan(0);
         expect(screen.getByText('2026-06-18 · Turno Noche (en curso)')).toBeInTheDocument();
+        expect(screen.getByText('2026-06-19 · Turno Tarde')).toBeInTheDocument();
         expect(screen.getByText('2026-06-20 · sin turno')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
 
         act(() => {
             MockResizeObserver.latest().emit(360, 210);
         });
 
         expect(screen.getByTestId('activity-analytics-groups-text')).toBeInTheDocument();
-        expect(screen.getAllByText('sin datos').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('cobertura incompleta').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('en curso').length).toBeGreaterThan(0);
         expect(screen.getByText('2026-06-18 · Turno Noche (en curso)')).toBeInTheDocument();
+        expect(screen.getByText('2026-06-19 · Turno Tarde')).toBeInTheDocument();
         expect(screen.getByText('2026-06-20 · sin turno')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
+    });
+
+    it('ranks closed high-coverage incomplete Turno buckets and discloses observed coverage in Mejor/Peor', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+            analytics: {
+                durationsMs: {
+                    prod: 11 * 60 * 60 * 1000,
+                    setup: 4.6 * 60 * 60 * 1000,
+                    stopped: 0,
+                    noData: 0.4 * 60 * 60 * 1000,
+                },
+                stopCount: 0,
+                estimatedKwh: 12,
+                utilizationRatio: 11 / 15.6,
+                coverageRatio: 0.975,
+                intervals: [],
+            },
+            grouped: [
+                buildGroupedBucket({
+                    bucketKey: 'shift-1',
+                    label: '2026-06-19 · Turno 1',
+                    durationsMs: {
+                        prod: 7 * 60 * 60 * 1000,
+                        setup: 0.6 * 60 * 60 * 1000,
+                        stopped: 0,
+                        noData: 0.4 * 60 * 60 * 1000,
+                    },
+                    utilizationRatio: 7 / 7.6,
+                    coverageRatio: 0.95,
+                    expectedDurationMs: 8 * 60 * 60 * 1000,
+                    productivityRatio: null,
+                    productivityLabel: 'cobertura incompleta',
+                    isInProgress: false,
+                }),
+                buildGroupedBucket({
+                    bucketKey: 'shift-2',
+                    label: '2026-06-19 · Turno 2',
+                    durationsMs: {
+                        prod: 4 * 60 * 60 * 1000,
+                        setup: 4 * 60 * 60 * 1000,
+                        stopped: 0,
+                        noData: 0,
+                    },
+                    utilizationRatio: 0.5,
+                    coverageRatio: 1,
+                    expectedDurationMs: 8 * 60 * 60 * 1000,
+                    productivityRatio: 0.5,
+                    productivityLabel: '50%',
+                    isInProgress: false,
+                }),
+            ],
+            comparison: {
+                best: { label: 'sin comparación', bucketKey: 'best' },
+                worst: { label: 'sin comparación', bucketKey: 'worst' },
+            },
+            summaryRows: [],
+            timezone: 'UTC',
+        } as never);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+
+        expect(within(comparisonPanel).getByText('2026-06-19 · Turno 1')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('2026-06-19 · Turno 2')).toBeInTheDocument();
+        expect(comparisonPanel).toHaveTextContent('Prod. observada 92% · Cob. 95% · 8.0 h');
+        expect(comparisonPanel).toHaveTextContent('% Prod. 50% · 8.0 h');
+        expect(comparisonPanel).not.toHaveTextContent('sin comparación');
+    });
+
+    it('renders calendar grouped buckets against full expected duration semantics and outlines in-progress buckets', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 6 * 60 * 60 * 1000, setup: 3 * 60 * 60 * 1000, stopped: 0, noData: 15 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: 0.25,
+                productivityLabel: '25%',
+                isInProgress: false,
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-2',
+                label: '2026-06-19 (en curso)',
+                durationsMs: { prod: 4 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 0, noData: 4 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'sin datos',
+                isInProgress: true,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getByTestId('activity-analytics-group-partial-outline')).toBeInTheDocument();
+        expect(screen.getByText('24.0h')).toBeInTheDocument();
+        expect(screen.getByText('18.0h')).toBeInTheDocument();
+        expect(screen.getByText('12.0h')).toBeInTheDocument();
+        expect(screen.getByText('6.0h')).toBeInTheDocument();
+        expect(screen.getAllByText('10.0 h').length).toBeGreaterThan(0);
     });
 
     it('shows an empty-series state when the endpoint returns no points', () => {
@@ -1452,7 +2337,18 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.getByText('Sin datos de actividad')).toBeInTheDocument();
     });
@@ -1466,7 +2362,18 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.getByText('No se pudo conectar con Activity-Series')).toBeInTheDocument();
         expect(screen.queryByText(/ECONNRESET/i)).not.toBeInTheDocument();
@@ -1481,7 +2388,12 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.getByText('Activity-Series rechazó la consulta')).toBeInTheDocument();
         expect(screen.queryByText('summary')).not.toBeInTheDocument();
@@ -1496,7 +2408,12 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.getByText('Activity-Series devolvió datos inválidos')).toBeInTheDocument();
         expect(screen.getByText('La respuesta recibida no cumple el contrato esperado para esta analítica.')).toBeInTheDocument();
@@ -1506,7 +2423,8 @@ describe('ActivityAnalyticsWidget', () => {
     it('uses compact chart typography for Mejor/Peor instead of KPI-scale values', () => {
         vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(false);
 
-        const { rerender } = render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        const dayGroupedWidget = makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } });
+        const { rerender } = render(<ActivityAnalyticsWidget widget={dayGroupedWidget} machines={MACHINES} />);
 
         expect(screen.getByText('Endpoint Activity-Series no configurado')).toHaveStyle({
             fontFamily: 'var(--font-system)',
@@ -1524,7 +2442,7 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        rerender(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        rerender(<ActivityAnalyticsWidget widget={dayGroupedWidget} machines={MACHINES} />);
 
         expect(screen.getByText('Mejor')).toHaveStyle({
             fontFamily: 'var(--font-chart)',
@@ -1571,7 +2489,12 @@ describe('ActivityAnalyticsWidget', () => {
             }),
         ]);
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
 
@@ -1579,6 +2502,162 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(comparisonPanel).getByText('% Prod. 60% · 5.0 h')).toBeInTheDocument();
         expect(within(comparisonPanel).getByText('2026-06-19')).toBeInTheDocument();
         expect(within(comparisonPanel).getByText('% Prod. 50% · 2.0 h')).toBeInTheDocument();
+    });
+
+    it('uses full grouped bucket duration in Mejor/Peor metadata and ignores in-progress entries', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 6 * 60 * 60 * 1000, setup: 3 * 60 * 60 * 1000, stopped: 0, noData: 15 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: 0.25,
+                productivityLabel: '25%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-2',
+                label: '2026-06-19 (en curso)',
+                durationsMs: { prod: 4 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 0, noData: 4 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'sin datos',
+                isInProgress: true,
+            }),
+        ]);
+
+        render(<ActivityAnalyticsWidget widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+
+        expect(within(comparisonPanel).getByText('sin comparación')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('% Prod. 25% · 24.0 h')).toBeInTheDocument();
+    });
+
+    it('shows sin comparación for aggregated Turno Resumen comparisons when productivity ties make ranking meaningless', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'shift-1',
+                label: '2026-06-18 · Turno 1',
+                durationsMs: { prod: 4 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 2 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 8 * 60 * 60 * 1000,
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift-2',
+                label: '2026-06-19 · Turno 1',
+                durationsMs: { prod: 2 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 4 * 60 * 60 * 1000,
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift-3',
+                label: '2026-06-18 · Turno 2',
+                durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 6 * 60 * 60 * 1000,
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+
+        expect(within(comparisonPanel).getAllByText('sin comparación')).toHaveLength(4);
+    });
+
+    it('does not rank aggregated Turno Resumen buckets as closed when any contributing shift is still in progress', () => {
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: { plantTimezone: null, shifts: [] },
+            shifts: [
+                { id: 'shift-a', label: 'Turno 1', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+                { id: 'shift-b', label: 'Turno 2', start: '14:00', end: '22:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+            ],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-a:2026-06-18',
+                label: '2026-06-18 · Turno 1',
+                durationsMs: { prod: 4 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 2 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 8 * 60 * 60 * 1000,
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-a:2026-06-19',
+                label: '2026-06-19 · Turno 1 (en curso)',
+                durationsMs: { prod: 2 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 4 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'sin datos',
+                isInProgress: true,
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-b:2026-06-18',
+                label: '2026-06-18 · Turno 2',
+                durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 3 * 60 * 60 * 1000, stopped: 2 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 8 * 60 * 60 * 1000,
+                productivityRatio: 0.375,
+                productivityLabel: '38%',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(2);
+        expect(screen.queryByText('2026-06-19 · Turno 1 (en curso)')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+
+        expect(within(comparisonPanel).queryByText('Turno 1')).not.toBeInTheDocument();
+        expect(within(comparisonPanel).getAllByText('sin comparación')).toHaveLength(4);
     });
 
     it('uses semantic surface tokens for analytics cards instead of hardcoded black/white utilities', () => {
@@ -1590,12 +2669,18 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
 
         expect(screen.getByTestId('activity-analytics-groups')).toHaveClass('border-industrial-border');
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveClass('border-industrial-border');
         expect(screen.getByTestId('activity-analytics-summary-bars')).toHaveClass('border-industrial-border');
-        expect(screen.getAllByTestId('activity-analytics-summary-bar').length).toBeGreaterThan(0);
+        expect(screen.getAllByTestId('activity-analytics-summary-stack')).toHaveLength(1);
+        expect(screen.getAllByTestId('activity-analytics-summary-segment').length).toBeGreaterThan(0);
     });
 
     it('does not recompute analytics when unrelated builder props change', () => {

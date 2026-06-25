@@ -21,6 +21,8 @@ export interface WeeklyShiftInterval {
     bucketKey: string;
     startMs: number;
     endMs: number;
+    semanticStartMs: number;
+    semanticEndMs: number;
 }
 
 export function normalizeWeekdays(value: unknown): WeekdayKey[] {
@@ -149,10 +151,8 @@ export function buildWeeklyShiftIntervals(options: {
                     timezone,
                     crossesMidnight: parseShiftMinutes(shift.start)! >= parseShiftMinutes(shift.end)!,
                 });
-                const clippedStartMs = Math.max(assignment.startMs, visibleStartMs);
-                const clippedEndMs = Math.min(assignment.endMs, visibleEndMs);
 
-                if (clippedEndMs <= clippedStartMs) {
+                if (assignment.endMs <= visibleStartMs || assignment.startMs >= visibleEndMs) {
                     return [];
                 }
 
@@ -160,8 +160,10 @@ export function buildWeeklyShiftIntervals(options: {
                     shiftId: assignment.shiftId,
                     label: assignment.label,
                     bucketKey: assignment.bucketKey,
-                    startMs: clippedStartMs,
-                    endMs: clippedEndMs,
+                    startMs: Math.max(assignment.startMs, visibleStartMs),
+                    endMs: Math.min(assignment.endMs, visibleEndMs),
+                    semanticStartMs: assignment.startMs,
+                    semanticEndMs: assignment.endMs,
                 }];
             });
         })
