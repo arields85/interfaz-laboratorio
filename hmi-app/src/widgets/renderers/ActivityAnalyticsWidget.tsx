@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { AlertTriangle, BarChart2, Loader2, PlugZap } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
@@ -51,7 +51,6 @@ interface ActivityAnalyticsRuntimeViewState {
 }
 
 const RANGE_OPTIONS: Array<{ value: ResolvedActivityAnalyticsDisplayOptions['range']; label: string }> = [
-    { value: '24h', label: '24h' },
     { value: '7d', label: '7d' },
     { value: '30d', label: '30d' },
     { value: '12m', label: '12m' },
@@ -85,21 +84,67 @@ const CHART_TYPOGRAPHY_STYLE: CSSProperties = {
     letterSpacing: 'var(--tracking-chart)',
 };
 
+const WIDGET_VALUE_TEXT_STYLE: CSSProperties = {
+    fontFamily: 'var(--font-widget-value-activity-analytics)',
+    fontWeight: 'var(--font-weight-widget-value-activity-analytics)',
+    fontSize: 'var(--font-size-widget-value-activity-analytics)',
+    letterSpacing: 'var(--tracking-widget-value-activity-analytics)',
+};
+
 const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden p-5';
-const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border bg-[color:color-mix(in_srgb,var(--color-industrial-hover)_72%,transparent)]';
-const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border bg-[color:color-mix(in_srgb,var(--color-industrial-surface)_88%,var(--color-industrial-hover))]';
+const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border';
+const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border';
 const SUMMARY_BAR_COLORS = {
     prod: 'var(--color-status-normal)',
     setup: 'var(--color-status-warning)',
     stopped: 'var(--color-status-critical)',
     noData: 'var(--color-industrial-muted)',
 } as const;
-const COMPARISON_PANEL_TARGET_WIDTH_PX = 272;
+const SUMMARY_SEGMENT_GRADIENTS = {
+    prod: ['var(--color-dynamic-normal-from)', 'var(--color-dynamic-normal-to)'],
+    setup: ['color-mix(in srgb, var(--color-status-warning) 76%, var(--color-industrial-surface))', 'var(--color-status-warning)'],
+    stopped: ['color-mix(in srgb, var(--color-status-critical) 72%, var(--color-industrial-surface))', 'var(--color-status-critical)'],
+} as const;
+const GROUP_STATUS_LEGEND_ITEMS = [
+    { key: 'stopped', label: 'Detenida', color: SUMMARY_BAR_COLORS.stopped },
+    { key: 'setup', label: 'Setup', color: SUMMARY_BAR_COLORS.setup },
+    { key: 'prod', label: 'Prod.', color: SUMMARY_BAR_COLORS.prod },
+] as const;
 const SUMMARY_CHART_MIN_WIDTH_PX = 320;
-const SUMMARY_CHART_MAX_WIDTH_PX = 440;
-const TOP_REGION_STACK_BREAKPOINT_PX = SUMMARY_CHART_MIN_WIDTH_PX + 256 + 16;
+const SUMMARY_CHART_MAX_WIDTH_PX = 480;
+const ROOT_REM_PX = 16;
+const TOP_REGION_COLUMN_GAP_REM = 1;
+const TOP_REGION_COLUMN_GAP_PX = TOP_REGION_COLUMN_GAP_REM * ROOT_REM_PX;
+const TOP_REGION_GRID_TRACKS = [
+    { minWidthRem: 16, fraction: 0.95 },
+    { minWidthRem: 20, fraction: 1.05 },
+    { minWidthRem: 15, fraction: 0.95 },
+] as const;
+const [
+    TOP_REGION_KPI_COLUMN,
+    TOP_REGION_SUMMARY_COLUMN,
+    TOP_REGION_COMPARISON_COLUMN,
+] = TOP_REGION_GRID_TRACKS;
+const TOP_REGION_GRID_TEMPLATE_COLUMNS = TOP_REGION_GRID_TRACKS
+    .map(({ minWidthRem, fraction }) => `minmax(${minWidthRem}rem,${fraction}fr)`)
+    .join(' ');
+const TOP_REGION_MIN_TRACK_WIDTH_PX = TOP_REGION_GRID_TRACKS
+    .reduce((total, { minWidthRem }) => total + (minWidthRem * ROOT_REM_PX), 0);
+const TOP_REGION_SUMMARY_COLUMN_MIN_WIDTH_PX = TOP_REGION_SUMMARY_COLUMN.minWidthRem * ROOT_REM_PX;
+const TOP_REGION_KPI_COLUMN_FRACTION = TOP_REGION_KPI_COLUMN.fraction;
+const TOP_REGION_SUMMARY_COLUMN_FRACTION = TOP_REGION_SUMMARY_COLUMN.fraction;
+const TOP_REGION_COMPARISON_COLUMN_FRACTION = TOP_REGION_COMPARISON_COLUMN.fraction;
+const TOP_REGION_TOTAL_COLUMN_FRACTION =
+    TOP_REGION_KPI_COLUMN_FRACTION
+    + TOP_REGION_SUMMARY_COLUMN_FRACTION
+    + TOP_REGION_COMPARISON_COLUMN_FRACTION;
+const TOP_REGION_STACK_BREAKPOINT_PX =
+    TOP_REGION_MIN_TRACK_WIDTH_PX
+    + (TOP_REGION_COLUMN_GAP_PX * (TOP_REGION_GRID_TRACKS.length - 1));
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
 const INCOMPLETE_COVERAGE_LABEL = 'cobertura incompleta';
+const SUMMARY_RING_BASE_THICKNESS = 8;
+const SUMMARY_RING_PROD_THICKNESS_MULTIPLIER = 1.5;
 
 export default function ActivityAnalyticsWidget({
     widget,
@@ -111,7 +156,9 @@ export default function ActivityAnalyticsWidget({
     const displayOptions = resolveActivityAnalyticsDisplayOptions(widget.displayOptions);
     const [runtimeViewState, setRuntimeViewState] = useState<ActivityAnalyticsRuntimeViewState>(() => createRuntimeViewState(displayOptions));
     const [analyticsBodySize, setAnalyticsBodySize] = useState<{ width: number; height: number } | null>(null);
+    const [summaryColumnWidth, setSummaryColumnWidth] = useState<number | null>(null);
     const analyticsBodyRef = useRef<HTMLDivElement | null>(null);
+    const summaryColumnRef = useRef<HTMLDivElement | null>(null);
     const displayKey = createDisplayOptionsSyncKey(displayOptions);
 
     if (runtimeViewState.sourceDisplayKey !== displayKey || runtimeViewState.sourceGroupBy !== displayOptions.groupBy) {
@@ -140,11 +187,8 @@ export default function ActivityAnalyticsWidget({
         groupBy: activeDisplayRules.groupBy,
     };
     const activeGroupBy = activeDisplayRules.groupBy;
-    const forceTurnoDetail = activeGroupBy === 'shift' && activeDisplayRules.range === '24h';
     const showTurnoModeControl = activeGroupBy === 'shift' && activeDisplayRules.range === '7d';
-    const activeTurnoMode = forceTurnoDetail
-        ? 'detail'
-        : activeDisplayRules.turnoDetailEligible ? runtimeViewState.turnoMode : 'summary';
+    const activeTurnoMode = activeDisplayRules.turnoDetailEligible ? runtimeViewState.turnoMode : 'summary';
 
     if (runtimeGroupBy !== null && runtimeGroupBy !== activeGroupBy) {
         setRuntimeViewState((current) => ({
@@ -237,26 +281,41 @@ export default function ActivityAnalyticsWidget({
             return undefined;
         }
 
+        const analyticsBodyElement = analyticsBodyRef.current;
+        const summaryColumnElement = summaryColumnRef.current;
+
         const observer = new ResizeObserver((entries) => {
-            const entry = entries[0];
+            entries.forEach((entry) => {
+                const nextWidth = Math.round(entry.contentRect.width);
 
-            if (!entry) {
-                return;
-            }
+                if (nextWidth <= 0) {
+                    return;
+                }
 
-            const nextWidth = Math.round(entry.contentRect.width);
-            const nextHeight = Math.round(entry.contentRect.height);
+                if (entry.target === analyticsBodyElement) {
+                    const nextHeight = Math.round(entry.contentRect.height);
 
-            if (nextWidth <= 0 || nextHeight <= 0) {
-                return;
-            }
+                    if (nextHeight <= 0) {
+                        return;
+                    }
 
-            setAnalyticsBodySize((current) => (current?.width === nextWidth && current?.height === nextHeight)
-                ? current
-                : { width: nextWidth, height: nextHeight });
+                    setAnalyticsBodySize((current) => (current?.width === nextWidth && current?.height === nextHeight)
+                        ? current
+                        : { width: nextWidth, height: nextHeight });
+                    return;
+                }
+
+                if (summaryColumnElement && entry.target === summaryColumnElement) {
+                    setSummaryColumnWidth((current) => (current === nextWidth ? current : nextWidth));
+                }
+            });
         });
 
-        observer.observe(analyticsBodyRef.current);
+        observer.observe(analyticsBodyElement);
+
+        if (summaryColumnElement) {
+            observer.observe(summaryColumnElement);
+        }
 
         return () => {
             observer.disconnect();
@@ -441,14 +500,16 @@ export default function ActivityAnalyticsWidget({
                     comparison={displayComparison}
                     grouped={displayGrouped}
                     visualLayout={visualLayout}
-                chartWidth={analyticsBodySize?.width ?? 640}
-                showTurnoModeControl={showTurnoModeControl}
-                turnoMode={activeTurnoMode}
-                onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
-                emptyMessage={hasHiddenOnlyTurnoGroups
-                    ? 'Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.'
-                    : null}
-            />
+                    chartWidth={analyticsBodySize?.width ?? 640}
+                    measuredSummaryColumnWidth={summaryColumnWidth}
+                    summaryColumnRef={summaryColumnRef}
+                    showTurnoModeControl={showTurnoModeControl}
+                    turnoMode={activeTurnoMode}
+                    onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
+                    emptyMessage={hasHiddenOnlyTurnoGroups
+                        ? 'Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.'
+                        : null}
+                />
             </div>
         </div>
     );
@@ -628,6 +689,8 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     grouped,
     visualLayout,
     chartWidth,
+    measuredSummaryColumnWidth,
+    summaryColumnRef,
     showTurnoModeControl,
     turnoMode,
     onTurnoModeChange,
@@ -638,31 +701,40 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     visualLayout: ActivityAnalyticsVisualLayout;
     chartWidth: number;
+    measuredSummaryColumnWidth: number | null;
+    summaryColumnRef: RefObject<HTMLDivElement | null>;
     showTurnoModeControl: boolean;
     turnoMode: 'summary' | 'detail';
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
     emptyMessage: string | null;
 }) {
     const stackTopRegion = chartWidth < TOP_REGION_STACK_BREAKPOINT_PX;
+    const resolvedSummaryColumnWidth = stackTopRegion
+        ? chartWidth
+        : measuredSummaryColumnWidth ?? resolveTopRegionCenterColumnWidth(chartWidth);
     const summaryChartWidth = Math.min(
         chartWidth,
         SUMMARY_CHART_MAX_WIDTH_PX,
-        stackTopRegion
-            ? chartWidth
-            : Math.max(chartWidth - COMPARISON_PANEL_TARGET_WIDTH_PX, SUMMARY_CHART_MIN_WIDTH_PX),
+        resolvedSummaryColumnWidth,
     );
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4">
             <div
-                className={stackTopRegion ? 'flex flex-col gap-4' : 'flex flex-wrap items-start gap-4'}
+                className={stackTopRegion
+                    ? 'flex flex-col gap-4'
+                    : 'grid items-start gap-4'}
+                style={stackTopRegion ? undefined : { gridTemplateColumns: TOP_REGION_GRID_TEMPLATE_COLUMNS }}
                 data-testid="activity-analytics-top-region"
                 data-top-layout={stackTopRegion ? 'stacked' : 'side-by-side'}
             >
-                <div className={stackTopRegion ? 'min-w-0' : 'min-w-0 flex-[1.4_1_20rem]'}>
+                <div className="min-w-0 self-stretch">
+                    <KpiPanel analytics={analytics} />
+                </div>
+                <div ref={summaryColumnRef} className="min-w-0" data-testid="activity-analytics-summary-column">
                     <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={summaryChartWidth} />
                 </div>
-                <div className={stackTopRegion ? 'min-w-0' : 'min-w-[16rem] flex-1 basis-[16rem] self-stretch'}>
+                <div className="min-w-0 self-stretch">
                     <ComparisonPanel comparison={comparison} grouped={grouped} />
                 </div>
             </div>
@@ -679,6 +751,47 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     );
 });
 
+function resolveTopRegionCenterColumnWidth(containerWidth: number): number {
+    const totalGapWidth = TOP_REGION_COLUMN_GAP_PX * (TOP_REGION_GRID_TRACKS.length - 1);
+    const availableTrackWidth = Math.max(containerWidth - totalGapWidth, 0);
+    const minimumTrackWidth = TOP_REGION_MIN_TRACK_WIDTH_PX;
+
+    if (availableTrackWidth <= minimumTrackWidth) {
+        return SUMMARY_CHART_MIN_WIDTH_PX;
+    }
+
+    const distributableWidth = availableTrackWidth - minimumTrackWidth;
+    const centerColumnWidth = TOP_REGION_SUMMARY_COLUMN_MIN_WIDTH_PX
+        + (distributableWidth * (TOP_REGION_SUMMARY_COLUMN_FRACTION / TOP_REGION_TOTAL_COLUMN_FRACTION));
+
+    return Math.max(centerColumnWidth, SUMMARY_CHART_MIN_WIDTH_PX);
+}
+
+const KpiPanel = memo(function KpiPanel({
+    analytics,
+}: {
+    analytics: ActivityAnalyticsSummaryData;
+}) {
+    const cards = createKpiDisplayModel(analytics);
+
+    return (
+        <div className={`${ANALYTICS_PANEL_CLASS} p-3`} data-testid="activity-analytics-kpis">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {cards.map((card) => (
+                    <div key={card.label} className={`${ANALYTICS_CARD_CLASS} flex min-h-24 flex-col justify-between rounded-xl p-3`}>
+                        <div className="uppercase text-industrial-muted" style={GENERAL_TYPOGRAPHY_STYLE}>
+                            {card.label}
+                        </div>
+                        <div className="mt-3 text-industrial-text" style={WIDGET_VALUE_TEXT_STYLE} data-testid="activity-analytics-kpi-value">
+                            {card.value}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+});
+
 const SummaryPanel = memo(function SummaryPanel({
     analytics,
     summaryLayout,
@@ -688,45 +801,81 @@ const SummaryPanel = memo(function SummaryPanel({
     summaryLayout: ActivityAnalyticsSummaryLayout;
     chartWidth: number;
 }) {
-    const sectionProductivity = analytics.coverageRatio < 1
-        ? INCOMPLETE_COVERAGE_LABEL
-        : formatPercent(analytics.utilizationRatio);
-    const coverageLabel = formatPercent(analytics.coverageRatio);
-    const stackedBars = [
-        { key: 'stopped', label: 'Detenida', durationMs: analytics.durationsMs.stopped, color: SUMMARY_BAR_COLORS.stopped },
-        { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
-        { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
-    ] as const;
-    const textFallbackMetrics = [
-        { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod },
-        { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup },
-        { key: 'stopped', label: 'Detenida', durationMs: analytics.durationsMs.stopped },
-    ] as const;
+    const summaryDisplay = createSummaryDisplayModel(analytics);
+    const coverageSummary = `Cobertura ${summaryDisplay.coverageLabel}`;
 
     if (summaryLayout.mode === 'text-fallback') {
         return (
             <div className={`${ANALYTICS_PANEL_CLASS} p-3`} data-testid="activity-analytics-summary-text">
-                <PanelHeading title="Resumen" value={`% Prod. ${sectionProductivity} · Cob. ${coverageLabel}`} />
+                <PanelHeading title="Distribución" />
+                <div className="mt-1 text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-coverage">
+                    {coverageSummary}
+                </div>
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {textFallbackMetrics.map((metric) => (
-                        <TextMetricCard key={metric.key} label={metric.label} durationMs={metric.durationMs} productivityLabel={sectionProductivity} />
+                    {summaryDisplay.textFallbackMetrics.map((metric) => (
+                        <TextMetricCard key={metric.key} label={metric.label} durationMs={metric.durationMs} productivityLabel={summaryDisplay.sectionProductivityLabel} />
                     ))}
                 </div>
             </div>
         );
     }
 
-    const chartHeight = summaryLayout.mode === 'compact-axis-bars' ? 224 : 252;
+    const chartHeight = summaryLayout.mode === 'compact-axis-bars' ? 236 : 276;
 
     return (
         <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-col p-3`} data-testid="activity-analytics-summary-bars">
-            <PanelHeading title="Resumen" value={`% Prod. ${sectionProductivity} · Cob. ${coverageLabel}`} />
+            <PanelHeading title="Distribución" />
+            <div className="mt-1 text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-coverage">
+                {coverageSummary}
+            </div>
             <div className="mt-3" data-testid="activity-analytics-summary-panel">
-                <SummaryBarsChart bars={stackedBars} width={chartWidth} height={chartHeight} density={summaryLayout.density} />
+                <SummaryBarsChart
+                    bars={summaryDisplay.stackedBars}
+                    width={chartWidth}
+                    height={chartHeight}
+                    density={summaryLayout.density}
+                    centerValue={summaryDisplay.sectionProductivityLabel}
+                    centerLabel="PROD"
+                />
             </div>
         </div>
     );
 });
+
+type ActivityAnalyticsSummaryData = ReturnType<typeof computeActivityAnalytics>['analytics'];
+
+function createSummaryDisplayModel(analytics: ActivityAnalyticsSummaryData) {
+    const sectionProductivityLabel = analytics.coverageRatio < 1
+        ? INCOMPLETE_COVERAGE_LABEL
+        : formatPercent(analytics.utilizationRatio);
+    const coverageLabel = formatPercent(analytics.coverageRatio);
+
+    return {
+        sectionProductivityLabel,
+        coverageLabel,
+        stackedBars: [
+            { key: 'stopped', label: 'Detenida', durationMs: analytics.durationsMs.stopped, color: SUMMARY_BAR_COLORS.stopped },
+            { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
+            { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
+        ] as const,
+        textFallbackMetrics: [
+            { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod },
+            { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup },
+            { key: 'stopped', label: 'Detenida', durationMs: analytics.durationsMs.stopped },
+        ] as const,
+    };
+}
+
+function createKpiDisplayModel(analytics: ActivityAnalyticsSummaryData) {
+    const summaryDisplay = createSummaryDisplayModel(analytics);
+
+    return [
+        { label: '% PROD.', value: summaryDisplay.sectionProductivityLabel },
+        { label: 'HORAS PROD.', value: formatDurationHours(analytics.durationsMs.prod) },
+        { label: 'HORAS DETENIDA', value: formatDurationHours(analytics.durationsMs.stopped) },
+        { label: 'HORAS SETUP', value: formatDurationHours(analytics.durationsMs.setup) },
+    ] as const;
+}
 
 const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
     grouped,
@@ -749,7 +898,7 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
         return (
             <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
                 <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
-                    <PanelHeading title="Grupos" value="0" />
+                    <PanelHeading title="Grupos" endContent={<GroupStatusLegend />} />
                     {showTurnoModeControl && (
                         <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
                     )}
@@ -769,7 +918,7 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
         return (
             <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
                 <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
-                <PanelHeading title="Grupos" value={String(grouped.length)} />
+                <PanelHeading title="Grupos" endContent={<GroupStatusLegend />} />
                 {showTurnoModeControl && (
                     <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
                 )}
@@ -793,7 +942,7 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
     return (
         <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
             <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
-                <PanelHeading title="Grupos" value={String(grouped.length)} />
+                <PanelHeading title="Grupos" endContent={<GroupStatusLegend />} />
                 {showTurnoModeControl && (
                     <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
                 )}
@@ -841,11 +990,36 @@ const TurnoModeControl = memo(function TurnoModeControl({
     );
 });
 
-const PanelHeading = memo(function PanelHeading({ title, value }: { title: string; value: string }) {
+const GroupStatusLegend = memo(function GroupStatusLegend() {
+    return (
+        <div className="flex items-center gap-3 normal-case" data-testid="activity-analytics-groups-header-legend">
+            {GROUP_STATUS_LEGEND_ITEMS.map((item) => (
+                <span key={item.key} className="flex items-center gap-1.5 whitespace-nowrap text-industrial-text">
+                    <span
+                        aria-hidden="true"
+                        className="h-2.5 w-2.5 rounded-[3px]"
+                        style={{ backgroundColor: item.color }}
+                    />
+                    <span style={CHART_TYPOGRAPHY_STYLE}>{item.label}</span>
+                </span>
+            ))}
+        </div>
+    );
+});
+
+const PanelHeading = memo(function PanelHeading({
+    title,
+    value,
+    endContent,
+}: {
+    title: string;
+    value?: string;
+    endContent?: ReactNode;
+}) {
     return (
         <div className="flex items-center justify-between gap-2 uppercase text-industrial-muted">
-            <span style={CHART_TYPOGRAPHY_STYLE}>{title}</span>
-            <span style={CHART_TYPOGRAPHY_STYLE}>{value}</span>
+            <span style={GENERAL_TYPOGRAPHY_STYLE}>{title}</span>
+            {endContent ?? (value ? <span data-testid="activity-analytics-panel-heading-value" style={CHART_TYPOGRAPHY_STYLE}>{value}</span> : null)}
         </div>
     );
 });
@@ -885,127 +1059,157 @@ function SummaryBarsChart({
     width,
     height,
     density,
+    centerValue,
+    centerLabel,
 }: {
     bars: ReadonlyArray<{ key: string; label: string; durationMs: number; color: string }>;
     width: number;
     height: number;
     density: ActivityAnalyticsSummaryLayout['density'];
+    centerValue: string;
+    centerLabel: string;
 }) {
+    const gradientPrefix = useId().replace(/:/g, '-');
+    const glowFilterId = `${gradientPrefix}-summary-glow`;
     const totalDurationMs = Math.max(bars.reduce((total, bar) => total + bar.durationMs, 0), 1);
+    const legendHeight = density === 'compress' ? 72 : 80;
     const margin = density === 'compress'
-        ? { top: 18, right: 12, bottom: 86, left: 50 } as const
-        : { top: 18, right: 18, bottom: 92, left: 58 } as const;
-    const plotWidth = Math.max(width - margin.left - margin.right, 1);
-    const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
-    const maxDurationMs = totalDurationMs;
-    const barWidth = Math.min(plotWidth * (density === 'compress' ? 0.3 : 0.24), density === 'compress' ? 92 : 104);
-    const stackX = margin.left + ((plotWidth - barWidth) / 2);
-    const axisTicks = Array.from({ length: 5 }, (_, index) => ({
-        value: maxDurationMs - ((maxDurationMs * index) / 4),
-        y: margin.top + ((index / 4) * plotHeight),
-    }));
+        ? { top: 12, right: 12, bottom: 14, left: 12 } as const
+        : { top: 14, right: 18, bottom: 16, left: 18 } as const;
+    const donutRegionHeight = Math.max(height - legendHeight - margin.top - margin.bottom, 1);
+    const legendY = margin.top + donutRegionHeight + (density === 'compress' ? 10 : 12);
+    const centerX = width / 2;
+    const centerY = margin.top + (donutRegionHeight / 2);
+    const ringThickness = SUMMARY_RING_BASE_THICKNESS;
+    const prodRingThickness = ringThickness * SUMMARY_RING_PROD_THICKNESS_MULTIPLIER;
+    const minimumOuterRadius = 32;
+    const outerRadius = Math.max(Math.min((Math.min(width, donutRegionHeight) / 2) - (density === 'compress' ? 4 : 8), density === 'compress' ? 88 : 104), minimumOuterRadius);
+    const radius = Math.max(outerRadius - (ringThickness / 2), 1);
+    const circumference = 2 * Math.PI * radius;
+    const nonZeroBars = bars.filter((bar) => bar.durationMs > 0);
+    const gapLength = nonZeroBars.length > 1 ? Math.min(circumference * 0.014, density === 'compress' ? 6 : 8) : 0;
+    const availableCircumference = Math.max(circumference - (gapLength * nonZeroBars.length), 0);
+    let currentOffset = 0;
+    const renderedSegments = bars.flatMap<{
+        bar: { key: string; label: string; durationMs: number; color: string };
+        dashArray: string;
+        dashOffset: number;
+    }>((bar) => {
+        if (bar.durationMs <= 0) {
+            return [];
+        }
+
+        const arcLength = (bar.durationMs / totalDurationMs) * availableCircumference;
+        const dashArray = `${arcLength} ${Math.max(circumference - arcLength, 0)}`;
+        const dashOffset = -(currentOffset + (gapLength / 2));
+        currentOffset += arcLength + gapLength;
+
+        return [{
+            bar,
+            dashArray,
+            dashOffset,
+        }];
+    });
 
     return (
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} data-testid="activity-analytics-summary-chart">
-            {axisTicks.map((tick, index) => (
-                <g key={`summary-tick-${index}`}>
-                    <line x1={margin.left} x2={margin.left + plotWidth} y1={tick.y} y2={tick.y} stroke="var(--color-industrial-border)" strokeDasharray="3 3" opacity={0.65} />
-                    <text
-                        x={margin.left - 8}
-                        y={tick.y}
-                        dy={4}
-                        textAnchor="end"
-                        fill="var(--color-industrial-muted)"
-                        style={CHART_TYPOGRAPHY_STYLE}
-                        data-testid="activity-analytics-y-axis-tick"
-                    >
-                        {formatHoursTick(tick.value)}
-                    </text>
-                </g>
-            ))}
-
-            <line x1={margin.left} x2={margin.left} y1={margin.top} y2={margin.top + plotHeight} stroke="var(--color-industrial-border)" />
-            <line x1={margin.left} x2={margin.left + plotWidth} y1={margin.top + plotHeight} y2={margin.top + plotHeight} stroke="var(--color-industrial-border)" />
-
-            <g data-testid="activity-analytics-summary-stack">
-                {(() => {
-                    let currentY = margin.top + plotHeight;
+            <defs>
+                <filter id={glowFilterId} x="-18%" y="-18%" width="136%" height="136%">
+                    <feGaussianBlur stdDeviation="2.5" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+                {bars.map((bar) => {
+                    const gradientStops = SUMMARY_SEGMENT_GRADIENTS[bar.key as keyof typeof SUMMARY_SEGMENT_GRADIENTS];
 
                     return (
-                        <>
-                            {bars.map((bar, index) => {
-                                const barHeight = (bar.durationMs / maxDurationMs) * plotHeight;
-                                currentY -= barHeight;
-
-                                return (
-                                    <rect
-                                        key={bar.key}
-                                        x={stackX}
-                                        y={currentY}
-                                        width={barWidth}
-                                        height={barHeight}
-                                        rx={index === bars.length - 1 ? 8 : 0}
-                                        fill={bar.color}
-                                        opacity={0.92}
-                                        data-testid="activity-analytics-summary-segment"
-                                    />
-                                );
-                            })}
-
-                            <text
-                                x={stackX + (barWidth / 2)}
-                                y={Math.max(currentY - 8, margin.top + 10)}
-                                textAnchor="middle"
-                                fill="var(--color-industrial-text)"
-                                style={TECHNICAL_TYPOGRAPHY_STYLE}
-                            >
-                                {formatDurationHours(totalDurationMs)}
-                            </text>
-                            <text
-                                x={stackX + (barWidth / 2)}
-                                y={margin.top + plotHeight + 20}
-                                textAnchor="middle"
-                                fill="var(--color-industrial-text)"
-                                style={CHART_TYPOGRAPHY_STYLE}
-                            >
-                                Total
-                            </text>
-                        </>
+                        <linearGradient key={bar.key} id={`${gradientPrefix}-${bar.key}-gradient`} x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stopColor={gradientStops?.[0] ?? bar.color} />
+                            <stop offset="100%" stopColor={gradientStops?.[1] ?? bar.color} />
+                        </linearGradient>
                     );
-                })()}
+                })}
+            </defs>
+
+            <circle
+                cx={centerX}
+                cy={centerY}
+                r={radius}
+                fill="none"
+                stroke="color-mix(in srgb, var(--color-industrial-border) 76%, transparent)"
+                strokeWidth={ringThickness}
+            />
+
+            <g data-testid="activity-analytics-summary-stack">
+                {renderedSegments.map(({ bar, dashArray, dashOffset }) => {
+                    return (
+                        <circle
+                            key={bar.key}
+                            cx={centerX}
+                            cy={centerY}
+                            r={radius}
+                            fill="none"
+                            stroke={`url(#${gradientPrefix}-${bar.key}-gradient)`}
+                            strokeWidth={bar.key === 'prod' ? prodRingThickness : ringThickness}
+                            strokeDasharray={dashArray}
+                            strokeDashoffset={dashOffset}
+                            strokeLinecap="butt"
+                            filter={`url(#${glowFilterId})`}
+                            transform={`rotate(-90 ${centerX} ${centerY})`}
+                            data-testid="activity-analytics-summary-segment"
+                            data-segment-key={bar.key}
+                        />
+                    );
+                })}
+
+                <circle
+                    cx={centerX}
+                    cy={centerY}
+                    r={Math.max(radius - (ringThickness / 2) - 6, 1)}
+                    fill="transparent"
+                />
+                <text
+                    x={centerX}
+                    y={centerY - 4}
+                    textAnchor="middle"
+                    fill="var(--color-industrial-text)"
+                    style={WIDGET_VALUE_TEXT_STYLE}
+                    data-testid="activity-analytics-summary-total-value"
+                >
+                    {centerValue}
+                </text>
+                <text
+                    x={centerX}
+                    y={centerY + 15}
+                    textAnchor="middle"
+                    fill="var(--color-industrial-muted)"
+                    style={GENERAL_TYPOGRAPHY_STYLE}
+                    data-testid="activity-analytics-summary-total-label"
+                >
+                    {centerLabel}
+                </text>
             </g>
 
             {bars.map((bar, index) => {
-                const legendX = margin.left + ((index + 0.5) * (plotWidth / bars.length));
+                const legendX = margin.left + (((index + 0.5) * (width - margin.left - margin.right)) / bars.length);
 
                 return (
                     <g key={`summary-legend-${bar.key}`} data-testid="activity-analytics-summary-legend-item">
                         <rect
                             x={legendX - 26}
-                            y={margin.top + plotHeight + 34}
+                            y={legendY}
                             width={10}
                             height={10}
                             rx={3}
-                            fill={bar.color}
-                            opacity={0.92}
+                            fill={`url(#${gradientPrefix}-${bar.key}-gradient)`}
                         />
                         <text
                             x={legendX - 10}
-                            y={margin.top + plotHeight + 43}
+                            y={legendY + 9}
                             textAnchor="start"
                             fill="var(--color-industrial-text)"
                             style={CHART_TYPOGRAPHY_STYLE}
                         >
                             {bar.label}
-                        </text>
-                        <text
-                            x={legendX}
-                            y={margin.top + plotHeight + 59}
-                            textAnchor="middle"
-                            fill="var(--color-industrial-muted)"
-                            style={TECHNICAL_TYPOGRAPHY_STYLE}
-                        >
-                            {formatDurationHours(bar.durationMs)}
                         </text>
                     </g>
                 );
@@ -1076,12 +1280,12 @@ function GroupedStackedBarsChart({
 
                 {grouped.map((bucket, index) => {
                     const x = margin.left + (step * index) + ((step - barWidth) / 2);
-                    const segments = [
+                    const segments: ReadonlyArray<{ key: string; value: number; color: string; opacity?: number }> = [
                         { key: 'noData', value: bucket.durationsMs.noData, color: SUMMARY_BAR_COLORS.noData, opacity: 0.5 },
                         { key: 'stopped', value: bucket.durationsMs.stopped, color: SUMMARY_BAR_COLORS.stopped },
                         { key: 'setup', value: bucket.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
                         { key: 'prod', value: bucket.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
-                    ] as const;
+                    ];
                     let currentY = margin.top + plotHeight;
 
                     return (
@@ -1217,23 +1421,23 @@ interface ComparisonEntry {
 
 const ComparisonRow = memo(function ComparisonRow({ entry }: { entry: ComparisonEntry }) {
     const totalDurationMs = Math.max(entry.totalDurationMs, 1);
-    const segments = [
+    const segments: ReadonlyArray<{ key: string; value: number; color: string; opacity?: number }> = [
         { key: 'noData', value: entry.durationsMs.noData, color: SUMMARY_BAR_COLORS.noData, opacity: 0.5 },
         { key: 'prod', value: entry.durationsMs.prod, color: SUMMARY_BAR_COLORS.prod },
         { key: 'setup', value: entry.durationsMs.setup, color: SUMMARY_BAR_COLORS.setup },
         { key: 'stopped', value: entry.durationsMs.stopped, color: SUMMARY_BAR_COLORS.stopped },
-    ] as const;
+    ];
 
     return (
         <div className={`${ANALYTICS_CARD_CLASS} rounded-xl p-3`}>
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <div className="uppercase text-industrial-muted" style={CHART_TYPOGRAPHY_STYLE}>{entry.heading}</div>
+                    <div className="uppercase text-industrial-muted" style={GENERAL_TYPOGRAPHY_STYLE}>{entry.heading}</div>
                     <div className="mt-1 truncate text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-metric-value">{entry.label}</div>
                     <div className="mt-1 text-industrial-muted" style={CHART_TYPOGRAPHY_STYLE}>{entry.metadata}</div>
                 </div>
                 {!entry.isEmpty && (
-                    <div className="mt-1 flex w-24 overflow-hidden rounded-full border border-industrial-border bg-industrial-hover" aria-hidden="true">
+                    <div className="mt-1 flex w-24 overflow-hidden rounded-full border border-industrial-border" aria-hidden="true">
                         {segments.map((segment) => (
                             <div
                                 key={`${entry.heading}-${segment.key}`}

@@ -62,6 +62,12 @@ export const WIDGET_GAUGE_VALUE_FONT_SIZE_RANGE = {
     max: 72,
 } as const;
 
+export const DEFAULT_ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_PX = 20;
+export const ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_RANGE = {
+    min: 10,
+    max: 72,
+} as const;
+
 export const DEFAULT_WIDGET_UNIT_FONT_SIZE_PX = 20;
 export const WIDGET_UNIT_FONT_SIZE_RANGE = {
     min: 10,
@@ -103,6 +109,7 @@ export const FONT_STACKS_BY_TOKEN = {
     '--font-dashboard-title': 'sans',
     '--font-widget-value': 'sans',
     '--font-widget-value-gauge': 'sans',
+    '--font-widget-value-activity-analytics': 'sans',
 } as const satisfies Record<string, FontStackKind>;
 
 export type FontFamilyTokenKey = keyof typeof FONT_STACKS_BY_TOKEN;
@@ -202,6 +209,14 @@ export function normalizeWidgetGaugeValueFontSizeValue(value: string | number): 
 
 export function parseWidgetGaugeValueFontSizeValue(value: string | undefined): number {
     return Number.parseInt(normalizeWidgetGaugeValueFontSizeValue(value ?? DEFAULT_WIDGET_GAUGE_VALUE_FONT_SIZE_PX), 10);
+}
+
+export function normalizeActivityAnalyticsValueFontSizeValue(value: string | number): string {
+    return normalizePixelValue(value, DEFAULT_ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_PX, ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_RANGE);
+}
+
+export function parseActivityAnalyticsValueFontSizeValue(value: string | undefined): number {
+    return Number.parseInt(normalizeActivityAnalyticsValueFontSizeValue(value ?? DEFAULT_ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_PX), 10);
 }
 
 export function normalizeWidgetUnitFontSizeValue(value: string | number): string {

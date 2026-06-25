@@ -5,26 +5,26 @@ import {
 } from './activityAnalyticsDisplayRules';
 
 describe('activityAnalyticsDisplayRules', () => {
-    it('removes legacy 1h from runtime range options and normalizes it to 24h', () => {
-        expect(ACTIVITY_ANALYTICS_RUNTIME_RANGE_OPTIONS).toEqual(['24h', '7d', '30d', '12m']);
+    it('removes legacy 1h and 24h from runtime range options and normalizes them to 7d', () => {
+        expect(ACTIVITY_ANALYTICS_RUNTIME_RANGE_OPTIONS).toEqual(['7d', '30d', '12m']);
         expect(resolveActivityAnalyticsDisplayRules({ range: '1h', groupBy: 'month' })).toEqual({
-            range: '24h',
-            allowedGroups: ['shift'],
+            range: '7d',
+            allowedGroups: ['shift', 'day'],
+            fallbackGroup: 'shift',
+            groupBy: 'shift',
+            turnoDetailEligible: true,
+        });
+
+        expect(resolveActivityAnalyticsDisplayRules({ range: '24h', groupBy: 'shift' })).toEqual({
+            range: '7d',
+            allowedGroups: ['shift', 'day'],
             fallbackGroup: 'shift',
             groupBy: 'shift',
             turnoDetailEligible: true,
         });
     });
 
-    it('keeps low-range Turno detail eligible only when the effective group stays in shift', () => {
-        expect(resolveActivityAnalyticsDisplayRules({ range: '24h', groupBy: 'shift' })).toEqual({
-            range: '24h',
-            allowedGroups: ['shift'],
-            fallbackGroup: 'shift',
-            groupBy: 'shift',
-            turnoDetailEligible: true,
-        });
-
+    it('keeps 7d Turno detail eligible only when the effective group stays in shift', () => {
         expect(resolveActivityAnalyticsDisplayRules({ range: '7d', groupBy: 'week' })).toEqual({
             range: '7d',
             allowedGroups: ['shift', 'day'],

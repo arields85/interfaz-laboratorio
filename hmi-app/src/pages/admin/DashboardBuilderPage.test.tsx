@@ -612,8 +612,8 @@ describe('DashboardBuilderPage', () => {
                         bindingVersion: 'node-red-v1',
                     },
                     displayOptions: {
-                        range: '24h',
-                        groupBy: 'day',
+                        range: '7d',
+                        groupBy: 'shift',
                         setupThresholdKw: 0.15,
                         prodThresholdKw: 0.25,
                         displayMode: 'kpis-and-bars',

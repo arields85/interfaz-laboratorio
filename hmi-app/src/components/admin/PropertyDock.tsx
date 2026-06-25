@@ -83,7 +83,6 @@ type ConnectionStatusTextFieldKey = 'onlineText' | 'degradadoText' | 'offlineTex
 
 const isPresetUnit = (value: string): value is PresetUnit => PRESET_UNITS.some(unit => unit === value);
 const ACTIVITY_ANALYTICS_RANGE_OPTIONS: Array<{ value: ActivityAnalyticsSupportedRange; label: string }> = [
-    { value: '24h', label: '24 horas' },
     { value: '7d', label: '7 días' },
     { value: '30d', label: '30 días' },
     { value: '12m', label: '12 meses' },
@@ -988,7 +987,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                                         <DockFieldRow label="Rango">
                                             <AdminSelect
-                                                value={activityAnalyticsOptions?.range ?? '24h'}
+                                                value={activityAnalyticsOptions?.range ?? '7d'}
                                                 onChange={handleActivityAnalyticsRangeChange}
                                                 options={ACTIVITY_ANALYTICS_RANGE_OPTIONS}
                                             />

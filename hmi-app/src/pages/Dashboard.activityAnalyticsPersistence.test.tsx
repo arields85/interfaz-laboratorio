@@ -252,7 +252,7 @@ describe('Dashboard activity-analytics viewer persistence', () => {
             </div>,
         );
 
-        const measureViewer = async (expectedActiveRange: '24h' | '7d') => {
+        const measureViewer = async (expectedActiveRange: '7d' | '30d') => {
             await waitFor(() => {
                 expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
             });
@@ -268,32 +268,34 @@ describe('Dashboard activity-analytics viewer persistence', () => {
         };
 
         const initialRender = renderDashboard();
-        await measureViewer('24h');
+        await measureViewer('7d');
 
-        await user.click(screen.getByRole('button', { name: '7d' }));
+        expect(screen.queryByRole('button', { name: '24h' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: '30d' }));
 
         await waitFor(() => {
             expect(persistSpy).toHaveBeenCalledWith('dashboard-activity-analytics', 'activity-widget', {
-                range: '7d',
+                range: '30d',
                 start: undefined,
                 end: undefined,
             });
         });
 
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
+            expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
         });
 
         await waitFor(() => {
             const storedDashboards = JSON.parse(localStorage.getItem(DASHBOARDS_STORAGE_KEY) ?? '[]');
-            expect(storedDashboards[0]?.publishedSnapshot?.widgets[0]?.displayOptions?.range).toBe('7d');
+            expect(storedDashboards[0]?.publishedSnapshot?.widgets[0]?.displayOptions?.range).toBe('30d');
         });
 
         initialRender.unmount();
 
         renderDashboard();
-        await measureViewer('7d');
+        await measureViewer('30d');
 
-        expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
     });
 });

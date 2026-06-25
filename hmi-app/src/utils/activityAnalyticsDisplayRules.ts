@@ -21,19 +21,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 const FALLBACK_GROUP_PREFERENCE: ActivityAnalyticsGroupBy[] = ['shift', 'day', 'week', 'month'];
 
-export const ACTIVITY_ANALYTICS_RUNTIME_RANGE_OPTIONS: ActivityAnalyticsSupportedRange[] = ['24h', '7d', '30d', '12m'];
+export const ACTIVITY_ANALYTICS_RUNTIME_RANGE_OPTIONS: ActivityAnalyticsSupportedRange[] = ['7d', '30d', '12m'];
 
 export function normalizeActivityAnalyticsRange(range?: string): ActivityAnalyticsSupportedRange {
     switch (range) {
-    case '24h':
     case '7d':
     case '30d':
     case '12m':
     case 'custom':
         return range;
+    case '24h':
     case '1h':
     default:
-        return '24h';
+        return '7d';
     }
 }
 
@@ -56,7 +56,7 @@ export function resolveActivityAnalyticsDisplayRules({
         allowedGroups,
         fallbackGroup,
         groupBy: resolvedGroupBy,
-        turnoDetailEligible: resolvedGroupBy === 'shift' && (normalizedRange === '24h' || normalizedRange === '7d'),
+        turnoDetailEligible: resolvedGroupBy === 'shift' && normalizedRange === '7d',
     };
 }
 
@@ -65,8 +65,6 @@ function resolveAllowedGroups(
     customDurationMs: number | null,
 ): ActivityAnalyticsGroupBy[] {
     switch (range) {
-    case '24h':
-        return ['shift'];
     case '7d':
         return ['shift', 'day'];
     case '30d':
@@ -88,6 +86,8 @@ function resolveAllowedGroups(
 
         return ['shift', 'day', 'week', 'month'];
     }
+
+    throw new Error(`Unsupported activity analytics range: ${range}`);
 }
 
 function resolveFallbackGroup(allowedGroups: ActivityAnalyticsGroupBy[]) {

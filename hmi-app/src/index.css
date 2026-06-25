@@ -293,6 +293,7 @@ h1, h2, h3, h4, h5, h6 {
   --font-dashboard-title: "Magistral";
   --font-widget-value: "Magistral";
   --font-widget-value-gauge: var(--font-widget-value);
+  --font-widget-value-activity-analytics: "Magistral";
   --font-weight-system: 400;
   --font-weight-sans: var(--font-weight-system);
   --font-weight-mono: 400;
@@ -300,6 +301,7 @@ h1, h2, h3, h4, h5, h6 {
   --font-weight-dashboard-title: 400;
   --font-weight-widget-value: 400;
   --font-weight-widget-value-gauge: var(--font-weight-widget-value);
+  --font-weight-widget-value-activity-analytics: 400;
   --font-size-system: 11px;
   --font-size-mono: 10px;
   --font-size-chart: 10px;
@@ -307,6 +309,7 @@ h1, h2, h3, h4, h5, h6 {
   --font-size-widget-value: 35px;
   --font-size-widget-unit: 20px;
   --font-size-widget-value-gauge: 60px;
+  --font-size-widget-value-activity-analytics: 20px;
   --font-size-logo: 20px;
   --font-size-widget-unit-gauge: 20px;
   --tracking-system: 0px;
@@ -315,6 +318,7 @@ h1, h2, h3, h4, h5, h6 {
   --tracking-dashboard-title: 0.2px;
   --tracking-widget-value: 0.2px;
   --tracking-widget-value-gauge: 0px;
+  --tracking-widget-value-activity-analytics: 0px;
   --text-xs: var(--font-size-system);
   --text-sm: calc(var(--font-size-system) * 7 / 6);
   --widget-spacing: 0.5rem;

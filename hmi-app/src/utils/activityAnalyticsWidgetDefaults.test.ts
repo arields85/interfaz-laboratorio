@@ -12,6 +12,7 @@ describe('activityAnalyticsWidgetDefaults', () => {
 
     it('defaults unsupported legacy display modes back to kpis-and-bars', () => {
         expect(createDefaultActivityAnalyticsDisplayOptions().displayMode).toBe('kpis-and-bars');
+        expect(createDefaultActivityAnalyticsDisplayOptions().range).toBe('7d');
         expect(
             resolveActivityAnalyticsDisplayOptions({
                 displayMode: 'kpis-bars-and-secondary',
@@ -21,14 +22,24 @@ describe('activityAnalyticsWidgetDefaults', () => {
         });
     });
 
-    it('normalizes legacy 1h and invalid grouped combinations through the shared rules contract', () => {
+    it('normalizes legacy 1h, removed 24h, and invalid grouped combinations through the shared rules contract', () => {
         expect(
             resolveActivityAnalyticsDisplayOptions({
                 range: '1h',
                 groupBy: 'month',
             }),
         ).toMatchObject({
-            range: '24h',
+            range: '7d',
+            groupBy: 'shift',
+        });
+
+        expect(
+            resolveActivityAnalyticsDisplayOptions({
+                range: '24h',
+                groupBy: 'shift',
+            }),
+        ).toMatchObject({
+            range: '7d',
             groupBy: 'shift',
         });
 
