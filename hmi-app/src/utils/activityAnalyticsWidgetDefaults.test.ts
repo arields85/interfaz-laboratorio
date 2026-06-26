@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
     ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS,
+    DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
+    DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
     createDefaultActivityAnalyticsDisplayOptions,
+    resolveActivityAnalyticsStateGradientAlphas,
     resolveActivityAnalyticsDisplayOptions,
+    resolveActivityAnalyticsStateGradients,
+    resolveActivityAnalyticsVisualEffects,
 } from './activityAnalyticsWidgetDefaults';
+
+const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 describe('activityAnalyticsWidgetDefaults', () => {
     it('exposes only first-release display modes', () => {
@@ -13,12 +22,194 @@ describe('activityAnalyticsWidgetDefaults', () => {
     it('defaults unsupported legacy display modes back to kpis-and-bars', () => {
         expect(createDefaultActivityAnalyticsDisplayOptions().displayMode).toBe('kpis-and-bars');
         expect(createDefaultActivityAnalyticsDisplayOptions().range).toBe('7d');
+        expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidth).toBe(1);
+        expect(createDefaultActivityAnalyticsDisplayOptions().stateGradients).toEqual(
+            DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
+        );
+        expect(createDefaultActivityAnalyticsDisplayOptions().stateGradientAlphas).toEqual(
+            DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
+        );
+        expect(createDefaultActivityAnalyticsDisplayOptions().visualEffects).toEqual({
+            groupedBars: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+            donut: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
+        });
         expect(
             resolveActivityAnalyticsDisplayOptions({
                 displayMode: 'kpis-bars-and-secondary',
             }),
         ).toMatchObject({
             displayMode: 'kpis-and-bars',
+            groupBarWidth: 1,
+            stateGradients: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
+            stateGradientAlphas: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
+            visualEffects: {
+                groupedBars: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+                donut: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
+            },
+        });
+    });
+
+    it('resolves safe default state gradients for missing persisted widgets', () => {
+        expect(resolveActivityAnalyticsStateGradients()).toEqual(
+            DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
+        );
+
+        expect(resolveActivityAnalyticsDisplayOptions()).toMatchObject({
+            stateGradients: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
+        });
+    });
+
+    it('returns color-input-compatible hex defaults for every resolved state gradient slot', () => {
+        const resolvedStateGradients = resolveActivityAnalyticsDisplayOptions().stateGradients;
+
+        expect(Object.values(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS).flat()).toHaveLength(6);
+        expect(Object.values(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS).flat()).toEqual(
+            expect.arrayContaining(Object.values(resolvedStateGradients).flat()),
+        );
+
+        for (const gradient of Object.values(resolvedStateGradients)) {
+            expect(gradient[0]).toMatch(HEX_COLOR_PATTERN);
+            expect(gradient[1]).toMatch(HEX_COLOR_PATTERN);
+        }
+    });
+
+    it('resolves safe default alpha pairs for missing persisted widgets and falls back per slot', () => {
+        expect(resolveActivityAnalyticsStateGradientAlphas()).toEqual(
+            DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
+        );
+
+        expect(
+            resolveActivityAnalyticsStateGradientAlphas({
+                prod: [0, 50],
+                setup: [Number.NaN, 150],
+                stopped: ['bad', null] as unknown as [number, number],
+            }),
+        ).toEqual({
+            prod: [0, 50],
+            setup: [DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.setup[0], 100],
+            stopped: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.stopped,
+        });
+    });
+
+    it('preserves valid tuples while filling missing tuple slots from defaults', () => {
+        expect(
+            resolveActivityAnalyticsStateGradients({
+                prod: ['#010203', '#040506'],
+                setup: ['#111111', ''],
+            }),
+        ).toEqual({
+            prod: ['#010203', '#040506'],
+            setup: ['#111111', DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.setup[1]],
+            stopped: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.stopped,
+        });
+    });
+
+    it('falls back per slot when persisted state gradients are malformed, blank, or non-hex', () => {
+        expect(
+            resolveActivityAnalyticsStateGradients({
+                prod: ['var(--brand-accent)', '#abcdef'],
+                setup: ['#123456', 'color-mix(in srgb, #123456 60%, white)'],
+                stopped: ['red', null] as unknown as [string, string],
+            }),
+        ).toEqual({
+            prod: [DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0], '#abcdef'],
+            setup: ['#123456', DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.setup[1]],
+            stopped: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.stopped,
+        });
+
+        expect(
+            resolveActivityAnalyticsStateGradients({
+                prod: ['   ', '#abcdef'],
+                setup: ['#123456'] as unknown as [string, string],
+                stopped: [42, null] as unknown as [string, string],
+            }),
+        ).toEqual({
+            prod: [DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0], '#abcdef'],
+            setup: ['#123456', DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.setup[1]],
+            stopped: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.stopped,
+        });
+    });
+
+    it('clamps grouped-bars and donut effects independently while preserving per-surface defaults', () => {
+        expect(resolveActivityAnalyticsVisualEffects()).toEqual({
+            groupedBars: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+            donut: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
+        });
+
+        expect(
+            resolveActivityAnalyticsVisualEffects({
+                groupedBars: {
+                    glow: -10,
+                    blur: 10,
+                    topCap: false,
+                    topCapGlow: Number.NaN,
+                },
+                donut: {
+                    glow: 25,
+                    blur: 4,
+                    topCap: true,
+                    topCapGlow: 120,
+                },
+            }),
+        ).toEqual({
+            groupedBars: {
+                glow: 0,
+                blur: 8,
+                topCap: false,
+                topCapGlow: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.topCapGlow,
+            },
+            donut: {
+                glow: 25,
+                blur: 4,
+                topCap: true,
+                topCapGlow: 100,
+            },
+        });
+
+        expect(
+            resolveActivityAnalyticsDisplayOptions({
+                visualEffects: {
+                    groupedBars: { glow: 35 },
+                    donut: { blur: 6 },
+                },
+            }),
+        ).toMatchObject({
+            visualEffects: {
+                groupedBars: {
+                    glow: 35,
+                    blur: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.blur,
+                    topCap: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.topCap,
+                    topCapGlow: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.topCapGlow,
+                },
+                donut: {
+                    glow: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.glow,
+                    blur: 6,
+                    topCap: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.topCap,
+                    topCapGlow: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.topCapGlow,
+                },
+            },
+        });
+    });
+
+    it('defaults and clamps grouped bar width to the production-history-safe range', () => {
+        expect(resolveActivityAnalyticsDisplayOptions()).toMatchObject({
+            groupBarWidth: 1,
+        });
+
+        expect(resolveActivityAnalyticsDisplayOptions({ groupBarWidth: 0.4 })).toMatchObject({
+            groupBarWidth: 0.5,
+        });
+
+        expect(resolveActivityAnalyticsDisplayOptions({ groupBarWidth: 1.4 })).toMatchObject({
+            groupBarWidth: 1.4,
+        });
+
+        expect(resolveActivityAnalyticsDisplayOptions({ groupBarWidth: 2 })).toMatchObject({
+            groupBarWidth: 1.5,
+        });
+
+        expect(resolveActivityAnalyticsDisplayOptions({ groupBarWidth: Number.NaN })).toMatchObject({
+            groupBarWidth: 1,
         });
     });
 

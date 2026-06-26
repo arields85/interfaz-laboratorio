@@ -5,6 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
+import {
+    DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
+    DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
+} from '../../utils/activityAnalyticsWidgetDefaults';
 import PropertyDock from './PropertyDock';
 
 vi.mock('../ui/AnchoredOverlay', () => ({
@@ -884,6 +890,8 @@ describe('PropertyDock activity-analytics', () => {
         expect(getFieldButtonInSection('Datos', 'Equipo')).toHaveTextContent('Seleccione...');
         expect(getFieldButtonInSection('Datos', 'Rango')).toHaveTextContent('7 días');
         expect(getFieldButtonInSection('Agrupación', 'Grupo')).toHaveTextContent('Día');
+        expect(within(getSection('Agrupación')).getByRole('slider')).toHaveValue('1');
+        expect(within(getSection('Agrupación')).getByText('×1.0')).toBeInTheDocument();
         expect(within(getSection('Agrupación')).queryByText('Layout')).not.toBeInTheDocument();
 
         const productiveStatesSection = getSection('Estados Productivos');
@@ -931,6 +939,410 @@ describe('PropertyDock activity-analytics', () => {
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             groupBy: 'week',
+        });
+
+        const groupBarWidthSlider = within(getSection('Agrupación')).getByRole('slider');
+        fireEvent.change(groupBarWidthSlider, { target: { value: '1.4' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            groupBarWidth: 1.4,
+        });
+        expect(within(getSection('Agrupación')).getByText('×1.4')).toBeInTheDocument();
+
+        fireEvent.change(groupBarWidthSlider, { target: { value: '9' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            groupBarWidth: 1.5,
+        });
+        expect(within(getSection('Agrupación')).getByText('×1.5')).toBeInTheDocument();
+
+        fireEvent.change(groupBarWidthSlider, { target: { value: '0.1' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            groupBarWidth: 0.5,
+        });
+        expect(within(getSection('Agrupación')).getByText('×0.5')).toBeInTheDocument();
+    });
+
+    it('renders activity analytics visual cards with paired color, hex, alpha, and independent surface effect defaults', () => {
+        renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '7d',
+                groupBy: 'day',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        });
+
+        const visualSection = getSection('Visualización');
+
+        expect(within(visualSection).getByText('Producción')).toBeInTheDocument();
+        expect(within(visualSection).getByText('Setup')).toBeInTheDocument();
+        expect(within(visualSection).getByText('Detenida')).toBeInTheDocument();
+
+        expect(within(visualSection).getByLabelText('Producción color inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0]);
+        expect(within(visualSection).getByLabelText('Producción hex inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0]);
+        expect(within(visualSection).getByLabelText('Producción alfa inicial')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[0]));
+        expect(within(visualSection).getByLabelText('Producción color final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1]);
+        expect(within(visualSection).getByLabelText('Producción hex final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1]);
+        expect(within(visualSection).getByLabelText('Producción alfa final')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[1]));
+
+        expect(within(visualSection).getByLabelText('Barras agrupadas glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.glow));
+        expect(within(visualSection).getByLabelText('Barras agrupadas blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.blur));
+        expect(within(visualSection).getByLabelText('Barras agrupadas top cap')).toBeChecked();
+        expect(within(visualSection).getByLabelText('Barras agrupadas top cap glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.topCapGlow));
+
+        expect(within(visualSection).getByLabelText('Donut glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.glow));
+        expect(within(visualSection).getByLabelText('Donut blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.blur));
+        expect(within(visualSection).getByLabelText('Donut top cap')).not.toBeChecked();
+        expect(within(visualSection).getByLabelText('Donut top cap glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.topCapGlow));
+    });
+
+    it('commits valid pasted hex values and keeps the paired picker in sync for activity analytics stops', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '30d',
+                groupBy: 'week',
+                stateGradients: {
+                    prod: ['#123456', '#654321'],
+                },
+            },
+        });
+
+        const prodStartHex = screen.getByLabelText('Producción hex inicial');
+
+        await user.clear(prodStartHex);
+        await user.type(prodStartHex, '#abcdef');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            stateGradients: {
+                prod: ['#abcdef', '#654321'],
+            },
+        });
+        expect(screen.getByLabelText('Producción color inicial')).toHaveValue('#abcdef');
+        expect(prodStartHex).toHaveValue('#abcdef');
+    });
+
+    it('resets invalid hex drafts on blur without mutating persisted options', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                stateGradients: {
+                    prod: ['#123456', '#654321'],
+                },
+            },
+        });
+
+        const prodStartHex = screen.getByLabelText('Producción hex inicial');
+
+        await user.clear(prodStartHex);
+        await user.type(prodStartHex, '#12');
+
+        expect(prodStartHex).toHaveAttribute('aria-invalid', 'true');
+
+        await user.tab();
+
+        expect(prodStartHex).toHaveValue('#123456');
+        expect(prodStartHex).toHaveAttribute('aria-invalid', 'false');
+        expect(updates).toHaveLength(0);
+    });
+
+    it('updates only the targeted alpha and effect fields while preserving sibling settings', async () => {
+        const { updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '30d',
+                groupBy: 'week',
+                setupThresholdKw: 0.2,
+                prodThresholdKw: 0.4,
+                displayMode: 'bars-only',
+                groupBarWidth: 1.3,
+                stateGradientAlphas: {
+                    prod: [90, 80],
+                    setup: [70, 60],
+                },
+                stateGradients: {
+                    prod: ['#123456', '#654321'],
+                    setup: ['#abcdef', '#fedcba'],
+                },
+                visualEffects: {
+                    groupedBars: {
+                        glow: 10,
+                        blur: 1,
+                        topCap: true,
+                        topCapGlow: 20,
+                    },
+                    donut: {
+                        glow: 70,
+                        blur: 3,
+                        topCap: false,
+                        topCapGlow: 5,
+                    },
+                },
+            },
+        });
+
+        const stoppedEndAlphaInput = screen.getByLabelText('Detenida alfa final');
+        fireEvent.change(stoppedEndAlphaInput, { target: { value: '45' } });
+        fireEvent.blur(stoppedEndAlphaInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            range: '30d',
+            groupBy: 'week',
+            setupThresholdKw: 0.2,
+            prodThresholdKw: 0.4,
+            displayMode: 'bars-only',
+            groupBarWidth: 1.3,
+            stateGradientAlphas: {
+                prod: [90, 80],
+                setup: [70, 60],
+                stopped: [100, 45],
+            },
+            stateGradients: {
+                prod: ['#123456', '#654321'],
+                setup: ['#abcdef', '#fedcba'],
+            },
+            visualEffects: {
+                groupedBars: {
+                    glow: 10,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 3,
+                    topCap: false,
+                    topCapGlow: 5,
+                },
+            },
+        });
+
+        const donutBlurInput = screen.getByLabelText('Donut blur');
+        fireEvent.change(donutBlurInput, { target: { value: '4.5' } });
+        fireEvent.blur(donutBlurInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            visualEffects: {
+                groupedBars: {
+                    glow: 10,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 4.5,
+                    topCap: false,
+                    topCapGlow: 5,
+                },
+            },
+        });
+
+        fireEvent.click(screen.getByLabelText('Donut top cap'));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            visualEffects: {
+                groupedBars: {
+                    glow: 10,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 4.5,
+                    topCap: true,
+                    topCapGlow: 5,
+                },
+            },
+        });
+    });
+
+    it('clamps activity analytics alpha and surface effect text commits before persisting', () => {
+        const { updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '30d',
+                groupBy: 'week',
+                stateGradientAlphas: {
+                    prod: [90, 80],
+                    setup: [70, 60],
+                    stopped: [15, 25],
+                },
+                stateGradients: {
+                    prod: ['#123456', '#654321'],
+                    setup: ['#abcdef', '#fedcba'],
+                    stopped: ['#0f172a', '#334155'],
+                },
+                visualEffects: {
+                    groupedBars: {
+                        glow: 10,
+                        blur: 1,
+                        topCap: true,
+                        topCapGlow: 20,
+                    },
+                    donut: {
+                        glow: 70,
+                        blur: 3,
+                        topCap: false,
+                        topCapGlow: 5,
+                    },
+                },
+            },
+        });
+
+        const stoppedEndAlphaInput = screen.getByLabelText('Detenida alfa final');
+        fireEvent.change(stoppedEndAlphaInput, { target: { value: '999' } });
+        fireEvent.blur(stoppedEndAlphaInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            stateGradientAlphas: {
+                prod: [90, 80],
+                setup: [70, 60],
+                stopped: [15, 100],
+            },
+            visualEffects: {
+                groupedBars: {
+                    glow: 10,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 3,
+                    topCap: false,
+                    topCapGlow: 5,
+                },
+            },
+        });
+
+        fireEvent.change(stoppedEndAlphaInput, { target: { value: 'abc' } });
+        fireEvent.blur(stoppedEndAlphaInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            stateGradientAlphas: {
+                prod: [90, 80],
+                setup: [70, 60],
+                stopped: [15, 100],
+            },
+        });
+
+        const groupedBarsGlowInput = screen.getByLabelText('Barras agrupadas glow');
+        fireEvent.change(groupedBarsGlowInput, { target: { value: '-5' } });
+        fireEvent.blur(groupedBarsGlowInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            visualEffects: {
+                groupedBars: {
+                    glow: 0,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 3,
+                    topCap: false,
+                    topCapGlow: 5,
+                },
+            },
+        });
+
+        const donutBlurInput = screen.getByLabelText('Donut blur');
+        fireEvent.change(donutBlurInput, { target: { value: '999' } });
+        fireEvent.blur(donutBlurInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            visualEffects: {
+                groupedBars: {
+                    glow: 0,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 8,
+                    topCap: false,
+                    topCapGlow: 5,
+                },
+            },
+        });
+
+        const donutTopCapGlowInput = screen.getByLabelText('Donut top cap glow');
+        fireEvent.change(donutTopCapGlowInput, { target: { value: '150' } });
+        fireEvent.blur(donutTopCapGlowInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            visualEffects: {
+                groupedBars: {
+                    glow: 0,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 8,
+                    topCap: false,
+                    topCapGlow: 100,
+                },
+            },
+        });
+
+        fireEvent.change(donutTopCapGlowInput, { target: { value: 'not-a-number' } });
+        fireEvent.blur(donutTopCapGlowInput);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            stateGradients: {
+                prod: ['#123456', '#654321'],
+                setup: ['#abcdef', '#fedcba'],
+                stopped: ['#0f172a', '#334155'],
+            },
+            visualEffects: {
+                groupedBars: {
+                    glow: 0,
+                    blur: 1,
+                    topCap: true,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 8,
+                    topCap: false,
+                    topCapGlow: 100,
+                },
+            },
         });
     });
 

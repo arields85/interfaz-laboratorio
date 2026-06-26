@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsDisplayOptions } from '../../domain/admin.types';
+import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
 import {
@@ -35,7 +35,10 @@ import {
 } from './adminSidebarStyles';
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
-import { resolveActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    clampActivityAnalyticsGroupBarWidth,
+    resolveActivityAnalyticsDisplayOptions,
+} from '../../utils/activityAnalyticsWidgetDefaults';
 import {
     resolveActivityAnalyticsDisplayRules,
     type ActivityAnalyticsSupportedRange,
@@ -93,6 +96,26 @@ const ACTIVITY_ANALYTICS_GROUP_OPTIONS = [
     { value: 'week', label: 'Semana' },
     { value: 'month', label: 'Mes' },
 ] as const;
+const ACTIVITY_ANALYTICS_STATE_GRADIENT_ROWS: Array<{
+    key: ActivityAnalyticsStateGradientKey;
+    label: string;
+}> = [
+    { key: 'prod', label: 'Producción' },
+    { key: 'setup', label: 'Setup' },
+    { key: 'stopped', label: 'Detenida' },
+];
+const ACTIVITY_ANALYTICS_GRADIENT_STOPS = [
+    { slotIndex: 0 as const, key: 'start', label: 'Color inicial', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
+    { slotIndex: 1 as const, key: 'end', label: 'Color final', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
+];
+const ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS = [
+    { key: 'groupedBars' as const, label: 'Barras agrupadas' },
+    { key: 'donut' as const, label: 'Donut' },
+];
+const ACTIVITY_ANALYTICS_HEX_PATTERN = /^#[0-9a-f]{6}$/i;
+type ActivityAnalyticsGradientSlotIndex = 0 | 1;
+type ActivityAnalyticsSurfaceKey = 'groupedBars' | 'donut';
+type ActivityAnalyticsHexDraftKey = `${ActivityAnalyticsStateGradientKey}-${ActivityAnalyticsGradientSlotIndex}`;
 
 const STATUS_TEXT_FIELDS: Array<{ key: keyof StatusDisplayOptions; label: string; placeholder: string }> = [
     { key: 'runningText', label: 'Running', placeholder: DEFAULT_STATUS_LABELS.running },
@@ -132,10 +155,15 @@ export default function PropertyDock(props: PropertyDockProps) {
     } = props;
     const [isCustomUnit, setIsCustomUnit] = useState(false);
     const [activityAnalyticsThresholdWarning, setActivityAnalyticsThresholdWarning] = useState<string | null>(null);
+    const [activityAnalyticsHexDrafts, setActivityAnalyticsHexDrafts] = useState<Partial<Record<ActivityAnalyticsHexDraftKey, string>>>({});
     void selectedLayout;
 
     useEffect(() => {
         setActivityAnalyticsThresholdWarning(null);
+    }, [selectedWidget?.id]);
+
+    useEffect(() => {
+        setActivityAnalyticsHexDrafts({});
     }, [selectedWidget?.id]);
 
     // -------------------------------------------------------------------------
@@ -243,6 +271,216 @@ export default function PropertyDock(props: PropertyDockProps) {
                 ...selectedWidget.displayOptions,
                 range: nextRules.range,
                 groupBy: nextRules.groupBy,
+            },
+        });
+    };
+
+    const handleActivityAnalyticsStateGradientChange = (
+        stateKey: ActivityAnalyticsStateGradientKey,
+        slotIndex: 0 | 1,
+        value: string,
+    ) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const currentStateGradients = currentOptions.stateGradients as Record<ActivityAnalyticsStateGradientKey, [string, string]>;
+        const currentGradient = currentStateGradients[stateKey];
+        const nextStateGradients = {
+            ...currentStateGradients,
+            [stateKey]: [currentGradient[0], currentGradient[1]] as [string, string],
+        };
+
+        nextStateGradients[stateKey][slotIndex] = value;
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                stateGradients: nextStateGradients,
+            },
+        });
+    };
+
+    const getActivityAnalyticsHexDraftKey = (
+        stateKey: ActivityAnalyticsStateGradientKey,
+        slotIndex: ActivityAnalyticsGradientSlotIndex,
+    ): ActivityAnalyticsHexDraftKey => `${stateKey}-${slotIndex}`;
+
+    const isValidActivityAnalyticsHex = (value: string): boolean => ACTIVITY_ANALYTICS_HEX_PATTERN.test(value.trim());
+
+    const handleActivityAnalyticsHexDraftChange = (
+        stateKey: ActivityAnalyticsStateGradientKey,
+        slotIndex: ActivityAnalyticsGradientSlotIndex,
+        value: string,
+    ) => {
+        const draftKey = getActivityAnalyticsHexDraftKey(stateKey, slotIndex);
+        const normalizedValue = value.trim();
+
+        setActivityAnalyticsHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [draftKey]: value,
+        }));
+
+        if (!isValidActivityAnalyticsHex(normalizedValue)) {
+            return;
+        }
+
+        handleActivityAnalyticsStateGradientChange(stateKey, slotIndex, normalizedValue.toLowerCase());
+        setActivityAnalyticsHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [draftKey]: normalizedValue.toLowerCase(),
+        }));
+    };
+
+    const handleActivityAnalyticsHexDraftBlur = (
+        stateKey: ActivityAnalyticsStateGradientKey,
+        slotIndex: ActivityAnalyticsGradientSlotIndex,
+        resolvedValue: string,
+    ) => {
+        const draftKey = getActivityAnalyticsHexDraftKey(stateKey, slotIndex);
+        const draftValue = activityAnalyticsHexDrafts[draftKey];
+
+        if (draftValue == null) {
+            return;
+        }
+
+        if (isValidActivityAnalyticsHex(draftValue)) {
+            setActivityAnalyticsHexDrafts((currentDrafts) => ({
+                ...currentDrafts,
+                [draftKey]: draftValue.trim().toLowerCase(),
+            }));
+            return;
+        }
+
+        setActivityAnalyticsHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [draftKey]: resolvedValue,
+        }));
+    };
+
+    const handleActivityAnalyticsColorPickerChange = (
+        stateKey: ActivityAnalyticsStateGradientKey,
+        slotIndex: ActivityAnalyticsGradientSlotIndex,
+        value: string,
+    ) => {
+        const normalizedValue = value.trim().toLowerCase();
+
+        setActivityAnalyticsHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [getActivityAnalyticsHexDraftKey(stateKey, slotIndex)]: normalizedValue,
+        }));
+        handleActivityAnalyticsStateGradientChange(stateKey, slotIndex, normalizedValue);
+    };
+
+    const handleActivityAnalyticsStateGradientAlphaChange = (
+        stateKey: ActivityAnalyticsStateGradientKey,
+        slotIndex: ActivityAnalyticsGradientSlotIndex,
+        value: string,
+    ) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const currentAlphas = currentOptions.stateGradientAlphas as Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair>;
+        const nextStateGradientAlphas = {
+            ...currentAlphas,
+            [stateKey]: [currentAlphas[stateKey][0], currentAlphas[stateKey][1]] as ActivityAnalyticsAlphaPair,
+        };
+
+        const clampActivityAnalyticsNumericValue = (
+            rawValue: string | number,
+            currentValue: number,
+            min: number,
+            max: number,
+        ) => {
+            const nextValue = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+
+            if (!Number.isFinite(nextValue)) {
+                return currentValue;
+            }
+
+            return Math.min(max, Math.max(min, nextValue));
+        };
+
+        nextStateGradientAlphas[stateKey][slotIndex] = clampActivityAnalyticsNumericValue(
+            value,
+            currentAlphas[stateKey][slotIndex],
+            0,
+            100,
+        );
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                stateGradientAlphas: nextStateGradientAlphas,
+            },
+        });
+    };
+
+    const handleActivityAnalyticsSurfaceEffectChange = (
+        surfaceKey: ActivityAnalyticsSurfaceKey,
+        effectKey: keyof ActivityAnalyticsSurfaceEffects,
+        value: string | number | boolean,
+    ) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const currentVisualEffects = currentOptions.visualEffects;
+        const currentSurfaceEffects = currentVisualEffects[surfaceKey] as ActivityAnalyticsSurfaceEffects;
+        const clampActivityAnalyticsNumericValue = (
+            rawValue: string | number,
+            currentValue: number,
+            min: number,
+            max: number,
+        ) => {
+            const nextValue = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+
+            if (!Number.isFinite(nextValue)) {
+                return currentValue;
+            }
+
+            return Math.min(max, Math.max(min, nextValue));
+        };
+        const nextEffectValue = (() => {
+            if (effectKey === 'topCap') {
+                return typeof value === 'boolean' ? value : currentSurfaceEffects.topCap;
+            }
+
+            if (effectKey === 'blur') {
+                return clampActivityAnalyticsNumericValue(
+                    typeof value === 'boolean' ? currentSurfaceEffects.blur : value,
+                    currentSurfaceEffects.blur,
+                    0,
+                    8,
+                );
+            }
+
+            return clampActivityAnalyticsNumericValue(
+                typeof value === 'boolean' ? currentSurfaceEffects[effectKey] : value,
+                currentSurfaceEffects[effectKey],
+                0,
+                100,
+            );
+        })();
+        const nextSurfaceEffects = {
+            ...currentSurfaceEffects,
+            [effectKey]: nextEffectValue,
+        };
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                visualEffects: {
+                    ...currentVisualEffects,
+                    [surfaceKey]: nextSurfaceEffects,
+                },
             },
         });
     };
@@ -550,6 +788,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         const rawValue = prodHistoryOptions?.productionBarWidth ?? 1;
         return Math.min(1.5, Math.max(0.5, Number.isFinite(rawValue) ? rawValue : 1));
     })();
+    const activityAnalyticsBarWidth = activityAnalyticsOptions?.groupBarWidth ?? 1;
     const shouldShowGeneralIconField = selectedWidget
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'text-title'
@@ -1306,6 +1545,23 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         options={ACTIVITY_ANALYTICS_GROUP_OPTIONS.filter((option) => activityAnalyticsDisplayRules?.allowedGroups.includes(option.value) ?? false)}
                                     />
                                 </DockFieldRow>
+                                <DockFieldRow label="Ancho barra">
+                                    <div className="flex w-full items-center gap-3">
+                                        <input
+                                            type="range"
+                                            min="0.5"
+                                            max="1.5"
+                                            step="0.1"
+                                            value={activityAnalyticsBarWidth}
+                                            onChange={(e) => handleDisplayOptionChange('groupBarWidth', clampActivityAnalyticsGroupBarWidth(Number(e.target.value)))}
+                                            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10"
+                                            style={{ accentColor: 'var(--color-admin-accent)' }}
+                                        />
+                                        <span className="w-10 text-right uppercase text-industrial-muted">
+                                            ×{activityAnalyticsBarWidth.toFixed(1)}
+                                        </span>
+                                    </div>
+                                </DockFieldRow>
                             </DockSection>
                         )}
 
@@ -1420,6 +1676,140 @@ export default function PropertyDock(props: PropertyDockProps) {
                                 {activityAnalyticsThresholdWarning && (
                                     <DockInfoBox variant="warning" text={activityAnalyticsThresholdWarning} />
                                 )}
+                            </DockSection>
+                        )}
+
+                        {isActivityAnalytics && activityAnalyticsOptions && (
+                            <DockSection icon={<Sliders size={11} />} title="Visualización">
+                                <div className="flex flex-col gap-3">
+                                    {ACTIVITY_ANALYTICS_STATE_GRADIENT_ROWS.map(({ key, label }) => {
+                                        const stateGradients = activityAnalyticsOptions.stateGradients as Record<ActivityAnalyticsStateGradientKey, [string, string]>;
+                                        const stateGradientAlphas = activityAnalyticsOptions.stateGradientAlphas as Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair>;
+                                        const gradient = stateGradients[key];
+                                        const gradientAlphas = stateGradientAlphas[key];
+
+                                        return (
+                                            <div key={key} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                                <div className="mb-2 text-sm font-medium text-industrial-text">{label}</div>
+                                                <div className="flex flex-col gap-2">
+                                                    {ACTIVITY_ANALYTICS_GRADIENT_STOPS.map(({ slotIndex, key: stopKey, label: stopLabel, hexLabel, alphaLabel }) => {
+                                                        const resolvedHexValue = gradient[slotIndex];
+                                                        const draftKey = getActivityAnalyticsHexDraftKey(key, slotIndex);
+                                                        const draftValue = activityAnalyticsHexDrafts[draftKey];
+                                                        const displayedHexValue = draftValue ?? resolvedHexValue;
+                                                        const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHex(displayedHexValue);
+
+                                                        return (
+                                                            <div key={`${key}-${stopKey}`} className="rounded-md border border-white/5 bg-black/20 p-2">
+                                                                <div className="mb-2 text-xs uppercase tracking-wide text-industrial-muted">{stopLabel}</div>
+                                                                <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr),120px]">
+                                                                    <label className="flex items-center gap-2 text-industrial-muted">
+                                                                        <span className="sr-only">{`${label} ${stopLabel}`}</span>
+                                                                        <input
+                                                                            type="color"
+                                                                            value={resolvedHexValue}
+                                                                            onChange={(event) => handleActivityAnalyticsColorPickerChange(key, slotIndex, event.target.value)}
+                                                                            className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-1"
+                                                                            aria-label={`${label} color ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                                        />
+                                                                    </label>
+                                                                    <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{hexLabel}</span>
+                                                                        <input
+                                                                            type="text"
+                                                                            inputMode="text"
+                                                                            spellCheck={false}
+                                                                            value={displayedHexValue}
+                                                                            onChange={(event) => handleActivityAnalyticsHexDraftChange(key, slotIndex, event.target.value)}
+                                                                            onBlur={() => handleActivityAnalyticsHexDraftBlur(key, slotIndex, resolvedHexValue)}
+                                                                            aria-invalid={isDraftInvalid}
+                                                                            aria-label={`${label} hex ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                                            className={`${INPUT_CLS} ${isDraftInvalid ? 'border-status-error bg-status-error/10' : ''}`.trim()}
+                                                                            placeholder="#RRGGBB"
+                                                                        />
+                                                                    </label>
+                                                                    <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{alphaLabel}</span>
+                                                                        <AdminNumberInput
+                                                                            value={gradientAlphas[slotIndex]}
+                                                                            min={0}
+                                                                            max={100}
+                                                                            step={1}
+                                                                            commitOnBlur
+                                                                            ariaLabel={`${label} alfa ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                                            onChange={(nextValue) => handleActivityAnalyticsStateGradientAlphaChange(key, slotIndex, nextValue)}
+                                                                        />
+                                                                    </label>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    <div className="grid gap-3 xl:grid-cols-2">
+                                        {ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS.map(({ key, label }) => {
+                                            const surfaceEffects = (key === 'groupedBars'
+                                                ? activityAnalyticsOptions.visualEffects.groupedBars
+                                                : activityAnalyticsOptions.visualEffects.donut) as ActivityAnalyticsSurfaceEffects;
+
+                                            return (
+                                                <div key={key} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                                    <div className="mb-2 text-sm font-medium text-industrial-text">{label}</div>
+                                                    <div className="flex flex-col gap-2">
+                                                        <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                            <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Glow</span>
+                                                            <AdminNumberInput
+                                                                value={surfaceEffects.glow}
+                                                                min={0}
+                                                                max={100}
+                                                                step={1}
+                                                                commitOnBlur
+                                                                ariaLabel={`${label} glow`}
+                                                                onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'glow', nextValue)}
+                                                            />
+                                                        </label>
+                                                        <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                            <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Blur</span>
+                                                            <AdminNumberInput
+                                                                value={surfaceEffects.blur}
+                                                                min={0}
+                                                                max={8}
+                                                                step={0.1}
+                                                                commitOnBlur
+                                                                ariaLabel={`${label} blur`}
+                                                                onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'blur', nextValue)}
+                                                            />
+                                                        </label>
+                                                        <label className="flex items-center justify-between gap-3 rounded-md border border-white/5 bg-black/20 px-3 py-2 text-industrial-text">
+                                                            <span>Top cap</span>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={surfaceEffects.topCap}
+                                                                onChange={(event) => handleActivityAnalyticsSurfaceEffectChange(key, 'topCap', event.target.checked)}
+                                                                aria-label={`${label} top cap`}
+                                                            />
+                                                        </label>
+                                                        <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                            <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Top cap glow</span>
+                                                            <AdminNumberInput
+                                                                value={surfaceEffects.topCapGlow}
+                                                                min={0}
+                                                                max={100}
+                                                                step={1}
+                                                                commitOnBlur
+                                                                ariaLabel={`${label} top cap glow`}
+                                                                onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'topCapGlow', nextValue)}
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                             </DockSection>
                         )}
 

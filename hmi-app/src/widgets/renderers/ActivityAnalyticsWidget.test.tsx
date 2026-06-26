@@ -12,6 +12,7 @@ import { DataServiceError } from '../../services/dataOverview.service';
 import type { ActivityAnalyticsInterval } from '../../utils/activityAnalytics';
 import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComputation';
 import { groupActivityAnalyticsIntervals } from '../../utils/activityAnalyticsGrouping';
+import { buildActivityAnalyticsSummarySegments } from '../../utils/activityAnalyticsSummarySegments';
 import ActivityAnalyticsWidget from './ActivityAnalyticsWidget';
 
 class MockResizeObserver implements ResizeObserver {
@@ -116,7 +117,18 @@ vi.mock('../../components/ui/ChartHoverLayer', () => ({
         highlights?: Array<unknown>;
         onHoverChange: (index: number | null, x?: number) => void;
     }) => (
-        <div data-testid="hover-layer" data-length={dataLength} data-highlights={highlights?.length ?? 0}>
+        <div
+            data-testid="hover-layer"
+            data-length={dataLength}
+            data-highlights={highlights?.length ?? 0}
+            data-highlight-colors={Array.isArray(highlights)
+                ? highlights
+                    .map((highlight) => (typeof highlight === 'object' && highlight !== null && 'color' in highlight
+                        ? String(highlight.color)
+                        : ''))
+                    .join('|')
+                : ''}
+        >
             <button type="button" onClick={() => onHoverChange(0, 120)}>
                 Hover first bucket
             </button>
@@ -189,6 +201,39 @@ const POPULATED_ACTIVITY_SERIES = {
     summary: { hidden: true },
 };
 
+const CUSTOM_STATE_GRADIENTS = {
+    prod: ['#112233', '#445566'],
+    setup: ['#778899', '#aabbcc'],
+    stopped: ['#ddee00', '#ff00aa'],
+} as const;
+
+const UPDATED_STATE_GRADIENTS = {
+    prod: ['#334455', '#667788'],
+    setup: ['#99aabb', '#ccddee'],
+    stopped: ['#550000', '#aa0000'],
+} as const;
+
+const CUSTOM_STATE_GRADIENT_ALPHAS = {
+    prod: [35, 75],
+    setup: [50, 65],
+    stopped: [20, 55],
+} as const;
+
+const CUSTOM_VISUAL_EFFECTS = {
+    groupedBars: {
+        glow: 82,
+        blur: 1.5,
+        topCap: false,
+        topCapGlow: 18,
+    },
+    donut: {
+        glow: 40,
+        blur: 4,
+        topCap: true,
+        topCapGlow: 60,
+    },
+} as const;
+
 function buildGroupedBucket(overrides?: Partial<ReturnType<typeof activityAnalyticsComputation.computeActivityAnalytics>['grouped'][number]>) {
     return {
         bucketKey: 'bucket-1',
@@ -257,7 +302,7 @@ function buildInterval(start: string, durationMs: number, state: ActivityAnalyti
 
 function expectVisibleRectStackSemantics(
     segments: HTMLElement[],
-    expectedOrder: Array<{ fill: string; roundedTop: boolean }>,
+    expectedOrder: Array<{ fill: string | RegExp; segmentKey: string }>,
 ) {
     expect(segments).toHaveLength(expectedOrder.length);
 
@@ -265,9 +310,72 @@ function expectVisibleRectStackSemantics(
     expect(yPositions).toEqual([...yPositions].sort((left, right) => right - left));
 
     expectedOrder.forEach((expected, index) => {
-        expect(segments[index]).toHaveAttribute('fill', expected.fill);
-        expect(segments[index]).toHaveAttribute('rx', expected.roundedTop ? '8' : '0');
+        const fill = segments[index].getAttribute('fill') ?? '';
+
+        if (expected.fill instanceof RegExp) {
+            expect(fill).toMatch(expected.fill);
+        } else {
+            expect(segments[index]).toHaveAttribute('fill', expected.fill);
+        }
+
+        expect(segments[index]).toHaveAttribute('data-segment-key', expected.segmentKey);
+        expect(segments[index]).toHaveAttribute('rx', '0');
     });
+}
+
+function parseRectMetrics(segment: HTMLElement) {
+    const x = Number(segment.getAttribute('x'));
+    const y = Number(segment.getAttribute('y'));
+    const width = Number(segment.getAttribute('width'));
+    const height = Number(segment.getAttribute('height'));
+
+    return {
+        x,
+        y,
+        width,
+        height,
+        centerX: x + (width / 2),
+    };
+}
+
+function hexToRgbCss(hex: string): string {
+    const normalized = hex.replace('#', '');
+    const red = Number.parseInt(normalized.slice(0, 2), 16);
+    const green = Number.parseInt(normalized.slice(2, 4), 16);
+    const blue = Number.parseInt(normalized.slice(4, 6), 16);
+
+    return `rgb(${red}, ${green}, ${blue})`;
+}
+
+function hexToRgbaCss(hex: string, alphaPercentage: number): string {
+    const normalized = hex.replace('#', '');
+    const red = Number.parseInt(normalized.slice(0, 2), 16);
+    const green = Number.parseInt(normalized.slice(2, 4), 16);
+    const blue = Number.parseInt(normalized.slice(4, 6), 16);
+
+    return `rgba(${red}, ${green}, ${blue}, ${alphaPercentage / 100})`;
+}
+
+function reverseGradientStops<TGradient extends readonly [string, string]>(gradient: TGradient): [string, string] {
+    return [gradient[1], gradient[0]];
+}
+
+function getGradientStopsByIdSuffix(container: HTMLElement, idSuffix: string) {
+    const gradient = container.querySelector(`linearGradient[id$="${idSuffix}"]`);
+
+    if (!gradient) {
+        throw new Error(`Missing gradient with id suffix "${idSuffix}"`);
+    }
+
+    return Array.from(gradient.querySelectorAll('stop'));
+}
+
+function resolveExpectedGroupedTopCapHeight(segmentHeight: number) {
+    return Math.min(5, Math.max(Math.min(segmentHeight - 0.75, segmentHeight * 0.2), 0));
+}
+
+function parseVisibleStrokeLength(strokeDashArray: string | null): number {
+    return Number((strokeDashArray ?? '0').split(' ')[0]);
 }
 
 describe('ActivityAnalyticsWidget', () => {
@@ -365,7 +473,8 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(vi.mocked(useActivitySeries)).toHaveBeenCalledWith({ machineId: 202, range: '7d' });
-        expect(screen.getByText('Reiner')).toBeInTheDocument();
+        expect(screen.getByText('Distribución')).toBeInTheDocument();
+        expect(screen.queryByText('Reiner')).not.toBeInTheDocument();
         expect(screen.queryByText('Seleccione una máquina válida')).not.toBeInTheDocument();
     });
 
@@ -547,7 +656,6 @@ describe('ActivityAnalyticsWidget', () => {
     });
 
     it('clamps persisted invalid grouping to the shared rules contract, keeps runtime overrides local, and preserves the hero summary while only detail layers change', async () => {
-        const user = userEvent.setup();
         const onPersistDisplayOptions = vi.fn();
 
         vi.mocked(useActivitySeries).mockReturnValue({
@@ -910,7 +1018,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getAllByText('2026-06-19 · Turno Tarde').length).toBeGreaterThan(0);
     });
 
-    it('renders Resumen with the same visible stacked order semantics as Grupos', () => {
+    it('renders the refreshed Distribución header and removes KPI/framed summary chrome while preserving grouped semantics', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -993,16 +1101,9 @@ describe('ActivityAnalyticsWidget', () => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
         });
 
-        const kpiPanel = screen.getByTestId('activity-analytics-kpis');
-
-        expect(kpiPanel).toBeInTheDocument();
-        expect(within(kpiPanel).getByText('% PROD.')).toBeInTheDocument();
-        expect(within(kpiPanel).getByText('HORAS PROD.')).toBeInTheDocument();
-        expect(within(kpiPanel).getByText('HORAS DETENIDA')).toBeInTheDocument();
-        expect(within(kpiPanel).getByText('HORAS SETUP')).toBeInTheDocument();
-        expect(within(kpiPanel).getAllByTestId('activity-analytics-kpi-value')).toHaveLength(4);
-        expect(within(kpiPanel).queryByText('Cobertura')).not.toBeInTheDocument();
-        expect(within(kpiPanel).queryByText('Total')).not.toBeInTheDocument();
+        expect(screen.getByText('Distribución')).toBeInTheDocument();
+        expect(screen.queryByText('Extrusora 101')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-kpis')).not.toBeInTheDocument();
         expect(screen.queryAllByTestId('activity-analytics-vertical-bar-track')).toHaveLength(0);
         expect(screen.getByTestId('activity-analytics-summary-chart')).toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-summary-stack')).toHaveLength(1);
@@ -1021,8 +1122,10 @@ describe('ActivityAnalyticsWidget', () => {
         const groupsPanel = screen.getByTestId('activity-analytics-groups');
         const topRegion = screen.getByTestId('activity-analytics-top-region');
         const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
-        const groupSegments = within(screen.getAllByTestId('activity-analytics-group-stack')[0]).getAllByTestId('activity-analytics-group-segment');
-        const legendLabels = screen.getAllByTestId('activity-analytics-summary-legend-item').map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
+        const firstGroupStack = screen.getAllByTestId('activity-analytics-group-stack')[0];
+        const groupSegments = within(firstGroupStack).getAllByTestId('activity-analytics-group-segment');
+        const topCaps = within(firstGroupStack).getAllByTestId('activity-analytics-group-top-cap');
+        const detailTitles = screen.getAllByTestId('activity-analytics-summary-detail-title').map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
 
         expect(summarySegments).toHaveLength(3);
@@ -1037,15 +1140,21 @@ describe('ActivityAnalyticsWidget', () => {
         expect(summaryChart.innerHTML).toContain('linearGradient');
         expect(summaryChart.innerHTML).toContain('summary-glow');
         expectVisibleRectStackSemantics(groupSegments, [
-            { fill: 'var(--color-industrial-muted)', roundedTop: false },
-            { fill: 'var(--color-status-critical)', roundedTop: false },
-            { fill: 'var(--color-status-warning)', roundedTop: false },
-            { fill: 'var(--color-status-normal)', roundedTop: true },
+            { fill: 'var(--color-industrial-muted)', segmentKey: 'noData' },
+            { fill: /^url\(#.+-stopped-gradient\)$/, segmentKey: 'stopped' },
+            { fill: /^url\(#.+-setup-gradient\)$/, segmentKey: 'setup' },
+            { fill: /^url\(#.+-prod-gradient\)$/, segmentKey: 'prod' },
         ]);
-        expect(legendLabels).toEqual([
-            'Detenida',
+        expect(topCaps.map((cap) => cap.getAttribute('data-segment-key'))).toEqual(['stopped', 'setup', 'prod']);
+        topCaps.forEach((cap) => {
+            expect(cap).toHaveAttribute('rx', '0');
+            expect(Number(cap.getAttribute('height'))).toBeGreaterThan(0);
+            expect(cap.getAttribute('style')).toContain('drop-shadow');
+        });
+        expect(detailTitles).toEqual([
+            'Producción',
             'Setup',
-            'Prod.',
+            'Detenida',
         ]);
         const groupsHeaderLegend = within(groupsPanel).getByTestId('activity-analytics-groups-header-legend');
         expect(within(groupsHeaderLegend).getAllByText(/^(Detenida|Setup|Prod\.)$/).map((item) => item.textContent)).toEqual([
@@ -1055,11 +1164,11 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(within(groupsPanel).queryByTestId('activity-analytics-panel-heading-value')).not.toBeInTheDocument();
         expect(screen.queryAllByTestId('activity-analytics-summary-segment-label')).toHaveLength(0);
-        expect(within(summaryPanel).getByText(/Distribución/i)).toBeInTheDocument();
+        expect(summaryPanel).not.toHaveClass('border-industrial-border');
         expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('Cobertura 100%');
         expect(within(summaryPanel).queryByText('% Prod. 57% · Cob. 100%')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-summary-panel')).not.toBeInTheDocument();
 
-        expect(topRegion).toContainElement(kpiPanel);
         expect(topRegion).toContainElement(summaryPanel);
         expect(topRegion).toContainElement(comparisonPanel);
         expect(topRegion).toHaveAttribute('data-top-layout', 'side-by-side');
@@ -1103,6 +1212,327 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-comparison')).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-summary-text')).not.toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'compress');
+    });
+
+    it('applies resolved state gradients across approved renderer surfaces without recomputing analytics for palette-only changes', async () => {
+        const user = userEvent.setup();
+        const onPersistDisplayOptions = vi.fn();
+        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+            analytics: {
+                durationsMs: {
+                    prod: 4 * 60 * 60 * 1000,
+                    setup: 2 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 30 * 60 * 1000,
+                },
+                stopCount: 1,
+                estimatedKwh: 18.4,
+                utilizationRatio: 4 / 7,
+                coverageRatio: 1,
+                intervals: [],
+            },
+            grouped: [buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: {
+                    prod: 3 * 60 * 60 * 1000,
+                    setup: 2 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 30 * 60 * 1000,
+                },
+                expectedDurationMs: 6.5 * 60 * 60 * 1000,
+                productivityLabel: '60%',
+            })],
+            comparison: {
+                best: { label: '2026-06-18', bucketKey: 'day-1' },
+                worst: { label: '2026-06-18', bucketKey: 'day-1' },
+            },
+            summaryRows: [{ label: '2026-06-18', productivityLabel: '60%', bucketKey: 'day-1' }],
+            timezone: 'UTC',
+        } as never);
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        const widget = makeWidget({
+            displayOptions: {
+                ...makeWidget().displayOptions,
+                range: '7d',
+                groupBy: 'day',
+                stateGradients: CUSTOM_STATE_GRADIENTS,
+            },
+        });
+
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={widget}
+                machines={MACHINES}
+                onPersistDisplayOptions={onPersistDisplayOptions}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
+        });
+
+        const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
+        const summaryGradients = Array.from(summaryChart.querySelectorAll('linearGradient'))
+            .filter((gradient) => !gradient.id.includes('top-cap'));
+        const summaryStops = summaryGradients.map((gradient) => Array.from(gradient.querySelectorAll('stop')).map((stop) => stop.getAttribute('stop-color')));
+        const detailMarkers = Array.from(screen.getByTestId('activity-analytics-summary-details').querySelectorAll('rect'));
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
+        const groupGradients = Array.from(groupsChart.querySelectorAll('linearGradient'));
+        const groupStops = groupGradients.map((gradient) => Array.from(gradient.querySelectorAll('stop')).map((stop) => stop.getAttribute('stop-color')));
+        const firstGroupStack = screen.getByTestId('activity-analytics-group-stack');
+        const groupSegments = within(firstGroupStack).getAllByTestId('activity-analytics-group-segment');
+        const topCaps = within(firstGroupStack).getAllByTestId('activity-analytics-group-top-cap');
+        const legendSwatches = Array.from(screen.getByTestId('activity-analytics-groups-header-legend').querySelectorAll('span[aria-hidden="true"]'));
+        const comparisonSegments = Array.from(screen.getByTestId('activity-analytics-comparison').querySelectorAll('div[aria-hidden="true"] > div'));
+
+        expect(summaryStops).toEqual([
+            reverseGradientStops(CUSTOM_STATE_GRADIENTS.stopped),
+            reverseGradientStops(CUSTOM_STATE_GRADIENTS.setup),
+            [...CUSTOM_STATE_GRADIENTS.prod],
+        ]);
+        expect(groupStops).toEqual([
+            reverseGradientStops(CUSTOM_STATE_GRADIENTS.prod),
+            reverseGradientStops(CUSTOM_STATE_GRADIENTS.setup),
+            reverseGradientStops(CUSTOM_STATE_GRADIENTS.stopped),
+        ]);
+        expect(detailMarkers.map((marker) => marker.getAttribute('fill'))).toEqual([
+            CUSTOM_STATE_GRADIENTS.prod[1],
+            CUSTOM_STATE_GRADIENTS.setup[1],
+            CUSTOM_STATE_GRADIENTS.stopped[1],
+        ]);
+        expect(groupSegments.map((segment) => segment.getAttribute('fill'))).toEqual([
+            'var(--color-industrial-muted)',
+            expect.stringMatching(/^url\(#.+-stopped-gradient\)$/),
+            expect.stringMatching(/^url\(#.+-setup-gradient\)$/),
+            expect.stringMatching(/^url\(#.+-prod-gradient\)$/),
+        ]);
+        expect(legendSwatches.map((swatch) => (swatch as HTMLElement).style.backgroundColor)).toEqual([
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.stopped[1]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[1]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[1]),
+        ]);
+        expect(topCaps.map((cap) => cap.getAttribute('fill'))).toEqual([
+            `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.stopped[1]} 80%, white)`,
+            `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.setup[1]} 84%, white)`,
+            `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.prod[1]} 88%, white)`,
+        ]);
+        expect(topCaps[0]?.getAttribute('style')).toContain(`drop-shadow(0 0 6px ${CUSTOM_STATE_GRADIENTS.stopped[1]})`);
+        expect(topCaps.at(-1)?.getAttribute('style')).toContain(`drop-shadow(0 0 6px ${CUSTOM_STATE_GRADIENTS.prod[1]})`);
+        expect(comparisonSegments.map((segment) => (segment as HTMLElement).style.backgroundColor).slice(0, 4)).toEqual([
+            'var(--color-industrial-muted)',
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[1]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[1]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.stopped[1]),
+        ]);
+
+        await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
+
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.prod[1]);
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.setup[1]);
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.stopped[1]);
+        expect(screen.getByTestId('hover-layer')).toHaveAttribute(
+            'data-highlight-colors',
+            [
+                'var(--color-industrial-muted)',
+                CUSTOM_STATE_GRADIENTS.prod[1],
+                CUSTOM_STATE_GRADIENTS.setup[1],
+                CUSTOM_STATE_GRADIENTS.stopped[1],
+            ].join('|'),
+        );
+        expect(groupsChart.innerHTML).toContain(CUSTOM_STATE_GRADIENTS.prod[0]);
+        expect(groupsChart.innerHTML).toContain(CUSTOM_STATE_GRADIENTS.stopped[1]);
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...widget.displayOptions,
+                        stateGradients: UPDATED_STATE_GRADIENTS,
+                    },
+                })}
+                machines={MACHINES}
+                onPersistDisplayOptions={onPersistDisplayOptions}
+            />,
+        );
+
+        expect(computeSpy).toHaveBeenCalledTimes(1);
+        expect(onPersistDisplayOptions).not.toHaveBeenCalled();
+        expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveTextContent('57%');
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('% Prod. 60% · 6.5 h');
+    });
+
+    it('applies resolved alpha and surface-specific visual effects without changing analytics results', async () => {
+        const user = userEvent.setup();
+        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+            analytics: {
+                durationsMs: {
+                    prod: 4 * 60 * 60 * 1000,
+                    setup: 2 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 30 * 60 * 1000,
+                },
+                stopCount: 1,
+                estimatedKwh: 18.4,
+                utilizationRatio: 4 / 7,
+                coverageRatio: 1,
+                intervals: [],
+            },
+            grouped: [buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: {
+                    prod: 3 * 60 * 60 * 1000,
+                    setup: 2 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 30 * 60 * 1000,
+                },
+                expectedDurationMs: 6.5 * 60 * 60 * 1000,
+                productivityLabel: '60%',
+            })],
+            comparison: {
+                best: { label: '2026-06-18', bucketKey: 'day-1' },
+                worst: { label: '2026-06-18', bucketKey: 'day-1' },
+            },
+            summaryRows: [{ label: '2026-06-18', productivityLabel: '60%', bucketKey: 'day-1' }],
+            timezone: 'UTC',
+        } as never);
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        const widget = makeWidget({
+            displayOptions: {
+                ...makeWidget().displayOptions,
+                range: '7d',
+                groupBy: 'day',
+                stateGradients: CUSTOM_STATE_GRADIENTS,
+                stateGradientAlphas: CUSTOM_STATE_GRADIENT_ALPHAS,
+                visualEffects: CUSTOM_VISUAL_EFFECTS,
+            },
+        });
+
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={widget}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
+        });
+
+        const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
+        const summaryBodyStops = ['stopped-gradient', 'setup-gradient', 'prod-gradient']
+            .flatMap((gradientIdSuffix) => getGradientStopsByIdSuffix(summaryChart, gradientIdSuffix));
+        const summaryTopCapStops = ['stopped-top-cap-gradient', 'setup-top-cap-gradient', 'prod-top-cap-gradient']
+            .flatMap((gradientIdSuffix) => getGradientStopsByIdSuffix(summaryChart, gradientIdSuffix));
+        const detailMarkers = Array.from(screen.getByTestId('activity-analytics-summary-details').querySelectorAll('rect'));
+        const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
+        const groupSegments = within(screen.getByTestId('activity-analytics-group-stack')).getAllByTestId('activity-analytics-group-segment');
+        const legendSwatches = Array.from(screen.getByTestId('activity-analytics-groups-header-legend').querySelectorAll('span[aria-hidden="true"]'));
+        const comparisonSegments = Array.from(screen.getByTestId('activity-analytics-comparison').querySelectorAll('div[aria-hidden="true"] > div'));
+        const summaryTopCaps = screen.getAllByTestId('activity-analytics-summary-top-cap');
+
+        expect(summaryBodyStops.map((stop) => stop.getAttribute('stop-opacity'))).toEqual([
+            '0.55', '0.2',
+            '0.65', '0.5',
+            '0.35', '0.75',
+        ]);
+        expect(summaryTopCapStops.map((stop) => stop.getAttribute('stop-color'))).toEqual([
+            ...reverseGradientStops(CUSTOM_STATE_GRADIENTS.stopped),
+            ...reverseGradientStops(CUSTOM_STATE_GRADIENTS.setup),
+            ...CUSTOM_STATE_GRADIENTS.prod,
+        ]);
+        expect(summaryTopCapStops.map((stop) => stop.getAttribute('stop-opacity'))).toEqual([
+            '1', '1',
+            '1', '1',
+            '1', '1',
+        ]);
+        expect(detailMarkers.map((marker) => marker.getAttribute('fill'))).toEqual([
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
+        ]);
+        expect(summarySegments.every((segment) => segment.getAttribute('filter')?.includes('summary-glow'))).toBe(true);
+        expect(summaryChart.innerHTML).toContain('stdDeviation="4"');
+        expect(summaryTopCaps.length).toBeGreaterThan(0);
+        expect(summaryTopCaps.every((cap) => (cap.getAttribute('style') ?? '').includes('drop-shadow'))).toBe(true);
+        expect(summaryTopCaps.every((cap) => (cap.getAttribute('stroke') ?? '').includes('-top-cap-gradient'))).toBe(true);
+        expect(summaryTopCaps.every((cap) => (cap.getAttribute('style') ?? '').includes(CUSTOM_STATE_GRADIENTS[cap.getAttribute('data-segment-key') as keyof typeof CUSTOM_STATE_GRADIENTS][1]))).toBe(true);
+        expect(summaryTopCaps.every((cap) => !(cap.getAttribute('style') ?? '').includes('rgba('))).toBe(true);
+        expect(summaryTopCaps.map((cap) => cap.getAttribute('stroke-width'))).toEqual(summarySegments.map((segment) => segment.getAttribute('stroke-width')));
+        expect(groupSegments.filter((segment) => segment.getAttribute('data-segment-key') !== 'noData').every((segment) => segment.getAttribute('filter')?.includes('grouped-glow'))).toBe(true);
+        expect(screen.queryByTestId('activity-analytics-group-top-cap')).not.toBeInTheDocument();
+        expect(legendSwatches.map((swatch) => (swatch as HTMLElement).style.backgroundColor)).toEqual([
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
+        ]);
+        expect(comparisonSegments.map((segment) => (segment as HTMLElement).style.backgroundColor).slice(0, 4)).toEqual([
+            'var(--color-industrial-muted)',
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
+        ]);
+
+        await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
+
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]));
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]));
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]));
+        expect(screen.getByTestId('hover-layer')).toHaveAttribute(
+            'data-highlight-colors',
+            [
+                'var(--color-industrial-muted)',
+                hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
+                hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
+                hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
+            ].join('|'),
+        );
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...widget.displayOptions,
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                                topCapGlow: 95,
+                            },
+                            donut: {
+                                ...CUSTOM_VISUAL_EFFECTS.donut,
+                                topCapGlow: 25,
+                            },
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(computeSpy).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveTextContent('57%');
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('% Prod. 60% · 6.5 h');
+        const groupedTopCaps = screen.getAllByTestId('activity-analytics-group-top-cap');
+        expect(groupedTopCaps).toHaveLength(3);
+        expect(groupedTopCaps.at(-1)).toHaveAttribute('fill', `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.prod[1]} 88%, white)`);
+        expect(groupedTopCaps.at(-1)?.getAttribute('style')).toContain(`drop-shadow(0 0 5.8px ${CUSTOM_STATE_GRADIENTS.prod[1]})`);
+        expect(groupedTopCaps.every((cap) => !cap.hasAttribute('opacity'))).toBe(true);
     });
 
     it('keeps the distribution donut free of external callout labels at the minimum chart width', () => {
@@ -1162,24 +1592,12 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'stacked');
 
         act(() => {
-            MockResizeObserver.latest().emit(592, 360);
-        });
-
-        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'stacked');
-
-        act(() => {
             MockResizeObserver.latest().emit(847, 360);
-        });
-
-        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'stacked');
-
-        act(() => {
-            MockResizeObserver.latest().emit(848, 360);
         });
 
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveStyle({
-            gridTemplateColumns: 'minmax(16rem,0.95fr) minmax(20rem,1.05fr) minmax(15rem,0.95fr)',
+            gridTemplateColumns: 'minmax(20rem,1.1fr) minmax(16rem,0.9fr)',
         });
     });
 
@@ -1221,6 +1639,40 @@ describe('ActivityAnalyticsWidget', () => {
         expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBeGreaterThan(intermediateWidth);
         expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBe(456);
         expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBeLessThanOrEqual(480);
+    });
+
+    it('renders ordered inline summary details in one vertically centered block', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18' })]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        const detailBlock = screen.getByTestId('activity-analytics-summary-details');
+        const detailSections = within(detailBlock).getAllByTestId('activity-analytics-summary-detail-section');
+
+        expect(detailBlock).toHaveAttribute('data-layout', 'centered-column');
+        expect(detailSections).toHaveLength(3);
+        expect(detailSections.map((section) => within(section).getByTestId('activity-analytics-summary-detail-title').textContent)).toEqual([
+            'Producción',
+            'Setup',
+            'Detenida',
+        ]);
+        expect(detailSections.map((section) => within(section).getByTestId('activity-analytics-summary-detail-value').textContent)).toEqual([
+            '57% - 4.0 h',
+            '29% - 2.0 h',
+            '14% - 1.0 h',
+        ]);
     });
 
     it('shows only the remaining runtime range options and keeps the 7d Turno toggle', async () => {
@@ -1826,6 +2278,50 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-groups-chart')).toBeInTheDocument();
     });
 
+    it('samples only truthful labels from real rendered groups while keeping every bucket stack reachable', async () => {
+        const user = userEvent.setup();
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        const labels = Array.from({ length: 6 }, (_, index) => `2026-06-${18 + index}`);
+        mockComputedAnalytics(labels.map((label, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label,
+        })));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            MockResizeObserver.latest().emit(480, 360);
+        });
+
+        expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'compress');
+        expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-length', '6');
+        expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(6);
+
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
+        const visibleSecondaryLabels = labels.filter((label) => within(groupsChart).queryAllByText(label).length > 0);
+
+        expect(visibleSecondaryLabels.length).toBeGreaterThan(0);
+        expect(visibleSecondaryLabels.length).toBeLessThan(labels.length);
+        expect(visibleSecondaryLabels.every((label) => labels.includes(label))).toBe(true);
+        expect(within(groupsChart).queryAllByText('2026-06-24')).toHaveLength(0);
+
+        await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
+
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('2026-06-18');
+    });
+
     it('renders Grupos as stacked duration bars and scrolls only after compression is exhausted', async () => {
         const user = userEvent.setup();
 
@@ -1886,7 +2382,7 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            MockResizeObserver.latest().emit(480, 360);
+            MockResizeObserver.latest().emit(320, 360);
         });
 
         expect(screen.getByTestId('activity-analytics-groups-scroll-region')).toHaveClass('hmi-scrollbar');
@@ -1906,6 +2402,319 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Detenida');
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Sin datos');
         expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '4');
+    });
+
+    it('renders grouped bars with flat stacked bodies and top-cap highlights on each visible state segment', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: {
+                    prod: 3 * 60 * 60 * 1000,
+                    setup: 2 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 30 * 60 * 1000,
+                },
+                expectedDurationMs: 6.5 * 60 * 60 * 1000,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                            },
+                            donut: {
+                                ...CUSTOM_VISUAL_EFFECTS.donut,
+                                topCap: true,
+                            },
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const stack = screen.getByTestId('activity-analytics-group-stack');
+        const segments = within(stack).getAllByTestId('activity-analytics-group-segment');
+        const topCaps = within(stack).getAllByTestId('activity-analytics-group-top-cap');
+        const partialOutline = within(stack).queryByTestId('activity-analytics-group-partial-outline');
+        const segmentByKey = new Map(segments.map((segment) => [segment.getAttribute('data-segment-key') ?? '', segment]));
+
+        expectVisibleRectStackSemantics(segments, [
+            { fill: 'var(--color-industrial-muted)', segmentKey: 'noData' },
+            { fill: /^url\(#.+-stopped-gradient\)$/, segmentKey: 'stopped' },
+            { fill: /^url\(#.+-setup-gradient\)$/, segmentKey: 'setup' },
+            { fill: /^url\(#.+-prod-gradient\)$/, segmentKey: 'prod' },
+        ]);
+        expect(topCaps.map((cap) => cap.getAttribute('data-segment-key'))).toEqual(['stopped', 'setup', 'prod']);
+        topCaps.forEach((cap) => {
+            const key = cap.getAttribute('data-segment-key') ?? '';
+            const segment = segmentByKey.get(key);
+            expect(segment).toBeDefined();
+
+            const capMetrics = parseRectMetrics(cap);
+            const segmentMetrics = parseRectMetrics(segment!);
+
+            expect(capMetrics.centerX).toBeCloseTo(segmentMetrics.centerX, 5);
+            expect(capMetrics.width).toBeCloseTo(segmentMetrics.width, 5);
+            expect(capMetrics.y).toBe(segmentMetrics.y);
+            expect(capMetrics.height).toBeCloseTo(resolveExpectedGroupedTopCapHeight(segmentMetrics.height), 5);
+            expect(capMetrics.height).toBeLessThan(segmentMetrics.height);
+        });
+        expect(partialOutline).not.toBeInTheDocument();
+    });
+
+    it('keeps donut top-cap stroke width aligned with the segment thickness while deriving its visible arc length from 20% of the stroke width', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                            },
+                            donut: {
+                                ...CUSTOM_VISUAL_EFFECTS.donut,
+                                topCap: true,
+                            },
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
+        });
+
+        const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
+        const summaryTopCaps = screen.getAllByTestId('activity-analytics-summary-top-cap');
+        let foundCapUsingVisibleLengthClamp = false;
+
+        summaryTopCaps.forEach((cap) => {
+            const key = cap.getAttribute('data-segment-key');
+            const segment = summarySegments.find((candidate) => candidate.getAttribute('data-segment-key') === key);
+            expect(segment).toBeDefined();
+
+            const segmentStrokeWidth = Number(segment?.getAttribute('stroke-width'));
+            const capStrokeWidth = Number(cap.getAttribute('stroke-width'));
+            const visibleSegmentLength = parseVisibleStrokeLength(segment?.getAttribute('stroke-dasharray') ?? null);
+            const capLength = parseVisibleStrokeLength(cap.getAttribute('stroke-dasharray'));
+            const expectedCapLength = Math.min(Math.max(segmentStrokeWidth * 0.2, 1), visibleSegmentLength);
+
+            expect(capStrokeWidth).toBeCloseTo(segmentStrokeWidth, 5);
+            expect(capLength).toBeLessThan(segmentStrokeWidth);
+            expect(capLength).toBeCloseTo(expectedCapLength, 5);
+
+            if (expectedCapLength === visibleSegmentLength) {
+                foundCapUsingVisibleLengthClamp = true;
+            }
+        });
+
+        expect(foundCapUsingVisibleLengthClamp).toBe(false);
+
+        const firstGroupStack = screen.getByTestId('activity-analytics-group-stack');
+        const groupSegments = within(firstGroupStack).getAllByTestId('activity-analytics-group-segment');
+        const groupTopCaps = within(firstGroupStack).getAllByTestId('activity-analytics-group-top-cap');
+        const groupSegmentByKey = new Map(groupSegments.map((segment) => [segment.getAttribute('data-segment-key') ?? '', segment]));
+
+        groupTopCaps.forEach((cap) => {
+            const key = cap.getAttribute('data-segment-key') ?? '';
+            const segment = groupSegmentByKey.get(key);
+
+            expect(segment).toBeDefined();
+            expect(Number(cap.getAttribute('height'))).toBeCloseTo(
+                resolveExpectedGroupedTopCapHeight(Number(segment?.getAttribute('height'))),
+                5,
+            );
+        });
+    });
+
+    it('uses the final stopped color for grouped top caps', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                durationsMs: {
+                    prod: 2 * 60 * 60 * 1000,
+                    setup: 1 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 0,
+                },
+                expectedDurationMs: 4 * 60 * 60 * 1000,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                            },
+                            donut: CUSTOM_VISUAL_EFFECTS.donut,
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const stack = screen.getByTestId('activity-analytics-group-stack');
+        const stoppedTopCap = within(stack)
+            .getAllByTestId('activity-analytics-group-top-cap')
+            .find((cap) => cap.getAttribute('data-segment-key') === 'stopped');
+        const prodTopCap = within(stack)
+            .getAllByTestId('activity-analytics-group-top-cap')
+            .find((cap) => cap.getAttribute('data-segment-key') === 'prod');
+
+        expect(stoppedTopCap).toHaveAttribute('fill', `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.stopped[1]} 80%, white)`);
+        expect(stoppedTopCap?.getAttribute('style')).toContain(CUSTOM_STATE_GRADIENTS.stopped[1]);
+        expect(prodTopCap).toHaveAttribute('fill', `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.prod[1]} 88%, white)`);
+        expect(prodTopCap?.getAttribute('style')).toContain(CUSTOM_STATE_GRADIENTS.prod[1]);
+    });
+
+    it('matches production-history width math while keeping analytics, stacks, and tooltips invariant across valid bar-width factors', async () => {
+        const user = userEvent.setup();
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics(Array.from({ length: 6 }, (_, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label: `2026-06-${18 + index}`,
+            expectedDurationMs: 5 * 60 * 60 * 1000,
+            durationsMs: {
+                prod: (index + 2) * 60 * 60 * 1000,
+                setup: 1 * 60 * 60 * 1000,
+                stopped: index % 2 === 0 ? 1 * 60 * 60 * 1000 : 0,
+                noData: 0,
+            },
+            productivityLabel: `${60 + index}%`,
+        })));
+
+        const widget = makeWidget({
+            displayOptions: {
+                ...makeWidget().displayOptions,
+                range: '7d',
+                groupBy: 'day',
+                groupBarWidth: 1,
+            },
+        });
+
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={widget}
+                machines={MACHINES}
+            />,
+        );
+
+        const renderFactor = async (factor: 0.5 | 1 | 1.5) => {
+            rerender(
+                <ActivityAnalyticsWidget
+                    widget={{
+                        ...widget,
+                        displayOptions: {
+                            ...widget.displayOptions,
+                            groupBarWidth: factor,
+                        },
+                    }}
+                    machines={MACHINES}
+                />,
+            );
+
+            act(() => {
+                MockResizeObserver.latest().emit(480, 360);
+            });
+
+            await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
+
+            const firstStack = screen.getAllByTestId('activity-analytics-group-stack')[0];
+            const firstStackSegments = within(firstStack).getAllByTestId('activity-analytics-group-segment');
+
+            return {
+                tooltip: screen.getByTestId('chart-tooltip').textContent,
+                comparison: screen.getByTestId('activity-analytics-comparison').textContent,
+                coverage: screen.getByTestId('activity-analytics-summary-coverage').textContent,
+                stackCount: screen.getAllByTestId('activity-analytics-group-stack').length,
+                productivityLabels: screen.getAllByTestId('activity-analytics-group-productivity').map((node) => node.textContent),
+                metrics: firstStackSegments.map(parseRectMetrics),
+            };
+        };
+
+        const narrow = await renderFactor(0.5);
+        const medium = await renderFactor(1);
+        const wide = await renderFactor(1.5);
+
+        expect(narrow.stackCount).toBe(6);
+        expect(medium.stackCount).toBe(6);
+        expect(wide.stackCount).toBe(6);
+        expect(narrow.tooltip).toBe(medium.tooltip);
+        expect(medium.tooltip).toBe(wide.tooltip);
+        expect(narrow.comparison).toBe(medium.comparison);
+        expect(medium.comparison).toBe(wide.comparison);
+        expect(narrow.coverage).toBe(medium.coverage);
+        expect(medium.coverage).toBe(wide.coverage);
+        expect(narrow.productivityLabels).toEqual(medium.productivityLabels);
+        expect(medium.productivityLabels).toEqual(wide.productivityLabels);
+        expect(narrow.metrics.map(({ y, height }) => ({ y, height }))).toEqual(medium.metrics.map(({ y, height }) => ({ y, height })));
+        expect(medium.metrics.map(({ y, height }) => ({ y, height }))).toEqual(wide.metrics.map(({ y, height }) => ({ y, height })));
+
+        expect(narrow.metrics[0]?.width).toBeCloseTo(12.19, 1);
+        expect(medium.metrics[0]?.width).toBeCloseTo(24.38, 1);
+        expect(wide.metrics[0]?.width).toBeCloseTo(36.57, 1);
+        expect(narrow.metrics[0]?.centerX).toBeCloseTo(62.19, 1);
+        expect(medium.metrics[0]?.centerX).toBeCloseTo(74.38, 1);
+        expect(wide.metrics[0]?.centerX).toBeCloseTo(86.57, 1);
     });
 
     it('falls back to truthful text cards on tight sizes and keeps grouped cards on full bucket duration semantics', () => {
@@ -1979,8 +2788,8 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-groups-text')).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-stacked-bar')).not.toBeInTheDocument();
         expect(screen.getAllByText('44%').length).toBeGreaterThan(0);
-        expect(within(screen.getByTestId('activity-analytics-summary-text')).getAllByText(/^(Prod\.|Setup|Detenida)$/).map((item) => item.textContent)).toEqual([
-            'Prod.',
+        expect(within(screen.getByTestId('activity-analytics-summary-text')).getAllByText(/^(Producción|Setup|Detenida)$/).map((item) => item.textContent)).toEqual([
+            'Producción',
             'Setup',
             'Detenida',
         ]);
@@ -2413,7 +3222,7 @@ describe('ActivityAnalyticsWidget', () => {
         });
     });
 
-    it('uses Activity Analytics numeric typography for the donut center value, keeps the PROD label typography, and makes the prod segment thicker', () => {
+    it('uses semantic typography for summary values/details and scales donut thickness responsively while preserving center semantics', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -2436,30 +3245,47 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
-        const kpiPanel = screen.getByTestId('activity-analytics-kpis');
-        const distributionTitle = within(summaryPanel).getByText('Distribución');
-        const kpiTitle = within(kpiPanel).getByText('% PROD.');
+        const detailBlock = screen.getByTestId('activity-analytics-summary-details');
+        const detailTitle = within(detailBlock).getAllByTestId('activity-analytics-summary-detail-title')[0];
+        const detailValue = within(detailBlock).getAllByTestId('activity-analytics-summary-detail-value')[0];
         const coverageValue = within(summaryPanel).getByTestId('activity-analytics-summary-coverage');
         const donutCenterValue = screen.getByTestId('activity-analytics-summary-total-value');
         const donutCenterLabel = screen.getByTestId('activity-analytics-summary-total-label');
-        const donutSegments = screen.getAllByTestId('activity-analytics-summary-segment');
-        const prodSegment = donutSegments.find((segment) => segment.getAttribute('data-segment-key') === 'prod');
-        const setupSegment = donutSegments.find((segment) => segment.getAttribute('data-segment-key') === 'setup');
-        const stoppedSegment = donutSegments.find((segment) => segment.getAttribute('data-segment-key') === 'stopped');
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 240 });
+        });
 
-        expect(kpiTitle).toHaveStyle({
+        const narrowSegments = screen.getAllByTestId('activity-analytics-summary-segment');
+        const narrowProdStrokeWidth = Number(narrowSegments.find((segment) => segment.getAttribute('data-segment-key') === 'prod')?.getAttribute('stroke-width'));
+        const narrowSetupStrokeWidth = Number(narrowSegments.find((segment) => segment.getAttribute('data-segment-key') === 'setup')?.getAttribute('stroke-width'));
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420, summaryColumnWidth: 456 });
+        });
+
+        const wideSegments = screen.getAllByTestId('activity-analytics-summary-segment');
+        const wideProdStrokeWidth = Number(wideSegments.find((segment) => segment.getAttribute('data-segment-key') === 'prod')?.getAttribute('stroke-width'));
+        const wideSetupStrokeWidth = Number(wideSegments.find((segment) => segment.getAttribute('data-segment-key') === 'setup')?.getAttribute('stroke-width'));
+
+        expect(detailTitle).toHaveStyle({
             fontFamily: 'var(--font-system)',
             fontWeight: 'var(--font-weight-system)',
             fontSize: 'var(--font-size-system)',
             letterSpacing: 'var(--tracking-system)',
         });
-        expect(distributionTitle).toHaveStyle({
-            fontFamily: 'var(--font-system)',
-            fontWeight: 'var(--font-weight-system)',
-            fontSize: 'var(--font-size-system)',
-            letterSpacing: 'var(--tracking-system)',
+        expect(detailValue).toHaveStyle({
+            fontFamily: 'var(--font-mono)',
+            fontWeight: 'var(--font-weight-mono)',
+            fontSize: 'var(--font-size-mono)',
+            letterSpacing: 'var(--tracking-mono)',
         });
         expect(coverageValue).toHaveTextContent('Cobertura 100%');
+        expect(coverageValue).toHaveStyle({
+            fontFamily: 'var(--font-mono)',
+            fontWeight: 'var(--font-weight-mono)',
+            fontSize: 'var(--font-size-mono)',
+            letterSpacing: 'var(--tracking-mono)',
+        });
         expect(donutCenterValue).toHaveTextContent('57%');
         expect(donutCenterValue).toHaveStyle({
             fontFamily: 'var(--font-widget-value-activity-analytics)',
@@ -2474,11 +3300,30 @@ describe('ActivityAnalyticsWidget', () => {
             fontSize: 'var(--font-size-system)',
             letterSpacing: 'var(--tracking-system)',
         });
-        expect(prodSegment).toHaveAttribute('stroke-width', '12');
-        expect(setupSegment).toHaveAttribute('stroke-width', '8');
-        expect(stoppedSegment).toHaveAttribute('stroke-width', '8');
+        expect(narrowSetupStrokeWidth).toBe(6);
+        expect(narrowProdStrokeWidth).toBe(9);
+        expect(wideSetupStrokeWidth).toBe(12);
+        expect(wideProdStrokeWidth).toBe(18);
         expect(donutCenterValue).not.toHaveTextContent('7.0 h');
         expect(donutCenterLabel).not.toHaveTextContent('Total');
+    });
+
+    it('builds summary donut segments without mutable render-time offsets', () => {
+        const segments = buildActivityAnalyticsSummarySegments({
+            bars: [
+                { key: 'stopped', label: 'Detenida', durationMs: 1, color: 'red' },
+                { key: 'setup', label: 'Setup', durationMs: 2, color: 'yellow' },
+                { key: 'prod', label: 'Prod.', durationMs: 3, color: 'green' },
+            ],
+            circumference: 120,
+            gapLength: 6,
+        });
+
+        expect(segments).toHaveLength(3);
+        expect(segments.map((segment) => segment.bar.key)).toEqual(['stopped', 'setup', 'prod']);
+        expect(segments[0]?.dashOffset).toBe(-3);
+        expect(segments[1]?.dashOffset).toBeLessThan(segments[0]?.dashOffset ?? 0);
+        expect(segments[2]?.dashOffset).toBeLessThan(segments[1]?.dashOffset ?? 0);
     });
 
     it('renders compact Mejor/Peor rows from the visible grouped data with productivity and duration context', () => {
@@ -2697,7 +3542,7 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getByTestId('activity-analytics-groups')).toHaveClass('border-industrial-border');
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveClass('border-industrial-border');
-        expect(screen.getByTestId('activity-analytics-summary-bars')).toHaveClass('border-industrial-border');
+        expect(screen.getByTestId('activity-analytics-summary-bars')).not.toHaveClass('border-industrial-border');
         expect(screen.getAllByTestId('activity-analytics-summary-stack')).toHaveLength(1);
         expect(screen.getAllByTestId('activity-analytics-summary-segment').length).toBeGreaterThan(0);
     });
@@ -2773,7 +3618,7 @@ describe('ActivityAnalyticsWidget', () => {
             <ActivityAnalyticsWidget
                 widget={makeWidget({
                     displayOptions: {
-                        range: '7d',
+                        range: '30d',
                         groupBy: 'shift',
                         setupThresholdKw: 0.2,
                         prodThresholdKw: 0.3,
