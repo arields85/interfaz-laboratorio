@@ -84,19 +84,13 @@ class MockResizeObserver implements ResizeObserver {
 function emitActivityAnalyticsLayoutSize({
     bodyWidth,
     bodyHeight,
-    summaryColumnWidth,
 }: {
     bodyWidth: number;
     bodyHeight: number;
-    summaryColumnWidth?: number;
 }) {
     const observer = MockResizeObserver.latest();
 
     observer.emit(bodyWidth, bodyHeight);
-
-    if (typeof summaryColumnWidth === 'number') {
-        observer.emitObservedTarget('activity-analytics-summary-column', summaryColumnWidth, bodyHeight);
-    }
 }
 
 vi.mock('../../config/dataConnection.config', () => ({
@@ -338,6 +332,22 @@ function parseRectMetrics(segment: HTMLElement) {
     };
 }
 
+function parseSvgTextPoint(node: HTMLElement) {
+    return {
+        x: Number(node.getAttribute('x')),
+        y: Number(node.getAttribute('y')),
+    };
+}
+
+function parseCircleMetrics(node: HTMLElement) {
+    return {
+        cx: Number(node.getAttribute('cx')),
+        cy: Number(node.getAttribute('cy')),
+        r: Number(node.getAttribute('r')),
+        strokeWidth: Number(node.getAttribute('stroke-width')),
+    };
+}
+
 function hexToRgbCss(hex: string): string {
     const normalized = hex.replace('#', '');
     const red = Number.parseInt(normalized.slice(0, 2), 16);
@@ -376,6 +386,14 @@ function resolveExpectedGroupedTopCapHeight(segmentHeight: number) {
 
 function parseVisibleStrokeLength(strokeDashArray: string | null): number {
     return Number((strokeDashArray ?? '0').split(' ')[0]);
+}
+
+function parsePercentHeight(value: string): number {
+    return Number.parseFloat(value.replace('%', ''));
+}
+
+function parsePxStyle(value: string): number {
+    return Number.parseFloat(value.replace('px', ''));
 }
 
 describe('ActivityAnalyticsWidget', () => {
@@ -1098,13 +1116,13 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 520, bodyHeight: 320 });
         });
 
         expect(screen.getByText('Distribución')).toBeInTheDocument();
         expect(screen.queryByText('Extrusora 101')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-kpis')).not.toBeInTheDocument();
-        expect(screen.queryAllByTestId('activity-analytics-vertical-bar-track')).toHaveLength(0);
+        expect(screen.getAllByTestId('activity-analytics-comparison-bar-track')).toHaveLength(2);
         expect(screen.getByTestId('activity-analytics-summary-chart')).toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-summary-stack')).toHaveLength(1);
         expect(screen.queryByTestId('activity-analytics-summary-bar')).not.toBeInTheDocument();
@@ -1164,10 +1182,22 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(within(groupsPanel).queryByTestId('activity-analytics-panel-heading-value')).not.toBeInTheDocument();
         expect(screen.queryAllByTestId('activity-analytics-summary-segment-label')).toHaveLength(0);
-        expect(summaryPanel).not.toHaveClass('border-industrial-border');
-        expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('Cobertura 100%');
+        expect(summaryPanel).toHaveClass('border-industrial-border');
+        expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('Cob. 100%');
         expect(within(summaryPanel).queryByText('% Prod. 57% · Cob. 100%')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-summary-panel')).not.toBeInTheDocument();
+        expect(screen.getAllByTestId('activity-analytics-comparison-percent').map((node) => node.textContent)).toEqual(['60%', '50%']);
+        expect(screen.queryByTestId('activity-analytics-comparison-context')).not.toBeInTheDocument();
+        expect(comparisonPanel).not.toHaveTextContent('Cobertura completa');
+        expect(comparisonPanel).not.toHaveTextContent(/Observado · Cob\./);
+        expect(comparisonPanel).toHaveClass('border-industrial-border');
+        expect(screen.queryByTestId('activity-analytics-comparison-scale')).not.toBeInTheDocument();
+        screen.getAllByTestId('activity-analytics-comparison-bar-track').forEach((track) => {
+            expect(track).toHaveClass('bg-white/5');
+            expect(track).toHaveClass('rounded-full');
+            expect(track).toHaveClass('w-2');
+        });
+        expect(screen.getAllByTestId('activity-analytics-metric-value').map((node) => node.textContent)).toEqual(['2026-06-18', '2026-06-19']);
 
         expect(topRegion).toContainElement(summaryPanel);
         expect(topRegion).toContainElement(comparisonPanel);
@@ -1177,7 +1207,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(Number(summaryChart.getAttribute('width'))).toBeLessThan(640);
     });
 
-    it('intentionally stacks Resumen over Mejor/Peor at compact supported widths instead of wrapping them unpredictably', () => {
+    it('keeps Resumen and Mejor/Peor in the same top row at compact supported widths', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -1207,7 +1237,8 @@ describe('ActivityAnalyticsWidget', () => {
             MockResizeObserver.latest().emit(520, 360);
         });
 
-        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'stacked');
+        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
+        expect(Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-overlap-px'))).toBeGreaterThan(0);
         expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-comparison')).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-summary-text')).not.toBeInTheDocument();
@@ -1276,7 +1307,7 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420 });
         });
 
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
@@ -1291,7 +1322,7 @@ describe('ActivityAnalyticsWidget', () => {
         const groupSegments = within(firstGroupStack).getAllByTestId('activity-analytics-group-segment');
         const topCaps = within(firstGroupStack).getAllByTestId('activity-analytics-group-top-cap');
         const legendSwatches = Array.from(screen.getByTestId('activity-analytics-groups-header-legend').querySelectorAll('span[aria-hidden="true"]'));
-        const comparisonSegments = Array.from(screen.getByTestId('activity-analytics-comparison').querySelectorAll('div[aria-hidden="true"] > div'));
+        const comparisonFills = screen.getAllByTestId('activity-analytics-comparison-bar-fill');
 
         expect(summaryStops).toEqual([
             reverseGradientStops(CUSTOM_STATE_GRADIENTS.stopped),
@@ -1304,9 +1335,9 @@ describe('ActivityAnalyticsWidget', () => {
             reverseGradientStops(CUSTOM_STATE_GRADIENTS.stopped),
         ]);
         expect(detailMarkers.map((marker) => marker.getAttribute('fill'))).toEqual([
-            CUSTOM_STATE_GRADIENTS.prod[1],
-            CUSTOM_STATE_GRADIENTS.setup[1],
-            CUSTOM_STATE_GRADIENTS.stopped[1],
+            CUSTOM_STATE_GRADIENTS.prod[0],
+            CUSTOM_STATE_GRADIENTS.setup[0],
+            CUSTOM_STATE_GRADIENTS.stopped[0],
         ]);
         expect(groupSegments.map((segment) => segment.getAttribute('fill'))).toEqual([
             'var(--color-industrial-muted)',
@@ -1315,9 +1346,9 @@ describe('ActivityAnalyticsWidget', () => {
             expect.stringMatching(/^url\(#.+-prod-gradient\)$/),
         ]);
         expect(legendSwatches.map((swatch) => (swatch as HTMLElement).style.backgroundColor)).toEqual([
-            hexToRgbCss(CUSTOM_STATE_GRADIENTS.stopped[1]),
-            hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[1]),
-            hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[1]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.stopped[0]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[0]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[0]),
         ]);
         expect(topCaps.map((cap) => cap.getAttribute('fill'))).toEqual([
             `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.stopped[1]} 80%, white)`,
@@ -1326,12 +1357,10 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(topCaps[0]?.getAttribute('style')).toContain(`drop-shadow(0 0 6px ${CUSTOM_STATE_GRADIENTS.stopped[1]})`);
         expect(topCaps.at(-1)?.getAttribute('style')).toContain(`drop-shadow(0 0 6px ${CUSTOM_STATE_GRADIENTS.prod[1]})`);
-        expect(comparisonSegments.map((segment) => (segment as HTMLElement).style.backgroundColor).slice(0, 4)).toEqual([
-            'var(--color-industrial-muted)',
-            hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[1]),
-            hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[1]),
-            hexToRgbCss(CUSTOM_STATE_GRADIENTS.stopped[1]),
-        ]);
+        comparisonFills.forEach((segment) => {
+            expect(parsePercentHeight((segment as HTMLElement).style.height)).toBeCloseTo((2 / 3) * 100, 5);
+            expect(segment.getAttribute('style')).toContain(`linear-gradient(to top, ${hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[0])} 0%, ${hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[1])} 100%)`);
+        });
 
         await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
 
@@ -1366,7 +1395,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(computeSpy).toHaveBeenCalledTimes(1);
         expect(onPersistDisplayOptions).not.toHaveBeenCalled();
         expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveTextContent('57%');
-        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('% Prod. 60% · 6.5 h');
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('60%');
     });
 
     it('applies resolved alpha and surface-specific visual effects without changing analytics results', async () => {
@@ -1431,7 +1460,7 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420 });
         });
 
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
@@ -1443,7 +1472,7 @@ describe('ActivityAnalyticsWidget', () => {
         const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
         const groupSegments = within(screen.getByTestId('activity-analytics-group-stack')).getAllByTestId('activity-analytics-group-segment');
         const legendSwatches = Array.from(screen.getByTestId('activity-analytics-groups-header-legend').querySelectorAll('span[aria-hidden="true"]'));
-        const comparisonSegments = Array.from(screen.getByTestId('activity-analytics-comparison').querySelectorAll('div[aria-hidden="true"] > div'));
+        const comparisonFills = screen.getAllByTestId('activity-analytics-comparison-bar-fill');
         const summaryTopCaps = screen.getAllByTestId('activity-analytics-summary-top-cap');
 
         expect(summaryBodyStops.map((stop) => stop.getAttribute('stop-opacity'))).toEqual([
@@ -1462,9 +1491,9 @@ describe('ActivityAnalyticsWidget', () => {
             '1', '1',
         ]);
         expect(detailMarkers.map((marker) => marker.getAttribute('fill'))).toEqual([
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]),
         ]);
         expect(summarySegments.every((segment) => segment.getAttribute('filter')?.includes('summary-glow'))).toBe(true);
         expect(summaryChart.innerHTML).toContain('stdDeviation="4"');
@@ -1477,16 +1506,13 @@ describe('ActivityAnalyticsWidget', () => {
         expect(groupSegments.filter((segment) => segment.getAttribute('data-segment-key') !== 'noData').every((segment) => segment.getAttribute('filter')?.includes('grouped-glow'))).toBe(true);
         expect(screen.queryByTestId('activity-analytics-group-top-cap')).not.toBeInTheDocument();
         expect(legendSwatches.map((swatch) => (swatch as HTMLElement).style.backgroundColor)).toEqual([
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]),
         ]);
-        expect(comparisonSegments.map((segment) => (segment as HTMLElement).style.backgroundColor).slice(0, 4)).toEqual([
-            'var(--color-industrial-muted)',
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
-        ]);
+        comparisonFills.forEach((segment) => {
+            expect(segment.getAttribute('style')).toContain(`linear-gradient(to top, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0])} 0%, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1])} 100%)`);
+        });
 
         await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
 
@@ -1527,7 +1553,7 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(computeSpy).toHaveBeenCalledTimes(1);
         expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveTextContent('57%');
-        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('% Prod. 60% · 6.5 h');
+        expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('60%');
         const groupedTopCaps = screen.getAllByTestId('activity-analytics-group-top-cap');
         expect(groupedTopCaps).toHaveLength(3);
         expect(groupedTopCaps.at(-1)).toHaveAttribute('fill', `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.prod[1]} 88%, white)`);
@@ -1565,7 +1591,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(summaryChart).queryAllByTestId('activity-analytics-summary-segment-label')).toHaveLength(0);
     });
 
-    it('stacks the top region at intermediate widths and keeps side-by-side only once the 3-block layout fits', () => {
+    it('never stacks the top region and increases comparison overlap as the widget narrows', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -1589,19 +1615,22 @@ describe('ActivityAnalyticsWidget', () => {
             MockResizeObserver.latest().emit(520, 360);
         });
 
-        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'stacked');
+        const compactTopRegion = screen.getByTestId('activity-analytics-top-region');
+
+        expect(compactTopRegion).toHaveAttribute('data-top-layout', 'side-by-side');
+        expect(Number(compactTopRegion.getAttribute('data-top-overlap-px'))).toBeGreaterThan(0);
 
         act(() => {
             MockResizeObserver.latest().emit(847, 360);
         });
 
-        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
-        expect(screen.getByTestId('activity-analytics-top-region')).toHaveStyle({
-            gridTemplateColumns: 'minmax(20rem,1.1fr) minmax(16rem,0.9fr)',
-        });
+        const wideTopRegion = screen.getByTestId('activity-analytics-top-region');
+
+        expect(wideTopRegion).toHaveAttribute('data-top-layout', 'side-by-side');
+        expect(Number(wideTopRegion.getAttribute('data-top-overlap-px'))).toBe(0);
     });
 
-    it('uses the measured summary column width for the donut when side-by-side layout is active', () => {
+    it('uses a responsive summary column width for the donut when side-by-side layout is active', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -1622,23 +1651,43 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 336 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 760, bodyHeight: 420 });
         });
 
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
+        const summaryColumn = screen.getByTestId('activity-analytics-summary-column');
         const intermediateWidth = Number(summaryChart.getAttribute('width'));
 
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
-        expect(intermediateWidth).toBe(336);
+        expect(intermediateWidth).toBeCloseTo(402.8, 1);
         expect(intermediateWidth).toBeLessThanOrEqual(480);
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420, summaryColumnWidth: 456 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
         });
 
         expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBeGreaterThan(intermediateWidth);
         expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBe(456);
         expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBeLessThanOrEqual(480);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 603, bodyHeight: 420 });
+        });
+
+        const widthAt603 = Number(summaryColumn.getAttribute('data-summary-column-width-px'));
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 520, bodyHeight: 420 });
+        });
+
+        const widthAt520 = Number(summaryColumn.getAttribute('data-summary-column-width-px'));
+
+        expect(widthAt603).toBeGreaterThan(319);
+        expect(widthAt603).toBeLessThan(320);
+        expect(widthAt520).toBeLessThan(widthAt603);
+        expect(widthAt520).toBeGreaterThan(288);
+        expect(widthAt520).toBeLessThan(289);
+        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
     });
 
     it('renders ordered inline summary details in one vertically centered block', () => {
@@ -2278,6 +2327,64 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-groups-chart')).toBeInTheDocument();
     });
 
+    it('compresses grouped inter-bar spacing as the widget narrows and re-expands it when width returns', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics(Array.from({ length: 6 }, (_, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label: `2026-06-${18 + index}`,
+        })));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        const readGap = () => {
+            const stacks = screen.getAllByTestId('activity-analytics-group-stack');
+            const firstVisible = within(stacks[0] as HTMLElement)
+                .getAllByTestId('activity-analytics-group-segment')
+                .find((segment) => Number(segment.getAttribute('height')) > 0);
+            const secondVisible = within(stacks[1] as HTMLElement)
+                .getAllByTestId('activity-analytics-group-segment')
+                .find((segment) => Number(segment.getAttribute('height')) > 0);
+
+            if (!firstVisible || !secondVisible) {
+                throw new Error('Missing visible grouped segments for spacing assertion');
+            }
+
+            const firstMetrics = parseRectMetrics(firstVisible);
+            const secondMetrics = parseRectMetrics(secondVisible);
+
+            return secondMetrics.x - (firstMetrics.x + firstMetrics.width);
+        };
+
+        act(() => {
+            MockResizeObserver.latest().emit(760, 360);
+        });
+        const wideGap = readGap();
+
+        act(() => {
+            MockResizeObserver.latest().emit(520, 360);
+        });
+        const narrowGap = readGap();
+
+        act(() => {
+            MockResizeObserver.latest().emit(760, 360);
+        });
+        const wideGapAgain = readGap();
+
+        expect(narrowGap).toBeLessThan(wideGap);
+        expect(wideGapAgain).toBeCloseTo(wideGap, 1);
+    });
+
     it('samples only truthful labels from real rendered groups while keeping every bucket stack reachable', async () => {
         const user = userEvent.setup();
 
@@ -2518,7 +2625,7 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 320 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420 });
         });
 
         const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
@@ -2679,7 +2786,19 @@ describe('ActivityAnalyticsWidget', () => {
             await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
 
             const firstStack = screen.getAllByTestId('activity-analytics-group-stack')[0];
+            const lastStack = screen.getAllByTestId('activity-analytics-group-stack').at(-1);
             const firstStackSegments = within(firstStack).getAllByTestId('activity-analytics-group-segment');
+            const lastStackSegments = lastStack ? within(lastStack).getAllByTestId('activity-analytics-group-segment') : [];
+            const chartWidth = Number(screen.getByTestId('activity-analytics-groups-chart').getAttribute('width'));
+            const lastVisibleSegment = [...lastStackSegments]
+                .reverse()
+                .find((segment) => Number(segment.getAttribute('height')) > 0);
+
+            if (!lastVisibleSegment) {
+                throw new Error('Missing last visible grouped segment');
+            }
+
+            const lastVisibleMetrics = parseRectMetrics(lastVisibleSegment);
 
             return {
                 tooltip: screen.getByTestId('chart-tooltip').textContent,
@@ -2688,6 +2807,7 @@ describe('ActivityAnalyticsWidget', () => {
                 stackCount: screen.getAllByTestId('activity-analytics-group-stack').length,
                 productivityLabels: screen.getAllByTestId('activity-analytics-group-productivity').map((node) => node.textContent),
                 metrics: firstStackSegments.map(parseRectMetrics),
+                rightGap: chartWidth - (lastVisibleMetrics.x + lastVisibleMetrics.width),
             };
         };
 
@@ -2709,12 +2829,13 @@ describe('ActivityAnalyticsWidget', () => {
         expect(narrow.metrics.map(({ y, height }) => ({ y, height }))).toEqual(medium.metrics.map(({ y, height }) => ({ y, height })));
         expect(medium.metrics.map(({ y, height }) => ({ y, height }))).toEqual(wide.metrics.map(({ y, height }) => ({ y, height })));
 
-        expect(narrow.metrics[0]?.width).toBeCloseTo(12.19, 1);
-        expect(medium.metrics[0]?.width).toBeCloseTo(24.38, 1);
-        expect(wide.metrics[0]?.width).toBeCloseTo(36.57, 1);
-        expect(narrow.metrics[0]?.centerX).toBeCloseTo(62.19, 1);
-        expect(medium.metrics[0]?.centerX).toBeCloseTo(74.38, 1);
-        expect(wide.metrics[0]?.centerX).toBeCloseTo(86.57, 1);
+        expect(narrow.metrics[0]?.width).toBeLessThan(medium.metrics[0]?.width ?? 0);
+        expect(medium.metrics[0]?.width).toBeLessThan(wide.metrics[0]?.width ?? 0);
+        expect(narrow.metrics[0]?.centerX).toBeLessThan(medium.metrics[0]?.centerX ?? 0);
+        expect(medium.metrics[0]?.centerX).toBeLessThan(wide.metrics[0]?.centerX ?? 0);
+        expect(narrow.rightGap).toBeGreaterThan(0);
+        expect(medium.rightGap).toBeGreaterThan(0);
+        expect(wide.rightGap).toBeGreaterThan(0);
     });
 
     it('falls back to truthful text cards on tight sizes and keeps grouped cards on full bucket duration semantics', () => {
@@ -2797,6 +2918,59 @@ describe('ActivityAnalyticsWidget', () => {
         const groupedCard = within(screen.getByTestId('activity-analytics-groups-text')).getByText('2026-06-18').parentElement as HTMLElement;
 
         expect(within(groupedCard).getByText('9.0 h')).toBeInTheDocument();
+    });
+
+    it('lets Mejor/Peor auto-size when Resumen falls back to text mode instead of reusing donut band height and padding', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                productivityRatio: 0.6,
+                productivityLabel: '60%',
+                expectedDurationMs: 5 * 60 * 60 * 1000,
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-2',
+                label: '2026-06-19',
+                durationsMs: { prod: 1 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 0, noData: 0 },
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+                expectedDurationMs: 2 * 60 * 60 * 1000,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 360, bodyHeight: 210 });
+        });
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+        const comparisonGrid = screen.getByTestId('activity-analytics-comparison-grid');
+
+        expect(screen.getByTestId('activity-analytics-summary-text')).toBeInTheDocument();
+        expect(comparisonPanel.style.height).toBe('');
+        expect(comparisonGrid.style.paddingTop).toBe('');
+        expect(comparisonGrid.style.paddingBottom).toBe('');
+        expect(comparisonGrid.style.alignSelf).toBe('center');
+        expect(within(comparisonPanel).getByText('2026-06-18')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('2026-06-19')).toBeInTheDocument();
+        expect(within(comparisonPanel).queryByTestId('activity-analytics-comparison-context')).not.toBeInTheDocument();
+        expect(comparisonPanel).not.toHaveTextContent('Cobertura completa');
+        expect(comparisonPanel).not.toHaveTextContent(/Observado · Cob\./);
     });
 
     it('shows cobertura incompleta for incomplete coverage while preserving en curso, sin turno, and sin comparación', async () => {
@@ -2927,7 +3101,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
     });
 
-    it('ranks closed high-coverage incomplete Turno buckets and discloses observed coverage in Mejor/Peor', async () => {
+    it('ranks closed high-coverage incomplete Turno buckets without rendering comparison context text in Mejor/Peor', async () => {
         const user = userEvent.setup();
 
         vi.mocked(useActivitySeries).mockReturnValue({
@@ -3011,9 +3185,80 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(within(comparisonPanel).getByText('2026-06-19 · Turno 1')).toBeInTheDocument();
         expect(within(comparisonPanel).getByText('2026-06-19 · Turno 2')).toBeInTheDocument();
-        expect(comparisonPanel).toHaveTextContent('Prod. observada 92% · Cob. 95% · 8.0 h');
-        expect(comparisonPanel).toHaveTextContent('% Prod. 50% · 8.0 h');
+        expect(comparisonPanel).toHaveTextContent('92%');
+        expect(comparisonPanel).toHaveTextContent('50%');
+        expect(comparisonPanel).not.toHaveTextContent('Observado · Cob. 95%');
+        expect(comparisonPanel).not.toHaveTextContent('Cobertura completa');
+        expect(within(comparisonPanel).queryByTestId('activity-analytics-comparison-context')).not.toBeInTheDocument();
         expect(comparisonPanel).not.toHaveTextContent('sin comparación');
+    });
+
+    it('uses the computed full-coverage productivity ratio for Mejor bar height instead of the rounded label text', async () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+            analytics: {
+                durationsMs: {
+                    prod: 6 * 60 * 60 * 1000,
+                    setup: 3 * 60 * 60 * 1000,
+                    stopped: 0,
+                    noData: 0,
+                },
+                stopCount: 0,
+                estimatedKwh: 0,
+                utilizationRatio: 2 / 3,
+                coverageRatio: 1,
+                intervals: [],
+            },
+            grouped: [
+                buildGroupedBucket({
+                    bucketKey: 'day-1',
+                    label: '2026-06-19',
+                    productivityRatio: 2 / 3,
+                    productivityLabel: '67%',
+                    coverageRatio: 1,
+                    isInProgress: false,
+                }),
+                buildGroupedBucket({
+                    bucketKey: 'day-2',
+                    label: '2026-06-20',
+                    productivityRatio: 0.5,
+                    productivityLabel: '50%',
+                    coverageRatio: 1,
+                    isInProgress: false,
+                }),
+            ],
+            comparison: {
+                best: { label: '2026-06-19', bucketKey: 'day-1' },
+                worst: { label: '2026-06-20', bucketKey: 'day-2' },
+            },
+            summaryRows: [],
+            timezone: 'UTC',
+        } as never);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        groupBy: 'day',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const comparisonFills = screen.getAllByTestId('activity-analytics-comparison-bar-fill');
+
+        expect(screen.getAllByTestId('activity-analytics-comparison-percent').map((node) => node.textContent)).toEqual(['67%', '50%']);
+        expect(parsePercentHeight((comparisonFills[0] as HTMLElement).style.height)).toBeCloseTo((2 / 3) * 100, 5);
+        expect((comparisonFills[0] as HTMLElement).style.height).not.toBe('67%');
+        expect(parsePercentHeight((comparisonFills[1] as HTMLElement).style.height)).toBeCloseTo(50, 5);
     });
 
     it('renders calendar grouped buckets against full expected duration semantics and outlines in-progress buckets', () => {
@@ -3252,17 +3497,19 @@ describe('ActivityAnalyticsWidget', () => {
         const donutCenterValue = screen.getByTestId('activity-analytics-summary-total-value');
         const donutCenterLabel = screen.getByTestId('activity-analytics-summary-total-label');
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420, summaryColumnWidth: 240 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420 });
         });
 
+        const narrowSummaryHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
         const narrowSegments = screen.getAllByTestId('activity-analytics-summary-segment');
         const narrowProdStrokeWidth = Number(narrowSegments.find((segment) => segment.getAttribute('data-segment-key') === 'prod')?.getAttribute('stroke-width'));
         const narrowSetupStrokeWidth = Number(narrowSegments.find((segment) => segment.getAttribute('data-segment-key') === 'setup')?.getAttribute('stroke-width'));
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420, summaryColumnWidth: 456 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
         });
 
+        const wideSummaryHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
         const wideSegments = screen.getAllByTestId('activity-analytics-summary-segment');
         const wideProdStrokeWidth = Number(wideSegments.find((segment) => segment.getAttribute('data-segment-key') === 'prod')?.getAttribute('stroke-width'));
         const wideSetupStrokeWidth = Number(wideSegments.find((segment) => segment.getAttribute('data-segment-key') === 'setup')?.getAttribute('stroke-width'));
@@ -3279,7 +3526,7 @@ describe('ActivityAnalyticsWidget', () => {
             fontSize: 'var(--font-size-mono)',
             letterSpacing: 'var(--tracking-mono)',
         });
-        expect(coverageValue).toHaveTextContent('Cobertura 100%');
+        expect(coverageValue).toHaveTextContent('Cob. 100%');
         expect(coverageValue).toHaveStyle({
             fontFamily: 'var(--font-mono)',
             fontWeight: 'var(--font-weight-mono)',
@@ -3300,12 +3547,178 @@ describe('ActivityAnalyticsWidget', () => {
             fontSize: 'var(--font-size-system)',
             letterSpacing: 'var(--tracking-system)',
         });
-        expect(narrowSetupStrokeWidth).toBe(6);
-        expect(narrowProdStrokeWidth).toBe(9);
-        expect(wideSetupStrokeWidth).toBe(12);
-        expect(wideProdStrokeWidth).toBe(18);
+        expect(narrowSummaryHeight).toBeLessThan(wideSummaryHeight);
+        expect(narrowProdStrokeWidth / narrowSetupStrokeWidth).toBeCloseTo(1.5, 5);
+        expect(wideProdStrokeWidth / wideSetupStrokeWidth).toBeCloseTo(1.5, 5);
         expect(donutCenterValue).not.toHaveTextContent('7.0 h');
         expect(donutCenterLabel).not.toHaveTextContent('Total');
+    });
+
+    it('anchors the Cob. label to the left summary edge while keeping it on the donut floor band', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
+        });
+
+        const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
+        const coverageValue = within(summaryPanel).getByTestId('activity-analytics-summary-coverage');
+        const donutCenterLabel = screen.getByTestId('activity-analytics-summary-total-label');
+        const prodSegment = screen
+            .getAllByTestId('activity-analytics-summary-segment')
+            .find((segment) => segment.getAttribute('data-segment-key') === 'prod');
+
+        if (!prodSegment) {
+            throw new Error('Missing production summary segment');
+        }
+
+        const coveragePoint = parseSvgTextPoint(coverageValue);
+        const donutCenterLabelPoint = parseSvgTextPoint(donutCenterLabel);
+        const prodRing = parseCircleMetrics(prodSegment);
+        const donutOuterLeftEdge = prodRing.cx - (prodRing.r + (prodRing.strokeWidth / 2));
+        const donutOuterBottomEdge = prodRing.cy + (prodRing.r + (prodRing.strokeWidth / 2));
+
+        expect(coverageValue).toHaveTextContent('Cob. 100%');
+        expect(coverageValue).toHaveAttribute('text-anchor', 'start');
+        expect(coveragePoint.x).toBeLessThan(donutOuterLeftEdge - 12);
+        expect(coveragePoint.x).toBeLessThan(prodRing.cx);
+        expect(Math.abs(coveragePoint.y - donutOuterBottomEdge)).toBeLessThanOrEqual(8);
+        expect(coveragePoint.y).toBeGreaterThan(donutCenterLabelPoint.y);
+    });
+
+    it('reuses the donut top and floor geometry to inset the Mejor/Peor band within the same vertical ceiling and floor', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                productivityRatio: 0.6,
+                productivityLabel: '60%',
+                expectedDurationMs: 5 * 60 * 60 * 1000,
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-2',
+                label: '2026-06-19',
+                durationsMs: { prod: 1 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 0, noData: 0 },
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+                expectedDurationMs: 2 * 60 * 60 * 1000,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
+        });
+
+        const prodSegment = screen
+            .getAllByTestId('activity-analytics-summary-segment')
+            .find((segment) => segment.getAttribute('data-segment-key') === 'prod');
+
+        if (!prodSegment) {
+            throw new Error('Missing production summary segment');
+        }
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+        const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
+        const comparisonGrid = screen.getByTestId('activity-analytics-comparison-grid');
+        const comparisonTrackRegions = screen.getAllByTestId('activity-analytics-comparison-track-region');
+        const prodRing = parseCircleMetrics(prodSegment);
+        const donutOuterTopEdge = prodRing.cy - (prodRing.r + (prodRing.strokeWidth / 2));
+        const donutOuterBottomEdge = prodRing.cy + (prodRing.r + (prodRing.strokeWidth / 2));
+        const chartHeight = Number.parseFloat(comparisonPanel.style.height);
+        const summaryPanelHeight = Number.parseFloat(summaryPanel.style.height);
+        const summaryChartHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
+        const gridPaddingTop = parsePxStyle(comparisonGrid.style.paddingTop);
+        const gridPaddingBottom = parsePxStyle(comparisonGrid.style.paddingBottom);
+
+        expect(chartHeight).toBeCloseTo(276, 5);
+        expect(summaryPanelHeight).toBeCloseTo(chartHeight, 5);
+        expect(summaryChartHeight).toBeCloseTo(chartHeight - 10, 5);
+        expect(Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-shared-height-px'))).toBeCloseTo(chartHeight, 5);
+        expect(gridPaddingTop).toBeCloseTo(Math.max(donutOuterTopEdge - 4, 0), 5);
+        expect(gridPaddingBottom).toBeCloseTo(Math.max(summaryChartHeight - donutOuterBottomEdge - 4, 0), 5);
+        comparisonTrackRegions.forEach((trackRegion) => {
+            expect(trackRegion).toHaveClass('flex-1');
+            expect(trackRegion.className).not.toContain('h-28');
+        });
+    });
+
+    it('keeps the summary and comparison containers on the same responsive shared height', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.5, productivityLabel: '50%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 760, bodyHeight: 420 });
+        });
+
+        const intermediateSummaryPanelHeight = Number.parseFloat(screen.getByTestId('activity-analytics-summary-bars').style.height);
+        const intermediateSummaryChartHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
+        const intermediateComparisonHeight = Number.parseFloat(screen.getByTestId('activity-analytics-comparison').style.height);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
+        });
+
+        const wideSummaryPanelHeight = Number.parseFloat(screen.getByTestId('activity-analytics-summary-bars').style.height);
+        const wideSummaryChartHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
+        const wideComparisonHeight = Number.parseFloat(screen.getByTestId('activity-analytics-comparison').style.height);
+
+        expect(intermediateSummaryPanelHeight).toBeCloseTo(intermediateComparisonHeight, 5);
+        expect(wideSummaryPanelHeight).toBeCloseTo(wideComparisonHeight, 5);
+        expect(intermediateSummaryChartHeight).toBeCloseTo(intermediateComparisonHeight - 10, 5);
+        expect(wideSummaryChartHeight).toBeCloseTo(wideComparisonHeight - 10, 5);
+        expect(wideSummaryPanelHeight).toBeGreaterThan(intermediateSummaryPanelHeight);
+        expect(screen.getByTestId('activity-analytics-summary-chart')).toHaveClass('block');
+        expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
     });
 
     it('builds summary donut segments without mutable render-time offsets', () => {
@@ -3326,7 +3739,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(segments[2]?.dashOffset).toBeLessThan(segments[1]?.dashOffset ?? 0);
     });
 
-    it('renders compact Mejor/Peor rows from the visible grouped data with productivity and duration context', () => {
+    it('renders compact Mejor/Peor bars from the visible grouped data and tightens spacing as the widget narrows', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -3361,11 +3774,116 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+        const comparisonGrid = screen.getByTestId('activity-analytics-comparison-grid');
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({
+                bodyWidth: 760,
+                bodyHeight: 420,
+            });
+        });
+
+        const wideGap = Number.parseFloat(comparisonGrid.style.columnGap);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({
+                bodyWidth: 590,
+                bodyHeight: 420,
+            });
+        });
+
+        const narrowGap = Number.parseFloat(comparisonGrid.style.columnGap);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({
+                bodyWidth: 520,
+                bodyHeight: 420,
+            });
+        });
+
+        const compactGap = Number.parseFloat(comparisonGrid.style.columnGap);
+        const compactTopRegion = screen.getByTestId('activity-analytics-top-region');
 
         expect(within(comparisonPanel).getByText('2026-06-18')).toBeInTheDocument();
-        expect(within(comparisonPanel).getByText('% Prod. 60% · 5.0 h')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('60%')).toBeInTheDocument();
         expect(within(comparisonPanel).getByText('2026-06-19')).toBeInTheDocument();
-        expect(within(comparisonPanel).getByText('% Prod. 50% · 2.0 h')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('50%')).toBeInTheDocument();
+        expect(comparisonPanel).toHaveClass('justify-center');
+        expect(comparisonPanel).toHaveClass('items-center');
+        expect(comparisonGrid).toHaveClass('w-fit');
+        expect(comparisonGrid.style.alignSelf).toBe('center');
+        expect(compactTopRegion).toHaveAttribute('data-top-layout', 'side-by-side');
+        expect(Number(compactTopRegion.getAttribute('data-top-overlap-px'))).toBeGreaterThan(0);
+        expect(wideGap).toBeGreaterThanOrEqual(narrowGap);
+        expect(narrowGap).toBeGreaterThanOrEqual(compactGap);
+        expect(compactGap).toBeGreaterThanOrEqual(10);
+    });
+
+    it('exposes the Mejor/Peor centering layout contract across wide intermediate and narrow widths', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                productivityRatio: 0.6,
+                productivityLabel: '60%',
+                expectedDurationMs: 5 * 60 * 60 * 1000,
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-2',
+                label: '2026-06-19',
+                durationsMs: { prod: 1 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 0, noData: 0 },
+                productivityRatio: 0.5,
+                productivityLabel: '50%',
+                expectedDurationMs: 2 * 60 * 60 * 1000,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+        const comparisonGrid = screen.getByTestId('activity-analytics-comparison-grid');
+        const comparisonColumn = screen.getByTestId('activity-analytics-comparison-column');
+
+        const assertCenteringContract = (expectedBodyWidth: number) => {
+            expect(comparisonPanel).toHaveClass('items-center');
+            expect(comparisonPanel).toHaveClass('justify-center');
+            expect(comparisonPanel.style.height).toBeTruthy();
+            expect(comparisonGrid).toHaveClass('w-fit');
+            expect(comparisonGrid).toHaveClass('justify-items-center');
+            expect(comparisonGrid.style.alignSelf).toBe('center');
+            expect(comparisonGrid).not.toHaveAttribute('data-content-center-delta');
+            expect(Number.parseFloat(comparisonColumn.getAttribute('data-comparison-column-width-px') ?? '0')).toBeGreaterThan(0);
+            expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
+            expect(expectedBodyWidth).toBeGreaterThan(0);
+        };
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 847, bodyHeight: 420 });
+        });
+        assertCenteringContract(847);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 603, bodyHeight: 420 });
+        });
+        assertCenteringContract(603);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 520, bodyHeight: 420 });
+        });
+        assertCenteringContract(520);
     });
 
     it('uses full grouped bucket duration in Mejor/Peor metadata and ignores in-progress entries', () => {
@@ -3400,8 +3918,13 @@ describe('ActivityAnalyticsWidget', () => {
 
         const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
 
-        expect(within(comparisonPanel).getByText('sin comparación')).toBeInTheDocument();
-        expect(within(comparisonPanel).getByText('% Prod. 25% · 24.0 h')).toBeInTheDocument();
+        expect(within(comparisonPanel).getAllByText('sin comparación')).toHaveLength(2);
+        expect(within(comparisonPanel).getByText('25%')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('2026-06-18')).toBeInTheDocument();
+        expect(within(comparisonPanel).queryByText('2026-06-19 (en curso)')).not.toBeInTheDocument();
+        expect(within(comparisonPanel).queryByTestId('activity-analytics-comparison-context')).not.toBeInTheDocument();
+        expect(comparisonPanel).not.toHaveTextContent('Cobertura completa');
+        expect(comparisonPanel).not.toHaveTextContent(/Observado · Cob\./);
     });
 
     it('shows sin comparación for aggregated Turno Resumen comparisons when productivity ties make ranking meaningless', () => {
@@ -3542,7 +4065,7 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getByTestId('activity-analytics-groups')).toHaveClass('border-industrial-border');
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveClass('border-industrial-border');
-        expect(screen.getByTestId('activity-analytics-summary-bars')).not.toHaveClass('border-industrial-border');
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toHaveClass('border-industrial-border');
         expect(screen.getAllByTestId('activity-analytics-summary-stack')).toHaveLength(1);
         expect(screen.getAllByTestId('activity-analytics-summary-segment').length).toBeGreaterThan(0);
     });

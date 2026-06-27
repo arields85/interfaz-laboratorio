@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AlertTriangle, BarChart2, Loader2, PlugZap } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
@@ -101,33 +101,15 @@ const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border';
 const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border';
 const NO_DATA_STATE_COLOR = 'var(--color-industrial-muted)';
 const ACTIVITY_ANALYTICS_STATE_KEYS = ['prod', 'setup', 'stopped'] as const;
-const SUMMARY_CHART_MIN_WIDTH_PX = 320;
 const SUMMARY_CHART_MAX_WIDTH_PX = 480;
-const ROOT_REM_PX = 16;
-const TOP_REGION_COLUMN_GAP_REM = 1;
-const TOP_REGION_COLUMN_GAP_PX = TOP_REGION_COLUMN_GAP_REM * ROOT_REM_PX;
-const TOP_REGION_GRID_TRACKS = [
-    { minWidthRem: 20, fraction: 1.1 },
-    { minWidthRem: 16, fraction: 0.9 },
-] as const;
-const [
-    TOP_REGION_SUMMARY_COLUMN,
-    TOP_REGION_COMPARISON_COLUMN,
-] = TOP_REGION_GRID_TRACKS;
-const TOP_REGION_GRID_TEMPLATE_COLUMNS = TOP_REGION_GRID_TRACKS
-    .map(({ minWidthRem, fraction }) => `minmax(${minWidthRem}rem,${fraction}fr)`)
-    .join(' ');
-const TOP_REGION_MIN_TRACK_WIDTH_PX = TOP_REGION_GRID_TRACKS
-    .reduce((total, { minWidthRem }) => total + (minWidthRem * ROOT_REM_PX), 0);
-const TOP_REGION_SUMMARY_COLUMN_MIN_WIDTH_PX = TOP_REGION_SUMMARY_COLUMN.minWidthRem * ROOT_REM_PX;
-const TOP_REGION_SUMMARY_COLUMN_FRACTION = TOP_REGION_SUMMARY_COLUMN.fraction;
-const TOP_REGION_COMPARISON_COLUMN_FRACTION = TOP_REGION_COMPARISON_COLUMN.fraction;
-const TOP_REGION_TOTAL_COLUMN_FRACTION =
-    TOP_REGION_SUMMARY_COLUMN_FRACTION
-    + TOP_REGION_COMPARISON_COLUMN_FRACTION;
-const TOP_REGION_STACK_BREAKPOINT_PX =
-    TOP_REGION_MIN_TRACK_WIDTH_PX
-    + (TOP_REGION_COLUMN_GAP_PX * (TOP_REGION_GRID_TRACKS.length - 1));
+const TOP_REGION_SUMMARY_WIDTH_RATIO = 0.53;
+const TOP_REGION_SUMMARY_WIDTH_MIN_PX = 320;
+const TOP_REGION_SUMMARY_WIDTH_MAX_PX = 456;
+const TOP_REGION_COMPARISON_OVERLAP_RULES = {
+    startWidthPx: 760,
+    endWidthPx: 480,
+    maxPx: 72,
+} as const;
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
 const INCOMPLETE_COVERAGE_LABEL = 'cobertura incompleta';
 const SUMMARY_RING_PROD_THICKNESS_MULTIPLIER = 1.5;
@@ -135,11 +117,112 @@ const SUMMARY_RING_MIN_THICKNESS = 6;
 const SUMMARY_RING_MAX_THICKNESS = 12;
 const SUMMARY_DONUT_TOP_CAP_LENGTH_MULTIPLIER = 0.2;
 const SUMMARY_DONUT_TOP_CAP_MIN_LENGTH = 1;
+const SUMMARY_DONUT_GEOMETRY_RULES = {
+    chartHeightPx: {
+        compactAxisBars: 236,
+        standard: 276,
+    },
+    segmentGap: {
+        circumferenceRatio: 0.014,
+        maxPx: {
+            compress: 6,
+            default: 8,
+        },
+    },
+    centerLabelOffsetY: {
+        value: -4,
+        label: 15,
+    },
+    innerClearancePx: 6,
+    minimumOuterRadiusPx: 32,
+    detailMarkerLabelGapPx: 8,
+    coverageLabelBottomAllowancePx: 4,
+    detail: {
+        markerSizePx: 10,
+        markerOffsetYPx: 3,
+        titleBaselineYPx: 12,
+    },
+    density: {
+        compress: {
+            marginPx: { top: 12, right: 12, bottom: 12, left: 12 },
+            detailGapPx: 12,
+            detailPanelWidthRatio: 0.31,
+            detailPanelWidthMinPx: 124,
+            detailPanelWidthMaxPx: 136,
+            centerYRatio: 0.43,
+            outerRadiusInsetPx: 4,
+            outerRadiusMaxPx: 88,
+            detailValueBaselineYPx: 32,
+            detailSectionHeightPx: 42,
+            detailSectionGapPx: 14,
+            coverageLabelOffsetYPx: 4,
+        },
+        default: {
+            marginPx: { top: 14, right: 18, bottom: 14, left: 18 },
+            detailGapPx: 18,
+            detailPanelWidthRatio: 0.33,
+            detailPanelWidthMinPx: 124,
+            detailPanelWidthMaxPx: 152,
+            centerYRatio: 0.45,
+            outerRadiusInsetPx: 8,
+            outerRadiusMaxPx: 104,
+            detailValueBaselineYPx: 34,
+            detailSectionHeightPx: 46,
+            detailSectionGapPx: 18,
+            coverageLabelOffsetYPx: 3,
+        },
+    },
+} as const;
+const TOP_REGION_SHARED_HEIGHT_RULES = {
+    widthPx: {
+        compact: { min: 520, max: 760 },
+        standard: { min: 520, max: 1260 },
+    },
+    heightRatio: 0.66,
+    compact: {
+        minPx: 208,
+        maxPx: SUMMARY_DONUT_GEOMETRY_RULES.chartHeightPx.compactAxisBars,
+    },
+    standard: {
+        minPx: 224,
+        maxPx: SUMMARY_DONUT_GEOMETRY_RULES.chartHeightPx.standard,
+    },
+} as const;
+const SUMMARY_PANEL_HEIGHT_CHROME_PX = 10;
+const COMPARISON_BAR_WIDTH_CLASS = 'w-2';
+const COMPARISON_LAYOUT_RULES = {
+    gridGapPx: {
+        min: 10,
+        max: 18,
+    },
+    widthPx: {
+        compact: 104,
+        expanded: 220,
+    },
+    bandInsetPaddingPx: 4,
+} as const;
+const GROUPED_EDGE_PADDING_MIN_PX = 6;
+const GROUPED_EDGE_PADDING_FACTORS = {
+    compress: 0.42,
+    scroll: 0.48,
+    default: 0.54,
+} as const;
+const GROUPED_BAR_WIDTH_RATIO = {
+    fit: 0.68,
+    compress: 0.62,
+    scroll: 0.56,
+} as const;
+const GROUPED_BAR_GAP_RULES = {
+    fit: { min: 18, max: 30, ratio: 0.26 },
+    compress: { min: 10, max: 20, ratio: 0.2 },
+    scroll: { min: 8, max: 16, ratio: 0.16 },
+} as const;
 type SummaryDetailKey = 'prod' | 'setup' | 'stopped';
 type ActivityAnalyticsGradientStateKey = typeof ACTIVITY_ANALYTICS_STATE_KEYS[number];
 type ActivityAnalyticsVisualPaletteEntry = Readonly<{
     gradient: readonly [string, string];
     gradientAlpha: readonly [number, number];
+    initialSolid: string;
     solid: string;
     highlight: string;
     topCapSolid: string;
@@ -159,6 +242,36 @@ type SummaryDetailRow = Readonly<{
     hoursLabel: string;
     valueLabel: `${string} - ${string}`;
 }>;
+type SummaryDonutGeometry = Readonly<{
+    chartHeight: number;
+    margin: Readonly<{
+        top: number;
+        right: number;
+        bottom: number;
+        left: number;
+    }>;
+    detailGap: number;
+    detailPanelWidth: number;
+    donutRegionWidth: number;
+    donutRegionHeight: number;
+    centerX: number;
+    centerY: number;
+    ringThickness: number;
+    prodRingThickness: number;
+    outerRadius: number;
+    radius: number;
+    detailBlockTop: number;
+    detailSectionSpacing: number;
+    detailSectionHeight: number;
+    detailMarkerSize: number;
+    detailMarkerOffsetY: number;
+    detailTitleBaselineY: number;
+    detailValueBaselineY: number;
+    coverageLabelX: number;
+    coverageLabelY: number;
+    donutBandTopY: number;
+    donutBandBottomY: number;
+}>;
 
 export default function ActivityAnalyticsWidget({
     widget,
@@ -170,9 +283,7 @@ export default function ActivityAnalyticsWidget({
     const displayOptions = resolveActivityAnalyticsDisplayOptions(widget.displayOptions);
     const [runtimeViewState, setRuntimeViewState] = useState<ActivityAnalyticsRuntimeViewState>(() => createRuntimeViewState(displayOptions));
     const [analyticsBodySize, setAnalyticsBodySize] = useState<{ width: number; height: number } | null>(null);
-    const [summaryColumnWidth, setSummaryColumnWidth] = useState<number | null>(null);
     const analyticsBodyRef = useRef<HTMLDivElement | null>(null);
-    const summaryColumnRef = useRef<HTMLDivElement | null>(null);
     const displayKey = createDisplayOptionsSyncKey(displayOptions);
 
     if (runtimeViewState.sourceDisplayKey !== displayKey || runtimeViewState.sourceGroupBy !== displayOptions.groupBy) {
@@ -308,8 +419,6 @@ export default function ActivityAnalyticsWidget({
         }
 
         const analyticsBodyElement = analyticsBodyRef.current;
-        const summaryColumnElement = summaryColumnRef.current;
-
         const observer = new ResizeObserver((entries) => {
             entries.forEach((entry) => {
                 const nextWidth = Math.round(entry.contentRect.width);
@@ -328,20 +437,11 @@ export default function ActivityAnalyticsWidget({
                     setAnalyticsBodySize((current) => (current?.width === nextWidth && current?.height === nextHeight)
                         ? current
                         : { width: nextWidth, height: nextHeight });
-                    return;
-                }
-
-                if (summaryColumnElement && entry.target === summaryColumnElement) {
-                    setSummaryColumnWidth((current) => (current === nextWidth ? current : nextWidth));
                 }
             });
         });
 
         observer.observe(analyticsBodyElement);
-
-        if (summaryColumnElement) {
-            observer.observe(summaryColumnElement);
-        }
 
         return () => {
             observer.disconnect();
@@ -520,7 +620,7 @@ export default function ActivityAnalyticsWidget({
 
             {header}
 
-            <div ref={analyticsBodyRef} className="mt-3 flex min-h-0 flex-1 flex-col gap-4">
+            <div ref={analyticsBodyRef} className="mt-1 flex min-h-0 flex-1 flex-col gap-3">
                 <AnalyticsVisualPanels
                     analytics={computedAnalytics.analytics}
                     comparison={displayComparison}
@@ -529,9 +629,8 @@ export default function ActivityAnalyticsWidget({
                     visualEffects={selectedDisplayOptions.visualEffects as ResolvedActivityAnalyticsVisualEffects}
                     visualLayout={visualLayout}
                     chartWidth={analyticsBodySize?.width ?? 640}
+                    chartHeight={analyticsBodySize?.height ?? 420}
                     barWidthFactor={activeDisplayOptions.groupBarWidth}
-                    measuredSummaryColumnWidth={summaryColumnWidth}
-                    summaryColumnRef={summaryColumnRef}
                     showTurnoModeControl={showTurnoModeControl}
                     turnoMode={activeTurnoMode}
                     onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
@@ -695,21 +794,44 @@ const ComparisonPanel = memo(function ComparisonPanel({
     comparison,
     grouped,
     visualPalette,
+    panelHeight,
+    comparisonColumnWidth,
+    comparisonBandGeometry,
 }: {
     comparison: ReturnType<typeof computeActivityAnalytics>['comparison'];
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     visualPalette: ActivityAnalyticsVisualPalette;
+    panelHeight?: number;
+    comparisonColumnWidth: number;
+    comparisonBandGeometry?: Pick<SummaryDonutGeometry, 'chartHeight' | 'donutBandTopY' | 'donutBandBottomY'>;
 }) {
     const entries = [
         createComparisonEntry('Mejor', comparison.best, grouped),
         createComparisonEntry('Peor', comparison.worst, grouped),
     ];
+    const columnGapPx = resolveComparisonGridColumnGap(comparisonColumnWidth);
+    const bandInsets = resolveComparisonBandInsets(comparisonBandGeometry);
 
     return (
-        <div className={`${ANALYTICS_PANEL_CLASS} grid grid-cols-1 gap-2 p-3`} data-testid="activity-analytics-comparison">
-            {entries.map((entry) => (
-                <ComparisonRow key={entry.heading} entry={entry} visualPalette={visualPalette} />
-            ))}
+        <div
+            className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-col items-center justify-center pl-0 pr-0 pt-1 pb-2`}
+            style={typeof panelHeight === 'number' ? { height: `${panelHeight}px` } : undefined}
+            data-testid="activity-analytics-comparison"
+        >
+            <div
+                className="grid h-full w-fit max-w-full flex-1 grid-cols-2 items-stretch justify-items-center box-border"
+                style={{
+                    alignSelf: 'center',
+                    columnGap: `${columnGapPx}px`,
+                    paddingTop: typeof bandInsets?.top === 'number' ? `${bandInsets.top}px` : undefined,
+                    paddingBottom: typeof bandInsets?.bottom === 'number' ? `${bandInsets.bottom}px` : undefined,
+                }}
+                data-testid="activity-analytics-comparison-grid"
+            >
+                {entries.map((entry) => (
+                    <ComparisonRow key={entry.heading} entry={entry} visualPalette={visualPalette} />
+                ))}
+            </div>
         </div>
     );
 });
@@ -722,9 +844,8 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     visualEffects,
     visualLayout,
     chartWidth,
+    chartHeight,
     barWidthFactor,
-    measuredSummaryColumnWidth,
-    summaryColumnRef,
     showTurnoModeControl,
     turnoMode,
     onTurnoModeChange,
@@ -737,39 +858,69 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     visualEffects: ResolvedActivityAnalyticsVisualEffects;
     visualLayout: ActivityAnalyticsVisualLayout;
     chartWidth: number;
+    chartHeight: number;
     barWidthFactor: number;
-    measuredSummaryColumnWidth: number | null;
-    summaryColumnRef: RefObject<HTMLDivElement | null>;
     showTurnoModeControl: boolean;
     turnoMode: 'summary' | 'detail';
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
     emptyMessage: string | null;
 }) {
-    const stackTopRegion = chartWidth < TOP_REGION_STACK_BREAKPOINT_PX;
-    const resolvedSummaryColumnWidth = stackTopRegion
-        ? chartWidth
-        : measuredSummaryColumnWidth ?? resolveTopRegionCenterColumnWidth(chartWidth);
+    const resolvedSummaryColumnWidth = resolveTopRegionSummaryColumnWidth(chartWidth);
+    const comparisonOverlapPx = resolveTopRegionComparisonOverlap(chartWidth);
+    const comparisonColumnWidth = Math.max(chartWidth - resolvedSummaryColumnWidth + comparisonOverlapPx, 0);
+    const comparisonGapDriverWidth = comparisonColumnWidth;
     const summaryChartWidth = Math.min(
         chartWidth,
         SUMMARY_CHART_MAX_WIDTH_PX,
         resolvedSummaryColumnWidth,
     );
+    const topRegionSharedHeight = resolveTopRegionSharedHeight({
+        containerWidth: chartWidth,
+        containerHeight: chartHeight,
+        summaryMode: visualLayout.summary.mode,
+    });
+    const summaryChartHeight = Math.max(topRegionSharedHeight - SUMMARY_PANEL_HEIGHT_CHROME_PX, 0);
+    const comparisonBandGeometry = visualLayout.summary.mode === 'text-fallback'
+        ? undefined
+        : resolveSummaryDonutGeometry({
+            width: summaryChartWidth,
+            height: summaryChartHeight,
+            density: visualLayout.summary.density,
+            detailRowCount: 3,
+        });
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
             <div
-                className={stackTopRegion
-                    ? 'flex flex-col gap-4'
-                    : 'grid items-start gap-4'}
-                style={stackTopRegion ? undefined : { gridTemplateColumns: TOP_REGION_GRID_TEMPLATE_COLUMNS }}
+                className="flex min-h-0 items-stretch overflow-visible"
+                style={{ gap: '0px' }}
                 data-testid="activity-analytics-top-region"
-                data-top-layout={stackTopRegion ? 'stacked' : 'side-by-side'}
+                data-top-layout="side-by-side"
+                data-top-overlap-px={comparisonOverlapPx.toFixed(2)}
+                data-top-shared-height-px={topRegionSharedHeight.toFixed(2)}
             >
-                <div ref={summaryColumnRef} className="min-w-0" data-testid="activity-analytics-summary-column">
-                    <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={summaryChartWidth} visualPalette={visualPalette} donutEffects={visualEffects.donut} />
+                <div
+                    className="relative z-[1] min-w-0 shrink-0"
+                    style={{ width: `${resolvedSummaryColumnWidth}px` }}
+                    data-testid="activity-analytics-summary-column"
+                    data-summary-column-width-px={resolvedSummaryColumnWidth.toFixed(2)}
+                >
+                    <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={summaryChartWidth} chartHeight={summaryChartHeight} panelHeight={topRegionSharedHeight} visualPalette={visualPalette} donutEffects={visualEffects.donut} />
                 </div>
-                <div className="min-w-0 self-stretch">
-                    <ComparisonPanel comparison={comparison} grouped={grouped} visualPalette={visualPalette} />
+                <div
+                    className="relative z-[2] min-w-0 flex-1 self-stretch"
+                    style={{ marginLeft: comparisonOverlapPx > 0 ? `${-comparisonOverlapPx}px` : undefined }}
+                    data-testid="activity-analytics-comparison-column"
+                    data-comparison-column-width-px={comparisonColumnWidth.toFixed(2)}
+                >
+                    <ComparisonPanel
+                        comparison={comparison}
+                        grouped={grouped}
+                        visualPalette={visualPalette}
+                        panelHeight={visualLayout.summary.mode === 'text-fallback' ? undefined : topRegionSharedHeight}
+                        comparisonColumnWidth={comparisonGapDriverWidth}
+                        comparisonBandGeometry={comparisonBandGeometry}
+                    />
                 </div>
             </div>
             <GroupedAnalyticsPanel
@@ -788,41 +939,144 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     );
 });
 
-function resolveTopRegionCenterColumnWidth(containerWidth: number): number {
-    const totalGapWidth = TOP_REGION_COLUMN_GAP_PX * (TOP_REGION_GRID_TRACKS.length - 1);
-    const availableTrackWidth = Math.max(containerWidth - totalGapWidth, 0);
-    const minimumTrackWidth = TOP_REGION_MIN_TRACK_WIDTH_PX;
+function resolveTopRegionSummaryColumnWidth(containerWidth: number): number {
+    const maximumWidth = Math.min(TOP_REGION_SUMMARY_WIDTH_MAX_PX, containerWidth);
+    const proportionalWidth = Math.min(containerWidth * TOP_REGION_SUMMARY_WIDTH_RATIO, maximumWidth);
 
-    if (availableTrackWidth <= minimumTrackWidth) {
-        return SUMMARY_CHART_MIN_WIDTH_PX;
+    if (containerWidth <= TOP_REGION_SUMMARY_WIDTH_MIN_PX) {
+        return containerWidth;
     }
 
-    const distributableWidth = availableTrackWidth - minimumTrackWidth;
-    const centerColumnWidth = TOP_REGION_SUMMARY_COLUMN_MIN_WIDTH_PX
-        + (distributableWidth * (TOP_REGION_SUMMARY_COLUMN_FRACTION / TOP_REGION_TOTAL_COLUMN_FRACTION));
+    const responsiveWidthStartPx = TOP_REGION_SUMMARY_WIDTH_MIN_PX / TOP_REGION_SUMMARY_WIDTH_RATIO;
 
-    return Math.max(centerColumnWidth, SUMMARY_CHART_MIN_WIDTH_PX);
+    if (containerWidth < responsiveWidthStartPx) {
+        const transitionProgress = (containerWidth - TOP_REGION_SUMMARY_WIDTH_MIN_PX)
+            / (responsiveWidthStartPx - TOP_REGION_SUMMARY_WIDTH_MIN_PX);
+
+        return TOP_REGION_SUMMARY_WIDTH_MIN_PX
+            + ((proportionalWidth - TOP_REGION_SUMMARY_WIDTH_MIN_PX) * transitionProgress);
+    }
+
+    return proportionalWidth;
+}
+
+function resolveComparisonGridColumnGap(containerWidth: number): number {
+    const widthRange = COMPARISON_LAYOUT_RULES.widthPx.expanded - COMPARISON_LAYOUT_RULES.widthPx.compact;
+
+    if (widthRange <= 0) {
+        return COMPARISON_LAYOUT_RULES.gridGapPx.min;
+    }
+
+    const normalizedWidth = Math.min(
+        Math.max(containerWidth, COMPARISON_LAYOUT_RULES.widthPx.compact),
+        COMPARISON_LAYOUT_RULES.widthPx.expanded,
+    );
+    const progress = (normalizedWidth - COMPARISON_LAYOUT_RULES.widthPx.compact) / widthRange;
+
+    return Number((
+        COMPARISON_LAYOUT_RULES.gridGapPx.min
+        + ((COMPARISON_LAYOUT_RULES.gridGapPx.max - COMPARISON_LAYOUT_RULES.gridGapPx.min) * progress)
+    ).toFixed(2));
+}
+
+function resolveTopRegionComparisonOverlap(containerWidth: number): number {
+    const widthRange = TOP_REGION_COMPARISON_OVERLAP_RULES.startWidthPx - TOP_REGION_COMPARISON_OVERLAP_RULES.endWidthPx;
+
+    if (widthRange <= 0 || containerWidth >= TOP_REGION_COMPARISON_OVERLAP_RULES.startWidthPx) {
+        return 0;
+    }
+
+    const normalizedWidth = Math.max(containerWidth, TOP_REGION_COMPARISON_OVERLAP_RULES.endWidthPx);
+    const progress = (TOP_REGION_COMPARISON_OVERLAP_RULES.startWidthPx - normalizedWidth) / widthRange;
+
+    return Number((TOP_REGION_COMPARISON_OVERLAP_RULES.maxPx * progress).toFixed(2));
+}
+
+function resolveTopRegionSharedHeight({
+    containerWidth,
+    containerHeight,
+    summaryMode,
+}: {
+    containerWidth: number;
+    containerHeight: number;
+    summaryMode: ActivityAnalyticsSummaryLayout['mode'];
+}): number {
+    const widthRules = summaryMode === 'compact-axis-bars'
+        ? TOP_REGION_SHARED_HEIGHT_RULES.widthPx.compact
+        : TOP_REGION_SHARED_HEIGHT_RULES.widthPx.standard;
+    const heightRules = summaryMode === 'compact-axis-bars'
+        ? TOP_REGION_SHARED_HEIGHT_RULES.compact
+        : TOP_REGION_SHARED_HEIGHT_RULES.standard;
+    const widthProgress = normalizeRange(containerWidth, widthRules.min, widthRules.max);
+    const widthDrivenHeight = heightRules.minPx + ((heightRules.maxPx - heightRules.minPx) * widthProgress);
+    const heightDrivenCap = clamp(
+        containerHeight * TOP_REGION_SHARED_HEIGHT_RULES.heightRatio,
+        heightRules.minPx,
+        heightRules.maxPx,
+    );
+
+    return Math.round(Math.min(widthDrivenHeight, heightDrivenCap));
+}
+
+function resolveComparisonBandInsets(
+    comparisonBandGeometry?: Pick<SummaryDonutGeometry, 'chartHeight' | 'donutBandTopY' | 'donutBandBottomY'>,
+): Readonly<{ top: number; bottom: number }> | undefined {
+    if (!comparisonBandGeometry) {
+        return undefined;
+    }
+
+    return {
+        top: Math.max(comparisonBandGeometry.donutBandTopY - COMPARISON_LAYOUT_RULES.bandInsetPaddingPx, 0),
+        bottom: Math.max(
+            comparisonBandGeometry.chartHeight - comparisonBandGeometry.donutBandBottomY - COMPARISON_LAYOUT_RULES.bandInsetPaddingPx,
+            0,
+        ),
+    };
+}
+
+function resolveSummarySegmentGapLength({
+    circumference,
+    density,
+    segmentCount,
+}: {
+    circumference: number;
+    density: ActivityAnalyticsSummaryLayout['density'];
+    segmentCount: number;
+}): number {
+    if (segmentCount <= 1) {
+        return 0;
+    }
+
+    const maxGapPx = density === 'compress'
+        ? SUMMARY_DONUT_GEOMETRY_RULES.segmentGap.maxPx.compress
+        : SUMMARY_DONUT_GEOMETRY_RULES.segmentGap.maxPx.default;
+
+    return Math.min(circumference * SUMMARY_DONUT_GEOMETRY_RULES.segmentGap.circumferenceRatio, maxGapPx);
 }
 
 const SummaryPanel = memo(function SummaryPanel({
     analytics,
     summaryLayout,
     chartWidth,
+    chartHeight,
+    panelHeight,
     visualPalette,
     donutEffects,
 }: {
     analytics: ReturnType<typeof computeActivityAnalytics>['analytics'];
     summaryLayout: ActivityAnalyticsSummaryLayout;
     chartWidth: number;
+    chartHeight: number;
+    panelHeight: number;
     visualPalette: ActivityAnalyticsVisualPalette;
     donutEffects: ResolvedActivityAnalyticsVisualEffects['donut'];
 }) {
     const summaryDisplay = createSummaryDisplayModel(analytics, visualPalette);
-    const coverageSummary = `Cobertura ${summaryDisplay.coverageLabel}`;
+    const coverageSummary = `Cob. ${summaryDisplay.coverageLabel}`;
 
     if (summaryLayout.mode === 'text-fallback') {
         return (
-            <div className="p-1" data-testid="activity-analytics-summary-text">
+            <div className={`${ANALYTICS_PANEL_CLASS} p-1`} data-testid="activity-analytics-summary-text">
                 <div className="text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-coverage">
                     {coverageSummary}
                 </div>
@@ -835,14 +1089,13 @@ const SummaryPanel = memo(function SummaryPanel({
         );
     }
 
-    const chartHeight = summaryLayout.mode === 'compact-axis-bars' ? 236 : 276;
-
     return (
-        <div className="flex min-h-0 flex-col p-1" data-testid="activity-analytics-summary-bars">
-            <div className="text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-coverage">
-                {coverageSummary}
-            </div>
-            <div className="mt-2">
+        <div
+            className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-col p-1`}
+            style={{ height: `${panelHeight}px` }}
+            data-testid="activity-analytics-summary-bars"
+        >
+            <div className="min-h-0 flex-1">
                 <SummaryBarsChart
                     bars={summaryDisplay.stackedBars}
                     width={chartWidth}
@@ -850,6 +1103,7 @@ const SummaryPanel = memo(function SummaryPanel({
                     density={summaryLayout.density}
                     centerValue={summaryDisplay.sectionProductivityLabel}
                     centerLabel="PROD"
+                    coverageLabel={summaryDisplay.coverageLabel}
                     detailRows={summaryDisplay.detailRows}
                     visualPalette={visualPalette}
                     donutEffects={donutEffects}
@@ -1029,9 +1283,9 @@ const GroupStatusLegend = memo(function GroupStatusLegend({ visualPalette }: { v
     return (
         <div className="flex items-center gap-3 normal-case" data-testid="activity-analytics-groups-header-legend">
             {[
-                { key: 'stopped' as const, label: 'Detenida', color: visualPalette.stopped.solid },
-                { key: 'setup' as const, label: 'Setup', color: visualPalette.setup.solid },
-                { key: 'prod' as const, label: 'Prod.', color: visualPalette.prod.solid },
+                { key: 'stopped' as const, label: 'Detenida', color: visualPalette.stopped.initialSolid },
+                { key: 'setup' as const, label: 'Setup', color: visualPalette.setup.initialSolid },
+                { key: 'prod' as const, label: 'Prod.', color: visualPalette.prod.initialSolid },
             ].map((item) => (
                 <span key={item.key} className="flex items-center gap-1.5 whitespace-nowrap text-industrial-text">
                     <span
@@ -1100,6 +1354,14 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
 
+function normalizeRange(value: number, min: number, max: number): number {
+    if (max <= min) {
+        return 1;
+    }
+
+    return clamp((value - min) / (max - min), 0, 1);
+}
+
 function formatPercent(value: number): string {
     return `${Math.round(value * 100)}%`;
 }
@@ -1138,6 +1400,7 @@ function createActivityAnalyticsPaletteEntry(
     return {
         gradient,
         gradientAlpha,
+        initialSolid: withAlpha(gradient[0], gradientAlpha[0]),
         solid,
         highlight: `color-mix(in srgb, ${solid} ${highlightMixPercent}%, white)`,
         topCapSolid: end,
@@ -1169,6 +1432,7 @@ function SummaryBarsChart({
     density,
     centerValue,
     centerLabel,
+    coverageLabel,
     detailRows,
     visualPalette,
     donutEffects,
@@ -1179,49 +1443,50 @@ function SummaryBarsChart({
     density: ActivityAnalyticsSummaryLayout['density'];
     centerValue: string;
     centerLabel: string;
+    coverageLabel: string;
     detailRows: readonly SummaryDetailRow[];
     visualPalette: ActivityAnalyticsVisualPalette;
     donutEffects: ResolvedActivityAnalyticsVisualEffects['donut'];
 }) {
     const gradientPrefix = useId().replace(/:/g, '-');
     const glowFilterId = `${gradientPrefix}-summary-glow`;
-    const margin = density === 'compress'
-        ? { top: 12, right: 12, bottom: 12, left: 12 } as const
-        : { top: 14, right: 18, bottom: 14, left: 18 } as const;
-    const detailGap = density === 'compress' ? 12 : 18;
-    const detailPanelWidth = Math.min(Math.max(width * (density === 'compress' ? 0.31 : 0.33), 124), density === 'compress' ? 136 : 152);
-    const donutRegionWidth = Math.max(width - margin.left - margin.right - detailGap - detailPanelWidth, 1);
-    const donutRegionHeight = Math.max(height - margin.top - margin.bottom, 1);
-    const centerX = margin.left + (donutRegionWidth / 2);
-    const centerY = margin.top + (donutRegionHeight / 2);
-    const safeReferenceSize = Math.min(donutRegionWidth, donutRegionHeight);
-    const ringThickness = clamp(
-        safeReferenceSize * 0.06,
-        SUMMARY_RING_MIN_THICKNESS,
-        SUMMARY_RING_MAX_THICKNESS,
-    );
-    const prodRingThickness = ringThickness * SUMMARY_RING_PROD_THICKNESS_MULTIPLIER;
-    const minimumOuterRadius = 32;
-    const outerRadius = Math.max(Math.min((safeReferenceSize / 2) - (density === 'compress' ? 4 : 8), density === 'compress' ? 88 : 104), minimumOuterRadius);
-    const radius = Math.max(outerRadius - (prodRingThickness / 2), 1);
+    const geometry = resolveSummaryDonutGeometry({
+        width,
+        height,
+        density,
+        detailRowCount: detailRows.length,
+    });
+    const {
+        margin,
+        detailGap,
+        donutRegionWidth,
+        centerX,
+        centerY,
+        ringThickness,
+        prodRingThickness,
+        radius,
+        detailBlockTop,
+        detailSectionSpacing,
+        detailMarkerSize,
+        detailMarkerOffsetY,
+        detailTitleBaselineY,
+        detailValueBaselineY,
+        coverageLabelX,
+        coverageLabelY,
+    } = geometry;
     const circumference = 2 * Math.PI * radius;
     const nonZeroBars = bars.filter((bar) => bar.durationMs > 0);
-    const gapLength = nonZeroBars.length > 1 ? Math.min(circumference * 0.014, density === 'compress' ? 6 : 8) : 0;
+    const gapLength = resolveSummarySegmentGapLength({
+        circumference,
+        density,
+        segmentCount: nonZeroBars.length,
+    });
     const renderedSegments = buildActivityAnalyticsSummarySegments({
         bars: nonZeroBars,
         circumference,
         gapLength,
     });
     const detailPanelX = margin.left + donutRegionWidth + detailGap;
-    const detailMarkerSize = 10;
-    const detailMarkerOffsetY = 3;
-    const detailTitleBaselineY = 12;
-    const detailValueBaselineY = density === 'compress' ? 32 : 34;
-    const detailSectionHeight = density === 'compress' ? 42 : 46;
-    const detailSectionGap = density === 'compress' ? 14 : 18;
-    const detailSectionSpacing = detailSectionHeight + detailSectionGap;
-    const detailBlockHeight = detailSectionHeight + ((Math.max(detailRows.length - 1, 0)) * detailSectionSpacing);
-    const detailBlockTop = centerY - (detailBlockHeight / 2);
     const donutTopCaps = donutEffects.topCap
         ? renderedSegments
             .map(({ bar, dashArray, dashOffset }) => createSummaryTopCapSegment({
@@ -1234,7 +1499,7 @@ function SummaryBarsChart({
         : [];
 
     return (
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} data-testid="activity-analytics-summary-chart">
+        <svg className="block" width={width} height={height} viewBox={`0 0 ${width} ${height}`} data-testid="activity-analytics-summary-chart">
             <defs>
                 {renderSurfaceEffectsFilter({
                     id: glowFilterId,
@@ -1333,12 +1598,12 @@ function SummaryBarsChart({
                 <circle
                     cx={centerX}
                     cy={centerY}
-                    r={Math.max(radius - (prodRingThickness / 2) - 6, 1)}
+                    r={Math.max(radius - (prodRingThickness / 2) - SUMMARY_DONUT_GEOMETRY_RULES.innerClearancePx, 1)}
                     fill="transparent"
                 />
                 <text
                     x={centerX}
-                    y={centerY - 4}
+                    y={centerY + SUMMARY_DONUT_GEOMETRY_RULES.centerLabelOffsetY.value}
                     textAnchor="middle"
                     fill="var(--color-industrial-text)"
                     style={WIDGET_VALUE_TEXT_STYLE}
@@ -1348,13 +1613,23 @@ function SummaryBarsChart({
                 </text>
                 <text
                     x={centerX}
-                    y={centerY + 15}
+                    y={centerY + SUMMARY_DONUT_GEOMETRY_RULES.centerLabelOffsetY.label}
                     textAnchor="middle"
                     fill="var(--color-industrial-muted)"
                     style={GENERAL_TYPOGRAPHY_STYLE}
                     data-testid="activity-analytics-summary-total-label"
                 >
                     {centerLabel}
+                </text>
+                <text
+                    x={coverageLabelX}
+                    y={coverageLabelY}
+                    textAnchor="start"
+                    fill="var(--color-industrial-muted)"
+                    style={TECHNICAL_TYPOGRAPHY_STYLE}
+                    data-testid="activity-analytics-summary-coverage"
+                >
+                    {`Cob. ${coverageLabel}`}
                 </text>
             </g>
 
@@ -1370,10 +1645,10 @@ function SummaryBarsChart({
                                 width={detailMarkerSize}
                                 height={detailMarkerSize}
                                 rx={3}
-                                fill={visualPalette[detailRow.key].solid}
+                                fill={visualPalette[detailRow.key].initialSolid}
                             />
                             <text
-                                x={detailMarkerSize + 8}
+                                x={detailMarkerSize + SUMMARY_DONUT_GEOMETRY_RULES.detailMarkerLabelGapPx}
                                 y={sectionY + detailTitleBaselineY}
                                 textAnchor="start"
                                 fill="var(--color-industrial-text)"
@@ -1383,7 +1658,7 @@ function SummaryBarsChart({
                                 {detailRow.title}
                             </text>
                             <text
-                                x={detailMarkerSize + 8}
+                                x={detailMarkerSize + SUMMARY_DONUT_GEOMETRY_RULES.detailMarkerLabelGapPx}
                                 y={sectionY + detailValueBaselineY}
                                 textAnchor="start"
                                 fill="var(--color-industrial-muted)"
@@ -1421,8 +1696,8 @@ function GroupedStackedBarsChart({
     const groupedGlowFilterId = `${gradientPrefix}-grouped-glow`;
     const height = layout.density === 'compress' ? 276 : 292;
     const margin = layout.density === 'compress'
-        ? { top: 18, right: 12, bottom: 68, left: 50 } as const
-        : { top: 18, right: 18, bottom: 76, left: 58 } as const;
+        ? { top: 18, right: 8, bottom: 68, left: 50 } as const
+        : { top: 18, right: 12, bottom: 76, left: 58 } as const;
     const minimumBucketWidth = layout.minSlotWidthPx;
     const chartWidth = layout.density === 'scroll'
         ? Math.max(width, margin.left + margin.right + (grouped.length * minimumBucketWidth))
@@ -1431,17 +1706,33 @@ function GroupedStackedBarsChart({
     const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
     const maxDurationMs = Math.max(...grouped.map((bucket) => bucket.expectedDurationMs), 1);
     const safeBarWidthFactor = clampActivityAnalyticsGroupBarWidth(barWidthFactor);
-    const barWidth = Math.max((plotWidth / Math.max(grouped.length, 1)) * 0.35 * safeBarWidthFactor, 6);
-    const horizontalPadding = barWidth;
+    const groupedDensity = layout.density === 'fit'
+        ? 'fit'
+        : layout.density === 'scroll'
+            ? 'scroll'
+            : 'compress';
+    const slotWidth = Math.max(plotWidth / Math.max(grouped.length, 1), 1);
+    const targetGap = resolveGroupedBarGap(slotWidth, groupedDensity);
+    const baseBarWidth = Math.max(
+        Math.min(slotWidth * GROUPED_BAR_WIDTH_RATIO[groupedDensity], slotWidth - targetGap),
+        6,
+    );
+    const barWidth = clamp(
+        baseBarWidth * safeBarWidthFactor,
+        6,
+        Math.max(slotWidth - 4, 6),
+    );
+    const horizontalPadding = resolveGroupedChartEdgePadding(barWidth, layout.density);
     const usablePlotWidth = Math.max(plotWidth - (2 * horizontalPadding), 1);
-    const centerStep = grouped.length > 1 ? usablePlotWidth / (grouped.length - 1) : 0;
+    const usableSlotWidth = grouped.length > 0 ? usablePlotWidth / grouped.length : usablePlotWidth;
+    const centerStep = usableSlotWidth;
     const axisTicks = Array.from({ length: 5 }, (_, index) => ({
         value: maxDurationMs - ((maxDurationMs * index) / 4),
         y: margin.top + ((index / 4) * plotHeight),
     }));
     const positions = grouped.length > 1
-        ? grouped.map((_, index) => margin.left + horizontalPadding + (index * centerStep))
-        : grouped.map(() => margin.left + (plotWidth / 2));
+        ? grouped.map((_, index) => margin.left + horizontalPadding + (usableSlotWidth * index) + (usableSlotWidth / 2))
+        : grouped.map(() => margin.left + horizontalPadding + (usablePlotWidth / 2));
     const visibleLabelIndices = layout.sampleLabels
         ? computeVisibleLabelIndices(
             grouped.map((bucket) => bucket.label),
@@ -1660,17 +1951,27 @@ function buildGroupHighlights({
     ];
 }
 
+function resolveGroupedChartEdgePadding(barWidth: number, density: ActivityAnalyticsGroupsLayout['density']): number {
+    const densityFactor = density === 'compress'
+        ? GROUPED_EDGE_PADDING_FACTORS.compress
+        : density === 'scroll'
+            ? GROUPED_EDGE_PADDING_FACTORS.scroll
+            : GROUPED_EDGE_PADDING_FACTORS.default;
+
+    return Math.max(barWidth * densityFactor, GROUPED_EDGE_PADDING_MIN_PX);
+}
+
+function resolveGroupedBarGap(slotWidth: number, density: keyof typeof GROUPED_BAR_GAP_RULES): number {
+    const rules = GROUPED_BAR_GAP_RULES[density];
+
+    return clamp(slotWidth * rules.ratio, rules.min, rules.max);
+}
+
 interface ComparisonEntry {
     label: string;
     heading: string;
-    metadata: string;
-    totalDurationMs: number;
-    durationsMs: {
-        prod: number;
-        setup: number;
-        stopped: number;
-        noData: number;
-    };
+    productivityLabel: string;
+    productivityRatio: number | null;
     isEmpty: boolean;
 }
 
@@ -1681,89 +1982,84 @@ const ComparisonRow = memo(function ComparisonRow({
     entry: ComparisonEntry;
     visualPalette: ActivityAnalyticsVisualPalette;
 }) {
-    const totalDurationMs = Math.max(entry.totalDurationMs, 1);
-    const segments: ReadonlyArray<{ key: string; value: number; color: string; opacity?: number }> = [
-        { key: 'noData', value: entry.durationsMs.noData, color: visualPalette.noData.solid, opacity: 0.5 },
-        { key: 'prod', value: entry.durationsMs.prod, color: visualPalette.prod.solid },
-        { key: 'setup', value: entry.durationsMs.setup, color: visualPalette.setup.solid },
-        { key: 'stopped', value: entry.durationsMs.stopped, color: visualPalette.stopped.solid },
-    ];
+    const fillHeight = entry.productivityRatio === null ? 0 : clamp(entry.productivityRatio * 100, 0, 100);
 
     return (
-        <div className={`${ANALYTICS_CARD_CLASS} rounded-xl p-3`}>
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="uppercase text-industrial-muted" style={GENERAL_TYPOGRAPHY_STYLE}>{entry.heading}</div>
-                    <div className="mt-1 truncate text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-metric-value">{entry.label}</div>
-                    <div className="mt-1 text-industrial-muted" style={CHART_TYPOGRAPHY_STYLE}>{entry.metadata}</div>
+        <div className="flex h-full min-h-0 flex-col items-center justify-start gap-1 text-center">
+            <div className="text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-comparison-percent">{entry.productivityLabel}</div>
+            <div className="flex min-h-0 flex-1 items-end justify-center self-stretch" data-testid="activity-analytics-comparison-track-region">
+                <div
+                    className={`relative flex h-full ${COMPARISON_BAR_WIDTH_CLASS} items-end overflow-hidden rounded-full bg-white/5`}
+                    data-testid="activity-analytics-comparison-bar-track"
+                    aria-hidden="true"
+                >
+                    <div
+                        className="absolute inset-x-0 bottom-0 rounded-full transition-all duration-500 ease-out"
+                        data-testid="activity-analytics-comparison-bar-fill"
+                        style={{
+                            height: `${fillHeight}%`,
+                            background: `linear-gradient(to top, ${visualPalette.prod.initialSolid} 0%, ${visualPalette.prod.solid} 100%)`,
+                            boxShadow: `0 0 15px ${visualPalette.prod.highlight}`,
+                            opacity: entry.isEmpty ? 0.2 : 1,
+                        }}
+                    />
                 </div>
-                {!entry.isEmpty && (
-                    <div className="mt-1 flex w-24 overflow-hidden rounded-full border border-industrial-border" aria-hidden="true">
-                        {segments.map((segment) => (
-                            <div
-                                key={`${entry.heading}-${segment.key}`}
-                                style={{
-                                    width: `${(segment.value / totalDurationMs) * 100}%`,
-                                    backgroundColor: segment.color,
-                                    minWidth: segment.value > 0 ? '0.375rem' : '0',
-                                    height: '0.5rem',
-                                    opacity: segment.opacity ?? 0.9,
-                                }}
-                            />
-                        ))}
-                    </div>
-                )}
             </div>
+            <div className="uppercase text-industrial-muted" style={GENERAL_TYPOGRAPHY_STYLE}>{entry.heading}</div>
+            <div className="text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-metric-value">{entry.label}</div>
         </div>
     );
 });
+
+function parsePercentLabel(value: string): number | null {
+    const match = value.match(/^(\d+)%$/);
+
+    if (!match) {
+        return null;
+    }
+
+    return Number(match[1]) / 100;
+}
 
 function createComparisonEntry(
     heading: 'Mejor' | 'Peor',
     target: { bucketKey: string; label: string } | null | undefined,
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'],
 ): ComparisonEntry {
-    const fallback: ComparisonEntry = {
+    const matchedBucket = target
+        ? grouped.find((bucket) => bucket.bucketKey === target.bucketKey)
+            ?? grouped.find((bucket) => bucket.label === target.label)
+        : undefined;
+    const fallbackEntry: ComparisonEntry = {
         heading,
-        label: target?.label ?? COMPARISON_FALLBACK_LABEL,
-        metadata: COMPARISON_FALLBACK_LABEL,
-        totalDurationMs: 0,
-        durationsMs: { prod: 0, setup: 0, stopped: 0, noData: 0 },
+        label: COMPARISON_FALLBACK_LABEL,
+        productivityLabel: COMPARISON_FALLBACK_LABEL,
+        productivityRatio: null,
         isEmpty: true,
     };
 
-    if (!target) {
-        return fallback;
+    if (!matchedBucket) {
+        return fallbackEntry;
     }
 
-    const matchedBucket = grouped.find((bucket) => bucket.bucketKey === target.bucketKey)
-        ?? grouped.find((bucket) => bucket.label === target.label);
+    const comparableProductivityRatio = resolveActivityAnalyticsComparableProductivityRatio(matchedBucket);
 
-    const comparableProductivityRatio = matchedBucket
-        ? resolveActivityAnalyticsComparableProductivityRatio(matchedBucket)
-        : null;
-
-    if (!matchedBucket || comparableProductivityRatio === null) {
-        return fallback;
+    if (comparableProductivityRatio === null) {
+        return fallbackEntry;
     }
 
-    const totalDurationMs = resolveGroupedVisibleDurationMs(matchedBucket);
-    const metadata = matchedBucket.coverageRatio < 1
-        ? `Prod. observada ${formatPercent(comparableProductivityRatio)} · Cob. ${formatPercent(matchedBucket.coverageRatio)} · ${formatDurationHours(totalDurationMs)}`
-        : `% Prod. ${matchedBucket.productivityLabel} · ${formatDurationHours(totalDurationMs)}`;
-
+    const resolvedProductivityRatio = matchedBucket.coverageRatio < 1
+        ? comparableProductivityRatio
+        : matchedBucket.productivityRatio ?? parsePercentLabel(matchedBucket.productivityLabel);
+    const resolvedProductivityLabel = matchedBucket.coverageRatio < 1
+        ? formatPercent(resolvedProductivityRatio)
+        : matchedBucket.productivityLabel;
     return {
         heading,
         label: matchedBucket.label,
-        metadata,
-        totalDurationMs,
-        durationsMs: {
-            prod: matchedBucket.durationsMs.prod,
-            setup: matchedBucket.durationsMs.setup,
-            stopped: matchedBucket.durationsMs.stopped,
-            noData: matchedBucket.durationsMs.noData,
-        },
-        isEmpty: false,
+        productivityLabel: resolvedProductivityLabel,
+        productivityRatio: resolvedProductivityRatio,
+        isEmpty: resolvedProductivityRatio === null,
     };
 }
 
@@ -1778,6 +2074,85 @@ function withAlpha(hex: string, alphaPercentage: number): string {
     const blue = Number.parseInt(normalized.slice(4, 6), 16);
 
     return `rgba(${red}, ${green}, ${blue}, ${alphaPercentage / 100})`;
+}
+
+function resolveSummaryDonutGeometry({
+    width,
+    height,
+    density,
+    detailRowCount,
+}: {
+    width: number;
+    height: number;
+    density: ActivityAnalyticsSummaryLayout['density'];
+    detailRowCount: number;
+}): SummaryDonutGeometry {
+    const densityGeometry = density === 'compress'
+        ? SUMMARY_DONUT_GEOMETRY_RULES.density.compress
+        : SUMMARY_DONUT_GEOMETRY_RULES.density.default;
+    const margin = densityGeometry.marginPx;
+    const detailGap = densityGeometry.detailGapPx;
+    const detailPanelWidth = Math.min(
+        Math.max(width * densityGeometry.detailPanelWidthRatio, densityGeometry.detailPanelWidthMinPx),
+        densityGeometry.detailPanelWidthMaxPx,
+    );
+    const donutRegionWidth = Math.max(width - margin.left - margin.right - detailGap - detailPanelWidth, 1);
+    const donutRegionHeight = Math.max(height - margin.top - margin.bottom, 1);
+    const centerX = margin.left + (donutRegionWidth / 2);
+    const centerY = margin.top + (donutRegionHeight * densityGeometry.centerYRatio);
+    const safeReferenceSize = Math.min(donutRegionWidth, donutRegionHeight);
+    const ringThickness = clamp(
+        safeReferenceSize * 0.06,
+        SUMMARY_RING_MIN_THICKNESS,
+        SUMMARY_RING_MAX_THICKNESS,
+    );
+    const prodRingThickness = ringThickness * SUMMARY_RING_PROD_THICKNESS_MULTIPLIER;
+    const outerRadius = Math.max(
+        Math.min((safeReferenceSize / 2) - densityGeometry.outerRadiusInsetPx, densityGeometry.outerRadiusMaxPx),
+        SUMMARY_DONUT_GEOMETRY_RULES.minimumOuterRadiusPx,
+    );
+    const radius = Math.max(outerRadius - (prodRingThickness / 2), 1);
+    const detailMarkerSize = SUMMARY_DONUT_GEOMETRY_RULES.detail.markerSizePx;
+    const detailMarkerOffsetY = SUMMARY_DONUT_GEOMETRY_RULES.detail.markerOffsetYPx;
+    const detailTitleBaselineY = SUMMARY_DONUT_GEOMETRY_RULES.detail.titleBaselineYPx;
+    const detailValueBaselineY = densityGeometry.detailValueBaselineYPx;
+    const detailSectionHeight = densityGeometry.detailSectionHeightPx;
+    const detailSectionGap = densityGeometry.detailSectionGapPx;
+    const detailSectionSpacing = detailSectionHeight + detailSectionGap;
+    const detailBlockHeight = detailSectionHeight + ((Math.max(detailRowCount - 1, 0)) * detailSectionSpacing);
+    const detailBlockTop = centerY - (detailBlockHeight / 2);
+    const coverageLabelX = margin.left;
+    const coverageLabelY = Math.min(
+        centerY + outerRadius + densityGeometry.coverageLabelOffsetYPx,
+        height - margin.bottom + SUMMARY_DONUT_GEOMETRY_RULES.coverageLabelBottomAllowancePx,
+    );
+    const donutBandRadius = radius + (prodRingThickness / 2);
+
+    return {
+        chartHeight: height,
+        margin,
+        detailGap,
+        detailPanelWidth,
+        donutRegionWidth,
+        donutRegionHeight,
+        centerX,
+        centerY,
+        ringThickness,
+        prodRingThickness,
+        outerRadius,
+        radius,
+        detailBlockTop,
+        detailSectionSpacing,
+        detailSectionHeight,
+        detailMarkerSize,
+        detailMarkerOffsetY,
+        detailTitleBaselineY,
+        detailValueBaselineY,
+        coverageLabelX,
+        coverageLabelY,
+        donutBandTopY: centerY - donutBandRadius,
+        donutBandBottomY: centerY + donutBandRadius,
+    };
 }
 
 function buildTopCapDropShadow(color: string, intensity: number): string | undefined {
