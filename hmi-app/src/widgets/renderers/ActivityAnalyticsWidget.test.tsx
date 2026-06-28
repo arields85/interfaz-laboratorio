@@ -1238,7 +1238,7 @@ describe('ActivityAnalyticsWidget', () => {
         });
 
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
-        expect(Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-overlap-px'))).toBeGreaterThan(0);
+        expect(Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-overlap-px'))).toBe(0);
         expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-comparison')).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-summary-text')).not.toBeInTheDocument();
@@ -1587,11 +1587,11 @@ describe('ActivityAnalyticsWidget', () => {
 
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
         const chartWidth = Number(summaryChart.getAttribute('width'));
-        expect(chartWidth).toBe(320);
+        expect(chartWidth).toBe(170);
         expect(within(summaryChart).queryAllByTestId('activity-analytics-summary-segment-label')).toHaveLength(0);
     });
 
-    it('never stacks the top region and increases comparison overlap as the widget narrows', () => {
+    it('never stacks the top region and keeps the A/B widths side-by-side without overlap as the widget narrows', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -1616,21 +1616,27 @@ describe('ActivityAnalyticsWidget', () => {
         });
 
         const compactTopRegion = screen.getByTestId('activity-analytics-top-region');
+        const compactSummaryWidth = Number(screen.getByTestId('activity-analytics-summary-column').getAttribute('data-summary-column-width-px'));
+        const compactComparisonWidth = Number(screen.getByTestId('activity-analytics-comparison-column').getAttribute('data-comparison-column-width-px'));
 
         expect(compactTopRegion).toHaveAttribute('data-top-layout', 'side-by-side');
-        expect(Number(compactTopRegion.getAttribute('data-top-overlap-px'))).toBeGreaterThan(0);
+        expect(Number(compactTopRegion.getAttribute('data-top-overlap-px'))).toBe(0);
+        expect(compactSummaryWidth + compactComparisonWidth).toBeCloseTo(520, 1);
 
         act(() => {
             MockResizeObserver.latest().emit(847, 360);
         });
 
         const wideTopRegion = screen.getByTestId('activity-analytics-top-region');
+        const wideSummaryWidth = Number(screen.getByTestId('activity-analytics-summary-column').getAttribute('data-summary-column-width-px'));
+        const wideComparisonWidth = Number(screen.getByTestId('activity-analytics-comparison-column').getAttribute('data-comparison-column-width-px'));
 
         expect(wideTopRegion).toHaveAttribute('data-top-layout', 'side-by-side');
         expect(Number(wideTopRegion.getAttribute('data-top-overlap-px'))).toBe(0);
+        expect(wideSummaryWidth + wideComparisonWidth).toBeCloseTo(847, 1);
     });
 
-    it('uses a responsive summary column width for the donut when side-by-side layout is active', () => {
+    it('keeps Panel B compact near the measured narrow breakpoint and caps its growth at wider widths', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -1651,42 +1657,53 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 760, bodyHeight: 420 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 420, bodyHeight: 420 });
         });
 
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
         const summaryColumn = screen.getByTestId('activity-analytics-summary-column');
-        const intermediateWidth = Number(summaryChart.getAttribute('width'));
+        const comparisonColumn = screen.getByTestId('activity-analytics-comparison-column');
+        const comparisonWidthAt420 = Number(comparisonColumn.getAttribute('data-comparison-column-width-px'));
+        const summaryWidthAt420 = Number(summaryColumn.getAttribute('data-summary-column-width-px'));
 
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
-        expect(intermediateWidth).toBeCloseTo(402.8, 1);
-        expect(intermediateWidth).toBeLessThanOrEqual(480);
+        expect(comparisonWidthAt420).toBeCloseTo(186, 0);
+        expect(summaryWidthAt420).toBeCloseTo(234, 0);
+        expect(Number(summaryChart.getAttribute('width'))).toBeCloseTo(summaryWidthAt420, 0);
+        expect(Number(summaryChart.getAttribute('width'))).toBeLessThanOrEqual(480);
 
         act(() => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
         });
 
-        expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBeGreaterThan(intermediateWidth);
-        expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBe(456);
-        expect(Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'))).toBeLessThanOrEqual(480);
+        const comparisonWidthAt1260 = Number(comparisonColumn.getAttribute('data-comparison-column-width-px'));
+        const summaryChartWidthAt1260 = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('width'));
+        const summaryWidthAt1260 = Number(summaryColumn.getAttribute('data-summary-column-width-px'));
+
+        expect(comparisonWidthAt1260).toBe(208);
+        expect(summaryWidthAt1260 + comparisonWidthAt1260).toBeCloseTo(1260, 1);
+        expect(summaryChartWidthAt1260).toBe(480);
+        expect(summaryChartWidthAt1260).toBeLessThanOrEqual(480);
 
         act(() => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 603, bodyHeight: 420 });
         });
 
         const widthAt603 = Number(summaryColumn.getAttribute('data-summary-column-width-px'));
+        const comparisonWidthAt603 = Number(comparisonColumn.getAttribute('data-comparison-column-width-px'));
 
         act(() => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 520, bodyHeight: 420 });
         });
 
         const widthAt520 = Number(summaryColumn.getAttribute('data-summary-column-width-px'));
+        const comparisonWidthAt520 = Number(comparisonColumn.getAttribute('data-comparison-column-width-px'));
 
-        expect(widthAt603).toBeGreaterThan(319);
-        expect(widthAt603).toBeLessThan(320);
+        expect(comparisonWidthAt603).toBeCloseTo(197.84, 1);
+        expect(widthAt603 + comparisonWidthAt603).toBeCloseTo(603, 1);
         expect(widthAt520).toBeLessThan(widthAt603);
-        expect(widthAt520).toBeGreaterThan(288);
-        expect(widthAt520).toBeLessThan(289);
+        expect(comparisonWidthAt520).toBeCloseTo(192.47, 1);
+        expect(widthAt520 + comparisonWidthAt520).toBeCloseTo(520, 1);
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
     });
 
@@ -3605,7 +3622,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(coveragePoint.y).toBeGreaterThan(donutCenterLabelPoint.y);
     });
 
-    it('reuses the donut top and floor geometry to inset the Mejor/Peor band within the same vertical ceiling and floor', () => {
+    it('keeps Mejor/Peor track height stable across wide and narrow top-row widths', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -3643,36 +3660,37 @@ describe('ActivityAnalyticsWidget', () => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
         });
 
-        const prodSegment = screen
-            .getAllByTestId('activity-analytics-summary-segment')
-            .find((segment) => segment.getAttribute('data-segment-key') === 'prod');
-
-        if (!prodSegment) {
-            throw new Error('Missing production summary segment');
-        }
-
         const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
         const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
         const comparisonGrid = screen.getByTestId('activity-analytics-comparison-grid');
         const comparisonTrackRegions = screen.getAllByTestId('activity-analytics-comparison-track-region');
-        const prodRing = parseCircleMetrics(prodSegment);
-        const donutOuterTopEdge = prodRing.cy - (prodRing.r + (prodRing.strokeWidth / 2));
-        const donutOuterBottomEdge = prodRing.cy + (prodRing.r + (prodRing.strokeWidth / 2));
         const chartHeight = Number.parseFloat(comparisonPanel.style.height);
         const summaryPanelHeight = Number.parseFloat(summaryPanel.style.height);
         const summaryChartHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
-        const gridPaddingTop = parsePxStyle(comparisonGrid.style.paddingTop);
-        const gridPaddingBottom = parsePxStyle(comparisonGrid.style.paddingBottom);
+        const wideTopRegionSharedHeight = Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-shared-height-px'));
+        const wideTrackHeight = parsePxStyle((comparisonTrackRegions[0] as HTMLElement).style.height);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 520, bodyHeight: 420 });
+        });
+
+        const narrowTrackRegions = screen.getAllByTestId('activity-analytics-comparison-track-region');
+        const narrowTrackHeight = parsePxStyle((narrowTrackRegions[0] as HTMLElement).style.height);
 
         expect(chartHeight).toBeCloseTo(276, 5);
         expect(summaryPanelHeight).toBeCloseTo(chartHeight, 5);
         expect(summaryChartHeight).toBeCloseTo(chartHeight - 10, 5);
-        expect(Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-shared-height-px'))).toBeCloseTo(chartHeight, 5);
-        expect(gridPaddingTop).toBeCloseTo(Math.max(donutOuterTopEdge - 4, 0), 5);
-        expect(gridPaddingBottom).toBeCloseTo(Math.max(summaryChartHeight - donutOuterBottomEdge - 4, 0), 5);
+        expect(wideTopRegionSharedHeight).toBeCloseTo(chartHeight, 5);
+        expect(comparisonGrid.style.paddingTop).toBe('');
+        expect(comparisonGrid.style.paddingBottom).toBe('');
+        expect(Math.abs(wideTrackHeight - narrowTrackHeight)).toBeLessThanOrEqual(4);
         comparisonTrackRegions.forEach((trackRegion) => {
-            expect(trackRegion).toHaveClass('flex-1');
-            expect(trackRegion.className).not.toContain('h-28');
+            expect(trackRegion.className).not.toContain('flex-1');
+            expect(trackRegion).toHaveStyle({ height: '112px' });
+        });
+        narrowTrackRegions.forEach((trackRegion) => {
+            expect(trackRegion.className).not.toContain('flex-1');
+            expect(trackRegion).toHaveStyle({ height: '112px' });
         });
     });
 
@@ -3803,6 +3821,7 @@ describe('ActivityAnalyticsWidget', () => {
 
         const compactGap = Number.parseFloat(comparisonGrid.style.columnGap);
         const compactTopRegion = screen.getByTestId('activity-analytics-top-region');
+        const comparisonRows = screen.getAllByTestId('activity-analytics-comparison-row');
 
         expect(within(comparisonPanel).getByText('2026-06-18')).toBeInTheDocument();
         expect(within(comparisonPanel).getByText('60%')).toBeInTheDocument();
@@ -3810,10 +3829,14 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(comparisonPanel).getByText('50%')).toBeInTheDocument();
         expect(comparisonPanel).toHaveClass('justify-center');
         expect(comparisonPanel).toHaveClass('items-center');
+        comparisonRows.forEach((row) => {
+            expect(row).toHaveClass('justify-start');
+            expect(row).not.toHaveClass('justify-center');
+        });
         expect(comparisonGrid).toHaveClass('w-fit');
         expect(comparisonGrid.style.alignSelf).toBe('center');
         expect(compactTopRegion).toHaveAttribute('data-top-layout', 'side-by-side');
-        expect(Number(compactTopRegion.getAttribute('data-top-overlap-px'))).toBeGreaterThan(0);
+        expect(Number(compactTopRegion.getAttribute('data-top-overlap-px'))).toBe(0);
         expect(wideGap).toBeGreaterThanOrEqual(narrowGap);
         expect(narrowGap).toBeGreaterThanOrEqual(compactGap);
         expect(compactGap).toBeGreaterThanOrEqual(10);
@@ -3856,10 +3879,15 @@ describe('ActivityAnalyticsWidget', () => {
         const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
         const comparisonGrid = screen.getByTestId('activity-analytics-comparison-grid');
         const comparisonColumn = screen.getByTestId('activity-analytics-comparison-column');
+        const comparisonRows = screen.getAllByTestId('activity-analytics-comparison-row');
 
         const assertCenteringContract = (expectedBodyWidth: number) => {
             expect(comparisonPanel).toHaveClass('items-center');
             expect(comparisonPanel).toHaveClass('justify-center');
+            comparisonRows.forEach((row) => {
+                expect(row).toHaveClass('justify-start');
+                expect(row).not.toHaveClass('justify-center');
+            });
             expect(comparisonPanel.style.height).toBeTruthy();
             expect(comparisonGrid).toHaveClass('w-fit');
             expect(comparisonGrid).toHaveClass('justify-items-center');

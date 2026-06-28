@@ -102,14 +102,6 @@ const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border';
 const NO_DATA_STATE_COLOR = 'var(--color-industrial-muted)';
 const ACTIVITY_ANALYTICS_STATE_KEYS = ['prod', 'setup', 'stopped'] as const;
 const SUMMARY_CHART_MAX_WIDTH_PX = 480;
-const TOP_REGION_SUMMARY_WIDTH_RATIO = 0.53;
-const TOP_REGION_SUMMARY_WIDTH_MIN_PX = 320;
-const TOP_REGION_SUMMARY_WIDTH_MAX_PX = 456;
-const TOP_REGION_COMPARISON_OVERLAP_RULES = {
-    startWidthPx: 760,
-    endWidthPx: 480,
-    maxPx: 72,
-} as const;
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
 const INCOMPLETE_COVERAGE_LABEL = 'cobertura incompleta';
 const SUMMARY_RING_PROD_THICKNESS_MULTIPLIER = 1.5;
@@ -195,11 +187,23 @@ const COMPARISON_LAYOUT_RULES = {
         min: 10,
         max: 18,
     },
+    externalWidthPx: {
+        min: 150,
+        preferred: 186,
+        max: 208,
+    },
+    preferredContentWidthPx: 148,
+    sideBreathingPx: 19,
+    responsiveContainerWidthPx: {
+        compact: 320,
+        preferred: 420,
+        expanded: 760,
+    },
     widthPx: {
         compact: 104,
         expanded: 220,
     },
-    bandInsetPaddingPx: 4,
+    trackHeightPx: 112,
 } as const;
 const GROUPED_EDGE_PADDING_MIN_PX = 6;
 const GROUPED_EDGE_PADDING_FACTORS = {
@@ -796,21 +800,18 @@ const ComparisonPanel = memo(function ComparisonPanel({
     visualPalette,
     panelHeight,
     comparisonColumnWidth,
-    comparisonBandGeometry,
 }: {
     comparison: ReturnType<typeof computeActivityAnalytics>['comparison'];
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     visualPalette: ActivityAnalyticsVisualPalette;
     panelHeight?: number;
     comparisonColumnWidth: number;
-    comparisonBandGeometry?: Pick<SummaryDonutGeometry, 'chartHeight' | 'donutBandTopY' | 'donutBandBottomY'>;
 }) {
     const entries = [
         createComparisonEntry('Mejor', comparison.best, grouped),
         createComparisonEntry('Peor', comparison.worst, grouped),
     ];
     const columnGapPx = resolveComparisonGridColumnGap(comparisonColumnWidth);
-    const bandInsets = resolveComparisonBandInsets(comparisonBandGeometry);
 
     return (
         <div
@@ -823,8 +824,6 @@ const ComparisonPanel = memo(function ComparisonPanel({
                 style={{
                     alignSelf: 'center',
                     columnGap: `${columnGapPx}px`,
-                    paddingTop: typeof bandInsets?.top === 'number' ? `${bandInsets.top}px` : undefined,
-                    paddingBottom: typeof bandInsets?.bottom === 'number' ? `${bandInsets.bottom}px` : undefined,
                 }}
                 data-testid="activity-analytics-comparison-grid"
             >
@@ -865,30 +864,20 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
     emptyMessage: string | null;
 }) {
-    const resolvedSummaryColumnWidth = resolveTopRegionSummaryColumnWidth(chartWidth);
-    const comparisonOverlapPx = resolveTopRegionComparisonOverlap(chartWidth);
-    const comparisonColumnWidth = Math.max(chartWidth - resolvedSummaryColumnWidth + comparisonOverlapPx, 0);
+    const comparisonColumnWidth = resolveTopRegionComparisonColumnWidth(chartWidth);
+    const resolvedSummaryColumnWidth = Math.max(chartWidth - comparisonColumnWidth, 0);
     const comparisonGapDriverWidth = comparisonColumnWidth;
     const summaryChartWidth = Math.min(
-        chartWidth,
-        SUMMARY_CHART_MAX_WIDTH_PX,
         resolvedSummaryColumnWidth,
+        SUMMARY_CHART_MAX_WIDTH_PX,
     );
+    const topRegionJoinOffsetPx = resolvedSummaryColumnWidth - (chartWidth / 2);
     const topRegionSharedHeight = resolveTopRegionSharedHeight({
         containerWidth: chartWidth,
         containerHeight: chartHeight,
         summaryMode: visualLayout.summary.mode,
     });
     const summaryChartHeight = Math.max(topRegionSharedHeight - SUMMARY_PANEL_HEIGHT_CHROME_PX, 0);
-    const comparisonBandGeometry = visualLayout.summary.mode === 'text-fallback'
-        ? undefined
-        : resolveSummaryDonutGeometry({
-            width: summaryChartWidth,
-            height: summaryChartHeight,
-            density: visualLayout.summary.density,
-            detailRowCount: 3,
-        });
-
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
             <div
@@ -896,8 +885,9 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
                 style={{ gap: '0px' }}
                 data-testid="activity-analytics-top-region"
                 data-top-layout="side-by-side"
-                data-top-overlap-px={comparisonOverlapPx.toFixed(2)}
+                data-top-overlap-px="0.00"
                 data-top-shared-height-px={topRegionSharedHeight.toFixed(2)}
+                data-top-join-offset-px={topRegionJoinOffsetPx.toFixed(2)}
             >
                 <div
                     className="relative z-[1] min-w-0 shrink-0"
@@ -908,8 +898,8 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
                     <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={summaryChartWidth} chartHeight={summaryChartHeight} panelHeight={topRegionSharedHeight} visualPalette={visualPalette} donutEffects={visualEffects.donut} />
                 </div>
                 <div
-                    className="relative z-[2] min-w-0 flex-1 self-stretch"
-                    style={{ marginLeft: comparisonOverlapPx > 0 ? `${-comparisonOverlapPx}px` : undefined }}
+                    className="relative z-[2] min-w-0 shrink-0 self-stretch"
+                    style={{ width: `${comparisonColumnWidth}px` }}
                     data-testid="activity-analytics-comparison-column"
                     data-comparison-column-width-px={comparisonColumnWidth.toFixed(2)}
                 >
@@ -919,7 +909,6 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
                         visualPalette={visualPalette}
                         panelHeight={visualLayout.summary.mode === 'text-fallback' ? undefined : topRegionSharedHeight}
                         comparisonColumnWidth={comparisonGapDriverWidth}
-                        comparisonBandGeometry={comparisonBandGeometry}
                     />
                 </div>
             </div>
@@ -939,25 +928,28 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     );
 });
 
-function resolveTopRegionSummaryColumnWidth(containerWidth: number): number {
-    const maximumWidth = Math.min(TOP_REGION_SUMMARY_WIDTH_MAX_PX, containerWidth);
-    const proportionalWidth = Math.min(containerWidth * TOP_REGION_SUMMARY_WIDTH_RATIO, maximumWidth);
+function resolveTopRegionComparisonColumnWidth(containerWidth: number): number {
+    const { compact, preferred, expanded } = COMPARISON_LAYOUT_RULES.responsiveContainerWidthPx;
+    const { min, max } = COMPARISON_LAYOUT_RULES.externalWidthPx;
+    const preferredWidth = COMPARISON_LAYOUT_RULES.preferredContentWidthPx + (COMPARISON_LAYOUT_RULES.sideBreathingPx * 2);
 
-    if (containerWidth <= TOP_REGION_SUMMARY_WIDTH_MIN_PX) {
-        return containerWidth;
+    if (containerWidth <= compact) {
+        return Math.min(containerWidth, min);
     }
 
-    const responsiveWidthStartPx = TOP_REGION_SUMMARY_WIDTH_MIN_PX / TOP_REGION_SUMMARY_WIDTH_RATIO;
+    if (containerWidth <= preferred) {
+        const progress = normalizeRange(containerWidth, compact, preferred);
 
-    if (containerWidth < responsiveWidthStartPx) {
-        const transitionProgress = (containerWidth - TOP_REGION_SUMMARY_WIDTH_MIN_PX)
-            / (responsiveWidthStartPx - TOP_REGION_SUMMARY_WIDTH_MIN_PX);
-
-        return TOP_REGION_SUMMARY_WIDTH_MIN_PX
-            + ((proportionalWidth - TOP_REGION_SUMMARY_WIDTH_MIN_PX) * transitionProgress);
+        return Number((min + ((preferredWidth - min) * progress)).toFixed(2));
     }
 
-    return proportionalWidth;
+    if (containerWidth >= expanded) {
+        return max;
+    }
+
+    const progress = normalizeRange(containerWidth, preferred, expanded);
+
+    return Number((preferredWidth + ((max - preferredWidth) * progress)).toFixed(2));
 }
 
 function resolveComparisonGridColumnGap(containerWidth: number): number {
@@ -977,19 +969,6 @@ function resolveComparisonGridColumnGap(containerWidth: number): number {
         COMPARISON_LAYOUT_RULES.gridGapPx.min
         + ((COMPARISON_LAYOUT_RULES.gridGapPx.max - COMPARISON_LAYOUT_RULES.gridGapPx.min) * progress)
     ).toFixed(2));
-}
-
-function resolveTopRegionComparisonOverlap(containerWidth: number): number {
-    const widthRange = TOP_REGION_COMPARISON_OVERLAP_RULES.startWidthPx - TOP_REGION_COMPARISON_OVERLAP_RULES.endWidthPx;
-
-    if (widthRange <= 0 || containerWidth >= TOP_REGION_COMPARISON_OVERLAP_RULES.startWidthPx) {
-        return 0;
-    }
-
-    const normalizedWidth = Math.max(containerWidth, TOP_REGION_COMPARISON_OVERLAP_RULES.endWidthPx);
-    const progress = (TOP_REGION_COMPARISON_OVERLAP_RULES.startWidthPx - normalizedWidth) / widthRange;
-
-    return Number((TOP_REGION_COMPARISON_OVERLAP_RULES.maxPx * progress).toFixed(2));
 }
 
 function resolveTopRegionSharedHeight({
@@ -1016,22 +995,6 @@ function resolveTopRegionSharedHeight({
     );
 
     return Math.round(Math.min(widthDrivenHeight, heightDrivenCap));
-}
-
-function resolveComparisonBandInsets(
-    comparisonBandGeometry?: Pick<SummaryDonutGeometry, 'chartHeight' | 'donutBandTopY' | 'donutBandBottomY'>,
-): Readonly<{ top: number; bottom: number }> | undefined {
-    if (!comparisonBandGeometry) {
-        return undefined;
-    }
-
-    return {
-        top: Math.max(comparisonBandGeometry.donutBandTopY - COMPARISON_LAYOUT_RULES.bandInsetPaddingPx, 0),
-        bottom: Math.max(
-            comparisonBandGeometry.chartHeight - comparisonBandGeometry.donutBandBottomY - COMPARISON_LAYOUT_RULES.bandInsetPaddingPx,
-            0,
-        ),
-    };
 }
 
 function resolveSummarySegmentGapLength({
@@ -1499,7 +1462,16 @@ function SummaryBarsChart({
         : [];
 
     return (
-        <svg className="block" width={width} height={height} viewBox={`0 0 ${width} ${height}`} data-testid="activity-analytics-summary-chart">
+        <svg
+            className="block"
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
+            data-testid="activity-analytics-summary-chart"
+            data-donut-region-width-px={geometry.donutRegionWidth.toFixed(2)}
+            data-detail-panel-width-px={geometry.detailPanelWidth.toFixed(2)}
+            data-donut-center-x-px={geometry.centerX.toFixed(2)}
+        >
             <defs>
                 {renderSurfaceEffectsFilter({
                     id: glowFilterId,
@@ -1985,9 +1957,13 @@ const ComparisonRow = memo(function ComparisonRow({
     const fillHeight = entry.productivityRatio === null ? 0 : clamp(entry.productivityRatio * 100, 0, 100);
 
     return (
-        <div className="flex h-full min-h-0 flex-col items-center justify-start gap-1 text-center">
+        <div className="flex h-full min-h-0 flex-col items-center justify-start gap-1 text-center" data-testid="activity-analytics-comparison-row">
             <div className="text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-comparison-percent">{entry.productivityLabel}</div>
-            <div className="flex min-h-0 flex-1 items-end justify-center self-stretch" data-testid="activity-analytics-comparison-track-region">
+            <div
+                className="flex shrink-0 items-end justify-center self-stretch"
+                style={{ height: `${COMPARISON_LAYOUT_RULES.trackHeightPx}px` }}
+                data-testid="activity-analytics-comparison-track-region"
+            >
                 <div
                     className={`relative flex h-full ${COMPARISON_BAR_WIDTH_CLASS} items-end overflow-hidden rounded-full bg-white/5`}
                     data-testid="activity-analytics-comparison-bar-track"
@@ -2052,7 +2028,7 @@ function createComparisonEntry(
         ? comparableProductivityRatio
         : matchedBucket.productivityRatio ?? parsePercentLabel(matchedBucket.productivityLabel);
     const resolvedProductivityLabel = matchedBucket.coverageRatio < 1
-        ? formatPercent(resolvedProductivityRatio)
+        ? formatPercent(comparableProductivityRatio)
         : matchedBucket.productivityLabel;
     return {
         heading,
