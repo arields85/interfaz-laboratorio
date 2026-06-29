@@ -99,6 +99,9 @@ const WIDGET_VALUE_TEXT_STYLE: CSSProperties = {
 const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden p-5';
 const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border';
 const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border';
+const GROUPS_PANEL_CLASS = `${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col px-0 pb-0 pt-2`;
+const GROUPS_CHART_AREA_SHELL_CLASS = 'mt-2 flex min-h-0 flex-1 flex-col px-5 pb-5';
+const GROUPS_CHART_VIEWPORT_CLASS = 'relative flex-1 min-h-0 -mx-3 -mb-3';
 const ACTIVITY_ANALYTICS_STATE_KEYS = ['prod', 'setup', 'stopped'] as const;
 const SUMMARY_CHART_MAX_WIDTH_PX = 480;
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
@@ -205,6 +208,18 @@ const GROUPED_BAR_GAP_RULES = {
     fit: { min: 18, max: 30, ratio: 0.26 },
     compress: { min: 10, max: 20, ratio: 0.2 },
     scroll: { min: 8, max: 16, ratio: 0.16 },
+} as const;
+const GROUPED_CHART_GEOMETRY = {
+    compress: {
+        height: 276,
+        chartMargin: { top: 8, right: 12, bottom: 24, left: 38 },
+        productivityLabelClearanceTop: 22,
+    },
+    default: {
+        height: 292,
+        chartMargin: { top: 8, right: 12, bottom: 24, left: 38 },
+        productivityLabelClearanceTop: 22,
+    },
 } as const;
 type SummaryDetailKey = 'prod' | 'setup' | 'stopped' | 'coverage';
 type ActivityAnalyticsGradientStateKey = typeof ACTIVITY_ANALYTICS_STATE_KEYS[number];
@@ -1118,14 +1133,18 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
 }) {
     if (grouped.length === 0 && emptyMessage) {
         return (
-            <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
+            <div className={GROUPS_PANEL_CLASS} data-testid="activity-analytics-groups">
                 <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
-                    <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                    <div className="px-3">
+                        <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                    </div>
                     {showTurnoModeControl && (
-                        <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                        <div className="px-3 pt-2">
+                            <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                        </div>
                     )}
                     <div
-                        className="mt-3 flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-industrial-border px-4 py-6 text-center text-industrial-muted"
+                        className="mt-2 flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-industrial-border mx-3 px-4 py-6 text-center text-industrial-muted"
                         style={GENERAL_TYPOGRAPHY_STYLE}
                         data-testid="activity-analytics-groups-empty"
                     >
@@ -1138,22 +1157,26 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
 
     if (groupsLayout.mode === 'text-fallback') {
         return (
-            <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
+            <div className={GROUPS_PANEL_CLASS} data-testid="activity-analytics-groups">
                 <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
-                <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
-                {showTurnoModeControl && (
-                    <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
-                )}
-                <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto hmi-scrollbar pr-1" data-testid="activity-analytics-groups-text">
-                    {grouped.map((bucket) => (
-                        <TextMetricCard
-                            key={bucket.bucketKey}
-                            label={bucket.label}
-                            durationMs={resolveGroupedVisibleDurationMs(bucket)}
-                            productivityLabel={bucket.productivityLabel}
-                        />
-                    ))}
-                </div>
+                    <div className="px-3">
+                        <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                    </div>
+                    {showTurnoModeControl && (
+                        <div className="px-3 pt-2">
+                            <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                        </div>
+                    )}
+                    <div className="mt-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto hmi-scrollbar px-3 pb-3" data-testid="activity-analytics-groups-text">
+                        {grouped.map((bucket) => (
+                            <TextMetricCard
+                                key={bucket.bucketKey}
+                                label={bucket.label}
+                                durationMs={resolveGroupedVisibleDurationMs(bucket)}
+                                productivityLabel={bucket.productivityLabel}
+                            />
+                        ))}
+                    </div>
                 </div>
             </div>
         );
@@ -1162,22 +1185,32 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
     const chart = <GroupedStackedBarsChart grouped={grouped} width={chartWidth} layout={groupsLayout} barWidthFactor={barWidthFactor} visualPalette={visualPalette} groupedEffects={groupedEffects} />;
 
     return (
-        <div className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col p-3`} data-testid="activity-analytics-groups">
+        <div className={GROUPS_PANEL_CLASS} data-testid="activity-analytics-groups">
             <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
-                <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                <div className="px-3">
+                    <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                </div>
                 {showTurnoModeControl && (
-                    <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                    <div className="px-3 pt-2">
+                        <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                    </div>
                 )}
-                {groupsLayout.density === 'scroll'
-                    ? (
-                        <div
-                            className="mt-3 min-h-0 flex-1 overflow-x-auto overflow-y-hidden hmi-scrollbar pb-2"
-                            data-testid="activity-analytics-groups-scroll-region"
-                        >
-                            {chart}
-                        </div>
-                    )
-                    : <div className="mt-3 min-h-0 flex-1">{chart}</div>}
+                <div className={GROUPS_CHART_AREA_SHELL_CLASS} data-testid="activity-analytics-groups-chart-shell">
+                    {groupsLayout.density === 'scroll'
+                        ? (
+                            <div
+                                className={`${GROUPS_CHART_VIEWPORT_CLASS} flex items-end overflow-x-auto overflow-y-hidden hmi-scrollbar`}
+                                data-testid="activity-analytics-groups-scroll-region"
+                            >
+                                {chart}
+                            </div>
+                        )
+                        : (
+                            <div className={`${GROUPS_CHART_VIEWPORT_CLASS} flex items-end`} data-testid="activity-analytics-groups-chart-viewport">
+                                {chart}
+                            </div>
+                        )}
+                </div>
             </div>
         </div>
     );
@@ -1191,7 +1224,7 @@ const TurnoModeControl = memo(function TurnoModeControl({
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
 }) {
     return (
-        <div className="mt-3 flex items-center gap-1" data-testid="activity-analytics-turno-mode">
+        <div className="flex items-center gap-1" data-testid="activity-analytics-turno-mode">
             <button
                 type="button"
                 aria-pressed={turnoMode === 'summary'}
@@ -1307,7 +1340,10 @@ function formatDurationHours(durationMs: number): string {
 }
 
 function formatHoursTick(durationMs: number): string {
-    return `${(durationMs / (60 * 60 * 1000)).toFixed(1)}h`;
+    const hours = durationMs / (60 * 60 * 1000);
+    const formattedHours = Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+
+    return `${formattedHours}h`;
 }
 
 function createActivityAnalyticsVisualPalette(
@@ -1628,10 +1664,16 @@ function GroupedStackedBarsChart({
     const [hoverInfo, setHoverInfo] = useState<{ index: number; x: number } | null>(null);
     const gradientPrefix = useId().replace(/:/g, '-');
     const groupedGlowFilterId = `${gradientPrefix}-grouped-glow`;
-    const height = layout.density === 'compress' ? 276 : 292;
-    const margin = layout.density === 'compress'
-        ? { top: 30, right: 8, bottom: 68, left: 50 } as const
-        : { top: 30, right: 12, bottom: 76, left: 58 } as const;
+    const geometry = layout.density === 'compress'
+        ? GROUPED_CHART_GEOMETRY.compress
+        : GROUPED_CHART_GEOMETRY.default;
+    const { height, chartMargin, productivityLabelClearanceTop } = geometry;
+    const margin = {
+        top: chartMargin.top + productivityLabelClearanceTop,
+        right: chartMargin.right,
+        bottom: chartMargin.bottom,
+        left: chartMargin.left,
+    };
     const minimumBucketWidth = layout.minSlotWidthPx;
     const chartWidth = layout.density === 'scroll'
         ? Math.max(width, margin.left + margin.right + (grouped.length * minimumBucketWidth))
@@ -1669,7 +1711,7 @@ function GroupedStackedBarsChart({
         : grouped.map(() => margin.left + horizontalPadding + (usablePlotWidth / 2));
     const visibleLabelIndices = layout.sampleLabels
         ? computeVisibleLabelIndices(
-            grouped.map((bucket) => bucket.label),
+            grouped.map((bucket) => resolveGroupedAxisLabel(bucket.label)),
             positions,
             getChartTextFont(),
             8,
@@ -1684,7 +1726,7 @@ function GroupedStackedBarsChart({
     };
 
     return (
-        <div className="relative h-full min-h-[18.25rem]" style={{ width: `${chartWidth}px` }}>
+        <div className="relative shrink-0 self-end" style={{ width: `${chartWidth}px` }}>
             <svg width={chartWidth} height={height} viewBox={`0 0 ${chartWidth} ${height}`} data-testid="activity-analytics-groups-chart">
                 <defs>
                     {renderSurfaceEffectsFilter({
@@ -1710,7 +1752,7 @@ function GroupedStackedBarsChart({
                 {axisTicks.map((tick, index) => (
                     <g key={`groups-tick-${index}`}>
                         <line x1={margin.left} x2={margin.left + plotWidth} y1={tick.y} y2={tick.y} stroke="var(--color-industrial-border)" strokeDasharray="3 3" opacity={0.65} />
-                        <text x={margin.left - 8} y={tick.y} dy={4} textAnchor="end" fill="var(--color-industrial-muted)" style={CHART_TYPOGRAPHY_STYLE} data-testid="activity-analytics-y-axis-tick">
+                        <text x={chartMargin.left - 8} y={tick.y} dy={4} textAnchor="end" fill="var(--color-industrial-muted)" style={CHART_TYPOGRAPHY_STYLE} data-testid="activity-analytics-y-axis-tick">
                             {formatHoursTick(tick.value)}
                         </text>
                     </g>
@@ -1807,11 +1849,11 @@ function GroupedStackedBarsChart({
                                 style={CHART_TYPOGRAPHY_STYLE}
                                 data-testid="activity-analytics-group-productivity"
                             >
-                                {resolveGroupedVisibleProductivityLabel(bucket)}
+                            {resolveGroupedVisibleProductivityLabel(bucket)}
                             </text>
                             {visibleLabelIndices.has(index) && (
-                                <text x={x + (barWidth / 2)} y={margin.top + plotHeight + 42} textAnchor="middle" fill="var(--color-industrial-muted)" style={TECHNICAL_TYPOGRAPHY_STYLE}>
-                                    {bucket.label}
+                                <text x={x + (barWidth / 2)} y={height - 8} textAnchor="middle" fill="var(--color-industrial-muted)" style={CHART_TYPOGRAPHY_STYLE}>
+                                    {resolveGroupedAxisLabel(bucket.label)}
                                 </text>
                             )}
                         </g>
@@ -2327,9 +2369,13 @@ function resolveTurnoSummaryLabel(label: string): string | null {
     const rawTurnoLabel = labelParts.length >= 2
         ? (labelParts.at(-1) ?? '')
         : (/^Turno\s+/i.test(label) ? label : '');
-    const normalizedLabel = rawTurnoLabel.replace(/\s+\(en curso\)$/i, '').trim();
+    const normalizedLabel = resolveGroupedAxisLabel(rawTurnoLabel);
 
     return normalizedLabel.length > 0 ? normalizedLabel : null;
+}
+
+function resolveGroupedAxisLabel(label: string): string {
+    return label.replace(/\s+\((?:en\s+curso)\)$/i, '').trim();
 }
 
 function validateComputedAnalytics(result: ReturnType<typeof computeActivityAnalytics> | null): asserts result is ReturnType<typeof computeActivityAnalytics> {

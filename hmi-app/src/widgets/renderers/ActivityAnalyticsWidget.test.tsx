@@ -106,14 +106,20 @@ vi.mock('../../queries/useActivitySeries', () => ({
 }));
 
 vi.mock('../../components/ui/ChartHoverLayer', () => ({
-    default: ({ dataLength, highlights, onHoverChange }: {
+    default: ({ dataLength, x0, marginLeft, plotWidth, highlights, onHoverChange }: {
         dataLength: number;
+        x0?: number;
+        marginLeft?: number;
+        plotWidth?: number;
         highlights?: Array<unknown>;
         onHoverChange: (index: number | null, x?: number) => void;
     }) => (
         <div
             data-testid="hover-layer"
             data-length={dataLength}
+            data-x0={x0}
+            data-margin-left={marginLeft}
+            data-plot-width={plotWidth}
             data-highlights={highlights?.length ?? 0}
             data-highlight-colors={Array.isArray(highlights)
                 ? highlights
@@ -1979,9 +1985,11 @@ describe('ActivityAnalyticsWidget', () => {
         await user.click(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' }));
 
         const groupStacks = screen.getAllByTestId('activity-analytics-group-stack');
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
 
         expect(groupStacks).toHaveLength(4);
-        expect(screen.getAllByText('2026-06-19 · Turno 1 (en curso)').length).toBeGreaterThan(0);
+        expect(within(groupsChart).getAllByText('2026-06-19 · Turno 1').length).toBeGreaterThan(0);
+        expect(within(groupsChart).queryByText('2026-06-19 · Turno 1 (en curso)')).not.toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-group-productivity').map((node) => node.textContent)).toContain('en curso');
 
         const currentShiftStack = groupStacks[3];
@@ -2092,7 +2100,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(comparisonPanel).queryByText('2026-06-22 · sin turno')).not.toBeInTheDocument();
         expect(screen.getByText(/Distribución/i)).toBeInTheDocument();
         expect(screen.queryByText('% Prod. 57% · Cobertura 100%')).not.toBeInTheDocument();
-        expect(yAxisTicks).toContain('4.0h');
+        expect(yAxisTicks).toContain('4h');
         expect(yAxisTicks).not.toContain('24.0h');
     });
 
@@ -2336,9 +2344,27 @@ describe('ActivityAnalyticsWidget', () => {
             MockResizeObserver.latest().emit(520, 360);
         });
 
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
+        const firstDateLabel = Array.from(groupsChart.querySelectorAll('text')).find((node) => node.textContent === '2026-06-18');
+        const firstYAxisTick = screen.getAllByTestId('activity-analytics-y-axis-tick')[0];
+        const hoverLayer = screen.getByTestId('hover-layer');
+        const chartShell = screen.getByTestId('activity-analytics-groups-chart-shell');
+        const chartViewport = screen.getByTestId('activity-analytics-groups-chart-viewport');
+        const marginLeft = Number(hoverLayer.getAttribute('data-margin-left'));
+
         expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'compress');
         expect(screen.queryByTestId('activity-analytics-groups-scroll-region')).not.toBeInTheDocument();
-        expect(screen.getByTestId('activity-analytics-groups-chart')).toBeInTheDocument();
+        expect(groupsChart).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-groups')).toHaveClass('px-0', 'pb-0', 'pt-2');
+        expect(screen.getByTestId('activity-analytics-groups')).not.toHaveClass('-mb-5');
+        expect(screen.getByTestId('activity-analytics-groups')).not.toHaveClass('-mx-5');
+        expect(chartShell).toHaveClass('mt-2', 'flex', 'min-h-0', 'flex-1', 'flex-col', 'px-5', 'pb-5');
+        expect(chartViewport).toHaveClass('relative', 'flex-1', 'min-h-0', '-mx-3', '-mb-3', 'flex', 'items-end');
+        expect(groupsChart.parentElement).toHaveClass('self-end');
+        expect(groupsChart.parentElement?.parentElement).toBe(chartViewport);
+        expect(Number(firstYAxisTick.getAttribute('x'))).toBe(marginLeft - 8);
+        expect(Number(groupsChart.getAttribute('height')) - Number(firstDateLabel?.getAttribute('y'))).toBe(8);
+        expect(hoverLayer).toHaveAttribute('data-margin-left', '38');
     });
 
     it('compresses grouped inter-bar spacing as the widget narrows and re-expands it when width returns', () => {
@@ -2506,12 +2532,30 @@ describe('ActivityAnalyticsWidget', () => {
             MockResizeObserver.latest().emit(320, 360);
         });
 
-        expect(screen.getByTestId('activity-analytics-groups-scroll-region')).toHaveClass('hmi-scrollbar');
+        const scrollRegion = screen.getByTestId('activity-analytics-groups-scroll-region');
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
+        const dateLabel = Array.from(groupsChart.querySelectorAll('text')).find((node) => node.textContent === '2026-06-18');
+        const firstYAxisTick = screen.getAllByTestId('activity-analytics-y-axis-tick')[0];
+        const hoverLayer = screen.getByTestId('hover-layer');
+        const chartShell = screen.getByTestId('activity-analytics-groups-chart-shell');
+        const marginLeft = Number(hoverLayer.getAttribute('data-margin-left'));
+
+        expect(chartShell).toHaveClass('mt-2', 'flex', 'min-h-0', 'flex-1', 'flex-col', 'px-5', 'pb-5');
+        expect(scrollRegion).toHaveClass('relative', 'flex-1', 'min-h-0', '-mx-3', '-mb-3', 'flex', 'items-end', 'hmi-scrollbar');
+        expect(scrollRegion.className).not.toContain('pb-2');
         expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'scroll');
-        expect(screen.getByTestId('activity-analytics-groups-chart')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-groups')).not.toHaveClass('-mb-5');
+        expect(screen.getByTestId('activity-analytics-groups')).not.toHaveClass('-mx-5');
+        expect(groupsChart).toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(6);
         expect(screen.getAllByTestId('activity-analytics-group-segment')).toHaveLength(24);
         expect(screen.getAllByTestId('activity-analytics-group-productivity')).toHaveLength(6);
+        expect(groupsChart.parentElement).toHaveClass('self-end');
+        expect(dateLabel).toBeTruthy();
+        expect(dateLabel?.getAttribute('style')).toContain('var(--font-chart)');
+        expect(Number(groupsChart.getAttribute('height')) - Number(dateLabel?.getAttribute('y'))).toBe(8);
+        expect(Number(firstYAxisTick.getAttribute('x'))).toBe(marginLeft - 8);
+        expect(hoverLayer).toHaveAttribute('data-margin-left', '38');
         expect(screen.getAllByText('2026-06-18').length).toBeGreaterThan(0);
         expect(screen.getAllByText('2026-06-23').length).toBeGreaterThan(0);
 
@@ -3095,9 +3139,12 @@ describe('ActivityAnalyticsWidget', () => {
 
         await user.click(screen.getByRole('button', { name: 'Detalle' }));
 
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
+
         expect(screen.getAllByText('cobertura incompleta').length).toBeGreaterThan(0);
         expect(screen.getAllByText('en curso').length).toBeGreaterThan(0);
-        expect(screen.getByText('2026-06-18 · Turno Noche (en curso)')).toBeInTheDocument();
+        expect(within(groupsChart).getByText('2026-06-18 · Turno Noche')).toBeInTheDocument();
+        expect(within(groupsChart).queryByText('2026-06-18 · Turno Noche (en curso)')).not.toBeInTheDocument();
         expect(screen.getByText('2026-06-19 · Turno Tarde')).toBeInTheDocument();
         expect(screen.getByText('2026-06-20 · sin turno')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
@@ -3317,13 +3364,17 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
+
         expect(screen.getByTestId('activity-analytics-group-partial-outline')).toBeInTheDocument();
-        expect(screen.getByText('24.0h')).toBeInTheDocument();
-        expect(screen.getByText('18.0h')).toBeInTheDocument();
-        expect(screen.getByText('12.0h')).toBeInTheDocument();
-        expect(screen.getByText('6.0h')).toBeInTheDocument();
+        expect(screen.getByText('24h')).toBeInTheDocument();
+        expect(screen.getByText('18h')).toBeInTheDocument();
+        expect(screen.getByText('12h')).toBeInTheDocument();
+        expect(screen.getByText('6h')).toBeInTheDocument();
         expect(screen.queryByText('10.0 h')).not.toBeInTheDocument();
         expect(screen.getAllByText('25%').length).toBeGreaterThan(0);
+        expect(within(groupsChart).getByText('2026-06-19')).toBeInTheDocument();
+        expect(within(groupsChart).queryByText('2026-06-19 (en curso)')).not.toBeInTheDocument();
     });
 
     it('shows an empty-series state when the endpoint returns no points', () => {
@@ -3980,11 +4031,22 @@ describe('ActivityAnalyticsWidget', () => {
             .getAllByTestId('activity-analytics-group-segment')
             .filter((segment) => Number(segment.getAttribute('height')) > 0);
         const productivityLabel = within(groupStack).getByTestId('activity-analytics-group-productivity');
+        const dateLabel = within(groupStack).getByText('2026-06-18');
         const topSegmentY = Math.min(...visibleSegments.map((segment) => Number(segment.getAttribute('y'))));
+        const baselineY = Math.max(...visibleSegments.map((segment) => Number(segment.getAttribute('y')) + Number(segment.getAttribute('height'))));
+        const chartHeight = Number(screen.getByTestId('activity-analytics-groups-chart').getAttribute('height'));
+        const firstYAxisTick = screen.getAllByTestId('activity-analytics-y-axis-tick')[0];
+        const hoverLayer = screen.getByTestId('hover-layer');
+        const marginLeft = Number(hoverLayer.getAttribute('data-margin-left'));
 
         expect(Number(productivityLabel.getAttribute('y'))).toBeLessThan(topSegmentY);
         expect(productivityLabel).toHaveAttribute('fill', 'var(--color-industrial-text)');
         expect(productivityLabel.getAttribute('style')).toContain('var(--font-chart)');
+        expect(Number(firstYAxisTick.getAttribute('x'))).toBe(marginLeft - 8);
+        expect(chartHeight - baselineY).toBe(24);
+        expect(Number(dateLabel.getAttribute('y'))).toBe(baselineY + 16);
+        expect(chartHeight - Number(dateLabel.getAttribute('y'))).toBe(8);
+        expect(dateLabel.getAttribute('style')).toContain('var(--font-chart)');
         expect(screen.queryByText('24.0 h')).not.toBeInTheDocument();
     });
 
@@ -4127,7 +4189,10 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
+        const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
+
         expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(2);
+        expect(within(groupsChart).getAllByText('Turno 1').length).toBeGreaterThan(0);
         expect(screen.queryByText('2026-06-19 · Turno 1 (en curso)')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-group-partial-outline')).not.toBeInTheDocument();
 
