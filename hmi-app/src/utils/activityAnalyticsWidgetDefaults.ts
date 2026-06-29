@@ -1,10 +1,15 @@
 import type {
+    ActivityAnalyticsProdTrendBandsDisplayOptions,
     ActivityAnalyticsAlphaPair,
     ActivityAnalyticsDisplayOptions,
+    ActivityAnalyticsGroupBarWidths,
     ActivityAnalyticsSurfaceEffects,
     ActivityAnalyticsStateGradient,
     ActivityAnalyticsStateGradientKey,
+    ActivityAnalyticsTrendBandAlphaTriple,
+    ActivityAnalyticsTrendBandBlendMode,
 } from '../domain/admin.types';
+import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../domain/admin.types';
 import {
     ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS,
     type ActivityAnalyticsDisplayMode,
@@ -19,8 +24,9 @@ export const DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW = 0.15;
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW = 0.25;
 export const DEFAULT_ACTIVITY_ANALYTICS_DISPLAY_MODE = 'kpis-and-bars' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 1;
-export const MIN_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 0.5;
+export const MIN_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 0.1;
 export const MAX_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 1.5;
+export const ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS = ['shift', 'day', 'week', 'month'] as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR = '#94a3b8';
 export const DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS: Record<
     ActivityAnalyticsStateGradientKey,
@@ -50,6 +56,9 @@ export const DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS: ActivityAnalyticsSurfaceE
     topCap: false,
     topCapGlow: 0,
 };
+export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS = [0, 50, 0] as const;
+export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE = 'overlay' as const;
+export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT = DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR;
 
 export { ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS };
 
@@ -64,10 +73,28 @@ export type ResolvedActivityAnalyticsVisualEffects = {
     donut: ActivityAnalyticsSurfaceEffects;
 };
 
+export type ResolvedActivityAnalyticsProdTrendBands = {
+    colors: [string | undefined, string | undefined, string | undefined];
+    alphas: [number, number, number];
+    blendMode: ActivityAnalyticsTrendBandBlendMode;
+};
+
 export type ResolvedActivityAnalyticsDisplayOptions = Required<Pick<
     ActivityAnalyticsDisplayOptions,
-    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode' | 'groupBarWidth' | 'coverageColor' | 'stateGradients' | 'stateGradientAlphas' | 'visualEffects'
+    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode' | 'groupBarWidth' | 'groupBarWidths' | 'coverageColor' | 'stateGradients' | 'stateGradientAlphas' | 'visualEffects'
 >> & Pick<ActivityAnalyticsDisplayOptions, 'start' | 'end'>;
+export type ResolvedActivityAnalyticsDisplayOptionsWithTrendBands = ResolvedActivityAnalyticsDisplayOptions & {
+    prodTrendBands: ResolvedActivityAnalyticsProdTrendBands;
+};
+
+function createDefaultActivityAnalyticsGroupBarWidths(): Record<typeof ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS[number], number> {
+    return {
+        shift: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
+        day: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
+        week: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
+        month: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
+    };
+}
 
 function cloneActivityAnalyticsStateGradients(
     stateGradients: Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsStateGradient>,
@@ -102,6 +129,12 @@ function resolveGradientSlot(
     return typeof value === 'string' && HEX_COLOR_PATTERN.test(value.trim())
         ? value.trim()
         : fallback;
+}
+
+function resolveOptionalHexColor(value: unknown): string | undefined {
+    return typeof value === 'string' && HEX_COLOR_PATTERN.test(value.trim())
+        ? value.trim().toLowerCase()
+        : undefined;
 }
 
 function resolveGradientTuple(
@@ -151,6 +184,21 @@ export function resolveActivityAnalyticsAlphaPair(
     return [
         clampActivityAnalyticsPercentage(alphaPair[0], fallback[0]),
         clampActivityAnalyticsPercentage(alphaPair[1], fallback[1]),
+    ];
+}
+
+export function resolveActivityAnalyticsTrendBandAlphaTriple(
+    alphaTriple: unknown,
+    fallback: readonly [number, number, number] = DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
+): [number, number, number] {
+    if (!Array.isArray(alphaTriple)) {
+        return [...fallback];
+    }
+
+    return [
+        clampActivityAnalyticsPercentage(alphaTriple[0], fallback[0]),
+        clampActivityAnalyticsPercentage(alphaTriple[1], fallback[1]),
+        clampActivityAnalyticsPercentage(alphaTriple[2], fallback[2]),
     ];
 }
 
@@ -207,6 +255,38 @@ export function resolveActivityAnalyticsVisualEffects(
     };
 }
 
+export function resolveActivityAnalyticsProdTrendBandColors(
+    rawColors?: ActivityAnalyticsProdTrendBandsDisplayOptions['colors'],
+): [string | undefined, string | undefined, string | undefined] {
+    if (!Array.isArray(rawColors)) {
+        return [undefined, undefined, undefined];
+    }
+
+    return [
+        resolveOptionalHexColor(rawColors[0]),
+        resolveOptionalHexColor(rawColors[1]),
+        resolveOptionalHexColor(rawColors[2]),
+    ];
+}
+
+export function resolveActivityAnalyticsProdTrendBandBlendMode(
+    rawBlendMode?: string,
+): ActivityAnalyticsTrendBandBlendMode {
+    return ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS.includes(rawBlendMode as ActivityAnalyticsTrendBandBlendMode)
+        ? rawBlendMode as ActivityAnalyticsTrendBandBlendMode
+        : DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE;
+}
+
+export function resolveActivityAnalyticsProdTrendBands(
+    rawProdTrendBands?: ActivityAnalyticsDisplayOptions['prodTrendBands'],
+): ResolvedActivityAnalyticsProdTrendBands {
+    return {
+        colors: resolveActivityAnalyticsProdTrendBandColors(rawProdTrendBands?.colors),
+        alphas: resolveActivityAnalyticsTrendBandAlphaTriple(rawProdTrendBands?.alphas),
+        blendMode: resolveActivityAnalyticsProdTrendBandBlendMode(rawProdTrendBands?.blendMode),
+    };
+}
+
 function normalizeActivityAnalyticsDisplayMode(
     displayMode?: string,
 ): ActivityAnalyticsDisplayMode {
@@ -228,6 +308,26 @@ export function clampActivityAnalyticsGroupBarWidth(groupBarWidth?: number): num
     );
 }
 
+export function resolveActivityAnalyticsGroupBarWidths(
+    groupBarWidths: ActivityAnalyticsGroupBarWidths | undefined,
+    legacyGroupBarWidth?: number,
+): Record<typeof ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS[number], number> {
+    const fallbackWidth = clampActivityAnalyticsGroupBarWidth(legacyGroupBarWidth);
+
+    return ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS.reduce<Record<typeof ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS[number], number>>((resolved, groupBy) => {
+        resolved[groupBy] = clampActivityAnalyticsGroupBarWidth(groupBarWidths?.[groupBy] ?? fallbackWidth);
+        return resolved;
+    }, createDefaultActivityAnalyticsGroupBarWidths());
+}
+
+export function resolveActivityAnalyticsGroupBarWidthForGroup(
+    groupBy: typeof ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS[number],
+    groupBarWidths: ActivityAnalyticsGroupBarWidths | undefined,
+    legacyGroupBarWidth?: number,
+): number {
+    return resolveActivityAnalyticsGroupBarWidths(groupBarWidths, legacyGroupBarWidth)[groupBy];
+}
+
 export function createDefaultActivityAnalyticsDisplayOptions(): ActivityAnalyticsDisplayOptions {
     return {
         range: DEFAULT_ACTIVITY_ANALYTICS_RANGE,
@@ -236,9 +336,14 @@ export function createDefaultActivityAnalyticsDisplayOptions(): ActivityAnalytic
         prodThresholdKw: DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         displayMode: normalizeActivityAnalyticsDisplayMode(),
         groupBarWidth: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
+        groupBarWidths: createDefaultActivityAnalyticsGroupBarWidths(),
         coverageColor: DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
         stateGradients: cloneActivityAnalyticsStateGradients(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS),
         stateGradientAlphas: cloneActivityAnalyticsStateGradientAlphas(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS),
+        prodTrendBands: {
+            alphas: [...DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS] as ActivityAnalyticsTrendBandAlphaTriple,
+            blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+        },
         visualEffects: {
             groupedBars: cloneActivityAnalyticsSurfaceEffects(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS),
             donut: cloneActivityAnalyticsSurfaceEffects(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS),
@@ -248,13 +353,18 @@ export function createDefaultActivityAnalyticsDisplayOptions(): ActivityAnalytic
 
 export function resolveActivityAnalyticsDisplayOptions(
     displayOptions?: ActivityAnalyticsDisplayOptions,
-): ResolvedActivityAnalyticsDisplayOptions {
+): ResolvedActivityAnalyticsDisplayOptionsWithTrendBands {
     const displayRules = resolveActivityAnalyticsDisplayRules({
         range: displayOptions?.range,
         start: displayOptions?.start,
         end: displayOptions?.end,
         groupBy: displayOptions?.groupBy,
     });
+
+    const resolvedGroupBarWidths = resolveActivityAnalyticsGroupBarWidths(
+        displayOptions?.groupBarWidths,
+        displayOptions?.groupBarWidth,
+    );
 
     return {
         range: displayRules.range,
@@ -264,10 +374,12 @@ export function resolveActivityAnalyticsDisplayOptions(
         setupThresholdKw: displayOptions?.setupThresholdKw ?? DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW,
         prodThresholdKw: displayOptions?.prodThresholdKw ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         displayMode: normalizeActivityAnalyticsDisplayMode(displayOptions?.displayMode),
-        groupBarWidth: clampActivityAnalyticsGroupBarWidth(displayOptions?.groupBarWidth),
+        groupBarWidth: resolvedGroupBarWidths[displayRules.groupBy],
+        groupBarWidths: resolvedGroupBarWidths,
         coverageColor: resolveActivityAnalyticsCoverageColor(displayOptions?.coverageColor),
         stateGradients: resolveActivityAnalyticsStateGradients(displayOptions?.stateGradients),
         stateGradientAlphas: resolveActivityAnalyticsStateGradientAlphas(displayOptions?.stateGradientAlphas),
+        prodTrendBands: resolveActivityAnalyticsProdTrendBands(displayOptions?.prodTrendBands),
         visualEffects: resolveActivityAnalyticsVisualEffects(displayOptions?.visualEffects),
     };
 }

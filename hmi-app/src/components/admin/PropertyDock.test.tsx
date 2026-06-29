@@ -9,6 +9,9 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
+    DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+    DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
 } from '../../utils/activityAnalyticsWidgetDefaults';
@@ -946,23 +949,106 @@ describe('PropertyDock activity-analytics', () => {
         fireEvent.change(groupBarWidthSlider, { target: { value: '1.4' } });
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
-            groupBarWidth: 1.4,
+            groupBarWidths: {
+                week: 1.4,
+            },
         });
         expect(within(getSection('Agrupación')).getByText('×1.4')).toBeInTheDocument();
 
         fireEvent.change(groupBarWidthSlider, { target: { value: '9' } });
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
-            groupBarWidth: 1.5,
+            groupBarWidths: {
+                week: 1.5,
+            },
         });
         expect(within(getSection('Agrupación')).getByText('×1.5')).toBeInTheDocument();
 
         fireEvent.change(groupBarWidthSlider, { target: { value: '0.1' } });
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
-            groupBarWidth: 0.5,
+            groupBarWidths: {
+                week: 0.1,
+            },
         });
-        expect(within(getSection('Agrupación')).getByText('×0.5')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByText('×0.1')).toBeInTheDocument();
+    });
+
+    it('edits and restores activity analytics bar width independently per selected group', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '12m',
+                groupBy: 'shift',
+                groupBarWidths: {
+                    shift: 0.3,
+                    day: 0.8,
+                    week: 1.1,
+                    month: 1.4,
+                },
+            },
+        });
+
+        const getSlider = () => within(getSection('Agrupación')).getByRole('slider');
+
+        expect(getSlider()).toHaveValue('0.3');
+        expect(within(getSection('Agrupación')).getByText('×0.3')).toBeInTheDocument();
+
+        fireEvent.change(getSlider(), { target: { value: '0.2' } });
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            groupBarWidths: {
+                shift: 0.2,
+                day: 0.8,
+                week: 1.1,
+                month: 1.4,
+            },
+        });
+
+        await user.click(getFieldButtonInSection('Agrupación', 'Grupo'));
+        await user.click(screen.getByRole('button', { name: 'Mes' }));
+        expect(getSlider()).toHaveValue('1.4');
+        expect(within(getSection('Agrupación')).getByText('×1.4')).toBeInTheDocument();
+
+        fireEvent.change(getSlider(), { target: { value: '1.2' } });
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            groupBy: 'month',
+            groupBarWidths: {
+                shift: 0.2,
+                day: 0.8,
+                week: 1.1,
+                month: 1.2,
+            },
+        });
+
+        await user.click(getFieldButtonInSection('Agrupación', 'Grupo'));
+        await user.click(screen.getByRole('button', { name: 'Turno' }));
+        expect(getSlider()).toHaveValue('0.2');
+        expect(within(getSection('Agrupación')).getByText('×0.2')).toBeInTheDocument();
+    });
+
+    it('uses legacy global bar width as fallback seed when per-group widths are missing', () => {
+        renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '30d',
+                groupBy: 'day',
+                groupBarWidth: 0.4,
+            },
+        });
+
+        const groupBarWidthSlider = within(getSection('Agrupación')).getByRole('slider');
+        expect(groupBarWidthSlider).toHaveValue('0.4');
+        expect(within(getSection('Agrupación')).getByText('×0.4')).toBeInTheDocument();
     });
 
     it('renders activity analytics visual cards with paired color, hex, alpha, and independent surface effect defaults', () => {
@@ -997,6 +1083,14 @@ describe('PropertyDock activity-analytics', () => {
         expect(within(visualSection).getByLabelText('Cobertura / sin datos color')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
         expect(within(visualSection).getByLabelText('Cobertura / sin datos hex')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
         expect(within(visualSection).getByLabelText('Producción alfa final')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[1]));
+
+        expect(within(visualSection).getByText('Bandas tendencia % PROD')).toBeInTheDocument();
+        expect(within(visualSection).getByLabelText('Bandas tendencia color superior')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT);
+        expect(within(visualSection).getByLabelText('Bandas tendencia hex superior')).toHaveValue('');
+        expect(within(visualSection).getByLabelText('Bandas tendencia alfa superior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[0]));
+        expect(within(visualSection).getByLabelText('Bandas tendencia alfa centro')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[1]));
+        expect(within(visualSection).getByLabelText('Bandas tendencia alfa inferior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[2]));
+        expect(within(visualSection).getByRole('button', { name: 'Blend mode' })).toHaveTextContent(/overlay/i);
 
         expect(within(visualSection).getByLabelText('Barras agrupadas glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.glow));
         expect(within(visualSection).getByLabelText('Barras agrupadas blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.blur));
@@ -1063,6 +1157,63 @@ describe('PropertyDock activity-analytics', () => {
         expect(screen.getByLabelText('Cobertura / sin datos color')).toHaveValue('#abcdef');
     });
 
+    it('updates prod trend band colors, alphas, and blend mode without mutating unrelated visual settings', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                coverageColor: '#123456',
+                prodTrendBands: {
+                    colors: ['#111111', '#222222', '#333333'],
+                    alphas: [10, 20, 30],
+                    blendMode: 'overlay',
+                },
+            },
+        });
+
+        const trendBandMiddleHex = screen.getByLabelText('Bandas tendencia hex centro');
+        await user.clear(trendBandMiddleHex);
+        await user.type(trendBandMiddleHex, '#abcdef');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            coverageColor: '#123456',
+            prodTrendBands: {
+                colors: ['#111111', '#abcdef', '#333333'],
+                alphas: [10, 20, 30],
+                blendMode: 'overlay',
+            },
+        });
+
+        const trendBandBottomAlpha = screen.getByLabelText('Bandas tendencia alfa inferior');
+        fireEvent.change(trendBandBottomAlpha, { target: { value: '45' } });
+        fireEvent.blur(trendBandBottomAlpha);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            coverageColor: '#123456',
+            prodTrendBands: {
+                colors: ['#111111', '#abcdef', '#333333'],
+                alphas: [10, 20, 45],
+                blendMode: 'overlay',
+            },
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Blend mode' }));
+        await user.click(screen.getByRole('button', { name: 'Normal' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            coverageColor: '#123456',
+            prodTrendBands: {
+                colors: ['#111111', '#abcdef', '#333333'],
+                alphas: [10, 20, 45],
+                blendMode: 'normal',
+            },
+        });
+    });
+
     it('resets invalid hex drafts on blur without mutating persisted options', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'activity-analytics',
@@ -1107,6 +1258,9 @@ describe('PropertyDock activity-analytics', () => {
                 prodThresholdKw: 0.4,
                 displayMode: 'bars-only',
                 groupBarWidth: 1.3,
+                groupBarWidths: {
+                    week: 1.3,
+                },
                 stateGradientAlphas: {
                     prod: [90, 80],
                     setup: [70, 60],
@@ -1143,6 +1297,9 @@ describe('PropertyDock activity-analytics', () => {
             prodThresholdKw: 0.4,
             displayMode: 'bars-only',
             groupBarWidth: 1.3,
+            groupBarWidths: {
+                week: 1.3,
+            },
             stateGradientAlphas: {
                 prod: [90, 80],
                 setup: [70, 60],

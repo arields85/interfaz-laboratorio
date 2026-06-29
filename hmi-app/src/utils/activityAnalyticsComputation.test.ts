@@ -292,42 +292,42 @@ describe('computeActivityAnalytics', () => {
         expect(rollingDayResult.grouped[0]?.bucketKey).toBe('day:2026-06-12');
         expect(rollingDayResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'day:2026-06-18',
-            label: '2026-06-18 (en curso)',
+            label: '18/06 (en curso)',
             isInProgress: true,
         });
         expect(rollingThirtyDayResult.grouped[0]?.bucketKey).toBe('day:2026-05-21');
         expect(rollingThirtyDayResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'day:2026-06-19',
-            label: '2026-06-19 (en curso)',
+            label: '19/06 (en curso)',
             isInProgress: true,
         });
         expect(rollingWeekResult.grouped[0]?.bucketKey).toBe('week:2026-06-15');
         expect(rollingWeekResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'week:2026-07-06',
-            label: 'Week 2026-07-06 (en curso)',
+            label: '06/07 (en curso)',
             isInProgress: true,
         });
         expect(rollingMonthResult.grouped[0]?.bucketKey).toBe('month:2025-08');
         expect(rollingMonthResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'month:2026-07',
-            label: '2026-07 (en curso)',
+            label: 'jul 26 (en curso)',
             isInProgress: true,
         });
         expect(customWindowResult.grouped[0]?.bucketKey).toBe('day:2026-06-11');
         expect(customWindowResult.grouped[0]).toMatchObject({
             bucketKey: 'day:2026-06-11',
-            label: '2026-06-11',
+            label: '11/06',
             isInProgress: false,
         });
         expect(customWindowResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'day:2026-06-13',
-            label: '2026-06-13',
+            label: '13/06',
             isInProgress: false,
             productivityLabel: 'cobertura incompleta',
         });
         expect(negativePresetGroupResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'week:2026-06-15',
-            label: 'Week 2026-06-15',
+            label: '15/06',
             isInProgress: false,
         });
         expect(rollingTwentyFourHourShiftResult.grouped.map((bucket) => bucket.bucketKey)).toEqual([
@@ -337,7 +337,7 @@ describe('computeActivityAnalytics', () => {
         ]);
         expect(rollingTwentyFourHourShiftResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-19',
-            label: '2026-06-19 · Turno A (en curso)',
+            label: '19/06 · Turno A (en curso)',
             isInProgress: true,
         });
         expect(rollingSevenDayShiftResult.grouped).toHaveLength(21);
@@ -349,14 +349,14 @@ describe('computeActivityAnalytics', () => {
         expect(rollingSevenDayShiftResult.grouped.some((bucket) => bucket.bucketKey === 'shift:shift-a:2026-06-12')).toBe(false);
         expect(rollingSevenDayShiftResult.grouped.at(-1)).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-19',
-            label: '2026-06-19 · Turno A (en curso)',
+            label: '19/06 · Turno A (en curso)',
             startMs: Date.parse('2026-06-19T06:00:00.000Z'),
             endMs: Date.parse('2026-06-19T10:00:00.000Z'),
             isInProgress: true,
         });
         expect(negativeShiftPresetResult.grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-18',
-            label: '2026-06-18 · Turno A',
+            label: '18/06 · Turno A',
             startMs: Date.parse('2026-06-18T09:00:00.000Z'),
             endMs: Date.parse('2026-06-18T14:00:00.000Z'),
         });
@@ -389,14 +389,14 @@ describe('computeActivityAnalytics', () => {
 
         expect(shiftRows).toHaveLength(2);
         expect(shiftRows[0]).toMatchObject({
-            label: '2026-06-20 · Turno C',
+            label: '20/06 · Turno C',
             productivityLabel: 'sin datos',
         });
         expect(result.comparison.best?.label).toBe('sin comparación');
         expect(result.comparison.worst?.label).toBe('sin comparación');
         expect(result.summaryRows.filter((row) => row.label.includes('Turno C')).map((row) => row.label)).toEqual([
-            '2026-06-20 · Turno C',
-            '2026-06-22 · Turno C',
+            '20/06 · Turno C',
+            '22/06 · Turno C',
         ]);
     });
 
@@ -428,22 +428,22 @@ describe('computeActivityAnalytics', () => {
         expect(result.grouped).toMatchObject([
             {
                 bucketKey: 'shift:shift-a:2026-06-18',
-                label: '2026-06-18 · Turno A',
+                label: '18/06 · Turno A',
                 coverageRatio: 0.95,
                 productivityRatio: null,
                 productivityLabel: 'sin datos',
             },
             {
                 bucketKey: 'shift:shift-b:2026-06-18',
-                label: '2026-06-18 · Turno B',
+                label: '18/06 · Turno B',
                 coverageRatio: 1,
                 productivityRatio: 0.5,
                 productivityLabel: '50%',
             },
         ]);
         expect(result.comparison).toEqual({
-            best: { bucketKey: 'shift:shift-a:2026-06-18', label: '2026-06-18 · Turno A' },
-            worst: { bucketKey: 'shift:shift-b:2026-06-18', label: '2026-06-18 · Turno B' },
+            best: { bucketKey: 'shift:shift-a:2026-06-18', label: '18/06 · Turno A' },
+            worst: { bucketKey: 'shift:shift-b:2026-06-18', label: '18/06 · Turno B' },
         });
     });
 
@@ -501,8 +501,8 @@ describe('computeActivityAnalytics', () => {
             },
         ]);
         expect(result.comparison).toEqual({
-            best: { bucketKey: 'shift:shift-b:2026-06-18', label: '2026-06-18 · Turno B' },
-            worst: { bucketKey: 'shift:shift-c:2026-06-18', label: '2026-06-18 · Turno C' },
+            best: { bucketKey: 'shift:shift-b:2026-06-18', label: '18/06 · Turno B' },
+            worst: { bucketKey: 'shift:shift-c:2026-06-18', label: '18/06 · Turno C' },
         });
     });
 
@@ -533,14 +533,14 @@ describe('computeActivityAnalytics', () => {
         expect(result.grouped).toMatchObject([
             {
                 bucketKey: 'day:2026-06-17',
-                label: '2026-06-17',
+                label: '17/06',
                 coverageRatio: 1,
                 productivityRatio: 0.5,
                 productivityLabel: '50%',
             },
             {
                 bucketKey: 'day:2026-06-18',
-                label: '2026-06-18',
+                label: '18/06',
                 coverageRatio: 1,
                 productivityRatio: null,
                 productivityLabel: 'cobertura incompleta',
@@ -574,15 +574,15 @@ describe('computeActivityAnalytics', () => {
             nowMs: Date.parse('2026-06-18T18:00:00.000Z'),
         });
 
-        expect(result.grouped.some((bucket) => bucket.label === '2026-06-18 (en curso)' && bucket.isInProgress && bucket.productivityRatio === null)).toBe(true);
-        expect(result.grouped.find((bucket) => bucket.label === '2026-06-17')?.productivityRatio).not.toBeNull();
-        expect(result.grouped.find((bucket) => bucket.label === '2026-06-18 (en curso)')).toMatchObject({
-            label: '2026-06-18 (en curso)',
+        expect(result.grouped.some((bucket) => bucket.label === '18/06 (en curso)' && bucket.isInProgress && bucket.productivityRatio === null)).toBe(true);
+        expect(result.grouped.find((bucket) => bucket.label === '17/06')?.productivityRatio).not.toBeNull();
+        expect(result.grouped.find((bucket) => bucket.label === '18/06 (en curso)')).toMatchObject({
+            label: '18/06 (en curso)',
             isInProgress: true,
             productivityRatio: null,
             productivityLabel: 'en curso',
         });
-        expect(result.comparison.best?.label).not.toBe('2026-06-18 (en curso)');
-        expect(result.comparison.worst?.label).not.toBe('2026-06-18 (en curso)');
+        expect(result.comparison.best?.label).not.toBe('18/06 (en curso)');
+        expect(result.comparison.worst?.label).not.toBe('18/06 (en curso)');
     });
 });

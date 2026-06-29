@@ -259,7 +259,9 @@ describe('WidgetRenderer', () => {
 
         expect(screen.getByText('Análisis de Actividad')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-summary-text')).toBeInTheDocument();
-        expect(screen.getByTestId('activity-analytics-runtime-secondary-controls')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-runtime-controls')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Mes' })).toBeDisabled();
         expect(screen.queryByText('hidden')).not.toBeInTheDocument();
     });
 
@@ -387,10 +389,11 @@ describe('WidgetRenderer', () => {
             />,
         );
 
-        expect(screen.queryByRole('button', { name: 'Semana' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Mes' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Mes' })).toBeDisabled();
         expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'Semana' })).toHaveAttribute('aria-pressed', 'false');
 
         await user.click(screen.getByRole('button', { name: 'Turno' }));
 

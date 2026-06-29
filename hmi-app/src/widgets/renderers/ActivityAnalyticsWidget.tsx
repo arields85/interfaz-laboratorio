@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { AlertTriangle, BarChart2, Loader2, PlugZap } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
@@ -8,8 +8,6 @@ import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredConte
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
-import WidgetHeader from '../../components/ui/WidgetHeader';
-import WidgetSegmentedControl from '../../components/ui/WidgetSegmentedControl';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
@@ -31,11 +29,18 @@ import {
 } from '../../utils/activityAnalyticsVisualLayout';
 import {
     clampActivityAnalyticsGroupBarWidth,
+    resolveActivityAnalyticsGroupBarWidthForGroup,
     resolveActivityAnalyticsDisplayOptions,
     type ResolvedActivityAnalyticsVisualEffects,
 } from '../../utils/activityAnalyticsWidgetDefaults';
 import { buildActivityAnalyticsSummarySegments, type ActivityAnalyticsSummarySegmentBar } from '../../utils/activityAnalyticsSummarySegments';
-import { computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont } from '../../utils/chartHelpers';
+import {
+    buildAreaPath,
+    computeVisibleLabelIndices,
+    getChartLetterSpacingPx,
+    getChartTextFont,
+    smoothPath,
+} from '../../utils/chartHelpers';
 
 interface ActivityAnalyticsWidgetProps {
     widget: ActivityAnalyticsWidgetConfig;
@@ -53,6 +58,24 @@ interface ActivityAnalyticsRuntimeViewState {
     selectionOverride: ResolvedActivityAnalyticsDisplayOptions | null;
     runtimeGroupBy: RuntimeActivityAnalyticsGroupBy;
     turnoMode: 'summary' | 'detail';
+}
+
+interface ActivityAnalyticsGroupsTitleInput {
+    range: ResolvedActivityAnalyticsDisplayOptions['range'];
+    groupBy: ResolvedActivityAnalyticsDisplayOptions['groupBy'];
+}
+
+interface ActivityAnalyticsGroupsChartLayout {
+    chartHeight: number;
+    chromeHeight: number;
+    compactTurnoLayout: boolean;
+    chartMargin: {
+        top: number;
+        right: number;
+        bottom: number;
+        left: number;
+    };
+    productivityLabelClearanceTop: number;
 }
 
 const RANGE_OPTIONS: Array<{ value: ResolvedActivityAnalyticsDisplayOptions['range']; label: string }> = [
@@ -96,12 +119,32 @@ const WIDGET_VALUE_TEXT_STYLE: CSSProperties = {
     letterSpacing: 'var(--tracking-widget-value-activity-analytics)',
 };
 
-const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden p-5';
+const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden px-5 pt-5 pb-3';
 const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border';
 const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border';
 const GROUPS_PANEL_CLASS = `${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col px-0 pb-0 pt-2`;
 const GROUPS_CHART_AREA_SHELL_CLASS = 'mt-2 flex min-h-0 flex-1 flex-col px-5 pb-5';
 const GROUPS_CHART_VIEWPORT_CLASS = 'relative flex-1 min-h-0 -mx-3 -mb-3';
+const PROD_TREND_PANEL_CLASS = `${ANALYTICS_PANEL_CLASS} flex shrink-0 flex-col px-0 pb-0 pt-2`;
+const PROD_TREND_PANEL_HEIGHT_PX = 168;
+const PROD_TREND_CHART_HEIGHT_PX = 118;
+const PROD_TREND_CHART_MIN_HEIGHT_PX = 24;
+const PROD_TREND_COMPACT_PANEL_BREAKPOINT_PX = 96;
+const PROD_TREND_COMPACT_CHROME_HEIGHT_PX = {
+    panelTopPadding: 8,
+    headingRow: 18,
+    chartGapAboveViewport: 4,
+    chartShellBottomPadding: 8,
+} as const;
+const PROD_TREND_COMPACT_CHART_MIN_HEIGHT_PX = 34;
+const PROD_TREND_COMPACT_CHROME_BUDGET_PX = PROD_TREND_COMPACT_CHROME_HEIGHT_PX.panelTopPadding
+    + PROD_TREND_COMPACT_CHROME_HEIGHT_PX.headingRow
+    + PROD_TREND_COMPACT_CHROME_HEIGHT_PX.chartGapAboveViewport
+    + PROD_TREND_COMPACT_CHROME_HEIGHT_PX.chartShellBottomPadding;
+const PROD_TREND_PANEL_MIN_HEIGHT_PX = PROD_TREND_COMPACT_CHROME_BUDGET_PX + PROD_TREND_COMPACT_CHART_MIN_HEIGHT_PX;
+const PROD_TREND_PANEL_CHROME_HEIGHT_PX = PROD_TREND_PANEL_HEIGHT_PX - PROD_TREND_CHART_HEIGHT_PX;
+const PROD_TREND_CHART_MARGIN = { top: 8, right: 12, bottom: 24, left: 38 } as const;
+const PROD_TREND_COMPACT_CHART_MARGIN = { top: 4, right: 10, bottom: 14, left: 32 } as const;
 const ACTIVITY_ANALYTICS_STATE_KEYS = ['prod', 'setup', 'stopped'] as const;
 const SUMMARY_CHART_MAX_WIDTH_PX = 480;
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
@@ -142,7 +185,7 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
             detailPanelWidthRatio: 0.31,
             detailPanelWidthMinPx: 124,
             detailPanelWidthMaxPx: 136,
-            centerYRatio: 0.43,
+            centerYRatio: 0.5,
             outerRadiusInsetPx: 4,
             outerRadiusMaxPx: 88,
             detailValueBaselineYPx: 12,
@@ -155,7 +198,7 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
             detailPanelWidthRatio: 0.33,
             detailPanelWidthMinPx: 124,
             detailPanelWidthMaxPx: 152,
-            centerYRatio: 0.45,
+            centerYRatio: 0.5,
             outerRadiusInsetPx: 8,
             outerRadiusMaxPx: 104,
             detailValueBaselineYPx: 12,
@@ -168,6 +211,34 @@ const TOP_REGION_SHARED_HEIGHT_RULES = {
     heightRatio: 0.66,
     fixedPx: 224,
 } as const;
+const TOP_REGION_COLUMN_GAP_PX = 12;
+const ANALYTICS_VERTICAL_PANEL_GAP_PX = 12;
+const ANALYTICS_FIXED_VERTICAL_GAPS_PX = ANALYTICS_VERTICAL_PANEL_GAP_PX * 2;
+const COMPACT_GROUPS_PRIORITY_HEIGHT_PX = 124;
+const COMPACT_STACK_PRIORITY_BREAKPOINT_PX = PROD_TREND_PANEL_HEIGHT_PX + COMPACT_GROUPS_PRIORITY_HEIGHT_PX;
+const GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX = {
+    panelTopPadding: 8,
+    headingRow: 24,
+    chartGapAboveViewport: 8,
+    chartShellBottomPadding: 20,
+    turnoControl: 32,
+} as const;
+const GROUPS_PANEL_COMPACT_TURNO_CHROME_HEIGHT_PX = {
+    panelTopPadding: 8,
+    headingPrimaryRow: 24,
+    headingLegendRow: 16,
+    chartGapAboveViewport: 4,
+    chartShellBottomPadding: 8,
+} as const;
+const GROUPS_PANEL_STANDARD_CHROME_BUDGET_PX = GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.panelTopPadding
+    + GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.headingRow
+    + GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.chartGapAboveViewport
+    + GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.chartShellBottomPadding;
+const GROUPS_PANEL_COMPACT_TURNO_CHROME_BUDGET_PX = GROUPS_PANEL_COMPACT_TURNO_CHROME_HEIGHT_PX.panelTopPadding
+    + GROUPS_PANEL_COMPACT_TURNO_CHROME_HEIGHT_PX.headingPrimaryRow
+    + GROUPS_PANEL_COMPACT_TURNO_CHROME_HEIGHT_PX.headingLegendRow
+    + GROUPS_PANEL_COMPACT_TURNO_CHROME_HEIGHT_PX.chartGapAboveViewport
+    + GROUPS_PANEL_COMPACT_TURNO_CHROME_HEIGHT_PX.chartShellBottomPadding;
 const SUMMARY_PANEL_HEIGHT_CHROME_PX = 10;
 const COMPARISON_BAR_WIDTH_CLASS = 'w-2';
 const COMPARISON_LAYOUT_RULES = {
@@ -211,15 +282,30 @@ const GROUPED_BAR_GAP_RULES = {
 } as const;
 const GROUPED_CHART_GEOMETRY = {
     compress: {
-        height: 276,
+        maxHeight: 276,
         chartMargin: { top: 8, right: 12, bottom: 24, left: 38 },
         productivityLabelClearanceTop: 22,
     },
     default: {
-        height: 292,
+        maxHeight: 292,
         chartMargin: { top: 8, right: 12, bottom: 24, left: 38 },
         productivityLabelClearanceTop: 22,
     },
+} as const;
+const GROUPED_CHART_MIN_HEIGHT_PX = {
+    fit: 40,
+    compress: 36,
+    scroll: 36,
+} as const;
+const GROUPS_MIN_CHART_MODE_HEIGHT_PX = {
+    fit: GROUPED_CHART_MIN_HEIGHT_PX.fit + GROUPS_PANEL_STANDARD_CHROME_BUDGET_PX,
+    compress: GROUPED_CHART_MIN_HEIGHT_PX.compress + GROUPS_PANEL_STANDARD_CHROME_BUDGET_PX,
+    scroll: GROUPED_CHART_MIN_HEIGHT_PX.scroll + GROUPS_PANEL_STANDARD_CHROME_BUDGET_PX,
+} as const;
+const GROUPS_MIN_VISUAL_HEIGHT_RULES = {
+    minPx: 56,
+    maxPx: 88,
+    heightRatio: 0.16,
 } as const;
 type SummaryDetailKey = 'prod' | 'setup' | 'stopped' | 'coverage';
 type ActivityAnalyticsGradientStateKey = typeof ACTIVITY_ANALYTICS_STATE_KEYS[number];
@@ -317,8 +403,17 @@ export default function ActivityAnalyticsWidget({
         selectedDisplayOptions.coverageColor,
     );
     const activeGroupBy = activeDisplayRules.groupBy;
+    const activeGroupBarWidth = resolveActivityAnalyticsGroupBarWidthForGroup(
+        activeGroupBy,
+        selectedDisplayOptions.groupBarWidths,
+        selectedDisplayOptions.groupBarWidth,
+    );
     const showTurnoModeControl = activeGroupBy === 'shift' && activeDisplayRules.range === '7d';
     const activeTurnoMode = activeDisplayRules.turnoDetailEligible ? runtimeViewState.turnoMode : 'summary';
+    const groupsTitle = resolveActivityAnalyticsGroupsTitle({
+        range: activeDisplayRules.range,
+        groupBy: activeGroupBy,
+    });
 
     if (runtimeGroupBy !== null && runtimeGroupBy !== activeGroupBy) {
         setRuntimeViewState((current) => ({
@@ -449,24 +544,146 @@ export default function ActivityAnalyticsWidget({
         };
     }, [groupedCount]);
 
-    const visualLayout = resolveActivityAnalyticsVisualLayout({
-        width: analyticsBodySize?.width ?? 640,
-        height: analyticsBodySize?.height ?? 420,
+    const analyticsBodyWidth = analyticsBodySize?.width ?? 640;
+    const analyticsBodyHeight = analyticsBodySize?.height ?? 420;
+    const topRegionSharedHeight = resolveTopRegionSharedHeight({
+        containerHeight: analyticsBodyHeight,
+    });
+    const prodTrendPanelHeight = resolveProdTrendPanelHeight({
+        containerHeight: analyticsBodyHeight,
+        topRegionHeight: topRegionSharedHeight,
+    });
+    const groupsHeightBudget = resolveGroupsHeightBudget({
+        containerHeight: analyticsBodyHeight,
+        topRegionHeight: topRegionSharedHeight,
+        prodTrendPanelHeight,
+    });
+    const summaryVisualLayout = resolveActivityAnalyticsVisualLayout({
+        width: analyticsBodyWidth,
+        height: analyticsBodyHeight,
         groupCount: groupedCount,
         groupBy: activeGroupBy,
         range: activeDisplayOptions.range,
         turnoMode: activeTurnoMode,
     });
+    const groupsVisualLayout = resolveGroupsVisualLayout({
+        width: analyticsBodyWidth,
+        height: groupsHeightBudget,
+        groupCount: groupedCount,
+        groupBy: activeGroupBy,
+        range: activeDisplayOptions.range,
+        turnoMode: activeTurnoMode,
+    });
+    const groupsChartLayout = resolveGroupsChartLayout({
+        panelHeight: groupsHeightBudget,
+        density: groupsVisualLayout.density,
+        showTurnoModeControl,
+    });
+    const visualLayout: ActivityAnalyticsVisualLayout = {
+        ...summaryVisualLayout,
+        groups: groupsVisualLayout,
+    };
 
     const header = (
-        <WidgetHeader
-            title={widget.title ?? 'Análisis de Actividad'}
-            icon={BarChart2}
-            iconColor="var(--color-widget-icon)"
-            iconPosition="right"
-            subtitle="Distribución"
-            className="min-w-0 shrink-0"
-        />
+        <div className="grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] -translate-y-1 gap-y-0 min-w-0 shrink-0">
+            <div className="row-start-1 flex items-center justify-between gap-3">
+                <span className="min-w-0 flex-1 truncate uppercase text-industrial-muted group-hover:text-white transition-colors">
+                    {widget.title ?? 'Análisis de Actividad'}
+                </span>
+
+                <div className="flex shrink-0 items-center gap-4">
+                    <div
+                        data-testid="activity-analytics-runtime-controls"
+                        className="flex items-center gap-2.5"
+                    >
+                        <div
+                            data-testid="activity-analytics-runtime-range-selector"
+                            className="flex flex-nowrap items-center justify-end gap-0.5"
+                        >
+                            {RANGE_OPTIONS.map((option) => {
+                                const isActive = option.value === activeDisplayOptions.range;
+
+                                return (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        aria-pressed={isActive}
+                                        onClick={() => {
+                                            const nextDisplayOptions = {
+                                                ...widget.displayOptions,
+                                                ...activeDisplayOptions,
+                                                range: option.value,
+                                                start: undefined,
+                                                end: undefined,
+                                            } satisfies ResolvedActivityAnalyticsDisplayOptions;
+
+                                            setRuntimeViewState((current) => ({
+                                                ...current,
+                                                selectionOverride: nextDisplayOptions,
+                                                turnoMode: 'summary',
+                                            }));
+                                            onPersistDisplayOptions?.({
+                                                range: option.value,
+                                                start: undefined,
+                                                end: undefined,
+                                            });
+                                        }}
+                                        className={getRuntimeControlButtonClass(isActive)}
+                                    >
+                                        {option.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <div
+                            data-testid="activity-analytics-runtime-group-selector"
+                            className="flex flex-nowrap items-center justify-end gap-0.5 border-l border-industrial-border pl-2.5"
+                        >
+                            {GROUP_BY_OPTIONS.map((option) => {
+                                const isAvailable = activeDisplayRules.allowedGroups.includes(option.value);
+                                const isActive = option.value === activeGroupBy;
+
+                                return (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        disabled={!isAvailable}
+                                        aria-disabled={!isAvailable}
+                                        aria-pressed={isActive}
+                                        onClick={() => {
+                                            if (!isAvailable) {
+                                                return;
+                                            }
+
+                                            setRuntimeViewState((current) => ({
+                                                ...current,
+                                                runtimeGroupBy: option.value,
+                                                turnoMode: option.value === 'shift' ? current.turnoMode : 'summary',
+                                            }));
+                                        }}
+                                        className={getRuntimeControlButtonClass(isActive, !isAvailable)}
+                                    >
+                                        {option.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <BarChart2
+                        size={24}
+                        strokeWidth={2}
+                        className="shrink-0 opacity-70 group-hover:opacity-100 transition-opacity"
+                        style={{ color: 'var(--color-widget-icon)' }}
+                    />
+                </div>
+            </div>
+
+            <span className="row-start-2 min-w-0 -mt-0.5 invisible truncate uppercase" aria-hidden="true">
+                &nbsp;
+            </span>
+        </div>
     );
 
     if (machineBinding.status === 'missing') {
@@ -564,61 +781,6 @@ export default function ActivityAnalyticsWidget({
 
     return (
         <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
-            <WidgetSegmentedControl
-                options={RANGE_OPTIONS}
-                value={activeDisplayOptions.range}
-                onChange={(nextRange) => {
-                    const nextDisplayOptions = {
-                        ...widget.displayOptions,
-                        ...activeDisplayOptions,
-                        range: nextRange,
-                        start: undefined,
-                        end: undefined,
-                    } satisfies ResolvedActivityAnalyticsDisplayOptions;
-
-                setRuntimeViewState((current) => ({
-                        ...current,
-                        selectionOverride: nextDisplayOptions,
-                        turnoMode: 'summary',
-                    }));
-                    onPersistDisplayOptions?.({
-                        range: nextRange,
-                        start: undefined,
-                        end: undefined,
-                    });
-                }}
-            >
-                <div
-                    data-testid="activity-analytics-runtime-secondary-controls"
-                    className="flex max-w-full flex-wrap items-center justify-end gap-2"
-                >
-                    <div
-                        data-testid="activity-analytics-runtime-group-selector"
-                        className="flex flex-wrap items-center gap-0.5"
-                    >
-                        {GROUP_BY_OPTIONS.filter((option) => activeDisplayRules.allowedGroups.includes(option.value)).map((option) => {
-                            const isActive = option.value === activeGroupBy;
-
-                            return (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    aria-pressed={isActive}
-                                    onClick={() => setRuntimeViewState((current) => ({
-                                        ...current,
-                                        runtimeGroupBy: option.value,
-                                        turnoMode: option.value === 'shift' ? current.turnoMode : 'summary',
-                                    }))}
-                                    className={getRuntimeControlButtonClass(isActive)}
-                                >
-                                    {option.label}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            </WidgetSegmentedControl>
-
             {header}
 
             <div ref={analyticsBodyRef} className="mt-1 flex min-h-0 flex-1 flex-col gap-3">
@@ -627,11 +789,17 @@ export default function ActivityAnalyticsWidget({
                     comparison={displayComparison}
                     grouped={displayGrouped}
                     visualPalette={visualPalette}
+                    prodTrendBands={selectedDisplayOptions.prodTrendBands}
                     visualEffects={selectedDisplayOptions.visualEffects as ResolvedActivityAnalyticsVisualEffects}
                     visualLayout={visualLayout}
-                    chartWidth={analyticsBodySize?.width ?? 640}
-                    chartHeight={analyticsBodySize?.height ?? 420}
-                    barWidthFactor={activeDisplayOptions.groupBarWidth}
+                    groupsChartLayout={groupsChartLayout}
+                    chartWidth={analyticsBodyWidth}
+                    chartHeight={analyticsBodyHeight}
+                    topRegionSharedHeight={topRegionSharedHeight}
+                    prodTrendPanelHeight={prodTrendPanelHeight}
+                    groupsHeightBudget={groupsHeightBudget}
+                    barWidthFactor={activeGroupBarWidth}
+                    title={groupsTitle}
                     showTurnoModeControl={showTurnoModeControl}
                     turnoMode={activeTurnoMode}
                     onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
@@ -644,10 +812,55 @@ export default function ActivityAnalyticsWidget({
     );
 }
 
-function getRuntimeControlButtonClass(isActive: boolean) {
+function getRuntimeControlButtonClass(isActive: boolean, isDisabled = false, compact = false) {
+    const baseClassName = 'rounded-md uppercase transition-colors';
+    const compactSpacingClassName = 'px-2 py-0.5';
+    const defaultSpacingClassName = 'px-2.5 py-1';
+    const spacingClassName = compact ? compactSpacingClassName : defaultSpacingClassName;
+
+    if (isDisabled) {
+        return `${baseClassName} border border-industrial-border bg-industrial-bg/40 ${spacingClassName} text-industrial-muted/50 disabled:cursor-not-allowed`;
+    }
+
     return isActive
-        ? 'rounded-md border border-admin-accent/30 bg-admin-accent/10 px-2.5 py-1 uppercase text-admin-accent transition-colors'
-        : 'rounded-md px-2.5 py-1 uppercase text-industrial-muted transition-colors hover:text-industrial-text';
+        ? `${baseClassName} border border-admin-accent/30 bg-admin-accent/10 ${spacingClassName} text-admin-accent`
+        : `${baseClassName} ${spacingClassName} text-industrial-muted hover:text-industrial-text`;
+}
+
+function resolveActivityAnalyticsGroupsTitle({
+    range,
+    groupBy,
+}: ActivityAnalyticsGroupsTitleInput): string {
+    const timeWindowLabel = (() => {
+        switch (range) {
+        case '7d':
+            return 'ÚLTIMOS 7 DÍAS';
+        case '30d':
+            return 'ÚLTIMOS 30 DÍAS';
+        case '12m':
+            return 'ÚLTIMOS 12 MESES';
+        case 'custom':
+            return 'PERÍODO SELECCIONADO';
+        default:
+            return 'VENTANA SELECCIONADA';
+        }
+    })();
+
+    const granularityLabel = (() => {
+        switch (groupBy) {
+        case 'day':
+            return 'RENDIMIENTO DIARIO';
+        case 'week':
+            return 'RENDIMIENTO SEMANAL';
+        case 'month':
+            return 'RENDIMIENTO MENSUAL';
+        case 'shift':
+        default:
+            return 'RENDIMIENTO POR TURNO';
+        }
+    })();
+
+    return `${granularityLabel} (${timeWindowLabel})`;
 }
 
 function resolveErrorState(error: Error | null) {
@@ -812,12 +1025,12 @@ const ComparisonPanel = memo(function ComparisonPanel({
 
     return (
         <div
-            className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-col items-center justify-center pl-0 pr-0 pt-1 pb-2`}
+            className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-col items-center justify-center p-0`}
             style={typeof panelHeight === 'number' ? { height: `${panelHeight}px` } : undefined}
             data-testid="activity-analytics-comparison"
         >
             <div
-                className="grid h-full w-fit max-w-full flex-1 grid-cols-2 items-stretch justify-items-center box-border"
+                className="grid h-full w-fit max-w-full flex-1 grid-cols-2 items-stretch justify-items-center content-center box-border"
                 style={{
                     alignSelf: 'center',
                     columnGap: `${columnGapPx}px`,
@@ -837,11 +1050,17 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     comparison,
     grouped,
     visualPalette,
+    prodTrendBands,
     visualEffects,
     visualLayout,
+    groupsChartLayout,
     chartWidth,
     chartHeight,
+    topRegionSharedHeight,
+    prodTrendPanelHeight,
+    groupsHeightBudget,
     barWidthFactor,
+    title,
     showTurnoModeControl,
     turnoMode,
     onTurnoModeChange,
@@ -851,36 +1070,87 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     comparison: ReturnType<typeof computeActivityAnalytics>['comparison'];
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     visualPalette: ActivityAnalyticsVisualPalette;
+    prodTrendBands: ResolvedActivityAnalyticsDisplayOptions['prodTrendBands'];
     visualEffects: ResolvedActivityAnalyticsVisualEffects;
     visualLayout: ActivityAnalyticsVisualLayout;
+    groupsChartLayout: ActivityAnalyticsGroupsChartLayout;
     chartWidth: number;
     chartHeight: number;
+    topRegionSharedHeight: number;
+    prodTrendPanelHeight: number;
+    groupsHeightBudget: number;
     barWidthFactor: number;
+    title: string;
     showTurnoModeControl: boolean;
     turnoMode: 'summary' | 'detail';
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
     emptyMessage: string | null;
 }) {
-    const comparisonColumnWidth = resolveTopRegionComparisonColumnWidth(chartWidth);
-    const resolvedSummaryColumnWidth = Math.max(chartWidth - comparisonColumnWidth, 0);
+    const groupsScrollRegionRef = useRef<HTMLDivElement | null>(null);
+    const trendScrollViewportRef = useRef<HTMLDivElement | null>(null);
+    const syncingScrollRef = useRef(false);
+    const topRegionColumnGapPx = TOP_REGION_COLUMN_GAP_PX;
+    const topRegionContentWidth = Math.max(chartWidth - topRegionColumnGapPx, 0);
+    const comparisonColumnWidth = resolveTopRegionComparisonColumnWidth(topRegionContentWidth);
+    const resolvedSummaryColumnWidth = Math.max(topRegionContentWidth - comparisonColumnWidth, 0);
     const comparisonGapDriverWidth = comparisonColumnWidth;
     const summaryChartWidth = Math.min(
         resolvedSummaryColumnWidth,
         SUMMARY_CHART_MAX_WIDTH_PX,
     );
-    const topRegionJoinOffsetPx = resolvedSummaryColumnWidth - (chartWidth / 2);
-    const topRegionSharedHeight = resolveTopRegionSharedHeight({
-        containerHeight: chartHeight,
-    });
+    const topRegionJoinOffsetPx = resolvedSummaryColumnWidth - (topRegionContentWidth / 2);
     const summaryChartHeight = Math.max(topRegionSharedHeight - SUMMARY_PANEL_HEIGHT_CHROME_PX, 0);
+
+    useEffect(() => {
+        if (visualLayout.groups.density !== 'scroll') {
+            if (trendScrollViewportRef.current) {
+                trendScrollViewportRef.current.scrollLeft = 0;
+            }
+
+            return;
+        }
+
+        const groupsScrollRegion = groupsScrollRegionRef.current;
+        const trendScrollViewport = trendScrollViewportRef.current;
+
+        if (!groupsScrollRegion || !trendScrollViewport) {
+            return;
+        }
+
+        syncingScrollRef.current = true;
+        trendScrollViewport.scrollLeft = groupsScrollRegion.scrollLeft;
+        syncingScrollRef.current = false;
+    }, [barWidthFactor, chartWidth, grouped, visualLayout.groups.density]);
+
+    const handleGroupsScroll = () => {
+        const groupsScrollRegion = groupsScrollRegionRef.current;
+        const trendScrollViewport = trendScrollViewportRef.current;
+
+        if (!groupsScrollRegion || !trendScrollViewport || syncingScrollRef.current) {
+            return;
+        }
+
+        syncingScrollRef.current = true;
+        trendScrollViewport.scrollLeft = groupsScrollRegion.scrollLeft;
+        syncingScrollRef.current = false;
+    };
+
     return (
-        <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <div
+            className="flex min-h-0 flex-1 flex-col gap-3"
+            data-testid="activity-analytics-visual-panels"
+            data-chart-height-px={chartHeight.toFixed(2)}
+            data-top-region-height-px={topRegionSharedHeight.toFixed(2)}
+            data-prod-trend-height-px={prodTrendPanelHeight.toFixed(2)}
+            data-groups-height-budget-px={groupsHeightBudget.toFixed(2)}
+            data-fixed-vertical-gaps-px={ANALYTICS_FIXED_VERTICAL_GAPS_PX.toFixed(2)}
+        >
             <div
-                className="flex min-h-0 items-stretch overflow-visible"
-                style={{ gap: '0px' }}
+                className="flex min-h-0 items-stretch gap-3 overflow-visible"
                 data-testid="activity-analytics-top-region"
                 data-top-layout="side-by-side"
                 data-top-overlap-px="0.00"
+                data-top-gap-px={topRegionColumnGapPx.toFixed(2)}
                 data-top-shared-height-px={topRegionSharedHeight.toFixed(2)}
                 data-top-join-offset-px={topRegionJoinOffsetPx.toFixed(2)}
             >
@@ -907,21 +1177,558 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
                     />
                 </div>
             </div>
+            <ProdTrendPanel
+                grouped={grouped}
+                visualPalette={visualPalette}
+                prodTrendBands={prodTrendBands}
+                chartWidth={chartWidth}
+                panelHeight={prodTrendPanelHeight}
+                groupsLayout={visualLayout.groups}
+                groupsChartMargin={groupsChartLayout.chartMargin}
+                barWidthFactor={barWidthFactor}
+                scrollViewportRef={trendScrollViewportRef}
+            />
             <GroupedAnalyticsPanel
                 grouped={grouped}
                 visualPalette={visualPalette}
                 groupedEffects={visualEffects.groupedBars}
                 groupsLayout={visualLayout.groups}
+                groupsChartLayout={groupsChartLayout}
                 chartWidth={chartWidth}
                 barWidthFactor={barWidthFactor}
+                title={title}
                 showTurnoModeControl={showTurnoModeControl}
                 turnoMode={turnoMode}
                 onTurnoModeChange={onTurnoModeChange}
                 emptyMessage={emptyMessage}
+                scrollRegionRef={groupsScrollRegionRef}
+                onScroll={handleGroupsScroll}
             />
         </div>
     );
 });
+
+const ProdTrendPanel = memo(function ProdTrendPanel({
+    grouped,
+    visualPalette,
+    prodTrendBands,
+    chartWidth,
+    panelHeight,
+    groupsLayout,
+    groupsChartMargin,
+    barWidthFactor,
+    scrollViewportRef,
+}: {
+    grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
+    visualPalette: ActivityAnalyticsVisualPalette;
+    prodTrendBands: ResolvedActivityAnalyticsDisplayOptions['prodTrendBands'];
+    chartWidth: number;
+    panelHeight: number;
+    groupsLayout: ActivityAnalyticsGroupsLayout;
+    groupsChartMargin: ActivityAnalyticsGroupsChartLayout['chartMargin'];
+    barWidthFactor: number;
+    scrollViewportRef: RefObject<HTMLDivElement | null>;
+}) {
+    const trendChartLayout = resolveProdTrendChartLayout(panelHeight);
+    const trendContentWidth = resolveGroupedXAxisModel({
+        grouped,
+        width: chartWidth,
+        layout: groupsLayout,
+        chartMargin: {
+            left: groupsChartMargin.left,
+            right: groupsChartMargin.right,
+        },
+        barWidthFactor,
+    }).chartWidth;
+
+    return (
+        <div
+            className={PROD_TREND_PANEL_CLASS}
+            style={{ height: `${panelHeight}px` }}
+            data-testid="activity-analytics-prod-trend"
+            data-panel-height-px={panelHeight.toFixed(2)}
+            data-chart-chrome-height-px={trendChartLayout.chromeHeight.toFixed(2)}
+            data-chart-height-px={trendChartLayout.chartHeight.toFixed(2)}
+            data-compact-panel-top-padding-px={trendChartLayout.compactChromeBreakdown?.panelTopPadding.toFixed(2)}
+            data-compact-heading-row-height-px={trendChartLayout.compactChromeBreakdown?.headingRow.toFixed(2)}
+            data-compact-shell-margin-top-px={trendChartLayout.compactChromeBreakdown?.chartGapAboveViewport.toFixed(2)}
+            data-compact-shell-padding-bottom-px={trendChartLayout.compactChromeBreakdown?.chartShellBottomPadding.toFixed(2)}
+        >
+            <div className="px-3">
+                <PanelHeading title="TENDENCIA % PROD" />
+            </div>
+            <div
+                className={trendChartLayout.compact
+                    ? 'mt-1 flex min-h-0 flex-1 flex-col px-4 pb-2'
+                    : 'mt-2 flex min-h-0 flex-1 flex-col px-5 pb-3'}
+                data-testid="activity-analytics-prod-trend-shell"
+            >
+                <div
+                    className={trendChartLayout.compact
+                        ? 'relative flex-1 min-h-0 overflow-x-hidden overflow-y-hidden -mx-2 -mb-2'
+                        : 'relative flex-1 min-h-0 overflow-x-hidden overflow-y-hidden -mx-3 -mb-3'}
+                    data-testid="activity-analytics-prod-trend-viewport"
+                    data-scroll-mode={groupsLayout.density === 'scroll' ? 'scroll' : 'static'}
+                    data-content-width-px={trendContentWidth.toFixed(2)}
+                    ref={scrollViewportRef}
+                >
+                    <div className="relative shrink-0 self-end" style={{ width: `${trendContentWidth}px` }} data-testid="activity-analytics-prod-trend-content">
+                        <ProdTrendChart
+                            grouped={grouped}
+                            width={trendContentWidth}
+                            height={trendChartLayout.chartHeight}
+                            chartMargin={trendChartLayout.chartMargin}
+                            visualPalette={visualPalette}
+                            prodTrendBands={prodTrendBands}
+                            groupsLayout={groupsLayout}
+                            groupsChartMargin={groupsChartMargin}
+                            barWidthFactor={barWidthFactor}
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+function ProdTrendChart({
+    grouped,
+    width,
+    height,
+    chartMargin,
+    visualPalette,
+    prodTrendBands,
+    groupsLayout,
+    groupsChartMargin,
+    barWidthFactor,
+}: {
+    grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
+    width: number;
+    height: number;
+    chartMargin: { top: number; right: number; bottom: number; left: number };
+    visualPalette: ActivityAnalyticsVisualPalette;
+    prodTrendBands: ResolvedActivityAnalyticsDisplayOptions['prodTrendBands'];
+    groupsLayout: ActivityAnalyticsGroupsLayout;
+    groupsChartMargin: ActivityAnalyticsGroupsChartLayout['chartMargin'];
+    barWidthFactor: number;
+}) {
+    const gradientPrefix = useId().replace(/:/g, '-');
+    const lineGradientId = `${gradientPrefix}-prod-trend-line-gradient`;
+    const areaGradientId = `${gradientPrefix}-prod-trend-area-gradient`;
+    const fadeGradientId = `${gradientPrefix}-prod-trend-area-fade`;
+    const maskId = `${gradientPrefix}-prod-trend-area-mask`;
+    const glowId = `${gradientPrefix}-prod-trend-line-glow`;
+    const bandGradientId = `${gradientPrefix}-prod-trend-band-gradient`;
+    const plotClipPathId = `${gradientPrefix}-prod-trend-plot-clip`;
+    const yAxisLabelX = chartMargin.left - 8;
+    const plotWidth = Math.max(width - chartMargin.left - chartMargin.right, 1);
+    const plotHeight = Math.max(height - chartMargin.top - chartMargin.bottom, 1);
+    const baselineY = chartMargin.top + plotHeight;
+    const xAxisModel = resolveGroupedXAxisModel({
+        grouped,
+        width,
+        layout: groupsLayout,
+        chartMargin: {
+            left: groupsChartMargin.left,
+            right: groupsChartMargin.right,
+        },
+        barWidthFactor,
+    });
+    const { positions, labels, visibleLabelIndices } = xAxisModel;
+    const renderablePoints = grouped.map((bucket, index) => {
+        const productivityRatio = resolveGroupedTrendProductivityRatio(bucket);
+        const y = productivityRatio === null
+            ? null
+            : chartMargin.top + plotHeight - (clamp(productivityRatio, 0, 1) * plotHeight);
+
+        return {
+            bucketKey: bucket.bucketKey,
+            isPartial: isGroupedBucketPartial(bucket),
+            x: positions[index] ?? (chartMargin.left + (plotWidth / 2)),
+            y,
+            markerY: y ?? baselineY,
+            valueState: productivityRatio === null ? 'missing' : 'measured',
+        };
+    });
+    const lineSegments = buildProdTrendLineSegments(renderablePoints);
+    const yTicks = Array.from({ length: 5 }, (_, index) => ({
+        value: 100 - (index * 25),
+        y: chartMargin.top + ((index / 4) * plotHeight),
+    }));
+    const hasRenderableTrend = lineSegments.some((segment) => segment.length >= 2);
+    const hasLabels = labels.some((label) => label.length > 0);
+    const prodGradientStops = getVisualGradientStops(visualPalette.prod.gradient, visualPalette.prod.gradientAlpha);
+    const prodTrendBandStopColors = prodTrendBands.colors.map((color) => color ?? 'var(--color-chart-grid)') as [string, string, string];
+    const prodTrendBandStopOpacities = prodTrendBands.alphas.map((alpha) => alpha / 100) as [number, number, number];
+    const latestPoint = renderablePoints.at(-1) ?? null;
+    const activeBandIntervals = positions.slice(0, -1)
+        .map((startX, index) => ({
+            index,
+            x: startX,
+            width: Math.max((positions[index + 1] ?? startX) - startX, 0),
+        }))
+        .filter((interval) => interval.index % 2 === 0 && interval.width > 0);
+
+    return (
+        <svg
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
+            data-testid="activity-analytics-prod-trend-chart"
+            data-y-domain-min="0"
+            data-y-domain-max="100"
+            data-renderable-point-y={renderablePoints.map((point) => point.y === null ? 'null' : point.y.toFixed(2)).join(',')}
+            data-bucket-keys={grouped.map((bucket) => bucket.bucketKey).join(',')}
+            data-x-axis-labels={labels.join('|')}
+            data-partial-bucket-keys={grouped.filter((bucket) => isGroupedBucketPartial(bucket)).map((bucket) => bucket.bucketKey).join(',')}
+            data-latest-bucket-key={latestPoint?.bucketKey ?? ''}
+            data-productivity-ratio={grouped.map((bucket) => {
+                const productivityRatio = resolveGroupedTrendProductivityRatio(bucket);
+
+                return productivityRatio === null ? 'null' : productivityRatio.toFixed(4);
+            }).join(',')}
+        >
+            <defs>
+                <linearGradient id={lineGradientId} gradientUnits="userSpaceOnUse" x1={chartMargin.left} y1="0" x2={chartMargin.left + plotWidth} y2="0">
+                    <stop offset="0%" stopColor={prodGradientStops.endColor} stopOpacity={Math.max(prodGradientStops.endOpacity, 0.72)} />
+                    <stop offset="100%" stopColor={prodGradientStops.startColor} stopOpacity={Math.max(prodGradientStops.startOpacity, 0.92)} />
+                </linearGradient>
+
+                <linearGradient id={areaGradientId} gradientUnits="userSpaceOnUse" x1={chartMargin.left} y1="0" x2={chartMargin.left + plotWidth} y2="0">
+                    <stop offset="0%" stopColor={prodGradientStops.endColor} stopOpacity={0.3} />
+                    <stop offset="100%" stopColor={prodGradientStops.startColor} stopOpacity={0.46} />
+                </linearGradient>
+
+                <linearGradient id={fadeGradientId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--color-industrial-text)" stopOpacity={0.72} />
+                    <stop offset="100%" stopColor="var(--color-industrial-text)" stopOpacity={0} />
+                </linearGradient>
+
+                <linearGradient id={bandGradientId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={prodTrendBandStopColors[0]} stopOpacity={prodTrendBandStopOpacities[0]} />
+                    <stop offset="50%" stopColor={prodTrendBandStopColors[1]} stopOpacity={prodTrendBandStopOpacities[1]} />
+                    <stop offset="100%" stopColor={prodTrendBandStopColors[2]} stopOpacity={prodTrendBandStopOpacities[2]} />
+                </linearGradient>
+
+                <mask id={maskId} maskContentUnits="objectBoundingBox">
+                    <rect x="0" y="0" width="1" height="1" fill={`url(#${fadeGradientId})`} />
+                </mask>
+
+                <clipPath id={plotClipPathId}>
+                    <rect x={chartMargin.left} y={chartMargin.top} width={plotWidth} height={plotHeight} />
+                </clipPath>
+
+                <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                </filter>
+            </defs>
+
+            <g
+                clipPath={`url(#${plotClipPathId})`}
+                data-testid="activity-analytics-prod-trend-band-layer"
+                style={{ mixBlendMode: prodTrendBands.blendMode }}
+            >
+                {activeBandIntervals.map((interval) => (
+                    <g key={`prod-trend-band-${interval.index}`} data-testid="activity-analytics-prod-trend-band-group">
+                        <rect
+                            x={interval.x}
+                            y={chartMargin.top}
+                            width={interval.width}
+                            height={plotHeight}
+                            fill={`url(#${bandGradientId})`}
+                            data-testid="activity-analytics-prod-trend-band"
+                            data-interval-index={interval.index}
+                        />
+                        <line
+                            x1={interval.x}
+                            x2={interval.x}
+                            y1={chartMargin.top}
+                            y2={baselineY}
+                            stroke="var(--color-chart-grid)"
+                            strokeOpacity={0.42}
+                            strokeWidth={1}
+                            strokeDasharray="3 3"
+                            data-testid="activity-analytics-prod-trend-band-boundary"
+                            data-interval-index={interval.index}
+                            data-boundary="left"
+                        />
+                        <line
+                            x1={interval.x + interval.width}
+                            x2={interval.x + interval.width}
+                            y1={chartMargin.top}
+                            y2={baselineY}
+                            stroke="var(--color-chart-grid)"
+                            strokeOpacity={0.42}
+                            strokeWidth={1}
+                            strokeDasharray="3 3"
+                            data-testid="activity-analytics-prod-trend-band-boundary"
+                            data-interval-index={interval.index}
+                            data-boundary="right"
+                        />
+                    </g>
+                ))}
+            </g>
+
+            {yTicks.map((tick) => (
+                <line
+                    key={`prod-trend-grid-${tick.value}`}
+                    x1={chartMargin.left}
+                    x2={chartMargin.left + plotWidth}
+                    y1={tick.y}
+                    y2={tick.y}
+                    stroke="var(--color-chart-grid)"
+                    strokeDasharray="3 3"
+                    data-testid="activity-analytics-prod-trend-y-grid-line"
+                />
+            ))}
+
+            <line
+                x1={chartMargin.left}
+                x2={chartMargin.left + plotWidth}
+                y1={baselineY}
+                y2={baselineY}
+                stroke="var(--color-industrial-border)"
+            />
+            <line
+                x1={chartMargin.left}
+                x2={chartMargin.left}
+                y1={chartMargin.top}
+                y2={baselineY}
+                stroke="var(--color-industrial-border)"
+            />
+
+            {lineSegments.map((segment, index) => {
+                const linePath = segment.length >= 2 ? smoothPath(segment) : '';
+                const areaPath = segment.length >= 2 ? buildAreaPath(linePath, segment, baselineY) : '';
+
+                return (
+                    <g key={`prod-trend-segment-${index}`} data-testid="activity-analytics-prod-trend-segment">
+                        {areaPath.length > 0 && (
+                            <path
+                                d={areaPath}
+                                fill={`url(#${areaGradientId})`}
+                                mask={`url(#${maskId})`}
+                                data-testid="activity-analytics-prod-trend-area"
+                            />
+                        )}
+                        {linePath.length > 0 && (
+                            <path
+                                d={linePath}
+                                fill="none"
+                                stroke={`url(#${lineGradientId})`}
+                                strokeWidth={2.5}
+                                filter={`url(#${glowId})`}
+                                data-testid="activity-analytics-prod-trend-line"
+                            />
+                        )}
+                    </g>
+                );
+            })}
+
+            {latestPoint && (
+                <g
+                    data-testid="activity-analytics-prod-trend-latest-point"
+                    data-bucket-key={latestPoint.bucketKey}
+                    data-partial={latestPoint.isPartial ? 'true' : 'false'}
+                    data-value-state={latestPoint.valueState}
+                >
+                    {latestPoint.y !== null ? (
+                        <>
+                            <circle
+                                data-testid="activity-analytics-prod-trend-final-point-pulse"
+                                cx={latestPoint.x}
+                                cy={latestPoint.y}
+                                r={9}
+                                fill={prodGradientStops.startColor}
+                                fillOpacity={0.45}
+                                className="animate-ping"
+                                style={{ animationDuration: '2s', transformOrigin: `${latestPoint.x}px ${latestPoint.y}px` }}
+                            />
+                            <circle
+                                data-testid="activity-analytics-prod-trend-final-point-core"
+                                cx={latestPoint.x}
+                                cy={latestPoint.y}
+                                r={4}
+                                fill={prodGradientStops.startColor}
+                                stroke="var(--color-industrial-bg)"
+                                strokeWidth={1.5}
+                            />
+                        </>
+                    ) : (
+                        <>
+                            <circle
+                                data-testid="activity-analytics-prod-trend-final-missing-pulse"
+                                cx={latestPoint.x}
+                                cy={latestPoint.markerY}
+                                r={8}
+                                fill="none"
+                                stroke="var(--color-industrial-muted)"
+                                strokeOpacity={0.7}
+                                strokeWidth={1.5}
+                                className="animate-pulse"
+                                style={{ transformOrigin: `${latestPoint.x}px ${latestPoint.markerY}px` }}
+                            />
+                            <circle
+                                data-testid="activity-analytics-prod-trend-final-missing-core"
+                                cx={latestPoint.x}
+                                cy={latestPoint.markerY}
+                                r={4}
+                                fill="var(--color-industrial-bg)"
+                                stroke="var(--color-industrial-muted)"
+                                strokeDasharray="2 2"
+                                strokeWidth={1.5}
+                            />
+                        </>
+                    )}
+                </g>
+            )}
+
+            {yTicks.map((tick) => (
+                <text
+                    key={`prod-trend-y-tick-${tick.value}`}
+                    x={yAxisLabelX}
+                    y={tick.y}
+                    dy={4}
+                    textAnchor="end"
+                    fill="var(--color-industrial-muted)"
+                    style={CHART_TYPOGRAPHY_STYLE}
+                    data-testid="activity-analytics-prod-trend-y-axis-tick"
+                >
+                    {tick.value}%
+                </text>
+            ))}
+
+            {grouped.map((bucket, index) => {
+                if (!visibleLabelIndices.has(index)) {
+                    return null;
+                }
+
+                const x = positions[index] ?? (chartMargin.left + (plotWidth / 2));
+                const label = labels[index] ?? '';
+                return (
+                    <text
+                        key={`prod-trend-x-tick-${bucket.bucketKey}`}
+                        x={x}
+                        y={height - 8}
+                        textAnchor="middle"
+                        fill="var(--color-industrial-muted)"
+                        style={CHART_TYPOGRAPHY_STYLE}
+                        data-testid="activity-analytics-prod-trend-x-axis-label"
+                    >
+                        {label}
+                    </text>
+                );
+            })}
+
+            {!hasRenderableTrend && (
+                <text
+                    x={chartMargin.left + (plotWidth / 2)}
+                    y={chartMargin.top + (plotHeight / 2)}
+                    textAnchor="middle"
+                    fill="var(--color-industrial-muted)"
+                    style={GENERAL_TYPOGRAPHY_STYLE}
+                    data-testid="activity-analytics-prod-trend-empty"
+                >
+                    {hasLabels ? 'Sin datos comparables' : 'Sin datos'}
+                </text>
+            )}
+        </svg>
+    );
+}
+
+function buildProdTrendLineSegments(points: Array<{ x: number; y: number | null }>) {
+    const segments: Array<Array<{ x: number; y: number }>> = [];
+    let currentSegment: Array<{ x: number; y: number }> = [];
+
+    points.forEach((point) => {
+        if (point.y === null) {
+            if (currentSegment.length > 0) {
+                segments.push(currentSegment);
+                currentSegment = [];
+            }
+
+            return;
+        }
+
+        currentSegment.push({ x: point.x, y: point.y });
+    });
+
+    if (currentSegment.length > 0) {
+        segments.push(currentSegment);
+    }
+
+    return segments;
+}
+
+function resolveGroupedXAxisModel({
+    grouped,
+    width,
+    layout,
+    chartMargin,
+    barWidthFactor,
+}: {
+    grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
+    width: number;
+    layout: ActivityAnalyticsGroupsLayout;
+    chartMargin: { left: number; right: number };
+    barWidthFactor: number;
+}) {
+    const minimumBucketWidth = layout.minSlotWidthPx;
+    const chartWidth = layout.density === 'scroll'
+        ? Math.max(width, chartMargin.left + chartMargin.right + (grouped.length * minimumBucketWidth))
+        : width;
+    const plotWidth = Math.max(chartWidth - chartMargin.left - chartMargin.right, 1);
+    const safeBarWidthFactor = clampActivityAnalyticsGroupBarWidth(barWidthFactor);
+    const groupedDensity = layout.density === 'fit'
+        ? 'fit'
+        : layout.density === 'scroll'
+            ? 'scroll'
+            : 'compress';
+    const slotWidth = Math.max(plotWidth / Math.max(grouped.length, 1), 1);
+    const targetGap = resolveGroupedBarGap(slotWidth, groupedDensity);
+    const baseBarWidth = Math.max(
+        Math.min(slotWidth * GROUPED_BAR_WIDTH_RATIO[groupedDensity], slotWidth - targetGap),
+        6,
+    );
+    const barWidth = clamp(
+        baseBarWidth * safeBarWidthFactor,
+        6,
+        Math.max(slotWidth - 4, 6),
+    );
+    const horizontalPadding = resolveGroupedChartEdgePadding(barWidth, layout.density);
+    const usablePlotWidth = Math.max(plotWidth - (2 * horizontalPadding), 1);
+    const usableSlotWidth = grouped.length > 0 ? usablePlotWidth / grouped.length : usablePlotWidth;
+    const positions = grouped.length > 1
+        ? grouped.map((_, index) => chartMargin.left + horizontalPadding + (usableSlotWidth * index) + (usableSlotWidth / 2))
+        : grouped.map(() => chartMargin.left + horizontalPadding + (usablePlotWidth / 2));
+    const labels = grouped.map((bucket) => resolveGroupedAxisLabel(bucket.label));
+    const visibleLabelIndices = layout.sampleLabels
+        ? computeVisibleLabelIndices(
+            labels,
+            positions,
+            getChartTextFont(),
+            8,
+            chartMargin.left + plotWidth,
+            getChartLetterSpacingPx(),
+        )
+        : new Set(grouped.map((_, index) => index));
+
+    return {
+        chartWidth,
+        plotWidth,
+        positions,
+        labels,
+        visibleLabelIndices,
+    };
+}
+
+function isGroupedBucketPartial(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    return bucket.isInProgress || bucket.hasInProgressContribution === true;
+}
 
 function resolveTopRegionComparisonColumnWidth(containerWidth: number): number {
     const { compact, preferred, expanded } = COMPARISON_LAYOUT_RULES.responsiveContainerWidthPx;
@@ -979,6 +1786,190 @@ function resolveTopRegionSharedHeight({
     return Math.max(Math.round(heightDrivenCap), 0);
 }
 
+function resolveProdTrendPanelHeight({
+    containerHeight,
+    topRegionHeight,
+}: {
+    containerHeight: number;
+    topRegionHeight: number;
+}): number {
+    const stackHeightBelowTopRegion = Math.max(containerHeight - topRegionHeight - ANALYTICS_FIXED_VERTICAL_GAPS_PX, 0);
+    const reservedGroupsHeight = stackHeightBelowTopRegion <= COMPACT_STACK_PRIORITY_BREAKPOINT_PX
+        ? Math.max(resolveGroupsMinimumVisualHeight(containerHeight), COMPACT_GROUPS_PRIORITY_HEIGHT_PX)
+        : resolveGroupsMinimumVisualHeight(containerHeight);
+    const availableTrendHeight = stackHeightBelowTopRegion - reservedGroupsHeight;
+
+    return Math.round(clamp(availableTrendHeight, PROD_TREND_PANEL_MIN_HEIGHT_PX, PROD_TREND_PANEL_HEIGHT_PX));
+}
+
+function resolveGroupsMinimumVisualHeight(containerHeight: number): number {
+    return Math.round(clamp(
+        containerHeight * GROUPS_MIN_VISUAL_HEIGHT_RULES.heightRatio,
+        GROUPS_MIN_VISUAL_HEIGHT_RULES.minPx,
+        GROUPS_MIN_VISUAL_HEIGHT_RULES.maxPx,
+    ));
+}
+
+function resolveGroupsHeightBudget({
+    containerHeight,
+    topRegionHeight,
+    prodTrendPanelHeight,
+}: {
+    containerHeight: number;
+    topRegionHeight: number;
+    prodTrendPanelHeight: number;
+}): number {
+    const availableGroupsHeight = Math.max(
+        containerHeight - topRegionHeight - prodTrendPanelHeight - ANALYTICS_FIXED_VERTICAL_GAPS_PX,
+        0,
+    );
+
+    return Math.round(clamp(
+        availableGroupsHeight,
+        0,
+        availableGroupsHeight,
+    ));
+}
+
+function resolveGroupsVisualLayout({
+    width,
+    height,
+    groupCount,
+    groupBy,
+    range,
+    turnoMode,
+}: {
+    width: number;
+    height: number;
+    groupCount: number;
+    groupBy: ResolvedActivityAnalyticsDisplayOptions['groupBy'];
+    range: ResolvedActivityAnalyticsDisplayOptions['range'];
+    turnoMode: 'summary' | 'detail';
+}): ActivityAnalyticsGroupsLayout {
+    const turnoDetailEligible = groupBy === 'shift' && (range === '24h' || range === '7d');
+    const showTurnoModeControl = groupBy === 'shift' && range === '7d';
+    const minSlotWidthPx = turnoDetailEligible && turnoMode === 'detail' ? 28 : 42;
+
+    if (width < 320) {
+        return {
+            mode: 'text-fallback',
+            density: 'text-fallback',
+            minSlotWidthPx,
+            sampleLabels: true,
+        };
+    }
+
+    const effectiveGroupCount = turnoDetailEligible && turnoMode === 'summary'
+        ? Math.min(Math.max(groupCount, 1), 3)
+        : groupCount;
+    const safeGroupCount = Math.max(effectiveGroupCount, 1);
+    const groupsPlotWidth = Math.max(width - 76, 1);
+    const slotWidth = groupsPlotWidth / safeGroupCount;
+    const density = slotWidth >= 76
+        ? 'fit'
+        : slotWidth >= minSlotWidthPx
+            ? 'compress'
+            : 'scroll';
+    const minimumChartModeHeight = resolveGroupsChartModeMinimumHeight({
+        panelHeight: height,
+        density,
+        showTurnoModeControl,
+    });
+
+    if (height < minimumChartModeHeight) {
+        return {
+            mode: 'text-fallback',
+            density: 'text-fallback',
+            minSlotWidthPx,
+            sampleLabels: true,
+        };
+    }
+
+    return {
+        mode: 'axis-stacked',
+        density,
+        minSlotWidthPx,
+        sampleLabels: density !== 'fit',
+    };
+}
+
+function resolveGroupsChartModeMinimumHeight({
+    panelHeight,
+    density,
+    showTurnoModeControl,
+}: {
+    panelHeight: number;
+    density: 'fit' | 'compress' | 'scroll';
+    showTurnoModeControl: boolean;
+}): number {
+    const chartMinimumHeight = GROUPED_CHART_MIN_HEIGHT_PX[density];
+
+    if (showTurnoModeControl && panelHeight < GROUPS_MIN_CHART_MODE_HEIGHT_PX[density] + GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.turnoControl) {
+        return chartMinimumHeight + GROUPS_PANEL_COMPACT_TURNO_CHROME_BUDGET_PX;
+    }
+
+    return GROUPS_MIN_CHART_MODE_HEIGHT_PX[density] + (showTurnoModeControl ? GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.turnoControl : 0);
+}
+
+function resolveGroupsChartLayout({
+    panelHeight,
+    density,
+    showTurnoModeControl,
+}: {
+    panelHeight: number;
+    density: ActivityAnalyticsGroupsLayout['density'];
+    showTurnoModeControl: boolean;
+}): ActivityAnalyticsGroupsChartLayout {
+    const resolvedDensity = density === 'text-fallback' ? 'fit' : density;
+    const geometry = resolvedDensity === 'compress'
+        ? GROUPED_CHART_GEOMETRY.compress
+        : GROUPED_CHART_GEOMETRY.default;
+    const compactTurnoLayout = showTurnoModeControl
+        && panelHeight < (GROUPS_MIN_CHART_MODE_HEIGHT_PX[resolvedDensity] + GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.turnoControl);
+    const chromeHeight = compactTurnoLayout
+        ? GROUPS_PANEL_COMPACT_TURNO_CHROME_BUDGET_PX
+        : GROUPS_PANEL_STANDARD_CHROME_BUDGET_PX + (showTurnoModeControl ? GROUPS_PANEL_STANDARD_CHROME_HEIGHT_PX.turnoControl : 0);
+    const availableChartHeight = Math.max(panelHeight - chromeHeight, 0);
+    const chartHeight = Math.round(clamp(
+        availableChartHeight,
+        GROUPED_CHART_MIN_HEIGHT_PX[resolvedDensity],
+        geometry.maxHeight,
+    ));
+
+    return {
+        chartHeight,
+        chromeHeight,
+        compactTurnoLayout,
+        chartMargin: {
+            top: Math.round(clamp(chartHeight * 0.08, 4, compactTurnoLayout ? 6 : geometry.chartMargin.top)),
+            right: geometry.chartMargin.right,
+            bottom: Math.round(clamp(chartHeight * 0.18, compactTurnoLayout ? 12 : 14, compactTurnoLayout ? 20 : geometry.chartMargin.bottom)),
+            left: geometry.chartMargin.left,
+        },
+        productivityLabelClearanceTop: Math.round(clamp(chartHeight * 0.2, compactTurnoLayout ? 8 : 10, geometry.productivityLabelClearanceTop)),
+    };
+}
+
+function resolveProdTrendChartLayout(panelHeight: number) {
+    const compact = panelHeight <= PROD_TREND_COMPACT_PANEL_BREAKPOINT_PX;
+    const chartMargin = compact ? PROD_TREND_COMPACT_CHART_MARGIN : PROD_TREND_CHART_MARGIN;
+    const compactChromeBreakdown = compact ? PROD_TREND_COMPACT_CHROME_HEIGHT_PX : null;
+    const chromeHeight = compact ? PROD_TREND_COMPACT_CHROME_BUDGET_PX : PROD_TREND_PANEL_CHROME_HEIGHT_PX;
+    const minChartHeight = compact ? PROD_TREND_COMPACT_CHART_MIN_HEIGHT_PX : PROD_TREND_CHART_MIN_HEIGHT_PX;
+
+    return {
+        compact,
+        compactChromeBreakdown,
+        chromeHeight,
+        chartMargin,
+        chartHeight: Math.round(clamp(
+            panelHeight - chromeHeight,
+            minChartHeight,
+            PROD_TREND_CHART_HEIGHT_PX,
+        )),
+    };
+}
+
 function resolveSummarySegmentGapLength({
     circumference,
     density,
@@ -1031,11 +2022,14 @@ const SummaryPanel = memo(function SummaryPanel({
 
     return (
         <div
-            className={`${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-col p-1`}
+            className={`${ANALYTICS_PANEL_CLASS} relative flex min-h-0 flex-col items-center justify-center p-1`}
             style={{ height: `${panelHeight}px` }}
             data-testid="activity-analytics-summary-bars"
         >
-            <div className="min-h-0 flex-1">
+            <div className="pointer-events-none absolute inset-x-0 top-2 px-3">
+                <PanelHeading title="DISTRIBUCIÓN" />
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center self-stretch">
                 <SummaryBarsChart
                     bars={summaryDisplay.stackedBars}
                     width={chartWidth}
@@ -1113,30 +2107,38 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
     visualPalette,
     groupedEffects,
     groupsLayout,
+    groupsChartLayout,
     chartWidth,
     barWidthFactor,
+    title,
     showTurnoModeControl,
     turnoMode,
     onTurnoModeChange,
     emptyMessage,
+    scrollRegionRef,
+    onScroll,
 }: {
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     visualPalette: ActivityAnalyticsVisualPalette;
     groupedEffects: ResolvedActivityAnalyticsVisualEffects['groupedBars'];
     groupsLayout: ActivityAnalyticsGroupsLayout;
+    groupsChartLayout: ActivityAnalyticsGroupsChartLayout;
     chartWidth: number;
     barWidthFactor: number;
+    title: string;
     showTurnoModeControl: boolean;
     turnoMode: 'summary' | 'detail';
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
     emptyMessage: string | null;
+    scrollRegionRef: RefObject<HTMLDivElement | null>;
+    onScroll: () => void;
 }) {
     if (grouped.length === 0 && emptyMessage) {
         return (
             <div className={GROUPS_PANEL_CLASS} data-testid="activity-analytics-groups">
                 <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
                     <div className="px-3">
-                        <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                        <PanelHeading title={title} endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
                     </div>
                     {showTurnoModeControl && (
                         <div className="px-3 pt-2">
@@ -1160,7 +2162,7 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
             <div className={GROUPS_PANEL_CLASS} data-testid="activity-analytics-groups">
                 <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
                     <div className="px-3">
-                        <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                        <PanelHeading title={title} endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
                     </div>
                     {showTurnoModeControl && (
                         <div className="px-3 pt-2">
@@ -1182,25 +2184,50 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
         );
     }
 
-    const chart = <GroupedStackedBarsChart grouped={grouped} width={chartWidth} layout={groupsLayout} barWidthFactor={barWidthFactor} visualPalette={visualPalette} groupedEffects={groupedEffects} />;
+    const chart = <GroupedStackedBarsChart grouped={grouped} width={chartWidth} layout={groupsLayout} chartLayout={groupsChartLayout} barWidthFactor={barWidthFactor} visualPalette={visualPalette} groupedEffects={groupedEffects} />;
 
     return (
         <div className={GROUPS_PANEL_CLASS} data-testid="activity-analytics-groups">
-            <div data-testid="activity-analytics-groups-panel" data-groups-density={groupsLayout.density} className="contents">
-                <div className="px-3">
-                    <PanelHeading title="Grupos" endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
-                </div>
-                {showTurnoModeControl && (
-                    <div className="px-3 pt-2">
-                        <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
-                    </div>
-                )}
-                <div className={GROUPS_CHART_AREA_SHELL_CLASS} data-testid="activity-analytics-groups-chart-shell">
+            <div
+                data-testid="activity-analytics-groups-panel"
+                data-groups-density={groupsLayout.density}
+                data-chart-height-px={groupsChartLayout.chartHeight.toFixed(2)}
+                data-chart-chrome-height-px={groupsChartLayout.chromeHeight.toFixed(2)}
+                data-compact-turno-layout={groupsChartLayout.compactTurnoLayout ? 'true' : 'false'}
+                className="contents"
+            >
+                {groupsChartLayout.compactTurnoLayout
+                    ? (
+                        <div className="px-3">
+                            <div className="flex items-start justify-between gap-2 uppercase text-industrial-muted">
+                                <span className="min-w-0 flex-1 truncate" style={GENERAL_TYPOGRAPHY_STYLE}>{title}</span>
+                                <TurnoModeControl compact turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                            </div>
+                            <div className="mt-1 flex min-w-0 justify-end overflow-hidden">
+                                <GroupStatusLegend compact visualPalette={visualPalette} />
+                            </div>
+                        </div>
+                    )
+                    : (
+                        <>
+                            <div className="px-3">
+                                <PanelHeading title={title} endContent={<GroupStatusLegend visualPalette={visualPalette} />} />
+                            </div>
+                            {showTurnoModeControl && (
+                                <div className="px-3 pt-2">
+                                    <TurnoModeControl turnoMode={turnoMode} onTurnoModeChange={onTurnoModeChange} />
+                                </div>
+                            )}
+                        </>
+                    )}
+                <div className={groupsChartLayout.compactTurnoLayout ? 'mt-1 flex min-h-0 flex-1 flex-col px-4 pb-2' : GROUPS_CHART_AREA_SHELL_CLASS} data-testid="activity-analytics-groups-chart-shell">
                     {groupsLayout.density === 'scroll'
                         ? (
                             <div
                                 className={`${GROUPS_CHART_VIEWPORT_CLASS} flex items-end overflow-x-auto overflow-y-hidden hmi-scrollbar`}
                                 data-testid="activity-analytics-groups-scroll-region"
+                                onScroll={onScroll}
+                                ref={scrollRegionRef}
                             >
                                 {chart}
                             </div>
@@ -1217,19 +2244,21 @@ const GroupedAnalyticsPanel = memo(function GroupedAnalyticsPanel({
 });
 
 const TurnoModeControl = memo(function TurnoModeControl({
+    compact = false,
     turnoMode,
     onTurnoModeChange,
 }: {
+    compact?: boolean;
     turnoMode: 'summary' | 'detail';
     onTurnoModeChange: (nextTurnoMode: 'summary' | 'detail') => void;
 }) {
     return (
-        <div className="flex items-center gap-1" data-testid="activity-analytics-turno-mode">
+        <div className={compact ? 'flex items-center gap-0.5' : 'flex items-center gap-1'} data-testid="activity-analytics-turno-mode">
             <button
                 type="button"
                 aria-pressed={turnoMode === 'summary'}
                 onClick={() => onTurnoModeChange('summary')}
-                className={getRuntimeControlButtonClass(turnoMode === 'summary')}
+                className={getRuntimeControlButtonClass(turnoMode === 'summary', false, compact)}
             >
                 Resumen
             </button>
@@ -1237,7 +2266,7 @@ const TurnoModeControl = memo(function TurnoModeControl({
                 type="button"
                 aria-pressed={turnoMode === 'detail'}
                 onClick={() => onTurnoModeChange('detail')}
-                className={getRuntimeControlButtonClass(turnoMode === 'detail')}
+                className={getRuntimeControlButtonClass(turnoMode === 'detail', false, compact)}
             >
                 Detalle
             </button>
@@ -1245,19 +2274,25 @@ const TurnoModeControl = memo(function TurnoModeControl({
     );
 });
 
-const GroupStatusLegend = memo(function GroupStatusLegend({ visualPalette }: { visualPalette: ActivityAnalyticsVisualPalette }) {
+const GroupStatusLegend = memo(function GroupStatusLegend({
+    visualPalette,
+    compact = false,
+}: {
+    visualPalette: ActivityAnalyticsVisualPalette;
+    compact?: boolean;
+}) {
     return (
-        <div className="flex items-center gap-3 normal-case" data-testid="activity-analytics-groups-header-legend">
+        <div className={compact ? 'flex items-center gap-2 normal-case' : 'flex items-center gap-3 normal-case'} data-testid="activity-analytics-groups-header-legend">
             {[
                 { key: 'stopped' as const, label: 'Detenida', color: visualPalette.stopped.initialSolid },
                 { key: 'setup' as const, label: 'Setup', color: visualPalette.setup.initialSolid },
                 { key: 'prod' as const, label: 'Prod.', color: visualPalette.prod.initialSolid },
                 { key: 'noData' as const, label: 'Cobertura incompleta', color: visualPalette.noData.solid },
             ].map((item) => (
-                <span key={item.key} className="flex items-center gap-1.5 whitespace-nowrap text-industrial-text">
+                <span key={item.key} className={compact ? 'flex items-center gap-1 whitespace-nowrap text-industrial-text' : 'flex items-center gap-1.5 whitespace-nowrap text-industrial-text'}>
                     <span
                         aria-hidden="true"
-                        className="h-2.5 w-2.5 rounded-[3px]"
+                        className={compact ? 'h-2 w-2 rounded-[3px]' : 'h-2.5 w-2.5 rounded-[3px]'}
                         style={{ backgroundColor: item.color }}
                     />
                     <span style={CHART_TYPOGRAPHY_STYLE}>{item.label}</span>
@@ -1475,7 +2510,10 @@ function SummaryBarsChart({
             height={height}
             viewBox={`0 0 ${width} ${height}`}
             data-testid="activity-analytics-summary-chart"
+            data-donut-center-y-px={geometry.centerY.toFixed(2)}
+            data-donut-margin-top-px={geometry.margin.top.toFixed(2)}
             data-donut-region-width-px={geometry.donutRegionWidth.toFixed(2)}
+            data-donut-region-height-px={geometry.donutRegionHeight.toFixed(2)}
             data-detail-panel-width-px={geometry.detailPanelWidth.toFixed(2)}
             data-donut-center-x-px={geometry.centerX.toFixed(2)}
         >
@@ -1649,6 +2687,7 @@ function GroupedStackedBarsChart({
     grouped,
     width,
     layout,
+    chartLayout,
     barWidthFactor,
     visualPalette,
     groupedEffects,
@@ -1656,6 +2695,7 @@ function GroupedStackedBarsChart({
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     width: number;
     layout: ActivityAnalyticsGroupsLayout;
+    chartLayout: ActivityAnalyticsGroupsChartLayout;
     barWidthFactor: number;
     visualPalette: ActivityAnalyticsVisualPalette;
     groupedEffects: ResolvedActivityAnalyticsVisualEffects['groupedBars'];
@@ -1664,21 +2704,21 @@ function GroupedStackedBarsChart({
     const [hoverInfo, setHoverInfo] = useState<{ index: number; x: number } | null>(null);
     const gradientPrefix = useId().replace(/:/g, '-');
     const groupedGlowFilterId = `${gradientPrefix}-grouped-glow`;
-    const geometry = layout.density === 'compress'
-        ? GROUPED_CHART_GEOMETRY.compress
-        : GROUPED_CHART_GEOMETRY.default;
-    const { height, chartMargin, productivityLabelClearanceTop } = geometry;
+    const { chartHeight: height, chartMargin, productivityLabelClearanceTop } = chartLayout;
     const margin = {
         top: chartMargin.top + productivityLabelClearanceTop,
         right: chartMargin.right,
         bottom: chartMargin.bottom,
         left: chartMargin.left,
     };
-    const minimumBucketWidth = layout.minSlotWidthPx;
-    const chartWidth = layout.density === 'scroll'
-        ? Math.max(width, margin.left + margin.right + (grouped.length * minimumBucketWidth))
-        : width;
-    const plotWidth = Math.max(chartWidth - margin.left - margin.right, 1);
+    const xAxisModel = resolveGroupedXAxisModel({
+        grouped,
+        width,
+        layout,
+        chartMargin: { left: margin.left, right: margin.right },
+        barWidthFactor,
+    });
+    const { chartWidth, plotWidth, positions, visibleLabelIndices } = xAxisModel;
     const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
     const maxDurationMs = Math.max(...grouped.map((bucket) => bucket.expectedDurationMs), 1);
     const safeBarWidthFactor = clampActivityAnalyticsGroupBarWidth(barWidthFactor);
@@ -1698,27 +2738,14 @@ function GroupedStackedBarsChart({
         6,
         Math.max(slotWidth - 4, 6),
     );
-    const horizontalPadding = resolveGroupedChartEdgePadding(barWidth, layout.density);
-    const usablePlotWidth = Math.max(plotWidth - (2 * horizontalPadding), 1);
-    const usableSlotWidth = grouped.length > 0 ? usablePlotWidth / grouped.length : usablePlotWidth;
-    const centerStep = usableSlotWidth;
     const axisTicks = Array.from({ length: 5 }, (_, index) => ({
         value: maxDurationMs - ((maxDurationMs * index) / 4),
         y: margin.top + ((index / 4) * plotHeight),
     }));
-    const positions = grouped.length > 1
-        ? grouped.map((_, index) => margin.left + horizontalPadding + (usableSlotWidth * index) + (usableSlotWidth / 2))
-        : grouped.map(() => margin.left + horizontalPadding + (usablePlotWidth / 2));
-    const visibleLabelIndices = layout.sampleLabels
-        ? computeVisibleLabelIndices(
-            grouped.map((bucket) => resolveGroupedAxisLabel(bucket.label)),
-            positions,
-            getChartTextFont(),
-            8,
-            margin.left + plotWidth,
-            getChartLetterSpacingPx(),
-        )
-        : new Set(grouped.map((_, index) => index));
+    const horizontalPadding = resolveGroupedChartEdgePadding(barWidth, layout.density);
+    const usablePlotWidth = Math.max(plotWidth - (2 * horizontalPadding), 1);
+    const usableSlotWidth = grouped.length > 0 ? usablePlotWidth / grouped.length : usablePlotWidth;
+    const centerStep = usableSlotWidth;
 
     const handleHoverChange = (index: number | null, x?: number) => {
         setHoveredIndex(index);
@@ -1965,7 +2992,7 @@ const ComparisonRow = memo(function ComparisonRow({
     const fillHeight = entry.productivityRatio === null ? 0 : clamp(entry.productivityRatio * 100, 0, 100);
 
     return (
-        <div className="flex h-full min-h-0 flex-col items-center justify-start gap-1 text-center" data-testid="activity-analytics-comparison-row">
+        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-1 text-center" data-testid="activity-analytics-comparison-row">
             <div className="text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-comparison-percent">{entry.productivityLabel}</div>
             <div
                 className="flex shrink-0 items-end justify-center self-stretch"
@@ -2205,20 +3232,48 @@ function resolveGroupedVisibleDurationMs(bucket: ReturnType<typeof computeActivi
 }
 
 function resolveGroupedVisibleProductivityLabel(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    const productivityRatio = resolveGroupedVisibleProductivityRatio(bucket);
+
+    if (productivityRatio !== null) {
+        return formatPercent(productivityRatio);
+    }
+
+    return bucket.productivityLabel;
+}
+
+function resolveGroupedVisibleProductivityRatio(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
     if (bucket.coverageRatio < 1) {
         const comparableProductivityRatio = resolveActivityAnalyticsComparableProductivityRatio(bucket);
         const productiveDurationMs = bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped;
 
         if (comparableProductivityRatio !== null) {
-            return formatPercent(comparableProductivityRatio);
+            return clamp(comparableProductivityRatio, 0, 1);
         }
 
         if (productiveDurationMs > 0) {
-            return formatPercent(bucket.durationsMs.prod / productiveDurationMs);
+            return clamp(bucket.durationsMs.prod / productiveDurationMs, 0, 1);
         }
     }
 
-    return bucket.productivityLabel;
+    const resolvedProductivityRatio = bucket.productivityRatio ?? parsePercentLabel(bucket.productivityLabel);
+
+    return resolvedProductivityRatio === null ? null : clamp(resolvedProductivityRatio, 0, 1);
+}
+
+function resolveGroupedTrendProductivityRatio(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    const resolvedProductivityRatio = resolveGroupedVisibleProductivityRatio(bucket);
+
+    if (resolvedProductivityRatio !== null) {
+        return resolvedProductivityRatio;
+    }
+
+    const observedDurationMs = bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped;
+
+    if (observedDurationMs > 0) {
+        return clamp(bucket.durationsMs.prod / observedDurationMs, 0, 1);
+    }
+
+    return null;
 }
 
 function isTurnoVisualHiddenBucket(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {

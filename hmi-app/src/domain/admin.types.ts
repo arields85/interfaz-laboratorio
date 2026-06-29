@@ -387,6 +387,23 @@ export interface MachineActivityDisplayOptions {
 export type ActivityAnalyticsStateGradientKey = 'prod' | 'setup' | 'stopped';
 export type ActivityAnalyticsStateGradient = [string, string];
 export type ActivityAnalyticsAlphaPair = [number, number];
+export type ActivityAnalyticsTrendBandColorTriple = [string?, string?, string?];
+export type ActivityAnalyticsTrendBandAlphaTriple = [number?, number?, number?];
+export const ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS = [
+    'overlay',
+    'normal',
+    'multiply',
+    'screen',
+    'soft-light',
+    'hard-light',
+] as const;
+export type ActivityAnalyticsTrendBandBlendMode = (typeof ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS)[number];
+
+export interface ActivityAnalyticsProdTrendBandsDisplayOptions {
+    colors?: ActivityAnalyticsTrendBandColorTriple;
+    alphas?: ActivityAnalyticsTrendBandAlphaTriple;
+    blendMode?: ActivityAnalyticsTrendBandBlendMode;
+}
 
 export interface ActivityAnalyticsSurfaceEffects {
     glow: number;
@@ -394,6 +411,8 @@ export interface ActivityAnalyticsSurfaceEffects {
     topCap: boolean;
     topCapGlow: number;
 }
+
+export type ActivityAnalyticsGroupBarWidths = Partial<Record<ActivityAnalyticsGroupBy, number>>;
 
 export interface ActivityAnalyticsDisplayOptions {
     range?: ActivityAnalyticsRange;
@@ -403,11 +422,14 @@ export interface ActivityAnalyticsDisplayOptions {
     setupThresholdKw?: number;
     prodThresholdKw?: number;
     displayMode?: ActivityAnalyticsDisplayMode;
-    /** Grouped stacked bar width factor in [0.5, 1.5], default 1. */
+    /** Grouped stacked bar width factor in [0.1, 1.5], default 1. Legacy global fallback. */
     groupBarWidth?: number;
+    /** Per-group grouped stacked bar width factors in [0.1, 1.5], default 1 per supported group. */
+    groupBarWidths?: ActivityAnalyticsGroupBarWidths;
     coverageColor?: string;
     stateGradients?: Partial<Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsStateGradient>>;
     stateGradientAlphas?: Partial<Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair>>;
+    prodTrendBands?: ActivityAnalyticsProdTrendBandsDisplayOptions;
     visualEffects?: {
         groupedBars?: Partial<ActivityAnalyticsSurfaceEffects>;
         donut?: Partial<ActivityAnalyticsSurfaceEffects>;

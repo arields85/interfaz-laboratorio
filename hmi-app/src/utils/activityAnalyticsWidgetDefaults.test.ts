@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
     ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS,
+    ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS,
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
+    DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
     createDefaultActivityAnalyticsDisplayOptions,
+    resolveActivityAnalyticsGroupBarWidthForGroup,
+    resolveActivityAnalyticsGroupBarWidths,
     resolveActivityAnalyticsStateGradientAlphas,
     resolveActivityAnalyticsDisplayOptions,
     resolveActivityAnalyticsCoverageColor,
+    resolveActivityAnalyticsProdTrendBands,
     resolveActivityAnalyticsStateGradients,
     resolveActivityAnalyticsVisualEffects,
 } from './activityAnalyticsWidgetDefaults';
@@ -25,6 +31,12 @@ describe('activityAnalyticsWidgetDefaults', () => {
         expect(createDefaultActivityAnalyticsDisplayOptions().displayMode).toBe('kpis-and-bars');
         expect(createDefaultActivityAnalyticsDisplayOptions().range).toBe('7d');
         expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidth).toBe(1);
+        expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidths).toEqual({
+            shift: 1,
+            day: 1,
+            week: 1,
+            month: 1,
+        });
         expect(createDefaultActivityAnalyticsDisplayOptions().coverageColor).toBe(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
         expect(createDefaultActivityAnalyticsDisplayOptions().stateGradients).toEqual(
             DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
@@ -36,6 +48,10 @@ describe('activityAnalyticsWidgetDefaults', () => {
             groupedBars: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
             donut: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
         });
+        expect(createDefaultActivityAnalyticsDisplayOptions().prodTrendBands).toEqual({
+            alphas: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
+            blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+        });
         expect(
             resolveActivityAnalyticsDisplayOptions({
                 displayMode: 'kpis-bars-and-secondary',
@@ -43,6 +59,12 @@ describe('activityAnalyticsWidgetDefaults', () => {
         ).toMatchObject({
             displayMode: 'kpis-and-bars',
             groupBarWidth: 1,
+            groupBarWidths: {
+                shift: 1,
+                day: 1,
+                week: 1,
+                month: 1,
+            },
             coverageColor: DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
             stateGradients: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
             stateGradientAlphas: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
@@ -50,6 +72,49 @@ describe('activityAnalyticsWidgetDefaults', () => {
                 groupedBars: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
                 donut: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
             },
+            prodTrendBands: {
+                colors: [undefined, undefined, undefined],
+                alphas: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
+                blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+            },
+        });
+    });
+
+    it('resolves safe default prod trend bands for missing persisted widgets', () => {
+        expect(resolveActivityAnalyticsProdTrendBands()).toEqual({
+            colors: [undefined, undefined, undefined],
+            alphas: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
+            blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+        });
+
+        expect(resolveActivityAnalyticsDisplayOptions().prodTrendBands).toEqual({
+            colors: [undefined, undefined, undefined],
+            alphas: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
+            blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+        });
+    });
+
+    it('normalizes prod trend band malformed colors, clamps alphas independently, and falls back unsupported blend modes', () => {
+        expect(resolveActivityAnalyticsProdTrendBands({
+            colors: ['#112233', 'bad-token', '   '] as [string, string, string],
+            alphas: [-10, 150, Number.NaN],
+            blendMode: 'difference' as never,
+        })).toEqual({
+            colors: ['#112233', undefined, undefined],
+            alphas: [0, 100, DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[2]],
+            blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+        });
+
+        expect(resolveActivityAnalyticsDisplayOptions({
+            prodTrendBands: {
+                colors: ['#abcdef', null, '#654321'] as unknown as [string, string, string],
+                alphas: [30, 'oops', 70] as unknown as [number, number, number],
+                blendMode: 'screen',
+            },
+        }).prodTrendBands).toEqual({
+            colors: ['#abcdef', undefined, '#654321'],
+            alphas: [30, DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[1], 70],
+            blendMode: 'screen',
         });
     });
 
@@ -204,13 +269,25 @@ describe('activityAnalyticsWidgetDefaults', () => {
         });
     });
 
-    it('defaults and clamps grouped bar width to the production-history-safe range', () => {
+    it('defaults and clamps grouped bar width to the production-history-safe range independently per group', () => {
         expect(resolveActivityAnalyticsDisplayOptions()).toMatchObject({
             groupBarWidth: 1,
+            groupBarWidths: {
+                shift: 1,
+                day: 1,
+                week: 1,
+                month: 1,
+            },
         });
 
         expect(resolveActivityAnalyticsDisplayOptions({ groupBarWidth: 0.4 })).toMatchObject({
-            groupBarWidth: 0.5,
+            groupBarWidth: 0.4,
+            groupBarWidths: {
+                shift: 0.4,
+                day: 0.4,
+                week: 0.4,
+                month: 0.4,
+            },
         });
 
         expect(resolveActivityAnalyticsDisplayOptions({ groupBarWidth: 1.4 })).toMatchObject({
@@ -224,6 +301,41 @@ describe('activityAnalyticsWidgetDefaults', () => {
         expect(resolveActivityAnalyticsDisplayOptions({ groupBarWidth: Number.NaN })).toMatchObject({
             groupBarWidth: 1,
         });
+
+        expect(resolveActivityAnalyticsDisplayOptions({
+            range: '30d',
+            groupBy: 'week',
+            groupBarWidth: 1.2,
+            groupBarWidths: {
+                shift: 0.05,
+                day: 0.25,
+                week: 9,
+            },
+        })).toMatchObject({
+            groupBarWidth: 1.5,
+            groupBarWidths: {
+                shift: 0.1,
+                day: 0.25,
+                week: 1.5,
+                month: 1.2,
+            },
+        });
+    });
+
+    it('resolves per-group widths with legacy fallback and group-specific lookup', () => {
+        expect(resolveActivityAnalyticsGroupBarWidths(undefined, 0.6)).toEqual({
+            shift: 0.6,
+            day: 0.6,
+            week: 0.6,
+            month: 0.6,
+        });
+
+        expect(ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS.map((groupBy) => resolveActivityAnalyticsGroupBarWidthForGroup(groupBy, {
+            shift: 0.2,
+            day: 0.7,
+            week: 1.1,
+            month: 1.4,
+        }))).toEqual([0.2, 0.7, 1.1, 1.4]);
     });
 
     it('normalizes legacy 1h, removed 24h, and invalid grouped combinations through the shared rules contract', () => {

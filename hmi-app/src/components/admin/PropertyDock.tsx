@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects } from '../../domain/admin.types';
+import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
+import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
 import {
     normalizeTrendChartV2ShiftDisplayMode,
@@ -37,7 +38,10 @@ import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCa
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
 import {
     clampActivityAnalyticsGroupBarWidth,
+    DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT,
     resolveActivityAnalyticsDisplayOptions,
+    resolveActivityAnalyticsGroupBarWidthForGroup,
+    resolveActivityAnalyticsProdTrendBandBlendMode,
 } from '../../utils/activityAnalyticsWidgetDefaults';
 import {
     resolveActivityAnalyticsDisplayRules,
@@ -108,14 +112,29 @@ const ACTIVITY_ANALYTICS_GRADIENT_STOPS = [
     { slotIndex: 0 as const, key: 'start', label: 'Color inicial', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
     { slotIndex: 1 as const, key: 'end', label: 'Color final', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
 ];
+const ACTIVITY_ANALYTICS_PROD_TREND_BAND_STOPS = [
+    { slotIndex: 0 as const, key: 'top', label: 'Superior', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
+    { slotIndex: 1 as const, key: 'middle', label: 'Centro', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
+    { slotIndex: 2 as const, key: 'bottom', label: 'Inferior', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
+];
+const ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE_LABELS: Record<ActivityAnalyticsTrendBandBlendMode, string> = {
+    overlay: 'Overlay',
+    normal: 'Normal',
+    multiply: 'Multiply',
+    screen: 'Screen',
+    'soft-light': 'Soft light',
+    'hard-light': 'Hard light',
+};
 const ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS = [
     { key: 'groupedBars' as const, label: 'Barras agrupadas' },
     { key: 'donut' as const, label: 'Donut' },
 ];
 const ACTIVITY_ANALYTICS_HEX_PATTERN = /^#[0-9a-f]{6}$/i;
 type ActivityAnalyticsGradientSlotIndex = 0 | 1;
+type ActivityAnalyticsProdTrendBandSlotIndex = 0 | 1 | 2;
 type ActivityAnalyticsSurfaceKey = 'groupedBars' | 'donut';
 type ActivityAnalyticsHexDraftKey = `${ActivityAnalyticsStateGradientKey}-${ActivityAnalyticsGradientSlotIndex}`;
+type ActivityAnalyticsProdTrendBandHexDraftKey = `prod-trend-band-${ActivityAnalyticsProdTrendBandSlotIndex}`;
 
 const STATUS_TEXT_FIELDS: Array<{ key: keyof StatusDisplayOptions; label: string; placeholder: string }> = [
     { key: 'runningText', label: 'Running', placeholder: DEFAULT_STATUS_LABELS.running },
@@ -156,6 +175,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     const [isCustomUnit, setIsCustomUnit] = useState(false);
     const [activityAnalyticsThresholdWarning, setActivityAnalyticsThresholdWarning] = useState<string | null>(null);
     const [activityAnalyticsHexDrafts, setActivityAnalyticsHexDrafts] = useState<Partial<Record<ActivityAnalyticsHexDraftKey, string>>>({});
+    const [activityAnalyticsProdTrendBandHexDrafts, setActivityAnalyticsProdTrendBandHexDrafts] = useState<Partial<Record<ActivityAnalyticsProdTrendBandHexDraftKey, string>>>({});
     const [activityAnalyticsCoverageColorDraft, setActivityAnalyticsCoverageColorDraft] = useState<string | null>(null);
     void selectedLayout;
 
@@ -165,6 +185,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     useEffect(() => {
         setActivityAnalyticsHexDrafts({});
+        setActivityAnalyticsProdTrendBandHexDrafts({});
         setActivityAnalyticsCoverageColorDraft(null);
     }, [selectedWidget?.id]);
 
@@ -277,6 +298,25 @@ export default function PropertyDock(props: PropertyDockProps) {
         });
     };
 
+    const handleActivityAnalyticsGroupBarWidthChange = (nextValue: number) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                groupBarWidths: {
+                    ...(selectedWidget.displayOptions?.groupBarWidths ?? {}),
+                    [currentOptions.groupBy]: clampActivityAnalyticsGroupBarWidth(nextValue),
+                },
+            },
+        });
+    };
+
     const handleActivityAnalyticsStateGradientChange = (
         stateKey: ActivityAnalyticsStateGradientKey,
         slotIndex: 0 | 1,
@@ -376,6 +416,113 @@ export default function PropertyDock(props: PropertyDockProps) {
         handleActivityAnalyticsStateGradientChange(stateKey, slotIndex, normalizedValue);
     };
 
+    const getActivityAnalyticsProdTrendBandHexDraftKey = (
+        slotIndex: ActivityAnalyticsProdTrendBandSlotIndex,
+    ): ActivityAnalyticsProdTrendBandHexDraftKey => `prod-trend-band-${slotIndex}`;
+
+    const handleActivityAnalyticsProdTrendBandColorChange = (
+        slotIndex: ActivityAnalyticsProdTrendBandSlotIndex,
+        value: string | undefined,
+    ) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const currentProdTrendBands = currentOptions.prodTrendBands;
+        const nextColors: [string | undefined, string | undefined, string | undefined] = [...currentProdTrendBands.colors];
+
+        nextColors[slotIndex] = value;
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                prodTrendBands: {
+                    ...selectedWidget.displayOptions?.prodTrendBands,
+                    colors: nextColors,
+                },
+            },
+        });
+    };
+
+    const handleActivityAnalyticsProdTrendBandHexDraftChange = (
+        slotIndex: ActivityAnalyticsProdTrendBandSlotIndex,
+        value: string,
+    ) => {
+        const draftKey = getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex);
+        const normalizedValue = value.trim();
+
+        setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [draftKey]: value,
+        }));
+
+        if (normalizedValue.length === 0) {
+            handleActivityAnalyticsProdTrendBandColorChange(slotIndex, undefined);
+            return;
+        }
+
+        if (!isValidActivityAnalyticsHex(normalizedValue)) {
+            return;
+        }
+
+        const nextColor = normalizedValue.toLowerCase();
+        handleActivityAnalyticsProdTrendBandColorChange(slotIndex, nextColor);
+        setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [draftKey]: nextColor,
+        }));
+    };
+
+    const handleActivityAnalyticsProdTrendBandHexDraftBlur = (
+        slotIndex: ActivityAnalyticsProdTrendBandSlotIndex,
+        resolvedValue: string,
+    ) => {
+        const draftKey = getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex);
+        const draftValue = activityAnalyticsProdTrendBandHexDrafts[draftKey];
+
+        if (draftValue == null) {
+            return;
+        }
+
+        const normalizedDraftValue = draftValue.trim().toLowerCase();
+
+        if (normalizedDraftValue.length === 0) {
+            setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
+                ...currentDrafts,
+                [draftKey]: '',
+            }));
+            return;
+        }
+
+        if (isValidActivityAnalyticsHex(normalizedDraftValue)) {
+            setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
+                ...currentDrafts,
+                [draftKey]: normalizedDraftValue,
+            }));
+            return;
+        }
+
+        setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [draftKey]: resolvedValue,
+        }));
+    };
+
+    const handleActivityAnalyticsProdTrendBandColorPickerChange = (
+        slotIndex: ActivityAnalyticsProdTrendBandSlotIndex,
+        value: string,
+    ) => {
+        const normalizedValue = value.trim().toLowerCase();
+
+        setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
+            ...currentDrafts,
+            [getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)]: normalizedValue,
+        }));
+        handleActivityAnalyticsProdTrendBandColorChange(slotIndex, normalizedValue);
+    };
+
     const handleActivityAnalyticsCoverageColorChange = (value: string) => {
         if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
             return;
@@ -460,6 +607,55 @@ export default function PropertyDock(props: PropertyDockProps) {
             displayOptions: {
                 ...selectedWidget.displayOptions,
                 stateGradientAlphas: nextStateGradientAlphas,
+            },
+        });
+    };
+
+    const handleActivityAnalyticsProdTrendBandAlphaChange = (
+        slotIndex: ActivityAnalyticsProdTrendBandSlotIndex,
+        value: string,
+    ) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const nextAlphas: [number, number, number] = [...currentOptions.prodTrendBands.alphas];
+        const nextValue = Number(value);
+
+        if (!Number.isFinite(nextValue)) {
+            return;
+        }
+
+        nextAlphas[slotIndex] = Math.min(100, Math.max(0, nextValue));
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                prodTrendBands: {
+                    ...selectedWidget.displayOptions?.prodTrendBands,
+                    alphas: nextAlphas,
+                },
+            },
+        });
+    };
+
+    const handleActivityAnalyticsProdTrendBandBlendModeChange = (blendMode: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        const resolvedBlendMode = resolveActivityAnalyticsProdTrendBandBlendMode(blendMode);
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                prodTrendBands: {
+                    ...selectedWidget.displayOptions?.prodTrendBands,
+                    blendMode: resolvedBlendMode,
+                },
             },
         });
     };
@@ -831,7 +1027,13 @@ export default function PropertyDock(props: PropertyDockProps) {
         const rawValue = prodHistoryOptions?.productionBarWidth ?? 1;
         return Math.min(1.5, Math.max(0.5, Number.isFinite(rawValue) ? rawValue : 1));
     })();
-    const activityAnalyticsBarWidth = activityAnalyticsOptions?.groupBarWidth ?? 1;
+    const activityAnalyticsBarWidth = activityAnalyticsOptions
+        ? resolveActivityAnalyticsGroupBarWidthForGroup(
+            activityAnalyticsOptions.groupBy,
+            activityAnalyticsOptions.groupBarWidths,
+            activityAnalyticsOptions.groupBarWidth,
+        )
+        : 1;
     const shouldShowGeneralIconField = selectedWidget
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'text-title'
@@ -1592,11 +1794,11 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     <div className="flex w-full items-center gap-3">
                                         <input
                                             type="range"
-                                            min="0.5"
+                                            min="0.1"
                                             max="1.5"
                                             step="0.1"
                                             value={activityAnalyticsBarWidth}
-                                            onChange={(e) => handleDisplayOptionChange('groupBarWidth', clampActivityAnalyticsGroupBarWidth(Number(e.target.value)))}
+                                            onChange={(e) => handleActivityAnalyticsGroupBarWidthChange(Number(e.target.value))}
                                             className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10"
                                             style={{ accentColor: 'var(--color-admin-accent)' }}
                                         />
@@ -1791,6 +1993,75 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             </div>
                                         );
                                     })}
+
+                                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                        <div className="mb-2 text-sm font-medium text-industrial-text">Bandas tendencia % PROD</div>
+                                        <div className="flex flex-col gap-2">
+                                            {ACTIVITY_ANALYTICS_PROD_TREND_BAND_STOPS.map(({ slotIndex, label: stopLabel, hexLabel, alphaLabel }) => {
+                                                const resolvedHexValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? '';
+                                                const displayedHexValue = activityAnalyticsProdTrendBandHexDrafts[getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)] ?? resolvedHexValue;
+                                                const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHex(displayedHexValue);
+                                                const pickerValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT;
+
+                                                return (
+                                                    <div key={`prod-trend-band-${slotIndex}`} className="rounded-md border border-white/5 bg-black/20 p-2">
+                                                        <div className="mb-2 text-xs uppercase tracking-wide text-industrial-muted">{stopLabel}</div>
+                                                        <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr),120px]">
+                                                            <label className="flex items-center gap-2 text-industrial-muted">
+                                                                <span className="sr-only">{`Bandas tendencia ${stopLabel}`}</span>
+                                                                <input
+                                                                    type="color"
+                                                                    value={pickerValue}
+                                                                    onChange={(event) => handleActivityAnalyticsProdTrendBandColorPickerChange(slotIndex, event.target.value)}
+                                                                    className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-1"
+                                                                    aria-label={`Bandas tendencia color ${stopLabel.toLowerCase()}`}
+                                                                />
+                                                            </label>
+                                                            <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                                <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{hexLabel}</span>
+                                                                <input
+                                                                    type="text"
+                                                                    inputMode="text"
+                                                                    spellCheck={false}
+                                                                    value={displayedHexValue}
+                                                                    onChange={(event) => handleActivityAnalyticsProdTrendBandHexDraftChange(slotIndex, event.target.value)}
+                                                                    onBlur={() => handleActivityAnalyticsProdTrendBandHexDraftBlur(slotIndex, resolvedHexValue)}
+                                                                    aria-invalid={isDraftInvalid}
+                                                                    aria-label={`Bandas tendencia hex ${stopLabel.toLowerCase()}`}
+                                                                    className={`${INPUT_CLS} ${isDraftInvalid ? 'border-status-error bg-status-error/10' : ''}`.trim()}
+                                                                    placeholder="#RRGGBB"
+                                                                />
+                                                            </label>
+                                                            <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                                <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{alphaLabel}</span>
+                                                                <AdminNumberInput
+                                                                    value={activityAnalyticsOptions.prodTrendBands.alphas[slotIndex]}
+                                                                    min={0}
+                                                                    max={100}
+                                                                    step={1}
+                                                                    commitOnBlur
+                                                                    ariaLabel={`Bandas tendencia alfa ${stopLabel.toLowerCase()}`}
+                                                                    onChange={(nextValue) => handleActivityAnalyticsProdTrendBandAlphaChange(slotIndex, nextValue)}
+                                                                />
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Blend mode</span>
+                                                <AdminSelect
+                                                    value={activityAnalyticsOptions.prodTrendBands.blendMode}
+                                                    onChange={handleActivityAnalyticsProdTrendBandBlendModeChange}
+                                                    options={ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS.map((blendMode) => ({
+                                                        value: blendMode,
+                                                        label: ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE_LABELS[blendMode],
+                                                    }))}
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
 
                                     {(() => {
                                         const displayedCoverageColor = activityAnalyticsCoverageColorDraft ?? activityAnalyticsOptions.coverageColor;
