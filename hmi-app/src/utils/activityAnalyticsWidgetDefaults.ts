@@ -21,6 +21,7 @@ export const DEFAULT_ACTIVITY_ANALYTICS_DISPLAY_MODE = 'kpis-and-bars' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 1;
 export const MIN_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 0.5;
 export const MAX_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 1.5;
+export const DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR = '#94a3b8';
 export const DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS: Record<
     ActivityAnalyticsStateGradientKey,
     ActivityAnalyticsStateGradient
@@ -65,7 +66,7 @@ export type ResolvedActivityAnalyticsVisualEffects = {
 
 export type ResolvedActivityAnalyticsDisplayOptions = Required<Pick<
     ActivityAnalyticsDisplayOptions,
-    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode' | 'groupBarWidth' | 'stateGradients' | 'stateGradientAlphas' | 'visualEffects'
+    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode' | 'groupBarWidth' | 'coverageColor' | 'stateGradients' | 'stateGradientAlphas' | 'visualEffects'
 >> & Pick<ActivityAnalyticsDisplayOptions, 'start' | 'end'>;
 
 function cloneActivityAnalyticsStateGradients(
@@ -175,6 +176,12 @@ export function resolveActivityAnalyticsStateGradients(
     };
 }
 
+export function resolveActivityAnalyticsCoverageColor(
+    rawCoverageColor?: ActivityAnalyticsDisplayOptions['coverageColor'],
+): string {
+    return resolveGradientSlot(rawCoverageColor, DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
+}
+
 export function resolveActivityAnalyticsStateGradientAlphas(
     rawStateGradientAlphas?: ActivityAnalyticsDisplayOptions['stateGradientAlphas'],
 ): Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair> {
@@ -229,6 +236,7 @@ export function createDefaultActivityAnalyticsDisplayOptions(): ActivityAnalytic
         prodThresholdKw: DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         displayMode: normalizeActivityAnalyticsDisplayMode(),
         groupBarWidth: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
+        coverageColor: DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
         stateGradients: cloneActivityAnalyticsStateGradients(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS),
         stateGradientAlphas: cloneActivityAnalyticsStateGradientAlphas(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS),
         visualEffects: {
@@ -257,6 +265,7 @@ export function resolveActivityAnalyticsDisplayOptions(
         prodThresholdKw: displayOptions?.prodThresholdKw ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         displayMode: normalizeActivityAnalyticsDisplayMode(displayOptions?.displayMode),
         groupBarWidth: clampActivityAnalyticsGroupBarWidth(displayOptions?.groupBarWidth),
+        coverageColor: resolveActivityAnalyticsCoverageColor(displayOptions?.coverageColor),
         stateGradients: resolveActivityAnalyticsStateGradients(displayOptions?.stateGradients),
         stateGradientAlphas: resolveActivityAnalyticsStateGradientAlphas(displayOptions?.stateGradientAlphas),
         visualEffects: resolveActivityAnalyticsVisualEffects(displayOptions?.visualEffects),

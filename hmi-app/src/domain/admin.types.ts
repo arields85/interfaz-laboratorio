@@ -405,6 +405,7 @@ export interface ActivityAnalyticsDisplayOptions {
     displayMode?: ActivityAnalyticsDisplayMode;
     /** Grouped stacked bar width factor in [0.5, 1.5], default 1. */
     groupBarWidth?: number;
+    coverageColor?: string;
     stateGradients?: Partial<Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsStateGradient>>;
     stateGradientAlphas?: Partial<Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair>>;
     visualEffects?: {

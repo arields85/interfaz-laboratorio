@@ -47,7 +47,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-c:2026-06-18',
-            label: '2026-06-18 · Turno C',
+            label: '18/06 · Turno C',
             durationsMs: {
                 prod: 30 * 60 * 1000,
                 setup: 30 * 60 * 1000,
@@ -73,7 +73,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-18',
-            label: '2026-06-18 · Turno A (en curso)',
+            label: '18/06 · Turno A (en curso)',
             expectedDurationMs: 8 * 60 * 60 * 1000,
             isInProgress: true,
             durationsMs: {
@@ -103,7 +103,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-18',
-            label: '2026-06-18 · Turno A',
+            label: '18/06 · Turno A',
             isInProgress: false,
             coverageRatio: 0.25,
             productivityRatio: null,
@@ -127,7 +127,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-c:2026-06-18',
-            label: '2026-06-19 · Turno C (en curso)',
+            label: '19/06 · Turno C (en curso)',
             startMs: Date.parse('2026-06-19T00:30:00.000Z'),
             endMs: Date.parse('2026-06-19T03:00:00.000Z'),
             expectedDurationMs: 8 * 60 * 60 * 1000,
@@ -151,7 +151,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-18',
-            label: '2026-06-18 · Turno A (en curso)',
+            label: '18/06 · Turno A (en curso)',
             startMs: Date.parse('2026-06-18T06:00:00.000Z'),
             endMs: Date.parse('2026-06-18T08:00:00.000Z'),
             expectedDurationMs: 8 * 60 * 60 * 1000,
@@ -186,14 +186,14 @@ describe('activityAnalyticsGrouping', () => {
         ]);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-b:2026-06-18',
-            label: '2026-06-18 · Turno B',
+            label: '18/06 · Turno B',
             startMs: Date.parse('2026-06-18T14:00:00.000Z'),
             endMs: Date.parse('2026-06-18T22:00:00.000Z'),
             isInProgress: false,
         });
         expect(grouped.at(-1)).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-19',
-            label: '2026-06-19 · Turno A (en curso)',
+            label: '19/06 · Turno A (en curso)',
             startMs: Date.parse('2026-06-19T06:00:00.000Z'),
             endMs: Date.parse('2026-06-19T10:00:00.000Z'),
             isInProgress: true,
@@ -219,7 +219,7 @@ describe('activityAnalyticsGrouping', () => {
 
         expect(grouped[0]).toMatchObject({
             bucketKey: 'shift:shift-a:2026-06-18',
-            label: '2026-06-18 · Turno A',
+            label: '18/06 · Turno A',
             startMs: Date.parse('2026-06-18T09:00:00.000Z'),
             endMs: Date.parse('2026-06-18T14:00:00.000Z'),
         });
@@ -308,6 +308,45 @@ describe('activityAnalyticsGrouping', () => {
             'month:2026-06',
             'month:2026-07',
         ]);
+    });
+
+    it('formats compact display labels for day, week, month, and shift buckets without changing semantic keys', () => {
+        const dayBuckets = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-06-18T08:00:00.000Z', 30 * 60 * 1000, 'prod')],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-08-01T00:00:00.000Z'),
+        });
+
+        const weekBuckets = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-06-18T08:00:00.000Z', 30 * 60 * 1000, 'prod')],
+            groupBy: 'week',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-08-01T00:00:00.000Z'),
+        });
+
+        const monthBuckets = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-06-18T08:00:00.000Z', 30 * 60 * 1000, 'prod')],
+            groupBy: 'month',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-08-01T00:00:00.000Z'),
+        });
+
+        const shiftBuckets = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-06-18T06:30:00.000Z', 30 * 60 * 1000, 'prod')],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-08-01T00:00:00.000Z'),
+        });
+
+        expect(dayBuckets[0]).toMatchObject({ bucketKey: 'day:2026-06-18', label: '18/06' });
+        expect(weekBuckets[0]).toMatchObject({ bucketKey: 'week:2026-06-15', label: '15/06' });
+        expect(monthBuckets[0]).toMatchObject({ bucketKey: 'month:2026-06', label: 'jun 26' });
+        expect(shiftBuckets[0]).toMatchObject({ bucketKey: 'shift:shift-a:2026-06-18', label: '18/06 · Turno A' });
     });
 
     it('splits a single interval across a week boundary and assigns the stop transition only once', () => {
@@ -464,7 +503,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'day:2026-06-18',
-            label: '2026-06-18 (en curso)',
+            label: '18/06 (en curso)',
             expectedDurationMs: 24 * 60 * 60 * 1000,
             isInProgress: true,
             durationsMs: {
@@ -497,7 +536,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'day:2026-06-18',
-            label: '2026-06-18 (en curso)',
+            label: '18/06 (en curso)',
             isInProgress: true,
             durationsMs: {
                 prod: 4 * 60 * 60 * 1000,
@@ -529,7 +568,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'day:2026-06-18',
-            label: '2026-06-18 (en curso)',
+            label: '18/06 (en curso)',
             isInProgress: true,
             productivityRatio: null,
             productivityLabel: 'en curso',
@@ -554,7 +593,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'day:2026-06-18',
-            label: '2026-06-18',
+            label: '18/06',
             isInProgress: false,
             productivityRatio: null,
             productivityLabel: 'cobertura incompleta',
@@ -587,7 +626,7 @@ describe('activityAnalyticsGrouping', () => {
         ]);
         expect(grouped.at(-1)).toMatchObject({
             bucketKey: 'day:2026-06-18',
-            label: '2026-06-18 (en curso)',
+            label: '18/06 (en curso)',
             isInProgress: true,
             productivityLabel: 'en curso',
         });
@@ -616,7 +655,7 @@ describe('activityAnalyticsGrouping', () => {
         ]);
         expect(grouped.at(-1)).toMatchObject({
             bucketKey: 'week:2026-07-06',
-            label: 'Week 2026-07-06 (en curso)',
+            label: '06/07 (en curso)',
             isInProgress: true,
             productivityLabel: 'en curso',
         });
@@ -653,7 +692,7 @@ describe('activityAnalyticsGrouping', () => {
         ]);
         expect(grouped.at(-1)).toMatchObject({
             bucketKey: 'month:2026-07',
-            label: '2026-07 (en curso)',
+            label: 'jul 26 (en curso)',
             isInProgress: true,
             productivityLabel: 'en curso',
         });
@@ -677,7 +716,7 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped).toHaveLength(1);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'day:2026-06-18',
-            label: '2026-06-18',
+            label: '18/06',
             isInProgress: false,
             durationsMs: {
                 prod: 4 * 60 * 60 * 1000,
@@ -711,7 +750,7 @@ describe('activityAnalyticsGrouping', () => {
         ]);
         expect(grouped[0]).toMatchObject({
             bucketKey: 'day:2026-06-11',
-            label: '2026-06-11',
+            label: '11/06',
             isInProgress: false,
         });
     });
@@ -791,11 +830,11 @@ describe('activityAnalyticsGrouping', () => {
         expect(grouped.map((bucket) => ({ bucketKey: bucket.bucketKey, label: bucket.label }))).toEqual([
             {
                 bucketKey: 'shift:shift-c:2026-06-19',
-                label: '2026-06-19 · Turno C',
+                label: '19/06 · Turno C',
             },
             {
                 bucketKey: 'sin-turno:2026-06-20T06:00',
-                label: '2026-06-20 · sin turno',
+                label: '20/06 · sin turno',
             },
         ]);
         expect(grouped[0]?.expectedDurationMs).toBe(8 * 60 * 60 * 1000);

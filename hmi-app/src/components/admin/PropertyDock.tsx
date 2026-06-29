@@ -156,6 +156,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     const [isCustomUnit, setIsCustomUnit] = useState(false);
     const [activityAnalyticsThresholdWarning, setActivityAnalyticsThresholdWarning] = useState<string | null>(null);
     const [activityAnalyticsHexDrafts, setActivityAnalyticsHexDrafts] = useState<Partial<Record<ActivityAnalyticsHexDraftKey, string>>>({});
+    const [activityAnalyticsCoverageColorDraft, setActivityAnalyticsCoverageColorDraft] = useState<string | null>(null);
     void selectedLayout;
 
     useEffect(() => {
@@ -164,6 +165,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     useEffect(() => {
         setActivityAnalyticsHexDrafts({});
+        setActivityAnalyticsCoverageColorDraft(null);
     }, [selectedWidget?.id]);
 
     // -------------------------------------------------------------------------
@@ -372,6 +374,47 @@ export default function PropertyDock(props: PropertyDockProps) {
             [getActivityAnalyticsHexDraftKey(stateKey, slotIndex)]: normalizedValue,
         }));
         handleActivityAnalyticsStateGradientChange(stateKey, slotIndex, normalizedValue);
+    };
+
+    const handleActivityAnalyticsCoverageColorChange = (value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                coverageColor: value,
+            },
+        });
+    };
+
+    const handleActivityAnalyticsCoverageColorDraftChange = (value: string) => {
+        const normalizedValue = value.trim();
+
+        setActivityAnalyticsCoverageColorDraft(value);
+
+        if (!isValidActivityAnalyticsHex(normalizedValue)) {
+            return;
+        }
+
+        const nextColor = normalizedValue.toLowerCase();
+        handleActivityAnalyticsCoverageColorChange(nextColor);
+        setActivityAnalyticsCoverageColorDraft(nextColor);
+    };
+
+    const handleActivityAnalyticsCoverageColorDraftBlur = (resolvedValue: string) => {
+        if (activityAnalyticsCoverageColorDraft == null) {
+            return;
+        }
+
+        if (isValidActivityAnalyticsHex(activityAnalyticsCoverageColorDraft)) {
+            setActivityAnalyticsCoverageColorDraft(activityAnalyticsCoverageColorDraft.trim().toLowerCase());
+            return;
+        }
+
+        setActivityAnalyticsCoverageColorDraft(resolvedValue);
     };
 
     const handleActivityAnalyticsStateGradientAlphaChange = (
@@ -1748,6 +1791,49 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             </div>
                                         );
                                     })}
+
+                                    {(() => {
+                                        const displayedCoverageColor = activityAnalyticsCoverageColorDraft ?? activityAnalyticsOptions.coverageColor;
+                                        const isCoverageDraftInvalid = displayedCoverageColor.length > 0
+                                            && !isValidActivityAnalyticsHex(displayedCoverageColor);
+
+                                        return (
+                                            <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                                <div className="mb-2 text-sm font-medium text-industrial-text">Cobertura / sin datos</div>
+                                                <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr)]">
+                                                    <label className="flex items-center gap-2 text-industrial-muted">
+                                                        <span className="sr-only">Cobertura / sin datos</span>
+                                                        <input
+                                                            type="color"
+                                                            value={activityAnalyticsOptions.coverageColor}
+                                                            onChange={(event) => {
+                                                                const nextColor = event.target.value.trim().toLowerCase();
+                                                                setActivityAnalyticsCoverageColorDraft(nextColor);
+                                                                handleActivityAnalyticsCoverageColorChange(nextColor);
+                                                            }}
+                                                            className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-1"
+                                                            aria-label="Cobertura / sin datos color"
+                                                        />
+                                                    </label>
+                                                    <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
+                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">HEX</span>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="text"
+                                                            spellCheck={false}
+                                                            value={displayedCoverageColor}
+                                                            onChange={(event) => handleActivityAnalyticsCoverageColorDraftChange(event.target.value)}
+                                                            onBlur={() => handleActivityAnalyticsCoverageColorDraftBlur(activityAnalyticsOptions.coverageColor)}
+                                                            aria-invalid={isCoverageDraftInvalid}
+                                                            aria-label="Cobertura / sin datos hex"
+                                                            className={`${INPUT_CLS} ${isCoverageDraftInvalid ? 'border-status-error bg-status-error/10' : ''}`.trim()}
+                                                            placeholder="#RRGGBB"
+                                                        />
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
 
                                     <div className="grid gap-3 xl:grid-cols-2">
                                         {ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS.map(({ key, label }) => {

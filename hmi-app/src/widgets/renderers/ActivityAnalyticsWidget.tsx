@@ -99,7 +99,6 @@ const WIDGET_VALUE_TEXT_STYLE: CSSProperties = {
 const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden p-5';
 const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border';
 const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border';
-const NO_DATA_STATE_COLOR = 'var(--color-industrial-muted)';
 const ACTIVITY_ANALYTICS_STATE_KEYS = ['prod', 'setup', 'stopped'] as const;
 const SUMMARY_CHART_MAX_WIDTH_PX = 480;
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
@@ -128,7 +127,6 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
     innerClearancePx: 6,
     minimumOuterRadiusPx: 32,
     detailMarkerLabelGapPx: 8,
-    coverageLabelBottomAllowancePx: 4,
     detail: {
         markerSizePx: 10,
         markerOffsetYPx: 3,
@@ -144,10 +142,9 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
             centerYRatio: 0.43,
             outerRadiusInsetPx: 4,
             outerRadiusMaxPx: 88,
-            detailValueBaselineYPx: 32,
-            detailSectionHeightPx: 42,
-            detailSectionGapPx: 14,
-            coverageLabelOffsetYPx: 4,
+            detailValueBaselineYPx: 12,
+            detailSectionHeightPx: 22,
+            detailSectionGapPx: 6,
         },
         default: {
             marginPx: { top: 14, right: 18, bottom: 14, left: 18 },
@@ -158,27 +155,15 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
             centerYRatio: 0.45,
             outerRadiusInsetPx: 8,
             outerRadiusMaxPx: 104,
-            detailValueBaselineYPx: 34,
-            detailSectionHeightPx: 46,
-            detailSectionGapPx: 18,
-            coverageLabelOffsetYPx: 3,
+            detailValueBaselineYPx: 12,
+            detailSectionHeightPx: 24,
+            detailSectionGapPx: 8,
         },
     },
 } as const;
 const TOP_REGION_SHARED_HEIGHT_RULES = {
-    widthPx: {
-        compact: { min: 520, max: 760 },
-        standard: { min: 520, max: 1260 },
-    },
     heightRatio: 0.66,
-    compact: {
-        minPx: 208,
-        maxPx: SUMMARY_DONUT_GEOMETRY_RULES.chartHeightPx.compactAxisBars,
-    },
-    standard: {
-        minPx: 224,
-        maxPx: SUMMARY_DONUT_GEOMETRY_RULES.chartHeightPx.standard,
-    },
+    fixedPx: 224,
 } as const;
 const SUMMARY_PANEL_HEIGHT_CHROME_PX = 10;
 const COMPARISON_BAR_WIDTH_CLASS = 'w-2';
@@ -221,7 +206,7 @@ const GROUPED_BAR_GAP_RULES = {
     compress: { min: 10, max: 20, ratio: 0.2 },
     scroll: { min: 8, max: 16, ratio: 0.16 },
 } as const;
-type SummaryDetailKey = 'prod' | 'setup' | 'stopped';
+type SummaryDetailKey = 'prod' | 'setup' | 'stopped' | 'coverage';
 type ActivityAnalyticsGradientStateKey = typeof ACTIVITY_ANALYTICS_STATE_KEYS[number];
 type ActivityAnalyticsVisualPaletteEntry = Readonly<{
     gradient: readonly [string, string];
@@ -240,11 +225,9 @@ type ActivityAnalyticsVisualPalette = Readonly<Record<ActivityAnalyticsGradientS
 }>;
 type SummaryDetailRow = Readonly<{
     key: SummaryDetailKey;
-    title: 'Producción' | 'Setup' | 'Detenida';
-    durationMs: number;
-    percentLabel: string;
-    hoursLabel: string;
-    valueLabel: `${string} - ${string}`;
+    title: 'Producción' | 'Setup' | 'Detenida' | 'Cobertura';
+    valueLabel: string;
+    markerFill: string;
 }>;
 type SummaryDonutGeometry = Readonly<{
     chartHeight: number;
@@ -271,8 +254,6 @@ type SummaryDonutGeometry = Readonly<{
     detailMarkerOffsetY: number;
     detailTitleBaselineY: number;
     detailValueBaselineY: number;
-    coverageLabelX: number;
-    coverageLabelY: number;
     donutBandTopY: number;
     donutBandBottomY: number;
 }>;
@@ -318,6 +299,7 @@ export default function ActivityAnalyticsWidget({
     const visualPalette = createActivityAnalyticsVisualPalette(
         selectedDisplayOptions.stateGradients as Record<ActivityAnalyticsGradientStateKey, readonly [string, string]>,
         selectedDisplayOptions.stateGradientAlphas as Record<ActivityAnalyticsGradientStateKey, readonly [number, number]>,
+        selectedDisplayOptions.coverageColor,
     );
     const activeGroupBy = activeDisplayRules.groupBy;
     const showTurnoModeControl = activeGroupBy === 'shift' && activeDisplayRules.range === '7d';
@@ -873,9 +855,7 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     );
     const topRegionJoinOffsetPx = resolvedSummaryColumnWidth - (chartWidth / 2);
     const topRegionSharedHeight = resolveTopRegionSharedHeight({
-        containerWidth: chartWidth,
         containerHeight: chartHeight,
-        summaryMode: visualLayout.summary.mode,
     });
     const summaryChartHeight = Math.max(topRegionSharedHeight - SUMMARY_PANEL_HEIGHT_CHROME_PX, 0);
     return (
@@ -972,29 +952,16 @@ function resolveComparisonGridColumnGap(containerWidth: number): number {
 }
 
 function resolveTopRegionSharedHeight({
-    containerWidth,
     containerHeight,
-    summaryMode,
 }: {
-    containerWidth: number;
     containerHeight: number;
-    summaryMode: ActivityAnalyticsSummaryLayout['mode'];
 }): number {
-    const widthRules = summaryMode === 'compact-axis-bars'
-        ? TOP_REGION_SHARED_HEIGHT_RULES.widthPx.compact
-        : TOP_REGION_SHARED_HEIGHT_RULES.widthPx.standard;
-    const heightRules = summaryMode === 'compact-axis-bars'
-        ? TOP_REGION_SHARED_HEIGHT_RULES.compact
-        : TOP_REGION_SHARED_HEIGHT_RULES.standard;
-    const widthProgress = normalizeRange(containerWidth, widthRules.min, widthRules.max);
-    const widthDrivenHeight = heightRules.minPx + ((heightRules.maxPx - heightRules.minPx) * widthProgress);
-    const heightDrivenCap = clamp(
+    const heightDrivenCap = Math.min(
         containerHeight * TOP_REGION_SHARED_HEIGHT_RULES.heightRatio,
-        heightRules.minPx,
-        heightRules.maxPx,
+        TOP_REGION_SHARED_HEIGHT_RULES.fixedPx,
     );
 
-    return Math.round(Math.min(widthDrivenHeight, heightDrivenCap));
+    return Math.max(Math.round(heightDrivenCap), 0);
 }
 
 function resolveSummarySegmentGapLength({
@@ -1035,15 +1002,10 @@ const SummaryPanel = memo(function SummaryPanel({
     donutEffects: ResolvedActivityAnalyticsVisualEffects['donut'];
 }) {
     const summaryDisplay = createSummaryDisplayModel(analytics, visualPalette);
-    const coverageSummary = `Cob. ${summaryDisplay.coverageLabel}`;
-
     if (summaryLayout.mode === 'text-fallback') {
         return (
             <div className={`${ANALYTICS_PANEL_CLASS} p-1`} data-testid="activity-analytics-summary-text">
-                <div className="text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-coverage">
-                    {coverageSummary}
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {summaryDisplay.detailRows.map((detailRow) => (
                         <SummaryDetailTextCard key={detailRow.key} detailRow={detailRow} />
                     ))}
@@ -1066,7 +1028,6 @@ const SummaryPanel = memo(function SummaryPanel({
                     density={summaryLayout.density}
                     centerValue={summaryDisplay.sectionProductivityLabel}
                     centerLabel="PROD"
-                    coverageLabel={summaryDisplay.coverageLabel}
                     detailRows={summaryDisplay.detailRows}
                     visualPalette={visualPalette}
                     donutEffects={donutEffects}
@@ -1085,41 +1046,50 @@ function createSummaryDisplayModel(
     const sectionProductivityLabel = analytics.coverageRatio < 1
         ? INCOMPLETE_COVERAGE_LABEL
         : formatPercent(analytics.utilizationRatio);
-    const coverageLabel = formatPercent(analytics.coverageRatio);
 
     return {
         sectionProductivityLabel,
-        coverageLabel,
         stackedBars: [
             { key: 'stopped', label: 'Detenida', durationMs: analytics.durationsMs.stopped, color: visualPalette.stopped.solid },
             { key: 'setup', label: 'Setup', durationMs: analytics.durationsMs.setup, color: visualPalette.setup.solid },
             { key: 'prod', label: 'Prod.', durationMs: analytics.durationsMs.prod, color: visualPalette.prod.solid },
         ] as const,
-        detailRows: createSummaryDetailRows(analytics),
+        detailRows: createSummaryDetailRows(analytics, visualPalette),
     };
 }
 
-function createSummaryDetailRows(analytics: ActivityAnalyticsSummaryData): readonly SummaryDetailRow[] {
+function createSummaryDetailRows(
+    analytics: ActivityAnalyticsSummaryData,
+    visualPalette: ActivityAnalyticsVisualPalette,
+): readonly SummaryDetailRow[] {
     const totalDurationMs = analytics.durationsMs.prod + analytics.durationsMs.setup + analytics.durationsMs.stopped;
 
-    const buildDetailRow = (key: SummaryDetailKey, title: SummaryDetailRow['title'], durationMs: number): SummaryDetailRow => {
+    const buildDetailRow = (
+        key: Extract<SummaryDetailKey, 'prod' | 'setup' | 'stopped'>,
+        title: Extract<SummaryDetailRow['title'], 'Producción' | 'Setup' | 'Detenida'>,
+        durationMs: number,
+        markerFill: string,
+    ): SummaryDetailRow => {
         const percentLabel = totalDurationMs > 0 ? formatPercent(durationMs / totalDurationMs) : '0%';
-        const hoursLabel = formatDurationHours(durationMs);
 
         return {
             key,
             title,
-            durationMs,
-            percentLabel,
-            hoursLabel,
-            valueLabel: `${percentLabel} - ${hoursLabel}`,
+            valueLabel: percentLabel,
+            markerFill,
         };
     };
 
     return [
-        buildDetailRow('prod', 'Producción', analytics.durationsMs.prod),
-        buildDetailRow('setup', 'Setup', analytics.durationsMs.setup),
-        buildDetailRow('stopped', 'Detenida', analytics.durationsMs.stopped),
+        buildDetailRow('prod', 'Producción', analytics.durationsMs.prod, visualPalette.prod.initialSolid),
+        buildDetailRow('setup', 'Setup', analytics.durationsMs.setup, visualPalette.setup.initialSolid),
+        buildDetailRow('stopped', 'Detenida', analytics.durationsMs.stopped, visualPalette.stopped.initialSolid),
+        {
+            key: 'coverage',
+            title: 'Cobertura',
+            valueLabel: formatPercent(analytics.coverageRatio),
+            markerFill: visualPalette.noData.solid,
+        },
     ] as const;
 }
 
@@ -1249,6 +1219,7 @@ const GroupStatusLegend = memo(function GroupStatusLegend({ visualPalette }: { v
                 { key: 'stopped' as const, label: 'Detenida', color: visualPalette.stopped.initialSolid },
                 { key: 'setup' as const, label: 'Setup', color: visualPalette.setup.initialSolid },
                 { key: 'prod' as const, label: 'Prod.', color: visualPalette.prod.initialSolid },
+                { key: 'noData' as const, label: 'Cobertura incompleta', color: visualPalette.noData.solid },
             ].map((item) => (
                 <span key={item.key} className="flex items-center gap-1.5 whitespace-nowrap text-industrial-text">
                     <span
@@ -1305,9 +1276,11 @@ const SummaryDetailTextCard = memo(function SummaryDetailTextCard({
 }) {
     return (
         <div className={`${ANALYTICS_CARD_CLASS} rounded-xl p-3`} data-testid="activity-analytics-summary-detail-section">
-            <div className="text-industrial-text" style={GENERAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-detail-title">{detailRow.title}</div>
-            <div className="mt-2 text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-detail-value">
-                {detailRow.valueLabel}
+            <div className="flex items-baseline justify-between gap-3">
+                <div className="text-industrial-text" style={GENERAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-detail-title">{detailRow.title}</div>
+                <div className="text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-summary-detail-value">
+                    {detailRow.valueLabel}
+                </div>
             </div>
         </div>
     );
@@ -1340,14 +1313,15 @@ function formatHoursTick(durationMs: number): string {
 function createActivityAnalyticsVisualPalette(
     stateGradients: Record<ActivityAnalyticsGradientStateKey, readonly [string, string]>,
     stateGradientAlphas: Record<ActivityAnalyticsGradientStateKey, readonly [number, number]>,
+    coverageColor: string,
 ): ActivityAnalyticsVisualPalette {
     return {
         prod: createActivityAnalyticsPaletteEntry(stateGradients.prod, stateGradientAlphas.prod, 88),
         setup: createActivityAnalyticsPaletteEntry(stateGradients.setup, stateGradientAlphas.setup, 84),
         stopped: createActivityAnalyticsPaletteEntry(stateGradients.stopped, stateGradientAlphas.stopped, 80),
         noData: {
-            solid: NO_DATA_STATE_COLOR,
-            highlight: `color-mix(in srgb, ${NO_DATA_STATE_COLOR} 82%, white)`,
+            solid: coverageColor,
+            highlight: `color-mix(in srgb, ${coverageColor} 82%, white)`,
         },
     };
 }
@@ -1395,7 +1369,6 @@ function SummaryBarsChart({
     density,
     centerValue,
     centerLabel,
-    coverageLabel,
     detailRows,
     visualPalette,
     donutEffects,
@@ -1406,7 +1379,6 @@ function SummaryBarsChart({
     density: ActivityAnalyticsSummaryLayout['density'];
     centerValue: string;
     centerLabel: string;
-    coverageLabel: string;
     detailRows: readonly SummaryDetailRow[];
     visualPalette: ActivityAnalyticsVisualPalette;
     donutEffects: ResolvedActivityAnalyticsVisualEffects['donut'];
@@ -1422,6 +1394,7 @@ function SummaryBarsChart({
     const {
         margin,
         detailGap,
+        detailPanelWidth,
         donutRegionWidth,
         centerX,
         centerY,
@@ -1434,8 +1407,6 @@ function SummaryBarsChart({
         detailMarkerOffsetY,
         detailTitleBaselineY,
         detailValueBaselineY,
-        coverageLabelX,
-        coverageLabelY,
     } = geometry;
     const circumference = 2 * Math.PI * radius;
     const nonZeroBars = bars.filter((bar) => bar.durationMs > 0);
@@ -1593,16 +1564,6 @@ function SummaryBarsChart({
                 >
                     {centerLabel}
                 </text>
-                <text
-                    x={coverageLabelX}
-                    y={coverageLabelY}
-                    textAnchor="start"
-                    fill="var(--color-industrial-muted)"
-                    style={TECHNICAL_TYPOGRAPHY_STYLE}
-                    data-testid="activity-analytics-summary-coverage"
-                >
-                    {`Cob. ${coverageLabel}`}
-                </text>
             </g>
 
             <g data-testid="activity-analytics-summary-details" data-layout="centered-column" transform={`translate(${detailPanelX} ${detailBlockTop})`}>
@@ -1617,7 +1578,7 @@ function SummaryBarsChart({
                                 width={detailMarkerSize}
                                 height={detailMarkerSize}
                                 rx={3}
-                                fill={visualPalette[detailRow.key].initialSolid}
+                                fill={detailRow.markerFill}
                             />
                             <text
                                 x={detailMarkerSize + SUMMARY_DONUT_GEOMETRY_RULES.detailMarkerLabelGapPx}
@@ -1632,10 +1593,11 @@ function SummaryBarsChart({
                             <text
                                 x={detailMarkerSize + SUMMARY_DONUT_GEOMETRY_RULES.detailMarkerLabelGapPx}
                                 y={sectionY + detailValueBaselineY}
-                                textAnchor="start"
+                                textAnchor="end"
                                 fill="var(--color-industrial-muted)"
                                 style={TECHNICAL_TYPOGRAPHY_STYLE}
-                                data-testid="activity-analytics-summary-detail-value"
+                                dx={detailPanelWidth - detailMarkerSize - SUMMARY_DONUT_GEOMETRY_RULES.detailMarkerLabelGapPx}
+                                data-testid={detailRow.key === 'coverage' ? 'activity-analytics-summary-coverage' : 'activity-analytics-summary-detail-value'}
                             >
                                 {detailRow.valueLabel}
                             </text>
@@ -1668,8 +1630,8 @@ function GroupedStackedBarsChart({
     const groupedGlowFilterId = `${gradientPrefix}-grouped-glow`;
     const height = layout.density === 'compress' ? 276 : 292;
     const margin = layout.density === 'compress'
-        ? { top: 18, right: 8, bottom: 68, left: 50 } as const
-        : { top: 18, right: 12, bottom: 76, left: 58 } as const;
+        ? { top: 30, right: 8, bottom: 68, left: 50 } as const
+        : { top: 30, right: 12, bottom: 76, left: 58 } as const;
     const minimumBucketWidth = layout.minSlotWidthPx;
     const chartWidth = layout.density === 'scroll'
         ? Math.max(width, margin.left + margin.right + (grouped.length * minimumBucketWidth))
@@ -1837,17 +1799,21 @@ function GroupedStackedBarsChart({
                                 />
                             ))}
 
-                            <text x={x + (barWidth / 2)} y={margin.top + plotHeight + 20} textAnchor="middle" fill="var(--color-industrial-text)" style={CHART_TYPOGRAPHY_STYLE} data-testid="activity-analytics-group-productivity">
-                                {bucket.productivityLabel}
+                            <text
+                                x={x + (barWidth / 2)}
+                                y={Math.max(currentY - 8, 14)}
+                                textAnchor="middle"
+                                fill="var(--color-industrial-text)"
+                                style={CHART_TYPOGRAPHY_STYLE}
+                                data-testid="activity-analytics-group-productivity"
+                            >
+                                {resolveGroupedVisibleProductivityLabel(bucket)}
                             </text>
                             {visibleLabelIndices.has(index) && (
                                 <text x={x + (barWidth / 2)} y={margin.top + plotHeight + 42} textAnchor="middle" fill="var(--color-industrial-muted)" style={TECHNICAL_TYPOGRAPHY_STYLE}>
                                     {bucket.label}
                                 </text>
                             )}
-                            <text x={x + (barWidth / 2)} y={Math.max(currentY - 8, margin.top + 10)} textAnchor="middle" fill="var(--color-industrial-text)" style={TECHNICAL_TYPOGRAPHY_STYLE}>
-                                {formatDurationHours(resolveGroupedVisibleDurationMs(bucket))}
-                            </text>
                         </g>
                     );
                 })}
@@ -2093,15 +2059,12 @@ function resolveSummaryDonutGeometry({
     const detailTitleBaselineY = SUMMARY_DONUT_GEOMETRY_RULES.detail.titleBaselineYPx;
     const detailValueBaselineY = densityGeometry.detailValueBaselineYPx;
     const detailSectionHeight = densityGeometry.detailSectionHeightPx;
-    const detailSectionGap = densityGeometry.detailSectionGapPx;
+    const detailSectionGap = detailRowCount > 3
+        ? Math.min(densityGeometry.detailSectionGapPx, 8)
+        : densityGeometry.detailSectionGapPx;
     const detailSectionSpacing = detailSectionHeight + detailSectionGap;
     const detailBlockHeight = detailSectionHeight + ((Math.max(detailRowCount - 1, 0)) * detailSectionSpacing);
     const detailBlockTop = centerY - (detailBlockHeight / 2);
-    const coverageLabelX = margin.left;
-    const coverageLabelY = Math.min(
-        centerY + outerRadius + densityGeometry.coverageLabelOffsetYPx,
-        height - margin.bottom + SUMMARY_DONUT_GEOMETRY_RULES.coverageLabelBottomAllowancePx,
-    );
     const donutBandRadius = radius + (prodRingThickness / 2);
 
     return {
@@ -2124,8 +2087,6 @@ function resolveSummaryDonutGeometry({
         detailMarkerOffsetY,
         detailTitleBaselineY,
         detailValueBaselineY,
-        coverageLabelX,
-        coverageLabelY,
         donutBandTopY: centerY - donutBandRadius,
         donutBandBottomY: centerY + donutBandRadius,
     };
@@ -2199,6 +2160,23 @@ function createSummaryTopCapSegment({
 
 function resolveGroupedVisibleDurationMs(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
     return bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped + bucket.durationsMs.noData;
+}
+
+function resolveGroupedVisibleProductivityLabel(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    if (bucket.coverageRatio < 1) {
+        const comparableProductivityRatio = resolveActivityAnalyticsComparableProductivityRatio(bucket);
+        const productiveDurationMs = bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped;
+
+        if (comparableProductivityRatio !== null) {
+            return formatPercent(comparableProductivityRatio);
+        }
+
+        if (productiveDurationMs > 0) {
+            return formatPercent(bucket.durationsMs.prod / productiveDurationMs);
+        }
+    }
+
+    return bucket.productivityLabel;
 }
 
 function isTurnoVisualHiddenBucket(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {

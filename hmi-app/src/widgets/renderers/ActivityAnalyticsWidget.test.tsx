@@ -332,22 +332,6 @@ function parseRectMetrics(segment: HTMLElement) {
     };
 }
 
-function parseSvgTextPoint(node: HTMLElement) {
-    return {
-        x: Number(node.getAttribute('x')),
-        y: Number(node.getAttribute('y')),
-    };
-}
-
-function parseCircleMetrics(node: HTMLElement) {
-    return {
-        cx: Number(node.getAttribute('cx')),
-        cy: Number(node.getAttribute('cy')),
-        r: Number(node.getAttribute('r')),
-        strokeWidth: Number(node.getAttribute('stroke-width')),
-    };
-}
-
 function hexToRgbCss(hex: string): string {
     const normalized = hex.replace('#', '');
     const red = Number.parseInt(normalized.slice(0, 2), 16);
@@ -956,8 +940,8 @@ describe('ActivityAnalyticsWidget', () => {
 
         await user.click(screen.getByRole('button', { name: 'Detalle' }));
 
-        expect(screen.getAllByText('2026-06-19 · Turno C').length).toBeGreaterThan(0);
-        expect(screen.queryByText('2026-06-20 · sin turno')).not.toBeInTheDocument();
+        expect(screen.getAllByText('19/06 · Turno C').length).toBeGreaterThan(0);
+        expect(screen.queryByText('20/06 · sin turno')).not.toBeInTheDocument();
     });
 
     it('re-renders grouped detail labels when the global timezone changes', async () => {
@@ -1033,7 +1017,7 @@ describe('ActivityAnalyticsWidget', () => {
 
         rerender(<ActivityAnalyticsWidget widget={widget} machines={MACHINES} />);
 
-        expect(screen.getAllByText('2026-06-19 · Turno Tarde').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('19/06 · Turno Tarde').length).toBeGreaterThan(0);
     });
 
     it('renders the refreshed Distribución header and removes KPI/framed summary chrome while preserving grouped semantics', () => {
@@ -1061,7 +1045,7 @@ describe('ActivityAnalyticsWidget', () => {
             grouped: [
                 {
                     bucketKey: 'day-1',
-                    label: '2026-06-18',
+                    label: '18/06',
                     startMs: 0,
                     endMs: 1,
                     durationsMs: {
@@ -1081,7 +1065,7 @@ describe('ActivityAnalyticsWidget', () => {
                 },
                 {
                     bucketKey: 'day-2',
-                    label: '2026-06-19',
+                    label: '19/06',
                     startMs: 1,
                     endMs: 2,
                     durationsMs: {
@@ -1101,8 +1085,8 @@ describe('ActivityAnalyticsWidget', () => {
                 },
             ],
             comparison: {
-                best: { label: '2026-06-18', bucketKey: 'best' },
-                worst: { label: '2026-06-19', bucketKey: 'worst' },
+                best: { label: '18/06', bucketKey: 'day-1' },
+                worst: { label: '19/06', bucketKey: 'day-2' },
             },
             summaryRows: [],
             timezone: 'UTC',
@@ -1133,7 +1117,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.queryByText('kWh est.')).not.toBeInTheDocument();
         expect(screen.queryByText('Paradas')).not.toBeInTheDocument();
         expect(screen.getAllByText('60%').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('2026-06-18').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('18/06').length).toBeGreaterThan(0);
 
         const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
         const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
@@ -1158,7 +1142,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(summaryChart.innerHTML).toContain('linearGradient');
         expect(summaryChart.innerHTML).toContain('summary-glow');
         expectVisibleRectStackSemantics(groupSegments, [
-            { fill: 'var(--color-industrial-muted)', segmentKey: 'noData' },
+            { fill: '#94a3b8', segmentKey: 'noData' },
             { fill: /^url\(#.+-stopped-gradient\)$/, segmentKey: 'stopped' },
             { fill: /^url\(#.+-setup-gradient\)$/, segmentKey: 'setup' },
             { fill: /^url\(#.+-prod-gradient\)$/, segmentKey: 'prod' },
@@ -1173,6 +1157,7 @@ describe('ActivityAnalyticsWidget', () => {
             'Producción',
             'Setup',
             'Detenida',
+            'Cobertura',
         ]);
         const groupsHeaderLegend = within(groupsPanel).getByTestId('activity-analytics-groups-header-legend');
         expect(within(groupsHeaderLegend).getAllByText(/^(Detenida|Setup|Prod\.)$/).map((item) => item.textContent)).toEqual([
@@ -1183,8 +1168,8 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(groupsPanel).queryByTestId('activity-analytics-panel-heading-value')).not.toBeInTheDocument();
         expect(screen.queryAllByTestId('activity-analytics-summary-segment-label')).toHaveLength(0);
         expect(summaryPanel).toHaveClass('border-industrial-border');
-        expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('Cob. 100%');
-        expect(within(summaryPanel).queryByText('% Prod. 57% · Cob. 100%')).not.toBeInTheDocument();
+        expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('100%');
+        expect(within(summaryPanel).queryByText('% Prod. 57% · Cobertura 100%')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-summary-panel')).not.toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-comparison-percent').map((node) => node.textContent)).toEqual(['60%', '50%']);
         expect(screen.queryByTestId('activity-analytics-comparison-context')).not.toBeInTheDocument();
@@ -1197,7 +1182,7 @@ describe('ActivityAnalyticsWidget', () => {
             expect(track).toHaveClass('rounded-full');
             expect(track).toHaveClass('w-2');
         });
-        expect(screen.getAllByTestId('activity-analytics-metric-value').map((node) => node.textContent)).toEqual(['2026-06-18', '2026-06-19']);
+        expect(screen.getAllByTestId('activity-analytics-metric-value').map((node) => node.textContent)).toEqual(['18/06', '19/06']);
 
         expect(topRegion).toContainElement(summaryPanel);
         expect(topRegion).toContainElement(comparisonPanel);
@@ -1289,11 +1274,13 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
+        const coverageColor = '#5b86ff';
         const widget = makeWidget({
             displayOptions: {
                 ...makeWidget().displayOptions,
                 range: '7d',
                 groupBy: 'day',
+                coverageColor,
                 stateGradients: CUSTOM_STATE_GRADIENTS,
             },
         });
@@ -1338,9 +1325,10 @@ describe('ActivityAnalyticsWidget', () => {
             CUSTOM_STATE_GRADIENTS.prod[0],
             CUSTOM_STATE_GRADIENTS.setup[0],
             CUSTOM_STATE_GRADIENTS.stopped[0],
+            coverageColor,
         ]);
         expect(groupSegments.map((segment) => segment.getAttribute('fill'))).toEqual([
-            'var(--color-industrial-muted)',
+            coverageColor,
             expect.stringMatching(/^url\(#.+-stopped-gradient\)$/),
             expect.stringMatching(/^url\(#.+-setup-gradient\)$/),
             expect.stringMatching(/^url\(#.+-prod-gradient\)$/),
@@ -1349,7 +1337,9 @@ describe('ActivityAnalyticsWidget', () => {
             hexToRgbCss(CUSTOM_STATE_GRADIENTS.stopped[0]),
             hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[0]),
             hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[0]),
+            hexToRgbCss(coverageColor),
         ]);
+        expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cobertura incompleta');
         expect(topCaps.map((cap) => cap.getAttribute('fill'))).toEqual([
             `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.stopped[1]} 80%, white)`,
             `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.setup[1]} 84%, white)`,
@@ -1370,7 +1360,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('hover-layer')).toHaveAttribute(
             'data-highlight-colors',
             [
-                'var(--color-industrial-muted)',
+                coverageColor,
                 CUSTOM_STATE_GRADIENTS.prod[1],
                 CUSTOM_STATE_GRADIENTS.setup[1],
                 CUSTOM_STATE_GRADIENTS.stopped[1],
@@ -1494,6 +1484,7 @@ describe('ActivityAnalyticsWidget', () => {
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]),
+            '#94a3b8',
         ]);
         expect(summarySegments.every((segment) => segment.getAttribute('filter')?.includes('summary-glow'))).toBe(true);
         expect(summaryChart.innerHTML).toContain('stdDeviation="4"');
@@ -1509,7 +1500,9 @@ describe('ActivityAnalyticsWidget', () => {
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]),
+            hexToRgbCss('#94a3b8'),
         ]);
+        expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cobertura incompleta');
         comparisonFills.forEach((segment) => {
             expect(segment.getAttribute('style')).toContain(`linear-gradient(to top, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0])} 0%, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1])} 100%)`);
         });
@@ -1522,7 +1515,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('hover-layer')).toHaveAttribute(
             'data-highlight-colors',
             [
-                'var(--color-industrial-muted)',
+                '#94a3b8',
                 hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]),
                 hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
                 hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]),
@@ -1728,16 +1721,21 @@ describe('ActivityAnalyticsWidget', () => {
         const detailSections = within(detailBlock).getAllByTestId('activity-analytics-summary-detail-section');
 
         expect(detailBlock).toHaveAttribute('data-layout', 'centered-column');
-        expect(detailSections).toHaveLength(3);
+        expect(detailSections).toHaveLength(4);
         expect(detailSections.map((section) => within(section).getByTestId('activity-analytics-summary-detail-title').textContent)).toEqual([
             'Producción',
             'Setup',
             'Detenida',
+            'Cobertura',
         ]);
-        expect(detailSections.map((section) => within(section).getByTestId('activity-analytics-summary-detail-value').textContent)).toEqual([
-            '57% - 4.0 h',
-            '29% - 2.0 h',
-            '14% - 1.0 h',
+        expect(detailSections.map((section) => (
+            within(section).queryByTestId('activity-analytics-summary-detail-value')
+            ?? within(section).queryByTestId('activity-analytics-summary-coverage')
+        )?.textContent)).toEqual([
+            '57%',
+            '29%',
+            '14%',
+            '100%',
         ]);
     });
 
@@ -1930,7 +1928,6 @@ describe('ActivityAnalyticsWidget', () => {
 
         const groupStack = screen.getByTestId('activity-analytics-group-stack');
 
-        expect(screen.getByText('2026-06-18 (en curso)')).toBeInTheDocument();
         expect(within(groupStack).getByTestId('activity-analytics-group-partial-outline')).toBeInTheDocument();
     });
 
@@ -2094,7 +2091,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(comparisonPanel).getByText('Turno 3')).toBeInTheDocument();
         expect(within(comparisonPanel).queryByText('2026-06-22 · sin turno')).not.toBeInTheDocument();
         expect(screen.getByText(/Distribución/i)).toBeInTheDocument();
-        expect(screen.queryByText('% Prod. 57% · Cob. 100%')).not.toBeInTheDocument();
+        expect(screen.queryByText('% Prod. 57% · Cobertura 100%')).not.toBeInTheDocument();
         expect(yAxisTicks).toContain('4.0h');
         expect(yAxisTicks).not.toContain('24.0h');
     });
@@ -2580,7 +2577,7 @@ describe('ActivityAnalyticsWidget', () => {
         const segmentByKey = new Map(segments.map((segment) => [segment.getAttribute('data-segment-key') ?? '', segment]));
 
         expectVisibleRectStackSemantics(segments, [
-            { fill: 'var(--color-industrial-muted)', segmentKey: 'noData' },
+            { fill: '#94a3b8', segmentKey: 'noData' },
             { fill: /^url\(#.+-stopped-gradient\)$/, segmentKey: 'stopped' },
             { fill: /^url\(#.+-setup-gradient\)$/, segmentKey: 'setup' },
             { fill: /^url\(#.+-prod-gradient\)$/, segmentKey: 'prod' },
@@ -3204,7 +3201,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(comparisonPanel).getByText('2026-06-19 · Turno 2')).toBeInTheDocument();
         expect(comparisonPanel).toHaveTextContent('92%');
         expect(comparisonPanel).toHaveTextContent('50%');
-        expect(comparisonPanel).not.toHaveTextContent('Observado · Cob. 95%');
+        expect(comparisonPanel).not.toHaveTextContent('Observado · Cobertura 95%');
         expect(comparisonPanel).not.toHaveTextContent('Cobertura completa');
         expect(within(comparisonPanel).queryByTestId('activity-analytics-comparison-context')).not.toBeInTheDocument();
         expect(comparisonPanel).not.toHaveTextContent('sin comparación');
@@ -3235,7 +3232,7 @@ describe('ActivityAnalyticsWidget', () => {
             grouped: [
                 buildGroupedBucket({
                     bucketKey: 'day-1',
-                    label: '2026-06-19',
+                    label: '19/06',
                     productivityRatio: 2 / 3,
                     productivityLabel: '67%',
                     coverageRatio: 1,
@@ -3325,7 +3322,8 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByText('18.0h')).toBeInTheDocument();
         expect(screen.getByText('12.0h')).toBeInTheDocument();
         expect(screen.getByText('6.0h')).toBeInTheDocument();
-        expect(screen.getAllByText('10.0 h').length).toBeGreaterThan(0);
+        expect(screen.queryByText('10.0 h')).not.toBeInTheDocument();
+        expect(screen.getAllByText('25%').length).toBeGreaterThan(0);
     });
 
     it('shows an empty-series state when the endpoint returns no points', () => {
@@ -3543,7 +3541,8 @@ describe('ActivityAnalyticsWidget', () => {
             fontSize: 'var(--font-size-mono)',
             letterSpacing: 'var(--tracking-mono)',
         });
-        expect(coverageValue).toHaveTextContent('Cob. 100%');
+        expect(detailTitle.getAttribute('y')).toBe(detailValue.getAttribute('y'));
+        expect(coverageValue).toHaveTextContent('100%');
         expect(coverageValue).toHaveStyle({
             fontFamily: 'var(--font-mono)',
             fontWeight: 'var(--font-weight-mono)',
@@ -3564,14 +3563,14 @@ describe('ActivityAnalyticsWidget', () => {
             fontSize: 'var(--font-size-system)',
             letterSpacing: 'var(--tracking-system)',
         });
-        expect(narrowSummaryHeight).toBeLessThan(wideSummaryHeight);
+        expect(narrowSummaryHeight).toBeCloseTo(wideSummaryHeight, 5);
         expect(narrowProdStrokeWidth / narrowSetupStrokeWidth).toBeCloseTo(1.5, 5);
         expect(wideProdStrokeWidth / wideSetupStrokeWidth).toBeCloseTo(1.5, 5);
         expect(donutCenterValue).not.toHaveTextContent('7.0 h');
         expect(donutCenterLabel).not.toHaveTextContent('Total');
     });
 
-    it('anchors the Cob. label to the left summary edge while keeping it on the donut floor band', () => {
+    it('renders Cobertura as a fourth summary detail row with the no-data marker color', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -3598,28 +3597,21 @@ describe('ActivityAnalyticsWidget', () => {
         });
 
         const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
-        const coverageValue = within(summaryPanel).getByTestId('activity-analytics-summary-coverage');
-        const donutCenterLabel = screen.getByTestId('activity-analytics-summary-total-label');
-        const prodSegment = screen
-            .getAllByTestId('activity-analytics-summary-segment')
-            .find((segment) => segment.getAttribute('data-segment-key') === 'prod');
+        const detailBlock = screen.getByTestId('activity-analytics-summary-details');
+        const detailSections = within(detailBlock).getAllByTestId('activity-analytics-summary-detail-section');
+        const coverageSection = detailSections.at(-1);
 
-        if (!prodSegment) {
-            throw new Error('Missing production summary segment');
+        if (!coverageSection) {
+            throw new Error('Missing coverage summary detail section');
         }
 
-        const coveragePoint = parseSvgTextPoint(coverageValue);
-        const donutCenterLabelPoint = parseSvgTextPoint(donutCenterLabel);
-        const prodRing = parseCircleMetrics(prodSegment);
-        const donutOuterLeftEdge = prodRing.cx - (prodRing.r + (prodRing.strokeWidth / 2));
-        const donutOuterBottomEdge = prodRing.cy + (prodRing.r + (prodRing.strokeWidth / 2));
+        const coverageMarker = coverageSection.querySelector('rect');
 
-        expect(coverageValue).toHaveTextContent('Cob. 100%');
-        expect(coverageValue).toHaveAttribute('text-anchor', 'start');
-        expect(coveragePoint.x).toBeLessThan(donutOuterLeftEdge - 12);
-        expect(coveragePoint.x).toBeLessThan(prodRing.cx);
-        expect(Math.abs(coveragePoint.y - donutOuterBottomEdge)).toBeLessThanOrEqual(8);
-        expect(coveragePoint.y).toBeGreaterThan(donutCenterLabelPoint.y);
+        expect(within(summaryPanel).queryByText('Cobertura 100%')).not.toBeInTheDocument();
+        expect(within(summaryPanel).queryByText(/\d+\.\d h/)).not.toBeInTheDocument();
+        expect(within(coverageSection).getByTestId('activity-analytics-summary-detail-title')).toHaveTextContent('Cobertura');
+        expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('100%');
+        expect(coverageMarker).toHaveAttribute('fill', '#94a3b8');
     });
 
     it('keeps Mejor/Peor track height stable across wide and narrow top-row widths', () => {
@@ -3677,7 +3669,7 @@ describe('ActivityAnalyticsWidget', () => {
         const narrowTrackRegions = screen.getAllByTestId('activity-analytics-comparison-track-region');
         const narrowTrackHeight = parsePxStyle((narrowTrackRegions[0] as HTMLElement).style.height);
 
-        expect(chartHeight).toBeCloseTo(276, 5);
+        expect(chartHeight).toBeCloseTo(224, 5);
         expect(summaryPanelHeight).toBeCloseTo(chartHeight, 5);
         expect(summaryChartHeight).toBeCloseTo(chartHeight - 10, 5);
         expect(wideTopRegionSharedHeight).toBeCloseTo(chartHeight, 5);
@@ -3694,7 +3686,7 @@ describe('ActivityAnalyticsWidget', () => {
         });
     });
 
-    it('keeps the summary and comparison containers on the same responsive shared height', () => {
+    it('keeps the summary and comparison containers on the same fixed shared height while widths stay responsive', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -3721,6 +3713,8 @@ describe('ActivityAnalyticsWidget', () => {
         const intermediateSummaryPanelHeight = Number.parseFloat(screen.getByTestId('activity-analytics-summary-bars').style.height);
         const intermediateSummaryChartHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
         const intermediateComparisonHeight = Number.parseFloat(screen.getByTestId('activity-analytics-comparison').style.height);
+        const intermediateSummaryWidth = Number(screen.getByTestId('activity-analytics-summary-column').getAttribute('data-summary-column-width-px'));
+        const intermediateGroupsHeight = screen.getByTestId('activity-analytics-groups').getBoundingClientRect().height;
 
         act(() => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
@@ -3729,12 +3723,17 @@ describe('ActivityAnalyticsWidget', () => {
         const wideSummaryPanelHeight = Number.parseFloat(screen.getByTestId('activity-analytics-summary-bars').style.height);
         const wideSummaryChartHeight = Number(screen.getByTestId('activity-analytics-summary-chart').getAttribute('height'));
         const wideComparisonHeight = Number.parseFloat(screen.getByTestId('activity-analytics-comparison').style.height);
+        const wideSummaryWidth = Number(screen.getByTestId('activity-analytics-summary-column').getAttribute('data-summary-column-width-px'));
+        const wideGroupsHeight = screen.getByTestId('activity-analytics-groups').getBoundingClientRect().height;
 
         expect(intermediateSummaryPanelHeight).toBeCloseTo(intermediateComparisonHeight, 5);
         expect(wideSummaryPanelHeight).toBeCloseTo(wideComparisonHeight, 5);
         expect(intermediateSummaryChartHeight).toBeCloseTo(intermediateComparisonHeight - 10, 5);
         expect(wideSummaryChartHeight).toBeCloseTo(wideComparisonHeight - 10, 5);
-        expect(wideSummaryPanelHeight).toBeGreaterThan(intermediateSummaryPanelHeight);
+        expect(intermediateSummaryPanelHeight).toBeCloseTo(224, 5);
+        expect(wideSummaryPanelHeight).toBeCloseTo(224, 5);
+        expect(wideGroupsHeight).toBeCloseTo(intermediateGroupsHeight, 5);
+        expect(wideSummaryWidth).toBeGreaterThan(intermediateSummaryWidth);
         expect(screen.getByTestId('activity-analytics-summary-chart')).toHaveClass('block');
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
     });
@@ -3953,6 +3952,69 @@ describe('ActivityAnalyticsWidget', () => {
         expect(within(comparisonPanel).queryByTestId('activity-analytics-comparison-context')).not.toBeInTheDocument();
         expect(comparisonPanel).not.toHaveTextContent('Cobertura completa');
         expect(comparisonPanel).not.toHaveTextContent(/Observado · Cob\./);
+    });
+
+    it('moves grouped productivity labels above the bars and removes the total-hours top labels', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 6 * 60 * 60 * 1000, setup: 3 * 60 * 60 * 1000, stopped: 0, noData: 15 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: 0.25,
+                productivityLabel: '25%',
+            }),
+        ]);
+
+        render(<ActivityAnalyticsWidget widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        const groupStack = screen.getByTestId('activity-analytics-group-stack');
+        const visibleSegments = within(groupStack)
+            .getAllByTestId('activity-analytics-group-segment')
+            .filter((segment) => Number(segment.getAttribute('height')) > 0);
+        const productivityLabel = within(groupStack).getByTestId('activity-analytics-group-productivity');
+        const topSegmentY = Math.min(...visibleSegments.map((segment) => Number(segment.getAttribute('y'))));
+
+        expect(Number(productivityLabel.getAttribute('y'))).toBeLessThan(topSegmentY);
+        expect(productivityLabel).toHaveAttribute('fill', 'var(--color-industrial-text)');
+        expect(productivityLabel.getAttribute('style')).toContain('var(--font-chart)');
+        expect(screen.queryByText('24.0 h')).not.toBeInTheDocument();
+    });
+
+    it('shows a production percent above incomplete grouped bars instead of cobertura incompleta', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 6 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 15 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                utilizationRatio: 6 / 9,
+                coverageRatio: 9 / 24,
+                productivityRatio: null,
+                productivityLabel: 'cobertura incompleta',
+            }),
+        ]);
+
+        render(<ActivityAnalyticsWidget widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        const productivityLabel = screen.getByTestId('activity-analytics-group-productivity');
+
+        expect(productivityLabel).toHaveTextContent('67%');
+        expect(productivityLabel).not.toHaveTextContent('cobertura incompleta');
     });
 
     it('shows sin comparación for aggregated Turno Resumen comparisons when productivity ties make ranking meaningless', () => {

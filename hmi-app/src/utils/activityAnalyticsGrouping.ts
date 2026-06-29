@@ -281,7 +281,7 @@ function groupShiftIntervals(options: {
         }
 
         const isInProgress = resolvedNowMs >= interval.semanticStartMs && resolvedNowMs < interval.semanticEndMs;
-        const labelBase = `${formatLocalDate(interval.startMs, options.timezone)} · ${interval.label}`;
+        const labelBase = `${formatCompactLocalDate(interval.startMs, options.timezone)} · ${interval.label}`;
 
         timeline.push({
             bucketKey: interval.bucketKey,
@@ -416,14 +416,14 @@ function resolveGroupingBucket(options: {
         const key = formatDateKey(localParts.year, localParts.month, localParts.day);
         const startMs = zonedLocalDateTimeToUtcMs({ ...localParts, hour: 0, minute: 0 }, options.timezone);
         const endMs = zonedLocalDateTimeToUtcMs(addLocalDays({ ...localParts, hour: 0, minute: 0 }, 1), options.timezone);
-        return { bucketKey: `day:${key}`, label: key, startMs, endMs };
+        return { bucketKey: `day:${key}`, label: formatCompactDate(localParts.day, localParts.month), startMs, endMs };
     }
     case 'week': {
         const weekStart = resolveWeekStart(localParts);
         const key = formatDateKey(weekStart.year, weekStart.month, weekStart.day);
         const startMs = zonedLocalDateTimeToUtcMs({ ...weekStart, hour: 0, minute: 0 }, options.timezone);
         const endMs = zonedLocalDateTimeToUtcMs(addLocalDays({ ...weekStart, hour: 0, minute: 0 }, 7), options.timezone);
-        return { bucketKey: `week:${key}`, label: `Week ${key}`, startMs, endMs };
+        return { bucketKey: `week:${key}`, label: formatCompactDate(weekStart.day, weekStart.month), startMs, endMs };
     }
     case 'month': {
         const key = `${localParts.year}-${pad(localParts.month)}`;
@@ -433,7 +433,7 @@ function resolveGroupingBucket(options: {
             : { year: localParts.year, month: localParts.month + 1, day: 1, hour: 0, minute: 0 };
         return {
             bucketKey: `month:${key}`,
-            label: key,
+            label: formatCompactMonthYear(localParts.month, localParts.year),
             startMs: zonedLocalDateTimeToUtcMs(start, options.timezone),
             endMs: zonedLocalDateTimeToUtcMs(end, options.timezone),
         };
@@ -533,7 +533,7 @@ function createEmptyDurations(): ActivityAnalyticsDurationsMs {
 function buildUncoveredBucket(startMs: number, endMs: number, timezone: string) {
     return {
         bucketKey: `${UNCOVERED_SHIFT_ID}:${formatLocalDateTime(startMs, timezone)}`,
-        label: `${formatLocalDate(startMs, timezone)} · ${UNCOVERED_SHIFT_LABEL}`,
+        label: `${formatCompactLocalDate(startMs, timezone)} · ${UNCOVERED_SHIFT_LABEL}`,
         startMs,
         endMs,
         expectedDurationMs: endMs - startMs,
@@ -568,9 +568,9 @@ function formatProductivityLabel(value: number | null, options?: {
     return `${Math.round(value * 100)}%`;
 }
 
-function formatLocalDate(timestampMs: number, timezone: string): string {
+function formatCompactLocalDate(timestampMs: number, timezone: string): string {
     const parts = getZonedDateTimeParts(timestampMs, timezone);
-    return formatDateKey(parts.year, parts.month, parts.day);
+    return formatCompactDate(parts.day, parts.month);
 }
 
 function formatLocalDateTime(timestampMs: number, timezone: string): string {
@@ -581,6 +581,16 @@ function formatLocalDateTime(timestampMs: number, timezone: string): string {
 function formatDateKey(year: number, month: number, day: number): string {
     return `${year}-${pad(month)}-${pad(day)}`;
 }
+
+function formatCompactDate(day: number, month: number): string {
+    return `${pad(day)}/${pad(month)}`;
+}
+
+function formatCompactMonthYear(month: number, year: number): string {
+    return `${SPANISH_SHORT_MONTH_NAMES[month - 1] ?? pad(month)} ${pad(year % 100)}`;
+}
+
+const SPANISH_SHORT_MONTH_NAMES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] as const;
 
 function pad(value: number): string {
     return value.toString().padStart(2, '0');

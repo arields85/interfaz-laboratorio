@@ -6,6 +6,7 @@ import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import {
+    DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
@@ -986,12 +987,15 @@ describe('PropertyDock activity-analytics', () => {
         expect(within(visualSection).getByText('Producción')).toBeInTheDocument();
         expect(within(visualSection).getByText('Setup')).toBeInTheDocument();
         expect(within(visualSection).getByText('Detenida')).toBeInTheDocument();
+        expect(within(visualSection).getAllByText('Cobertura / sin datos').length).toBeGreaterThan(0);
 
         expect(within(visualSection).getByLabelText('Producción color inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0]);
         expect(within(visualSection).getByLabelText('Producción hex inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0]);
         expect(within(visualSection).getByLabelText('Producción alfa inicial')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[0]));
         expect(within(visualSection).getByLabelText('Producción color final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1]);
         expect(within(visualSection).getByLabelText('Producción hex final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1]);
+        expect(within(visualSection).getByLabelText('Cobertura / sin datos color')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
+        expect(within(visualSection).getByLabelText('Cobertura / sin datos hex')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
         expect(within(visualSection).getByLabelText('Producción alfa final')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[1]));
 
         expect(within(visualSection).getByLabelText('Barras agrupadas glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.glow));
@@ -1034,6 +1038,29 @@ describe('PropertyDock activity-analytics', () => {
         });
         expect(screen.getByLabelText('Producción color inicial')).toHaveValue('#abcdef');
         expect(prodStartHex).toHaveValue('#abcdef');
+    });
+
+    it('updates the shared coverage/no-data color from the activity analytics visual section', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                coverageColor: '#123456',
+            },
+        });
+
+        const coverageHex = screen.getByLabelText('Cobertura / sin datos hex');
+
+        fireEvent.change(coverageHex, { target: { value: '#abcdef' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            coverageColor: '#abcdef',
+        });
+        expect(screen.getByLabelText('Cobertura / sin datos color')).toHaveValue('#abcdef');
     });
 
     it('resets invalid hex drafts on blur without mutating persisted options', async () => {

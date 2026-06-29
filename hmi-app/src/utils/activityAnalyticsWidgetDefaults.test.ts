@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
     ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS,
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
     createDefaultActivityAnalyticsDisplayOptions,
     resolveActivityAnalyticsStateGradientAlphas,
     resolveActivityAnalyticsDisplayOptions,
+    resolveActivityAnalyticsCoverageColor,
     resolveActivityAnalyticsStateGradients,
     resolveActivityAnalyticsVisualEffects,
 } from './activityAnalyticsWidgetDefaults';
@@ -23,6 +25,7 @@ describe('activityAnalyticsWidgetDefaults', () => {
         expect(createDefaultActivityAnalyticsDisplayOptions().displayMode).toBe('kpis-and-bars');
         expect(createDefaultActivityAnalyticsDisplayOptions().range).toBe('7d');
         expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidth).toBe(1);
+        expect(createDefaultActivityAnalyticsDisplayOptions().coverageColor).toBe(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
         expect(createDefaultActivityAnalyticsDisplayOptions().stateGradients).toEqual(
             DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
         );
@@ -40,6 +43,7 @@ describe('activityAnalyticsWidgetDefaults', () => {
         ).toMatchObject({
             displayMode: 'kpis-and-bars',
             groupBarWidth: 1,
+            coverageColor: DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
             stateGradients: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
             stateGradientAlphas: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
             visualEffects: {
@@ -56,6 +60,15 @@ describe('activityAnalyticsWidgetDefaults', () => {
 
         expect(resolveActivityAnalyticsDisplayOptions()).toMatchObject({
             stateGradients: DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
+        });
+    });
+
+    it('resolves a safe default coverage color and falls back for malformed persisted values', () => {
+        expect(resolveActivityAnalyticsCoverageColor()).toBe(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
+        expect(resolveActivityAnalyticsCoverageColor('#112233')).toBe('#112233');
+        expect(resolveActivityAnalyticsCoverageColor('var(--color-industrial-muted)')).toBe(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
+        expect(resolveActivityAnalyticsDisplayOptions({ coverageColor: 'bad-value' })).toMatchObject({
+            coverageColor: DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
         });
     });
 
