@@ -101,6 +101,47 @@ describe('HeaderWidgetCanvas', () => {
         expect(onDeleteWidget).toHaveBeenCalledWith('header-status');
     });
 
+    it('navigates viewer header widgets only when a dashboard target is configured', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+
+        const { rerender } = render(
+            <HeaderWidgetCanvas
+                widgets={[
+                    makeWidget({
+                        id: 'header-status',
+                        type: 'status',
+                        title: 'Status widget',
+                        navigationTargetDashboardId: 'dashboard-linea-a',
+                    }) as never,
+                ]}
+                equipmentMap={new Map()}
+                mode="viewer"
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        const surface = screen.getByRole('button', { name: 'Status widget' });
+
+        await user.click(surface);
+        fireEvent.keyDown(surface, { key: ' ' });
+
+        expect(onNavigateDashboard).toHaveBeenNthCalledWith(1, 'dashboard-linea-a');
+        expect(onNavigateDashboard).toHaveBeenNthCalledWith(2, 'dashboard-linea-a');
+
+        rerender(
+            <HeaderWidgetCanvas
+                widgets={[makeWidget({ id: 'header-status', type: 'status', title: 'Status widget' }) as never]}
+                equipmentMap={new Map()}
+                mode="viewer"
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'Status widget' })).not.toBeInTheDocument();
+        expect(onNavigateDashboard).toHaveBeenCalledTimes(2);
+    });
+
     it('opens the empty slot add menu and inserts the selected widget type into that slot', async () => {
         const user = userEvent.setup();
         const onAddHeaderWidget = vi.fn();

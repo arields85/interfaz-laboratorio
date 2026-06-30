@@ -29,11 +29,15 @@ export default function TextTitleWidget({ widget, className }: TextTitleWidgetPr
         textAlign,
     };
 
+    const content = (
+        <span className="block w-full break-words" style={titleStyle}>
+            {widget.title ?? ''}
+        </span>
+    );
+
     return (
         <div className={[className, 'flex h-full w-full items-center'].filter(Boolean).join(' ')}>
-            <span className="block w-full break-words" style={titleStyle}>
-                {widget.title ?? ''}
-            </span>
+            {content}
         </div>
     );
 }

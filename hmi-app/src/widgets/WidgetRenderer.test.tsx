@@ -1,9 +1,15 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine, DataHistoryResponseV2 } from '../domain/dataContract.types';
-import type { ActivityAnalyticsWidgetConfig, MachineActivityWidgetConfig, TrendChartV2WidgetConfig } from '../domain/admin.types';
+import type {
+    ActivityAnalyticsWidgetConfig,
+    AlertHistoryWidgetConfig,
+    MachineActivityWidgetConfig,
+    ProdHistoryWidgetConfig,
+    TrendChartV2WidgetConfig,
+} from '../domain/admin.types';
 import { isDataHistoryEnabled } from '../config/dataConnection.config';
 import { useTemporalSettings } from '../hooks/useTemporalSettings';
 import { useActivitySeries } from '../queries/useActivitySeries';
@@ -169,6 +175,126 @@ describe('WidgetRenderer', () => {
         expect(screen.getByText('0')).toBeInTheDocument();
         expect(screen.getByText('0.35 kW')).toBeInTheDocument();
         expect(screen.getByTestId('gauge-circular')).toBeInTheDocument();
+    });
+
+    it('navigates non-text-title widgets through the shared viewer wrapper when configured', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+
+        render(
+            <WidgetRenderer
+                widget={{
+                    ...widget,
+                    navigationTargetDashboardId: 'dashboard-linea-a',
+                }}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                isLoadingData={false}
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        const surface = screen.getByRole('button', { name: 'Actividad de Máquina' });
+
+        await user.click(surface);
+        fireEvent.keyDown(surface, { key: 'Enter' });
+
+        expect(onNavigateDashboard).toHaveBeenNthCalledWith(1, 'dashboard-linea-a');
+        expect(onNavigateDashboard).toHaveBeenNthCalledWith(2, 'dashboard-linea-a');
+    });
+
+    it('does not expose shared navigation semantics when no target dashboard is configured', () => {
+        render(
+            <WidgetRenderer
+                widget={widget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                isLoadingData={false}
+                onNavigateDashboard={vi.fn()}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'Actividad de Máquina' })).not.toBeInTheDocument();
+    });
+
+    it('keeps pointer navigation for widgets with internal controls without adding a button-like parent wrapper', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+        const alertHistoryWidget: AlertHistoryWidgetConfig = {
+            id: 'alert-history-1',
+            type: 'alert-history',
+            title: 'Alert History',
+            position: { x: 0, y: 0 },
+            size: { w: 8, h: 8 },
+            navigationTargetDashboardId: 'dashboard-linea-a',
+            displayOptions: {
+                dashboardId: 'dashboard-alert-history-navigation-test',
+            },
+        };
+
+        render(
+            <WidgetRenderer
+                widget={alertHistoryWidget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                isLoadingData={false}
+                onNavigateDashboard={onNavigateDashboard}
+                siblingWidgets={[]}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'Alert History' })).not.toBeInTheDocument();
+
+        const internalControl = screen.getByRole('button', { name: 'Ver historial completo (funcionalidad pendiente)' });
+
+        expect(internalControl.closest('[role="button"]')).toBeNull();
+
+        await user.click(internalControl);
+
+        expect(onNavigateDashboard).not.toHaveBeenCalled();
+
+        await user.click(screen.getByText('Alert History'));
+
+        expect(onNavigateDashboard).toHaveBeenCalledWith('dashboard-linea-a');
+    });
+
+    it('keeps prod-history pointer navigation without adding shared button semantics around its internal controls', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+        const prodHistoryWidget: ProdHistoryWidgetConfig = {
+            id: 'prod-history-1',
+            type: 'prod-history',
+            title: 'Producción histórica',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            navigationTargetDashboardId: 'dashboard-linea-a',
+            displayOptions: {
+                chartTitle: 'Producción histórica',
+            },
+        };
+
+        render(
+            <WidgetRenderer
+                widget={prodHistoryWidget}
+                equipmentMap={equipmentMap}
+                isLoadingData={false}
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'Producción histórica' })).not.toBeInTheDocument();
+
+        const oeeToggle = screen.getByRole('button', { name: 'OEE' });
+
+        expect(oeeToggle.closest('[role="button"]')).toBeNull();
+
+        await user.click(oeeToggle);
+
+        expect(onNavigateDashboard).not.toHaveBeenCalled();
+
+        await user.click(screen.getByText('Producción histórica'));
+
+        expect(onNavigateDashboard).toHaveBeenCalledWith('dashboard-linea-a');
     });
 
     it('dispatches trend-chart-v2 widgets to the dedicated timestamp renderer without breaking legacy types', () => {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from './Dashboard';
 import { makeDashboard } from '../test/fixtures/dashboard.fixture';
@@ -126,6 +126,32 @@ describe('Dashboard page layout', () => {
                 onPersistWidgetDisplayOptions: expect.any(Function),
             }),
         );
+    });
+
+    it('switches the active published dashboard when the viewer navigation callback targets another published dashboard', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({ id: 'dashboard-a', name: 'Dashboard A', status: 'published', widgets: [], layout: [] }),
+            makeDashboard({ id: 'dashboard-b', name: 'Dashboard B', status: 'published', widgets: [], layout: [] }),
+        ]);
+
+        render(<Dashboard />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        });
+
+        const firstViewerCall = dashboardViewerMock.mock.calls.at(-1)?.[0] as { onNavigateDashboard: (dashboardId: string) => void };
+        act(() => {
+            firstViewerCall.onNavigateDashboard('dashboard-b');
+        });
+
+        await waitFor(() => {
+            expect(dashboardHeaderMock).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    dashboard: expect.objectContaining({ id: 'dashboard-b' }),
+                }),
+            );
+        });
     });
 
     it('passes contract machines to the viewer pipeline', async () => {

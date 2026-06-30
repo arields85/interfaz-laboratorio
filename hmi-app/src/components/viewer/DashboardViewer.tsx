@@ -22,6 +22,7 @@ interface DashboardViewerProps {
     cols?: number;
     rows?: number;
     onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
+    onNavigateDashboard?: (dashboardId: string) => void;
 }
 
 // =============================================================================
@@ -51,6 +52,7 @@ export default function DashboardViewer({
     cols = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
     onPersistWidgetDisplayOptions,
+    onNavigateDashboard,
 }: DashboardViewerProps) {
     const { containerRef, width, height, rowHeight, hasFirstValidMeasurement } = useCanvasReference({
         cols,
@@ -108,9 +110,10 @@ export default function DashboardViewer({
                                         isLoadingData={false} 
                                      siblingWidgets={widgets}
                                      hierarchyContext={hierarchyContext}
-                                     className="w-full h-full"
-                                     onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
-                                 />
+                                      className="w-full h-full"
+                                      onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                                      onNavigateDashboard={onNavigateDashboard}
+                                  />
                                 </div>
                             </div>
                         );

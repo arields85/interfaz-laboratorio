@@ -531,6 +531,7 @@ export interface TextTitleDisplayOptions {
 interface WidgetConfigBase {
     id: string;
     title?: string;
+    navigationTargetDashboardId?: string;
     /**
      * @deprecated Use the matching `Dashboard.layout` entry (`WidgetLayout.x/y`) as the canonical source of truth.
      * Kept temporarily for compatibility with legacy widget config callsites during the canvas-bounds transition.

@@ -161,6 +161,14 @@ export default function Dashboard() {
         setPublishedDashboards((previous) => previous.map((dashboard) => dashboard.id === updatedDashboard.id ? updatedDashboard : dashboard));
     };
 
+    const handleNavigateDashboard = (dashboardId: string) => {
+        const nextIndex = publishedDashboards.findIndex((dashboard) => dashboard.id === dashboardId);
+
+        if (nextIndex >= 0) {
+            setActiveTab(nextIndex);
+        }
+    };
+
     const renderNoPublishedState = () => (
         <div className="h-full flex flex-col items-center justify-center text-industrial-muted space-y-4">
             <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-2">
@@ -219,6 +227,7 @@ export default function Dashboard() {
                 equipmentMap={equipmentMap}
                 connection={connection}
                 machines={machines}
+                onNavigateDashboard={handleNavigateDashboard}
                 hierarchyContext={hierarchyContext}
             />
 
@@ -235,6 +244,7 @@ export default function Dashboard() {
                     cols={activeDashboard.cols}
                     rows={activeDashboard.rows}
                     onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
+                    onNavigateDashboard={handleNavigateDashboard}
                 />
             </div>
         </div>

@@ -1,3 +1,4 @@
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import type { ActivityAnalyticsPersistedDisplayPatch, WidgetConfig } from '../domain/admin.types';
 import type { EquipmentSummary } from '../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../domain/dataContract.types';
@@ -13,6 +14,7 @@ import ActivityAnalyticsWidget from './renderers/ActivityAnalyticsWidget';
 import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
+import { hasNestedInteractiveNavigation } from '../utils/widgetCapabilities';
 
 // =============================================================================
 // WidgetRenderer — Dispatcher central
@@ -55,6 +57,28 @@ interface WidgetRendererProps {
      */
     hierarchyContext?: HierarchyContext;
     onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
+    onNavigateDashboard?: (dashboardId: string) => void;
+}
+
+const NAVIGATION_INTERACTIVE_SELECTOR = [
+    'button',
+    'a',
+    'input',
+    'select',
+    'textarea',
+    '[role="button"]',
+    '[role="link"]',
+    '[data-widget-navigation-ignore="true"]',
+].join(', ');
+
+function shouldIgnoreNavigationTarget(target: EventTarget | null, currentTarget: EventTarget | null): boolean {
+    if (!(target instanceof Element)) {
+        return false;
+    }
+
+    const interactiveAncestor = target.closest(NAVIGATION_INTERACTIVE_SELECTOR);
+
+    return interactiveAncestor != null && interactiveAncestor !== currentTarget;
 }
 
 export default function WidgetRenderer({
@@ -67,10 +91,13 @@ export default function WidgetRenderer({
     siblingWidgets,
     hierarchyContext,
     onPersistWidgetDisplayOptions,
+    onNavigateDashboard,
 }: WidgetRendererProps) {
+    let renderedWidget: ReactNode;
+
     switch (widget.type) {
         case 'metric-card':
-            return (
+            renderedWidget = (
                 <MetricWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -80,9 +107,10 @@ export default function WidgetRenderer({
                     hierarchyContext={hierarchyContext}
                 />
             );
+            break;
 
         case 'kpi':
-            return (
+            renderedWidget = (
                 <KpiWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -91,9 +119,10 @@ export default function WidgetRenderer({
                     className={className}
                 />
             );
+            break;
 
         case 'machine-activity':
-            return (
+            renderedWidget = (
                 <MachineActivityWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -102,9 +131,10 @@ export default function WidgetRenderer({
                     className={className}
                 />
             );
+            break;
 
         case 'activity-analytics':
-            return (
+            renderedWidget = (
                 <ActivityAnalyticsWidget
                     widget={widget}
                     machines={machines}
@@ -113,18 +143,20 @@ export default function WidgetRenderer({
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
                 />
             );
+            break;
 
         case 'status':
-            return (
+            renderedWidget = (
                 <StatusWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
                     className={className}
                 />
             );
+            break;
 
         case 'connection-status':
-            return (
+            renderedWidget = (
                 <ConnectionStatusWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -133,9 +165,10 @@ export default function WidgetRenderer({
                     className={className}
                 />
             );
+            break;
 
         case 'trend-chart':
-            return (
+            renderedWidget = (
                 <TrendChartWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -144,9 +177,10 @@ export default function WidgetRenderer({
                     className={className}
                 />
             );
+            break;
 
         case 'trend-chart-v2':
-            return (
+            renderedWidget = (
                 <TrendChartV2Widget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -155,9 +189,10 @@ export default function WidgetRenderer({
                     className={className}
                 />
             );
+            break;
 
         case 'prod-history':
-            return (
+            renderedWidget = (
                 <ProdHistoryWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -165,9 +200,10 @@ export default function WidgetRenderer({
                     className={className}
                 />
             );
+            break;
 
         case 'alert-history':
-            return (
+            renderedWidget = (
                 <AlertHistoryWidget
                     widget={widget}
                     equipmentMap={equipmentMap}
@@ -176,9 +212,11 @@ export default function WidgetRenderer({
                     className={className}
                 />
             );
+            break;
 
         case 'text-title':
-            return <TextTitleWidget widget={widget} className={className} />;
+            renderedWidget = <TextTitleWidget widget={widget} className={className} />;
+            break;
 
         // -----------------------------------------------------------------------
         // Tipos pendientes de implementación — placeholder elegante.
@@ -186,10 +224,57 @@ export default function WidgetRenderer({
         // sin romper la renderización del dashboard actual.
         // -----------------------------------------------------------------------
         default:
-            return (
+            renderedWidget = (
                 <UnsupportedWidget type={widget.type} title={widget.title} />
             );
+            break;
     }
+
+    const navigationTargetDashboardId = widget.navigationTargetDashboardId?.trim() ?? '';
+    const isViewerNavigable = navigationTargetDashboardId !== '' && Boolean(onNavigateDashboard);
+    const supportsWrapperKeyboardNavigation = !hasNestedInteractiveNavigation(widget.type);
+
+    if (!isViewerNavigable) {
+        return renderedWidget;
+    }
+
+    const handleNavigate = () => {
+        onNavigateDashboard?.(navigationTargetDashboardId);
+    };
+
+    const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+        if (shouldIgnoreNavigationTarget(event.target, event.currentTarget)) {
+            return;
+        }
+
+        handleNavigate();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+
+        if (shouldIgnoreNavigationTarget(event.target, event.currentTarget)) {
+            return;
+        }
+
+        event.preventDefault();
+        handleNavigate();
+    };
+
+    return (
+        <div
+            role={supportsWrapperKeyboardNavigation ? 'button' : undefined}
+            tabIndex={supportsWrapperKeyboardNavigation ? 0 : undefined}
+            aria-label={supportsWrapperKeyboardNavigation ? (widget.title?.trim() || widget.type) : undefined}
+            className="h-full w-full cursor-pointer rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-admin-accent/40"
+            onClick={handleClick}
+            onKeyDown={supportsWrapperKeyboardNavigation ? handleKeyDown : undefined}
+        >
+            {renderedWidget}
+        </div>
+    );
 }
 
 // -----------------------------------------------------------------------------

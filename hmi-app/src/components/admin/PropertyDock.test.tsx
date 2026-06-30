@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
+import type { Dashboard, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import {
@@ -88,6 +88,8 @@ function renderPropertyDock(options?: {
     dataLoading?: boolean;
     dataError?: boolean;
     dataEnabled?: boolean;
+    availableDashboards?: Dashboard[];
+    currentDashboardId?: string;
 }) {
     const updates: WidgetConfig[] = [];
 
@@ -110,6 +112,8 @@ function renderPropertyDock(options?: {
                 dataLoading={options?.dataLoading}
                 dataError={options?.dataError}
                 dataEnabled={options?.dataEnabled ?? true}
+                availableDashboards={options?.availableDashboards ?? []}
+                currentDashboardId={options?.currentDashboardId}
                 onCreateVariable={vi.fn()}
                 onDeleteVariable={vi.fn()}
                 onUpdateWidget={(nextWidget) => {
@@ -448,6 +452,76 @@ describe('PropertyDock text-title', () => {
         await user.tab();
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({ fontSize: 72 });
+    });
+
+    it('shows all other dashboards, disables unpublished targets, and persists only published navigation targets', async () => {
+        const availableDashboards: Dashboard[] = [
+            {
+                id: 'dashboard-current',
+                name: 'Dashboard actual',
+                dashboardType: 'free',
+                aspect: '16:9',
+                cols: 24,
+                rows: 12,
+                layout: [],
+                widgets: [],
+                isTemplate: false,
+                version: 1,
+                status: 'draft',
+            },
+            {
+                id: 'dashboard-linea-a',
+                name: 'Línea A',
+                dashboardType: 'free',
+                aspect: '16:9',
+                cols: 24,
+                rows: 12,
+                layout: [],
+                widgets: [],
+                isTemplate: false,
+                version: 1,
+                status: 'published',
+            },
+            {
+                id: 'dashboard-borrador',
+                name: 'Dashboard borrador',
+                dashboardType: 'free',
+                aspect: '16:9',
+                cols: 24,
+                rows: 12,
+                layout: [],
+                widgets: [],
+                isTemplate: false,
+                version: 1,
+                status: 'draft',
+            },
+        ];
+
+        const { user, updates } = renderPropertyDock({
+            type: 'text-title',
+            title: 'Título de texto',
+            binding: { mode: 'simulated_value', simulatedValue: 0 },
+            availableDashboards,
+            currentDashboardId: 'dashboard-current',
+        });
+
+        expect(screen.getByRole('button', { name: /navegación/i })).toBeInTheDocument();
+        expect(screen.getByText('Si seleccionás un dashboard, este widget navegará a ese dashboard en el viewer.')).toBeInTheDocument();
+
+        await user.click(getFieldButtonInSection('Navegación', 'Enlace'));
+
+        expect(screen.getAllByRole('button', { name: 'Sin enlace' }).length).toBeGreaterThan(0);
+        expect(screen.getByRole('button', { name: 'Línea A' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Dashboard borrador (no publicado)' })).toBeDisabled();
+        expect(screen.queryByRole('button', { name: 'Dashboard actual' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Dashboard borrador (no publicado)' }));
+
+        expect(updates).toHaveLength(0);
+
+        await user.click(screen.getByRole('button', { name: 'Línea A' }));
+
+        expect(updates.at(-1)?.navigationTargetDashboardId).toBe('dashboard-linea-a');
     });
 });
 
@@ -862,6 +936,59 @@ describe('PropertyDock machine-activity', () => {
         expect(smoothingInput).toBeDisabled();
         expect(screen.getByLabelText('Mostrar valor en subtexto')).toBeChecked();
         expect(screen.queryByLabelText('Mostrar variable en subtexto')).not.toBeInTheDocument();
+    });
+
+    it('keeps Navegación as the last section and persists navigation targets for non-text-title widgets', async () => {
+        const availableDashboards: Dashboard[] = [
+            {
+                id: 'dashboard-current',
+                name: 'Dashboard actual',
+                dashboardType: 'free',
+                aspect: '16:9',
+                cols: 24,
+                rows: 12,
+                layout: [],
+                widgets: [],
+                isTemplate: false,
+                version: 1,
+                status: 'draft',
+            },
+            {
+                id: 'dashboard-linea-a',
+                name: 'Línea A',
+                dashboardType: 'free',
+                aspect: '16:9',
+                cols: 24,
+                rows: 12,
+                layout: [],
+                widgets: [],
+                isTemplate: false,
+                version: 1,
+                status: 'published',
+            },
+        ];
+
+        const { user, updates } = renderPropertyDock({
+            type: 'machine-activity',
+            title: 'Actividad de Máquina',
+            binding: {
+                mode: 'real_variable',
+                unit: 'kW',
+            },
+            availableDashboards,
+            currentDashboardId: 'dashboard-current',
+        });
+
+        const sectionTitles = Array.from(document.querySelectorAll('section')).map((section) =>
+            section.querySelector('button')?.textContent?.trim() ?? '',
+        );
+
+        expect(sectionTitles.at(-1)).toMatch(/navegación/i);
+
+        await user.click(getFieldButtonInSection('Navegación', 'Enlace'));
+        await user.click(screen.getByRole('button', { name: 'Línea A' }));
+
+        expect(updates.at(-1)?.navigationTargetDashboardId).toBe('dashboard-linea-a');
     });
 });
 

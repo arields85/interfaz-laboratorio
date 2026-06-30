@@ -182,6 +182,7 @@ interface HeaderWidgetCanvasProps {
     mode?: 'viewer' | 'preview';
     selectedWidgetId?: string;
     onWidgetSelect?: (widgetId: string) => void;
+    onNavigateDashboard?: (dashboardId: string) => void;
     onMoveWidget?: (widgetId: string, targetColumn: number) => void;
     onRemoveWidget?: (widgetId: string) => void;
     onDeleteWidget?: (widgetId: string) => void;
@@ -209,6 +210,7 @@ export default function HeaderWidgetCanvas({
     mode = 'viewer',
     selectedWidgetId,
     onWidgetSelect,
+    onNavigateDashboard,
     onMoveWidget,
     onRemoveWidget,
     onDeleteWidget,
@@ -247,14 +249,24 @@ export default function HeaderWidgetCanvas({
     };
 
     const resolveDisplayTitle = (widget: WidgetConfig) => widget.title || widget.type;
+    const resolveNavigationTarget = (widget: WidgetConfig) => widget.navigationTargetDashboardId?.trim() ?? '';
 
     const handleSelectByKeyboard = (
         event: KeyboardEvent<HTMLDivElement>,
-        widgetId: string,
+        widget: WidgetConfig,
     ) => {
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            onWidgetSelect?.(widgetId);
+
+            if (isPreview) {
+                onWidgetSelect?.(widget.id);
+                return;
+            }
+
+            const navigationTargetDashboardId = resolveNavigationTarget(widget);
+            if (navigationTargetDashboardId !== '') {
+                onNavigateDashboard?.(navigationTargetDashboardId);
+            }
         }
     };
 
@@ -276,16 +288,29 @@ export default function HeaderWidgetCanvas({
 
     const renderWidgetSurface = (widget: WidgetConfig) => {
         const hasDisplayTitle = !(widget.type === 'connection-status' && !widget.title?.trim());
+        const navigationTargetDashboardId = resolveNavigationTarget(widget);
+        const isNavigable = !isPreview && navigationTargetDashboardId !== '' && Boolean(onNavigateDashboard);
+        const isSelectable = isPreview && Boolean(onWidgetSelect);
+        const isInteractive = isNavigable || isSelectable;
 
         return (
             <div
                 data-header-widget-surface="true"
-                role="button"
-                tabIndex={0}
-                aria-label={resolveDisplayTitle(widget)}
+                role={isInteractive ? 'button' : undefined}
+                tabIndex={isInteractive ? 0 : undefined}
+                aria-label={isInteractive ? resolveDisplayTitle(widget) : undefined}
                 draggable={false}
-                onClick={() => onWidgetSelect?.(widget.id)}
-                onKeyDown={(event) => handleSelectByKeyboard(event, widget.id)}
+                onClick={() => {
+                    if (isPreview) {
+                        onWidgetSelect?.(widget.id);
+                        return;
+                    }
+
+                    if (isNavigable) {
+                        onNavigateDashboard?.(navigationTargetDashboardId);
+                    }
+                }}
+                onKeyDown={(event) => handleSelectByKeyboard(event, widget)}
                 className="glass-panel relative flex h-full min-h-18 w-full flex-col px-3 py-2 text-left transition-all focus:outline-none md:w-auto"
                 style={{
                     borderRadius: widgetCornerRadius,

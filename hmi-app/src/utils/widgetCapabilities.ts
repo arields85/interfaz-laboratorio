@@ -11,6 +11,8 @@ export interface WidgetCapabilities {
     catalogVariable: boolean;
     /** Widget can aggregate values from hierarchy children. */
     hierarchy: boolean;
+    /** Widget renders nested runtime controls that must not be wrapped in button semantics. */
+    nestedInteractiveNavigation: boolean;
     /** Default grid size (columns × rows) when the widget is first placed. */
     defaultSize: { w: number; h: number };
     /** Default icon name (Lucide string) when the widget is first placed. Null means no icon. */
@@ -18,23 +20,24 @@ export interface WidgetCapabilities {
 }
 
 const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
-    'kpi': { catalogVariable: false, hierarchy: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'Gauge' },
-    'machine-activity': { catalogVariable: false, hierarchy: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'HeartPulse' },
-    'activity-analytics': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: null },
-    'metric-card': { catalogVariable: true, hierarchy: true, defaultSize: { w: 6, h: 5 }, defaultIcon: 'BarChart2' },
-    'trend-chart': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
-    'trend-chart-v2': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
-    'prod-history': { catalogVariable: false, hierarchy: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'LineChart' },
-    'status': { catalogVariable: false, hierarchy: false, defaultSize: { w: 4, h: 4 }, defaultIcon: null },
-    'connection-status': { catalogVariable: false, hierarchy: false, defaultSize: { w: 5, h: 5 }, defaultIcon: null },
-    'alert-history': { catalogVariable: false, hierarchy: false, defaultSize: { w: 8, h: 8 }, defaultIcon: 'Siren' },
-    'text-title': { catalogVariable: false, hierarchy: false, defaultSize: { w: 5, h: 2 }, defaultIcon: null },
+    'kpi': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'Gauge' },
+    'machine-activity': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'HeartPulse' },
+    'activity-analytics': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 11, h: 9 }, defaultIcon: null },
+    'metric-card': { catalogVariable: true, hierarchy: true, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 5 }, defaultIcon: 'BarChart2' },
+    'trend-chart': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
+    'trend-chart-v2': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
+    'prod-history': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 11, h: 9 }, defaultIcon: 'LineChart' },
+    'status': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 4, h: 4 }, defaultIcon: null },
+    'connection-status': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 5, h: 5 }, defaultIcon: null },
+    'alert-history': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 8, h: 8 }, defaultIcon: 'Siren' },
+    'text-title': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 5, h: 2 }, defaultIcon: null },
 };
 
 /** Default capabilities for unknown widget types. */
 const DEFAULT_CAPABILITIES: WidgetCapabilities = {
     catalogVariable: false,
     hierarchy: false,
+    nestedInteractiveNavigation: false,
     defaultSize: { w: 4, h: 3 },
     defaultIcon: null,
 };
@@ -58,6 +61,13 @@ export function supportsCatalogVariable(widgetType: string): boolean {
  */
 export function supportsHierarchy(widgetType: string): boolean {
     return getWidgetCapabilities(widgetType).hierarchy;
+}
+
+/**
+ * Returns true when the widget renders nested controls that block button-like wrappers.
+ */
+export function hasNestedInteractiveNavigation(widgetType: string): boolean {
+    return getWidgetCapabilities(widgetType).nestedInteractiveNavigation;
 }
 
 /**

@@ -4,6 +4,7 @@ import {
     getWidgetCapabilities,
     getDefaultIcon,
     getDefaultSize,
+    hasNestedInteractiveNavigation,
     supportsCatalogVariable,
     supportsHierarchy,
 } from './widgetCapabilities';
@@ -15,9 +16,11 @@ describe('widgetCapabilities', () => {
         expect(getWidgetCapabilities(widgetType)).toEqual({
             catalogVariable: false,
             hierarchy: false,
+            nestedInteractiveNavigation: false,
             defaultSize: { w: 5, h: 2 },
             defaultIcon: null,
         });
+        expect(hasNestedInteractiveNavigation(widgetType)).toBe(false);
         expect(supportsCatalogVariable(widgetType)).toBe(false);
         expect(supportsHierarchy(widgetType)).toBe(false);
     });
@@ -26,9 +29,11 @@ describe('widgetCapabilities', () => {
         expect(getWidgetCapabilities('machine-activity')).toEqual({
             catalogVariable: false,
             hierarchy: false,
+            nestedInteractiveNavigation: false,
             defaultSize: { w: 6, h: 10 },
             defaultIcon: 'HeartPulse',
         });
+        expect(hasNestedInteractiveNavigation('machine-activity')).toBe(false);
         expect(supportsCatalogVariable('machine-activity')).toBe(false);
         expect(supportsHierarchy('machine-activity')).toBe(false);
     });
@@ -37,11 +42,20 @@ describe('widgetCapabilities', () => {
         expect(getWidgetCapabilities('activity-analytics')).toEqual({
             catalogVariable: false,
             hierarchy: false,
+            nestedInteractiveNavigation: true,
             defaultSize: { w: 11, h: 9 },
             defaultIcon: null,
         });
+        expect(hasNestedInteractiveNavigation('activity-analytics')).toBe(true);
         expect(supportsCatalogVariable('activity-analytics')).toBe(false);
         expect(supportsHierarchy('activity-analytics')).toBe(false);
+    });
+
+    it('marks widgets with runtime controls as nested-interactive navigation surfaces', () => {
+        expect(hasNestedInteractiveNavigation('alert-history')).toBe(true);
+        expect(hasNestedInteractiveNavigation('prod-history')).toBe(true);
+        expect(hasNestedInteractiveNavigation('trend-chart-v2')).toBe(true);
+        expect(hasNestedInteractiveNavigation('trend-chart')).toBe(false);
     });
 
     it('returns configured default sizes per widget type', () => {

@@ -1284,6 +1284,8 @@ export default function DashboardBuilderPage() {
                 dataEnabled={dataEnabled}
                 catalogVariables={allCatalogVariables}
                 usedCatalogVariableIds={usedCatalogVariableIds}
+                availableDashboards={allDashboards}
+                currentDashboardId={draft.id}
                 onCreateVariable={handleCreateVariable}
                 onDeleteVariable={handleRequestVariableDeletion}
                 onDelete={handleDeleteWidget}

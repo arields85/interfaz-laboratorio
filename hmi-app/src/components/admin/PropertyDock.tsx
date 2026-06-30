@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode } from '../../domain/admin.types';
+import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -70,6 +70,8 @@ interface PropertyDockProps {
     onCreateVariable: (name: string, unit: string) => void;
     onDeleteVariable: (variableId: string) => void;
     onUpdateWidget: (w: WidgetConfig) => void;
+    availableDashboards?: Dashboard[];
+    currentDashboardId?: string;
     onUpdateLayout: (l: WidgetLayout) => void;
     onDelete: () => void;
     onDuplicate: () => void;
@@ -171,6 +173,8 @@ export default function PropertyDock(props: PropertyDockProps) {
         onCreateVariable,
         onDeleteVariable,
         onUpdateWidget,
+        availableDashboards = [],
+        currentDashboardId,
     } = props;
     const [isCustomUnit, setIsCustomUnit] = useState(false);
     const [activityAnalyticsThresholdWarning, setActivityAnalyticsThresholdWarning] = useState<string | null>(null);
@@ -953,6 +957,25 @@ export default function PropertyDock(props: PropertyDockProps) {
     const isMachineActivity = selectedWidget?.type === 'machine-activity';
     const isActivityAnalytics = selectedWidget?.type === 'activity-analytics';
     const isDashboardTitle = selectedWidget?.type === 'text-title';
+    const navigationDashboardOptions = availableDashboards
+        .filter((dashboard) => dashboard.id !== currentDashboardId)
+        .map((dashboard) => ({
+            value: dashboard.id,
+            label: dashboard.status === 'published'
+                ? (dashboard.headerConfig?.title?.trim() || dashboard.name)
+                : `${dashboard.headerConfig?.title?.trim() || dashboard.name} (no publicado)`,
+            disabled: dashboard.status !== 'published',
+        }));
+    const handleNavigationTargetChange = (value: string) => {
+        if (!selectedWidget) {
+            return;
+        }
+
+        onUpdateWidget({
+            ...selectedWidget,
+            navigationTargetDashboardId: value || undefined,
+        });
+    };
     const widgetType = selectedWidget?.type ?? '';
     const hasCatalogSupport = supportsCatalogVariable(widgetType);
     const hasHierarchySupport = supportsHierarchy(widgetType);
@@ -2571,6 +2594,23 @@ export default function PropertyDock(props: PropertyDockProps) {
                                 </label>
                             </DockSection>
                         )}
+
+                        <DockSection icon={<MousePointerClick size={11} />} title="Navegación">
+                            <DockFieldRow label="Enlace">
+                                <AdminSelect
+                                    value={selectedWidget.navigationTargetDashboardId ?? ''}
+                                    onChange={handleNavigationTargetChange}
+                                    options={[
+                                        { value: '', label: 'Sin enlace' },
+                                        ...navigationDashboardOptions,
+                                    ]}
+                                />
+                            </DockFieldRow>
+                            <DockInfoBox
+                                variant="normal"
+                                text="Si seleccionás un dashboard, este widget navegará a ese dashboard en el viewer."
+                            />
+                        </DockSection>
 
             </div>
         </div>

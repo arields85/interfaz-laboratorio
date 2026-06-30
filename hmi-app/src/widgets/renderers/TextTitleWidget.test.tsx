@@ -69,4 +69,13 @@ describe('TextTitleWidget', () => {
 
         expect(container.firstElementChild).toBeInTheDocument();
     });
+
+    it('keeps text-title renderers free of direct navigation semantics even when a target exists', () => {
+        render(
+            <TextTitleWidget widget={makeWidget({ navigationTargetDashboardId: 'dashboard-linea-a' })} />,
+        );
+
+        expect(screen.queryByRole('button')).not.toBeInTheDocument();
+        expect(screen.getByText('Producción Línea A')).toBeInTheDocument();
+    });
 });

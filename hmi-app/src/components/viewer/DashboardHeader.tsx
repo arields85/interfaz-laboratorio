@@ -131,6 +131,7 @@ interface DashboardHeaderViewerProps {
     canDropHeaderWidget?: never;
     onAddHeaderWidget?: never;
     onDropWidgetAtSlot?: never;
+    onNavigateDashboard?: (dashboardId: string) => void;
     hierarchyContext?: HierarchyContext;
 }
 
@@ -157,6 +158,7 @@ interface DashboardHeaderPreviewProps {
     onAddHeaderWidget?: (type: WidgetType, slotIndex: number) => void;
     /** Asigna un widget existente (arrastrado desde el grid) al slot indicado */
     onDropWidgetAtSlot?: (widgetId: string, slotIndex: number) => void;
+    onNavigateDashboard?: never;
     hierarchyContext?: HierarchyContext;
 }
 
@@ -183,6 +185,7 @@ export default function DashboardHeader({
     canDropHeaderWidget,
     onAddHeaderWidget,
     onDropWidgetAtSlot,
+    onNavigateDashboard,
     hierarchyContext,
 }: DashboardHeaderProps) {
     const headerConfig = dashboard.headerConfig;
@@ -257,15 +260,16 @@ export default function DashboardHeader({
 
             <div className="flex gap-3 items-end">
                 {(isPreview || headerWidgets.length > 0) && (
-                    <HeaderWidgetCanvas
-                        widgets={headerWidgets}
-                        widgetColumnMap={widgetColumnMap}
-                        equipmentMap={equipmentMap}
-                        connection={connection}
-                        machines={machines}
-                        mode={isPreview ? 'preview' : 'viewer'}
-                        selectedWidgetId={selectedWidgetId}
-                        onWidgetSelect={onSelectHeaderWidget}
+                        <HeaderWidgetCanvas
+                            widgets={headerWidgets}
+                            widgetColumnMap={widgetColumnMap}
+                            equipmentMap={equipmentMap}
+                            connection={connection}
+                            machines={machines}
+                            mode={isPreview ? 'preview' : 'viewer'}
+                            onNavigateDashboard={onNavigateDashboard}
+                            selectedWidgetId={selectedWidgetId}
+                            onWidgetSelect={onSelectHeaderWidget}
                         onMoveWidget={onMoveHeaderWidget}
                         onRemoveWidget={onRemoveHeaderWidget}
                         onDeleteWidget={onDeleteHeaderWidget}

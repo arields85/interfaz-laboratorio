@@ -58,10 +58,12 @@ Todo widget nuevo debe:
 ### Integración
 - Registrar el renderer en `widgets/WidgetRenderer.tsx`.
 - Tipar `displayOptions` en `domain/admin.types.ts`.
+- Todo widget nuevo hereda `navigationTargetDashboardId` desde `WidgetConfigBase`; no redeclararlo por tipo.
 - Si el widget tiene propiedades configurables, exponerlas en:
   - `components/admin/PropertiesPanel.tsx`
   - `components/admin/PropertyDock.tsx`
 - La UI lateral de configuración debe reutilizar `components/admin/adminSidebarStyles.ts` para mantener el look industrial del `PropertyDock`.
+- No implementar lógica de navegación dashboard-a-dashboard dentro del renderer: `WidgetRenderer`/`HeaderWidgetCanvas` la resuelven en viewer y el bloque `Navegación` debe quedar al final del panel.
 - Si aplica al header, declarar explícitamente su compatibilidad con las reglas del header.
 
 ### Diseño y semántica

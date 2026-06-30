@@ -18,6 +18,9 @@ interface NewWidgetTemplateProps {
  * - usar `WidgetHeader` si hay encabezado
  * - `subtitle` en header / `subtext` en footer
  * - no inventar focus/hover actions propios
+ * - `navigationTargetDashboardId` ya viene heredado desde `WidgetConfigBase`
+ * - NO agregar `onClick` de navegación en el renderer: el wrapper compartido de `WidgetRenderer` lo resuelve en viewer
+ * - el PropertyDock compartido agrega `Navegación` al final del panel automáticamente
  */
 export default function NewWidgetTemplate({
   widget,
