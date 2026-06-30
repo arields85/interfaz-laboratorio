@@ -1688,6 +1688,41 @@ describe('ActivityAnalyticsWidget', () => {
         expect(scheduledTimeouts.map(({ delay }) => delay)).toContain(8_920);
     });
 
+    it('stops scheduling when requestAnimationFrame re-enters with a non-advancing timestamp', () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+            callback(0);
+            return 1;
+        });
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        expect(screen.getByTestId('activity-analytics-visual-panels')).toBeInTheDocument();
+    });
+
     it('hides the traveling glow after each traversal and restarts it after a per-cycle random pause', () => {
         vi.spyOn(Math, 'random').mockReturnValue(0.5);
         vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);

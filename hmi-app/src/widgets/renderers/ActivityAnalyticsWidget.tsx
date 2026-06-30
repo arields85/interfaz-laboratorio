@@ -2150,18 +2150,31 @@ function useTravelingEffectCycle({
         const travelDurationMs = durationSeconds * 1000;
         const randomPauseMs = resolveTravelingEffectPauseMs();
         const travelStartTime = performance.now();
+        let isAnimatingFrame = false;
         let animationFrameId = 0;
 
         setProgress(0);
         setIsPaused(false);
 
         const animateTravelingEffect = (now: number) => {
-            const nextProgress = clamp(now - travelStartTime, 0, travelDurationMs) / travelDurationMs;
+            if (isAnimatingFrame) {
+                setProgress(1);
+                setIsPaused(true);
+                return;
+            }
 
-            setProgress(nextProgress);
+            isAnimatingFrame = true;
 
-            if (nextProgress < 1) {
-                animationFrameId = window.requestAnimationFrame(animateTravelingEffect);
+            try {
+                const nextProgress = clamp(now - travelStartTime, 0, travelDurationMs) / travelDurationMs;
+
+                setProgress(nextProgress);
+
+                if (nextProgress < 1) {
+                    animationFrameId = window.requestAnimationFrame(animateTravelingEffect);
+                }
+            } finally {
+                isAnimatingFrame = false;
             }
         };
 
@@ -4402,7 +4415,6 @@ function resolveSummaryTravelingTopCapFrame({
         routeStep,
         routeCount,
         direction,
-        visibleLength,
         segmentStart,
         segmentEnd,
         localProgress,

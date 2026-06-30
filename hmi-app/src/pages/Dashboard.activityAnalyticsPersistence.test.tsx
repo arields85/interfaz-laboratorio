@@ -70,6 +70,12 @@ function emitResize(target: Element, width: number, height: number) {
     }
 }
 
+async function waitForResizeObserver(target: Element) {
+    await waitFor(() => {
+        expect(resizeCallbacks.get(target)?.size ?? 0).toBeGreaterThan(0);
+    });
+}
+
 const { hierarchyStorageMock, useDataOverviewMock, useActivitySeriesMock, useTemporalSettingsMock, isDataActivitySeriesEnabledMock } = vi.hoisted(() => ({
     hierarchyStorageMock: {
         getNodes: vi.fn(),
@@ -258,6 +264,8 @@ describe('Dashboard activity-analytics viewer persistence', () => {
             });
 
             const viewerRoot = screen.getByTestId('dashboard-viewer-root');
+            await waitForResizeObserver(viewerRoot);
+
             act(() => {
                 emitResize(viewerRoot, 1280, 800);
             });
