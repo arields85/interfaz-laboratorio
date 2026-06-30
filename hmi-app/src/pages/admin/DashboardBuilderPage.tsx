@@ -46,6 +46,7 @@ import { migrateLegacyBindings } from '../../utils/catalogMigration';
 import { supportsCatalogVariable, getDefaultIcon, getDefaultSize } from '../../utils/widgetCapabilities';
 import { DEFAULT_COLS, DEFAULT_ROWS } from '../../utils/gridConfig';
 import { buildCatalogVariableId } from '../../utils/catalogVariableId';
+import { getUsedCatalogVariableIdsForWidget, hasDuplicateCatalogBindings } from '../../utils/catalogBindingIdentity';
 import { useUIStore } from '../../store/ui.store';
 import { useDataOverview } from '../../queries/useDataOverview';
 
@@ -111,18 +112,6 @@ export default function DashboardBuilderPage() {
         () => [...catalogVariables, ...stagedVariables],
         [catalogVariables, stagedVariables],
     );
-
-    const usedCatalogVariableIds = useMemo(() => {
-        if (!draft) {
-            return [];
-        }
-
-        return [...new Set(
-            draft.widgets
-                .map((widget) => widget.binding?.catalogVariableId)
-                .filter((catalogVariableId): catalogVariableId is string => Boolean(catalogVariableId)),
-        )];
-    }, [draft]);
 
     // 4a. IDs de widgets asignados al header — excluidos del grid del builder
     // Calculado antes del guard para respetar las reglas de hooks.
@@ -407,6 +396,7 @@ export default function DashboardBuilderPage() {
         );
     } else {
         const selectedWidget = draft.widgets.find(w => w.id === selectedWidgetId);
+        const usedCatalogVariableIds = getUsedCatalogVariableIdsForWidget(draft.widgets, selectedWidget?.id);
         const isSelectedHeaderWidget = selectedWidgetId ? headerWidgetIds.has(selectedWidgetId) : false;
         const ownerNode = draft.ownerNodeId
             ? allNodes.find((node) => node.id === draft.ownerNodeId)
@@ -1103,12 +1093,8 @@ export default function DashboardBuilderPage() {
                 return null;
             }
 
-            const currentCatalogIds = catalogAwareWidgets
-                .map((widget) => widget.binding?.catalogVariableId)
-                .filter((catalogVariableId): catalogVariableId is string => Boolean(catalogVariableId));
-
-            if (new Set(currentCatalogIds).size !== currentCatalogIds.length) {
-                setDialogMessage('No se permite duplicar la misma variable en un mismo dashboard.');
+            if (hasDuplicateCatalogBindings(catalogAwareWidgets)) {
+                setDialogMessage('No se permite duplicar la misma variable con el mismo contexto de binding en un mismo dashboard.');
                 return null;
             }
 
@@ -1152,13 +1138,8 @@ export default function DashboardBuilderPage() {
                 setStagedVariables([]);
             }
 
-            const persistedHierarchyIds = nextDashboard.widgets
-                .filter((widget) => supportsCatalogVariable(widget.type))
-                .map((widget) => widget.binding?.catalogVariableId)
-                .filter((catalogVariableId): catalogVariableId is string => Boolean(catalogVariableId));
-
-            if (new Set(persistedHierarchyIds).size !== persistedHierarchyIds.length) {
-                setDialogMessage('No se permite duplicar la misma variable en un mismo dashboard.');
+            if (hasDuplicateCatalogBindings(nextDashboard.widgets.filter((widget) => supportsCatalogVariable(widget.type)))) {
+                setDialogMessage('No se permite duplicar la misma variable con el mismo contexto de binding en un mismo dashboard.');
                 return null;
             }
 
