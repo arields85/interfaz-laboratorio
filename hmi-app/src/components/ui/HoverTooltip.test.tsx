@@ -1,7 +1,33 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import HoverTooltip from './HoverTooltip';
+
+const createRect = ({
+    x,
+    y,
+    width,
+    height,
+}: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}) => ({
+    x,
+    y,
+    width,
+    height,
+    top: y,
+    right: x + width,
+    bottom: y + height,
+    left: x,
+    toJSON: () => ({}),
+});
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
 
 describe('HoverTooltip', () => {
     it('renders the tooltip on hover with the shared fixed-position tokens', () => {
@@ -14,17 +40,9 @@ describe('HoverTooltip', () => {
         expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
 
         const trigger = screen.getByRole('button', { name: 'Duplicar' });
-        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue({
-            x: 100,
-            y: 200,
-            width: 48,
-            height: 24,
-            top: 200,
-            right: 148,
-            bottom: 224,
-            left: 100,
-            toJSON: () => ({}),
-        });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 100, y: 200, width: 48, height: 24 }),
+        );
 
         fireEvent.mouseEnter(trigger);
 
@@ -60,17 +78,9 @@ describe('HoverTooltip', () => {
         );
 
         const trigger = screen.getByRole('button', { name: `Trigger ${position}` });
-        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue({
-            x: 100,
-            y: 200,
-            width: 48,
-            height: 24,
-            top: 200,
-            right: 148,
-            bottom: 224,
-            left: 100,
-            toJSON: () => ({}),
-        });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 100, y: 200, width: 48, height: 24 }),
+        );
 
         fireEvent.mouseEnter(trigger);
 
@@ -85,22 +95,82 @@ describe('HoverTooltip', () => {
         );
 
         const trigger = screen.getByRole('button', { name: 'Eliminar' });
-        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue({
-            x: 20,
-            y: 30,
-            width: 40,
-            height: 20,
-            top: 30,
-            right: 60,
-            bottom: 50,
-            left: 20,
-            toJSON: () => ({}),
-        });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 20, y: 30, width: 40, height: 20 }),
+        );
 
         fireEvent.mouseEnter(trigger);
         expect(screen.getByRole('tooltip')).toBeInTheDocument();
 
         fireEvent.mouseLeave(trigger);
         expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('flips a right-positioned tooltip to the left and clamps it inside the viewport', async () => {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 });
+
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+            if (this.getAttribute('role') === 'tooltip') {
+                return createRect({ x: 0, y: 0, width: 120, height: 32 });
+            }
+
+            return createRect({ x: 0, y: 0, width: 0, height: 0 });
+        });
+
+        render(
+            <HoverTooltip label="Exportar dashboard" position="right">
+                <button type="button">Export</button>
+            </HoverTooltip>,
+        );
+
+        const trigger = screen.getByRole('button', { name: 'Export' });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 280, y: 100, width: 24, height: 24 }),
+        );
+
+        fireEvent.mouseEnter(trigger);
+
+        await waitFor(() => {
+            expect(screen.getByRole('tooltip')).toHaveStyle({
+                top: '112px',
+                left: '274px',
+                transform: 'translate(-100%, -50%)',
+            });
+        });
+    });
+
+    it('clamps flipped tooltips within the viewport margin', async () => {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 });
+
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+            if (this.getAttribute('role') === 'tooltip') {
+                return createRect({ x: 0, y: 0, width: 120, height: 48 });
+            }
+
+            return createRect({ x: 0, y: 0, width: 0, height: 0 });
+        });
+
+        render(
+            <HoverTooltip label="Very long tooltip label" position="right">
+                <button type="button">Edge trigger</button>
+            </HoverTooltip>,
+        );
+
+        const trigger = screen.getByRole('button', { name: 'Edge trigger' });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 280, y: 0, width: 24, height: 24 }),
+        );
+
+        fireEvent.mouseEnter(trigger);
+
+        await waitFor(() => {
+            expect(screen.getByRole('tooltip')).toHaveStyle({
+                top: '20px',
+                left: '274px',
+                transform: 'translate(-100%, -50%)',
+            });
+        });
     });
 });
