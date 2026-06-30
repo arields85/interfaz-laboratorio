@@ -6,8 +6,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../../config/loaderOptions.config';
 import type { AuthSession } from '../../domain';
 import { AUTH_SESSION_STORAGE_KEY, useAuthStore } from '../../store/auth.store';
+import { useUIStore } from '../../store/ui.store';
 import Topbar from './Topbar';
 import { SHIELD_REVEAL_REQUEST_EVENT } from '../../hooks/useBootShield';
+
+const { hierarchyStorageMock, dashboardStorageMock } = vi.hoisted(() => ({
+    hierarchyStorageMock: {
+        getNodes: vi.fn(),
+    },
+    dashboardStorageMock: {
+        getDashboards: vi.fn(),
+    },
+}));
+
+vi.mock('../../services/HierarchyStorageService', () => ({
+    hierarchyStorage: hierarchyStorageMock,
+}));
+
+vi.mock('../../services/DashboardStorageService', () => ({
+    dashboardStorage: dashboardStorageMock,
+}));
 
 vi.mock('./ShaderSettingsPanel', () => ({
     default: () => null,
@@ -47,7 +65,7 @@ function mountBootShield() {
 function LocationIndicator() {
     const location = useLocation();
 
-    return <div data-testid="current-path">{location.pathname}</div>;
+    return <div data-testid="current-path">{`${location.pathname}${location.search}`}</div>;
 }
 
 function renderTopbar(initialEntry = '/') {
@@ -63,6 +81,13 @@ describe('Topbar', () => {
     beforeEach(() => {
         localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
         clearLoaderOptionsConfig();
+        hierarchyStorageMock.getNodes.mockResolvedValue([]);
+        dashboardStorageMock.getDashboards.mockResolvedValue([]);
+        useUIStore.setState({
+            selectedPlantId: null,
+            selectedAreaId: null,
+            selectedEquipmentId: null,
+        });
         useAuthStore.setState({
             session: unauthenticatedSession,
             isHydrated: true,
@@ -103,6 +128,61 @@ describe('Topbar', () => {
         expect(screen.getByTitle('Administracion')).toBeInTheDocument();
         expect(screen.getByTestId('current-path')).toHaveTextContent('/explorer');
         expect(screen.queryByLabelText('Usuario')).not.toBeInTheDocument();
+    });
+
+    it('navigates Home to the selected plant main dashboard when the plant links a published dashboard', async () => {
+        const user = userEvent.setup();
+
+        useUIStore.getState().setSelectedPlant('node-plant-01');
+        hierarchyStorageMock.getNodes.mockResolvedValue([
+            {
+                id: 'node-plant-01',
+                name: 'Steigen',
+                type: 'plant',
+                parentId: null,
+                order: 0,
+                linkedDashboardId: 'dash-main',
+            },
+        ]);
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            {
+                id: 'dash-main',
+                status: 'published',
+            },
+        ]);
+
+        renderTopbar('/explorer');
+
+        await user.click(screen.getByTitle('Visión General'));
+
+        await waitFor(() => {
+            expect(screen.getByTestId('current-path')).toHaveTextContent('/?dashboardId=dash-main');
+        });
+    });
+
+    it('keeps the current Home fallback when no plant main dashboard can be resolved', async () => {
+        const user = userEvent.setup();
+
+        useUIStore.getState().setSelectedPlant('node-plant-01');
+        hierarchyStorageMock.getNodes.mockResolvedValue([
+            {
+                id: 'node-plant-01',
+                name: 'Steigen',
+                type: 'plant',
+                parentId: null,
+                order: 0,
+            },
+        ]);
+
+        renderTopbar('/alerts');
+
+        await user.click(screen.getByTitle('Visión General'));
+
+        await waitFor(() => {
+            expect(screen.getByTestId('current-path')).toHaveTextContent('/');
+        });
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/');
+        expect(screen.getByTestId('current-path')).not.toHaveTextContent('dashboardId=');
     });
 
     it('uses the short loader and same-tab routing when entering admin from a viewer route', async () => {

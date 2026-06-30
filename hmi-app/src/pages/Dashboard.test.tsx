@@ -1,8 +1,10 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from './Dashboard';
 import { makeDashboard } from '../test/fixtures/dashboard.fixture';
 import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.types';
+import { useUIStore } from '../store/ui.store';
 
 const CONTENT_READY_ATTRIBUTE = 'data-hmi-content-ready';
 
@@ -44,11 +46,27 @@ vi.mock('../queries/useDataOverview', () => ({
     useDataOverview: useDataOverviewMock,
 }));
 
+function renderDashboard(initialEntry = '/', options?: Parameters<typeof render>[1]) {
+    return render(
+        <MemoryRouter initialEntries={[initialEntry]}>
+            <Routes>
+                <Route path="/" element={<Dashboard />} />
+            </Routes>
+        </MemoryRouter>,
+        options,
+    );
+}
+
 describe('Dashboard page layout', () => {
     beforeEach(() => {
         const dashboard = makeDashboard({ status: 'published', publishedSnapshot: undefined });
         dashboardStorageMock.getDashboards.mockResolvedValue([dashboard]);
         hierarchyStorageMock.getNodes.mockResolvedValue([]);
+        useUIStore.setState({
+            selectedPlantId: null,
+            selectedAreaId: null,
+            selectedEquipmentId: null,
+        });
         useDataOverviewMock.mockReturnValue({
             connection: { globalStatus: 'unknown', lastSuccess: null, ageMs: null },
             machines: [],
@@ -65,7 +83,7 @@ describe('Dashboard page layout', () => {
     });
 
     it('keeps the viewer header title and canvas inside the same padded column for left-edge alignment', async () => {
-        const { container } = render(<Dashboard />);
+        const { container } = renderDashboard();
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
@@ -100,7 +118,7 @@ describe('Dashboard page layout', () => {
             }),
         ]);
 
-        render(<Dashboard />);
+        renderDashboard();
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
@@ -115,7 +133,7 @@ describe('Dashboard page layout', () => {
     });
 
     it('passes a viewer widget persistence callback so published dashboards can restore custom windows on reload', async () => {
-        render(<Dashboard />);
+        renderDashboard();
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
@@ -134,7 +152,7 @@ describe('Dashboard page layout', () => {
             makeDashboard({ id: 'dashboard-b', name: 'Dashboard B', status: 'published', widgets: [], layout: [] }),
         ]);
 
-        render(<Dashboard />);
+        renderDashboard();
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
@@ -176,7 +194,7 @@ describe('Dashboard page layout', () => {
             isEnabled: true,
         });
 
-        render(<Dashboard />);
+        renderDashboard();
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
@@ -214,7 +232,7 @@ describe('Dashboard page layout', () => {
             isEnabled: true,
         });
 
-        render(<Dashboard />);
+        renderDashboard();
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-header-title')).toBeInTheDocument();
@@ -242,7 +260,7 @@ describe('Dashboard page layout', () => {
         document.body.innerHTML = '<div id="root"></div>';
         const root = document.getElementById('root') as HTMLDivElement;
 
-        const { unmount } = render(<Dashboard />, { container: root });
+        const { unmount } = renderDashboard('/', { container: root });
 
         await waitFor(() => {
             expect(root).toHaveAttribute(CONTENT_READY_ATTRIBUTE, 'true');
@@ -266,7 +284,7 @@ describe('Dashboard page layout', () => {
         document.body.innerHTML = '<div id="root"></div>';
         const root = document.getElementById('root') as HTMLDivElement;
 
-        render(<Dashboard />, { container: root });
+        renderDashboard('/', { container: root });
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
@@ -284,7 +302,7 @@ describe('Dashboard page layout', () => {
         document.body.innerHTML = '<div id="root"></div>';
         const root = document.getElementById('root') as HTMLDivElement;
 
-        render(<Dashboard />, { container: root });
+        renderDashboard('/', { container: root });
 
         await waitFor(() => {
             expect(screen.getByRole('alert')).toHaveTextContent('No se pudieron cargar los dashboards públicos.');
@@ -293,5 +311,53 @@ describe('Dashboard page layout', () => {
         expect(root).toHaveAttribute(CONTENT_READY_ATTRIBUTE, 'true');
         expect(screen.getByText('Reintentá desde el navegador o contactá a un administrador si el problema persiste.')).toBeInTheDocument();
         expect(consoleErrorSpy).toHaveBeenCalledWith('Error cargando dashboards públicos:', expect.any(Error));
+    });
+
+    it('opens the requested published dashboard when Home navigation passes a dashboardId search param', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({ id: 'dashboard-a', name: 'Dashboard A', status: 'published', widgets: [], layout: [] }),
+            makeDashboard({ id: 'dashboard-main', name: 'Dashboard Main', status: 'published', widgets: [], layout: [] }),
+        ]);
+
+        renderDashboard('/?dashboardId=dashboard-main');
+
+        await waitFor(() => {
+            expect(dashboardHeaderMock).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    dashboard: expect.objectContaining({ id: 'dashboard-main' }),
+                }),
+            );
+        });
+    });
+
+    it('does not snap back to the query dashboard after internal viewer navigation moves to another published dashboard', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({ id: 'dashboard-a', name: 'Dashboard A', status: 'published', widgets: [], layout: [] }),
+            makeDashboard({ id: 'dashboard-main', name: 'Dashboard Main', status: 'published', widgets: [], layout: [] }),
+        ]);
+
+        renderDashboard('/?dashboardId=dashboard-main');
+
+        await waitFor(() => {
+            expect(dashboardHeaderMock).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    dashboard: expect.objectContaining({ id: 'dashboard-main' }),
+                }),
+            );
+        });
+
+        const viewerCall = dashboardViewerMock.mock.calls.at(-1)?.[0] as { onNavigateDashboard: (dashboardId: string) => void };
+
+        act(() => {
+            viewerCall.onNavigateDashboard('dashboard-a');
+        });
+
+        await waitFor(() => {
+            expect(dashboardHeaderMock).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    dashboard: expect.objectContaining({ id: 'dashboard-a' }),
+                }),
+            );
+        });
     });
 });

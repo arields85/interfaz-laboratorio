@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, Loader2, Link2Off } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { dashboardStorage } from '../services/DashboardStorageService';
 import { hierarchyStorage } from '../services/HierarchyStorageService';
 import type { ActivityAnalyticsPersistedDisplayPatch, Dashboard, HierarchyNode } from '../domain/admin.types';
@@ -10,6 +11,7 @@ import type { EquipmentSummary } from '../domain/equipment.types';
 import { useDataOverview } from '../queries/useDataOverview';
 import type { HierarchyContext } from '../widgets/resolvers/hierarchyResolver';
 import { resetShieldContentReady, signalShieldContentReady } from '../shield/shieldContentReadiness';
+import { useUIStore } from '../store/ui.store';
 
 // =============================================================================
 // Dashboard Público (Visor)
@@ -24,6 +26,7 @@ import { resetShieldContentReady, signalShieldContentReady } from '../shield/shi
 // =============================================================================
 
 export default function Dashboard() {
+    const [searchParams, setSearchParams] = useSearchParams();
     const [allDashboards, setAllDashboards] = useState<Dashboard[]>([]);
     const [publishedDashboards, setPublishedDashboards] = useState<Dashboard[]>([]);
     const [allNodes, setAllNodes] = useState<HierarchyNode[]>([]);
@@ -31,6 +34,7 @@ export default function Dashboard() {
     const [loadFailed, setLoadFailed] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
     const { connection, machines } = useDataOverview();
+    const setSelectedPlant = useUIStore((state) => state.setSelectedPlant);
 
     // Mapeo de equipos simulado (para resolver bindings)
     const equipmentMap = useMemo(() => {
@@ -99,6 +103,28 @@ export default function Dashboard() {
         }
     }, [activeTab, publishedDashboards.length]);
 
+    useEffect(() => {
+        if (isLoading) {
+            return;
+        }
+
+        const requestedDashboardId = searchParams.get('dashboardId');
+
+        if (!requestedDashboardId) {
+            return;
+        }
+
+        const requestedDashboardIndex = publishedDashboards.findIndex((dashboard) => dashboard.id === requestedDashboardId);
+
+        if (requestedDashboardIndex >= 0) {
+            setActiveTab(requestedDashboardIndex);
+        }
+
+        const nextSearchParams = new URLSearchParams(searchParams);
+        nextSearchParams.delete('dashboardId');
+        setSearchParams(nextSearchParams, { replace: true });
+    }, [isLoading, publishedDashboards, searchParams, setSearchParams]);
+
     const rawActiveDashboard = publishedDashboards[activeTab] ?? publishedDashboards[0];
 
     // Si el dashboard tiene publishedSnapshot, el viewer muestra esa versión congelada
@@ -145,6 +171,27 @@ export default function Dashboard() {
         allDashboards,
         currentNodeId: activeDashboard?.ownerNodeId,
     }), [allNodes, allDashboards, activeDashboard?.ownerNodeId]);
+
+    useEffect(() => {
+        if (!activeDashboard?.ownerNodeId) {
+            setSelectedPlant(null);
+            return;
+        }
+
+        const nodeById = new Map(allNodes.map((node) => [node.id, node]));
+        let currentNode = nodeById.get(activeDashboard.ownerNodeId);
+
+        while (currentNode) {
+            if (currentNode.type === 'plant') {
+                setSelectedPlant(currentNode.id);
+                return;
+            }
+
+            currentNode = currentNode.parentId ? nodeById.get(currentNode.parentId) : undefined;
+        }
+
+        setSelectedPlant(null);
+    }, [activeDashboard?.ownerNodeId, allNodes, setSelectedPlant]);
 
     const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => {
         if (!activeDashboard) {

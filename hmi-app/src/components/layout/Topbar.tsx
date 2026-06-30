@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react';
 import { Bell, Search, User, Home, FolderTree, Activity, AlertTriangle, Box, Settings, LayoutDashboard, Stethoscope, ScrollText, Palette } from 'lucide-react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import LoginOverlay from '../auth/LoginOverlay';
 import ShaderSettingsPanel from './ShaderSettingsPanel';
 import { useAuthStore } from '../../store/auth.store';
 import { requestShieldReveal } from '../../hooks/useBootShield';
+import { useUIStore } from '../../store/ui.store';
+import { hierarchyStorage } from '../../services/HierarchyStorageService';
+import { dashboardStorage } from '../../services/DashboardStorageService';
 
 const navLeftItems = [
-    { icon: Home, label: 'Visión General', path: '/' },
     { icon: FolderTree, label: 'Explorador', path: '/explorer' },
     { icon: Activity, label: 'Tendencias', path: '/trends' },
     { icon: AlertTriangle, label: 'Alarmas', path: '/alerts' },
@@ -36,6 +38,56 @@ function NavIconLink({ icon: Icon, label, path }: { icon: typeof Home; label: st
         >
             <Icon size={20} />
         </NavLink>
+    );
+}
+
+function HomeNavButton() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const selectedPlantId = useUIStore((state) => state.selectedPlantId);
+    const isActive = location.pathname === '/';
+
+    const handleHomeNavigation = async () => {
+        const fallbackTarget = '/';
+
+        if (!selectedPlantId) {
+            navigate(fallbackTarget);
+            return;
+        }
+
+        try {
+            const [nodes, dashboards] = await Promise.all([
+                hierarchyStorage.getNodes(),
+                dashboardStorage.getDashboards(),
+            ]);
+            const plantNode = nodes.find((node) => node.id === selectedPlantId);
+            const targetDashboardId = plantNode?.linkedDashboardId;
+            const hasPublishedTarget = dashboards.some((dashboard) => (
+                dashboard.id === targetDashboardId && dashboard.status === 'published'
+            ));
+
+            navigate(hasPublishedTarget ? `/?dashboardId=${encodeURIComponent(targetDashboardId!)}` : fallbackTarget);
+        } catch {
+            navigate(fallbackTarget);
+        }
+    };
+
+    return (
+        <button
+            type="button"
+            title="Visión General"
+            aria-label="Visión General"
+            onClick={() => {
+                void handleHomeNavigation();
+            }}
+            className={`p-2 rounded-lg transition-colors ${
+                isActive
+                    ? 'text-admin-accent hover:bg-industrial-hover'
+                    : 'text-industrial-muted hover:bg-industrial-hover hover:text-industrial-text'
+            }`}
+        >
+            <Home size={20} />
+        </button>
     );
 }
 
@@ -71,6 +123,7 @@ export default function Topbar() {
                 {/* Center: Nav Left + Search + Nav Right */}
                 <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
                     <nav className="flex items-center gap-1">
+                        <HomeNavButton />
                         {navLeftItems.map((item) => (
                             <NavIconLink key={item.path} {...item} />
                         ))}
