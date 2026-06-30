@@ -163,12 +163,19 @@ vi.mock('../../components/ui/ChartHoverLayer', () => ({
 }));
 
 vi.mock('../../components/ui/ChartTooltip', () => ({
-    default: ({ label, series }: { label: string; series: Array<{ name: string; value: string }> }) => (
-        <div data-testid="chart-tooltip">
+    default: ({ label, series, panelClassName, labelClassName }: { label: string; series: Array<{ name: string; value: string; color?: string }>; panelClassName?: string; labelClassName?: string }) => (
+        <div data-testid="chart-tooltip" className={panelClassName} data-label-class={labelClassName}>
             {label}::{JSON.stringify(series)}
         </div>
     ),
 }));
+
+function readTooltipSeries() {
+    const tooltip = screen.getByTestId('chart-tooltip');
+    const [, serializedSeries = '[]'] = (tooltip.textContent ?? '').split('::');
+
+    return JSON.parse(serializedSeries) as Array<{ name: string; value: string; color?: string }>;
+}
 
 function makeWidget(overrides?: Partial<ActivityAnalyticsWidgetConfig>): ActivityAnalyticsWidgetConfig {
     return {
@@ -440,6 +447,19 @@ function getRenderedGroupXAxisLabelNodes() {
             return textNodes.length >= 2 ? textNodes.at(-1) as SVGTextElement | null : null;
         })
         .filter((label): label is SVGTextElement => label !== null);
+}
+
+function createMatchMediaMock(matches: boolean): typeof window.matchMedia {
+    return vi.fn().mockImplementation((query: string) => ({
+        matches,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+    }));
 }
 
 describe('ActivityAnalyticsWidget', () => {
@@ -1368,6 +1388,389 @@ describe('ActivityAnalyticsWidget', () => {
         expect(parseNumericCsvAttribute(trendChart.getAttribute('data-renderable-point-y'))).toEqual([7.2, 11.2, 8.8]);
     });
 
+    it('inverts the % PROD trend gradient direction and keeps the endpoint marker family aligned with the line end color', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '18/06', productivityRatio: 0.8, productivityLabel: '80%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '19/06', productivityRatio: 0.55, productivityLabel: '55%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '20/06', productivityRatio: 0.7, productivityLabel: '70%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        const trendChart = screen.getByTestId('activity-analytics-prod-trend-chart');
+        const lineStops = getGradientStopsByIdSuffix(trendChart, 'prod-trend-line-gradient');
+        const areaStops = getGradientStopsByIdSuffix(trendChart, 'prod-trend-area-gradient');
+        const latestValueLabel = screen.getByTestId('activity-analytics-prod-trend-latest-value-label');
+        const latestPointPulse = screen.getByTestId('activity-analytics-prod-trend-final-point-pulse');
+        const latestPointAura = screen.getByTestId('activity-analytics-prod-trend-final-point-aura');
+        const latestPointHalo = screen.getByTestId('activity-analytics-prod-trend-final-point-halo');
+        const latestPointCore = screen.getByTestId('activity-analytics-prod-trend-final-point-core');
+
+        expect(lineStops.map((stop) => stop.getAttribute('stop-color'))).toEqual(reverseGradientStops(CUSTOM_STATE_GRADIENTS.prod));
+        expect(areaStops.map((stop) => stop.getAttribute('stop-color'))).toEqual(reverseGradientStops(CUSTOM_STATE_GRADIENTS.prod));
+        expect(latestValueLabel).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
+        expect(latestPointPulse).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
+        expect(latestPointAura.getAttribute('fill')).toMatch(/^url\(#.+-prod-trend-traveling-glow-aura\)$/);
+        expect(latestPointHalo.getAttribute('fill')).toMatch(/^url\(#.+-prod-trend-traveling-glow-aura\)$/);
+        expect(latestPointAura).toHaveClass('activity-analytics-prod-trend-final-point-flicker', 'activity-analytics-prod-trend-final-point-flicker-aura');
+        expect(latestPointHalo).toHaveClass('activity-analytics-prod-trend-final-point-flicker', 'activity-analytics-prod-trend-final-point-flicker-halo');
+        expect(latestPointCore).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
+        expect(latestPointCore).toHaveAttribute('stroke', CUSTOM_STATE_GRADIENTS.prod[1]);
+
+        fireEvent.mouseEnter(screen.getAllByTestId('activity-analytics-prod-trend-hit-area')[1]!);
+
+        expect(screen.getByTestId('activity-analytics-prod-trend-hover-point')).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
+    });
+
+    it('uses the accepted grouped tooltip glass panel style for the % PROD trend tooltip', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.8, productivityLabel: '80%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.55, productivityLabel: '55%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.7, productivityLabel: '70%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        const firstHitArea = screen.getAllByTestId('activity-analytics-prod-trend-hit-area')[0]!;
+
+        expect(firstHitArea).toHaveAttribute('cursor', 'crosshair');
+
+        fireEvent.mouseEnter(firstHitArea);
+
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('2026-06-18');
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Prod.');
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('80%');
+        expect(screen.getByTestId('activity-analytics-prod-trend-hover-guide')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-prod-trend-hover-guide')).toHaveAttribute('stroke-dasharray', '4 3');
+        expect(screen.getByTestId('activity-analytics-prod-trend-hover-point')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-prod-trend-hover-point')).toHaveAttribute('data-bucket-key', 'day-1');
+        expect(screen.getByTestId('chart-tooltip')).toHaveClass(
+            'rounded-lg',
+            'border',
+            'border-industrial-border',
+            'bg-[linear-gradient(135deg,rgba(9,13,22,0.57)_0%,rgba(17,24,39,0.52)_100%)]',
+            'px-3',
+            'py-2',
+            'shadow-lg',
+            'backdrop-blur-sm',
+        );
+        expect(screen.getByTestId('chart-tooltip')).not.toHaveClass('glass-panel');
+        expect(screen.getByTestId('chart-tooltip')).toHaveAttribute('data-label-class', 'mb-1 whitespace-nowrap text-industrial-muted');
+    });
+
+    it('renders a non-interactive traveling glow that follows the measured % PROD trend path when enough points exist', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        const trendLine = screen.getByTestId('activity-analytics-prod-trend-line');
+        const travelingGlow = screen.getByTestId('activity-analytics-prod-trend-traveling-glow');
+        const travelingGlowAura = screen.getByTestId('activity-analytics-prod-trend-traveling-glow-aura');
+        const travelingGlowHalo = screen.getByTestId('activity-analytics-prod-trend-traveling-glow-halo');
+        const travelingGlowCore = screen.getByTestId('activity-analytics-prod-trend-traveling-glow-core');
+        const latestPointAura = screen.getByTestId('activity-analytics-prod-trend-final-point-aura');
+        const latestPointHalo = screen.getByTestId('activity-analytics-prod-trend-final-point-halo');
+        const latestPointCore = screen.getByTestId('activity-analytics-prod-trend-final-point-core');
+
+        expect(travelingGlow).toHaveAttribute('pointer-events', 'none');
+        expect(travelingGlow).toHaveAttribute('aria-hidden', 'true');
+        expect(travelingGlow).toHaveStyle({ mixBlendMode: 'screen' });
+        expect(trendLine.getAttribute('id')).toBeTruthy();
+        expect(travelingGlow).toHaveAttribute('data-path-id', trendLine.getAttribute('id'));
+        expect(travelingGlow).toHaveAttribute('data-cycle-key', '0');
+        expect(Number(travelingGlowAura.getAttribute('cx'))).toBeGreaterThan(0);
+        expect(Number(travelingGlowAura.getAttribute('cy'))).toBeGreaterThan(0);
+        expect(travelingGlowAura.getAttribute('fill')).toMatch(/^url\(#.+-prod-trend-traveling-glow-aura\)$/);
+        expect(travelingGlowHalo.getAttribute('fill')).toMatch(/^url\(#.+-prod-trend-traveling-glow-aura\)$/);
+        expect(travelingGlowHalo.getAttribute('filter')).toMatch(/^url\(#.+-prod-trend-traveling-glow\)$/);
+        expect(latestPointAura.getAttribute('fill')).toBe(travelingGlowAura.getAttribute('fill'));
+        expect(latestPointHalo.getAttribute('fill')).toBe(travelingGlowHalo.getAttribute('fill'));
+        expect(latestPointHalo.getAttribute('filter')).toBe(travelingGlowHalo.getAttribute('filter'));
+        expect(travelingGlowCore).toHaveAttribute('fill', latestPointCore.getAttribute('fill'));
+        expect(travelingGlowCore).toHaveAttribute('stroke', latestPointCore.getAttribute('stroke'));
+        expect(travelingGlowAura).toHaveAttribute('data-duration', '0.92s');
+        expect(travelingGlowHalo).toHaveAttribute('data-motion-duration', '0.92s');
+        expect(travelingGlowCore).toHaveAttribute('data-duration', '0.92s');
+        expect(Number(travelingGlowAura.getAttribute('data-opacity'))).toBeGreaterThan(0);
+        expect(Number(travelingGlowHalo.getAttribute('data-opacity'))).toBeGreaterThan(0);
+        expect(Number(travelingGlowCore.getAttribute('data-opacity'))).toBeGreaterThan(0);
+    });
+
+    it('clamps the traveling glow duration to the configured maximum for long PROD trend paths', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics(Array.from({ length: 30 }, (_, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label: `2026-06-${String(index + 1).padStart(2, '0')}`,
+            productivityRatio: 0.25 + ((index % 5) * 0.15),
+            productivityLabel: `${25 + ((index % 5) * 15)}%`,
+        })));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420 });
+        });
+
+        const travelingGlowAura = screen.getByTestId('activity-analytics-prod-trend-traveling-glow-aura');
+        const travelingGlowHalo = screen.getByTestId('activity-analytics-prod-trend-traveling-glow-halo');
+        const travelingGlowCore = screen.getByTestId('activity-analytics-prod-trend-traveling-glow-core');
+
+        expect(travelingGlowAura).toHaveAttribute('data-duration', '3.2s');
+        expect(travelingGlowHalo).toHaveAttribute('data-motion-duration', '3.2s');
+        expect(travelingGlowCore).toHaveAttribute('data-duration', '3.2s');
+    });
+
+    it('shows the traveling glow immediately on mount when a usable PROD trend path exists', () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+        const scheduledTimeouts: Array<{ callback: () => void; delay: number }> = [];
+
+        vi.spyOn(window, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number) => {
+            if (typeof callback === 'function') {
+                scheduledTimeouts.push({
+                    callback: callback as () => void,
+                    delay: Number(delay ?? 0),
+                });
+            }
+
+            return scheduledTimeouts.length as unknown as number;
+        }) as typeof window.setTimeout);
+        vi.spyOn(window, 'clearTimeout').mockImplementation(() => undefined);
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        const travelingGlow = screen.getByTestId('activity-analytics-prod-trend-traveling-glow');
+        expect(travelingGlow).toBeInTheDocument();
+        expect(Number(screen.getByTestId('activity-analytics-prod-trend-traveling-glow-aura').getAttribute('data-opacity'))).toBeGreaterThan(0);
+        expect(scheduledTimeouts.map(({ delay }) => delay)).toContain(920);
+        expect(scheduledTimeouts.map(({ delay }) => delay)).toContain(8_920);
+    });
+
+    it('hides the traveling glow after each traversal and restarts it after a per-cycle random pause', () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0.5);
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+        const scheduledTimeouts: Array<{ callback: () => void; delay: number }> = [];
+
+        vi.spyOn(window, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number) => {
+            if (typeof callback === 'function') {
+                scheduledTimeouts.push({
+                    callback: callback as () => void,
+                    delay: Number(delay ?? 0),
+                });
+            }
+
+            return scheduledTimeouts.length as unknown as number;
+        }) as typeof window.setTimeout);
+        vi.spyOn(window, 'clearTimeout').mockImplementation(() => undefined);
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        expect(screen.getByTestId('activity-analytics-prod-trend-traveling-glow')).toHaveAttribute('data-cycle-key', '0');
+        expect(scheduledTimeouts.map(({ delay }) => delay)).toContain(920);
+        expect(scheduledTimeouts.map(({ delay }) => delay)).toContain(14_920);
+
+        const hideTimeout = scheduledTimeouts.find(({ delay }) => delay === 920);
+        const restartTimeout = scheduledTimeouts.find(({ delay }) => delay === 14_920);
+
+        act(() => {
+            hideTimeout?.callback();
+        });
+
+        expect(screen.queryByTestId('activity-analytics-prod-trend-traveling-glow')).not.toBeInTheDocument();
+        expect(restartTimeout).toBeDefined();
+
+        act(() => {
+            restartTimeout?.callback();
+        });
+
+        expect(screen.getByTestId('activity-analytics-prod-trend-traveling-glow')).toHaveAttribute('data-cycle-key', '1');
+    });
+
+    it('renders the traveling glow when reduced motion is not explicitly requested', () => {
+        vi.stubGlobal('matchMedia', createMatchMediaMock(false));
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        expect(screen.getByTestId('activity-analytics-prod-trend-traveling-glow')).toBeInTheDocument();
+    });
+
+    it('does not render or schedule the traveling glow when reduced motion is preferred', () => {
+        vi.stubGlobal('matchMedia', createMatchMediaMock(true));
+
+        const randomSpy = vi.spyOn(Math, 'random');
+        const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        expect(screen.queryByTestId('activity-analytics-prod-trend-traveling-glow')).not.toBeInTheDocument();
+        expect(randomSpy).not.toHaveBeenCalled();
+        expect(setTimeoutSpy).not.toHaveBeenCalled();
+    });
+
     it('renders alternating soft zebra bands across PROD trend bucket centers behind the foreground trend data', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
@@ -1454,6 +1857,45 @@ describe('ActivityAnalyticsWidget', () => {
         expect(bandLayer?.compareDocumentPosition(latestPoint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(bandLayer).toContainElement(trendBands[0]);
         expect(trendChart.lastElementChild).not.toBe(bandLayer);
+    });
+
+    it('hides PROD trend zebra bands for sparse 7d Turno summary labels', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'shift-1', label: '2026-06-18 · Turno 1', productivityRatio: 0.75, productivityLabel: '75%' }),
+            buildGroupedBucket({ bucketKey: 'shift-2', label: '2026-06-18 · Turno 2', productivityRatio: 0.55, productivityLabel: '55%' }),
+            buildGroupedBucket({ bucketKey: 'shift-3', label: '2026-06-18 · Turno 3', productivityRatio: 0.7, productivityLabel: '70%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        expect(screen.getAllByTestId('activity-analytics-prod-trend-x-axis-label').map((node) => node.textContent)).toEqual(['Turno 1', 'Turno 2', 'Turno 3']);
+        expect(screen.queryAllByTestId('activity-analytics-prod-trend-band')).toHaveLength(0);
+        expect(screen.queryAllByTestId('activity-analytics-prod-trend-band-boundary')).toHaveLength(0);
+        expect(screen.getAllByTestId('activity-analytics-prod-trend-line').length).toBeGreaterThan(0);
+        expect(screen.getAllByTestId('activity-analytics-prod-trend-area').length).toBeGreaterThan(0);
+        expect(screen.getByTestId('activity-analytics-prod-trend-latest-point')).toBeInTheDocument();
     });
 
     it('applies custom prod trend band stop colors, alphas, and blend mode when configured', () => {
@@ -1850,7 +2292,10 @@ describe('ActivityAnalyticsWidget', () => {
         const groupLabels = getRenderedGroupXAxisLabels();
         const groupStacks = screen.getAllByTestId('activity-analytics-group-stack');
         const latestPoint = screen.getByTestId('activity-analytics-prod-trend-latest-point');
+        const latestValueLabel = screen.getByTestId('activity-analytics-prod-trend-latest-value-label');
         const latestPointPulse = screen.getByTestId('activity-analytics-prod-trend-final-point-pulse');
+        const latestPointAura = screen.getByTestId('activity-analytics-prod-trend-final-point-aura');
+        const latestPointHalo = screen.getByTestId('activity-analytics-prod-trend-final-point-halo');
         const latestPointCore = screen.getByTestId('activity-analytics-prod-trend-final-point-core');
         const renderablePointY = (trendChart.getAttribute('data-renderable-point-y') ?? '').split(',');
 
@@ -1871,10 +2316,22 @@ describe('ActivityAnalyticsWidget', () => {
         expect(latestPoint).toHaveAttribute('data-partial', 'true');
         expect(latestPoint).toHaveAttribute('data-value-state', 'measured');
         expect(trendChart).toHaveAttribute('data-latest-bucket-key', 'day-3');
+        expect(latestValueLabel).toHaveTextContent('50%');
+        expect(latestValueLabel).toHaveClass('activity-analytics-prod-trend-latest-value-float');
+        expect(latestValueLabel).toHaveAttribute('pointer-events', 'none');
+        expect(Number(latestValueLabel.getAttribute('x'))).toBe(Number(latestPointCore.getAttribute('cx')));
+        expect(Number(latestValueLabel.getAttribute('y'))).toBeLessThanOrEqual(Number(latestPointCore.getAttribute('cy')) + 2);
         expect(Number(latestPointPulse.getAttribute('cx'))).toBe(Number(latestPointCore.getAttribute('cx')));
         expect(Number(latestPointPulse.getAttribute('cy'))).toBe(Number(latestPointCore.getAttribute('cy')));
         expect(Number(latestPointPulse.getAttribute('cy'))).toBeCloseTo(Number.parseFloat(renderablePointY[2] ?? 'NaN'));
         expect(latestPointPulse).toHaveClass('animate-ping');
+        expect(Number(latestPointAura.getAttribute('cx'))).toBe(Number(latestPointCore.getAttribute('cx')));
+        expect(Number(latestPointAura.getAttribute('cy'))).toBe(Number(latestPointCore.getAttribute('cy')));
+        expect(Number(latestPointHalo.getAttribute('cx'))).toBe(Number(latestPointCore.getAttribute('cx')));
+        expect(Number(latestPointHalo.getAttribute('cy'))).toBe(Number(latestPointCore.getAttribute('cy')));
+        expect(latestPointAura).toHaveClass('activity-analytics-prod-trend-final-point-flicker', 'activity-analytics-prod-trend-final-point-flicker-aura');
+        expect(latestPointHalo).toHaveClass('activity-analytics-prod-trend-final-point-flicker', 'activity-analytics-prod-trend-final-point-flicker-halo');
+        expect(latestPointCore).toHaveAttribute('stroke-opacity', '0.42');
         expect(screen.queryByTestId('activity-analytics-prod-trend-final-missing-pulse')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-prod-trend-final-missing-core')).not.toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-groups')).toBeInTheDocument();
@@ -1941,6 +2398,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.queryByTestId('activity-analytics-prod-trend-final-point-pulse')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-prod-trend-final-point-core')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-prod-trend-partial-point')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-prod-trend-latest-value-label')).not.toBeInTheDocument();
         expect(latestPoint).toHaveAttribute('data-bucket-key', 'day-3');
         expect(latestPoint).toHaveAttribute('data-partial', 'true');
         expect(latestPoint).toHaveAttribute('data-value-state', 'missing');
@@ -2105,6 +2563,7 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.queryByTestId('activity-analytics-prod-trend-line')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-prod-trend-area')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-prod-trend-traveling-glow')).not.toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-prod-trend-empty')).toHaveTextContent('Sin datos comparables');
     });
 
@@ -2148,6 +2607,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(trendChart).toHaveAttribute('data-productivity-ratio', 'null,null');
         expect(screen.queryByTestId('activity-analytics-prod-trend-line')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-prod-trend-area')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-prod-trend-traveling-glow')).not.toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-prod-trend-empty')).toHaveTextContent('Sin datos comparables');
     });
 
@@ -2285,7 +2745,6 @@ describe('ActivityAnalyticsWidget', () => {
             CUSTOM_STATE_GRADIENTS.prod[0],
             CUSTOM_STATE_GRADIENTS.setup[0],
             CUSTOM_STATE_GRADIENTS.stopped[0],
-            coverageColor,
         ]);
         expect(groupSegments.map((segment) => segment.getAttribute('fill'))).toEqual([
             coverageColor,
@@ -2314,9 +2773,9 @@ describe('ActivityAnalyticsWidget', () => {
 
         await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
 
-        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.prod[1]);
-        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.setup[1]);
-        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.stopped[1]);
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.prod[0]);
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.setup[0]);
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(CUSTOM_STATE_GRADIENTS.stopped[0]);
         expect(screen.getByTestId('hover-layer')).toHaveAttribute(
             'data-highlight-colors',
             [
@@ -2444,7 +2903,6 @@ describe('ActivityAnalyticsWidget', () => {
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]),
-            '#94a3b8',
         ]);
         expect(summarySegments.every((segment) => segment.getAttribute('filter')?.includes('summary-glow'))).toBe(true);
         expect(summaryChart.innerHTML).toContain('stdDeviation="4"');
@@ -2469,9 +2927,9 @@ describe('ActivityAnalyticsWidget', () => {
 
         await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
 
-        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1]));
-        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]));
-        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[1], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[1]));
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]));
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]));
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]));
         expect(screen.getByTestId('hover-layer')).toHaveAttribute(
             'data-highlight-colors',
             [
@@ -3624,8 +4082,115 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Prod.');
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Setup');
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Detenida');
-        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Sin datos');
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Cobertura incompleta');
+        expect(screen.getByTestId('chart-tooltip')).toHaveClass(
+            'rounded-lg',
+            'border',
+            'border-industrial-border',
+            'bg-[linear-gradient(135deg,rgba(9,13,22,0.57)_0%,rgba(17,24,39,0.52)_100%)]',
+            'px-3',
+            'py-2',
+            'shadow-lg',
+            'backdrop-blur-sm',
+        );
+        expect(screen.getByTestId('chart-tooltip')).not.toHaveClass('glass-panel');
+        expect(screen.getByTestId('chart-tooltip')).toHaveAttribute('data-label-class', 'mb-1 whitespace-nowrap text-industrial-muted');
         expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '4');
+    });
+
+    it('formats grouped rendimiento tooltip rows as percentage-only legend values with grouped legend order and colors', async () => {
+        const user = userEvent.setup();
+        const coverageColor = '#5b86ff';
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        mockComputedAnalytics(Array.from({ length: 6 }, (_, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label: `2026-06-${String(18 + index).padStart(2, '0')}`,
+            durationsMs: index === 0
+                ? {
+                    prod: 4 * 60 * 60 * 1000,
+                    setup: 1 * 60 * 60 * 1000,
+                    stopped: 3 * 60 * 60 * 1000,
+                    noData: 2 * 60 * 60 * 1000,
+                }
+                : {
+                    prod: 3 * 60 * 60 * 1000,
+                    setup: 1 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 0,
+                },
+            expectedDurationMs: 10 * 60 * 60 * 1000,
+            productivityRatio: index === 0 ? 0.5 : 0.6,
+            productivityLabel: index === 0 ? '50%' : '60%',
+            coverageRatio: index === 0 ? 0.8 : 1,
+        })));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        coverageColor,
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                        stateGradientAlphas: CUSTOM_STATE_GRADIENT_ALPHAS,
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
+
+        const tooltip = screen.getByTestId('chart-tooltip');
+        const series = readTooltipSeries();
+
+        expect(tooltip).toHaveTextContent('2026-06-18');
+        expect(series).toEqual([
+            { name: 'Detenida', value: '38%', color: hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]), shape: 'square' },
+            { name: 'Setup', value: '13%', color: hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]), shape: 'square' },
+            { name: 'Prod.', value: '50%', color: hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]), shape: 'square' },
+            { name: 'Cobertura incompleta', value: '20%', color: coverageColor, shape: 'square' },
+        ]);
+        expect(tooltip).not.toHaveTextContent(' h');
+        expect(tooltip).not.toHaveTextContent('cob.');
+    });
+
+    it('keeps grouped tooltip in-progress labels lowercase', async () => {
+        const user = userEvent.setup();
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        mockComputedAnalytics(Array.from({ length: 6 }, (_, index) => buildGroupedBucket({
+            bucketKey: `day-${index + 1}`,
+            label: index === 0 ? '2026-06-18 (EN CURSO)' : `2026-06-${String(19 + index).padStart(2, '0')}`,
+            isInProgress: index === 0,
+        })));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        await user.click(screen.getByRole('button', { name: 'Hover first bucket' }));
+
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('2026-06-18 (en curso)');
     });
 
     it('keeps 30d day PROD trend clipped and horizontally synchronized with Groups scroll mode', () => {
@@ -3666,6 +4231,7 @@ describe('ActivityAnalyticsWidget', () => {
         const trendViewport = screen.getByTestId('activity-analytics-prod-trend-viewport');
         const trendContent = screen.getByTestId('activity-analytics-prod-trend-content');
         const trendChart = screen.getByTestId('activity-analytics-prod-trend-chart');
+        const latestValueLabel = screen.getByTestId('activity-analytics-prod-trend-latest-value-label');
 
         expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'scroll');
         expect(trendViewport).toHaveAttribute('data-scroll-mode', 'scroll');
@@ -3676,6 +4242,10 @@ describe('ActivityAnalyticsWidget', () => {
         expect(trendContent).toHaveStyle({ width: `${groupsChart.getAttribute('width')}px` });
         expect(trendChart).toHaveAttribute('width', groupsChart.getAttribute('width') ?? '');
         expect(trendChart.parentElement).toBe(trendContent);
+        expect(latestValueLabel).toHaveStyle({
+            transformBox: 'fill-box',
+            transformOrigin: 'center bottom',
+        });
 
         const trendBands = screen.getAllByTestId('activity-analytics-prod-trend-band');
         expect(trendBands.length).toBe(15);
@@ -4344,7 +4914,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(comparisonPanel).not.toHaveTextContent(/Observado · Cob\./);
     });
 
-    it('shows cobertura incompleta for incomplete coverage while preserving en curso, sin turno, and sin comparación', async () => {
+    it('shows observed production percent for incomplete coverage while preserving en curso, sin turno, and sin comparación', async () => {
         const user = userEvent.setup();
 
         vi.mocked(useActivitySeries).mockReturnValue({
@@ -4454,7 +5024,8 @@ describe('ActivityAnalyticsWidget', () => {
 
         const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
 
-        expect(screen.getAllByText('cobertura incompleta').length).toBeGreaterThan(0);
+        expect(screen.queryByText('cobertura incompleta')).not.toBeInTheDocument();
+        expect(screen.getAllByText('100%').length).toBeGreaterThan(0);
         expect(screen.getAllByText('en curso').length).toBeGreaterThan(0);
         expect(within(groupsChart).getByText('2026-06-18 · Turno Noche')).toBeInTheDocument();
         expect(within(groupsChart).queryByText('2026-06-18 · Turno Noche (en curso)')).not.toBeInTheDocument();
@@ -4468,6 +5039,7 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getByTestId('activity-analytics-groups-text')).toBeInTheDocument();
         expect(screen.getAllByText('cobertura incompleta').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('100%').length).toBeGreaterThan(0);
         expect(screen.getAllByText('en curso').length).toBeGreaterThan(0);
         expect(screen.getByText('2026-06-18 · Turno Noche (en curso)')).toBeInTheDocument();
         expect(screen.getAllByText('2026-06-19 · Turno Tarde').length).toBeGreaterThan(0);
@@ -4940,7 +5512,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(donutCenterLabel).not.toHaveTextContent('Total');
     });
 
-    it('renders Cobertura as a fourth summary detail row with the no-data marker color', () => {
+    it('renders Cobertura as a fourth summary detail row without a marker while keeping muted aligned text', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -4969,19 +5541,83 @@ describe('ActivityAnalyticsWidget', () => {
         const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
         const detailBlock = screen.getByTestId('activity-analytics-summary-details');
         const detailSections = within(detailBlock).getAllByTestId('activity-analytics-summary-detail-section');
+        const detailTitles = within(detailBlock).getAllByTestId('activity-analytics-summary-detail-title');
         const coverageSection = detailSections.at(-1);
 
         if (!coverageSection) {
             throw new Error('Missing coverage summary detail section');
         }
 
-        const coverageMarker = coverageSection.querySelector('rect');
+        const coverageTitle = within(coverageSection).getByTestId('activity-analytics-summary-detail-title');
 
         expect(within(summaryPanel).queryByText('Cobertura 100%')).not.toBeInTheDocument();
         expect(within(summaryPanel).queryByText(/\d+\.\d h/)).not.toBeInTheDocument();
-        expect(within(coverageSection).getByTestId('activity-analytics-summary-detail-title')).toHaveTextContent('Cobertura');
+        expect(coverageTitle).toHaveTextContent('Cobertura');
         expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('100%');
-        expect(coverageMarker).toHaveAttribute('fill', '#94a3b8');
+        expect(coverageSection.querySelector('rect')).toBeNull();
+        expect(coverageTitle).toHaveAttribute('fill', 'var(--color-industrial-muted)');
+        expect(coverageTitle.getAttribute('x')).toBe(detailTitles[0]?.getAttribute('x'));
+    });
+
+    it('shows the donut center production percent for incomplete coverage when observed duration exists and keeps coverage in the detail row', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+            analytics: {
+                durationsMs: {
+                    prod: 6 * 60 * 60 * 1000,
+                    setup: 2 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 15 * 60 * 60 * 1000,
+                },
+                stopCount: 0,
+                estimatedKwh: 18.4,
+                utilizationRatio: 6 / 9,
+                coverageRatio: 9 / 24,
+                intervals: [],
+            },
+            grouped: [
+                buildGroupedBucket({
+                    bucketKey: 'day-1',
+                    label: '2026-06-18',
+                    durationsMs: { prod: 6 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 15 * 60 * 60 * 1000 },
+                    expectedDurationMs: 24 * 60 * 60 * 1000,
+                    utilizationRatio: 6 / 9,
+                    coverageRatio: 9 / 24,
+                    productivityRatio: null,
+                    productivityLabel: 'cobertura incompleta',
+                }),
+            ],
+            comparison: {
+                best: { label: '2026-06-18', bucketKey: 'day-1' },
+                worst: { label: '2026-06-18', bucketKey: 'day-1' },
+            },
+            summaryRows: [{ label: '2026-06-18', productivityLabel: 'cobertura incompleta', bucketKey: 'day-1' }],
+            timezone: 'UTC',
+        } as never);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 1260, bodyHeight: 420 });
+        });
+
+        const summaryPanel = screen.getByTestId('activity-analytics-summary-bars');
+
+        expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveTextContent('67%');
+        expect(screen.getByTestId('activity-analytics-summary-total-value')).not.toHaveTextContent('cobertura incompleta');
+        expect(within(summaryPanel).getByTestId('activity-analytics-summary-coverage')).toHaveTextContent('38%');
+        expect(within(summaryPanel).getByText('Cobertura')).toBeInTheDocument();
     });
 
     it('keeps Mejor/Peor track height stable across wide and narrow top-row widths', () => {
@@ -5403,6 +6039,105 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(productivityLabel).toHaveTextContent('67%');
         expect(productivityLabel).not.toHaveTextContent('cobertura incompleta');
+    });
+
+    it('compares aggregated 12m Turno summary buckets by visible productivity and scales the bars to visible duration', () => {
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: { plantTimezone: null, shifts: [] },
+            shifts: [
+                { id: 'shift-a', label: 'Turno 1', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+                { id: 'shift-b', label: 'Turno 2', start: '14:00', end: '22:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+                { id: 'shift-c', label: 'Turno 3', start: '22:00', end: '06:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+            ],
+            resolvedTimezone: 'UTC',
+        });
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: { ...POPULATED_ACTIVITY_SERIES, range: '12m' },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-a:2026-01',
+                label: '2026-01 · Turno 1',
+                durationsMs: { prod: 4 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 2 * 60 * 60 * 1000 },
+                expectedDurationMs: 31 * 8 * 60 * 60 * 1000,
+                coverageRatio: 6 / (31 * 8),
+                productivityRatio: null,
+                productivityLabel: 'cobertura incompleta',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-a:2026-02',
+                label: '2026-02 · Turno 1',
+                durationsMs: { prod: 5 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 3 * 60 * 60 * 1000 },
+                expectedDurationMs: 28 * 8 * 60 * 60 * 1000,
+                coverageRatio: 7 / (28 * 8),
+                productivityRatio: null,
+                productivityLabel: 'cobertura incompleta',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-b:2026-01',
+                label: '2026-01 · Turno 2',
+                durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 2 * 60 * 60 * 1000 },
+                expectedDurationMs: 31 * 8 * 60 * 60 * 1000,
+                coverageRatio: 6 / (31 * 8),
+                productivityRatio: null,
+                productivityLabel: 'cobertura incompleta',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-b:2026-02',
+                label: '2026-02 · Turno 2',
+                durationsMs: { prod: 3 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 4 * 60 * 60 * 1000 },
+                expectedDurationMs: 28 * 8 * 60 * 60 * 1000,
+                coverageRatio: 6 / (28 * 8),
+                productivityRatio: null,
+                productivityLabel: 'cobertura incompleta',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-c:2026-01',
+                label: '2026-01 · Turno 3',
+                durationsMs: { prod: 1 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 3 * 60 * 60 * 1000, noData: 2 * 60 * 60 * 1000 },
+                expectedDurationMs: 31 * 8 * 60 * 60 * 1000,
+                coverageRatio: 6 / (31 * 8),
+                productivityRatio: null,
+                productivityLabel: 'cobertura incompleta',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'shift:shift-c:2026-02',
+                label: '2026-02 · Turno 3',
+                durationsMs: { prod: 2 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 2 * 60 * 60 * 1000, noData: 6 * 60 * 60 * 1000 },
+                expectedDurationMs: 28 * 8 * 60 * 60 * 1000,
+                coverageRatio: 6 / (28 * 8),
+                productivityRatio: null,
+                productivityLabel: 'cobertura incompleta',
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '12m',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const comparisonPanel = screen.getByTestId('activity-analytics-comparison');
+        const yAxisTicks = screen.getAllByTestId('activity-analytics-y-axis-tick').map((tick) => tick.textContent);
+
+        expect(within(comparisonPanel).getByText('Turno 1')).toBeInTheDocument();
+        expect(within(comparisonPanel).getByText('Turno 3')).toBeInTheDocument();
+        expect(comparisonPanel).toHaveTextContent('69%');
+        expect(comparisonPanel).toHaveTextContent('25%');
+        expect(within(comparisonPanel).queryAllByText('sin comparación')).toHaveLength(0);
+        expect(yAxisTicks[0]).toBe('20h');
+        expect(yAxisTicks).not.toContain('2088h');
     });
 
     it('shows sin comparación for aggregated Turno Resumen comparisons when productivity ties make ranking meaningless', () => {

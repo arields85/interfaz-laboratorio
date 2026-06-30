@@ -340,6 +340,105 @@ h1, h2, h3, h4, h5, h6 {
     transparent;
 }
 
+@keyframes activity-analytics-prod-trend-latest-value-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  50% {
+    transform: translate3d(0, -2.75px, 0) rotate(-1.2deg);
+  }
+}
+
+.activity-analytics-prod-trend-latest-value-float {
+  animation: activity-analytics-prod-trend-latest-value-float 3.4s ease-in-out infinite;
+}
+
+@keyframes activity-analytics-prod-trend-final-point-flicker {
+  0%,
+  14%,
+  32%,
+  58%,
+  82%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.986);
+  }
+
+  8% {
+    opacity: 0.9;
+    transform: scale(1.012);
+  }
+
+  20% {
+    opacity: 0.58;
+    transform: scale(0.992);
+  }
+
+  26% {
+    opacity: 1;
+    transform: scale(1.044);
+  }
+
+  44% {
+    opacity: 0.92;
+    transform: scale(1.016);
+  }
+
+  52% {
+    opacity: 0.54;
+    transform: scale(0.988);
+  }
+
+  60% {
+    opacity: 0.99;
+    transform: scale(1.038);
+  }
+
+  76% {
+    opacity: 0.9;
+    transform: scale(1.014);
+  }
+
+  88% {
+    opacity: 0.6;
+    transform: scale(0.994);
+  }
+
+  94% {
+    opacity: 0.97;
+    transform: scale(1.026);
+  }
+}
+
+.activity-analytics-prod-trend-final-point-flicker {
+  animation: activity-analytics-prod-trend-final-point-flicker 3.65s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+.activity-analytics-prod-trend-final-point-flicker-aura {
+  animation-duration: 4.1s;
+}
+
+.activity-analytics-prod-trend-final-point-flicker-halo {
+  animation-delay: -0.7s;
+  animation-duration: 3.25s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-analytics-prod-trend-traveling-glow {
+    display: none;
+  }
+
+  .activity-analytics-prod-trend-final-point-flicker {
+    animation: none;
+    transform: none;
+  }
+}
+
 @layer base {
   body {
     background-color: var(--color-industrial-bg);

@@ -39,6 +39,8 @@ import {
     computeVisibleLabelIndices,
     getChartLetterSpacingPx,
     getChartTextFont,
+    measureSmoothPathLength,
+    resolveAnimationDurationSecondsFromPathLength,
     smoothPath,
 } from '../../utils/chartHelpers';
 
@@ -120,6 +122,8 @@ const WIDGET_VALUE_TEXT_STYLE: CSSProperties = {
 };
 
 const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden px-5 pt-5 pb-3';
+const GROUPED_TOOLTIP_PANEL_CLASS = 'rounded-lg border border-industrial-border bg-[linear-gradient(135deg,rgba(9,13,22,0.57)_0%,rgba(17,24,39,0.52)_100%)] px-3 py-2 shadow-lg backdrop-blur-sm';
+const GROUPED_TOOLTIP_LABEL_CLASS = 'mb-1 whitespace-nowrap text-industrial-muted';
 const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border';
 const ANALYTICS_CARD_CLASS = 'rounded-2xl border border-industrial-border';
 const GROUPS_PANEL_CLASS = `${ANALYTICS_PANEL_CLASS} flex min-h-0 flex-1 flex-col px-0 pb-0 pt-2`;
@@ -145,6 +149,13 @@ const PROD_TREND_PANEL_MIN_HEIGHT_PX = PROD_TREND_COMPACT_CHROME_BUDGET_PX + PRO
 const PROD_TREND_PANEL_CHROME_HEIGHT_PX = PROD_TREND_PANEL_HEIGHT_PX - PROD_TREND_CHART_HEIGHT_PX;
 const PROD_TREND_CHART_MARGIN = { top: 8, right: 12, bottom: 24, left: 38 } as const;
 const PROD_TREND_COMPACT_CHART_MARGIN = { top: 4, right: 10, bottom: 14, left: 32 } as const;
+const PROD_TREND_LATEST_VALUE_LABEL_Y_OFFSET_PX = 16;
+const PROD_TREND_LATEST_VALUE_LABEL_EDGE_PADDING_PX = 28;
+const PROD_TREND_TRAVELING_GLOW_SPEED_PX_PER_SECOND = 323;
+const PROD_TREND_TRAVELING_GLOW_DURATION_MIN_SECONDS = 0.9;
+const PROD_TREND_TRAVELING_GLOW_DURATION_MAX_SECONDS = 3.2;
+const PROD_TREND_TRAVELING_GLOW_PAUSE_MIN_MS = 8_000;
+const PROD_TREND_TRAVELING_GLOW_PAUSE_MAX_MS = 20_000;
 const ACTIVITY_ANALYTICS_STATE_KEYS = ['prod', 'setup', 'stopped'] as const;
 const SUMMARY_CHART_MAX_WIDTH_PX = 480;
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
@@ -329,6 +340,8 @@ type SummaryDetailRow = Readonly<{
     title: 'Producción' | 'Setup' | 'Detenida' | 'Cobertura';
     valueLabel: string;
     markerFill: string;
+    showMarker?: boolean;
+    titleFill?: string;
 }>;
 type SummaryDonutGeometry = Readonly<{
     chartHeight: number;
@@ -504,7 +517,7 @@ export default function ActivityAnalyticsWidget({
         }
 
         return activeGroupBy === 'shift'
-            ? resolveActivityAnalyticsComparison(displayGrouped)
+            ? resolveTurnoDisplayComparison(displayGrouped)
             : computedAnalytics.comparison;
     }, [activeGroupBy, computedAnalytics, displayGrouped]);
     const groupedCount = displayGrouped.length;
@@ -1312,13 +1325,16 @@ function ProdTrendChart({
     groupsChartMargin: ActivityAnalyticsGroupsChartLayout['chartMargin'];
     barWidthFactor: number;
 }) {
+    const [hoverInfo, setHoverInfo] = useState<{ index: number; x: number } | null>(null);
     const gradientPrefix = useId().replace(/:/g, '-');
     const lineGradientId = `${gradientPrefix}-prod-trend-line-gradient`;
     const areaGradientId = `${gradientPrefix}-prod-trend-area-gradient`;
     const fadeGradientId = `${gradientPrefix}-prod-trend-area-fade`;
     const maskId = `${gradientPrefix}-prod-trend-area-mask`;
     const glowId = `${gradientPrefix}-prod-trend-line-glow`;
+    const travelingGlowFilterId = `${gradientPrefix}-prod-trend-traveling-glow`;
     const bandGradientId = `${gradientPrefix}-prod-trend-band-gradient`;
+    const travelingGlowAuraGradientId = `${gradientPrefix}-prod-trend-traveling-glow-aura`;
     const plotClipPathId = `${gradientPrefix}-prod-trend-plot-clip`;
     const yAxisLabelX = chartMargin.left - 8;
     const plotWidth = Math.max(width - chartMargin.left - chartMargin.right, 1);
@@ -1361,42 +1377,128 @@ function ProdTrendChart({
     const prodTrendBandStopColors = prodTrendBands.colors.map((color) => color ?? 'var(--color-chart-grid)') as [string, string, string];
     const prodTrendBandStopOpacities = prodTrendBands.alphas.map((alpha) => alpha / 100) as [number, number, number];
     const latestPoint = renderablePoints.at(-1) ?? null;
-    const activeBandIntervals = positions.slice(0, -1)
-        .map((startX, index) => ({
-            index,
-            x: startX,
-            width: Math.max((positions[index + 1] ?? startX) - startX, 0),
-        }))
-        .filter((interval) => interval.index % 2 === 0 && interval.width > 0);
+    const latestValueLabel = latestPoint && latestPoint.y !== null
+        ? formatPercent(resolveGroupedTrendProductivityRatio(grouped.at(-1) ?? null) ?? 0)
+        : null;
+    const latestValueLabelAnchor = latestPoint
+        ? latestPoint.x >= width - chartMargin.right - PROD_TREND_LATEST_VALUE_LABEL_EDGE_PADDING_PX
+            ? 'end'
+            : latestPoint.x <= chartMargin.left + PROD_TREND_LATEST_VALUE_LABEL_EDGE_PADDING_PX
+                ? 'start'
+                : 'middle'
+        : 'middle';
+    const latestValueLabelX = latestPoint
+        ? clamp(latestPoint.x, chartMargin.left + 4, width - chartMargin.right - 4)
+        : 0;
+    const latestValueLabelY = latestPoint?.y !== null && latestPoint?.y !== undefined
+        ? Math.max(chartMargin.top + 10, latestPoint.y - PROD_TREND_LATEST_VALUE_LABEL_Y_OFFSET_PX)
+        : 0;
+    const hoveredPoint = hoverInfo && hoverInfo.index >= 0 && hoverInfo.index < renderablePoints.length
+        ? renderablePoints[hoverInfo.index] ?? null
+        : null;
+    const showProdTrendBands = visibleLabelIndices.size > 3;
+    const activeBandIntervals = showProdTrendBands
+        ? positions.slice(0, -1)
+            .map((startX, index) => ({
+                index,
+                x: startX,
+                width: Math.max((positions[index + 1] ?? startX) - startX, 0),
+            }))
+            .filter((interval) => interval.index % 2 === 0 && interval.width > 0)
+        : [];
+    const hitStep = grouped.length > 1
+        ? Math.max((positions[1] ?? chartMargin.left) - (positions[0] ?? chartMargin.left), 1)
+        : Math.max(plotWidth, 1);
+    const travelingGlowTarget = resolveProdTrendTravelingGlowTarget(lineSegments);
+    const travelingGlowSegment = travelingGlowTarget ? lineSegments[travelingGlowTarget.index] ?? null : null;
+    const travelingGlowPathId = travelingGlowTarget ? `${gradientPrefix}-prod-trend-motion-path-${travelingGlowTarget.index}` : null;
+    const travelingGlowDurationSeconds = resolveProdTrendTravelingGlowDurationSeconds(travelingGlowSegment);
+    const travelingGlowDuration = `${travelingGlowDurationSeconds}s`;
+    const prefersReducedMotion = usePrefersReducedMotion();
+    const [travelingGlowCycleKey, setTravelingGlowCycleKey] = useState(0);
+    const [travelingGlowProgress, setTravelingGlowProgress] = useState(0);
+    const [isTravelingGlowPaused, setIsTravelingGlowPaused] = useState(false);
+    const travelingGlowFrame = useMemo(
+        () => resolveProdTrendTravelingGlowFrame(travelingGlowSegment, travelingGlowProgress),
+        [travelingGlowProgress, travelingGlowSegment],
+    );
+    const showTravelingGlow = travelingGlowPathId !== null
+        && !prefersReducedMotion
+        && !isTravelingGlowPaused
+        && travelingGlowFrame !== null;
+    const activeTravelingGlowFrame = showTravelingGlow ? travelingGlowFrame : null;
+
+    useEffect(() => {
+        if (!travelingGlowPathId || prefersReducedMotion) {
+            setTravelingGlowProgress(0);
+            setIsTravelingGlowPaused(false);
+            return undefined;
+        }
+
+        const travelDurationMs = travelingGlowDurationSeconds * 1000;
+        const randomPauseMs = resolveProdTrendTravelingGlowPauseMs();
+        const travelStartTime = performance.now();
+        let animationFrameId = 0;
+
+        setTravelingGlowProgress(0);
+        setIsTravelingGlowPaused(false);
+
+        const animateTravelingGlow = (now: number) => {
+            const nextProgress = clamp(now - travelStartTime, 0, travelDurationMs) / travelDurationMs;
+
+            setTravelingGlowProgress(nextProgress);
+
+            if (nextProgress < 1) {
+                animationFrameId = window.requestAnimationFrame(animateTravelingGlow);
+            }
+        };
+
+        animationFrameId = window.requestAnimationFrame(animateTravelingGlow);
+
+        const hideTimerId = window.setTimeout(() => {
+            setTravelingGlowProgress(1);
+            setIsTravelingGlowPaused(true);
+        }, travelDurationMs);
+        const restartTimerId = window.setTimeout(() => {
+            setTravelingGlowCycleKey((current) => current + 1);
+        }, travelDurationMs + randomPauseMs);
+
+        return () => {
+            window.cancelAnimationFrame(animationFrameId);
+            window.clearTimeout(hideTimerId);
+            window.clearTimeout(restartTimerId);
+        };
+    }, [prefersReducedMotion, travelingGlowCycleKey, travelingGlowDurationSeconds, travelingGlowPathId]);
 
     return (
-        <svg
-            width={width}
-            height={height}
-            viewBox={`0 0 ${width} ${height}`}
-            data-testid="activity-analytics-prod-trend-chart"
-            data-y-domain-min="0"
-            data-y-domain-max="100"
-            data-renderable-point-y={renderablePoints.map((point) => point.y === null ? 'null' : point.y.toFixed(2)).join(',')}
-            data-bucket-keys={grouped.map((bucket) => bucket.bucketKey).join(',')}
-            data-x-axis-labels={labels.join('|')}
-            data-partial-bucket-keys={grouped.filter((bucket) => isGroupedBucketPartial(bucket)).map((bucket) => bucket.bucketKey).join(',')}
-            data-latest-bucket-key={latestPoint?.bucketKey ?? ''}
-            data-productivity-ratio={grouped.map((bucket) => {
-                const productivityRatio = resolveGroupedTrendProductivityRatio(bucket);
+        <>
+            <svg
+                width={width}
+                height={height}
+                viewBox={`0 0 ${width} ${height}`}
+                data-testid="activity-analytics-prod-trend-chart"
+                data-y-domain-min="0"
+                data-y-domain-max="100"
+                data-renderable-point-y={renderablePoints.map((point) => point.y === null ? 'null' : point.y.toFixed(2)).join(',')}
+                data-bucket-keys={grouped.map((bucket) => bucket.bucketKey).join(',')}
+                data-x-axis-labels={labels.join('|')}
+                data-partial-bucket-keys={grouped.filter((bucket) => isGroupedBucketPartial(bucket)).map((bucket) => bucket.bucketKey).join(',')}
+                data-latest-bucket-key={latestPoint?.bucketKey ?? ''}
+                data-productivity-ratio={grouped.map((bucket) => {
+                    const productivityRatio = resolveGroupedTrendProductivityRatio(bucket);
 
-                return productivityRatio === null ? 'null' : productivityRatio.toFixed(4);
-            }).join(',')}
-        >
-            <defs>
+                    return productivityRatio === null ? 'null' : productivityRatio.toFixed(4);
+                }).join(',')}
+            >
+                <defs>
                 <linearGradient id={lineGradientId} gradientUnits="userSpaceOnUse" x1={chartMargin.left} y1="0" x2={chartMargin.left + plotWidth} y2="0">
-                    <stop offset="0%" stopColor={prodGradientStops.endColor} stopOpacity={Math.max(prodGradientStops.endOpacity, 0.72)} />
-                    <stop offset="100%" stopColor={prodGradientStops.startColor} stopOpacity={Math.max(prodGradientStops.startOpacity, 0.92)} />
+                    <stop offset="0%" stopColor={prodGradientStops.startColor} stopOpacity={Math.max(prodGradientStops.startOpacity, 0.72)} />
+                    <stop offset="100%" stopColor={prodGradientStops.endColor} stopOpacity={Math.max(prodGradientStops.endOpacity, 0.92)} />
                 </linearGradient>
 
                 <linearGradient id={areaGradientId} gradientUnits="userSpaceOnUse" x1={chartMargin.left} y1="0" x2={chartMargin.left + plotWidth} y2="0">
-                    <stop offset="0%" stopColor={prodGradientStops.endColor} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={prodGradientStops.startColor} stopOpacity={0.46} />
+                    <stop offset="0%" stopColor={prodGradientStops.startColor} stopOpacity={0.3} />
+                    <stop offset="100%" stopColor={prodGradientStops.endColor} stopOpacity={0.46} />
                 </linearGradient>
 
                 <linearGradient id={fadeGradientId} x1="0" y1="0" x2="0" y2="1">
@@ -1409,6 +1511,13 @@ function ProdTrendChart({
                     <stop offset="50%" stopColor={prodTrendBandStopColors[1]} stopOpacity={prodTrendBandStopOpacities[1]} />
                     <stop offset="100%" stopColor={prodTrendBandStopColors[2]} stopOpacity={prodTrendBandStopOpacities[2]} />
                 </linearGradient>
+
+                <radialGradient id={travelingGlowAuraGradientId} cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stopColor={prodGradientStops.endColor} stopOpacity={0.96} />
+                    <stop offset="34%" stopColor={prodGradientStops.endColor} stopOpacity={0.52} />
+                    <stop offset="72%" stopColor={prodGradientStops.startColor} stopOpacity={0.18} />
+                    <stop offset="100%" stopColor={prodGradientStops.startColor} stopOpacity={0} />
+                </radialGradient>
 
                 <mask id={maskId} maskContentUnits="objectBoundingBox">
                     <rect x="0" y="0" width="1" height="1" fill={`url(#${fadeGradientId})`} />
@@ -1425,7 +1534,23 @@ function ProdTrendChart({
                         <feMergeNode in="SourceGraphic" />
                     </feMerge>
                 </filter>
-            </defs>
+
+                <filter id={travelingGlowFilterId} x="-140%" y="-140%" width="380%" height="380%">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="outer-blur" />
+                    <feColorMatrix
+                        in="outer-blur"
+                        result="outer-bloom"
+                        type="matrix"
+                        values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1.45 0"
+                    />
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="inner-blur" />
+                    <feMerge>
+                        <feMergeNode in="outer-bloom" />
+                        <feMergeNode in="inner-blur" />
+                        <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                </filter>
+                </defs>
 
             <g
                 clipPath={`url(#${plotClipPathId})`}
@@ -1517,6 +1642,7 @@ function ProdTrendChart({
                         )}
                         {linePath.length > 0 && (
                             <path
+                                id={travelingGlowTarget?.index === index ? travelingGlowPathId ?? undefined : undefined}
                                 d={linePath}
                                 fill="none"
                                 stroke={`url(#${lineGradientId})`}
@@ -1529,6 +1655,59 @@ function ProdTrendChart({
                 );
             })}
 
+            {travelingGlowPathId && activeTravelingGlowFrame && (
+                <g
+                    key={`prod-traveling-glow-cycle-${travelingGlowCycleKey}`}
+                    clipPath={`url(#${plotClipPathId})`}
+                    pointerEvents="none"
+                    aria-hidden="true"
+                    className="activity-analytics-prod-trend-traveling-glow"
+                    data-testid="activity-analytics-prod-trend-traveling-glow"
+                    data-cycle-key={travelingGlowCycleKey}
+                    data-path-id={travelingGlowPathId}
+                    style={{ mixBlendMode: 'screen' }}
+                >
+                    <circle
+                        cx={activeTravelingGlowFrame.x}
+                        cy={activeTravelingGlowFrame.y}
+                        r={activeTravelingGlowFrame.auraRadius}
+                        fill={`url(#${travelingGlowAuraGradientId})`}
+                        opacity={activeTravelingGlowFrame.auraOpacity}
+                        fillOpacity={activeTravelingGlowFrame.auraFillOpacity}
+                        filter={`url(#${travelingGlowFilterId})`}
+                        data-duration={travelingGlowDuration}
+                        data-opacity={activeTravelingGlowFrame.auraOpacity.toFixed(3)}
+                        data-testid="activity-analytics-prod-trend-traveling-glow-aura"
+                    />
+                    <circle
+                        cx={activeTravelingGlowFrame.x}
+                        cy={activeTravelingGlowFrame.y}
+                        r={activeTravelingGlowFrame.haloRadius}
+                        fill={`url(#${travelingGlowAuraGradientId})`}
+                        opacity={activeTravelingGlowFrame.haloOpacity}
+                        fillOpacity={activeTravelingGlowFrame.haloFillOpacity}
+                        filter={`url(#${travelingGlowFilterId})`}
+                        data-duration={travelingGlowDuration}
+                        data-opacity={activeTravelingGlowFrame.haloOpacity.toFixed(3)}
+                        data-testid="activity-analytics-prod-trend-traveling-glow-halo"
+                        data-motion-duration={travelingGlowDuration}
+                    />
+                    <circle
+                        cx={activeTravelingGlowFrame.x}
+                        cy={activeTravelingGlowFrame.y}
+                        r={activeTravelingGlowFrame.coreRadius}
+                        fill={prodGradientStops.endColor}
+                        opacity={activeTravelingGlowFrame.coreOpacity}
+                        stroke={prodGradientStops.startColor}
+                        strokeOpacity={0.42}
+                        strokeWidth={0.9}
+                        data-duration={travelingGlowDuration}
+                        data-opacity={activeTravelingGlowFrame.coreOpacity.toFixed(3)}
+                        data-testid="activity-analytics-prod-trend-traveling-glow-core"
+                    />
+                </g>
+            )}
+
             {latestPoint && (
                 <g
                     data-testid="activity-analytics-prod-trend-latest-point"
@@ -1536,27 +1715,68 @@ function ProdTrendChart({
                     data-partial={latestPoint.isPartial ? 'true' : 'false'}
                     data-value-state={latestPoint.valueState}
                 >
+                    {latestValueLabel && latestPoint.y !== null && (
+                        <text
+                            x={latestValueLabelX}
+                            y={latestValueLabelY}
+                            textAnchor={latestValueLabelAnchor}
+                            fill={prodGradientStops.endColor}
+                            className="activity-analytics-prod-trend-latest-value-float"
+                            style={{
+                                ...CHART_TYPOGRAPHY_STYLE,
+                                transformBox: 'fill-box',
+                                transformOrigin: 'center bottom',
+                            }}
+                            pointerEvents="none"
+                            data-testid="activity-analytics-prod-trend-latest-value-label"
+                        >
+                            {latestValueLabel}
+                        </text>
+                    )}
                     {latestPoint.y !== null ? (
                         <>
-                            <circle
-                                data-testid="activity-analytics-prod-trend-final-point-pulse"
-                                cx={latestPoint.x}
-                                cy={latestPoint.y}
-                                r={9}
-                                fill={prodGradientStops.startColor}
-                                fillOpacity={0.45}
-                                className="animate-ping"
-                                style={{ animationDuration: '2s', transformOrigin: `${latestPoint.x}px ${latestPoint.y}px` }}
-                            />
-                            <circle
-                                data-testid="activity-analytics-prod-trend-final-point-core"
-                                cx={latestPoint.x}
-                                cy={latestPoint.y}
-                                r={4}
-                                fill={prodGradientStops.startColor}
-                                stroke="var(--color-industrial-bg)"
-                                strokeWidth={1.5}
-                            />
+                            <g clipPath={`url(#${plotClipPathId})`} pointerEvents="none" aria-hidden="true" style={{ mixBlendMode: 'screen' }}>
+                                <circle
+                                    data-testid="activity-analytics-prod-trend-final-point-pulse"
+                                    cx={latestPoint.x}
+                                    cy={latestPoint.y}
+                                    r={9}
+                                    fill={prodGradientStops.endColor}
+                                    fillOpacity={0.45}
+                                    className="animate-ping"
+                                    style={{ animationDuration: '2s', transformOrigin: `${latestPoint.x}px ${latestPoint.y}px` }}
+                                />
+                                <circle
+                                    data-testid="activity-analytics-prod-trend-final-point-aura"
+                                    cx={latestPoint.x}
+                                    cy={latestPoint.y}
+                                    r={13.5}
+                                    fill={`url(#${travelingGlowAuraGradientId})`}
+                                    fillOpacity={0.3}
+                                    filter={`url(#${travelingGlowFilterId})`}
+                                    className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-aura"
+                                />
+                                <circle
+                                    data-testid="activity-analytics-prod-trend-final-point-halo"
+                                    cx={latestPoint.x}
+                                    cy={latestPoint.y}
+                                    r={8.75}
+                                    fill={`url(#${travelingGlowAuraGradientId})`}
+                                    fillOpacity={0.48}
+                                    filter={`url(#${travelingGlowFilterId})`}
+                                    className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-halo"
+                                />
+                                <circle
+                                    data-testid="activity-analytics-prod-trend-final-point-core"
+                                    cx={latestPoint.x}
+                                    cy={latestPoint.y}
+                                    r={3}
+                                    fill={prodGradientStops.endColor}
+                                    stroke={prodGradientStops.startColor}
+                                    strokeOpacity={0.42}
+                                    strokeWidth={0.9}
+                                />
+                            </g>
                         </>
                     ) : (
                         <>
@@ -1583,6 +1803,34 @@ function ProdTrendChart({
                                 strokeWidth={1.5}
                             />
                         </>
+                    )}
+                </g>
+            )}
+
+            {hoveredPoint && (
+                <g pointerEvents="none" data-testid="activity-analytics-prod-trend-hover-affordance">
+                    <line
+                        x1={hoveredPoint.x}
+                        x2={hoveredPoint.x}
+                        y1={chartMargin.top}
+                        y2={baselineY}
+                        stroke="var(--color-industrial-muted)"
+                        strokeWidth={1}
+                        strokeDasharray="4 3"
+                        opacity={0.7}
+                        data-testid="activity-analytics-prod-trend-hover-guide"
+                    />
+                    {hoveredPoint.y !== null && (
+                        <circle
+                            cx={hoveredPoint.x}
+                            cy={hoveredPoint.y}
+                            r={4}
+                            fill={prodGradientStops.endColor}
+                            stroke="var(--color-industrial-bg)"
+                            strokeWidth={2}
+                            data-testid="activity-analytics-prod-trend-hover-point"
+                            data-bucket-key={hoveredPoint.bucketKey}
+                        />
                     )}
                 </g>
             )}
@@ -1624,19 +1872,52 @@ function ProdTrendChart({
                 );
             })}
 
-            {!hasRenderableTrend && (
-                <text
-                    x={chartMargin.left + (plotWidth / 2)}
-                    y={chartMargin.top + (plotHeight / 2)}
-                    textAnchor="middle"
-                    fill="var(--color-industrial-muted)"
-                    style={GENERAL_TYPOGRAPHY_STYLE}
-                    data-testid="activity-analytics-prod-trend-empty"
-                >
-                    {hasLabels ? 'Sin datos comparables' : 'Sin datos'}
-                </text>
+                {!hasRenderableTrend && (
+                    <text
+                        x={chartMargin.left + (plotWidth / 2)}
+                        y={chartMargin.top + (plotHeight / 2)}
+                        textAnchor="middle"
+                        fill="var(--color-industrial-muted)"
+                        style={GENERAL_TYPOGRAPHY_STYLE}
+                        data-testid="activity-analytics-prod-trend-empty"
+                    >
+                        {hasLabels ? 'Sin datos comparables' : 'Sin datos'}
+                    </text>
+                )}
+
+                {grouped.map((bucket, index) => {
+                    const centerX = positions[index] ?? (chartMargin.left + (plotWidth / 2));
+                    const hitWidth = grouped.length > 1 ? hitStep : plotWidth;
+
+                    return (
+                        <rect
+                            key={`prod-trend-hit-${bucket.bucketKey}`}
+                            x={Math.max(centerX - (hitWidth / 2), chartMargin.left)}
+                            y={chartMargin.top}
+                            width={Math.min(hitWidth, plotWidth)}
+                            height={plotHeight}
+                            fill="transparent"
+                            cursor="crosshair"
+                            data-testid="activity-analytics-prod-trend-hit-area"
+                            data-bucket-key={bucket.bucketKey}
+                            onMouseEnter={() => setHoverInfo({ index, x: centerX })}
+                            onMouseLeave={() => setHoverInfo(null)}
+                        />
+                    );
+                })}
+            </svg>
+
+            {hoverInfo && hoverInfo.index < grouped.length && (
+                <ChartTooltip
+                    label={resolveGroupedTooltipLabel(grouped[hoverInfo.index]?.label ?? '')}
+                    series={buildProdTrendTooltipSeries(grouped[hoverInfo.index], visualPalette)}
+                    x={hoverInfo.x}
+                    containerWidth={width}
+                    panelClassName={GROUPED_TOOLTIP_PANEL_CLASS}
+                    labelClassName={GROUPED_TOOLTIP_LABEL_CLASS}
+                />
             )}
-        </svg>
+        </>
     );
 }
 
@@ -1662,6 +1943,211 @@ function buildProdTrendLineSegments(points: Array<{ x: number; y: number | null 
     }
 
     return segments;
+}
+
+function resolveProdTrendTravelingGlowTarget(segments: Array<Array<{ x: number; y: number }>>) {
+    return segments.reduce<{ index: number; length: number } | null>((best, segment, index) => {
+        if (segment.length < 2) {
+            return best;
+        }
+
+        if (!best || segment.length >= best.length) {
+            return { index, length: segment.length };
+        }
+
+        return best;
+    }, null);
+}
+
+function resolveProdTrendTravelingGlowDurationSeconds(segment: Array<{ x: number; y: number }> | null) {
+    if (!segment || segment.length < 2) {
+        return PROD_TREND_TRAVELING_GLOW_DURATION_MIN_SECONDS;
+    }
+
+    const pathLength = measureSmoothPathLength(segment);
+    return resolveAnimationDurationSecondsFromPathLength(
+        pathLength,
+        PROD_TREND_TRAVELING_GLOW_SPEED_PX_PER_SECOND,
+        PROD_TREND_TRAVELING_GLOW_DURATION_MIN_SECONDS,
+        PROD_TREND_TRAVELING_GLOW_DURATION_MAX_SECONDS,
+    );
+}
+
+function resolveProdTrendTravelingGlowPauseMs(randomValue = Math.random()) {
+    return Math.round(
+        PROD_TREND_TRAVELING_GLOW_PAUSE_MIN_MS
+        + (randomValue * (PROD_TREND_TRAVELING_GLOW_PAUSE_MAX_MS - PROD_TREND_TRAVELING_GLOW_PAUSE_MIN_MS)),
+    );
+}
+
+function resolveProdTrendTravelingGlowFrame(segment: Array<{ x: number; y: number }> | null, progress: number) {
+    if (!segment || segment.length < 2) {
+        return null;
+    }
+
+    const point = samplePointAlongSmoothSegment(segment, progress);
+
+    return {
+        x: point.x,
+        y: point.y,
+        auraOpacity: interpolateTravelingGlowValue(progress, [0, 0.08, 0.7, 0.9, 1], [0.12, 0.28, 0.34, 0.14, 0]),
+        auraFillOpacity: interpolateTravelingGlowValue(progress, [0, 0.14, 0.72, 0.9, 1], [0.18, 0.26, 0.3, 0.12, 0]),
+        auraRadius: interpolateTravelingGlowValue(progress, [0, 0.14, 0.72, 0.9, 1], [10.5, 14.25, 13.75, 11.5, 10.5]),
+        haloOpacity: interpolateTravelingGlowValue(progress, [0, 0.08, 0.72, 0.9, 1], [0.32, 0.68, 0.7, 0.22, 0]),
+        haloFillOpacity: interpolateTravelingGlowValue(progress, [0, 0.14, 0.72, 0.9, 1], [0.24, 0.42, 0.48, 0.18, 0]),
+        haloRadius: interpolateTravelingGlowValue(progress, [0, 0.14, 0.72, 0.9, 1], [6.25, 9.35, 8.9, 6.75, 6.25]),
+        coreOpacity: interpolateTravelingGlowValue(progress, [0, 0.08, 0.72, 0.9, 1], [0.62, 0.98, 1, 0.28, 0]),
+        coreRadius: interpolateTravelingGlowValue(progress, [0, 0.14, 0.72, 0.9, 1], [2.35, 3.25, 3.05, 2.55, 2.35]),
+    };
+}
+
+function interpolateTravelingGlowValue(progress: number, keyTimes: number[], values: number[]) {
+    const clampedProgress = clamp(progress, 0, 1);
+
+    for (let index = 1; index < keyTimes.length; index += 1) {
+        const startTime = keyTimes[index - 1] ?? 0;
+        const endTime = keyTimes[index] ?? 1;
+
+        if (clampedProgress <= endTime) {
+            const startValue = values[index - 1] ?? values[0] ?? 0;
+            const endValue = values[index] ?? startValue;
+            const segmentProgress = endTime === startTime ? 1 : (clampedProgress - startTime) / (endTime - startTime);
+
+            return startValue + ((endValue - startValue) * clamp(segmentProgress, 0, 1));
+        }
+    }
+
+    return values.at(-1) ?? 0;
+}
+
+function samplePointAlongSmoothSegment(segment: Array<{ x: number; y: number }>, progress: number) {
+    const clampedProgress = clamp(progress, 0, 1);
+    const startPoint = segment[0];
+
+    if (!startPoint) {
+        return { x: 0, y: 0 };
+    }
+
+    const sampledPoints = buildTravelingGlowSamplePoints(segment);
+    const totalLength = sampledPoints.at(-1)?.distance ?? 0;
+
+    if (totalLength <= 0) {
+        return startPoint;
+    }
+
+    const targetDistance = totalLength * clampedProgress;
+
+    for (let index = 1; index < sampledPoints.length; index += 1) {
+        const previousSample = sampledPoints[index - 1];
+        const currentSample = sampledPoints[index];
+
+        if (!previousSample || !currentSample || targetDistance > currentSample.distance) {
+            continue;
+        }
+
+        const distanceBetweenSamples = currentSample.distance - previousSample.distance;
+        const distanceProgress = distanceBetweenSamples <= 0
+            ? 1
+            : (targetDistance - previousSample.distance) / distanceBetweenSamples;
+
+        return {
+            x: previousSample.x + ((currentSample.x - previousSample.x) * clamp(distanceProgress, 0, 1)),
+            y: previousSample.y + ((currentSample.y - previousSample.y) * clamp(distanceProgress, 0, 1)),
+        };
+    }
+
+    const lastSample = sampledPoints.at(-1);
+
+    return lastSample ? { x: lastSample.x, y: lastSample.y } : startPoint;
+}
+
+function buildTravelingGlowSamplePoints(segment: Array<{ x: number; y: number }>) {
+    const samples = [{ ...segment[0], distance: 0 }];
+    let totalDistance = 0;
+
+    for (let segmentIndex = 1; segmentIndex < segment.length; segmentIndex += 1) {
+        const start = segment[segmentIndex - 1];
+        const end = segment[segmentIndex];
+
+        if (!start || !end) {
+            continue;
+        }
+
+        const controlX = (start.x + end.x) / 2;
+        const control1 = { x: controlX, y: start.y };
+        const control2 = { x: controlX, y: end.y };
+        let previousPoint = start;
+
+        for (let sampleIndex = 1; sampleIndex <= 24; sampleIndex += 1) {
+            const point = sampleTravelingGlowBezierPoint(start, control1, control2, end, sampleIndex / 24);
+
+            totalDistance += Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y);
+            samples.push({ ...point, distance: totalDistance });
+            previousPoint = point;
+        }
+    }
+
+    return samples;
+}
+
+function sampleTravelingGlowBezierPoint(
+    start: { x: number; y: number },
+    control1: { x: number; y: number },
+    control2: { x: number; y: number },
+    end: { x: number; y: number },
+    t: number,
+) {
+    const oneMinusT = 1 - t;
+    const oneMinusTSquared = oneMinusT * oneMinusT;
+    const tSquared = t * t;
+    const coefficient0 = oneMinusTSquared * oneMinusT;
+    const coefficient1 = 3 * oneMinusTSquared * t;
+    const coefficient2 = 3 * oneMinusT * tSquared;
+    const coefficient3 = tSquared * t;
+
+    return {
+        x: (coefficient0 * start.x) + (coefficient1 * control1.x) + (coefficient2 * control2.x) + (coefficient3 * end.x),
+        y: (coefficient0 * start.y) + (coefficient1 * control1.y) + (coefficient2 * control2.y) + (coefficient3 * end.y),
+    };
+}
+
+function usePrefersReducedMotion() {
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return false;
+        }
+
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    });
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return undefined;
+        }
+
+        const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const handleChange = (event: MediaQueryListEvent) => {
+            setPrefersReducedMotion(event.matches);
+        };
+
+        setPrefersReducedMotion(mediaQuery.matches);
+
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', handleChange);
+
+            return () => {
+                mediaQuery.removeEventListener('change', handleChange);
+            };
+        }
+
+        mediaQuery.addListener(handleChange);
+
+        return () => {
+            mediaQuery.removeListener(handleChange);
+        };
+    }, []);
+
+    return prefersReducedMotion;
 }
 
 function resolveGroupedXAxisModel({
@@ -2052,9 +2538,10 @@ function createSummaryDisplayModel(
     analytics: ActivityAnalyticsSummaryData,
     visualPalette: ActivityAnalyticsVisualPalette,
 ) {
-    const sectionProductivityLabel = analytics.coverageRatio < 1
-        ? INCOMPLETE_COVERAGE_LABEL
-        : formatPercent(analytics.utilizationRatio);
+    const observedDurationMs = analytics.durationsMs.prod + analytics.durationsMs.setup + analytics.durationsMs.stopped;
+    const sectionProductivityLabel = observedDurationMs > 0
+        ? formatPercent(analytics.utilizationRatio)
+        : INCOMPLETE_COVERAGE_LABEL;
 
     return {
         sectionProductivityLabel,
@@ -2098,6 +2585,8 @@ function createSummaryDetailRows(
             title: 'Cobertura',
             valueLabel: formatPercent(analytics.coverageRatio),
             markerFill: visualPalette.noData.solid,
+            showMarker: false,
+            titleFill: 'var(--color-industrial-muted)',
         },
     ] as const;
 }
@@ -2368,6 +2857,14 @@ function normalizeRange(value: number, min: number, max: number): number {
 
 function formatPercent(value: number): string {
     return `${Math.round(value * 100)}%`;
+}
+
+function formatPercentRatio(value: number, total: number): string {
+    if (total <= 0) {
+        return '0%';
+    }
+
+    return formatPercent(clamp(value / total, 0, 1));
 }
 
 function formatDurationHours(durationMs: number): string {
@@ -2646,19 +3143,21 @@ function SummaryBarsChart({
 
                     return (
                         <g key={`summary-detail-${detailRow.key}`} data-testid="activity-analytics-summary-detail-section">
-                            <rect
-                                x={0}
-                                y={sectionY + detailMarkerOffsetY}
-                                width={detailMarkerSize}
-                                height={detailMarkerSize}
-                                rx={3}
-                                fill={detailRow.markerFill}
-                            />
+                            {detailRow.showMarker !== false ? (
+                                <rect
+                                    x={0}
+                                    y={sectionY + detailMarkerOffsetY}
+                                    width={detailMarkerSize}
+                                    height={detailMarkerSize}
+                                    rx={3}
+                                    fill={detailRow.markerFill}
+                                />
+                            ) : null}
                             <text
                                 x={detailMarkerSize + SUMMARY_DONUT_GEOMETRY_RULES.detailMarkerLabelGapPx}
                                 y={sectionY + detailTitleBaselineY}
                                 textAnchor="start"
-                                fill="var(--color-industrial-text)"
+                                fill={detailRow.titleFill ?? 'var(--color-industrial-text)'}
                                 style={GENERAL_TYPOGRAPHY_STYLE}
                                 data-testid="activity-analytics-summary-detail-title"
                             >
@@ -2720,7 +3219,7 @@ function GroupedStackedBarsChart({
     });
     const { chartWidth, plotWidth, positions, visibleLabelIndices } = xAxisModel;
     const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
-    const maxDurationMs = Math.max(...grouped.map((bucket) => bucket.expectedDurationMs), 1);
+    const maxDurationMs = Math.max(...grouped.map(resolveGroupedChartDomainDurationMs), 1);
     const safeBarWidthFactor = clampActivityAnalyticsGroupBarWidth(barWidthFactor);
     const groupedDensity = layout.density === 'fit'
         ? 'fit'
@@ -2914,15 +3413,17 @@ function GroupedStackedBarsChart({
 
             {hoverInfo && hoverInfo.index < grouped.length && (() => {
                 const bucket = grouped[hoverInfo.index];
-                const series: ChartTooltipSeries[] = [
-                    { name: 'Prod.', value: formatDurationHours(bucket.durationsMs.prod), color: visualPalette.prod.solid, shape: 'square' },
-                    { name: 'Setup', value: formatDurationHours(bucket.durationsMs.setup), color: visualPalette.setup.solid, shape: 'square' },
-                    { name: 'Detenida', value: formatDurationHours(bucket.durationsMs.stopped), color: visualPalette.stopped.solid, shape: 'square' },
-                    { name: 'Sin datos', value: formatDurationHours(bucket.durationsMs.noData), color: visualPalette.noData.solid, shape: 'square' },
-                ];
+                const series: ChartTooltipSeries[] = buildGroupedTooltipSeries(bucket, visualPalette);
 
                 return (
-                    <ChartTooltip label={bucket.label} series={series} x={hoverInfo.x} containerWidth={chartWidth} />
+                    <ChartTooltip
+                        label={resolveGroupedTooltipLabel(bucket.label)}
+                        series={series}
+                        x={hoverInfo.x}
+                        containerWidth={chartWidth}
+                        panelClassName={GROUPED_TOOLTIP_PANEL_CLASS}
+                        labelClassName={GROUPED_TOOLTIP_LABEL_CLASS}
+                    />
                 );
             })()}
         </div>
@@ -3054,17 +3555,26 @@ function createComparisonEntry(
     }
 
     const comparableProductivityRatio = resolveActivityAnalyticsComparableProductivityRatio(matchedBucket);
+    const visibleProductivityRatio = resolveGroupedVisibleProductivityRatio(matchedBucket);
+    const shouldUseTurnoSummaryVisibleProductivity = isTurnoSummaryBucket(matchedBucket)
+        && matchedBucket.isInProgress !== true
+        && matchedBucket.hasInProgressContribution !== true
+        && visibleProductivityRatio !== null;
 
-    if (comparableProductivityRatio === null) {
+    if (comparableProductivityRatio === null && !shouldUseTurnoSummaryVisibleProductivity) {
         return fallbackEntry;
     }
 
-    const resolvedProductivityRatio = matchedBucket.coverageRatio < 1
-        ? comparableProductivityRatio
-        : matchedBucket.productivityRatio ?? parsePercentLabel(matchedBucket.productivityLabel);
-    const resolvedProductivityLabel = matchedBucket.coverageRatio < 1
-        ? formatPercent(comparableProductivityRatio)
-        : matchedBucket.productivityLabel;
+    const resolvedProductivityRatio = shouldUseTurnoSummaryVisibleProductivity
+        ? visibleProductivityRatio
+        : matchedBucket.coverageRatio < 1
+            ? comparableProductivityRatio
+            : matchedBucket.productivityRatio ?? parsePercentLabel(matchedBucket.productivityLabel);
+    const resolvedProductivityLabel = shouldUseTurnoSummaryVisibleProductivity
+        ? resolveGroupedVisibleProductivityLabel(matchedBucket)
+        : matchedBucket.coverageRatio < 1
+            ? formatPercent(comparableProductivityRatio ?? 0)
+            : matchedBucket.productivityLabel;
     return {
         heading,
         label: matchedBucket.label,
@@ -3231,6 +3741,57 @@ function resolveGroupedVisibleDurationMs(bucket: ReturnType<typeof computeActivi
     return bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped + bucket.durationsMs.noData;
 }
 
+function buildGroupedTooltipSeries(
+    bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number],
+    visualPalette: ActivityAnalyticsVisualPalette,
+): ChartTooltipSeries[] {
+    const observedDurationMs = bucket.durationsMs.prod + bucket.durationsMs.setup + bucket.durationsMs.stopped;
+    const visibleDurationMs = observedDurationMs + bucket.durationsMs.noData;
+
+    return [
+        {
+            name: 'Detenida',
+            value: formatPercentRatio(bucket.durationsMs.stopped, observedDurationMs),
+            color: visualPalette.stopped.initialSolid,
+            shape: 'square',
+        },
+        {
+            name: 'Setup',
+            value: formatPercentRatio(bucket.durationsMs.setup, observedDurationMs),
+            color: visualPalette.setup.initialSolid,
+            shape: 'square',
+        },
+        {
+            name: 'Prod.',
+            value: formatPercentRatio(bucket.durationsMs.prod, observedDurationMs),
+            color: visualPalette.prod.initialSolid,
+            shape: 'square',
+        },
+        {
+            name: 'Cobertura incompleta',
+            value: formatPercentRatio(bucket.durationsMs.noData, visibleDurationMs),
+            color: visualPalette.noData.solid,
+            shape: 'square',
+        },
+    ];
+}
+
+function buildProdTrendTooltipSeries(
+    bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number],
+    visualPalette: ActivityAnalyticsVisualPalette,
+): ChartTooltipSeries[] {
+    return [{
+        name: 'Prod.',
+        value: resolveGroupedVisibleProductivityLabel(bucket),
+        color: visualPalette.prod.initialSolid,
+        shape: 'square',
+    }];
+}
+
+function resolveGroupedTooltipLabel(label: string) {
+    return label.replace(/\(\s*en curso\s*\)/i, '(en curso)');
+}
+
 function resolveGroupedVisibleProductivityLabel(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
     const productivityRatio = resolveGroupedVisibleProductivityRatio(bucket);
 
@@ -3260,7 +3821,75 @@ function resolveGroupedVisibleProductivityRatio(bucket: ReturnType<typeof comput
     return resolvedProductivityRatio === null ? null : clamp(resolvedProductivityRatio, 0, 1);
 }
 
-function resolveGroupedTrendProductivityRatio(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+function resolveGroupedChartDomainDurationMs(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    const visibleDurationMs = resolveGroupedVisibleDurationMs(bucket);
+
+    if (bucket.isInProgress) {
+        return Math.max(bucket.expectedDurationMs, visibleDurationMs, 1);
+    }
+
+    return Math.max(visibleDurationMs, bucket.expectedDurationMs > 0 && visibleDurationMs <= 0 ? bucket.expectedDurationMs : 0, 1);
+}
+
+function isTurnoSummaryBucket(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    return bucket.bucketKey.startsWith('turno-summary:');
+}
+
+function resolveTurnoDisplayComparison(
+    grouped: ReturnType<typeof computeActivityAnalytics>['grouped'],
+): ReturnType<typeof computeActivityAnalytics>['comparison'] {
+    return grouped.some(isTurnoSummaryBucket)
+        ? resolveTurnoSummaryVisibleComparison(grouped)
+        : resolveActivityAnalyticsComparison(grouped);
+}
+
+function resolveTurnoSummaryVisibleComparison(
+    grouped: ReturnType<typeof computeActivityAnalytics>['grouped'],
+): ReturnType<typeof computeActivityAnalytics>['comparison'] {
+    const comparableBuckets = grouped
+        .map((bucket) => ({
+            bucket,
+            visibleProductivityRatio: isTurnoSummaryBucket(bucket)
+                && bucket.isInProgress !== true
+                && bucket.hasInProgressContribution !== true
+                ? resolveGroupedVisibleProductivityRatio(bucket)
+                : null,
+        }))
+        .filter((entry) => entry.visibleProductivityRatio !== null);
+
+    if (comparableBuckets.length < 2) {
+        return {
+            best: { bucketKey: 'best', label: COMPARISON_FALLBACK_LABEL },
+            worst: { bucketKey: 'worst', label: COMPARISON_FALLBACK_LABEL },
+        };
+    }
+
+    const sorted = [...comparableBuckets].sort(
+        (left, right) => (right.visibleProductivityRatio ?? 0) - (left.visibleProductivityRatio ?? 0),
+    );
+    const best = sorted[0]?.bucket;
+    const worst = sorted[sorted.length - 1]?.bucket;
+    const bestVisibleRatio = sorted[0]?.visibleProductivityRatio ?? null;
+    const worstVisibleRatio = sorted[sorted.length - 1]?.visibleProductivityRatio ?? null;
+
+    if (!best || !worst || bestVisibleRatio === null || worstVisibleRatio === null || bestVisibleRatio === worstVisibleRatio) {
+        return {
+            best: { bucketKey: 'best', label: COMPARISON_FALLBACK_LABEL },
+            worst: { bucketKey: 'worst', label: COMPARISON_FALLBACK_LABEL },
+        };
+    }
+
+    return {
+        best: { bucketKey: best.bucketKey, label: best.label },
+        worst: { bucketKey: worst.bucketKey, label: worst.label },
+    };
+}
+
+function resolveGroupedTrendProductivityRatio(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number] | null | undefined) {
+    if (!bucket) {
+        return null;
+    }
+
     const resolvedProductivityRatio = resolveGroupedVisibleProductivityRatio(bucket);
 
     if (resolvedProductivityRatio !== null) {

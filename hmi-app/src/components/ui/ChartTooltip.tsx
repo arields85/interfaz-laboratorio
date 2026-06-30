@@ -26,6 +26,10 @@ interface ChartTooltipProps {
     containerWidth: number;
     /** Optional extra content below the series rows */
     children?: ReactNode;
+    /** Optional panel class override for per-widget surface styling */
+    panelClassName?: string;
+    /** Optional label class override for per-widget typography/casing */
+    labelClassName?: string;
 }
 
 /**
@@ -38,7 +42,7 @@ interface ChartTooltipProps {
  * Usage: place inside a `position: relative` container that wraps the chart.
  * The tooltip uses `pointerEvents: 'none'` so it never blocks mouse interaction.
  */
-export default function ChartTooltip({ label, series, x, containerWidth, children }: ChartTooltipProps) {
+export default function ChartTooltip({ label, series, x, containerWidth, children, panelClassName, labelClassName }: ChartTooltipProps) {
     const gap = 12;
     const flipLeft = x > containerWidth - 180;
 
@@ -52,9 +56,9 @@ export default function ChartTooltip({ label, series, x, containerWidth, childre
                 pointerEvents: 'none',
                 zIndex: 20,
             }}
-            className="rounded-lg border border-industrial-border bg-industrial-surface/95 backdrop-blur-sm px-3 py-2 shadow-lg"
+            className={panelClassName ?? 'rounded-lg border border-industrial-border bg-industrial-surface/95 px-3 py-2 shadow-lg backdrop-blur-sm'}
         >
-            <div className="uppercase text-industrial-muted mb-1">
+            <div className={labelClassName ?? 'uppercase text-industrial-muted mb-1'}>
                 {label}
             </div>
             {series.map((s) => (

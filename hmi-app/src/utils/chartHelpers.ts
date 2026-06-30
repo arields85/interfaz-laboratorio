@@ -43,6 +43,78 @@ export function round2(value: number): number {
     return Number(value.toFixed(2));
 }
 
+function measureLineSegmentLength(start: Point, end: Point): number {
+    return Math.hypot(end.x - start.x, end.y - start.y);
+}
+
+function resolveSmoothPathBezierControls(start: Point, end: Point) {
+    const controlX = (start.x + end.x) / 2;
+
+    return {
+        control1: { x: controlX, y: start.y },
+        control2: { x: controlX, y: end.y },
+    };
+}
+
+function sampleCubicBezierPoint(start: Point, control1: Point, control2: Point, end: Point, t: number): Point {
+    const oneMinusT = 1 - t;
+    const oneMinusTSquared = oneMinusT * oneMinusT;
+    const tSquared = t * t;
+    const coefficient0 = oneMinusTSquared * oneMinusT;
+    const coefficient1 = 3 * oneMinusTSquared * t;
+    const coefficient2 = 3 * oneMinusT * tSquared;
+    const coefficient3 = tSquared * t;
+
+    return {
+        x: (coefficient0 * start.x) + (coefficient1 * control1.x) + (coefficient2 * control2.x) + (coefficient3 * end.x),
+        y: (coefficient0 * start.y) + (coefficient1 * control1.y) + (coefficient2 * control2.y) + (coefficient3 * end.y),
+    };
+}
+
+function measureCubicBezierLength(start: Point, control1: Point, control2: Point, end: Point, samples: number = 24): number {
+    let previousPoint = start;
+    let length = 0;
+
+    for (let index = 1; index <= samples; index += 1) {
+        const point = sampleCubicBezierPoint(start, control1, control2, end, index / samples);
+        length += measureLineSegmentLength(previousPoint, point);
+        previousPoint = point;
+    }
+
+    return length;
+}
+
+export function measureSmoothPathLength(points: Point[]): number {
+    if (points.length < 2) return 0;
+
+    let length = 0;
+
+    for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1];
+        const end = points[index];
+        const { control1, control2 } = resolveSmoothPathBezierControls(start, end);
+
+        length += measureCubicBezierLength(start, control1, control2, end);
+    }
+
+    return length;
+}
+
+export function resolveAnimationDurationSecondsFromPathLength(
+    pathLength: number,
+    speedPxPerSecond: number,
+    minimumSeconds: number,
+    maximumSeconds: number,
+): number {
+    if (!Number.isFinite(pathLength) || pathLength <= 0 || !Number.isFinite(speedPxPerSecond) || speedPxPerSecond <= 0) {
+        return Number(minimumSeconds.toFixed(2));
+    }
+
+    const duration = clamp(pathLength / speedPxPerSecond, minimumSeconds, maximumSeconds);
+
+    return Number(duration.toFixed(2));
+}
+
 /**
  * Lazily-created offscreen canvas context for text measurement.
  * Reused across all calls to avoid allocation overhead.
