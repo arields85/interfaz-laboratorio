@@ -1434,10 +1434,7 @@ function ProdTrendChart({
         enabled: travelingGlowPathId !== null,
         durationSeconds: travelingGlowDurationSeconds,
     });
-    const travelingGlowFrame = useMemo(
-        () => resolveProdTrendTravelingGlowFrame(travelingGlowSegment, travelingGlowProgress),
-        [travelingGlowProgress, travelingGlowSegment],
-    );
+    const travelingGlowFrame = resolveProdTrendTravelingGlowFrame(travelingGlowSegment, travelingGlowProgress);
     const showTravelingGlow = travelingGlowPathId !== null
         && !prefersReducedMotion
         && !isTravelingGlowPaused
@@ -2107,8 +2104,6 @@ function usePrefersReducedMotion() {
         const handleChange = (event: MediaQueryListEvent) => {
             setPrefersReducedMotion(event.matches);
         };
-
-        setPrefersReducedMotion(mediaQuery.matches);
 
         if (typeof mediaQuery.addEventListener === 'function') {
             mediaQuery.addEventListener('change', handleChange);
@@ -3092,16 +3087,13 @@ function SummaryBarsChart({
         enabled: donutEffects.topCap && renderedSegments.length > 0,
         durationSeconds: donutTravelingTopCapDurationSeconds,
     });
-    const movingDonutTopCap = useMemo(
-        () => resolveSummaryTravelingTopCapFrame({
-            renderedSegments,
-            cycleKey: donutTravelingTopCapCycleKey,
-            progress: donutTravelingTopCapProgress,
-            ringThickness,
-            prodRingThickness,
-        }),
-        [donutTravelingTopCapCycleKey, donutTravelingTopCapProgress, prodRingThickness, renderedSegments, ringThickness],
-    );
+    const movingDonutTopCap = resolveSummaryTravelingTopCapFrame({
+        renderedSegments,
+        cycleKey: donutTravelingTopCapCycleKey,
+        progress: donutTravelingTopCapProgress,
+        ringThickness,
+        prodRingThickness,
+    });
     const staticDonutTopCapFrame = useMemo(() => resolveSummaryStaticTopCapGlowFrame(), []);
     const showMovingDonutTopCap = donutEffects.topCap
         && !prefersReducedMotion
@@ -3121,7 +3113,7 @@ function SummaryBarsChart({
         });
 
         setCenterLabelLayout((currentLayout) => areSummaryCenterLabelLayoutsEqual(currentLayout, nextLayout) ? currentLayout : nextLayout);
-    });
+    }, []);
 
     return (
         <svg
@@ -4505,6 +4497,7 @@ function resolveGroupedTravelingTopCapStateKey(renderedSegments: ReadonlyArray<{
     return 'prod';
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only helper kept colocated with the widget renderer
 export function resolveSummaryTravelingTopCapRoute(
     renderedSegments: ReturnType<typeof buildActivityAnalyticsSummarySegments>,
     cycleKey: number,

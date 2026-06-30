@@ -10,7 +10,6 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
-    DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
@@ -1262,7 +1261,7 @@ describe('PropertyDock activity-analytics', () => {
     });
 
     it('updates the shared coverage/no-data color from the activity analytics visual section', async () => {
-        const { user, updates } = renderPropertyDock({
+        const { updates } = renderPropertyDock({
             type: 'activity-analytics',
             title: 'Análisis de Actividad',
             binding: {
