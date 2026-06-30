@@ -3,9 +3,84 @@
 // All visual parameters are runtime-controllable via uniform floats.
 // =============================================================================
 import { useEffect, useRef } from 'react';
-import { useShaderParamsStore, UNIFORM_MAP } from '../../store/shaderParams.store';
-import type { ShaderParams } from '../../store/shaderParams.store';
+import {
+    SHADER_BLEND_DEFAULTS,
+    useShaderParamsStore,
+    UNIFORM_MAP,
+} from '../../store/shaderParams.store';
+import type {
+    ShaderBlendMode,
+    ShaderBlendModes,
+    ShaderBlendTarget,
+    ShaderParams,
+} from '../../store/shaderParams.store';
 import { SHADER_READY_ATTRIBUTE, WEBGL_FIRST_DRAW_EVENT } from '../../hooks/useBootShield';
+
+const BLEND_MODE_VALUES: Record<ShaderBlendMode, number> = {
+    normal: 0,
+    screen: 1,
+    overlay: 2,
+    'soft-light': 3,
+    multiply: 4,
+};
+
+const BLEND_UNIFORM_MAP: Record<ShaderBlendTarget, string> = {
+    nebula: 'u_nebBlendMode',
+    stars: 'u_starBlendMode',
+    chromatic: 'u_chromBlendMode',
+    cursorNebula: 'u_cursorNebBlendMode',
+    cursorHalo: 'u_haloBlendMode',
+    clickRing: 'u_ringBlendMode',
+};
+
+function resolveLensOpacity(params: ShaderParams, time: number): number {
+    if (params.lensAutoOpacity <= 0.5) {
+        return params.lensOpacity;
+    }
+
+    const speed = params.lensAutoSpeed;
+    const breath =
+        0.5 +
+        0.25 * Math.sin(time * speed) +
+        0.15 * Math.sin(time * speed * 1.7) +
+        0.1 * Math.sin(time * speed * 0.6);
+
+    return params.lensOpacity * Math.max(0, Math.min(1, breath));
+}
+
+function uploadParamUniforms(
+    gl: WebGLRenderingContext,
+    paramUniforms: Partial<Record<keyof ShaderParams, WebGLUniformLocation | null>>,
+    params: ShaderParams,
+    time: number,
+) {
+    for (const key of Object.keys(paramUniforms) as (keyof ShaderParams)[]) {
+        const location = paramUniforms[key];
+        if (location) {
+            gl.uniform1f(location, params[key]);
+        }
+    }
+
+    const lensOpacityLocation = paramUniforms.lensOpacity;
+    if (lensOpacityLocation) {
+        gl.uniform1f(lensOpacityLocation, resolveLensOpacity(params, time));
+    }
+}
+
+function uploadBlendUniforms(
+    gl: WebGLRenderingContext,
+    blendUniforms: Record<ShaderBlendTarget, WebGLUniformLocation | null>,
+    blendModes: ShaderBlendModes,
+) {
+    void blendModes;
+
+    for (const target of Object.keys(blendUniforms) as ShaderBlendTarget[]) {
+        const location = blendUniforms[target];
+        if (location) {
+            gl.uniform1f(location, BLEND_MODE_VALUES[SHADER_BLEND_DEFAULTS[target]]);
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Shaders
@@ -28,21 +103,29 @@ uniform float u_press;
 uniform float u_nebShow;
 uniform float u_nebSpeed;
 uniform float u_nebIntensity;
+uniform float u_nebAlpha;
 uniform float u_nebVariation;
 uniform float u_nebHue;
 uniform float u_nebContrast;
+uniform float u_nebBrightness;
 uniform float u_nebDensity;
 uniform float u_nebSat;
 uniform float u_nebColorVar;
 uniform float u_nebColorShift;
+uniform float u_nebBlendMode;
 
 // Stars
 uniform float u_starShow;
 uniform float u_starDensity;
 uniform float u_starBrightness;
+uniform float u_starHue;
+uniform float u_starSaturation;
+uniform float u_starContrast;
+uniform float u_starAlpha;
 uniform float u_starTwinkle;
 uniform float u_starSize;
 uniform float u_starParallax;
+uniform float u_starBlendMode;
 
 // Lensing
 uniform float u_lensShow;
@@ -53,6 +136,12 @@ uniform float u_lensOpacity;
 // Chromatic aberration
 uniform float u_chromShow;
 uniform float u_chromIntensity;
+uniform float u_chromHue;
+uniform float u_chromSaturation;
+uniform float u_chromBrightness;
+uniform float u_chromContrast;
+uniform float u_chromAlpha;
+uniform float u_chromBlendMode;
 
 // Mouse nebula displacement
 uniform float u_nebMouseShow;
@@ -62,23 +151,39 @@ uniform vec2  u_mouseNeb;
 // Cursor nebula
 uniform float u_cursorNebShow;
 uniform float u_cursorNebIntensity;
+uniform float u_cursorNebHue;
+uniform float u_cursorNebSaturation;
+uniform float u_cursorNebBrightness;
+uniform float u_cursorNebContrast;
+uniform float u_cursorNebAlpha;
 uniform float u_cursorNebRadius;
 uniform vec2  u_mouseCursorNeb;
+uniform float u_cursorNebBlendMode;
 
 // Cursor halo
 uniform float u_haloShow;
 uniform float u_haloIntensity;
+uniform float u_haloHue;
+uniform float u_haloSaturation;
+uniform float u_haloBrightness;
+uniform float u_haloContrast;
+uniform float u_haloAlpha;
 uniform vec2  u_mouseHalo;
+uniform float u_haloBlendMode;
 
 // Click ring
 uniform float u_ringShow;
 uniform float u_ringIntensity;
+uniform float u_ringAlpha;
+uniform float u_ringBrightness;
+uniform float u_ringContrast;
 uniform float u_ringSpeed;
 uniform float u_ringWidth;
 uniform float u_ringHue;
 uniform float u_ringLife;
 uniform float u_ringSaturation;
 uniform vec4  u_clicks[8];
+uniform float u_ringBlendMode;
 
 // Vignette
 uniform float u_vigShow;
@@ -108,6 +213,59 @@ vec3 hueShift(vec3 col, float h){
   return col*cosA + cross(k, col)*sinA + k*dot(k, col)*(1.0-cosA);
 }
 
+vec3 applySaturation(vec3 col, float saturation){
+  float luminance = dot(col, vec3(0.299, 0.587, 0.114));
+  return mix(vec3(luminance), col, saturation);
+}
+
+vec3 applyBrightness(vec3 col, float brightness){
+  return col * max(brightness, 0.0);
+}
+
+vec3 applyContrast(vec3 col, float contrast){
+  return (col - 0.5) * max(contrast, 0.0) + 0.5;
+}
+
+vec3 applyColorControls(vec3 col, float saturation, float brightness, float contrast){
+  vec3 saturated = applySaturation(col, saturation);
+  vec3 brightened = applyBrightness(saturated, brightness);
+  return applyContrast(brightened, contrast);
+}
+
+vec3 blendStyled(vec3 base, vec3 layer, float mode){
+  vec3 b = clamp(base, 0.0, 1.0);
+  vec3 l = clamp(layer, 0.0, 1.0);
+
+  if(mode < 1.5){
+    return 1.0 - (1.0 - b) * (1.0 - l);
+  }
+
+  if(mode < 2.5){
+    return mix(2.0 * b * l, 1.0 - 2.0 * (1.0 - b) * (1.0 - l), step(vec3(0.5), b));
+  }
+
+  if(mode < 3.5){
+    return mix(
+      b - (1.0 - 2.0 * l) * b * (1.0 - b),
+      b + (2.0 * l - 1.0) * (sqrt(b) - b),
+      step(vec3(0.5), l)
+    );
+  }
+
+  return b * l;
+}
+
+vec3 composeLayer(vec3 base, vec3 layer, float alpha, float mode){
+  float clampedAlpha = clamp(alpha, 0.0, 1.0);
+  vec3 scaledLayer = layer * clampedAlpha;
+  if(mode < 0.5){
+    return base + scaledLayer;
+  }
+
+  vec3 styled = blendStyled(base, layer, mode);
+  return base + (styled - clamp(base, 0.0, 1.0)) * clampedAlpha;
+}
+
 vec3 stars(vec2 p, float density, float seed){
   vec2 g = floor(p);
   vec2 f = fract(p);
@@ -130,7 +288,7 @@ vec3 starfield(vec2 p){
   c += stars(p*9.0 + vec2(u_time*0.001*u_starParallax, u_time*0.0005*u_starParallax), 0.02*dens, 1.0) * 0.5;
   c += stars(p*18.0 + vec2(u_time*0.003*u_starParallax, u_time*0.002*u_starParallax), 0.015*dens, 2.0) * 0.8;
   c += stars(p*36.0 + vec2(u_time*0.008*u_starParallax, u_time*0.005*u_starParallax), 0.010*dens, 3.0) * 1.0;
-  return c * u_starShow;
+  return applyColorControls(hueShift(c, u_starHue), u_starSaturation, 1.0, u_starContrast) * u_starShow;
 }
 
 vec3 ringPalette(float h){
@@ -143,8 +301,7 @@ vec3 clickRings(vec2 p){
   float aspect = u_res.x / u_res.y;
   vec3 acc = vec3(0.0);
   vec3 col = ringPalette(u_ringHue);
-  float lum = dot(col, vec3(0.299,0.587,0.114));
-  col = mix(vec3(lum), col, u_ringSaturation);
+  col = applyColorControls(col, u_ringSaturation, u_ringBrightness, u_ringContrast);
   float w = mix(20.0, 4.0, clamp(u_ringWidth, 0.0, 1.0));
   for(int i=0;i<8;i++){
     vec4 c = u_clicks[i];
@@ -158,8 +315,11 @@ vec3 clickRings(vec2 p){
   return acc;
 }
 
-vec3 ambientBG(vec2 p){
-  vec3 bg = vec3(0.01, 0.012, 0.03);
+vec3 ambientBase(){
+  return vec3(0.01, 0.012, 0.03);
+}
+
+vec3 nebulaLayer(vec2 p){
   float t = u_time * u_nebSpeed;
   vec2 mp = u_mouseNeb * 2.0 - 1.0;
   mp.x *= u_res.x / u_res.y;
@@ -181,11 +341,7 @@ vec3 ambientBG(vec2 p){
   dark   = hueShift(dark,   u_nebHue * 0.4);
   vec3 light = mix(lightA, lightB, smoothstep(0.3, 0.8, neb2) * u_nebColorVar);
   vec3 nebCol = mix(dark, light, smoothstep(edge0, edge1, neb)) * u_nebIntensity * u_nebShow;
-  float nebLum = dot(nebCol, vec3(0.299,0.587,0.114));
-  nebCol = mix(vec3(nebLum), nebCol, u_nebSat);
-  bg += nebCol;
-  bg += starfield(p + vec2(10.0,10.0));
-  return bg;
+  return applyColorControls(nebCol, u_nebSat, u_nebBrightness, 1.0);
 }
 
 void main(){
@@ -204,7 +360,10 @@ void main(){
   float bend = (mass / max(d*d, 0.002)) * u_lensShow;
   vec2 sdir = normalize(toC + 1e-5);
   vec2 sampP = mix(p, p - sdir * bend * u_lensSize, u_lensOpacity);
-  vec3 bg = ambientBG(sampP);
+
+  vec3 bg = ambientBase();
+  bg = composeLayer(bg, nebulaLayer(sampP), u_nebAlpha, u_nebBlendMode);
+  bg = composeLayer(bg, starfield(sampP + vec2(10.0,10.0)), u_starAlpha, u_starBlendMode);
 
   // Chromatic aberration (toggleable)
   if(u_chromShow > 0.5 && u_lensShow > 0.5){
@@ -217,7 +376,9 @@ void main(){
       bg.g,
       0.12 + 0.9*smoothstep(0.35,0.75,bn)
     );
-    bg = mix(bg, lensCol, smoothstep(0.5, horizon*2.0, 1.0/(d+0.01)) * u_chromIntensity);
+    lensCol = applyColorControls(hueShift(lensCol, u_chromHue), u_chromSaturation, u_chromBrightness, u_chromContrast);
+    float chromStrength = smoothstep(0.5, horizon*2.0, 1.0/(d+0.01)) * u_chromIntensity;
+    bg = composeLayer(bg, (lensCol - bg) * chromStrength, u_chromAlpha, u_chromBlendMode);
   }
 
   vec3 col = bg;
@@ -229,18 +390,30 @@ void main(){
     float cnDist = length(p - cnP);
     float cnFalloff = exp(-cnDist * (3.0 / max(u_cursorNebRadius, 0.1)));
     float cnPattern = fbm(p * 1.5 + vec2(u_time * 0.08, u_time * 0.06));
-    vec3 cnColor = hueShift(vec3(0.35, 0.18, 0.55), u_nebHue);
-    col += cnColor * cnFalloff * cnPattern * u_cursorNebIntensity;
+    vec3 cnColor = hueShift(vec3(0.35, 0.18, 0.55), u_cursorNebHue);
+    vec3 cursorNebula = applyColorControls(
+      cnColor * cnFalloff * cnPattern * u_cursorNebIntensity,
+      u_cursorNebSaturation,
+      u_cursorNebBrightness,
+      u_cursorNebContrast
+    );
+    col = composeLayer(col, cursorNebula, u_cursorNebAlpha, u_cursorNebBlendMode);
   }
 
   // Click rings
-  col += clickRings(p);
+  col = composeLayer(col, clickRings(p), u_ringAlpha, u_ringBlendMode);
 
   // Cursor halo (uses separate u_mouseHalo position)
   vec2 haloP = u_mouseHalo*2.0-1.0;
   haloP.x *= aspect;
   float dHalo = length(p - haloP);
-  col += vec3(0.9,0.8,0.6) * exp(-dHalo*14.0) * u_haloIntensity * u_haloShow;
+  vec3 haloColor = applyColorControls(
+    hueShift(vec3(0.9,0.8,0.6), u_haloHue) * exp(-dHalo*14.0) * u_haloIntensity * u_haloShow,
+    u_haloSaturation,
+    u_haloBrightness,
+    u_haloContrast
+  );
+  col = composeLayer(col, haloColor, u_haloAlpha, u_haloBlendMode);
 
   // Vignette
   float vig = mix(1.0, 0.85 + 0.2*smoothstep(1.8, 0.2, length(p)), u_vigShow);
@@ -256,7 +429,10 @@ void main(){
 
 function compileShader(gl: WebGLRenderingContext, type: number, src: string): WebGLShader | null {
     const s = gl.createShader(type);
-    if (!s) { console.error('WebGL: createShader returned null'); return null; }
+    if (!s) {
+        console.error('WebGL: createShader returned null');
+        return null;
+    }
     gl.shaderSource(s, src);
     gl.compileShader(s);
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
@@ -292,19 +468,23 @@ function createProgram(gl: WebGLRenderingContext, vsSrc: string, fsSrc: string):
 export default function EventHorizonBackground() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const params = useShaderParamsStore((s) => s.params);
+    const blendModes = useShaderParamsStore((s) => s.blendModes);
     const paramsRef = useRef<ShaderParams>(params);
+    const blendModesRef = useRef<ShaderBlendModes>(blendModes);
 
-    // Sync state to ref (ref is read in the frame loop without re-renders)
     useEffect(() => {
         paramsRef.current = params;
     }, [params]);
 
-    // WebGL setup
+    useEffect(() => {
+        blendModesRef.current = blendModes;
+    }, [blendModes]);
+
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
+        const shaderCanvas = canvas;
 
-        // --- Mutable state shared across init/frame/cleanup ---
         const mouse = { x: 0.5, y: 0.5 };
         const smoothMouseNeb = { x: 0.5, y: 0.5 };
         const smoothMouseCursorNeb = { x: 0.5, y: 0.5 };
@@ -325,26 +505,31 @@ export default function EventHorizonBackground() {
         let uPress: WebGLUniformLocation | null = null;
         let uClicks: WebGLUniformLocation | null = null;
         let paramUniforms: Partial<Record<keyof ShaderParams, WebGLUniformLocation | null>> = {};
+        let blendUniforms: Record<ShaderBlendTarget, WebGLUniformLocation | null> = {
+            nebula: null,
+            stars: null,
+            chromatic: null,
+            cursorNebula: null,
+            cursorHalo: null,
+            clickRing: null,
+        };
 
-
-        // --- Resize helper (returns false if canvas has no size) ---
         function resize() {
-            if (!gl || !canvas) return false;
+            if (!gl) return false;
             const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-            const w = Math.floor(canvas.clientWidth * dpr);
-            const h = Math.floor(canvas.clientHeight * dpr);
+            const w = Math.floor(shaderCanvas.clientWidth * dpr);
+            const h = Math.floor(shaderCanvas.clientHeight * dpr);
             if (w === 0 || h === 0) return false;
-            if (canvas.width !== w || canvas.height !== h) {
-                canvas.width = w;
-                canvas.height = h;
+            if (shaderCanvas.width !== w || shaderCanvas.height !== h) {
+                shaderCanvas.width = w;
+                shaderCanvas.height = h;
                 gl.viewport(0, 0, w, h);
             }
             return true;
         }
 
-        // --- Full GL init (called on mount AND on context restore) ---
         function initGL(): boolean {
-            gl = canvas!.getContext('webgl', {
+            gl = shaderCanvas.getContext('webgl', {
                 alpha: false,
                 antialias: false,
                 premultipliedAlpha: false,
@@ -379,35 +564,40 @@ export default function EventHorizonBackground() {
                 paramUniforms[key] = gl.getUniformLocation(prog, UNIFORM_MAP[key]!);
             }
 
-            // ── SYNCHRONOUS FIRST DRAW — eliminates blank frame on mount ──
+            blendUniforms = {
+                nebula: gl.getUniformLocation(prog, BLEND_UNIFORM_MAP.nebula),
+                stars: gl.getUniformLocation(prog, BLEND_UNIFORM_MAP.stars),
+                chromatic: gl.getUniformLocation(prog, BLEND_UNIFORM_MAP.chromatic),
+                cursorNebula: gl.getUniformLocation(prog, BLEND_UNIFORM_MAP.cursorNebula),
+                cursorHalo: gl.getUniformLocation(prog, BLEND_UNIFORM_MAP.cursorHalo),
+                clickRing: gl.getUniformLocation(prog, BLEND_UNIFORM_MAP.clickRing),
+            };
+
             if (resize()) {
-                const p = paramsRef.current;
                 gl.useProgram(prog);
-                if (uRes) gl.uniform2f(uRes, canvas!.width, canvas!.height);
+                if (uRes) gl.uniform2f(uRes, shaderCanvas.width, shaderCanvas.height);
                 if (uTime) gl.uniform1f(uTime, 0);
                 if (uMouse) gl.uniform2f(uMouse, 0.5, 0.5);
                 if (uMouseNeb) gl.uniform2f(uMouseNeb, 0.5, 0.5);
                 if (uMouseCursorNeb) gl.uniform2f(uMouseCursorNeb, 0.5, 0.5);
                 if (uMouseHalo) gl.uniform2f(uMouseHalo, 0.5, 0.5);
                 if (uPress) gl.uniform1f(uPress, 0);
-                for (const key of Object.keys(paramUniforms) as (keyof ShaderParams)[]) {
-                    const loc = paramUniforms[key];
-                    if (loc) gl.uniform1f(loc, p[key]);
-                }
+                uploadParamUniforms(gl, paramUniforms, paramsRef.current, 0);
+                uploadBlendUniforms(gl, blendUniforms, blendModesRef.current);
                 if (uClicks) gl.uniform4fv(uClicks, new Float32Array(32));
                 gl.drawArrays(gl.TRIANGLES, 0, 3);
-                canvas!.setAttribute(SHADER_READY_ATTRIBUTE, 'true');
-                canvas!.dispatchEvent(new CustomEvent(WEBGL_FIRST_DRAW_EVENT, { bubbles: true }));
+                shaderCanvas.setAttribute(SHADER_READY_ATTRIBUTE, 'true');
+                shaderCanvas.dispatchEvent(new CustomEvent(WEBGL_FIRST_DRAW_EVENT, { bubbles: true }));
             }
 
             return true;
         }
 
-        // --- Context lost/restored handlers ---
         const handleContextLost = (e: Event) => {
             e.preventDefault();
             cancelAnimationFrame(rafId);
         };
+
         const handleContextRestored = () => {
             if (initGL()) {
                 startTime = performance.now();
@@ -415,22 +605,25 @@ export default function EventHorizonBackground() {
                 rafId = requestAnimationFrame(frame);
             }
         };
-        canvas.addEventListener('webglcontextlost', handleContextLost);
-        canvas.addEventListener('webglcontextrestored', handleContextRestored);
 
-        // --- Frame loop ---
+        shaderCanvas.addEventListener('webglcontextlost', handleContextLost);
+        shaderCanvas.addEventListener('webglcontextrestored', handleContextRestored);
+
         function frame(now: number) {
             if (!gl || gl.isContextLost() || !prog) return;
             if (!resize()) {
                 rafId = requestAnimationFrame(frame);
                 return;
             }
+
             gl.clear(gl.COLOR_BUFFER_BIT);
+
             const t = (now - startTime) / 1000;
             const p = paramsRef.current;
             const lensSpeed = p.lensDriftSpeed;
             const autoLensX = 0.5 + 0.35 * Math.sin(t * 0.1 * lensSpeed) * Math.cos(t * 0.07 * lensSpeed);
             const autoLensY = 0.5 + 0.3 * Math.cos(t * 0.08 * lensSpeed) * Math.sin(t * 0.13 * lensSpeed);
+
             smoothMouseNeb.x += (mouse.x - smoothMouseNeb.x) * p.nebMouseLag;
             smoothMouseNeb.y += (mouse.y - smoothMouseNeb.y) * p.nebMouseLag;
             smoothMouseCursorNeb.x += (mouse.x - smoothMouseCursorNeb.x) * p.cursorNebLag;
@@ -439,13 +632,18 @@ export default function EventHorizonBackground() {
             smoothMouseHalo.y += (mouse.y - smoothMouseHalo.y) * p.haloLag;
 
             const dt = Math.min(0.05, t - (prevT || t));
-            for (const c of clicks) { c.t += dt; c.strength *= Math.pow(0.35, dt); }
-            for (let i = clicks.length - 1; i >= 0; i--) {
-                if (clicks[i].t > 4.5 || clicks[i].strength < 0.02) clicks.splice(i, 1);
+            for (const click of clicks) {
+                click.t += dt;
+                click.strength *= Math.pow(0.35, dt);
+            }
+            for (let i = clicks.length - 1; i >= 0; i -= 1) {
+                if (clicks[i].t > 4.5 || clicks[i].strength < 0.02) {
+                    clicks.splice(i, 1);
+                }
             }
 
             gl.useProgram(prog);
-            if (uRes) gl.uniform2f(uRes, canvas!.width, canvas!.height);
+            if (uRes) gl.uniform2f(uRes, shaderCanvas.width, shaderCanvas.height);
             if (uTime) gl.uniform1f(uTime, t);
             if (uMouse) gl.uniform2f(uMouse, autoLensX, autoLensY);
             if (uMouseNeb) gl.uniform2f(uMouseNeb, smoothMouseNeb.x, smoothMouseNeb.y);
@@ -453,21 +651,12 @@ export default function EventHorizonBackground() {
             if (uMouseHalo) gl.uniform2f(uMouseHalo, smoothMouseHalo.x, smoothMouseHalo.y);
             if (uPress) gl.uniform1f(uPress, 0);
 
-            let effectiveLensOpacity = p.lensOpacity;
-            if (p.lensAutoOpacity > 0.5) {
-                const s = p.lensAutoSpeed;
-                const breath = 0.5 + 0.25 * Math.sin(t * s) + 0.15 * Math.sin(t * s * 1.7) + 0.1 * Math.sin(t * s * 0.6);
-                effectiveLensOpacity = p.lensOpacity * Math.max(0, Math.min(1, breath));
-            }
-
-            for (const key of Object.keys(paramUniforms) as (keyof ShaderParams)[]) {
-                const loc = paramUniforms[key];
-                if (loc) gl.uniform1f(loc, p[key]);
-            }
+            uploadParamUniforms(gl, paramUniforms, p, t);
+            uploadBlendUniforms(gl, blendUniforms, blendModesRef.current);
 
             if (uClicks) {
                 const arr = new Float32Array(8 * 4);
-                for (let i = 0; i < clicks.length && i < 8; i++) {
+                for (let i = 0; i < clicks.length && i < 8; i += 1) {
                     arr[i * 4 + 0] = clicks[i].x;
                     arr[i * 4 + 1] = clicks[i].y;
                     arr[i * 4 + 2] = clicks[i].t;
@@ -476,18 +665,12 @@ export default function EventHorizonBackground() {
                 gl.uniform4fv(uClicks, arr);
             }
 
-            const uLensOpacityLoc = paramUniforms.lensOpacity;
-            if (uLensOpacityLoc) gl.uniform1f(uLensOpacityLoc, effectiveLensOpacity);
-
             gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-
 
             prevT = t;
             rafId = requestAnimationFrame(frame);
         }
 
-        // --- Input handlers ---
         const handleMouseMove = (e: MouseEvent) => {
             mouse.x = e.clientX / window.innerWidth;
             mouse.y = 1 - e.clientY / window.innerHeight;
@@ -496,39 +679,34 @@ export default function EventHorizonBackground() {
 
         const handleClick = (e: MouseEvent) => {
             const nx = e.clientX / window.innerWidth;
-            const ny = 1 - (e.clientY / window.innerHeight);
+            const ny = 1 - e.clientY / window.innerHeight;
             clicks.push({ x: nx, y: ny, t: 0, strength: 1 });
             if (clicks.length > 8) clicks.shift();
         };
         window.addEventListener('pointerdown', handleClick);
 
-        // --- Init and start ---
         if (initGL()) {
             rafId = requestAnimationFrame(frame);
         }
 
-        // --- Cleanup (StrictMode safe: releases GL resources) ---
         return () => {
             cancelAnimationFrame(rafId);
             window.removeEventListener('pointermove', handleMouseMove);
             window.removeEventListener('pointerdown', handleClick);
-            canvas.removeEventListener('webglcontextlost', handleContextLost);
-            canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+            shaderCanvas.removeEventListener('webglcontextlost', handleContextLost);
+            shaderCanvas.removeEventListener('webglcontextrestored', handleContextRestored);
 
             if (gl && !gl.isContextLost()) {
                 if (prog) gl.deleteProgram(prog);
                 if (buf) gl.deleteBuffer(buf);
             }
-            gl = null;
-            prog = null;
-            buf = null;
         };
     }, []);
 
     return (
         <canvas
             ref={canvasRef}
-            className="fixed inset-0 w-full h-full"
+            className="fixed inset-0 h-full w-full"
             data-hmi-shader-canvas="true"
             style={{ zIndex: 1, pointerEvents: 'none', backgroundColor: 'var(--color-industrial-bg)' }}
             aria-hidden="true"

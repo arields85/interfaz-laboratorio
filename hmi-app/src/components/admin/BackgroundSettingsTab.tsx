@@ -1,7 +1,13 @@
 import { useCallback, useState } from 'react';
 import { RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { useShaderParamsStore, SHADER_SECTIONS } from '../../store/shaderParams.store';
-import type { ShaderParams } from '../../store/shaderParams.store';
+import type {
+    ControlDef,
+    ShaderControlSlot,
+    ShaderGroupControlCapability,
+    ShaderParams,
+    SectionDef,
+} from '../../store/shaderParams.store';
 import HoverTooltip from '../ui/HoverTooltip';
 
 // =============================================================================
@@ -32,11 +38,201 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
     );
 }
 
+const FIRST_POSITION_CONTROL_ORDER: ShaderControlSlot[] = [
+    'tone',
+    'saturation',
+    'brightness',
+    'contrast',
+    'intensity',
+    'alpha',
+];
+
+const SLOT_LABELS: Record<ShaderControlSlot, string> = {
+    tone: 'Tone',
+    saturation: 'Saturation',
+    brightness: 'Brightness',
+    contrast: 'Contrast',
+    intensity: 'Intensity',
+    alpha: 'Alpha',
+    blend: 'Blend Mode',
+};
+
+const DEFAULT_SLOT_SLIDER_CONFIG: Record<
+    Exclude<ShaderControlSlot, 'blend'>,
+    Pick<ControlDef, 'min' | 'max' | 'step'>
+> = {
+    tone: { min: 0, max: 1, step: 0.01 },
+    saturation: { min: 0, max: 2, step: 0.02 },
+    brightness: { min: 0, max: 2, step: 0.02 },
+    contrast: { min: 0, max: 2, step: 0.02 },
+    intensity: { min: 0, max: 2.5, step: 0.01 },
+    alpha: { min: 0, max: 1, step: 0.01 },
+};
+
+const INITIAL_COLLAPSED_SECTIONS = Object.fromEntries(
+    SHADER_SECTIONS.map((section) => [section.title, true]),
+) as Record<string, boolean>;
+
+function isParamCapability(
+    capability: ShaderGroupControlCapability,
+): capability is Extract<ShaderGroupControlCapability, { state: 'supported'; storage: 'param' }> {
+    return capability.state === 'supported' && capability.storage === 'param';
+}
+
+function isAliasedCapability(
+    capability: ShaderGroupControlCapability,
+): capability is Extract<ShaderGroupControlCapability, { state: 'aliased' }> {
+    return capability.state === 'aliased';
+}
+
+function getDisplayedControls(section: SectionDef): ControlDef[] {
+    const consumedKeys = new Set<keyof ShaderParams>();
+
+    for (const capability of Object.values(section.capabilities)) {
+        if (isParamCapability(capability) || isAliasedCapability(capability)) {
+            consumedKeys.add(capability.key);
+        }
+    }
+
+    return section.controls.filter((control) => !consumedKeys.has(control.key));
+}
+
+function getSliderPrecision(step: number): number {
+    const fractionalDigits = step.toString().split('.')[1];
+
+    return fractionalDigits?.length ?? 0;
+}
+
+function getCapabilitySliderConfig(
+    section: SectionDef,
+    capability: Extract<
+        ShaderGroupControlCapability,
+        { state: 'supported'; storage: 'param' } | { state: 'aliased' }
+    >,
+): Pick<ControlDef, 'min' | 'max' | 'step'> {
+    const canonicalControl = section.controls.find((control) => control.key === capability.key);
+
+    if (canonicalControl) {
+        return {
+            min: canonicalControl.min,
+            max: canonicalControl.max,
+            step: canonicalControl.step,
+        };
+    }
+
+    return DEFAULT_SLOT_SLIDER_CONFIG[capability.slot];
+}
+
+function ValueSlider({
+    ariaLabel,
+    label,
+    min,
+    max,
+    step,
+    value,
+    onChange,
+}: {
+    ariaLabel: string;
+    label: string;
+    min: number;
+    max: number;
+    step: number;
+    value: number;
+    onChange: (value: number) => void;
+}) {
+    const precision = getSliderPrecision(step);
+
+    return (
+        <div className="space-y-0.5">
+            <div className="flex justify-between">
+                <span className="text-industrial-muted">{label}</span>
+                <span className="font-mono text-industrial-muted/70 tabular-nums">
+                    {value.toFixed(precision)}
+                </span>
+            </div>
+            <input
+                aria-label={ariaLabel}
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                onChange={(e) => onChange(parseFloat(e.target.value))}
+                className="w-full h-1 appearance-none rounded-full bg-white/8 accent-admin-accent cursor-pointer [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:bg-admin-accent [&::-webkit-slider-thumb]:shadow-[0_0_6px_var(--color-admin-accent)]"
+            />
+        </div>
+    );
+}
+
+function renderCapabilityControl({
+    section,
+    slot,
+    params,
+    updateParam,
+}: {
+    section: SectionDef;
+    slot: ShaderControlSlot;
+    params: ShaderParams;
+    updateParam: (key: keyof ShaderParams, value: number) => void;
+}) {
+    const capability = section.capabilities[slot];
+
+    if (capability.state === 'omitted' || capability.state === 'disabled') {
+        return null;
+    }
+
+    if (capability.state === 'supported' && capability.storage === 'blendMode') {
+        return null;
+    }
+
+    const label = SLOT_LABELS[slot];
+    const key = capability.key;
+    const sliderConfig = getCapabilitySliderConfig(section, capability);
+
+    return (
+        <ValueSlider
+            key={slot}
+            ariaLabel={`${section.title} ${label.toLowerCase()}`}
+            label={label}
+            min={sliderConfig.min}
+            max={sliderConfig.max}
+            step={sliderConfig.step}
+            value={params[key]}
+            onChange={(value) => updateParam(key, value)}
+        />
+    );
+}
+
+function renderLegacyControl({
+    sectionTitle,
+    control,
+    value,
+    onChange,
+}: {
+    sectionTitle: string;
+    control: ControlDef;
+    value: number;
+    onChange: (value: number) => void;
+}) {
+    return (
+        <ValueSlider
+            key={control.key}
+            ariaLabel={`${sectionTitle} ${control.label.toLowerCase()}`}
+            label={control.label}
+            min={control.min}
+            max={control.max}
+            step={control.step}
+            value={value}
+            onChange={onChange}
+        />
+    );
+}
+
 export default function BackgroundSettingsTab() {
     const params = useShaderParamsStore((s) => s.params);
     const updateParam = useShaderParamsStore((s) => s.updateParam);
     const resetAll = useShaderParamsStore((s) => s.resetAll);
-    const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+    const [collapsed, setCollapsed] = useState<Record<string, boolean>>(INITIAL_COLLAPSED_SECTIONS);
 
     const toggleSection = useCallback((title: string) => {
         setCollapsed((prev) => ({ ...prev, [title]: !prev[title] }));
@@ -68,6 +264,18 @@ export default function BackgroundSettingsTab() {
                     const isEnabled = section.toggleKey
                         ? params[section.toggleKey] > 0.5
                         : true;
+                    const firstPositionControls = FIRST_POSITION_CONTROL_ORDER
+                        .map((slot) =>
+                            renderCapabilityControl({
+                                section,
+                                slot,
+                                params,
+                                updateParam,
+                            }),
+                        )
+                        .filter(Boolean);
+                    const displayedControls = getDisplayedControls(section);
+                    const hasVisibleControls = firstPositionControls.length > 0 || displayedControls.length > 0;
 
                     return (
                         <div key={section.title} className="rounded-lg">
@@ -108,7 +316,7 @@ export default function BackgroundSettingsTab() {
                             </div>
 
                             {/* Section body */}
-                            {!isCollapsed && section.controls.length > 0 && (
+                            {!isCollapsed && hasVisibleControls && (
                                 <div
                                     className={`px-2 pb-2 space-y-2 ${
                                         !isEnabled
@@ -116,32 +324,15 @@ export default function BackgroundSettingsTab() {
                                             : ''
                                     }`}
                                 >
-                                    {section.controls.map((ctrl) => (
-                                        <div key={ctrl.key} className="space-y-0.5">
-                                            <div className="flex justify-between">
-                                                <span className="text-industrial-muted">
-                                                    {ctrl.label}
-                                                </span>
-                                                <span className="font-mono text-industrial-muted/70 tabular-nums">
-                                                    {params[ctrl.key].toFixed(2)}
-                                                </span>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                min={ctrl.min}
-                                                max={ctrl.max}
-                                                step={ctrl.step}
-                                                value={params[ctrl.key]}
-                                                onChange={(e) =>
-                                                    updateParam(
-                                                        ctrl.key,
-                                                        parseFloat(e.target.value),
-                                                    )
-                                                }
-                                                className="w-full h-1 appearance-none rounded-full bg-white/8 accent-admin-accent cursor-pointer [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:bg-admin-accent [&::-webkit-slider-thumb]:shadow-[0_0_6px_var(--color-admin-accent)]"
-                                            />
-                                        </div>
-                                    ))}
+                                    {firstPositionControls}
+                                    {displayedControls.map((control) =>
+                                        renderLegacyControl({
+                                            sectionTitle: section.title,
+                                            control,
+                                            value: params[control.key],
+                                            onChange: (value) => updateParam(control.key, value),
+                                        }),
+                                    )}
                                 </div>
                             )}
                         </div>

@@ -26,15 +26,41 @@ React Component (TSX)
 
 | Efecto | Descripción | Controlable |
 |--------|-------------|-------------|
-| Nebulosa volumétrica | FBM (6 octavas), colores púrpura/cyan con hue shift | Speed, Intensity, Variation, Contrast, Density, Hue, Saturation, Color Variation, Color Shift |
-| Campo de estrellas | 3 capas con parallax temporal, twinkle aleatorio por estrella | Density, Brightness, Size, Twinkle, Parallax Depth |
-| Lensing gravitacional | Distorsión de coordenadas tipo lupa, movimiento autónomo Lissajous | Intensity, Size, Max Opacity, Auto Breathing, Breathing Speed, Drift Speed |
-| Aberración cromática | Separación rojo/azul cerca del punto de lensing | Intensity (toggle + slider) |
-| Mouse Nebula | Desplazamiento FBM de la nebulosa por posición del cursor | Intensity, Follow Delay |
-| Cursor Nebula | Glow púrpura FBM-modulado que sigue al cursor | Intensity, Radius, Follow Delay |
-| Cursor Halo | Punto dorado sutil en la posición del mouse | Intensity, Follow Delay |
-| Click Ring | Onda de choque expansiva al hacer click (8 slots simultáneos) | Intensity, Expansion Speed, Width, Duration, Color Hue, Saturation |
+| Nebulosa volumétrica | FBM (6 octavas), colores púrpura/cyan con hue shift | Primer bloque: Tone, Saturation, Brightness, Contrast, Intensity, Alpha. Luego: Speed, Variation, Density, Color Variation, Color Shift |
+| Campo de estrellas | 3 capas con parallax temporal, twinkle aleatorio por estrella | Primer bloque: Tone, Saturation, Brightness, Contrast, Alpha. Luego: Density, Size, Twinkle, Parallax Depth |
+| Lensing gravitacional | Distorsión de coordenadas tipo lupa, movimiento autónomo Lissajous | Primer bloque: Intensity, Alpha. Luego: Size, Max Opacity, Auto Breathing, Breathing Speed, Drift Speed |
+| Aberración cromática | Separación rojo/azul cerca del punto de lensing | Primer bloque: Tone, Saturation, Brightness, Contrast, Intensity, Alpha |
+| Mouse Nebula | Desplazamiento FBM de la nebulosa por posición del cursor | Primer bloque: Intensity. Luego: Follow Delay |
+| Cursor Nebula | Glow púrpura FBM-modulado que sigue al cursor | Primer bloque: Tone, Saturation, Brightness, Contrast, Intensity, Alpha. Luego: Radius, Follow Delay |
+| Cursor Halo | Punto dorado sutil en la posición del mouse | Primer bloque: Tone, Saturation, Brightness, Contrast, Intensity, Alpha. Luego: Follow Delay |
+| Click Ring | Onda de choque expansiva al hacer click (8 slots simultáneos) | Primer bloque: Tone, Saturation, Brightness, Contrast, Intensity, Alpha. Luego: Expansion Speed, Width, Duration |
 | Viñeta | Oscurecimiento en los bordes de la pantalla | Toggle on/off |
+
+---
+
+## Controles de primer bloque (estado final)
+
+El panel de shader usa un bloque inicial fijo, en este orden:
+
+1. **Tone**
+2. **Saturation**
+3. **Brightness**
+4. **Contrast**
+5. **Intensity**
+6. **Alpha**
+
+### Reglas de UI
+
+- Si un control está **soportado**, se muestra en ese bloque inicial.
+- Si un control es **alias** de un parámetro canónico existente, se muestra igual en el bloque inicial pero escribe sobre la key real del shader/store.
+- Si un control no aplica al grupo, se **omite por completo** de la UI.
+- Los controles no soportados **ya no se renderizan como carteles/cards deshabilitados**.
+
+### Blend Mode
+
+- **No hay controles de Blend Mode expuestos en la UI.**
+- Internamente, los uniforms de blend siguen existiendo, pero el comportamiento efectivo queda fijo en **`normal`**.
+- Valores persistidos viejos con blend distinto de `normal` se **ignoran / neutralizan** durante hidratación y durante upload al shader.
 
 ---
 
@@ -85,9 +111,9 @@ El shader maneja 4 fuentes de posición independientes, cada una con su propio s
 ## Fallback
 
 Si WebGL no está disponible o el shader falla:
-1. El canvas se oculta (`display: none`)
-2. El `body` mantiene `background-color: var(--color-industrial-bg)` (#05070a)
-3. La aplicación funciona normalmente sin efecto visual
+1. El loop WebGL no arranca o no se recompone.
+2. El canvas base sigue presente con `background-color: var(--color-industrial-bg)`.
+3. La aplicación continúa operativa con un fondo oscuro estático, sin UI extra de error.
 
 ---
 
@@ -105,7 +131,7 @@ Para cubrir el hueco entre el HTML inicial, el mount de React y el teardown por 
    - la señal real `webgl-first-draw` del canvas shader cuando existe,
    - múltiples `requestAnimationFrame` para garantizar un frame compuesto estable,
    - un tiempo mínimo visible conservador para no destapar tipografías/layout todavía inestables,
-   - y un timeout acotado de 5s para no dejar la HMI bloqueada si algo no resuelve.
+   - y un timeout acotado de 10s para no dejar la HMI bloqueada si algo no resuelve.
 4. Cuando la shell está lista, el shield hace fade-out, queda oculto/inerte y se reutiliza si después hay un reload por teclado.
 
 ### Secuencia de reload por teclado
@@ -134,11 +160,27 @@ El canvas pide el contexto con `alpha: false`. Eso vuelve opaco el backbuffer y 
 
 ## Panel de Control (Shader Tweaks)
 
-Botón de engranaje en la esquina inferior izquierda. Permite ajustar TODOS los parámetros en tiempo real:
-- Sliders con valores numéricos
-- Toggles on/off por sección
-- Secciones colapsables
-- Botón Reset para restaurar defaults
+Botón de engranaje en la esquina inferior izquierda. El panel permite ajustar parámetros visuales locales en tiempo real con estas reglas:
+
+- Sliders numéricos para controles soportados.
+- Toggles on/off por sección.
+- Secciones colapsables.
+- Botón **Reset** para restaurar defaults del store.
+- Los controles del bloque inicial respetan el orden `tone -> saturation -> brightness -> contrast -> intensity -> alpha`.
+- **No** se muestran placeholders/carteles para capacidades no soportadas.
+- **No** se expone ningún selector de **Blend Mode**.
+
+### Persistencia y migración
+
+- El storage `hmi-shader-params` sigue persistiendo `params` del shader.
+- Los `blendModes` ya **no** se persisten.
+- La hidratación siempre recompone el estado partiendo de `SHADER_DEFAULTS`.
+- Los blend modes runtime también se normalizan a `SHADER_BLEND_DEFAULTS`, así que valores viejos no alteran la salida visual final.
+
+### Aceptación visual final
+
+- La aceptación visual final de este slice requiere comparar el baseline provisional y validar ajustes representativos de `tone`, `saturation`, `brightness`, `contrast`, `intensity` y `alpha`.
+- **Estado actual**: aceptación visual final registrada el **2026-06-30** tras quitar cards deshabilitadas y remover los controles de blend; respuesta del usuario: **"Está bien"**.
 
 ---
 
@@ -154,6 +196,6 @@ Botón de engranaje en la esquina inferior izquierda. Permite ajustar TODOS los 
 
 5. **Auto-breathing**: la opacidad del lensing oscila orgánicamente usando múltiples senos con frecuencias irracionales, evitando repetición perceptible.
 
-6. **Click rings**: los clicks en el panel de tweaks (`data-shader-panel`) no generan rings.
+6. **Click rings**: actualmente los rings escuchan `pointerdown` global sobre `window`; también pueden dispararse desde clicks sobre UI, incluido el panel.
 
 7. **Uniforms JS-only**: parámetros como `haloLag`, `nebMouseLag`, `lensDriftSpeed` NO son uniforms del shader — se procesan en JavaScript y no aparecen en `UNIFORM_MAP`.
