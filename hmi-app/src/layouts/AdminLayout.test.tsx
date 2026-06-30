@@ -102,6 +102,15 @@ describe('AdminLayout', () => {
         document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 
+    it('navigates back to the viewer without logging out the admin session', () => {
+        render(<AdminLayout />);
+
+        fireEvent.click(screen.getByRole('button', { name: /ver viewer/i }));
+
+        expect(navigateMock).toHaveBeenCalledWith('/');
+        expect(logoutMock).not.toHaveBeenCalled();
+    });
+
     it('opens the global settings dialog from the admin toolbar and renders inactive sections separately', () => {
         render(<AdminLayout />);
 

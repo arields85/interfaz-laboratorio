@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { LogOut, Settings } from 'lucide-react';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { LogOut, Monitor, Settings } from 'lucide-react';
 import GlobalSettingsDialog from '../components/admin/GlobalSettingsDialog';
 import { HmiButton } from '../components/ui';
 import { requestShieldReveal } from '../hooks/useBootShield';
@@ -18,6 +18,7 @@ import { useAuthStore } from '../store/auth.store';
 
 export default function AdminLayout() {
     const location = useLocation();
+    const navigate = useNavigate();
     const activeSectionKey = getAdminSectionByPath(location.pathname)?.key;
     const [isNodeRedSettingsOpen, setIsNodeRedSettingsOpen] = useState(false);
     const session = useAuthStore((state) => state.session);
@@ -67,6 +68,14 @@ export default function AdminLayout() {
                         SESIÓN ADMIN ACTIVA · {session.user?.displayName ?? 'Admin'}
                     </span>
                     <div className="h-4 w-px bg-industrial-border" />
+                    <HmiButton
+                        variant="primary"
+                        size="sm"
+                        onClick={() => navigate('/')}
+                    >
+                        Ver viewer
+                        <Monitor size={14} />
+                    </HmiButton>
                     <HmiButton
                         variant="secondary"
                         size="sm"
