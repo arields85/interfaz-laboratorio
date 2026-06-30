@@ -45,16 +45,16 @@ export const DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS: Record<
     stopped: [100, 100],
 };
 export const DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS: ActivityAnalyticsSurfaceEffects = {
-    glow: 0,
+    glow: 72,
     blur: 0,
-    topCap: true,
+    topCap: false,
     topCapGlow: 100,
 };
 export const DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS: ActivityAnalyticsSurfaceEffects = {
-    glow: 100,
-    blur: 2.5,
-    topCap: false,
-    topCapGlow: 0,
+    glow: 75,
+    blur: 0,
+    topCap: true,
+    topCapGlow: 100,
 };
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS = [0, 50, 0] as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE = 'overlay' as const;

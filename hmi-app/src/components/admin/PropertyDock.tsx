@@ -2149,18 +2149,6 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                 aria-label={`${label} top cap`}
                                                             />
                                                         </label>
-                                                        <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                            <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Top cap glow</span>
-                                                            <AdminNumberInput
-                                                                value={surfaceEffects.topCapGlow}
-                                                                min={0}
-                                                                max={100}
-                                                                step={1}
-                                                                commitOnBlur
-                                                                ariaLabel={`${label} top cap glow`}
-                                                                onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'topCapGlow', nextValue)}
-                                                            />
-                                                        </label>
                                                     </div>
                                                 </div>
                                             );

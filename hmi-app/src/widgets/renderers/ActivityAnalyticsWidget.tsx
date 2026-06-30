@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { AlertTriangle, BarChart2, Loader2, PlugZap } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
@@ -121,6 +121,13 @@ const WIDGET_VALUE_TEXT_STYLE: CSSProperties = {
     letterSpacing: 'var(--tracking-widget-value-activity-analytics)',
 };
 
+const PROD_TREND_LATEST_VALUE_TEXT_STYLE: CSSProperties = {
+    fontFamily: 'var(--font-widget-value-activity-analytics-prod-trend)',
+    fontWeight: 'var(--font-weight-widget-value-activity-analytics-prod-trend)',
+    fontSize: 'var(--font-size-widget-value-activity-analytics-prod-trend)',
+    letterSpacing: 'var(--tracking-widget-value-activity-analytics-prod-trend)',
+};
+
 const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden px-5 pt-5 pb-3';
 const GROUPED_TOOLTIP_PANEL_CLASS = 'rounded-lg border border-industrial-border bg-[linear-gradient(135deg,rgba(9,13,22,0.57)_0%,rgba(17,24,39,0.52)_100%)] px-3 py-2 shadow-lg backdrop-blur-sm';
 const GROUPED_TOOLTIP_LABEL_CLASS = 'mb-1 whitespace-nowrap text-industrial-muted';
@@ -160,11 +167,14 @@ const ACTIVITY_ANALYTICS_STATE_KEYS = ['prod', 'setup', 'stopped'] as const;
 const SUMMARY_CHART_MAX_WIDTH_PX = 480;
 const COMPARISON_FALLBACK_LABEL = 'sin comparación';
 const INCOMPLETE_COVERAGE_LABEL = 'cobertura incompleta';
-const SUMMARY_RING_PROD_THICKNESS_MULTIPLIER = 1.5;
+const SUMMARY_RING_PROD_THICKNESS_MULTIPLIER = 1.75;
 const SUMMARY_RING_MIN_THICKNESS = 6;
 const SUMMARY_RING_MAX_THICKNESS = 12;
 const SUMMARY_DONUT_TOP_CAP_LENGTH_MULTIPLIER = 0.2;
+const SUMMARY_DONUT_TRAVELING_TOP_CAP_LENGTH_MULTIPLIER = 0.3;
+const SUMMARY_DONUT_TRAVELING_TOP_CAP_THICKNESS_MULTIPLIER = 1.25;
 const SUMMARY_DONUT_TOP_CAP_MIN_LENGTH = 1;
+const GROUPED_CURRENT_BAR_TOP_LABEL_OFFSET_PX = 8;
 const SUMMARY_DONUT_GEOMETRY_RULES = {
     chartHeightPx: {
         compactAxisBars: 236,
@@ -176,10 +186,6 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
             compress: 6,
             default: 8,
         },
-    },
-    centerLabelOffsetY: {
-        value: -4,
-        label: 15,
     },
     innerClearancePx: 6,
     minimumOuterRadiusPx: 32,
@@ -218,6 +224,9 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
         },
     },
 } as const;
+const SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX = 20;
+const SUMMARY_DONUT_CENTER_LABEL_FONT_SIZE_FALLBACK_PX = 11;
+const SUMMARY_DONUT_CENTER_LABEL_GAP_RATIO = 0.45;
 const TOP_REGION_SHARED_HEIGHT_RULES = {
     heightRatio: 0.66,
     fixedPx: 224,
@@ -328,6 +337,8 @@ type ActivityAnalyticsVisualPaletteEntry = Readonly<{
     highlight: string;
     topCapSolid: string;
     topCapHighlight: string;
+    donutTopCapSolid: string;
+    donutTopCapHighlight: string;
 }>;
 type ActivityAnalyticsVisualPalette = Readonly<Record<ActivityAnalyticsGradientStateKey, ActivityAnalyticsVisualPaletteEntry> & {
     noData: Readonly<{
@@ -1414,10 +1425,15 @@ function ProdTrendChart({
     const travelingGlowPathId = travelingGlowTarget ? `${gradientPrefix}-prod-trend-motion-path-${travelingGlowTarget.index}` : null;
     const travelingGlowDurationSeconds = resolveProdTrendTravelingGlowDurationSeconds(travelingGlowSegment);
     const travelingGlowDuration = `${travelingGlowDurationSeconds}s`;
-    const prefersReducedMotion = usePrefersReducedMotion();
-    const [travelingGlowCycleKey, setTravelingGlowCycleKey] = useState(0);
-    const [travelingGlowProgress, setTravelingGlowProgress] = useState(0);
-    const [isTravelingGlowPaused, setIsTravelingGlowPaused] = useState(false);
+    const {
+        prefersReducedMotion,
+        cycleKey: travelingGlowCycleKey,
+        progress: travelingGlowProgress,
+        isPaused: isTravelingGlowPaused,
+    } = useTravelingEffectCycle({
+        enabled: travelingGlowPathId !== null,
+        durationSeconds: travelingGlowDurationSeconds,
+    });
     const travelingGlowFrame = useMemo(
         () => resolveProdTrendTravelingGlowFrame(travelingGlowSegment, travelingGlowProgress),
         [travelingGlowProgress, travelingGlowSegment],
@@ -1427,48 +1443,6 @@ function ProdTrendChart({
         && !isTravelingGlowPaused
         && travelingGlowFrame !== null;
     const activeTravelingGlowFrame = showTravelingGlow ? travelingGlowFrame : null;
-
-    useEffect(() => {
-        if (!travelingGlowPathId || prefersReducedMotion) {
-            setTravelingGlowProgress(0);
-            setIsTravelingGlowPaused(false);
-            return undefined;
-        }
-
-        const travelDurationMs = travelingGlowDurationSeconds * 1000;
-        const randomPauseMs = resolveProdTrendTravelingGlowPauseMs();
-        const travelStartTime = performance.now();
-        let animationFrameId = 0;
-
-        setTravelingGlowProgress(0);
-        setIsTravelingGlowPaused(false);
-
-        const animateTravelingGlow = (now: number) => {
-            const nextProgress = clamp(now - travelStartTime, 0, travelDurationMs) / travelDurationMs;
-
-            setTravelingGlowProgress(nextProgress);
-
-            if (nextProgress < 1) {
-                animationFrameId = window.requestAnimationFrame(animateTravelingGlow);
-            }
-        };
-
-        animationFrameId = window.requestAnimationFrame(animateTravelingGlow);
-
-        const hideTimerId = window.setTimeout(() => {
-            setTravelingGlowProgress(1);
-            setIsTravelingGlowPaused(true);
-        }, travelDurationMs);
-        const restartTimerId = window.setTimeout(() => {
-            setTravelingGlowCycleKey((current) => current + 1);
-        }, travelDurationMs + randomPauseMs);
-
-        return () => {
-            window.cancelAnimationFrame(animationFrameId);
-            window.clearTimeout(hideTimerId);
-            window.clearTimeout(restartTimerId);
-        };
-    }, [prefersReducedMotion, travelingGlowCycleKey, travelingGlowDurationSeconds, travelingGlowPathId]);
 
     return (
         <>
@@ -1723,7 +1697,7 @@ function ProdTrendChart({
                             fill={prodGradientStops.endColor}
                             className="activity-analytics-prod-trend-latest-value-float"
                             style={{
-                                ...CHART_TYPOGRAPHY_STYLE,
+                                ...PROD_TREND_LATEST_VALUE_TEXT_STYLE,
                                 transformBox: 'fill-box',
                                 transformOrigin: 'center bottom',
                             }}
@@ -1965,6 +1939,10 @@ function resolveProdTrendTravelingGlowDurationSeconds(segment: Array<{ x: number
     }
 
     const pathLength = measureSmoothPathLength(segment);
+    return resolveTravelingEffectDurationSeconds(pathLength);
+}
+
+function resolveTravelingEffectDurationSeconds(pathLength: number) {
     return resolveAnimationDurationSecondsFromPathLength(
         pathLength,
         PROD_TREND_TRAVELING_GLOW_SPEED_PX_PER_SECOND,
@@ -1973,7 +1951,7 @@ function resolveProdTrendTravelingGlowDurationSeconds(segment: Array<{ x: number
     );
 }
 
-function resolveProdTrendTravelingGlowPauseMs(randomValue = Math.random()) {
+function resolveTravelingEffectPauseMs(randomValue = Math.random()) {
     return Math.round(
         PROD_TREND_TRAVELING_GLOW_PAUSE_MIN_MS
         + (randomValue * (PROD_TREND_TRAVELING_GLOW_PAUSE_MAX_MS - PROD_TREND_TRAVELING_GLOW_PAUSE_MIN_MS)),
@@ -2150,6 +2128,68 @@ function usePrefersReducedMotion() {
     return prefersReducedMotion;
 }
 
+function useTravelingEffectCycle({
+    enabled,
+    durationSeconds,
+}: {
+    enabled: boolean;
+    durationSeconds: number;
+}) {
+    const prefersReducedMotion = usePrefersReducedMotion();
+    const [cycleKey, setCycleKey] = useState(0);
+    const [progress, setProgress] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
+
+    useEffect(() => {
+        if (!enabled || prefersReducedMotion) {
+            setProgress(0);
+            setIsPaused(false);
+            return undefined;
+        }
+
+        const travelDurationMs = durationSeconds * 1000;
+        const randomPauseMs = resolveTravelingEffectPauseMs();
+        const travelStartTime = performance.now();
+        let animationFrameId = 0;
+
+        setProgress(0);
+        setIsPaused(false);
+
+        const animateTravelingEffect = (now: number) => {
+            const nextProgress = clamp(now - travelStartTime, 0, travelDurationMs) / travelDurationMs;
+
+            setProgress(nextProgress);
+
+            if (nextProgress < 1) {
+                animationFrameId = window.requestAnimationFrame(animateTravelingEffect);
+            }
+        };
+
+        animationFrameId = window.requestAnimationFrame(animateTravelingEffect);
+
+        const hideTimerId = window.setTimeout(() => {
+            setProgress(1);
+            setIsPaused(true);
+        }, travelDurationMs);
+        const restartTimerId = window.setTimeout(() => {
+            setCycleKey((current) => current + 1);
+        }, travelDurationMs + randomPauseMs);
+
+        return () => {
+            window.cancelAnimationFrame(animationFrameId);
+            window.clearTimeout(hideTimerId);
+            window.clearTimeout(restartTimerId);
+        };
+    }, [cycleKey, durationSeconds, enabled, prefersReducedMotion]);
+
+    return {
+        prefersReducedMotion,
+        cycleKey,
+        progress,
+        isPaused,
+    };
+}
+
 function resolveGroupedXAxisModel({
     grouped,
     width,
@@ -2214,6 +2254,10 @@ function resolveGroupedXAxisModel({
 
 function isGroupedBucketPartial(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
     return bucket.isInProgress || bucket.hasInProgressContribution === true;
+}
+
+function isGroupedBucketMarkedInProgress(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {
+    return /\(\s*en curso\s*\)/i.test(bucket.label);
 }
 
 function resolveTopRegionComparisonColumnWidth(containerWidth: number): number {
@@ -2534,6 +2578,11 @@ const SummaryPanel = memo(function SummaryPanel({
 
 type ActivityAnalyticsSummaryData = ReturnType<typeof computeActivityAnalytics>['analytics'];
 
+type SummaryCenterLabelLayout = {
+    valueY: number;
+    labelY: number;
+};
+
 function createSummaryDisplayModel(
     analytics: ActivityAnalyticsSummaryData,
     visualPalette: ActivityAnalyticsVisualPalette,
@@ -2578,7 +2627,7 @@ function createSummaryDetailRows(
 
     return [
         buildDetailRow('prod', 'Producción', analytics.durationsMs.prod, visualPalette.prod.initialSolid),
-        buildDetailRow('setup', 'Setup', analytics.durationsMs.setup, visualPalette.setup.initialSolid),
+        buildDetailRow('setup', 'Setup', analytics.durationsMs.setup, visualPalette.setup.solid),
         buildDetailRow('stopped', 'Detenida', analytics.durationsMs.stopped, visualPalette.stopped.initialSolid),
         {
             key: 'coverage',
@@ -2772,12 +2821,12 @@ const GroupStatusLegend = memo(function GroupStatusLegend({
 }) {
     return (
         <div className={compact ? 'flex items-center gap-2 normal-case' : 'flex items-center gap-3 normal-case'} data-testid="activity-analytics-groups-header-legend">
-            {[
-                { key: 'stopped' as const, label: 'Detenida', color: visualPalette.stopped.initialSolid },
-                { key: 'setup' as const, label: 'Setup', color: visualPalette.setup.initialSolid },
-                { key: 'prod' as const, label: 'Prod.', color: visualPalette.prod.initialSolid },
-                { key: 'noData' as const, label: 'Cobertura incompleta', color: visualPalette.noData.solid },
-            ].map((item) => (
+                {[
+                    { key: 'stopped' as const, label: 'Detenida', color: visualPalette.stopped.initialSolid },
+                    { key: 'setup' as const, label: 'Setup', color: visualPalette.setup.solid },
+                    { key: 'prod' as const, label: 'Prod.', color: visualPalette.prod.initialSolid },
+                    { key: 'noData' as const, label: 'Cobertura incompleta', color: visualPalette.noData.solid },
+                ].map((item) => (
                 <span key={item.key} className={compact ? 'flex items-center gap-1 whitespace-nowrap text-industrial-text' : 'flex items-center gap-1.5 whitespace-nowrap text-industrial-text'}>
                     <span
                         aria-hidden="true"
@@ -2899,8 +2948,12 @@ function createActivityAnalyticsPaletteEntry(
     gradientAlpha: readonly [number, number],
     highlightMixPercent: number,
 ): ActivityAnalyticsVisualPaletteEntry {
-    const [, end] = gradient;
+    const [start, end] = gradient;
     const solid = withAlpha(end, gradientAlpha[1]);
+    const topCapSolid = end;
+    const topCapHighlight = `color-mix(in srgb, ${end} ${highlightMixPercent}%, white)`;
+    const donutTopCapSolid = start;
+    const donutTopCapHighlight = `color-mix(in srgb, ${start} ${highlightMixPercent}%, white)`;
 
     return {
         gradient,
@@ -2908,9 +2961,25 @@ function createActivityAnalyticsPaletteEntry(
         initialSolid: withAlpha(gradient[0], gradientAlpha[0]),
         solid,
         highlight: `color-mix(in srgb, ${solid} ${highlightMixPercent}%, white)`,
-        topCapSolid: end,
-        topCapHighlight: `color-mix(in srgb, ${end} ${highlightMixPercent}%, white)`,
+        topCapSolid,
+        topCapHighlight,
+        donutTopCapSolid,
+        donutTopCapHighlight,
     };
+}
+
+function resolveGroupedTopCapSolid(
+    stateKey: ActivityAnalyticsGradientStateKey,
+    paletteEntry: ActivityAnalyticsVisualPaletteEntry,
+): string {
+    return stateKey === 'setup' ? paletteEntry.topCapSolid : paletteEntry.donutTopCapSolid;
+}
+
+function resolveGroupedTopCapHighlight(
+    stateKey: ActivityAnalyticsGradientStateKey,
+    paletteEntry: ActivityAnalyticsVisualPaletteEntry,
+): string {
+    return stateKey === 'setup' ? paletteEntry.topCapHighlight : paletteEntry.donutTopCapHighlight;
 }
 
 function getVisualGradientStops(
@@ -2953,6 +3022,7 @@ function SummaryBarsChart({
 }) {
     const gradientPrefix = useId().replace(/:/g, '-');
     const glowFilterId = `${gradientPrefix}-summary-glow`;
+    const travelingTopCapGlowFilterId = `${gradientPrefix}-summary-top-cap-traveling-glow`;
     const geometry = resolveSummaryDonutGeometry({
         width,
         height,
@@ -2989,7 +3059,7 @@ function SummaryBarsChart({
         gapLength,
     });
     const detailPanelX = margin.left + donutRegionWidth + detailGap;
-    const donutTopCaps = donutEffects.topCap
+    const staticDonutTopCaps = donutEffects.topCap
         ? renderedSegments
             .map(({ bar, dashArray, dashOffset }) => createSummaryTopCapSegment({
                 bar,
@@ -2999,6 +3069,46 @@ function SummaryBarsChart({
             }))
             .filter((segment): segment is NonNullable<typeof segment> => segment !== null)
         : [];
+    const donutTravelingTopCapDurationSeconds = resolveTravelingEffectDurationSeconds(circumference);
+    const {
+        prefersReducedMotion,
+        cycleKey: donutTravelingTopCapCycleKey,
+        progress: donutTravelingTopCapProgress,
+        isPaused: isDonutTravelingTopCapPaused,
+    } = useTravelingEffectCycle({
+        enabled: donutEffects.topCap && renderedSegments.length > 0,
+        durationSeconds: donutTravelingTopCapDurationSeconds,
+    });
+    const movingDonutTopCap = useMemo(
+        () => resolveSummaryTravelingTopCapFrame({
+            renderedSegments,
+            cycleKey: donutTravelingTopCapCycleKey,
+            progress: donutTravelingTopCapProgress,
+            ringThickness,
+            prodRingThickness,
+        }),
+        [donutTravelingTopCapCycleKey, donutTravelingTopCapProgress, prodRingThickness, renderedSegments, ringThickness],
+    );
+    const staticDonutTopCapFrame = useMemo(() => resolveSummaryStaticTopCapGlowFrame(), []);
+    const showMovingDonutTopCap = donutEffects.topCap
+        && !prefersReducedMotion
+        && !isDonutTravelingTopCapPaused
+        && movingDonutTopCap !== null;
+    const centerValueRef = useRef<SVGTextElement | null>(null);
+    const centerLabelRef = useRef<SVGTextElement | null>(null);
+    const [centerLabelLayout, setCenterLabelLayout] = useState<SummaryCenterLabelLayout>(() => resolveSummaryCenterLabelLayout({
+        valueFontSizePx: SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX,
+        labelFontSizePx: SUMMARY_DONUT_CENTER_LABEL_FONT_SIZE_FALLBACK_PX,
+    }));
+
+    useLayoutEffect(() => {
+        const nextLayout = resolveSummaryCenterLabelLayout({
+            valueFontSizePx: readSvgTextFontSizePx(centerValueRef.current, SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX),
+            labelFontSizePx: readSvgTextFontSizePx(centerLabelRef.current, SUMMARY_DONUT_CENTER_LABEL_FONT_SIZE_FALLBACK_PX),
+        });
+
+        setCenterLabelLayout((currentLayout) => areSummaryCenterLabelLayoutsEqual(currentLayout, nextLayout) ? currentLayout : nextLayout);
+    });
 
     return (
         <svg
@@ -3019,8 +3129,24 @@ function SummaryBarsChart({
                     id: glowFilterId,
                     glow: donutEffects.glow,
                     blur: donutEffects.blur,
-                    bounds: { x: '-18%', y: '-18%', width: '136%', height: '136%' },
+                    bounds: { x: '-60%', y: '-60%', width: '220%', height: '220%' },
+                    profile: 'layered-aura',
                 })}
+                <filter id={travelingTopCapGlowFilterId} x="-140%" y="-140%" width="380%" height="380%">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="outer-blur" />
+                    <feColorMatrix
+                        in="outer-blur"
+                        result="outer-bloom"
+                        type="matrix"
+                        values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1.45 0"
+                    />
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="inner-blur" />
+                    <feMerge>
+                        <feMergeNode in="outer-bloom" />
+                        <feMergeNode in="inner-blur" />
+                        <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                </filter>
                 {bars.map((bar) => {
                     const gradientStops = visualPalette[bar.key as ActivityAnalyticsGradientStateKey].gradient;
                     const gradientAlpha = visualPalette[bar.key as ActivityAnalyticsGradientStateKey].gradientAlpha;
@@ -3041,20 +3167,12 @@ function SummaryBarsChart({
                     );
                 })}
                 {bars.map((bar) => {
-                    const gradientStops = visualPalette[bar.key as ActivityAnalyticsGradientStateKey].gradient;
-                    const visualGradientStops = bar.key === 'prod'
-                        ? {
-                            startColor: gradientStops[0],
-                            startOpacity: 1,
-                            endColor: gradientStops[1],
-                            endOpacity: 1,
-                        }
-                        : getVisualGradientStops(gradientStops, [100, 100]);
+                    const topCapPalette = visualPalette[bar.key as ActivityAnalyticsGradientStateKey];
 
                     return (
                         <linearGradient key={`${bar.key}-top-cap`} id={`${gradientPrefix}-${bar.key}-top-cap-gradient`} x1="0" y1="0" x2="1" y2="1">
-                            <stop offset="0%" stopColor={visualGradientStops.startColor} stopOpacity={1} />
-                            <stop offset="100%" stopColor={visualGradientStops.endColor} stopOpacity={1} />
+                            <stop offset="0%" stopColor={topCapPalette.donutTopCapHighlight} stopOpacity={1} />
+                            <stop offset="100%" stopColor={topCapPalette.donutTopCapSolid} stopOpacity={1} />
                         </linearGradient>
                     );
                 })}
@@ -3090,24 +3208,56 @@ function SummaryBarsChart({
                         />
                     );
                 })}
-                {donutTopCaps.map((segment) => (
-                    <circle
-                        key={`summary-top-cap-${segment.key}`}
-                        cx={centerX}
-                        cy={centerY}
-                        r={radius}
-                        fill="none"
-                        stroke={`url(#${gradientPrefix}-${segment.key}-top-cap-gradient)`}
-                        strokeWidth={segment.key === 'prod' ? prodRingThickness : ringThickness}
-                        strokeDasharray={segment.dashArray}
-                        strokeDashoffset={segment.dashOffset}
-                        strokeLinecap="butt"
-                        transform={`rotate(-90 ${centerX} ${centerY})`}
-                        style={{ filter: buildTopCapDropShadow(visualPalette[segment.key].topCapSolid, donutEffects.topCapGlow) }}
-                        data-testid="activity-analytics-summary-top-cap"
+                {!showMovingDonutTopCap && prefersReducedMotion && staticDonutTopCaps.map((segment) => (
+                    <g
+                        key={`summary-static-top-cap-${segment.key}`}
+                        pointerEvents="none"
+                        aria-hidden="true"
+                        data-testid="activity-analytics-summary-static-top-cap"
                         data-segment-key={segment.key}
-                    />
+                        style={{ mixBlendMode: 'screen' }}
+                    >
+                        {renderSummaryTopCapGlowStack({
+                            centerX,
+                            centerY,
+                            radius,
+                            gradientPrefix,
+                            segment,
+                            frame: staticDonutTopCapFrame,
+                            filterId: travelingTopCapGlowFilterId,
+                            solidColor: visualPalette[segment.key].donutTopCapSolid,
+                            highlightColor: visualPalette[segment.key].donutTopCapHighlight,
+                        })}
+                    </g>
                 ))}
+                {showMovingDonutTopCap && movingDonutTopCap ? (
+                    <g
+                        key={`summary-traveling-top-cap-${donutTravelingTopCapCycleKey}`}
+                        pointerEvents="none"
+                        aria-hidden="true"
+                        data-testid="activity-analytics-summary-top-cap"
+                        data-segment-key={movingDonutTopCap.key}
+                        data-direction={movingDonutTopCap.direction}
+                        data-route-step={movingDonutTopCap.routeStep}
+                        data-route-count={movingDonutTopCap.routeCount}
+                        data-route-index={movingDonutTopCap.routeIndex}
+                        data-cycle-key={donutTravelingTopCapCycleKey}
+                        data-duration={`${donutTravelingTopCapDurationSeconds}s`}
+                        style={{ mixBlendMode: 'screen' }}
+                    >
+                        {renderSummaryTopCapGlowStack({
+                            centerX,
+                            centerY,
+                            radius,
+                            gradientPrefix,
+                            segment: movingDonutTopCap,
+                            frame: movingDonutTopCap.frame,
+                            filterId: travelingTopCapGlowFilterId,
+                            solidColor: visualPalette[movingDonutTopCap.key].donutTopCapSolid,
+                            highlightColor: visualPalette[movingDonutTopCap.key].donutTopCapHighlight,
+                        })}
+                    </g>
+                ) : null}
 
                 <circle
                     cx={centerX}
@@ -3115,26 +3265,35 @@ function SummaryBarsChart({
                     r={Math.max(radius - (prodRingThickness / 2) - SUMMARY_DONUT_GEOMETRY_RULES.innerClearancePx, 1)}
                     fill="transparent"
                 />
-                <text
-                    x={centerX}
-                    y={centerY + SUMMARY_DONUT_GEOMETRY_RULES.centerLabelOffsetY.value}
-                    textAnchor="middle"
-                    fill="var(--color-industrial-text)"
-                    style={WIDGET_VALUE_TEXT_STYLE}
-                    data-testid="activity-analytics-summary-total-value"
+                <g
+                    data-testid="activity-analytics-summary-center-label-group"
+                    transform={`translate(${centerX} ${centerY})`}
                 >
-                    {centerValue}
-                </text>
-                <text
-                    x={centerX}
-                    y={centerY + SUMMARY_DONUT_GEOMETRY_RULES.centerLabelOffsetY.label}
-                    textAnchor="middle"
-                    fill="var(--color-industrial-muted)"
-                    style={GENERAL_TYPOGRAPHY_STYLE}
-                    data-testid="activity-analytics-summary-total-label"
-                >
-                    {centerLabel}
-                </text>
+                    <text
+                        ref={centerValueRef}
+                        x={0}
+                        y={centerLabelLayout.valueY}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill="var(--color-industrial-text)"
+                        style={WIDGET_VALUE_TEXT_STYLE}
+                        data-testid="activity-analytics-summary-total-value"
+                    >
+                        {centerValue}
+                    </text>
+                    <text
+                        ref={centerLabelRef}
+                        x={0}
+                        y={centerLabelLayout.labelY}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill="var(--color-industrial-muted)"
+                        style={GENERAL_TYPOGRAPHY_STYLE}
+                        data-testid="activity-analytics-summary-total-label"
+                    >
+                        {centerLabel}
+                    </text>
+                </g>
             </g>
 
             <g data-testid="activity-analytics-summary-details" data-layout="centered-column" transform={`translate(${detailPanelX} ${detailBlockTop})`}>
@@ -3182,6 +3341,40 @@ function SummaryBarsChart({
     );
 }
 
+function readSvgTextFontSizePx(element: SVGTextElement | null, fallbackPx: number): number {
+    if (!element || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return fallbackPx;
+    }
+
+    const computedFontSize = window.getComputedStyle(element).fontSize;
+    const parsedFontSize = Number.parseFloat(computedFontSize);
+
+    return Number.isFinite(parsedFontSize) && parsedFontSize > 0 ? parsedFontSize : fallbackPx;
+}
+
+function resolveSummaryCenterLabelLayout({
+    valueFontSizePx,
+    labelFontSizePx,
+}: {
+    valueFontSizePx: number;
+    labelFontSizePx: number;
+}): SummaryCenterLabelLayout {
+    const gapPx = Math.max(2, labelFontSizePx * SUMMARY_DONUT_CENTER_LABEL_GAP_RATIO);
+
+    return {
+        valueY: -((labelFontSizePx + gapPx) / 2),
+        labelY: (valueFontSizePx + gapPx) / 2,
+    };
+}
+
+function areSummaryCenterLabelLayoutsEqual(
+    currentLayout: SummaryCenterLabelLayout,
+    nextLayout: SummaryCenterLabelLayout,
+): boolean {
+    return Math.abs(currentLayout.valueY - nextLayout.valueY) < 0.01
+        && Math.abs(currentLayout.labelY - nextLayout.labelY) < 0.01;
+}
+
 function GroupedStackedBarsChart({
     grouped,
     width,
@@ -3203,6 +3396,7 @@ function GroupedStackedBarsChart({
     const [hoverInfo, setHoverInfo] = useState<{ index: number; x: number } | null>(null);
     const gradientPrefix = useId().replace(/:/g, '-');
     const groupedGlowFilterId = `${gradientPrefix}-grouped-glow`;
+    const groupedTravelingTopCapGlowFilterId = `${gradientPrefix}-grouped-current-top-cap-traveling-glow`;
     const { chartHeight: height, chartMargin, productivityLabelClearanceTop } = chartLayout;
     const margin = {
         top: chartMargin.top + productivityLabelClearanceTop,
@@ -3245,6 +3439,45 @@ function GroupedStackedBarsChart({
     const usablePlotWidth = Math.max(plotWidth - (2 * horizontalPadding), 1);
     const usableSlotWidth = grouped.length > 0 ? usablePlotWidth / grouped.length : usablePlotWidth;
     const centerStep = usableSlotWidth;
+    const currentPartialBucketKey = useMemo(() => {
+        for (let index = grouped.length - 1; index >= 0; index -= 1) {
+            const bucket = grouped[index];
+
+            if (isGroupedBucketPartial(bucket) && isGroupedBucketMarkedInProgress(bucket)) {
+                return bucket.bucketKey;
+            }
+        }
+
+        return null;
+    }, [grouped]);
+    const currentPartialTrackHeight = useMemo(() => {
+        if (!currentPartialBucketKey) {
+            return 0;
+        }
+
+        const currentPartialBucket = grouped.find((bucket) => bucket.bucketKey === currentPartialBucketKey);
+
+        if (!currentPartialBucket) {
+            return 0;
+        }
+
+        const trackDurationMs = currentPartialBucket.expectedDurationMs > 0
+            ? currentPartialBucket.expectedDurationMs
+            : resolveGroupedChartDomainDurationMs(currentPartialBucket);
+
+        return (trackDurationMs / maxDurationMs) * plotHeight;
+    }, [currentPartialBucketKey, grouped, maxDurationMs, plotHeight]);
+    const groupedTravelingTopCapDurationSeconds = resolveTravelingEffectDurationSeconds(Math.max(currentPartialTrackHeight, 1));
+    const {
+        prefersReducedMotion,
+        cycleKey: groupedTravelingTopCapCycleKey,
+        progress: groupedTravelingTopCapProgress,
+        isPaused: isGroupedTravelingTopCapPaused,
+    } = useTravelingEffectCycle({
+        enabled: groupedEffects.topCap && currentPartialBucketKey !== null && currentPartialTrackHeight > 0,
+        durationSeconds: groupedTravelingTopCapDurationSeconds,
+    });
+    const staticGroupedTopCapFrame = useMemo(() => resolveSummaryStaticTopCapGlowFrame(), []);
 
     const handleHoverChange = (index: number | null, x?: number) => {
         setHoveredIndex(index);
@@ -3259,7 +3492,8 @@ function GroupedStackedBarsChart({
                         id: groupedGlowFilterId,
                         glow: groupedEffects.glow,
                         blur: groupedEffects.blur,
-                        bounds: { x: '-20%', y: '-20%', width: '140%', height: '140%' },
+                        bounds: { x: '-60%', y: '-60%', width: '220%', height: '220%' },
+                        profile: 'layered-aura',
                     })}
                     {ACTIVITY_ANALYTICS_STATE_KEYS.map((stateKey) => {
                         const visualGradientStops = getVisualGradientStops(
@@ -3271,6 +3505,31 @@ function GroupedStackedBarsChart({
                             <linearGradient key={stateKey} id={`${gradientPrefix}-${stateKey}-gradient`} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="0%" stopColor={visualGradientStops.startColor} stopOpacity={visualGradientStops.startOpacity} />
                                 <stop offset="100%" stopColor={visualGradientStops.endColor} stopOpacity={visualGradientStops.endOpacity} />
+                            </linearGradient>
+                        );
+                    })}
+                    <filter id={groupedTravelingTopCapGlowFilterId} x="-140%" y="-140%" width="380%" height="380%">
+                        <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="outer-blur" />
+                        <feColorMatrix
+                            in="outer-blur"
+                            result="outer-bloom"
+                            type="matrix"
+                            values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1.45 0"
+                        />
+                        <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="inner-blur" />
+                        <feMerge>
+                            <feMergeNode in="outer-bloom" />
+                            <feMergeNode in="inner-blur" />
+                            <feMergeNode in="SourceGraphic" />
+                        </feMerge>
+                    </filter>
+                    {ACTIVITY_ANALYTICS_STATE_KEYS.map((stateKey) => {
+                        const topCapPalette = visualPalette[stateKey];
+
+                        return (
+                            <linearGradient key={`${stateKey}-group-top-cap`} id={`${gradientPrefix}-${stateKey}-group-top-cap-gradient`} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={resolveGroupedTopCapHighlight(stateKey, topCapPalette)} stopOpacity={1} />
+                                <stop offset="100%" stopColor={resolveGroupedTopCapSolid(stateKey, topCapPalette)} stopOpacity={1} />
                             </linearGradient>
                         );
                     })}
@@ -3312,9 +3571,35 @@ function GroupedStackedBarsChart({
                         .filter((segment) => segment.key !== 'noData' && segment.value > 0)
                         .map((segment) => ({
                             ...segment,
-                            topCapHeight: Math.min(5, Math.max(Math.min(segment.height - 0.75, segment.height * 0.2), 0)),
+                            topCapHeight: Math.max(Math.min(segment.height - 0.75, 3), 0),
                         }))
                         .filter((segment) => segment.topCapHeight > 0);
+                    const isCurrentPartialBucket = bucket.bucketKey === currentPartialBucketKey;
+                    const groupedTravelingTopCap = isCurrentPartialBucket
+                        ? resolveGroupedTravelingTopCapFrame({
+                            bucket,
+                            renderedSegments,
+                            x,
+                            barWidth,
+                            plotHeight,
+                            plotTop: margin.top,
+                            maxDurationMs,
+                            cycleKey: groupedTravelingTopCapCycleKey,
+                            progress: groupedTravelingTopCapProgress,
+                        })
+                        : null;
+                    const showMovingGroupedTopCap = isCurrentPartialBucket
+                        && groupedEffects.topCap
+                        && !prefersReducedMotion
+                        && !isGroupedTravelingTopCapPaused
+                        && groupedTravelingTopCap !== null;
+                    const showStaticGroupedTopCap = isCurrentPartialBucket
+                        && groupedEffects.topCap
+                        && prefersReducedMotion
+                        && groupedTravelingTopCap !== null;
+                    const productivityLabelY = isCurrentPartialBucket
+                        ? Math.max(margin.top - GROUPED_CURRENT_BAR_TOP_LABEL_OFFSET_PX, 14)
+                        : Math.max(currentY - 8, 14);
 
                     return (
                         <g key={bucket.bucketKey} data-testid="activity-analytics-group-stack">
@@ -3349,7 +3634,7 @@ function GroupedStackedBarsChart({
                                     data-segment-key={segment.key}
                                 />
                             ))}
-                            {groupedEffects.topCap && topCapSegments.map((segment) => (
+                            {groupedEffects.topCap && !isCurrentPartialBucket && topCapSegments.map((segment) => (
                                 <rect
                                     key={`${bucket.bucketKey}-${segment.key}-top-cap`}
                                     x={topCapX}
@@ -3357,23 +3642,79 @@ function GroupedStackedBarsChart({
                                     width={topCapWidth}
                                     height={segment.topCapHeight}
                                     rx={0}
-                                    fill={visualPalette[segment.key as ActivityAnalyticsGradientStateKey].topCapHighlight}
+                                    fill={resolveGroupedTopCapHighlight(
+                                        segment.key as ActivityAnalyticsGradientStateKey,
+                                        visualPalette[segment.key as ActivityAnalyticsGradientStateKey],
+                                    )}
                                     style={{ filter: buildTopCapDropShadow(
-                                        visualPalette[segment.key as ActivityAnalyticsGradientStateKey].topCapSolid,
+                                        resolveGroupedTopCapSolid(
+                                            segment.key as ActivityAnalyticsGradientStateKey,
+                                            visualPalette[segment.key as ActivityAnalyticsGradientStateKey],
+                                        ),
                                         groupedEffects.topCapGlow,
                                     ) }}
                                     data-testid="activity-analytics-group-top-cap"
                                     data-segment-key={segment.key}
                                 />
                             ))}
+                            {showStaticGroupedTopCap && groupedTravelingTopCap ? (
+                                <g
+                                    pointerEvents="none"
+                                    aria-hidden="true"
+                                    data-testid="activity-analytics-group-current-top-cap"
+                                    data-segment-key={groupedTravelingTopCap.key}
+                                    data-direction="bottom-to-top"
+                                    data-motion="static"
+                                    data-track-y={groupedTravelingTopCap.trackY.toFixed(2)}
+                                    data-track-height={groupedTravelingTopCap.trackHeight.toFixed(2)}
+                                    data-cap-height={groupedTravelingTopCap.height.toFixed(2)}
+                                    style={{ mixBlendMode: 'screen' }}
+                                >
+                                    {renderGroupedTopCapGlowStack({
+                                        gradientPrefix,
+                                        segment: groupedTravelingTopCap,
+                                        frame: staticGroupedTopCapFrame,
+                                        filterId: groupedTravelingTopCapGlowFilterId,
+                                        solidColor: resolveGroupedTopCapSolid(groupedTravelingTopCap.key, visualPalette[groupedTravelingTopCap.key]),
+                                        highlightColor: resolveGroupedTopCapHighlight(groupedTravelingTopCap.key, visualPalette[groupedTravelingTopCap.key]),
+                                    })}
+                                </g>
+                            ) : null}
+                            {showMovingGroupedTopCap && groupedTravelingTopCap ? (
+                                <g
+                                    key={`group-traveling-top-cap-${bucket.bucketKey}-${groupedTravelingTopCapCycleKey}`}
+                                    pointerEvents="none"
+                                    aria-hidden="true"
+                                    data-testid="activity-analytics-group-current-top-cap"
+                                    data-segment-key={groupedTravelingTopCap.key}
+                                    data-direction="bottom-to-top"
+                                    data-motion="traveling"
+                                    data-cycle-key={groupedTravelingTopCapCycleKey}
+                                    data-duration={`${groupedTravelingTopCapDurationSeconds}s`}
+                                    data-track-y={groupedTravelingTopCap.trackY.toFixed(2)}
+                                    data-track-height={groupedTravelingTopCap.trackHeight.toFixed(2)}
+                                    data-cap-height={groupedTravelingTopCap.height.toFixed(2)}
+                                    style={{ mixBlendMode: 'screen' }}
+                                >
+                                    {renderGroupedTopCapGlowStack({
+                                        gradientPrefix,
+                                        segment: groupedTravelingTopCap,
+                                        frame: groupedTravelingTopCap.frame,
+                                        filterId: groupedTravelingTopCapGlowFilterId,
+                                        solidColor: resolveGroupedTopCapSolid(groupedTravelingTopCap.key, visualPalette[groupedTravelingTopCap.key]),
+                                        highlightColor: resolveGroupedTopCapHighlight(groupedTravelingTopCap.key, visualPalette[groupedTravelingTopCap.key]),
+                                    })}
+                                </g>
+                            ) : null}
 
                             <text
                                 x={x + (barWidth / 2)}
-                                y={Math.max(currentY - 8, 14)}
+                                y={productivityLabelY}
                                 textAnchor="middle"
                                 fill="var(--color-industrial-text)"
                                 style={CHART_TYPOGRAPHY_STYLE}
                                 data-testid="activity-analytics-group-productivity"
+                                data-label-placement={isCurrentPartialBucket ? 'top-row' : 'bar-top'}
                             >
                             {resolveGroupedVisibleProductivityLabel(bucket)}
                             </text>
@@ -3679,24 +4020,79 @@ function buildTopCapDropShadow(color: string, intensity: number): string | undef
     return `drop-shadow(0 0 ${2 + (intensity / 25)}px ${color})`;
 }
 
+type SurfaceEffectsFilterProfile = 'standard' | 'layered-aura';
+
 function renderSurfaceEffectsFilter({
     id,
     glow,
     blur,
     bounds,
+    profile = 'standard',
 }: {
     id: string;
     glow: number;
     blur: number;
     bounds: { x: string; y: string; width: string; height: string };
+    profile?: SurfaceEffectsFilterProfile;
 }) {
     if (glow <= 0 && blur <= 0) {
         return null;
     }
 
+    if (profile === 'layered-aura' && glow > 0) {
+        const normalizedGlow = glow / 100;
+        const effectiveBlur = Math.max(blur, 0.35);
+        const strongGlowBoost = Math.max(0, normalizedGlow - 0.55);
+        const coreBlur = Number((
+            effectiveBlur
+            + (normalizedGlow * 0.65)
+            + (Math.pow(strongGlowBoost, 1.35) * 2.4)
+        ).toFixed(2));
+        const auraBlur = Number((
+            effectiveBlur
+            + 1
+            + (Math.pow(normalizedGlow, 1.4) * 4.75)
+            + (Math.pow(strongGlowBoost, 1.6) * 10.5)
+        ).toFixed(2));
+        const coreAlpha = Number((
+            1.05
+            + (normalizedGlow * 0.95)
+            + (Math.pow(strongGlowBoost, 1.25) * 0.42)
+        ).toFixed(2));
+        const auraAlpha = Number((
+            0.08
+            + (Math.pow(normalizedGlow, 1.3) * 0.72)
+            + (Math.pow(strongGlowBoost, 1.45) * 0.42)
+        ).toFixed(2));
+
+        return (
+            <filter id={id} x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height}>
+                <feGaussianBlur in="SourceGraphic" stdDeviation={coreBlur} result="surface-core-blur" />
+                <feColorMatrix
+                    in="surface-core-blur"
+                    result="surface-core-glow"
+                    type="matrix"
+                    values={`1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 ${coreAlpha} 0`}
+                />
+                <feGaussianBlur in="SourceGraphic" stdDeviation={auraBlur} result="surface-aura-blur" />
+                <feColorMatrix
+                    in="surface-aura-blur"
+                    result="surface-aura-glow"
+                    type="matrix"
+                    values={`1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 ${auraAlpha} 0`}
+                />
+                <feMerge result="surface-glow">
+                    <feMergeNode in="surface-aura-glow" />
+                    <feMergeNode in="surface-core-glow" />
+                </feMerge>
+                <feComposite in="SourceGraphic" in2="surface-glow" operator="over" />
+            </filter>
+        );
+    }
+
     return (
         <filter id={id} x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height}>
-            <feGaussianBlur stdDeviation={blur} result="surface-blur" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation={blur} result="surface-blur" />
             <feColorMatrix
                 in="surface-blur"
                 result="surface-glow"
@@ -3734,7 +4130,527 @@ function createSummaryTopCapSegment({
         key: bar.key as ActivityAnalyticsGradientStateKey,
         dashArray: `${capLength} 9999`,
         dashOffset: dashOffset - Math.max(visibleLength - capLength, 0),
+        strokeWidth,
     };
+}
+
+function renderSummaryTopCapGlowStack({
+    centerX,
+    centerY,
+    radius,
+    gradientPrefix,
+    segment,
+    frame,
+    filterId,
+    solidColor,
+    highlightColor,
+}: {
+    centerX: number;
+    centerY: number;
+    radius: number;
+    gradientPrefix: string;
+    segment: {
+        key: ActivityAnalyticsGradientStateKey;
+        dashArray: string;
+        dashOffset: number;
+        strokeWidth: number;
+    };
+    frame: {
+        auraOpacity: number;
+        auraFillOpacity: number;
+        auraRadius: number;
+        haloOpacity: number;
+        haloFillOpacity: number;
+        haloRadius: number;
+        coreOpacity: number;
+        coreRadius: number;
+    };
+    filterId: string;
+    solidColor: string;
+    highlightColor: string;
+}) {
+    const auraStrokeWidth = Number((segment.strokeWidth + ((frame.auraRadius - frame.coreRadius) * 0.9)).toFixed(2));
+    const haloStrokeWidth = Number((segment.strokeWidth + ((frame.haloRadius - frame.coreRadius) * 1.05)).toFixed(2));
+    const coreStrokeWidth = Number((segment.strokeWidth + Math.max(frame.coreRadius - 1.8, 0)).toFixed(2));
+    const coreHighlightStrokeWidth = Number((Math.max(segment.strokeWidth * 0.38, 1.2)).toFixed(2));
+    const coreStrokeOpacity = Number((0.6 + (Math.max(frame.coreOpacity - 0.62, 0) * 0.24)).toFixed(3));
+    const auraStrokeOpacity = Number(Math.min(frame.auraFillOpacity + 0.12, 0.52).toFixed(3));
+    const haloStrokeOpacity = Number(Math.min(frame.haloFillOpacity + 0.16, 0.72).toFixed(3));
+    const coreHighlightOpacity = Number(Math.min(0.82 + (Math.max(frame.coreOpacity - 0.78, 0) * 0.22), 0.96).toFixed(3));
+
+    return (
+        <>
+            <circle
+                cx={centerX}
+                cy={centerY}
+                r={radius}
+                fill="none"
+                stroke={`url(#${gradientPrefix}-${segment.key}-top-cap-gradient)`}
+                strokeWidth={auraStrokeWidth}
+                strokeDasharray={segment.dashArray}
+                strokeDashoffset={segment.dashOffset}
+                strokeLinecap="butt"
+                transform={`rotate(-90 ${centerX} ${centerY})`}
+                opacity={frame.auraOpacity}
+                strokeOpacity={auraStrokeOpacity}
+                filter={`url(#${filterId})`}
+                data-testid="activity-analytics-summary-top-cap-aura"
+            />
+            <circle
+                cx={centerX}
+                cy={centerY}
+                r={radius}
+                fill="none"
+                stroke={`url(#${gradientPrefix}-${segment.key}-top-cap-gradient)`}
+                strokeWidth={haloStrokeWidth}
+                strokeDasharray={segment.dashArray}
+                strokeDashoffset={segment.dashOffset}
+                strokeLinecap="butt"
+                transform={`rotate(-90 ${centerX} ${centerY})`}
+                opacity={frame.haloOpacity}
+                strokeOpacity={haloStrokeOpacity}
+                filter={`url(#${filterId})`}
+                data-testid="activity-analytics-summary-top-cap-halo"
+            />
+            <circle
+                cx={centerX}
+                cy={centerY}
+                r={radius}
+                fill="none"
+                stroke={`url(#${gradientPrefix}-${segment.key}-top-cap-gradient)`}
+                strokeWidth={coreStrokeWidth}
+                strokeDasharray={segment.dashArray}
+                strokeDashoffset={segment.dashOffset}
+                strokeLinecap="butt"
+                transform={`rotate(-90 ${centerX} ${centerY})`}
+                opacity={frame.coreOpacity}
+                strokeOpacity={1}
+                data-testid="activity-analytics-summary-top-cap-core"
+            />
+            <circle
+                cx={centerX}
+                cy={centerY}
+                r={radius}
+                fill="none"
+                stroke={highlightColor}
+                strokeWidth={coreHighlightStrokeWidth}
+                strokeDasharray={segment.dashArray}
+                strokeDashoffset={segment.dashOffset}
+                strokeLinecap="butt"
+                transform={`rotate(-90 ${centerX} ${centerY})`}
+                opacity={coreHighlightOpacity}
+                strokeOpacity={1}
+                data-testid="activity-analytics-summary-top-cap-core-highlight"
+            />
+            <circle
+                cx={centerX}
+                cy={centerY}
+                r={radius}
+                fill="none"
+                stroke={solidColor}
+                strokeWidth={Math.max(segment.strokeWidth, 1.15)}
+                strokeDasharray={segment.dashArray}
+                strokeDashoffset={segment.dashOffset}
+                strokeLinecap="butt"
+                transform={`rotate(-90 ${centerX} ${centerY})`}
+                opacity={frame.coreOpacity}
+                strokeOpacity={coreStrokeOpacity}
+                data-testid="activity-analytics-summary-top-cap-core-stroke"
+            />
+        </>
+    );
+}
+
+function renderGroupedTopCapGlowStack({
+    gradientPrefix,
+    segment,
+    frame,
+    filterId,
+    solidColor,
+    highlightColor,
+}: {
+    gradientPrefix: string;
+    segment: {
+        key: ActivityAnalyticsGradientStateKey;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+    frame: {
+        auraOpacity: number;
+        auraFillOpacity: number;
+        auraRadius: number;
+        haloOpacity: number;
+        haloFillOpacity: number;
+        haloRadius: number;
+        coreOpacity: number;
+        coreRadius: number;
+    };
+    filterId: string;
+    solidColor: string;
+    highlightColor: string;
+}) {
+    const auraInsetX = Math.max((frame.auraRadius - frame.coreRadius) * 0.45, 0);
+    const auraHeight = Number((segment.height + ((frame.auraRadius - frame.coreRadius) * 0.9)).toFixed(2));
+    const haloInsetX = Math.max((frame.haloRadius - frame.coreRadius) * 0.38, 0);
+    const haloHeight = Number((segment.height + ((frame.haloRadius - frame.coreRadius) * 1.05)).toFixed(2));
+    const coreHeight = Number((segment.height + Math.max(frame.coreRadius - 1.8, 0)).toFixed(2));
+    const coreHighlightHeight = Number(Math.max(segment.height * 0.38, 1.2).toFixed(2));
+    const coreStrokeOpacity = Number((0.6 + (Math.max(frame.coreOpacity - 0.62, 0) * 0.24)).toFixed(3));
+    const auraFillOpacity = Number(Math.min(frame.auraFillOpacity + 0.12, 0.52).toFixed(3));
+    const haloFillOpacity = Number(Math.min(frame.haloFillOpacity + 0.16, 0.72).toFixed(3));
+    const coreHighlightOpacity = Number(Math.min(0.82 + (Math.max(frame.coreOpacity - 0.78, 0) * 0.22), 0.96).toFixed(3));
+    const centeredRectY = (targetHeight: number) => Number((segment.y - ((targetHeight - segment.height) / 2)).toFixed(2));
+    const centeredRectX = (insetX: number) => Number((segment.x - insetX).toFixed(2));
+    const expandedWidth = (insetX: number) => Number((segment.width + (insetX * 2)).toFixed(2));
+    const topCapGradientId = `${gradientPrefix}-${segment.key}-group-top-cap-gradient`;
+
+    return (
+        <>
+            <rect
+                x={centeredRectX(auraInsetX)}
+                y={centeredRectY(auraHeight)}
+                width={expandedWidth(auraInsetX)}
+                height={auraHeight}
+                rx={0}
+                fill={`url(#${topCapGradientId})`}
+                opacity={frame.auraOpacity}
+                fillOpacity={auraFillOpacity}
+                filter={`url(#${filterId})`}
+                data-testid="activity-analytics-group-current-top-cap-aura"
+            />
+            <rect
+                x={centeredRectX(haloInsetX)}
+                y={centeredRectY(haloHeight)}
+                width={expandedWidth(haloInsetX)}
+                height={haloHeight}
+                rx={0}
+                fill={`url(#${topCapGradientId})`}
+                opacity={frame.haloOpacity}
+                fillOpacity={haloFillOpacity}
+                filter={`url(#${filterId})`}
+                data-testid="activity-analytics-group-current-top-cap-halo"
+            />
+            <rect
+                x={segment.x}
+                y={centeredRectY(coreHeight)}
+                width={segment.width}
+                height={coreHeight}
+                rx={0}
+                fill={`url(#${topCapGradientId})`}
+                opacity={frame.coreOpacity}
+                data-testid="activity-analytics-group-current-top-cap-core"
+            />
+            <rect
+                x={segment.x}
+                y={centeredRectY(coreHighlightHeight)}
+                width={segment.width}
+                height={coreHighlightHeight}
+                rx={0}
+                fill={highlightColor}
+                opacity={coreHighlightOpacity}
+                data-testid="activity-analytics-group-current-top-cap-core-highlight"
+            />
+            <rect
+                x={segment.x}
+                y={segment.y}
+                width={segment.width}
+                height={segment.height}
+                rx={0}
+                fill={solidColor}
+                opacity={frame.coreOpacity}
+                fillOpacity={coreStrokeOpacity}
+                data-testid="activity-analytics-group-current-top-cap-core-stroke"
+            />
+        </>
+    );
+}
+
+function resolveSummaryTravelingTopCapFrame({
+    renderedSegments,
+    cycleKey,
+    progress,
+    ringThickness,
+    prodRingThickness,
+}: {
+    renderedSegments: ReturnType<typeof buildActivityAnalyticsSummarySegments>;
+    cycleKey: number;
+    progress: number;
+    ringThickness: number;
+    prodRingThickness: number;
+}) {
+    if (renderedSegments.length === 0) {
+        return null;
+    }
+
+    const route = resolveSummaryTravelingTopCapRoute(
+        renderedSegments,
+        cycleKey,
+        progress,
+        ringThickness,
+        prodRingThickness,
+    );
+
+    if (route === null) {
+        return null;
+    }
+
+    const {
+        segment,
+        routeIndex,
+        routeStep,
+        routeCount,
+        direction,
+        visibleLength,
+        segmentStart,
+        segmentEnd,
+        localProgress,
+    } = route;
+    const { baseStrokeWidth, capLength } = route;
+    const travelStart = direction === 'forward'
+        ? segmentStart
+        : Math.max(segmentEnd - capLength, segmentStart);
+    const travelEnd = direction === 'forward'
+        ? Math.max(segmentEnd - capLength, segmentStart)
+        : segmentStart;
+    const capStartDistance = travelStart + ((travelEnd - travelStart) * localProgress);
+
+    return {
+        key: segment.bar.key as ActivityAnalyticsGradientStateKey,
+        dashArray: `${capLength} 9999`,
+        dashOffset: -capStartDistance,
+        strokeWidth: Number((baseStrokeWidth * SUMMARY_DONUT_TRAVELING_TOP_CAP_THICKNESS_MULTIPLIER).toFixed(2)),
+        direction,
+        routeStep,
+        routeCount,
+        routeIndex,
+        frame: resolveSummaryTopCapGlowFrame(localProgress),
+    };
+}
+
+function resolveGroupedTravelingTopCapFrame({
+    bucket,
+    renderedSegments,
+    x,
+    barWidth,
+    plotHeight,
+    plotTop,
+    maxDurationMs,
+    cycleKey,
+    progress,
+}: {
+    bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number];
+    renderedSegments: ReadonlyArray<{ key: string; y: number; height: number }>;
+    x: number;
+    barWidth: number;
+    plotHeight: number;
+    plotTop: number;
+    maxDurationMs: number;
+    cycleKey: number;
+    progress: number;
+}) {
+    const trackDurationMs = bucket.expectedDurationMs > 0
+        ? bucket.expectedDurationMs
+        : resolveGroupedChartDomainDurationMs(bucket);
+    const trackHeight = Math.max((trackDurationMs / maxDurationMs) * plotHeight, 0);
+
+    if (trackHeight <= 0) {
+        return null;
+    }
+
+    const trackY = plotTop + plotHeight - trackHeight;
+    const key = resolveGroupedTravelingTopCapStateKey(renderedSegments);
+    const height = Math.min(
+        Math.max(barWidth * SUMMARY_DONUT_TRAVELING_TOP_CAP_LENGTH_MULTIPLIER, SUMMARY_DONUT_TOP_CAP_MIN_LENGTH),
+        trackHeight,
+    );
+    const travelDistance = Math.max(trackHeight - height, 0);
+    const localProgress = clamp(progress, 0, 1);
+    const y = Number((trackY + ((1 - localProgress) * travelDistance)).toFixed(2));
+
+    return {
+        key,
+        x,
+        y,
+        width: barWidth,
+        height: Number(height.toFixed(2)),
+        trackY: Number(trackY.toFixed(2)),
+        trackHeight: Number(trackHeight.toFixed(2)),
+        frame: resolveSummaryTopCapGlowFrame(clamp((cycleKey % 2 === 0 ? progress : 1 - progress), 0, 1)),
+    };
+}
+
+function resolveGroupedTravelingTopCapStateKey(renderedSegments: ReadonlyArray<{ key: string; height: number }>): ActivityAnalyticsGradientStateKey {
+    const topVisibleSegment = [...renderedSegments]
+        .reverse()
+        .find((segment) => segment.key !== 'noData' && segment.height > 0);
+
+    if (topVisibleSegment?.key === 'setup' || topVisibleSegment?.key === 'stopped' || topVisibleSegment?.key === 'prod') {
+        return topVisibleSegment.key;
+    }
+
+    return 'prod';
+}
+
+export function resolveSummaryTravelingTopCapRoute(
+    renderedSegments: ReturnType<typeof buildActivityAnalyticsSummarySegments>,
+    cycleKey: number,
+    progress: number,
+    ringThickness: number,
+    prodRingThickness: number,
+) {
+    const visibleSegments = renderedSegments
+        .map((segment, index) => {
+            const visibleLength = parseSummaryVisibleStrokeLength(segment.dashArray);
+
+            if (!Number.isFinite(visibleLength) || visibleLength <= 0) {
+                return null;
+            }
+
+            const segmentStart = Math.max(0, -segment.dashOffset);
+            const baseStrokeWidth = segment.bar.key === 'prod' ? prodRingThickness : ringThickness;
+            const capLength = Math.min(
+                Math.max(baseStrokeWidth * SUMMARY_DONUT_TRAVELING_TOP_CAP_LENGTH_MULTIPLIER, SUMMARY_DONUT_TOP_CAP_MIN_LENGTH),
+                visibleLength,
+            );
+            const travelLength = Math.max(visibleLength - capLength, 0);
+
+            return {
+                segment,
+                routeIndex: index,
+                visibleLength,
+                baseStrokeWidth,
+                capLength,
+                travelLength,
+                progressWeight: travelLength > 0 ? travelLength : visibleLength,
+                segmentStart,
+                segmentEnd: segmentStart + visibleLength,
+            };
+        })
+        .filter((segment): segment is NonNullable<typeof segment> => segment !== null);
+
+    if (visibleSegments.length === 0) {
+        return null;
+    }
+
+    const normalizedCycleKey = Math.max(Math.trunc(cycleKey), 0);
+    const routeCount = visibleSegments.length;
+    const normalizedProgress = clamp(progress, 0, 1);
+    const anchorIndex = resolveDeterministicSegmentIndex(normalizedCycleKey, routeCount);
+    const routeStride = resolveSummaryTravelingRouteStride(routeCount, normalizedCycleKey);
+    const orderedRouteSegments = Array.from({ length: routeCount }, (_, routeStep) => {
+        const selectedVisibleIndex = routeCount > 1
+            ? (anchorIndex + (routeStep * routeStride)) % routeCount
+            : anchorIndex;
+
+        return visibleSegments[selectedVisibleIndex];
+    });
+    const totalProgressWeight = orderedRouteSegments.reduce((total, segment) => total + segment.progressWeight, 0);
+    let accumulatedProgress = 0;
+    const routedSegments = orderedRouteSegments.map((segment, routeStep) => {
+        const intervalLength = totalProgressWeight <= 0
+            ? 1 / routeCount
+            : segment.progressWeight / totalProgressWeight;
+        const stepProgressStart = accumulatedProgress;
+        const stepProgressEnd = routeStep === routeCount - 1
+            ? 1
+            : accumulatedProgress + intervalLength;
+        accumulatedProgress = stepProgressEnd;
+
+        return {
+            ...segment,
+            routeStep,
+            stepProgressStart,
+            stepProgressEnd,
+        };
+    });
+    const selectedRoute = routedSegments.find((segment) => normalizedProgress < segment.stepProgressEnd) ?? routedSegments.at(-1);
+
+    if (!selectedRoute) {
+        return null;
+    }
+
+    const localProgress = clamp(
+        (normalizedProgress - selectedRoute.stepProgressStart)
+        / Math.max(selectedRoute.stepProgressEnd - selectedRoute.stepProgressStart, Number.EPSILON),
+        0,
+        1,
+    );
+    const direction = (normalizedCycleKey + selectedRoute.routeStep) % 2 === 0 ? 'forward' : 'reverse';
+
+    return {
+        ...selectedRoute,
+        routeCount,
+        localProgress,
+        direction,
+    };
+}
+
+function resolveDeterministicSegmentIndex(cycleKey: number, segmentCount: number) {
+    if (segmentCount <= 1) {
+        return 0;
+    }
+
+    const hashedCycleKey = (Math.imul(cycleKey + 1, 1103515245) + 12345) >>> 0;
+
+    return hashedCycleKey % segmentCount;
+}
+
+function resolveSummaryTravelingRouteStride(segmentCount: number, cycleKey: number) {
+    if (segmentCount <= 2) {
+        return 1;
+    }
+
+    const preferredStride = Math.floor(segmentCount / 2) + 1 + (Math.max(Math.trunc(cycleKey), 0) % Math.max(segmentCount - 2, 1));
+
+    for (let offset = 0; offset < segmentCount; offset += 1) {
+        const candidate = ((preferredStride + offset - 1) % (segmentCount - 1)) + 1;
+
+        if (greatestCommonDivisor(candidate, segmentCount) === 1) {
+            return candidate;
+        }
+    }
+
+    return 1;
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+    let left = Math.abs(Math.trunc(a));
+    let right = Math.abs(Math.trunc(b));
+
+    while (right !== 0) {
+        const remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+
+    return Math.max(left, 1);
+}
+
+function resolveSummaryTopCapGlowFrame(progress: number) {
+    const trendFrame = resolveProdTrendTravelingGlowFrame([{ x: 0, y: 0 }, { x: 1, y: 0 }], progress);
+
+    return trendFrame ?? resolveSummaryStaticTopCapGlowFrame();
+}
+
+function resolveSummaryStaticTopCapGlowFrame() {
+    return resolveProdTrendTravelingGlowFrame([{ x: 0, y: 0 }, { x: 1, y: 0 }], 0.72) ?? {
+        x: 0,
+        y: 0,
+        auraOpacity: 0.34,
+        auraFillOpacity: 0.3,
+        auraRadius: 13.75,
+        haloOpacity: 0.7,
+        haloFillOpacity: 0.48,
+        haloRadius: 8.9,
+        coreOpacity: 1,
+        coreRadius: 3.05,
+    };
+}
+
+function parseSummaryVisibleStrokeLength(dashArray: string) {
+    return Number.parseFloat(dashArray.split(' ')[0] ?? '0');
 }
 
 function resolveGroupedVisibleDurationMs(bucket: ReturnType<typeof computeActivityAnalytics>['grouped'][number]) {

@@ -36,6 +36,20 @@ describe('designSettingsTypography', () => {
         });
     });
 
+    it('migrates chart typography overrides to the prod trend floating value token when missing', () => {
+        expect(normalizeStoredFontOverrides({
+            '--font-chart': 'IBMPlexMono',
+            '--font-weight-chart': '500',
+            '--font-size-chart': '14px',
+            '--tracking-chart': '0.4px',
+        })).toMatchObject({
+            '--font-widget-value-activity-analytics-prod-trend': 'IBMPlexMono',
+            '--font-weight-widget-value-activity-analytics-prod-trend': '500',
+            '--font-size-widget-value-activity-analytics-prod-trend': '14px',
+            '--tracking-widget-value-activity-analytics-prod-trend': '0.4px',
+        });
+    });
+
     it('resolves CSS values with the correct fallback stacks', () => {
         expect(resolveFontCssVariableValue('--font-system', 'Magistral')).toBe('"Magistral"');
         expect(resolveFontCssVariableValue('--font-mono', 'IBMPlexMono')).toBe('"IBMPlexMono"');

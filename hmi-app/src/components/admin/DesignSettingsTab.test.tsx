@@ -29,6 +29,7 @@ describe('DesignSettingsTab typography controls', () => {
         expect(screen.getByText('TEXTOS WIDGET GRÁFICOS')).toBeInTheDocument();
         expect(screen.getByText('TÍTULOS DE DASHBOARD')).toBeInTheDocument();
         expect(screen.getAllByText('VALORES NUMERICOS MOSTRADOS POR:')).toHaveLength(3);
+        expect(getTypographyGroup('VALOR FLOTANTE FINAL MOSTRADO POR:', 'ACTIVITY-ANALYTICS', '% PROD')).toBeInTheDocument();
 
         expect(screen.queryByText('Textos, titulos, UI')).not.toBeInTheDocument();
         expect(screen.queryByText('Codigo, URLs, valores')).not.toBeInTheDocument();
@@ -86,6 +87,7 @@ describe('DesignSettingsTab typography controls', () => {
             ['TÍTULOS DE DASHBOARD'],
             ['VALORES NUMERICOS MOSTRADOS POR:', 'METRIC-CARD'],
             ['VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS'],
+            ['VALOR FLOTANTE FINAL MOSTRADO POR:', 'ACTIVITY-ANALYTICS', '% PROD'],
         ] as const;
 
         for (const contents of groupContents) {
@@ -122,6 +124,7 @@ describe('DesignSettingsTab typography controls', () => {
         const [metricValueInput, metricTrackingInput, metricUnitInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'METRIC-CARD')).getAllByRole('textbox');
         const [gaugeValueInput, gaugeTrackingInput, gaugeUnitInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'KPI', 'MACHINE-ACTIVITY')).getAllByRole('textbox');
         const [activityAnalyticsValueInput, activityAnalyticsTrackingInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS')).getAllByRole('textbox');
+        const [activityAnalyticsProdTrendValueInput, activityAnalyticsProdTrendTrackingInput] = within(getTypographyGroup('VALOR FLOTANTE FINAL MOSTRADO POR:', 'ACTIVITY-ANALYTICS', '% PROD')).getAllByRole('textbox');
 
         expect(systemSizeInput).toHaveValue('11');
         expect(titleSizeInput).toHaveValue('48');
@@ -133,6 +136,8 @@ describe('DesignSettingsTab typography controls', () => {
         expect(gaugeUnitInput).toHaveValue('20');
         expect(activityAnalyticsValueInput).toHaveValue('20');
         expect(activityAnalyticsTrackingInput).toHaveValue('0');
+        expect(activityAnalyticsProdTrendValueInput).toHaveValue('10');
+        expect(activityAnalyticsProdTrendTrackingInput).toHaveValue('0');
 
         fireEvent.change(systemSizeInput, { target: { value: '20' } });
         fireEvent.change(titleSizeInput, { target: { value: '10' } });
@@ -143,6 +148,8 @@ describe('DesignSettingsTab typography controls', () => {
         fireEvent.change(gaugeUnitInput, { target: { value: '28' } });
         fireEvent.change(activityAnalyticsValueInput, { target: { value: '24' } });
         fireEvent.change(activityAnalyticsTrackingInput, { target: { value: '0.4' } });
+        fireEvent.change(activityAnalyticsProdTrendValueInput, { target: { value: '15' } });
+        fireEvent.change(activityAnalyticsProdTrendTrackingInput, { target: { value: '0.7' } });
 
         expect(document.documentElement.style.getPropertyValue('--font-size-system')).toBe('20px');
         expect(document.documentElement.style.getPropertyValue('--font-size-dashboard-title')).toBe('10px');
@@ -153,6 +160,8 @@ describe('DesignSettingsTab typography controls', () => {
         expect(document.documentElement.style.getPropertyValue('--font-size-widget-unit-gauge')).toBe('28px');
         expect(document.documentElement.style.getPropertyValue('--font-size-widget-value-activity-analytics')).toBe('24px');
         expect(document.documentElement.style.getPropertyValue('--tracking-widget-value-activity-analytics')).toBe('0.4px');
+        expect(document.documentElement.style.getPropertyValue('--font-size-widget-value-activity-analytics-prod-trend')).toBe('15px');
+        expect(document.documentElement.style.getPropertyValue('--tracking-widget-value-activity-analytics-prod-trend')).toBe('0.7px');
     });
 
     it('wraps the KPI and machine-activity controls without horizontal overflow', () => {

@@ -1094,13 +1094,13 @@ describe('PropertyDock activity-analytics', () => {
 
         expect(within(visualSection).getByLabelText('Barras agrupadas glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.glow));
         expect(within(visualSection).getByLabelText('Barras agrupadas blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.blur));
-        expect(within(visualSection).getByLabelText('Barras agrupadas top cap')).toBeChecked();
-        expect(within(visualSection).getByLabelText('Barras agrupadas top cap glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.topCapGlow));
+        expect(within(visualSection).getByLabelText('Barras agrupadas top cap')).not.toBeChecked();
+        expect(within(visualSection).queryByLabelText('Barras agrupadas top cap glow')).not.toBeInTheDocument();
 
         expect(within(visualSection).getByLabelText('Donut glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.glow));
         expect(within(visualSection).getByLabelText('Donut blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.blur));
-        expect(within(visualSection).getByLabelText('Donut top cap')).not.toBeChecked();
-        expect(within(visualSection).getByLabelText('Donut top cap glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.topCapGlow));
+        expect(within(visualSection).getByLabelText('Donut top cap')).toBeChecked();
+        expect(within(visualSection).queryByLabelText('Donut top cap glow')).not.toBeInTheDocument();
     });
 
     it('commits valid pasted hex values and keeps the paired picker in sync for activity analytics stops', async () => {
@@ -1483,51 +1483,7 @@ describe('PropertyDock activity-analytics', () => {
             },
         });
 
-        const donutTopCapGlowInput = screen.getByLabelText('Donut top cap glow');
-        fireEvent.change(donutTopCapGlowInput, { target: { value: '150' } });
-        fireEvent.blur(donutTopCapGlowInput);
-
-        expect(updates.at(-1)?.displayOptions).toMatchObject({
-            visualEffects: {
-                groupedBars: {
-                    glow: 0,
-                    blur: 1,
-                    topCap: true,
-                    topCapGlow: 20,
-                },
-                donut: {
-                    glow: 70,
-                    blur: 8,
-                    topCap: false,
-                    topCapGlow: 100,
-                },
-            },
-        });
-
-        fireEvent.change(donutTopCapGlowInput, { target: { value: 'not-a-number' } });
-        fireEvent.blur(donutTopCapGlowInput);
-
-        expect(updates.at(-1)?.displayOptions).toMatchObject({
-            stateGradients: {
-                prod: ['#123456', '#654321'],
-                setup: ['#abcdef', '#fedcba'],
-                stopped: ['#0f172a', '#334155'],
-            },
-            visualEffects: {
-                groupedBars: {
-                    glow: 0,
-                    blur: 1,
-                    topCap: true,
-                    topCapGlow: 20,
-                },
-                donut: {
-                    glow: 70,
-                    blur: 8,
-                    topCap: false,
-                    topCapGlow: 100,
-                },
-            },
-        });
+        expect(screen.queryByLabelText('Donut top cap glow')).not.toBeInTheDocument();
     });
 
     it('never offers 1h, 24h, or custom in admin and keeps long-range Turno summary available in the shared compatibility matrix', async () => {

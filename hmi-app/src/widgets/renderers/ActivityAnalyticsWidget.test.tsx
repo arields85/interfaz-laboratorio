@@ -14,7 +14,7 @@ import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComp
 import { groupActivityAnalyticsIntervals } from '../../utils/activityAnalyticsGrouping';
 import { buildActivityAnalyticsSummarySegments } from '../../utils/activityAnalyticsSummarySegments';
 import { DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS } from '../../utils/activityAnalyticsWidgetDefaults';
-import ActivityAnalyticsWidget from './ActivityAnalyticsWidget';
+import ActivityAnalyticsWidget, { resolveSummaryTravelingTopCapRoute } from './ActivityAnalyticsWidget';
 
 class MockResizeObserver implements ResizeObserver {
     private static instances: MockResizeObserver[] = [];
@@ -392,6 +392,16 @@ function hexToRgbaCss(hex: string, alphaPercentage: number): string {
     return `rgba(${red}, ${green}, ${blue}, ${alphaPercentage / 100})`;
 }
 
+function topCapHighlightColor(hex: string, mixPercentage: number): string {
+    return `color-mix(in srgb, ${hex} ${mixPercentage}%, white)`;
+}
+
+const TOP_CAP_HIGHLIGHT_MIX_BY_STATE = {
+    prod: 88,
+    setup: 84,
+    stopped: 80,
+} as const;
+
 function reverseGradientStops<TGradient extends readonly [string, string]>(gradient: TGradient): [string, string] {
     return [gradient[1], gradient[0]];
 }
@@ -407,11 +417,28 @@ function getGradientStopsByIdSuffix(container: HTMLElement, idSuffix: string) {
 }
 
 function resolveExpectedGroupedTopCapHeight(segmentHeight: number) {
-    return Math.min(5, Math.max(Math.min(segmentHeight - 0.75, segmentHeight * 0.2), 0));
+    return Math.max(Math.min(segmentHeight - 0.75, 3), 0);
 }
 
 function parseVisibleStrokeLength(strokeDashArray: string | null): number {
     return Number((strokeDashArray ?? '0').split(' ')[0]);
+}
+
+function parseStrokeDashOffset(strokeDashOffset: string | null): number {
+    return Number(strokeDashOffset ?? '0');
+}
+
+function buildRenderedSummarySegmentsFromDom(summarySegments: HTMLElement[]) {
+    return summarySegments.map((segment) => ({
+        bar: {
+            key: segment.getAttribute('data-segment-key') ?? 'stopped',
+            label: segment.getAttribute('data-segment-key') ?? 'stopped',
+            durationMs: 1,
+            color: '',
+        },
+        dashArray: segment.getAttribute('stroke-dasharray') ?? '0 0',
+        dashOffset: Number(segment.getAttribute('stroke-dashoffset') ?? '0'),
+    }));
 }
 
 function parsePercentHeight(value: string): number {
@@ -1273,7 +1300,7 @@ describe('ActivityAnalyticsWidget', () => {
         const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
         const firstGroupStack = screen.getAllByTestId('activity-analytics-group-stack')[0];
         const groupSegments = within(firstGroupStack).getAllByTestId('activity-analytics-group-segment');
-        const topCaps = within(firstGroupStack).getAllByTestId('activity-analytics-group-top-cap');
+        const topCaps = within(firstGroupStack).queryAllByTestId('activity-analytics-group-top-cap');
         const detailTitles = screen.getAllByTestId('activity-analytics-summary-detail-title').map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
 
@@ -1294,7 +1321,7 @@ describe('ActivityAnalyticsWidget', () => {
             { fill: /^url\(#.+-setup-gradient\)$/, segmentKey: 'setup' },
             { fill: /^url\(#.+-prod-gradient\)$/, segmentKey: 'prod' },
         ]);
-        expect(topCaps.map((cap) => cap.getAttribute('data-segment-key'))).toEqual(['stopped', 'setup', 'prod']);
+        expect(topCaps).toHaveLength(0);
         topCaps.forEach((cap) => {
             expect(cap).toHaveAttribute('rx', '0');
             expect(Number(cap.getAttribute('height'))).toBeGreaterThan(0);
@@ -1360,7 +1387,14 @@ describe('ActivityAnalyticsWidget', () => {
 
         render(
             <ActivityAnalyticsWidget
-                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                    },
+                })}
                 machines={MACHINES}
             />,
         );
@@ -1461,7 +1495,14 @@ describe('ActivityAnalyticsWidget', () => {
 
         render(
             <ActivityAnalyticsWidget
-                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                    },
+                })}
                 machines={MACHINES}
             />,
         );
@@ -1513,7 +1554,14 @@ describe('ActivityAnalyticsWidget', () => {
 
         render(
             <ActivityAnalyticsWidget
-                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                    },
+                })}
                 machines={MACHINES}
             />,
         );
@@ -1768,6 +1816,369 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.queryByTestId('activity-analytics-prod-trend-traveling-glow')).not.toBeInTheDocument();
         expect(randomSpy).not.toHaveBeenCalled();
+        expect(setTimeoutSpy).not.toHaveBeenCalled();
+    });
+
+    it('maps one moving donut top-cap cycle across all visible segments with alternating directions and jumped routes', () => {
+        const animationFrames: FrameRequestCallback[] = [];
+        const runAnimationFrame = (timestamp: number) => {
+            const queuedFrames = [...animationFrames];
+            animationFrames.length = 0;
+            queuedFrames.forEach((callback) => callback(timestamp));
+        };
+
+        vi.spyOn(performance, 'now').mockReturnValue(1000);
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+            animationFrames.push(callback);
+            return animationFrames.length;
+        });
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+        vi.spyOn(Math, 'random').mockReturnValue(0.5);
+
+        const scheduledTimeouts: Array<{ callback: () => void; delay: number }> = [];
+
+        vi.spyOn(window, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number) => {
+            if (typeof callback === 'function') {
+                scheduledTimeouts.push({
+                    callback: callback as () => void,
+                    delay: Number(delay ?? 0),
+                });
+            }
+
+            return scheduledTimeouts.length as unknown as number;
+        }) as typeof window.setTimeout);
+        vi.spyOn(window, 'clearTimeout').mockImplementation(() => undefined);
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: CHART_ELIGIBLE_GROUPS_BODY_HEIGHT_PX });
+        });
+
+        const movingTopCap = screen.getByTestId('activity-analytics-summary-top-cap');
+        const movingTopCapAura = within(movingTopCap).getByTestId('activity-analytics-summary-top-cap-aura');
+        const movingTopCapHalo = within(movingTopCap).getByTestId('activity-analytics-summary-top-cap-halo');
+        const movingTopCapCore = within(movingTopCap).getByTestId('activity-analytics-summary-top-cap-core');
+        const movingTopCapCoreHighlight = within(movingTopCap).getByTestId('activity-analytics-summary-top-cap-core-highlight');
+        const movingTopCapCoreStroke = within(movingTopCap).getByTestId('activity-analytics-summary-top-cap-core-stroke');
+        const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
+        const renderedSegments = buildRenderedSummarySegmentsFromDom(summarySegments);
+        const activeSegment = summarySegments.find((segment) => segment.getAttribute('data-segment-key') === movingTopCap.getAttribute('data-segment-key'));
+        const activeKey = movingTopCap.getAttribute('data-segment-key') as keyof typeof CUSTOM_STATE_GRADIENTS;
+        const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
+        const activeTopCapStops = getGradientStopsByIdSuffix(summaryChart, `${activeKey}-top-cap-gradient`);
+        const segmentStrokeWidth = Number(activeSegment?.getAttribute('stroke-width'));
+        const segmentVisibleLength = parseVisibleStrokeLength(activeSegment?.getAttribute('stroke-dasharray') ?? null);
+        const segmentStart = -parseStrokeDashOffset(activeSegment?.getAttribute('stroke-dashoffset') ?? null);
+        const segmentEnd = segmentStart + segmentVisibleLength;
+        const capLength = parseVisibleStrokeLength(movingTopCapCore.getAttribute('stroke-dasharray'));
+        const firstCycleStart = -parseStrokeDashOffset(movingTopCapCore.getAttribute('stroke-dashoffset'));
+        const ringThickness = Number(summarySegments.find((segment) => segment.getAttribute('data-segment-key') !== 'prod')?.getAttribute('stroke-width') ?? '0');
+        const prodRingThickness = Number(summarySegments.find((segment) => segment.getAttribute('data-segment-key') === 'prod')?.getAttribute('stroke-width') ?? '0');
+        const initialRoute = resolveSummaryTravelingTopCapRoute(renderedSegments, 0, 0, ringThickness, prodRingThickness);
+
+        if (!initialRoute) {
+            throw new Error('Expected an initial donut top-cap route');
+        }
+
+        const secondRouteProbeProgress = Math.min(initialRoute.stepProgressEnd + 0.0001, 0.999999);
+        const secondRoute = resolveSummaryTravelingTopCapRoute(renderedSegments, 0, secondRouteProbeProgress, ringThickness, prodRingThickness);
+
+        if (!secondRoute) {
+            throw new Error('Expected a second donut top-cap route');
+        }
+
+        const secondRouteProgress = (secondRoute.stepProgressStart + secondRoute.stepProgressEnd) / 2;
+        const secondRouteTimestamp = 1000 + (secondRouteProgress * 1460);
+
+        expect(movingTopCap).toHaveAttribute('pointer-events', 'none');
+        expect(movingTopCap).toHaveAttribute('aria-hidden', 'true');
+        expect(movingTopCap).toHaveAttribute('data-cycle-key', '0');
+        expect(movingTopCap).toHaveAttribute('data-route-step', '0');
+        expect(movingTopCap).toHaveAttribute('data-route-count', '3');
+        expect(movingTopCap).toHaveAttribute('data-direction', 'forward');
+        expect(movingTopCap).toHaveAttribute('data-duration', '1.46s');
+        expect(movingTopCap).toHaveStyle({ mixBlendMode: 'screen' });
+        expect(movingTopCapAura.getAttribute('stroke')).toMatch(/^url\(#.+-top-cap-gradient\)$/);
+        expect(movingTopCapHalo.getAttribute('stroke')).toMatch(/^url\(#.+-top-cap-gradient\)$/);
+        expect(movingTopCapCore.getAttribute('stroke')).toMatch(/^url\(#.+-top-cap-gradient\)$/);
+        expect(movingTopCapAura.getAttribute('filter')).toMatch(/^url\(#.+-summary-top-cap-traveling-glow\)$/);
+        expect(movingTopCapHalo.getAttribute('filter')).toMatch(/^url\(#.+-summary-top-cap-traveling-glow\)$/);
+        expect(activeTopCapStops.map((stop) => stop.getAttribute('stop-color'))).toEqual([
+            topCapHighlightColor(CUSTOM_STATE_GRADIENTS[activeKey][0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE[activeKey]),
+            CUSTOM_STATE_GRADIENTS[activeKey][0],
+        ]);
+        expect(movingTopCapCoreHighlight).toHaveAttribute('stroke', topCapHighlightColor(CUSTOM_STATE_GRADIENTS[activeKey][0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE[activeKey]));
+        expect(movingTopCapCoreStroke).toHaveAttribute('stroke', CUSTOM_STATE_GRADIENTS[activeKey][0]);
+        expect(movingTopCapCoreStroke.getAttribute('stroke')).not.toBe(CUSTOM_STATE_GRADIENTS[activeKey][1]);
+        expect(activeSegment).toBeDefined();
+        expect(parseVisibleStrokeLength(movingTopCapCore.getAttribute('stroke-dasharray'))).toBeCloseTo(
+            Math.min(
+                Math.max(segmentStrokeWidth * 0.3, 1),
+                segmentVisibleLength,
+            ),
+            5,
+        );
+        expect(Number(movingTopCapCoreStroke.getAttribute('stroke-width'))).toBeCloseTo(
+            segmentStrokeWidth * 1.25,
+            2,
+        );
+        expect(firstCycleStart).toBeCloseTo(segmentStart, 5);
+        expect(firstCycleStart + capLength).toBeLessThanOrEqual(segmentEnd + 0.001);
+
+        act(() => {
+            runAnimationFrame(secondRouteTimestamp);
+        });
+
+        const secondRouteTopCap = screen.getByTestId('activity-analytics-summary-top-cap');
+        const secondRouteCore = within(secondRouteTopCap).getByTestId('activity-analytics-summary-top-cap-core');
+        const secondRouteSegment = screen
+            .getAllByTestId('activity-analytics-summary-segment')
+            .find((segment) => segment.getAttribute('data-segment-key') === secondRouteTopCap.getAttribute('data-segment-key'));
+        const secondRouteSegmentVisibleLength = parseVisibleStrokeLength(secondRouteSegment?.getAttribute('stroke-dasharray') ?? null);
+        const secondRouteSegmentStart = -parseStrokeDashOffset(secondRouteSegment?.getAttribute('stroke-dashoffset') ?? null);
+        const secondRouteSegmentEnd = secondRouteSegmentStart + secondRouteSegmentVisibleLength;
+        const secondRouteCapLength = parseVisibleStrokeLength(secondRouteCore.getAttribute('stroke-dasharray'));
+        const secondRouteStart = -parseStrokeDashOffset(secondRouteCore.getAttribute('stroke-dashoffset'));
+
+        expect(secondRouteTopCap).toHaveAttribute('data-route-step', '1');
+        expect(secondRouteTopCap).toHaveAttribute('data-route-count', '3');
+        expect(secondRouteTopCap).toHaveAttribute('data-direction', 'reverse');
+        expect(secondRouteTopCap).not.toHaveAttribute('data-segment-key', activeKey);
+        expect(secondRouteStart).toBeGreaterThanOrEqual(secondRouteSegmentStart - 0.001);
+        expect(secondRouteStart).toBeLessThanOrEqual(secondRouteSegmentEnd - secondRouteCapLength + 0.01);
+        const secondRouteKey = secondRouteTopCap.getAttribute('data-segment-key');
+        const thirdRouteProbeProgress = Math.min(secondRoute.stepProgressEnd + 0.0001, 0.999999);
+        const thirdRoute = resolveSummaryTravelingTopCapRoute(renderedSegments, 0, thirdRouteProbeProgress, ringThickness, prodRingThickness);
+
+        if (!thirdRoute) {
+            throw new Error('Expected a third donut top-cap route');
+        }
+
+        const thirdRouteProgress = (thirdRoute.stepProgressStart + thirdRoute.stepProgressEnd) / 2;
+        const thirdRouteTimestamp = 1000 + (thirdRouteProgress * 1460);
+
+        act(() => {
+            runAnimationFrame(thirdRouteTimestamp);
+        });
+
+        const thirdRouteTopCap = screen.getByTestId('activity-analytics-summary-top-cap');
+        const thirdRouteCore = within(thirdRouteTopCap).getByTestId('activity-analytics-summary-top-cap-core');
+        const thirdRouteSegment = screen
+            .getAllByTestId('activity-analytics-summary-segment')
+            .find((segment) => segment.getAttribute('data-segment-key') === thirdRouteTopCap.getAttribute('data-segment-key'));
+        const thirdRouteSegmentVisibleLength = parseVisibleStrokeLength(thirdRouteSegment?.getAttribute('stroke-dasharray') ?? null);
+        const thirdRouteSegmentStart = -parseStrokeDashOffset(thirdRouteSegment?.getAttribute('stroke-dashoffset') ?? null);
+        const thirdRouteSegmentEnd = thirdRouteSegmentStart + thirdRouteSegmentVisibleLength;
+        const thirdRouteCapLength = parseVisibleStrokeLength(thirdRouteCore.getAttribute('stroke-dasharray'));
+        const thirdRouteStart = -parseStrokeDashOffset(thirdRouteCore.getAttribute('stroke-dashoffset'));
+
+        expect(thirdRouteTopCap).toHaveAttribute('data-route-step', '2');
+        expect(thirdRouteTopCap).toHaveAttribute('data-route-count', '3');
+        expect(thirdRouteTopCap).toHaveAttribute('data-direction', 'forward');
+        expect(thirdRouteTopCap).not.toHaveAttribute('data-segment-key', activeKey);
+        expect(thirdRouteTopCap.getAttribute('data-segment-key')).not.toBe(secondRouteKey);
+        expect(thirdRouteStart).toBeGreaterThanOrEqual(thirdRouteSegmentStart - 0.001);
+        expect(thirdRouteStart + thirdRouteCapLength).toBeLessThanOrEqual(thirdRouteSegmentEnd + 0.01);
+        expect(screen.queryByTestId('activity-analytics-summary-static-top-cap')).not.toBeInTheDocument();
+
+        const hideTimeout = scheduledTimeouts.find(({ delay }) => delay === 1460);
+        const restartTimeout = scheduledTimeouts.find(({ delay }) => delay === 15_460);
+
+        act(() => {
+            hideTimeout?.callback();
+        });
+
+        expect(screen.queryByTestId('activity-analytics-summary-top-cap')).not.toBeInTheDocument();
+
+        act(() => {
+            restartTimeout?.callback();
+        });
+
+        const secondCycleTopCap = screen.getByTestId('activity-analytics-summary-top-cap');
+        const secondCycleCore = within(secondCycleTopCap).getByTestId('activity-analytics-summary-top-cap-core');
+        const secondCycleSegment = screen
+            .getAllByTestId('activity-analytics-summary-segment')
+            .find((segment) => segment.getAttribute('data-segment-key') === secondCycleTopCap.getAttribute('data-segment-key'));
+        const secondCycleSegmentVisibleLength = parseVisibleStrokeLength(secondCycleSegment?.getAttribute('stroke-dasharray') ?? null);
+        const secondCycleSegmentStart = -parseStrokeDashOffset(secondCycleSegment?.getAttribute('stroke-dashoffset') ?? null);
+        const secondCycleSegmentEnd = secondCycleSegmentStart + secondCycleSegmentVisibleLength;
+        const secondCycleCapLength = parseVisibleStrokeLength(secondCycleCore.getAttribute('stroke-dasharray'));
+        const secondCycleStart = -parseStrokeDashOffset(secondCycleCore.getAttribute('stroke-dashoffset'));
+
+        expect(secondCycleTopCap).toHaveAttribute('data-cycle-key', '1');
+        expect(secondCycleTopCap).toHaveAttribute('data-route-step', '0');
+        expect(secondCycleTopCap).toHaveAttribute('data-route-count', '3');
+        expect(secondCycleTopCap).toHaveAttribute('data-direction', 'reverse');
+        expect(secondCycleStart).toBeCloseTo(secondCycleSegmentEnd - secondCycleCapLength, 5);
+        expect(secondCycleStart).toBeGreaterThanOrEqual(secondCycleSegmentStart - 0.001);
+    });
+
+    it('hides the moving donut top cap after traversal and restarts it after the random pause', () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0.5);
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+        const scheduledTimeouts: Array<{ callback: () => void; delay: number }> = [];
+
+        vi.spyOn(window, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number) => {
+            if (typeof callback === 'function') {
+                scheduledTimeouts.push({
+                    callback: callback as () => void,
+                    delay: Number(delay ?? 0),
+                });
+            }
+
+            return scheduledTimeouts.length as unknown as number;
+        }) as typeof window.setTimeout);
+        vi.spyOn(window, 'clearTimeout').mockImplementation(() => undefined);
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: CHART_ELIGIBLE_GROUPS_BODY_HEIGHT_PX });
+        });
+
+        expect(screen.getByTestId('activity-analytics-summary-top-cap')).toHaveAttribute('data-cycle-key', '0');
+        expect(scheduledTimeouts.map(({ delay }) => delay)).toContain(1460);
+        expect(scheduledTimeouts.map(({ delay }) => delay)).toContain(15_460);
+
+        const hideTimeout = scheduledTimeouts.find(({ delay }) => delay === 1460);
+        const restartTimeout = scheduledTimeouts.find(({ delay }) => delay === 15_460);
+
+        act(() => {
+            hideTimeout?.callback();
+        });
+
+        expect(screen.queryByTestId('activity-analytics-summary-top-cap')).not.toBeInTheDocument();
+
+        act(() => {
+            restartTimeout?.callback();
+        });
+
+        expect(screen.getByTestId('activity-analytics-summary-top-cap')).toHaveAttribute('data-cycle-key', '1');
+    });
+
+    it('falls back to static donut top caps and skips motion scheduling when reduced motion is preferred', () => {
+        vi.stubGlobal('matchMedia', createMatchMediaMock(true));
+
+        const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '2026-06-18', productivityRatio: 0.42, productivityLabel: '42%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '2026-06-19', productivityRatio: 0.58, productivityLabel: '58%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '2026-06-20', productivityRatio: 0.74, productivityLabel: '74%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: CHART_ELIGIBLE_GROUPS_BODY_HEIGHT_PX });
+        });
+
+        expect(screen.queryByTestId('activity-analytics-summary-top-cap')).not.toBeInTheDocument();
+        const staticTopCaps = screen.getAllByTestId('activity-analytics-summary-static-top-cap');
+        const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
+        const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
+        const summarySegmentByKey = new Map(summarySegments.map((segment) => [segment.getAttribute('data-segment-key') ?? '', segment]));
+        expect(staticTopCaps.length).toBeGreaterThan(0);
+        staticTopCaps.forEach((cap) => {
+            const key = cap.getAttribute('data-segment-key') as keyof typeof CUSTOM_STATE_GRADIENTS;
+            const topCapStops = getGradientStopsByIdSuffix(summaryChart, `${key}-top-cap-gradient`);
+            const staticTopCapCore = within(cap).getByTestId('activity-analytics-summary-top-cap-core');
+            const segment = summarySegmentByKey.get(key);
+
+            expect(segment).toBeDefined();
+            expect(cap).toHaveStyle({ mixBlendMode: 'screen' });
+            expect(within(cap).getByTestId('activity-analytics-summary-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-summary-top-cap-traveling-glow\)$/);
+            expect(within(cap).getByTestId('activity-analytics-summary-top-cap-halo').getAttribute('filter')).toMatch(/^url\(#.+-summary-top-cap-traveling-glow\)$/);
+            expect(within(cap).getByTestId('activity-analytics-summary-top-cap-core-highlight')).toHaveAttribute('stroke', topCapHighlightColor(CUSTOM_STATE_GRADIENTS[key][0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE[key]));
+            expect(within(cap).getByTestId('activity-analytics-summary-top-cap-core-stroke')).toHaveAttribute('stroke', CUSTOM_STATE_GRADIENTS[key][0]);
+            expect(Number(within(cap).getByTestId('activity-analytics-summary-top-cap-core-stroke').getAttribute('stroke-width'))).toBeCloseTo(
+                Number(segment?.getAttribute('stroke-width')),
+                2,
+            );
+            expect(parseVisibleStrokeLength(staticTopCapCore.getAttribute('stroke-dasharray'))).toBeCloseTo(
+                Math.min(
+                    Math.max(Number(segment?.getAttribute('stroke-width')) * 0.2, 1),
+                    parseVisibleStrokeLength(segment?.getAttribute('stroke-dasharray') ?? null),
+                ),
+                5,
+            );
+            expect(topCapStops.map((stop) => stop.getAttribute('stop-color'))).toEqual([
+                topCapHighlightColor(CUSTOM_STATE_GRADIENTS[key][0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE[key]),
+                CUSTOM_STATE_GRADIENTS[key][0],
+            ]);
+        });
         expect(setTimeoutSpy).not.toHaveBeenCalled();
     });
 
@@ -2723,11 +3134,12 @@ describe('ActivityAnalyticsWidget', () => {
         const summaryStops = summaryGradients.map((gradient) => Array.from(gradient.querySelectorAll('stop')).map((stop) => stop.getAttribute('stop-color')));
         const detailMarkers = Array.from(screen.getByTestId('activity-analytics-summary-details').querySelectorAll('rect'));
         const groupsChart = screen.getByTestId('activity-analytics-groups-chart');
-        const groupGradients = Array.from(groupsChart.querySelectorAll('linearGradient'));
+        const groupGradients = Array.from(groupsChart.querySelectorAll('linearGradient'))
+            .filter((gradient) => !gradient.id.includes('group-top-cap'));
         const groupStops = groupGradients.map((gradient) => Array.from(gradient.querySelectorAll('stop')).map((stop) => stop.getAttribute('stop-color')));
         const firstGroupStack = screen.getByTestId('activity-analytics-group-stack');
         const groupSegments = within(firstGroupStack).getAllByTestId('activity-analytics-group-segment');
-        const topCaps = within(firstGroupStack).getAllByTestId('activity-analytics-group-top-cap');
+        const topCaps = within(firstGroupStack).queryAllByTestId('activity-analytics-group-top-cap');
         const legendSwatches = Array.from(screen.getByTestId('activity-analytics-groups-header-legend').querySelectorAll('span[aria-hidden="true"]'));
         const comparisonFills = screen.getAllByTestId('activity-analytics-comparison-bar-fill');
 
@@ -2743,7 +3155,7 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(detailMarkers.map((marker) => marker.getAttribute('fill'))).toEqual([
             CUSTOM_STATE_GRADIENTS.prod[0],
-            CUSTOM_STATE_GRADIENTS.setup[0],
+            CUSTOM_STATE_GRADIENTS.setup[1],
             CUSTOM_STATE_GRADIENTS.stopped[0],
         ]);
         expect(groupSegments.map((segment) => segment.getAttribute('fill'))).toEqual([
@@ -2754,18 +3166,14 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(legendSwatches.map((swatch) => (swatch as HTMLElement).style.backgroundColor)).toEqual([
             hexToRgbCss(CUSTOM_STATE_GRADIENTS.stopped[0]),
-            hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[0]),
+            hexToRgbCss(CUSTOM_STATE_GRADIENTS.setup[1]),
             hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[0]),
             hexToRgbCss(coverageColor),
         ]);
+        expect(detailMarkers[1]?.getAttribute('fill')).toBe(CUSTOM_STATE_GRADIENTS.setup[1]);
+        expect((legendSwatches[1] as HTMLElement | undefined)?.style.backgroundColor).toBe(hexToRgbCss(detailMarkers[1]?.getAttribute('fill') ?? ''));
         expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cobertura incompleta');
-        expect(topCaps.map((cap) => cap.getAttribute('fill'))).toEqual([
-            `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.stopped[1]} 80%, white)`,
-            `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.setup[1]} 84%, white)`,
-            `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.prod[1]} 88%, white)`,
-        ]);
-        expect(topCaps[0]?.getAttribute('style')).toContain(`drop-shadow(0 0 6px ${CUSTOM_STATE_GRADIENTS.stopped[1]})`);
-        expect(topCaps.at(-1)?.getAttribute('style')).toContain(`drop-shadow(0 0 6px ${CUSTOM_STATE_GRADIENTS.prod[1]})`);
+        expect(topCaps).toHaveLength(0);
         comparisonFills.forEach((segment) => {
             expect(parsePercentHeight((segment as HTMLElement).style.height)).toBeCloseTo((2 / 3) * 100, 5);
             expect(segment.getAttribute('style')).toContain(`linear-gradient(to top, ${hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[0])} 0%, ${hexToRgbCss(CUSTOM_STATE_GRADIENTS.prod[1])} 100%)`);
@@ -2882,7 +3290,7 @@ describe('ActivityAnalyticsWidget', () => {
         const groupSegments = within(screen.getByTestId('activity-analytics-group-stack')).getAllByTestId('activity-analytics-group-segment');
         const legendSwatches = Array.from(screen.getByTestId('activity-analytics-groups-header-legend').querySelectorAll('span[aria-hidden="true"]'));
         const comparisonFills = screen.getAllByTestId('activity-analytics-comparison-bar-fill');
-        const summaryTopCaps = screen.getAllByTestId('activity-analytics-summary-top-cap');
+        const movingSummaryTopCap = screen.getByTestId('activity-analytics-summary-top-cap');
 
         expect(summaryBodyStops.map((stop) => stop.getAttribute('stop-opacity'))).toEqual([
             '0.55', '0.2',
@@ -2890,9 +3298,12 @@ describe('ActivityAnalyticsWidget', () => {
             '0.35', '0.75',
         ]);
         expect(summaryTopCapStops.map((stop) => stop.getAttribute('stop-color'))).toEqual([
-            ...reverseGradientStops(CUSTOM_STATE_GRADIENTS.stopped),
-            ...reverseGradientStops(CUSTOM_STATE_GRADIENTS.setup),
-            ...CUSTOM_STATE_GRADIENTS.prod,
+            topCapHighlightColor(CUSTOM_STATE_GRADIENTS.stopped[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.stopped),
+            CUSTOM_STATE_GRADIENTS.stopped[0],
+            topCapHighlightColor(CUSTOM_STATE_GRADIENTS.setup[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.setup),
+            CUSTOM_STATE_GRADIENTS.setup[0],
+            topCapHighlightColor(CUSTOM_STATE_GRADIENTS.prod[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.prod),
+            CUSTOM_STATE_GRADIENTS.prod[0],
         ]);
         expect(summaryTopCapStops.map((stop) => stop.getAttribute('stop-opacity'))).toEqual([
             '1', '1',
@@ -2901,25 +3312,61 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(detailMarkers.map((marker) => marker.getAttribute('fill'))).toEqual([
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]),
         ]);
         expect(summarySegments.every((segment) => segment.getAttribute('filter')?.includes('summary-glow'))).toBe(true);
-        expect(summaryChart.innerHTML).toContain('stdDeviation="4"');
-        expect(summaryTopCaps.length).toBeGreaterThan(0);
-        expect(summaryTopCaps.every((cap) => (cap.getAttribute('style') ?? '').includes('drop-shadow'))).toBe(true);
-        expect(summaryTopCaps.every((cap) => (cap.getAttribute('stroke') ?? '').includes('-top-cap-gradient'))).toBe(true);
-        expect(summaryTopCaps.every((cap) => (cap.getAttribute('style') ?? '').includes(CUSTOM_STATE_GRADIENTS[cap.getAttribute('data-segment-key') as keyof typeof CUSTOM_STATE_GRADIENTS][1]))).toBe(true);
-        expect(summaryTopCaps.every((cap) => !(cap.getAttribute('style') ?? '').includes('rgba('))).toBe(true);
-        expect(summaryTopCaps.map((cap) => cap.getAttribute('stroke-width'))).toEqual(summarySegments.map((segment) => segment.getAttribute('stroke-width')));
+        const summaryGlowFilter = summaryChart.querySelector('filter[id$="-summary-glow"]');
+
+        expect(summaryGlowFilter).not.toBeNull();
+        expect(summaryGlowFilter).toHaveAttribute('x', '-60%');
+        expect(summaryGlowFilter).toHaveAttribute('y', '-60%');
+        expect(summaryGlowFilter).toHaveAttribute('width', '220%');
+        expect(summaryGlowFilter).toHaveAttribute('height', '220%');
+        expect(summaryGlowFilter?.innerHTML).toContain('surface-core-blur');
+        expect(summaryGlowFilter?.innerHTML).toContain('surface-aura-blur');
+        expect(summaryGlowFilter?.innerHTML).toContain('surface-core-glow');
+        expect(summaryGlowFilter?.innerHTML).toContain('surface-aura-glow');
+        expect(summaryGlowFilter?.innerHTML).toContain('feMerge');
+        expect(summaryGlowFilter?.querySelector('feGaussianBlur[result="surface-core-blur"]')).toHaveAttribute('stdDeviation', '4.26');
+        expect(summaryGlowFilter?.querySelector('feGaussianBlur[result="surface-aura-blur"]')).toHaveAttribute('stdDeviation', '6.32');
+        expect(summaryGlowFilter?.querySelector('feColorMatrix[result="surface-core-glow"]')).toHaveAttribute('values', '1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1.43 0');
+        expect(summaryGlowFilter?.querySelector('feColorMatrix[result="surface-aura-glow"]')).toHaveAttribute('values', '1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 0.3 0');
+        const movingSummaryTopCapAura = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-aura');
+        const movingSummaryTopCapHalo = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-halo');
+        const movingSummaryTopCapCore = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-core');
+        expect(movingSummaryTopCap).toHaveStyle({ mixBlendMode: 'screen' });
+        expect(movingSummaryTopCapAura.getAttribute('stroke')).toContain('-top-cap-gradient');
+        expect(movingSummaryTopCapHalo.getAttribute('stroke')).toContain('-top-cap-gradient');
+        expect(movingSummaryTopCapCore.getAttribute('stroke')).toContain('-top-cap-gradient');
+        expect(movingSummaryTopCapAura.getAttribute('filter')).toMatch(/^url\(#.+-summary-top-cap-traveling-glow\)$/);
+        expect(movingSummaryTopCapHalo.getAttribute('filter')).toMatch(/^url\(#.+-summary-top-cap-traveling-glow\)$/);
+        expect(summarySegments.map((segment) => Number(segment.getAttribute('stroke-width')))).toContainEqual(expect.any(Number));
+        expect(Number(movingSummaryTopCapCore.getAttribute('stroke-width'))).toBeGreaterThanOrEqual(Number(summarySegments.find((segment) => segment.getAttribute('data-segment-key') === movingSummaryTopCap.getAttribute('data-segment-key'))?.getAttribute('stroke-width')));
         expect(groupSegments.filter((segment) => segment.getAttribute('data-segment-key') !== 'noData').every((segment) => segment.getAttribute('filter')?.includes('grouped-glow'))).toBe(true);
+        const groupedChart = screen.getByTestId('activity-analytics-groups-chart');
+        const groupedGlowFilter = groupedChart.querySelector('filter[id$="-grouped-glow"]');
+
+        expect(groupedGlowFilter).not.toBeNull();
+        expect(groupedGlowFilter).toHaveAttribute('x', '-60%');
+        expect(groupedGlowFilter).toHaveAttribute('y', '-60%');
+        expect(groupedGlowFilter).toHaveAttribute('width', '220%');
+        expect(groupedGlowFilter).toHaveAttribute('height', '220%');
+        expect(groupedGlowFilter?.innerHTML).toContain('surface-core-blur');
+        expect(groupedGlowFilter?.innerHTML).toContain('surface-aura-blur');
+        expect(groupedGlowFilter?.innerHTML).toContain('surface-core-glow');
+        expect(groupedGlowFilter?.innerHTML).toContain('surface-aura-glow');
+        expect(Number.parseFloat(groupedGlowFilter?.querySelector('feGaussianBlur[result="surface-core-blur"]')?.getAttribute('stdDeviation') ?? '0')).toBeGreaterThan(2.3);
+        expect(Number.parseFloat(groupedGlowFilter?.querySelector('feGaussianBlur[result="surface-aura-blur"]')?.getAttribute('stdDeviation') ?? '0')).toBeGreaterThan(6.5);
         expect(screen.queryByTestId('activity-analytics-group-top-cap')).not.toBeInTheDocument();
         expect(legendSwatches.map((swatch) => (swatch as HTMLElement).style.backgroundColor)).toEqual([
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.stopped[0], CUSTOM_STATE_GRADIENT_ALPHAS.stopped[0]),
-            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[0], CUSTOM_STATE_GRADIENT_ALPHAS.setup[0]),
+            hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]),
             hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0]),
             hexToRgbCss('#94a3b8'),
         ]);
+        expect(detailMarkers[1]?.getAttribute('fill')).toBe(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]));
+        expect((legendSwatches[1] as HTMLElement | undefined)?.style.backgroundColor).toBe(detailMarkers[1]?.getAttribute('fill'));
         expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cobertura incompleta');
         comparisonFills.forEach((segment) => {
             expect(segment.getAttribute('style')).toContain(`linear-gradient(to top, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0])} 0%, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1])} 100%)`);
@@ -2948,11 +3395,13 @@ describe('ActivityAnalyticsWidget', () => {
                         visualEffects: {
                             groupedBars: {
                                 ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                glow: 100,
                                 topCap: true,
                                 topCapGlow: 95,
                             },
                             donut: {
                                 ...CUSTOM_VISUAL_EFFECTS.donut,
+                                glow: 100,
                                 topCapGlow: 25,
                             },
                         },
@@ -2965,10 +3414,20 @@ describe('ActivityAnalyticsWidget', () => {
         expect(computeSpy).toHaveBeenCalledTimes(1);
         expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveTextContent('57%');
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('60%');
+        const strongSummaryGlowFilter = screen.getByTestId('activity-analytics-summary-chart').querySelector('filter[id$="-summary-glow"]');
+        const strongGroupedGlowFilter = screen.getByTestId('activity-analytics-groups-chart').querySelector('filter[id$="-grouped-glow"]');
+        expect(Number.parseFloat(strongSummaryGlowFilter?.querySelector('feGaussianBlur[result="surface-core-blur"]')?.getAttribute('stdDeviation') ?? '0')).toBeGreaterThan(5.4);
+        expect(Number.parseFloat(strongSummaryGlowFilter?.querySelector('feGaussianBlur[result="surface-aura-blur"]')?.getAttribute('stdDeviation') ?? '0')).toBeGreaterThan(12.5);
+        expect(strongSummaryGlowFilter?.querySelector('feColorMatrix[result="surface-core-glow"]')?.getAttribute('values')).toContain('2.1');
+        expect(strongSummaryGlowFilter?.querySelector('feColorMatrix[result="surface-aura-glow"]')?.getAttribute('values')).toContain('0.9');
+        expect(Number.parseFloat(strongGroupedGlowFilter?.querySelector('feGaussianBlur[result="surface-core-blur"]')?.getAttribute('stdDeviation') ?? '0')).toBeGreaterThan(2.1);
+        expect(Number.parseFloat(strongGroupedGlowFilter?.querySelector('feGaussianBlur[result="surface-aura-blur"]')?.getAttribute('stdDeviation') ?? '0')).toBeGreaterThan(7.2);
+        expect(strongGroupedGlowFilter?.querySelector('feColorMatrix[result="surface-core-glow"]')?.getAttribute('values')).toContain('2');
+        expect(strongGroupedGlowFilter?.querySelector('feColorMatrix[result="surface-aura-glow"]')?.getAttribute('values')).toContain('0.9');
         const groupedTopCaps = screen.getAllByTestId('activity-analytics-group-top-cap');
         expect(groupedTopCaps).toHaveLength(3);
-        expect(groupedTopCaps.at(-1)).toHaveAttribute('fill', `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.prod[1]} 88%, white)`);
-        expect(groupedTopCaps.at(-1)?.getAttribute('style')).toContain(`drop-shadow(0 0 5.8px ${CUSTOM_STATE_GRADIENTS.prod[1]})`);
+        expect(groupedTopCaps.at(-1)).toHaveAttribute('fill', topCapHighlightColor(CUSTOM_STATE_GRADIENTS.prod[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.prod));
+        expect(groupedTopCaps.at(-1)?.getAttribute('style')).toContain(`drop-shadow(0 0 5.8px ${CUSTOM_STATE_GRADIENTS.prod[0]})`);
         expect(groupedTopCaps.every((cap) => !cap.hasAttribute('opacity'))).toBe(true);
     });
 
@@ -4243,6 +4702,10 @@ describe('ActivityAnalyticsWidget', () => {
         expect(trendChart).toHaveAttribute('width', groupsChart.getAttribute('width') ?? '');
         expect(trendChart.parentElement).toBe(trendContent);
         expect(latestValueLabel).toHaveStyle({
+            fontFamily: 'var(--font-widget-value-activity-analytics-prod-trend)',
+            fontWeight: 'var(--font-weight-widget-value-activity-analytics-prod-trend)',
+            fontSize: 'var(--font-size-widget-value-activity-analytics-prod-trend)',
+            letterSpacing: 'var(--tracking-widget-value-activity-analytics-prod-trend)',
             transformBox: 'fill-box',
             transformOrigin: 'center bottom',
         });
@@ -4381,7 +4844,73 @@ describe('ActivityAnalyticsWidget', () => {
         expect(partialOutline).not.toBeInTheDocument();
     });
 
-    it('keeps donut top-cap stroke width aligned with the segment thickness while deriving its visible arc length from 20% of the stroke width', () => {
+    it('caps grouped top-cap height at a fixed 3px', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: {
+                    prod: 3 * 60 * 60 * 1000,
+                    setup: 5 * 60 * 1000,
+                    stopped: 0,
+                    noData: 0,
+                },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                            },
+                            donut: {
+                                ...CUSTOM_VISUAL_EFFECTS.donut,
+                                topCap: true,
+                            },
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const stack = screen.getByTestId('activity-analytics-group-stack');
+        const segments = within(stack).getAllByTestId('activity-analytics-group-segment');
+        const topCaps = within(stack).getAllByTestId('activity-analytics-group-top-cap');
+        const segmentByKey = new Map(segments.map((segment) => [segment.getAttribute('data-segment-key') ?? '', segment]));
+        const capByKey = new Map(topCaps.map((cap) => [cap.getAttribute('data-segment-key') ?? '', cap]));
+
+        expect(Number(capByKey.get('prod')?.getAttribute('height'))).toBeCloseTo(3, 5);
+
+        topCaps.forEach((cap) => {
+            const key = cap.getAttribute('data-segment-key') ?? '';
+            const segment = segmentByKey.get(key);
+
+            expect(segment).toBeDefined();
+            expect(Number(cap.getAttribute('height'))).toBeCloseTo(
+                resolveExpectedGroupedTopCapHeight(Number(segment?.getAttribute('height'))),
+                5,
+            );
+            expect(Number(cap.getAttribute('height'))).toBeLessThanOrEqual(3);
+        });
+    });
+
+    it('keeps static donut top caps at 20% of stroke width while giving the moving top cap a 0.3x arc and 25% thicker stroke', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -4424,30 +4953,30 @@ describe('ActivityAnalyticsWidget', () => {
         });
 
         const summarySegments = screen.getAllByTestId('activity-analytics-summary-segment');
-        const summaryTopCaps = screen.getAllByTestId('activity-analytics-summary-top-cap');
-        let foundCapUsingVisibleLengthClamp = false;
+        const movingSummaryTopCap = screen.getByTestId('activity-analytics-summary-top-cap');
+        const movingSummaryTopCapAura = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-aura');
+        const movingSummaryTopCapHalo = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-halo');
+        const movingSummaryTopCapCore = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-core');
+        const movingSummaryTopCapCoreHighlight = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-core-highlight');
+        const movingSummaryTopCapCoreStroke = within(movingSummaryTopCap).getByTestId('activity-analytics-summary-top-cap-core-stroke');
+        const activeSegment = summarySegments.find((candidate) => candidate.getAttribute('data-segment-key') === movingSummaryTopCap.getAttribute('data-segment-key'));
 
-        summaryTopCaps.forEach((cap) => {
-            const key = cap.getAttribute('data-segment-key');
-            const segment = summarySegments.find((candidate) => candidate.getAttribute('data-segment-key') === key);
-            expect(segment).toBeDefined();
+        expect(activeSegment).toBeDefined();
 
-            const segmentStrokeWidth = Number(segment?.getAttribute('stroke-width'));
-            const capStrokeWidth = Number(cap.getAttribute('stroke-width'));
-            const visibleSegmentLength = parseVisibleStrokeLength(segment?.getAttribute('stroke-dasharray') ?? null);
-            const capLength = parseVisibleStrokeLength(cap.getAttribute('stroke-dasharray'));
-            const expectedCapLength = Math.min(Math.max(segmentStrokeWidth * 0.2, 1), visibleSegmentLength);
+        const segmentStrokeWidth = Number(activeSegment?.getAttribute('stroke-width'));
+        const capStrokeWidth = Number(movingSummaryTopCapCoreStroke.getAttribute('stroke-width'));
+        const visibleSegmentLength = parseVisibleStrokeLength(activeSegment?.getAttribute('stroke-dasharray') ?? null);
+        const capLength = parseVisibleStrokeLength(movingSummaryTopCapCore.getAttribute('stroke-dasharray'));
+        const expectedMovingCapLength = Math.min(Math.max(segmentStrokeWidth * 0.3, 1), visibleSegmentLength);
 
-            expect(capStrokeWidth).toBeCloseTo(segmentStrokeWidth, 5);
-            expect(capLength).toBeLessThan(segmentStrokeWidth);
-            expect(capLength).toBeCloseTo(expectedCapLength, 5);
-
-            if (expectedCapLength === visibleSegmentLength) {
-                foundCapUsingVisibleLengthClamp = true;
-            }
-        });
-
-        expect(foundCapUsingVisibleLengthClamp).toBe(false);
+        expect(capStrokeWidth).toBeCloseTo(segmentStrokeWidth * 1.25, 2);
+        expect(capLength).toBeCloseTo(expectedMovingCapLength, 5);
+        expect(Number(movingSummaryTopCapAura.getAttribute('stroke-opacity'))).toBeGreaterThanOrEqual(0.3);
+        expect(Number(movingSummaryTopCapHalo.getAttribute('stroke-opacity'))).toBeGreaterThan(Number(movingSummaryTopCapAura.getAttribute('stroke-opacity')));
+        expect(Number(movingSummaryTopCapCoreHighlight.getAttribute('stroke-width'))).toBeLessThan(capStrokeWidth);
+        expect(Number(movingSummaryTopCapCoreHighlight.getAttribute('opacity'))).toBeGreaterThan(Number(movingSummaryTopCapCoreStroke.getAttribute('stroke-opacity')));
+        expect(Number(movingSummaryTopCapCoreStroke.getAttribute('stroke-opacity'))).toBeGreaterThan(0.59);
+        expect(activeSegment?.compareDocumentPosition(movingSummaryTopCap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
         const firstGroupStack = screen.getByTestId('activity-analytics-group-stack');
         const groupSegments = within(firstGroupStack).getAllByTestId('activity-analytics-group-segment');
@@ -4466,7 +4995,7 @@ describe('ActivityAnalyticsWidget', () => {
         });
     });
 
-    it('uses the final stopped color for grouped top caps', () => {
+    it('keeps grouped prod/stopped top caps on their existing non-final color source', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -4515,10 +5044,81 @@ describe('ActivityAnalyticsWidget', () => {
             .getAllByTestId('activity-analytics-group-top-cap')
             .find((cap) => cap.getAttribute('data-segment-key') === 'prod');
 
-        expect(stoppedTopCap).toHaveAttribute('fill', `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.stopped[1]} 80%, white)`);
-        expect(stoppedTopCap?.getAttribute('style')).toContain(CUSTOM_STATE_GRADIENTS.stopped[1]);
-        expect(prodTopCap).toHaveAttribute('fill', `color-mix(in srgb, ${CUSTOM_STATE_GRADIENTS.prod[1]} 88%, white)`);
-        expect(prodTopCap?.getAttribute('style')).toContain(CUSTOM_STATE_GRADIENTS.prod[1]);
+        expect(stoppedTopCap).toHaveAttribute('fill', topCapHighlightColor(CUSTOM_STATE_GRADIENTS.stopped[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.stopped));
+        expect(stoppedTopCap?.getAttribute('style')).toContain(CUSTOM_STATE_GRADIENTS.stopped[0]);
+        expect(stoppedTopCap?.getAttribute('style')).not.toContain(CUSTOM_STATE_GRADIENTS.stopped[1]);
+        expect(prodTopCap).toHaveAttribute('fill', topCapHighlightColor(CUSTOM_STATE_GRADIENTS.prod[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.prod));
+        expect(prodTopCap?.getAttribute('style')).toContain(CUSTOM_STATE_GRADIENTS.prod[0]);
+        expect(prodTopCap?.getAttribute('style')).not.toContain(CUSTOM_STATE_GRADIENTS.prod[1]);
+    });
+
+    it('uses the configured final setup color for the Distribución marker and grouped legend dot while keeping donut top caps on the initial color', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                durationsMs: {
+                    prod: 2 * 60 * 60 * 1000,
+                    setup: 1 * 60 * 60 * 1000,
+                    stopped: 1 * 60 * 60 * 1000,
+                    noData: 0,
+                },
+                expectedDurationMs: 4 * 60 * 60 * 1000,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                        stateGradientAlphas: CUSTOM_STATE_GRADIENT_ALPHAS,
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                            },
+                            donut: {
+                                ...CUSTOM_VISUAL_EFFECTS.donut,
+                                topCap: true,
+                            },
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const legendSwatches = Array.from(screen.getByTestId('activity-analytics-groups-header-legend').querySelectorAll('span[aria-hidden="true"]'));
+        const setupLegendSwatch = legendSwatches[1] as HTMLElement | undefined;
+        const detailMarkers = Array.from(screen.getByTestId('activity-analytics-summary-details').querySelectorAll('rect'));
+        const setupDetailMarker = detailMarkers[1];
+        const setupTopCap = screen.getAllByTestId('activity-analytics-group-top-cap')
+            .find((cap) => cap.getAttribute('data-segment-key') === 'setup');
+        const summaryTopCapStops = ['stopped-top-cap-gradient', 'setup-top-cap-gradient', 'prod-top-cap-gradient']
+            .flatMap((gradientIdSuffix) => getGradientStopsByIdSuffix(screen.getByTestId('activity-analytics-summary-chart'), gradientIdSuffix));
+        expect(setupDetailMarker?.getAttribute('fill')).toBe(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]));
+        expect(setupLegendSwatch?.style.backgroundColor).toBe(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]));
+        expect(setupLegendSwatch?.style.backgroundColor).toBe(setupDetailMarker?.getAttribute('fill'));
+        expect(setupTopCap).toHaveAttribute('fill', topCapHighlightColor(CUSTOM_STATE_GRADIENTS.setup[1], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.setup));
+        expect(setupTopCap?.getAttribute('style')).toContain(CUSTOM_STATE_GRADIENTS.setup[1]);
+        expect(setupTopCap?.getAttribute('style')).not.toContain(CUSTOM_STATE_GRADIENTS.setup[0]);
+        expect(summaryTopCapStops.map((stop) => stop.getAttribute('stop-color'))).toEqual([
+            topCapHighlightColor(CUSTOM_STATE_GRADIENTS.stopped[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.stopped),
+            CUSTOM_STATE_GRADIENTS.stopped[0],
+            topCapHighlightColor(CUSTOM_STATE_GRADIENTS.setup[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.setup),
+            CUSTOM_STATE_GRADIENTS.setup[0],
+            topCapHighlightColor(CUSTOM_STATE_GRADIENTS.prod[0], TOP_CAP_HIGHLIGHT_MIX_BY_STATE.prod),
+            CUSTOM_STATE_GRADIENTS.prod[0],
+        ]);
     });
 
     it('matches production-history width math while keeping analytics, stacks, and tooltips invariant across valid bar-width factors', async () => {
@@ -5418,7 +6018,26 @@ describe('ActivityAnalyticsWidget', () => {
         });
     });
 
-    it('uses semantic typography for summary values/details and scales donut thickness responsively while preserving center semantics', () => {
+    it('uses semantic typography for summary values/details and keeps the donut center label block grouped around the donut center', () => {
+        const actualGetComputedStyle = window.getComputedStyle.bind(window);
+        const getComputedStyleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element) => {
+            const computedStyle = actualGetComputedStyle(element);
+            const testId = element.getAttribute('data-testid');
+
+            if (testId === 'activity-analytics-summary-total-value' || testId === 'activity-analytics-summary-total-label') {
+                const fontSize = testId === 'activity-analytics-summary-total-value' ? '32px' : '12px';
+                const mockedStyle = Object.create(computedStyle) as CSSStyleDeclaration;
+                Object.defineProperty(mockedStyle, 'fontSize', {
+                    configurable: true,
+                    value: fontSize,
+                });
+
+                return mockedStyle;
+            }
+
+            return computedStyle;
+        });
+
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -5447,6 +6066,7 @@ describe('ActivityAnalyticsWidget', () => {
         const coverageValue = within(summaryPanel).getByTestId('activity-analytics-summary-coverage');
         const donutCenterValue = screen.getByTestId('activity-analytics-summary-total-value');
         const donutCenterLabel = screen.getByTestId('activity-analytics-summary-total-label');
+        const donutCenterGroup = screen.getByTestId('activity-analytics-summary-center-label-group');
         act(() => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: 420 });
         });
@@ -5465,9 +6085,14 @@ describe('ActivityAnalyticsWidget', () => {
         const wideProdStrokeWidth = Number(wideSegments.find((segment) => segment.getAttribute('data-segment-key') === 'prod')?.getAttribute('stroke-width'));
         const wideSetupStrokeWidth = Number(wideSegments.find((segment) => segment.getAttribute('data-segment-key') === 'setup')?.getAttribute('stroke-width'));
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
+        const donutCenterX = Number(summaryChart.getAttribute('data-donut-center-x-px'));
         const donutCenterY = Number(summaryChart.getAttribute('data-donut-center-y-px'));
         const donutMarginTop = Number(summaryChart.getAttribute('data-donut-margin-top-px'));
         const donutRegionHeight = Number(summaryChart.getAttribute('data-donut-region-height-px'));
+        const donutCenterValueY = Number(donutCenterValue.getAttribute('y'));
+        const donutCenterLabelY = Number(donutCenterLabel.getAttribute('y'));
+
+        getComputedStyleSpy.mockRestore();
 
         expect(detailTitle).toHaveStyle({
             fontFamily: 'var(--font-system)',
@@ -5503,11 +6128,19 @@ describe('ActivityAnalyticsWidget', () => {
             fontSize: 'var(--font-size-system)',
             letterSpacing: 'var(--tracking-system)',
         });
+        expect(donutCenterGroup).toHaveAttribute('transform', `translate(${donutCenterX} ${donutCenterY})`);
+        expect(donutCenterValue).toHaveAttribute('x', '0');
+        expect(donutCenterLabel).toHaveAttribute('x', '0');
+        expect(donutCenterValue).toHaveAttribute('dominant-baseline', 'middle');
+        expect(donutCenterLabel).toHaveAttribute('dominant-baseline', 'middle');
+        expect(donutCenterValueY).toBeLessThan(0);
+        expect(donutCenterLabelY).toBeGreaterThan(0);
+        expect(Math.abs(donutCenterLabelY)).toBeGreaterThan(Math.abs(donutCenterValueY));
         expect(summaryPanel).toHaveClass('items-center', 'justify-center');
         expect(donutCenterY).toBeCloseTo(donutMarginTop + (donutRegionHeight / 2), 2);
         expect(narrowSummaryHeight).toBeCloseTo(wideSummaryHeight, 5);
-        expect(narrowProdStrokeWidth / narrowSetupStrokeWidth).toBeCloseTo(1.5, 5);
-        expect(wideProdStrokeWidth / wideSetupStrokeWidth).toBeCloseTo(1.5, 5);
+        expect(narrowProdStrokeWidth / narrowSetupStrokeWidth).toBeCloseTo(1.75, 5);
+        expect(wideProdStrokeWidth / wideSetupStrokeWidth).toBeCloseTo(1.75, 5);
         expect(donutCenterValue).not.toHaveTextContent('7.0 h');
         expect(donutCenterLabel).not.toHaveTextContent('Total');
     });
@@ -5769,6 +6402,70 @@ describe('ActivityAnalyticsWidget', () => {
         expect(segments[2]?.dashOffset).toBeLessThan(segments[1]?.dashOffset ?? 0);
     });
 
+    it('allocates donut route progress proportionally to each segment travel length instead of equal step counts', () => {
+        const ringThickness = 10;
+        const prodRingThickness = 14;
+        const segments = buildActivityAnalyticsSummarySegments({
+            bars: [
+                { key: 'stopped', label: 'Detenida', durationMs: 1, color: 'red' },
+                { key: 'setup', label: 'Setup', durationMs: 2, color: 'yellow' },
+                { key: 'prod', label: 'Prod.', durationMs: 3, color: 'green' },
+            ],
+            circumference: 150,
+            gapLength: 6,
+        });
+
+        const firstRoute = resolveSummaryTravelingTopCapRoute(segments, 0, 0, ringThickness, prodRingThickness);
+
+        if (!firstRoute) {
+            throw new Error('Expected a first donut top-cap route');
+        }
+
+        const secondRoute = resolveSummaryTravelingTopCapRoute(
+            segments,
+            0,
+            Math.min(firstRoute.stepProgressEnd + 0.0001, 0.999999),
+            ringThickness,
+            prodRingThickness,
+        );
+
+        if (!secondRoute) {
+            throw new Error('Expected a second donut top-cap route');
+        }
+
+        const thirdRoute = resolveSummaryTravelingTopCapRoute(
+            segments,
+            0,
+            Math.min(secondRoute.stepProgressEnd + 0.0001, 0.999999),
+            ringThickness,
+            prodRingThickness,
+        );
+
+        if (!thirdRoute) {
+            throw new Error('Expected a third donut top-cap route');
+        }
+
+        const routeSteps = [firstRoute, secondRoute, thirdRoute];
+
+        const orderedRoutes = routeSteps.filter((route): route is NonNullable<typeof route> => route !== null)
+            .sort((left, right) => left.routeStep - right.routeStep);
+
+        expect(orderedRoutes).toHaveLength(3);
+
+        const totalTravelLength = orderedRoutes.reduce((total, route) => total + route.travelLength, 0);
+        const expectedFirstBoundary = orderedRoutes[0]!.travelLength / totalTravelLength;
+        const expectedSecondBoundary = (orderedRoutes[0]!.travelLength + orderedRoutes[1]!.travelLength) / totalTravelLength;
+
+        expect(orderedRoutes[0]!.stepProgressStart).toBeCloseTo(0, 6);
+        expect(orderedRoutes[0]!.stepProgressEnd).toBeCloseTo(expectedFirstBoundary, 6);
+        expect(orderedRoutes[1]!.stepProgressStart).toBeCloseTo(expectedFirstBoundary, 6);
+        expect(orderedRoutes[1]!.stepProgressEnd).toBeCloseTo(expectedSecondBoundary, 6);
+        expect(orderedRoutes[2]!.stepProgressStart).toBeCloseTo(expectedSecondBoundary, 6);
+        expect(orderedRoutes[2]!.stepProgressEnd).toBeCloseTo(1, 6);
+        expect(orderedRoutes[0]!.stepProgressEnd).not.toBeCloseTo(1 / 3, 2);
+        expect(orderedRoutes[1]!.stepProgressEnd).not.toBeCloseTo(2 / 3, 3);
+    });
+
     it('renders compact Mejor/Peor bars from the visible grouped data and tightens spacing as the widget narrows', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
@@ -6010,6 +6707,151 @@ describe('ActivityAnalyticsWidget', () => {
         expect(chartHeight - Number(dateLabel.getAttribute('y'))).toBe(8);
         expect(dateLabel.getAttribute('style')).toContain('var(--font-chart)');
         expect(screen.queryByText('24.0 h')).not.toBeInTheDocument();
+    });
+
+    it('pins the en curso grouped label to the top row and renders a track-height traveling top cap only on the current partial bucket', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 4 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 1 * 60 * 60 * 1000, noData: 0 },
+                expectedDurationMs: 6 * 60 * 60 * 1000,
+                productivityRatio: 4 / 6,
+                productivityLabel: '67%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-2',
+                label: '2026-06-19',
+                durationsMs: { prod: 5 * 60 * 60 * 1000, setup: 1 * 60 * 60 * 1000, stopped: 0, noData: 0 },
+                expectedDurationMs: 6 * 60 * 60 * 1000,
+                productivityRatio: 5 / 6,
+                productivityLabel: '83%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-3',
+                label: '2026-06-20 (en curso)',
+                durationsMs: { prod: 0, setup: 0, stopped: 0, noData: 60 * 60 * 1000 },
+                expectedDurationMs: 6 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'en curso',
+                coverageRatio: 1 / 6,
+                isInProgress: true,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        stateGradients: CUSTOM_STATE_GRADIENTS,
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                            },
+                            donut: CUSTOM_VISUAL_EFFECTS.donut,
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: CHART_ELIGIBLE_GROUPS_BODY_HEIGHT_PX });
+        });
+
+        const stacks = screen.getAllByTestId('activity-analytics-group-stack');
+        const previousLabel = within(stacks[1]).getByTestId('activity-analytics-group-productivity');
+        const currentLabel = within(stacks[2]).getByTestId('activity-analytics-group-productivity');
+        const currentOutline = within(stacks[2]).getByTestId('activity-analytics-group-partial-outline');
+        const currentTravelingTopCap = within(stacks[2]).getByTestId('activity-analytics-group-current-top-cap');
+        const currentTravelingTopCapAura = within(currentTravelingTopCap).getByTestId('activity-analytics-group-current-top-cap-aura');
+        const currentTravelingTopCapHalo = within(currentTravelingTopCap).getByTestId('activity-analytics-group-current-top-cap-halo');
+        const currentTravelingTopCapCore = within(currentTravelingTopCap).getByTestId('activity-analytics-group-current-top-cap-core-stroke');
+        const currentVisibleSegments = within(stacks[2])
+            .getAllByTestId('activity-analytics-group-segment')
+            .filter((segment) => Number(segment.getAttribute('height')) > 0);
+        const visibleFilledHeight = currentVisibleSegments.reduce((total, segment) => total + Number(segment.getAttribute('height')), 0);
+        const currentTopCapMetrics = parseRectMetrics(currentTravelingTopCapCore);
+        const outlineMetrics = parseRectMetrics(currentOutline);
+
+        expect(currentLabel).toHaveTextContent('en curso');
+        expect(currentLabel).toHaveAttribute('data-label-placement', 'top-row');
+        expect(Number(currentLabel.getAttribute('y'))).toBeLessThan(Math.min(...currentVisibleSegments.map((segment) => Number(segment.getAttribute('y')))));
+        expect(Number(currentLabel.getAttribute('y'))).toBeLessThanOrEqual(Number(previousLabel.getAttribute('y')));
+        expect(within(stacks[0]).queryByTestId('activity-analytics-group-current-top-cap')).not.toBeInTheDocument();
+        expect(within(stacks[1]).queryByTestId('activity-analytics-group-current-top-cap')).not.toBeInTheDocument();
+        expect(within(stacks[2]).queryByTestId('activity-analytics-group-top-cap')).not.toBeInTheDocument();
+        expect(currentTravelingTopCap).toHaveAttribute('data-motion', 'traveling');
+        expect(currentTravelingTopCap).toHaveAttribute('data-direction', 'bottom-to-top');
+        expect(currentTravelingTopCap).toHaveAttribute('data-segment-key', 'prod');
+        expect(currentTravelingTopCapAura.getAttribute('fill')).toContain('-group-top-cap-gradient');
+        expect(currentTravelingTopCapHalo.getAttribute('fill')).toContain('-group-top-cap-gradient');
+        expect(currentTravelingTopCapCore).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
+        expect(Number(currentTravelingTopCap.getAttribute('data-track-height'))).toBeCloseTo(outlineMetrics.height, 2);
+        expect(Number(currentTravelingTopCap.getAttribute('data-track-height'))).toBeGreaterThan(visibleFilledHeight);
+        expect(currentTopCapMetrics.y).toBeGreaterThanOrEqual(outlineMetrics.y);
+        expect(currentTopCapMetrics.y + currentTopCapMetrics.height).toBeLessThanOrEqual(outlineMetrics.y + outlineMetrics.height + 0.05);
+    });
+
+    it('falls back to a static current grouped top cap when reduced motion is enabled', () => {
+        vi.stubGlobal('matchMedia', createMatchMediaMock(true));
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-3',
+                label: '2026-06-20 (en curso)',
+                durationsMs: { prod: 90 * 60 * 1000, setup: 30 * 60 * 1000, stopped: 0, noData: 0 },
+                expectedDurationMs: 6 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'en curso',
+                coverageRatio: 2 / 6,
+                isInProgress: true,
+            }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                        visualEffects: {
+                            groupedBars: {
+                                ...CUSTOM_VISUAL_EFFECTS.groupedBars,
+                                topCap: true,
+                            },
+                            donut: CUSTOM_VISUAL_EFFECTS.donut,
+                        },
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 848, bodyHeight: CHART_ELIGIBLE_GROUPS_BODY_HEIGHT_PX });
+        });
+
+        expect(screen.getByTestId('activity-analytics-group-current-top-cap')).toHaveAttribute('data-motion', 'static');
     });
 
     it('shows a production percent above incomplete grouped bars instead of cobertura incompleta', () => {

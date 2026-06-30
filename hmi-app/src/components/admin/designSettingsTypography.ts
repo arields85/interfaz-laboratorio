@@ -68,6 +68,9 @@ export const ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_RANGE = {
     max: 72,
 } as const;
 
+export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_PX = DEFAULT_CHART_FONT_SIZE_PX;
+export const ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_RANGE = CHART_FONT_SIZE_RANGE;
+
 export const DEFAULT_WIDGET_UNIT_FONT_SIZE_PX = 20;
 export const WIDGET_UNIT_FONT_SIZE_RANGE = {
     min: 10,
@@ -110,6 +113,7 @@ export const FONT_STACKS_BY_TOKEN = {
     '--font-widget-value': 'sans',
     '--font-widget-value-gauge': 'sans',
     '--font-widget-value-activity-analytics': 'sans',
+    '--font-widget-value-activity-analytics-prod-trend': 'sans',
 } as const satisfies Record<string, FontStackKind>;
 
 export type FontFamilyTokenKey = keyof typeof FONT_STACKS_BY_TOKEN;
@@ -164,6 +168,22 @@ export function normalizeStoredFontOverrides(overrides: Record<string, string>):
     delete normalizedOverrides['--font-sans'];
     delete normalizedOverrides['--font-weight-sans'];
 
+    if (normalizedOverrides['--font-chart'] && !normalizedOverrides['--font-widget-value-activity-analytics-prod-trend']) {
+        normalizedOverrides['--font-widget-value-activity-analytics-prod-trend'] = normalizedOverrides['--font-chart'];
+    }
+
+    if (normalizedOverrides['--font-weight-chart'] && !normalizedOverrides['--font-weight-widget-value-activity-analytics-prod-trend']) {
+        normalizedOverrides['--font-weight-widget-value-activity-analytics-prod-trend'] = normalizedOverrides['--font-weight-chart'];
+    }
+
+    if (normalizedOverrides['--font-size-chart'] && !normalizedOverrides['--font-size-widget-value-activity-analytics-prod-trend']) {
+        normalizedOverrides['--font-size-widget-value-activity-analytics-prod-trend'] = normalizedOverrides['--font-size-chart'];
+    }
+
+    if (normalizedOverrides['--tracking-chart'] && !normalizedOverrides['--tracking-widget-value-activity-analytics-prod-trend']) {
+        normalizedOverrides['--tracking-widget-value-activity-analytics-prod-trend'] = normalizedOverrides['--tracking-chart'];
+    }
+
     return normalizedOverrides;
 }
 
@@ -217,6 +237,14 @@ export function normalizeActivityAnalyticsValueFontSizeValue(value: string | num
 
 export function parseActivityAnalyticsValueFontSizeValue(value: string | undefined): number {
     return Number.parseInt(normalizeActivityAnalyticsValueFontSizeValue(value ?? DEFAULT_ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_PX), 10);
+}
+
+export function normalizeActivityAnalyticsProdTrendValueFontSizeValue(value: string | number): string {
+    return normalizePixelValue(value, DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_PX, ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_RANGE);
+}
+
+export function parseActivityAnalyticsProdTrendValueFontSizeValue(value: string | undefined): number {
+    return Number.parseInt(normalizeActivityAnalyticsProdTrendValueFontSizeValue(value ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_PX), 10);
 }
 
 export function normalizeWidgetUnitFontSizeValue(value: string | number): string {
