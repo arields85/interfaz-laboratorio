@@ -1,11 +1,16 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     LayoutTemplate, FileEdit, Copy, Trash2, Plus, Edit2, Check,
     GripVertical, Loader2, Search, SearchX, LayoutDashboard,
-    Bookmark
+    Bookmark, Download, Upload
 } from 'lucide-react';
 import { dashboardStorage } from '../../services/DashboardStorageService';
+import type {
+    DashboardImportResult,
+    DashboardPortabilityIssue,
+} from '../../services/dashboardPortabilityService';
+import { dashboardPortabilityService } from '../../services/dashboardPortabilityService';
 import { templateStorage } from '../../services/TemplateStorageService';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import type { Dashboard, HierarchyNode, Template } from '../../domain/admin.types';
@@ -81,6 +86,86 @@ function getWidgetCountLabel(widgetCount: number) {
     return `${widgetCount} ${widgetCount === 1 ? 'widget' : 'widgets'}`;
 }
 
+interface DashboardManagerData {
+    dashboards: Dashboard[];
+    templates: Template[];
+    nodeMap: Map<string, HierarchyNode>;
+}
+
+interface DashboardPortabilityFeedback {
+    kind: 'success' | 'error';
+    title: string;
+    dashboardName?: string;
+    createdCatalogVariableCount: number;
+    issues: DashboardPortabilityIssue[];
+}
+
+async function loadDashboardManagerData(): Promise<DashboardManagerData> {
+    const [dashboards, templates, hierarchyNodes] = await Promise.all([
+        dashboardStorage.getDashboards(),
+        templateStorage.getTemplates(),
+        hierarchyStorage.getNodes(),
+    ]);
+
+    return {
+        dashboards,
+        templates,
+        nodeMap: new Map(hierarchyNodes.map((node) => [node.id, node])),
+    };
+}
+
+function extractPortabilityIssues(error: unknown): DashboardPortabilityIssue[] {
+    if (
+        error
+        && typeof error === 'object'
+        && 'issues' in error
+        && Array.isArray(error.issues)
+    ) {
+        return error.issues as DashboardPortabilityIssue[];
+    }
+
+    return [{
+        code: 'portable_dashboard_operation_failed',
+        path: '$',
+        message: 'No pudimos completar la operación portable del dashboard. Volvé a intentarlo.',
+        severity: 'error',
+    }];
+}
+
+function buildImportSuccessSummary(createdCatalogVariableCount: number) {
+    if (createdCatalogVariableCount === 0) {
+        return 'No hizo falta crear variables nuevas; las coincidencias locales se reutilizaron sin sobrescribir.';
+    }
+
+    return createdCatalogVariableCount === 1
+        ? 'Se creó 1 variable nueva; las coincidencias locales existentes se reutilizaron sin sobrescribir.'
+        : `Se crearon ${createdCatalogVariableCount} variables nuevas; las coincidencias locales existentes se reutilizaron sin sobrescribir.`;
+}
+
+function createImportSuccessFeedback(result: DashboardImportResult): DashboardPortabilityFeedback {
+    return {
+        kind: 'success',
+        title: 'Importación completada',
+        dashboardName: result.dashboard.name,
+        createdCatalogVariableCount: result.createdCatalogVariables.length,
+        issues: result.issues,
+    };
+}
+
+async function triggerDashboardDownload(dashboard: Dashboard) {
+    const exportResult = await dashboardPortabilityService.exportDashboard(dashboard);
+    const downloadUrl = URL.createObjectURL(new Blob([exportResult.json], { type: 'application/json' }));
+
+    try {
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = exportResult.fileName;
+        link.click();
+    } finally {
+        URL.revokeObjectURL(downloadUrl);
+    }
+}
+
 // =============================================================================
 // DashboardManagerPage
 // Gestor de dashboards y templates del Modo Administrador.
@@ -106,7 +191,22 @@ export default function DashboardManagerPage() {
     const [draggingDashboardId, setDraggingDashboardId] = useState<string | null>(null);
     const [dragOverDashboardId, setDragOverDashboardId] = useState<string | null>(null);
     const [dashboardSearch, setDashboardSearch] = useState('');
+    const [isImporting, setIsImporting] = useState(false);
+    const [exportingDashboardId, setExportingDashboardId] = useState<string | null>(null);
+    const [portabilityFeedback, setPortabilityFeedback] = useState<DashboardPortabilityFeedback | null>(null);
     const [, setNodeTypeLabelsVersion] = useState(0);
+    const importInputRef = useRef<HTMLInputElement | null>(null);
+
+    const applyManagerData = ({ dashboards: nextDashboards, templates: nextTemplates, nodeMap: nextNodeMap }: DashboardManagerData) => {
+        setDashboards(nextDashboards);
+        setTemplates(nextTemplates);
+        setNodeMap(nextNodeMap);
+    };
+
+    const refreshDashboardList = async () => {
+        const nextDashboards = await dashboardStorage.getDashboards();
+        setDashboards(nextDashboards);
+    };
 
     useEffect(() => {
         void loadNodeTypeLabels().then(() => {
@@ -118,14 +218,7 @@ export default function DashboardManagerPage() {
         const loadAll = async () => {
             setIsLoading(true);
             try {
-                const [dashData, tplData, hierarchyNodes] = await Promise.all([
-                    dashboardStorage.getDashboards(),
-                    templateStorage.getTemplates(),
-                    hierarchyStorage.getNodes(),
-                ]);
-                setDashboards(dashData);
-                setTemplates(tplData);
-                setNodeMap(new Map(hierarchyNodes.map((node) => [node.id, node])));
+                applyManagerData(await loadDashboardManagerData());
             } catch (error) {
                 console.error("Error cargando datos:", error);
             } finally {
@@ -141,6 +234,56 @@ export default function DashboardManagerPage() {
             navigate(`/admin/builder/${newDash.id}`);
         } catch (error) {
             console.error("Error creando dashboard:", error);
+        }
+    };
+
+    const handleExportDashboard = async (dashboard: Dashboard) => {
+        setExportingDashboardId(dashboard.id);
+
+        try {
+            await triggerDashboardDownload(dashboard);
+        } catch (error) {
+            console.error('Error exportando dashboard:', error);
+            setPortabilityFeedback({
+                kind: 'error',
+                title: 'No pudimos exportar el dashboard',
+                dashboardName: dashboard.name,
+                createdCatalogVariableCount: 0,
+                issues: extractPortabilityIssues(error),
+            });
+        } finally {
+            setExportingDashboardId(null);
+        }
+    };
+
+    const handleOpenImportPicker = () => {
+        importInputRef.current?.click();
+    };
+
+    const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+
+        if (!file) {
+            return;
+        }
+
+        setIsImporting(true);
+
+        try {
+            const result = await dashboardPortabilityService.importDashboard(await file.text());
+            await refreshDashboardList();
+            setPortabilityFeedback(createImportSuccessFeedback(result));
+        } catch (error) {
+            console.error('Error importando dashboard:', error);
+            setPortabilityFeedback({
+                kind: 'error',
+                title: 'No pudimos importar el dashboard',
+                createdCatalogVariableCount: 0,
+                issues: extractPortabilityIssues(error),
+            });
+        } finally {
+            event.target.value = '';
+            setIsImporting(false);
         }
     };
 
@@ -367,18 +510,48 @@ export default function DashboardManagerPage() {
                         />
                     </label>
 
-                    <AdminActionButton
-                        onClick={handleCreateNew}
-                        variant="primary"
-                        className="shrink-0"
-                    >
-                        <Plus size={14} />
-                        Nuevo Dashboard
-                    </AdminActionButton>
+                    <input
+                        ref={importInputRef}
+                        type="file"
+                        accept="application/json,.json"
+                        className="sr-only"
+                        aria-label="Seleccionar archivo portable de dashboard"
+                        onChange={(event) => void handleImportFileChange(event)}
+                    />
+
+                    <div className="flex items-center gap-2 shrink-0">
+                        <AdminActionButton
+                            onClick={handleOpenImportPicker}
+                            variant="secondary"
+                            disabled={isImporting}
+                        >
+                            {isImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                            Importar Dashboard
+                        </AdminActionButton>
+
+                        <AdminActionButton
+                            onClick={handleCreateNew}
+                            variant="primary"
+                        >
+                            <Plus size={14} />
+                            Nuevo Dashboard
+                        </AdminActionButton>
+                    </div>
                 </div>
             }
             rail={
                 <div className="h-full w-full flex flex-col items-center py-3 gap-1">
+                    <HoverTooltip label="Importar dashboard" position="right" className="flex">
+                        <button
+                            type="button"
+                            aria-label="Importar dashboard"
+                            onClick={handleOpenImportPicker}
+                            disabled={isImporting}
+                            className="h-9 w-9 inline-flex items-center justify-center rounded-md text-industrial-muted transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {isImporting ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                        </button>
+                    </HoverTooltip>
                     <HoverTooltip label="Nuevo dashboard" position="right" className="flex">
                         <button
                             type="button"
@@ -641,6 +814,19 @@ export default function DashboardManagerPage() {
                                         <Bookmark size={16} />
                                     </button>
                                 </HoverTooltip>
+                                <HoverTooltip label="Exportar dashboard" position="right" className="flex">
+                                    <button
+                                        type="button"
+                                        aria-label={`Exportar ${headerTitle}`}
+                                        className="p-2 hover:bg-white/10 hover:text-white rounded transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                                        onClick={() => void handleExportDashboard(dash)}
+                                        disabled={exportingDashboardId === dash.id}
+                                    >
+                                        {exportingDashboardId === dash.id
+                                            ? <Loader2 size={16} className="animate-spin" />
+                                            : <Download size={16} />}
+                                    </button>
+                                </HoverTooltip>
                                 <HoverTooltip label="Eliminar" position="right" className="flex">
                                     <button 
                                         type="button"
@@ -818,6 +1004,52 @@ export default function DashboardManagerPage() {
                 )}
             >
                 <p className="text-industrial-muted">¿Eliminar este template?</p>
+            </AdminDialog>
+
+            <AdminDialog
+                open={Boolean(portabilityFeedback)}
+                title={portabilityFeedback?.title ?? 'Portabilidad de dashboard'}
+                onClose={() => setPortabilityFeedback(null)}
+                actions={(
+                    <AdminActionButton variant="primary" onClick={() => setPortabilityFeedback(null)}>
+                        Cerrar
+                    </AdminActionButton>
+                )}
+                maxWidth="max-w-lg"
+            >
+                {portabilityFeedback?.kind === 'success' ? (
+                    <div className="space-y-3 text-industrial-muted">
+                        <p>
+                            Dashboard importado: <span className="text-white">{portabilityFeedback.dashboardName}</span>
+                        </p>
+                        <p>{buildImportSuccessSummary(portabilityFeedback.createdCatalogVariableCount)}</p>
+                        {portabilityFeedback.issues.length > 0 && (
+                            <div className="space-y-2">
+                                <h4 className="uppercase text-white">Advertencias</h4>
+                                <ul className="space-y-2">
+                                    {portabilityFeedback.issues.map((issue) => (
+                                        <li key={`${issue.code}-${issue.path}`} className="rounded border border-white/10 bg-black/10 px-3 py-2">
+                                            <p>{issue.message}</p>
+                                            <p className="mt-1 font-mono text-xs text-industrial-muted/80">{issue.path}</p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="space-y-3 text-industrial-muted">
+                        <p>Revisá los problemas marcados antes de volver a intentar la importación.</p>
+                        <ul className="space-y-2">
+                            {portabilityFeedback?.issues.map((issue) => (
+                                <li key={`${issue.code}-${issue.path}`} className="rounded border border-status-critical/30 bg-status-critical/10 px-3 py-2">
+                                    <p className="text-white">{issue.message}</p>
+                                    <p className="mt-1 font-mono text-xs text-industrial-muted/80">{issue.path}</p>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
             </AdminDialog>
 
                         </>

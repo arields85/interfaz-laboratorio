@@ -45,6 +45,7 @@ import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels
 import { migrateLegacyBindings } from '../../utils/catalogMigration';
 import { supportsCatalogVariable, getDefaultIcon, getDefaultSize } from '../../utils/widgetCapabilities';
 import { DEFAULT_COLS, DEFAULT_ROWS } from '../../utils/gridConfig';
+import { buildCatalogVariableId } from '../../utils/catalogVariableId';
 import { useUIStore } from '../../store/ui.store';
 import { useDataOverview } from '../../queries/useDataOverview';
 
@@ -1429,22 +1430,4 @@ interface VariableDeletionState {
         id: string;
         name: string;
     }>;
-}
-
-function buildCatalogVariableId(name: string, unit: string): string {
-    const normalizedName = slugify(name);
-    const normalizedUnit = slugify(unit);
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).slice(2, 6);
-    return `cv-${normalizedName}-${normalizedUnit}-${timestamp}-${random}`;
-}
-
-function slugify(value: string): string {
-    return value
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLocaleLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        || 'variable';
 }

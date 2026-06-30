@@ -46,6 +46,16 @@ class VariableCatalogStorageService {
         return variables.filter((variable) => variable.unit === unit);
     }
 
+    /** Retorna una variable por nombre (case-insensitive) y unidad exacta. */
+    async findByNameAndUnit(name: string, unit: string): Promise<CatalogVariable | null> {
+        const variables = await this.readStorage();
+        const normalizedName = name.trim().toLocaleLowerCase();
+
+        return variables.find(
+            (variable) => variable.unit === unit && variable.name.trim().toLocaleLowerCase() === normalizedName,
+        ) ?? null;
+    }
+
     /**
      * Crea una variable nueva en el catálogo.
      * Rechaza nombres duplicados dentro de la misma unidad.

@@ -72,6 +72,26 @@ describe('VariableCatalogStorageService', () => {
         await expect(variableCatalogStorage.getByUnit('RPM')).resolves.toEqual([variables[0], variables[1]]);
     });
 
+    it('finds a variable by case-insensitive name and exact unit', async () => {
+        const variables = [
+            makeVariable({ id: 'cv-rpm', name: 'Rotor speed', unit: 'RPM' }),
+            makeVariable({ id: 'cv-bar', name: 'Rotor speed', unit: 'bar' }),
+        ];
+
+        localStorage.setItem(VARIABLE_CATALOG_STORAGE_KEY, JSON.stringify(variables));
+
+        await expect(variableCatalogStorage.findByNameAndUnit('ROTOR SPEED', 'RPM')).resolves.toEqual(variables[0]);
+    });
+
+    it('returns null when only the name matches but the unit drifts', async () => {
+        localStorage.setItem(
+            VARIABLE_CATALOG_STORAGE_KEY,
+            JSON.stringify([makeVariable({ id: 'cv-kpa', name: 'Line pressure', unit: 'kPa' })]),
+        );
+
+        await expect(variableCatalogStorage.findByNameAndUnit('Line pressure', 'bar')).resolves.toBeNull();
+    });
+
     it('creates and persists a new variable', async () => {
         const existing = [makeVariable()];
         const created = makeVariable({
