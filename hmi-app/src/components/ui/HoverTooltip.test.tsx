@@ -106,17 +106,13 @@ describe('HoverTooltip', () => {
         expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     });
 
-    it('flips a right-positioned tooltip to the left and clamps it inside the viewport', async () => {
+    it('prefers an above-left diagonal placement for right-positioned row actions near the viewport edge when top space is available', async () => {
         Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
         Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 });
 
-        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
-            if (this.getAttribute('role') === 'tooltip') {
-                return createRect({ x: 0, y: 0, width: 120, height: 32 });
-            }
-
-            return createRect({ x: 0, y: 0, width: 0, height: 0 });
-        });
+        vi.spyOn(HTMLSpanElement.prototype, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 0, y: 0, width: 120, height: 32 }),
+        );
 
         render(
             <HoverTooltip label="Exportar dashboard" position="right">
@@ -133,24 +129,80 @@ describe('HoverTooltip', () => {
 
         await waitFor(() => {
             expect(screen.getByRole('tooltip')).toHaveStyle({
-                top: '112px',
-                left: '274px',
-                transform: 'translate(-100%, -50%)',
+                top: '62px',
+                left: '184px',
+                transform: 'none',
             });
         });
     });
 
-    it('clamps flipped tooltips within the viewport margin', async () => {
+    it('prefers an above-right diagonal placement for right-positioned row actions when there is room', async () => {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 640 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 360 });
+
+        vi.spyOn(HTMLSpanElement.prototype, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 0, y: 0, width: 120, height: 32 }),
+        );
+
+        render(
+            <HoverTooltip label="Export dashboard" position="right">
+                <button type="button">Export</button>
+            </HoverTooltip>,
+        );
+
+        const trigger = screen.getByRole('button', { name: 'Export' });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 320, y: 120, width: 24, height: 24 }),
+        );
+
+        fireEvent.mouseEnter(trigger);
+
+        await waitFor(() => {
+            expect(screen.getByRole('tooltip')).toHaveStyle({
+                top: '82px',
+                left: '350px',
+                transform: 'none',
+            });
+        });
+    });
+
+    it('prefers an above-left diagonal placement for right-positioned row actions near the viewport edge', async () => {
         Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
         Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 });
 
-        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
-            if (this.getAttribute('role') === 'tooltip') {
-                return createRect({ x: 0, y: 0, width: 120, height: 48 });
-            }
+        vi.spyOn(HTMLSpanElement.prototype, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 0, y: 0, width: 120, height: 32 }),
+        );
 
-            return createRect({ x: 0, y: 0, width: 0, height: 0 });
+        render(
+            <HoverTooltip label="Export dashboard" position="right">
+                <button type="button">Export</button>
+            </HoverTooltip>,
+        );
+
+        const trigger = screen.getByRole('button', { name: 'Export' });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 280, y: 100, width: 24, height: 24 }),
+        );
+
+        fireEvent.mouseEnter(trigger);
+
+        await waitFor(() => {
+            expect(screen.getByRole('tooltip')).toHaveStyle({
+                top: '62px',
+                left: '184px',
+                transform: 'none',
+            });
         });
+    });
+
+    it('uses a bottom-left diagonal placement when top lacks room but bottom space is available', async () => {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 });
+
+        vi.spyOn(HTMLSpanElement.prototype, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 0, y: 0, width: 120, height: 48 }),
+        );
 
         render(
             <HoverTooltip label="Very long tooltip label" position="right">
@@ -167,9 +219,9 @@ describe('HoverTooltip', () => {
 
         await waitFor(() => {
             expect(screen.getByRole('tooltip')).toHaveStyle({
-                top: '20px',
-                left: '274px',
-                transform: 'translate(-100%, -50%)',
+                top: '30px',
+                left: '184px',
+                transform: 'none',
             });
         });
     });

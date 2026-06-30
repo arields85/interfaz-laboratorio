@@ -4,6 +4,7 @@ const TOOLTIP_OFFSET_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
 
 type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
+type MeasuredTooltipPlacement = TooltipPosition | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 interface TooltipCoordinates {
     top: number;
@@ -51,7 +52,7 @@ const getOppositePosition = (position: TooltipPosition): TooltipPosition => {
     }
 };
 
-const getTooltipBox = (rect: DOMRect, size: TooltipSize, position: TooltipPosition) => {
+const getTooltipBox = (rect: DOMRect, size: TooltipSize, position: MeasuredTooltipPlacement) => {
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
 
@@ -76,6 +77,26 @@ const getTooltipBox = (rect: DOMRect, size: TooltipSize, position: TooltipPositi
                 top: centerY - size.height / 2,
                 left: rect.right + TOOLTIP_OFFSET_PX,
             };
+        case 'top-left':
+            return {
+                top: rect.top - TOOLTIP_OFFSET_PX - size.height,
+                left: rect.right - size.width,
+            };
+        case 'top-right':
+            return {
+                top: rect.top - TOOLTIP_OFFSET_PX - size.height,
+                left: rect.right + TOOLTIP_OFFSET_PX,
+            };
+        case 'bottom-left':
+            return {
+                top: rect.bottom + TOOLTIP_OFFSET_PX,
+                left: rect.right - size.width,
+            };
+        case 'bottom-right':
+            return {
+                top: rect.bottom + TOOLTIP_OFFSET_PX,
+                left: rect.right + TOOLTIP_OFFSET_PX,
+            };
     }
 };
 
@@ -94,6 +115,28 @@ const overflowsPrimaryAxis = (rect: DOMRect, size: TooltipSize, position: Toolti
     }
 };
 
+const fitsWithinViewport = (box: { top: number; left: number }, size: TooltipSize) => {
+    return (
+        box.left >= VIEWPORT_MARGIN_PX &&
+        box.top >= VIEWPORT_MARGIN_PX &&
+        box.left + size.width <= window.innerWidth - VIEWPORT_MARGIN_PX &&
+        box.top + size.height <= window.innerHeight - VIEWPORT_MARGIN_PX
+    );
+};
+
+const getMeasuredPlacementCandidates = (preferredPosition: TooltipPosition): MeasuredTooltipPlacement[] => {
+    switch (preferredPosition) {
+        case 'left':
+            return ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'left', 'right'];
+        case 'right':
+            return ['top-right', 'top-left', 'bottom-right', 'bottom-left', 'right', 'left'];
+        case 'top':
+            return ['top', 'bottom'];
+        case 'bottom':
+            return ['bottom', 'top'];
+    }
+};
+
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 const getMeasuredTooltipCoordinates = (
@@ -102,7 +145,11 @@ const getMeasuredTooltipCoordinates = (
     preferredPosition: TooltipPosition,
 ): TooltipCoordinates => {
     const fallbackPosition = getOppositePosition(preferredPosition);
-    const finalPosition = overflowsPrimaryAxis(rect, size, preferredPosition) ? fallbackPosition : preferredPosition;
+    const defaultPosition = overflowsPrimaryAxis(rect, size, preferredPosition) ? fallbackPosition : preferredPosition;
+    const finalPosition =
+        getMeasuredPlacementCandidates(preferredPosition).find((candidate) =>
+            fitsWithinViewport(getTooltipBox(rect, size, candidate), size),
+        ) ?? defaultPosition;
     const tooltipBox = getTooltipBox(rect, size, finalPosition);
     const maxLeft = Math.max(VIEWPORT_MARGIN_PX, window.innerWidth - VIEWPORT_MARGIN_PX - size.width);
     const maxTop = Math.max(VIEWPORT_MARGIN_PX, window.innerHeight - VIEWPORT_MARGIN_PX - size.height);
@@ -133,6 +180,15 @@ const getMeasuredTooltipCoordinates = (
                 top: clampedTop + size.height / 2,
                 left: clampedLeft,
                 transform: 'translate(0, -50%)',
+            };
+        case 'top-left':
+        case 'top-right':
+        case 'bottom-left':
+        case 'bottom-right':
+            return {
+                top: clampedTop,
+                left: clampedLeft,
+                transform: 'none',
             };
     }
 };
