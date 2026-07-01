@@ -66,6 +66,26 @@ Todo widget nuevo debe:
 - No implementar lógica de navegación dashboard-a-dashboard dentro del renderer: `WidgetRenderer`/`HeaderWidgetCanvas` la resuelven en viewer y el bloque `Navegación` debe quedar al final del panel.
 - Si aplica al header, declarar explícitamente su compatibilidad con las reglas del header.
 
+### Panel de propiedades del widget
+
+El panel de propiedades debe ser compacto, legible y consistente. No debe parecer un panel dentro de otro panel.
+
+- Dentro de un grupo/desplegable, no crear contenedores visuales anidados para resumir o agrupar información.
+- La única tipografía en mayúsculas dentro del bloque debe ser el título del grupo/desplegable.
+- El contenido interno usa minúsculas y la tipografía estándar del panel de propiedades.
+- Evitar información excesiva, repetida o decorativa: mostrar solo lo necesario para configurar o entender el valor actual.
+- Cuando un label tiene un desplegable a la derecha, el label debe tener como máximo 9 caracteres. Si excede ese largo, abreviarlo sin perder sentido.
+- Los títulos visibles del widget deben quedar en una sola línea. Usar como referencia máxima 17 caracteres y separar palabras con guion (`-`) cuando sea necesario abreviar.
+- Si un control horizontal se superpone con su label, mover el control debajo y permitir que ocupe todo el ancho útil del grupo.
+- Los subtítulos internos excepcionales pueden usar color blanco, pero deben conservar la tipografía y tamaño estándar del panel.
+- Para configuración de color, usar una estructura plana:
+  - label del color, por ejemplo `color inicial`
+  - swatch/cuadro de color
+  - texto `hex #` junto al campo de código
+  - el campo de código contiene solo el valor hexadecimal, sin `#`
+  - campo de `alfa (%)` separado y explícito
+- No usar cajas, tarjetas o bloques internos para cada color si el grupo/desplegable padre ya define el contexto visual.
+
 ### Diseño y semántica
 - Usar tokens de `index.css`.
 - Usar solo íconos de Lucide React.
