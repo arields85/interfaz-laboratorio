@@ -111,6 +111,7 @@ Estas reglas deben cristalizarse en primitives reutilizables siempre que el patr
 - `DockDetailDisclosure` — detalle expandible, listas secundarias o auditoría compactada detrás de una expansión. Crear/reutilizar antes de mostrar listas abiertas por defecto.
 - `DockColorField` — edición de color con layout canónico: swatch + `Hex #` + campo, y debajo `Alfa (%)` + campo numérico.
 - `DockInlineControlRow` — fila interna compacta para casos donde una propiedad necesita varios controles alineados sin exceder el ancho estándar de `DockFieldRow`.
+- `DockSliderField` — slider con label arriba, campo numérico editable a la derecha y rango full-width debajo. Usarlo para controles deslizables en vez de marcado local con `input[type="range"]`.
 
 Si una primitive requerida todavía no existe, crearla en `components/admin/` antes de corregir múltiples widgets con el mismo patrón.
 
