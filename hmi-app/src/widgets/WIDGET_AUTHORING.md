@@ -68,23 +68,50 @@ Todo widget nuevo debe:
 
 ### Panel de propiedades del widget
 
-El panel de propiedades debe ser compacto, legible y consistente. No debe parecer un panel dentro de otro panel.
+El panel de propiedades debe ser compacto, legible y consistente. Su estructura se compone de secciones colapsables (`DockSection`), filas de propiedad (`DockFieldRow`), controles reutilizables y ayudas contextuales (`DockInfoBox`). No debe parecer un panel dentro de otro panel.
 
-- Dentro de un grupo/desplegable, no crear contenedores visuales anidados para resumir o agrupar información.
-- La única tipografía en mayúsculas dentro del bloque debe ser el título del grupo/desplegable.
-- El contenido interno usa minúsculas y la tipografía estándar del panel de propiedades.
+- Dentro de una sección colapsable (`DockSection`), no crear contenedores visuales anidados para resumir o agrupar información.
+- Dentro de una sección colapsable, solo el título de la sección puede usar mayúsculas sostenidas.
+- Los labels internos de filas de propiedad (`DockFieldRow`) usan capitalización normal: primera letra en mayúscula y el resto en minúscula cuando corresponda.
+  - Correcto: `Incluido`, `Excluido`, `Color inicial`, `Alfa (%)`
+  - Incorrecto: `incluido`, `INCLUIDO`, `COLOR INICIAL`
+- La tipografía del panel de propiedades se toma únicamente de las primitives/clases compartidas del panel (`DockFieldRow`, `DockInfoBox`, `ADMIN_SIDEBAR_LABEL_CLS`, `ADMIN_SIDEBAR_INPUT_CLS`, etc.). No ajustar tamaño, peso, tracking, interlineado o familia tipográfica localmente para “hacer entrar” contenido.
+- No usar clases tipográficas ad-hoc dentro del panel (`text-sm`, `text-xs`, `text-[...]`, `font-*`, `tracking-*`, `leading-*`, etc.) para labels, resúmenes o ayudas.
 - Evitar información excesiva, repetida o decorativa: mostrar solo lo necesario para configurar o entender el valor actual.
-- Cuando un label tiene un desplegable a la derecha, el label debe tener como máximo 9 caracteres. Si excede ese largo, abreviarlo sin perder sentido.
+- Si hace falta una leyenda aclaratoria, usar `components/admin/DockInfoBox.tsx`; no crear avisos locales.
+  - Mantener el estilo visual del patrón: contenedor `border-white/5 bg-white/5` y texto `text-industrial-muted` para leyendas normales.
+  - El ícono puede variar según el contenido de la leyenda, o puede omitirse si la leyenda no lo necesita.
+  - Espaciado canónico: `flex items-start gap-2 rounded border px-2 py-1.5`, con el ícono `mt-0.5 shrink-0`.
+  - Usar este patrón para ayuda contextual breve, como el bloque de la sección `NAVEGACIÓN`.
+- Cuando un label tiene un selector (`AdminSelect`) a la derecha, el label debe tener como máximo 9 caracteres. Si excede ese largo, abreviarlo sin perder sentido.
+- La información secundaria, listas de detalle o auditoría debe ir compactada detrás de controles reutilizables: `AdminSelect` cuando se elige una opción, o una primitive equivalente de expansión de detalle cuando solo se muestra información.
+- No mostrar listas completas abiertas por defecto dentro de una sección colapsable.
+- Para selectores/dropdowns de opciones del panel admin, priorizar `AdminSelect`. Si el caso no es selección sino expansión de detalle, crear o reutilizar una primitive equivalente del panel antes de inventar marcado local.
+- Si una corrección necesaria para cumplir estas reglas puede cambiar semántica visible o datos guardados —por ejemplo renombrar el título de un widget—, no asumir. Preguntar al usuario y esperar confirmación antes de modificar.
 - Los títulos visibles del widget deben quedar en una sola línea. Usar como referencia máxima 17 caracteres y separar palabras con guion (`-`) cuando sea necesario abreviar.
-- Si un control horizontal se superpone con su label, mover el control debajo y permitir que ocupe todo el ancho útil del grupo.
+- Si una sección colapsable queda demasiado larga, dividirla en secciones colapsables específicas en vez de crear una única sección gigante.
+  - Ejemplos: `COLORES PRODUCCION`, `COLORES SETUP`, `COLORES DETENIDA`, `COBERTURA SIN DATOS`, `BANDAS TENDENCIA % PROD`, `BARRAS AGRUPADAS`, `DONUT`.
+- Si un control horizontal se superpone con su label, mover el control debajo y permitir que ocupe todo el ancho útil de la sección.
+- Evitar espacios vacíos dentro de una fila. Ordenar controles para aprovechar la línea completa.
 - Los subtítulos internos excepcionales pueden usar color blanco, pero deben conservar la tipografía y tamaño estándar del panel.
+- Los campos internos no pueden superar el ancho estándar de un control de `DockFieldRow`: label `w-14` + control `flex-1`. Pueden ser menores, nunca mayores.
 - Para configuración de color, usar una estructura plana:
-  - label del color, por ejemplo `color inicial`
-  - swatch/cuadro de color
-  - texto `hex #` junto al campo de código
+  - label del color, por ejemplo `Color inicial`
+  - primera línea: swatch/cuadrado de color sin tarjeta, marco ni contenedor visual adicional + texto `Hex #` + campo de código
   - el campo de código contiene solo el valor hexadecimal, sin `#`
-  - campo de `alfa (%)` separado y explícito
-- No usar cajas, tarjetas o bloques internos para cada color si el grupo/desplegable padre ya define el contexto visual.
+  - segunda línea: `Alfa (%)` + campo numérico
+- No usar cajas, tarjetas o bloques internos para cada color si la sección colapsable padre ya define el contexto visual.
+
+#### Primitives recomendadas para paneles de propiedades
+
+Estas reglas deben cristalizarse en primitives reutilizables siempre que el patrón se repita. No resolver cada widget con marcado local si existe o corresponde crear una primitive compartida.
+
+- `DockInfoBox` — ayuda contextual o leyenda aclaratoria breve. Ya existe en `components/admin/DockInfoBox.tsx`.
+- `DockDetailDisclosure` — detalle expandible, listas secundarias o auditoría compactada detrás de una expansión. Crear/reutilizar antes de mostrar listas abiertas por defecto.
+- `DockColorField` — edición de color con layout canónico: swatch + `Hex #` + campo, y debajo `Alfa (%)` + campo numérico.
+- `DockInlineControlRow` — fila interna compacta para casos donde una propiedad necesita varios controles alineados sin exceder el ancho estándar de `DockFieldRow`.
+
+Si una primitive requerida todavía no existe, crearla en `components/admin/` antes de corregir múltiples widgets con el mismo patrón.
 
 ### Diseño y semántica
 - Usar tokens de `index.css`.
