@@ -1299,7 +1299,7 @@ describe('PropertyDock activity-analytics', () => {
         expect(within(getSection('Agrupación')).getByText('×0.4')).toBeInTheDocument();
     });
 
-    it('renders activity analytics visual cards with paired color, hex, alpha, and independent surface effect defaults', () => {
+    it('renders activity analytics flat visual controls with paired color, hex, alpha, and independent surface effect defaults', () => {
         renderPropertyDock({
             type: 'activity-analytics',
             title: 'Análisis de Actividad',
@@ -1338,7 +1338,7 @@ describe('PropertyDock activity-analytics', () => {
         expect(within(visualSection).getByLabelText('Bandas tendencia alfa superior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[0]));
         expect(within(visualSection).getByLabelText('Bandas tendencia alfa centro')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[1]));
         expect(within(visualSection).getByLabelText('Bandas tendencia alfa inferior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[2]));
-        expect(within(visualSection).getByRole('button', { name: 'Blend mode' })).toHaveTextContent(/overlay/i);
+        expect(within(visualSection).getByRole('button', { name: 'Blend' })).toHaveTextContent(/overlay/i);
 
         expect(within(visualSection).getByLabelText('Barras agrupadas glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.glow));
         expect(within(visualSection).getByLabelText('Barras agrupadas blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.blur));
@@ -1449,7 +1449,7 @@ describe('PropertyDock activity-analytics', () => {
             },
         });
 
-        await user.click(screen.getByRole('button', { name: 'Blend mode' }));
+        await user.click(screen.getByRole('button', { name: 'Blend' }));
         await user.click(screen.getByRole('button', { name: 'Normal' }));
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({

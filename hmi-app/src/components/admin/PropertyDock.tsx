@@ -1560,11 +1560,9 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         </DockFieldRow>
 
                                         {shouldShowHierarchyPreview && (
-                                            <div className="flex flex-col gap-2 rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                                            <div className="flex flex-col gap-3">
                                                 <div className="flex flex-col gap-1">
-                                                    <span className="text-[11px] uppercase tracking-wide text-industrial-muted">
-                                                        Vista previa de jerarquía
-                                                    </span>
+                                                    <span className="text-sm text-white">Vista previa de jerarquía</span>
                                                     {hierarchyTrace.state === 'resolved' ? (
                                                         <>
                                                             <span className="text-sm text-white">
@@ -1588,34 +1586,30 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 </div>
 
                                                 {hierarchyTrace.included.length > 0 && (
-                                                    <div className="flex flex-col gap-2">
-                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Incluidos</span>
-                                                        <div className="flex flex-col gap-2">
-                                                            {hierarchyTrace.included.map((entry) => (
-                                                                <div key={`${entry.nodeId}-${entry.widgetId}`} className="rounded border border-white/5 bg-white/5 px-2 py-2">
-                                                                    <div className="text-sm text-white">{entry.widgetTitle}</div>
-                                                                    <div className="text-xs text-industrial-muted">
-                                                                        {`${entry.nodeName} · ${formatHierarchyTraceValue(entry.value, entry.unit)}`}
-                                                                    </div>
+                                                    <div className="flex flex-col gap-1.5">
+                                                        <span className="text-xs text-industrial-muted">incluidos</span>
+                                                        {hierarchyTrace.included.map((entry) => (
+                                                            <div key={`${entry.nodeId}-${entry.widgetId}`} className="flex flex-col gap-0.5">
+                                                                <div className="text-sm text-white">{entry.widgetTitle}</div>
+                                                                <div className="text-xs text-industrial-muted">
+                                                                    {`${entry.nodeName} · ${formatHierarchyTraceValue(entry.value, entry.unit)}`}
                                                                 </div>
-                                                            ))}
-                                                        </div>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 )}
 
                                                 {hierarchyTrace.excluded.length > 0 && (
-                                                    <div className="flex flex-col gap-2">
-                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Excluidos</span>
-                                                        <div className="flex flex-col gap-2">
-                                                            {hierarchyTrace.excluded.map((entry, index) => (
-                                                                <div key={`${entry.nodeId}-${entry.widgetId ?? entry.dashboardId ?? index}`} className="rounded border border-white/5 bg-white/5 px-2 py-2">
-                                                                    <div className="text-sm text-white">{entry.widgetTitle ?? entry.dashboardName ?? entry.nodeName}</div>
-                                                                    <div className="text-xs text-industrial-muted">
-                                                                        {getHierarchyTraceExclusionReasonLabel(entry.reason)}
-                                                                    </div>
+                                                    <div className="flex flex-col gap-1.5">
+                                                        <span className="text-xs text-industrial-muted">excluidos</span>
+                                                        {hierarchyTrace.excluded.map((entry, index) => (
+                                                            <div key={`${entry.nodeId}-${entry.widgetId ?? entry.dashboardId ?? index}`} className="flex flex-col gap-0.5">
+                                                                <div className="text-sm text-white">{entry.widgetTitle ?? entry.dashboardName ?? entry.nodeName}</div>
+                                                                <div className="text-xs text-industrial-muted">
+                                                                    {getHierarchyTraceExclusionReasonLabel(entry.reason)}
                                                                 </div>
-                                                            ))}
-                                                        </div>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 )}
                                             </div>
@@ -1884,7 +1878,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         options={ACTIVITY_ANALYTICS_GROUP_OPTIONS.filter((option) => activityAnalyticsDisplayRules?.allowedGroups.includes(option.value) ?? false)}
                                     />
                                 </DockFieldRow>
-                                <DockFieldRow label="Ancho barra">
+                                <div className="flex flex-col gap-2">
+                                    <span className={LABEL_CLS}>Ancho</span>
                                     <div className="flex w-full items-center gap-3">
                                         <input
                                             type="range"
@@ -1896,11 +1891,11 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10"
                                             style={{ accentColor: 'var(--color-admin-accent)' }}
                                         />
-                                        <span className="w-10 text-right uppercase text-industrial-muted">
+                                        <span className="w-10 text-right text-industrial-muted">
                                             ×{activityAnalyticsBarWidth.toFixed(1)}
                                         </span>
                                     </div>
-                                </DockFieldRow>
+                                </div>
                             </DockSection>
                         )}
 
@@ -2020,7 +2015,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                         {isActivityAnalytics && activityAnalyticsOptions && (
                             <DockSection icon={<Sliders size={11} />} title="Visualización">
-                                <div className="flex flex-col gap-3">
+                                <div className="flex flex-col gap-4">
                                     {ACTIVITY_ANALYTICS_STATE_GRADIENT_ROWS.map(({ key, label }) => {
                                         const stateGradients = activityAnalyticsOptions.stateGradients as Record<ActivityAnalyticsStateGradientKey, [string, string]>;
                                         const stateGradientAlphas = activityAnalyticsOptions.stateGradientAlphas as Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair>;
@@ -2028,8 +2023,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         const gradientAlphas = stateGradientAlphas[key];
 
                                         return (
-                                            <div key={key} className="rounded-lg border border-white/10 bg-black/20 p-3">
-                                                <div className="mb-2 text-sm font-medium text-industrial-text">{label}</div>
+                                            <div key={key} className="flex flex-col gap-2">
+                                                <div className="text-sm text-white">{label}</div>
                                                 <div className="flex flex-col gap-2">
                                                     {ACTIVITY_ANALYTICS_GRADIENT_STOPS.map(({ slotIndex, key: stopKey, label: stopLabel, hexLabel, alphaLabel }) => {
                                                         const resolvedHexValue = gradient[slotIndex];
@@ -2039,9 +2034,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                         const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHex(displayedHexValue);
 
                                                         return (
-                                                            <div key={`${key}-${stopKey}`} className="rounded-md border border-white/5 bg-black/20 p-2">
-                                                                <div className="mb-2 text-xs uppercase tracking-wide text-industrial-muted">{stopLabel}</div>
-                                                                <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr),120px]">
+                                                            <div key={`${key}-${stopKey}`} className="grid gap-2 xl:grid-cols-[80px,auto,minmax(0,1fr),120px] xl:items-center">
+                                                                <span className="text-xs text-industrial-muted">{stopLabel.toLowerCase()}</span>
                                                                     <label className="flex items-center gap-2 text-industrial-muted">
                                                                         <span className="sr-only">{`${label} ${stopLabel}`}</span>
                                                                         <input
@@ -2052,8 +2046,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                             aria-label={`${label} color ${slotIndex === 0 ? 'inicial' : 'final'}`}
                                                                         />
                                                                     </label>
-                                                                    <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{hexLabel}</span>
+                                                                    <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                                        <span className="shrink-0 text-xs text-industrial-muted">{`${hexLabel.toLowerCase()} #`}</span>
                                                                         <input
                                                                             type="text"
                                                                             inputMode="text"
@@ -2067,8 +2061,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                             placeholder="#RRGGBB"
                                                                         />
                                                                     </label>
-                                                                    <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{alphaLabel}</span>
+                                                                    <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                                        <span className="shrink-0 text-xs text-industrial-muted">{alphaLabel.toLowerCase()}</span>
                                                                         <AdminNumberInput
                                                                             value={gradientAlphas[slotIndex]}
                                                                             min={0}
@@ -2079,7 +2073,6 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                             onChange={(nextValue) => handleActivityAnalyticsStateGradientAlphaChange(key, slotIndex, nextValue)}
                                                                         />
                                                                     </label>
-                                                                </div>
                                                             </div>
                                                         );
                                                     })}
@@ -2088,8 +2081,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         );
                                     })}
 
-                                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                                        <div className="mb-2 text-sm font-medium text-industrial-text">Bandas tendencia % PROD</div>
+                                    <div className="flex flex-col gap-2">
+                                        <div className="text-sm text-white">Bandas tendencia % PROD</div>
                                         <div className="flex flex-col gap-2">
                                             {ACTIVITY_ANALYTICS_PROD_TREND_BAND_STOPS.map(({ slotIndex, label: stopLabel, hexLabel, alphaLabel }) => {
                                                 const resolvedHexValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? '';
@@ -2098,9 +2091,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 const pickerValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT;
 
                                                 return (
-                                                    <div key={`prod-trend-band-${slotIndex}`} className="rounded-md border border-white/5 bg-black/20 p-2">
-                                                        <div className="mb-2 text-xs uppercase tracking-wide text-industrial-muted">{stopLabel}</div>
-                                                        <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr),120px]">
+                                                    <div key={`prod-trend-band-${slotIndex}`} className="grid gap-2 xl:grid-cols-[80px,auto,minmax(0,1fr),120px] xl:items-center">
+                                                        <span className="text-xs text-industrial-muted">{stopLabel.toLowerCase()}</span>
                                                             <label className="flex items-center gap-2 text-industrial-muted">
                                                                 <span className="sr-only">{`Bandas tendencia ${stopLabel}`}</span>
                                                                 <input
@@ -2111,8 +2103,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                     aria-label={`Bandas tendencia color ${stopLabel.toLowerCase()}`}
                                                                 />
                                                             </label>
-                                                            <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                                <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{hexLabel}</span>
+                                                            <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                                <span className="shrink-0 text-xs text-industrial-muted">{`${hexLabel.toLowerCase()} #`}</span>
                                                                 <input
                                                                     type="text"
                                                                     inputMode="text"
@@ -2126,8 +2118,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                     placeholder="#RRGGBB"
                                                                 />
                                                             </label>
-                                                            <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                                <span className="text-[11px] uppercase tracking-wide text-industrial-muted">{alphaLabel}</span>
+                                                            <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                                <span className="shrink-0 text-xs text-industrial-muted">{alphaLabel.toLowerCase()}</span>
                                                                 <AdminNumberInput
                                                                     value={activityAnalyticsOptions.prodTrendBands.alphas[slotIndex]}
                                                                     min={0}
@@ -2138,13 +2130,12 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                     onChange={(nextValue) => handleActivityAnalyticsProdTrendBandAlphaChange(slotIndex, nextValue)}
                                                                 />
                                                             </label>
-                                                        </div>
                                                     </div>
                                                 );
                                             })}
 
-                                            <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Blend mode</span>
+                                            <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                <span className={`${LABEL_CLS} w-auto`}>Blend</span>
                                                 <AdminSelect
                                                     value={activityAnalyticsOptions.prodTrendBands.blendMode}
                                                     onChange={handleActivityAnalyticsProdTrendBandBlendModeChange}
@@ -2163,9 +2154,9 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             && !isValidActivityAnalyticsHex(displayedCoverageColor);
 
                                         return (
-                                            <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                                                <div className="mb-2 text-sm font-medium text-industrial-text">Cobertura / sin datos</div>
-                                                <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr)]">
+                                            <div className="flex flex-col gap-2">
+                                                <div className="text-sm text-white">Cobertura / sin datos</div>
+                                                <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr)] xl:items-center">
                                                     <label className="flex items-center gap-2 text-industrial-muted">
                                                         <span className="sr-only">Cobertura / sin datos</span>
                                                         <input
@@ -2180,8 +2171,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                             aria-label="Cobertura / sin datos color"
                                                         />
                                                     </label>
-                                                    <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">HEX</span>
+                                                    <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                        <span className="shrink-0 text-xs text-industrial-muted">hex #</span>
                                                         <input
                                                             type="text"
                                                             inputMode="text"
@@ -2200,18 +2191,18 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         );
                                     })()}
 
-                                    <div className="grid gap-3 xl:grid-cols-2">
+                                    <div className="grid gap-4 xl:grid-cols-2">
                                         {ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS.map(({ key, label }) => {
                                             const surfaceEffects = (key === 'groupedBars'
                                                 ? activityAnalyticsOptions.visualEffects.groupedBars
                                                 : activityAnalyticsOptions.visualEffects.donut) as ActivityAnalyticsSurfaceEffects;
 
                                             return (
-                                                <div key={key} className="rounded-lg border border-white/10 bg-black/20 p-3">
-                                                    <div className="mb-2 text-sm font-medium text-industrial-text">{label}</div>
+                                                <div key={key} className="flex flex-col gap-2">
+                                                    <div className="text-sm text-white">{label}</div>
                                                     <div className="flex flex-col gap-2">
-                                                        <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                            <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Glow</span>
+                                                        <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                            <span className={`${LABEL_CLS} w-auto`}>Glow</span>
                                                             <AdminNumberInput
                                                                 value={surfaceEffects.glow}
                                                                 min={0}
@@ -2222,8 +2213,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                 onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'glow', nextValue)}
                                                             />
                                                         </label>
-                                                        <label className="flex min-w-0 flex-col gap-1 text-industrial-muted">
-                                                            <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Blur</span>
+                                                        <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
+                                                            <span className={`${LABEL_CLS} w-auto`}>Blur</span>
                                                             <AdminNumberInput
                                                                 value={surfaceEffects.blur}
                                                                 min={0}
@@ -2234,7 +2225,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                 onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'blur', nextValue)}
                                                             />
                                                         </label>
-                                                        <label className="flex items-center justify-between gap-3 rounded-md border border-white/5 bg-black/20 px-3 py-2 text-industrial-text">
+                                                        <label className="flex items-center justify-between gap-3 text-industrial-text">
                                                             <span>Top cap</span>
                                                             <input
                                                                 type="checkbox"
