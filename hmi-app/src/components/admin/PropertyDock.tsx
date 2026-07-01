@@ -21,7 +21,9 @@ import AdminSelect from './AdminSelect';
 import AdminNumberInput from './AdminNumberInput';
 import AdminEmptyState from './AdminEmptyState';
 import CatalogVariableSelector from './CatalogVariableSelector';
+import DockInfoDropdown from './DockInfoDropdown';
 import DockInfoBox from './DockInfoBox';
+import DockInlineControlRow from './DockInlineControlRow';
 import {
     DEFAULT_STATUS_LABELS,
     EQUIPMENT_STATUS_VALUES,
@@ -30,6 +32,10 @@ import {
 import { DEFAULT_CONTRACT_STATUS_LABELS } from '../../utils/connectionWidget';
 import {
     ADMIN_SIDEBAR_INPUT_CLS,
+    ADMIN_SIDEBAR_HINT_CLS,
+    ADMIN_SIDEBAR_INFO_ITEM_CLS,
+    ADMIN_SIDEBAR_INFO_LIST_CLS,
+    ADMIN_SIDEBAR_INFO_TITLE_CLS,
     ADMIN_SIDEBAR_LABEL_CLS,
     ADMIN_SIDEBAR_PANEL_CLS,
     ADMIN_SIDEBAR_PANEL_HEADER_CLS,
@@ -1560,58 +1566,62 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         </DockFieldRow>
 
                                         {shouldShowHierarchyPreview && (
-                                            <div className="flex flex-col gap-3">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className="text-sm text-white">Vista previa de jerarquía</span>
-                                                    {hierarchyTrace.state === 'resolved' ? (
-                                                        <>
-                                                            <span className="text-sm text-white">
-                                                                {`${getHierarchyAggregationModeLabel(hierarchyTrace.aggregation)} actual · ${formatHierarchyTraceValue(hierarchyTrace.resolved.value, hierarchyTrace.resolved.unit)}`}
+                                            <div className="flex flex-col gap-2">
+                                                {hierarchyTrace.state === 'resolved' ? (
+                                                    <>
+                                                        <DockFieldRow label="Resultado">
+                                                            <span className="text-white">
+                                                                {`${getHierarchyAggregationModeLabel(hierarchyTrace.aggregation)} actual · ${formatHierarchyTraceValue(hierarchyTrace.resolved.value, hierarchyTrace.resolved.unit)} · ${hierarchyTrace.scannedDashboardCount} ${hierarchyTrace.scannedDashboardCount === 1 ? 'dashboard' : 'dashboards'}`}
                                                             </span>
-                                                            <span className="text-xs text-industrial-muted">
-                                                                {`${hierarchyTrace.included.length} ${hierarchyTrace.included.length === 1 ? 'incluido' : 'incluidos'} · ${hierarchyTrace.excluded.length} ${hierarchyTrace.excluded.length === 1 ? 'excluido' : 'excluidos'} · ${hierarchyTrace.scannedDashboardCount} ${hierarchyTrace.scannedDashboardCount === 1 ? 'dashboard' : 'dashboards'}`}
-                                                            </span>
-                                                        </>
-                                                    ) : hierarchyTrace.emptyReason ? (
-                                                        (() => {
-                                                            const message = getHierarchyTraceEmptyStateMessage(hierarchyTrace.emptyReason);
-                                                            return (
-                                                                <>
-                                                                    <span className="text-sm text-white">{message.title}</span>
-                                                                    <span className="text-xs text-industrial-muted">{message.description}</span>
-                                                                </>
-                                                            );
-                                                        })()
-                                                    ) : null}
-                                                </div>
+                                                        </DockFieldRow>
 
-                                                {hierarchyTrace.included.length > 0 && (
-                                                    <div className="flex flex-col gap-1.5">
-                                                        <span className="text-xs text-industrial-muted">incluidos</span>
-                                                        {hierarchyTrace.included.map((entry) => (
-                                                            <div key={`${entry.nodeId}-${entry.widgetId}`} className="flex flex-col gap-0.5">
-                                                                <div className="text-sm text-white">{entry.widgetTitle}</div>
-                                                                <div className="text-xs text-industrial-muted">
-                                                                    {`${entry.nodeName} · ${formatHierarchyTraceValue(entry.value, entry.unit)}`}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
+                                                        {hierarchyTrace.included.length > 0 && (
+                                                            <DockFieldRow label={hierarchyTrace.included.length === 1 ? 'Incluido' : 'Incluidos'}>
+                                                                <DockInfoDropdown value={`${hierarchyTrace.included.length} ${hierarchyTrace.included.length === 1 ? 'widget' : 'widgets'}`}>
+                                                                    <div className={ADMIN_SIDEBAR_INFO_LIST_CLS}>
+                                                                        {hierarchyTrace.included.map((entry) => (
+                                                                            <div key={`${entry.nodeId}-${entry.widgetId}`} className={ADMIN_SIDEBAR_INFO_ITEM_CLS}>
+                                                                                <div className={ADMIN_SIDEBAR_INFO_TITLE_CLS}>{entry.widgetTitle}</div>
+                                                                                <div className={ADMIN_SIDEBAR_HINT_CLS}>
+                                                                                    {`${entry.nodeName} · ${formatHierarchyTraceValue(entry.value, entry.unit)}`}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </DockInfoDropdown>
+                                                            </DockFieldRow>
+                                                        )}
 
-                                                {hierarchyTrace.excluded.length > 0 && (
-                                                    <div className="flex flex-col gap-1.5">
-                                                        <span className="text-xs text-industrial-muted">excluidos</span>
-                                                        {hierarchyTrace.excluded.map((entry, index) => (
-                                                            <div key={`${entry.nodeId}-${entry.widgetId ?? entry.dashboardId ?? index}`} className="flex flex-col gap-0.5">
-                                                                <div className="text-sm text-white">{entry.widgetTitle ?? entry.dashboardName ?? entry.nodeName}</div>
-                                                                <div className="text-xs text-industrial-muted">
-                                                                    {getHierarchyTraceExclusionReasonLabel(entry.reason)}
+                                                        {hierarchyTrace.excluded.length > 0 && (
+                                                            <DockFieldRow label={hierarchyTrace.excluded.length === 1 ? 'Excluido' : 'Excluidos'}>
+                                                                <DockInfoDropdown value={`${hierarchyTrace.excluded.length} ${hierarchyTrace.excluded.length === 1 ? 'widget' : 'widgets'}`}>
+                                                                    <div className={ADMIN_SIDEBAR_INFO_LIST_CLS}>
+                                                                        {hierarchyTrace.excluded.map((entry, index) => (
+                                                                            <div key={`${entry.nodeId}-${entry.widgetId ?? entry.dashboardId ?? index}`} className={ADMIN_SIDEBAR_INFO_ITEM_CLS}>
+                                                                                <div className={ADMIN_SIDEBAR_INFO_TITLE_CLS}>{entry.widgetTitle ?? entry.dashboardName ?? entry.nodeName}</div>
+                                                                                <div className={ADMIN_SIDEBAR_HINT_CLS}>
+                                                                                    {getHierarchyTraceExclusionReasonLabel(entry.reason)}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </DockInfoDropdown>
+                                                            </DockFieldRow>
+                                                        )}
+                                                    </>
+                                                ) : hierarchyTrace.emptyReason ? (
+                                                    (() => {
+                                                        const message = getHierarchyTraceEmptyStateMessage(hierarchyTrace.emptyReason);
+                                                        return (
+                                                            <DockInlineControlRow label="Resultado" labelClassName="w-14">
+                                                                <div className="flex flex-col gap-1">
+                                                                    <span className="text-white">{message.title}</span>
+                                                                    <span className={ADMIN_SIDEBAR_HINT_CLS}>{message.description}</span>
                                                                 </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
+                                                            </DockInlineControlRow>
+                                                        );
+                                                    })()
+                                                ) : null}
                                             </div>
                                         )}
                                     </>

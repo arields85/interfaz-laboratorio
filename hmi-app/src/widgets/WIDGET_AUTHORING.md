@@ -84,9 +84,9 @@ El panel de propiedades debe ser compacto, legible y consistente. Su estructura 
   - Espaciado canónico: `flex items-start gap-2 rounded border px-2 py-1.5`, con el ícono `mt-0.5 shrink-0`.
   - Usar este patrón para ayuda contextual breve, como el bloque de la sección `NAVEGACIÓN`.
 - Cuando un label tiene un selector (`AdminSelect`) a la derecha, el label debe tener como máximo 9 caracteres. Si excede ese largo, abreviarlo sin perder sentido.
-- La información secundaria, listas de detalle o auditoría debe ir compactada detrás de controles reutilizables: `AdminSelect` cuando se elige una opción, o una primitive equivalente de expansión de detalle cuando solo se muestra información.
+- La información secundaria, listas de detalle o auditoría debe ir compactada detrás de controles reutilizables: `AdminSelect` cuando se elige una opción, o `DockInfoDropdown` cuando solo se muestra información.
 - No mostrar listas completas abiertas por defecto dentro de una sección colapsable.
-- Para selectores/dropdowns de opciones del panel admin, priorizar `AdminSelect`. Si el caso no es selección sino expansión de detalle, crear o reutilizar una primitive equivalente del panel antes de inventar marcado local.
+- Para selectores/dropdowns de opciones del panel admin, priorizar `AdminSelect`. Si el caso no es selección sino expansión de detalle, reutilizar `DockInfoDropdown` (o crear la primitive compartida correspondiente) antes de inventar marcado local.
 - Si una corrección necesaria para cumplir estas reglas puede cambiar semántica visible o datos guardados —por ejemplo renombrar el título de un widget—, no asumir. Preguntar al usuario y esperar confirmación antes de modificar.
 - Los títulos visibles del widget deben quedar en una sola línea. Usar como referencia máxima 17 caracteres y separar palabras con guion (`-`) cuando sea necesario abreviar.
 - Si una sección colapsable queda demasiado larga, dividirla en secciones colapsables específicas en vez de crear una única sección gigante.
@@ -107,6 +107,7 @@ El panel de propiedades debe ser compacto, legible y consistente. Su estructura 
 Estas reglas deben cristalizarse en primitives reutilizables siempre que el patrón se repita. No resolver cada widget con marcado local si existe o corresponde crear una primitive compartida.
 
 - `DockInfoBox` — ayuda contextual o leyenda aclaratoria breve. Ya existe en `components/admin/DockInfoBox.tsx`.
+- `DockInfoDropdown` — dropdown informativo read-only con el mismo chrome cerrado de `AdminSelect`. Usarlo para listas secundarias o detalle no seleccionable.
 - `DockDetailDisclosure` — detalle expandible, listas secundarias o auditoría compactada detrás de una expansión. Crear/reutilizar antes de mostrar listas abiertas por defecto.
 - `DockColorField` — edición de color con layout canónico: swatch + `Hex #` + campo, y debajo `Alfa (%)` + campo numérico.
 - `DockInlineControlRow` — fila interna compacta para casos donde una propiedad necesita varios controles alineados sin exceder el ancho estándar de `DockFieldRow`.

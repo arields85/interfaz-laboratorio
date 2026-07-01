@@ -578,19 +578,30 @@ describe('PropertyDock hierarchy aggregation preview', () => {
         ],
     };
 
-    it('renders hierarchy preview details only for hierarchy metric-cards', () => {
-        const { rerender } = renderPropertyDock({
+    it('renders hierarchy preview disclosures only for hierarchy metric-cards', async () => {
+        const { rerender, user } = renderPropertyDock({
             type: 'metric-card',
             title: 'Temperatura agregada',
             binding: { mode: 'real_variable', catalogVariableId: 'cv-temperature', unit: '°C' },
             hierarchyTrace,
         });
 
-        expect(screen.getByText('Vista previa de jerarquía')).toBeInTheDocument();
-        expect(screen.getByText('Suma actual · 30 °C')).toBeInTheDocument();
-        expect(screen.getByText('2 incluidos · 1 excluido · 2 dashboards')).toBeInTheDocument();
+        expect(screen.getByText('Resultado')).toBeInTheDocument();
+        expect(screen.getByText('Suma actual · 30 °C · 2 dashboards')).toBeInTheDocument();
+        expect(screen.getByText('Incluidos')).toBeInTheDocument();
+        expect(screen.getByText('Excluido')).toBeInTheDocument();
+        expect(screen.queryByText('Temperatura Línea A')).not.toBeInTheDocument();
+        expect(screen.queryByText('Temperatura Línea B')).not.toBeInTheDocument();
+        expect(screen.queryByText('Presión Línea C')).not.toBeInTheDocument();
+        expect(screen.queryByText('Variable distinta')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: /2 widgets/i }));
+
         expect(screen.getByText('Temperatura Línea A')).toBeInTheDocument();
         expect(screen.getByText('Temperatura Línea B')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: /1 widget/i }));
+
         expect(screen.getByText('Presión Línea C')).toBeInTheDocument();
         expect(screen.getByText('Variable distinta')).toBeInTheDocument();
 
@@ -620,7 +631,7 @@ describe('PropertyDock hierarchy aggregation preview', () => {
             />,
         );
 
-        expect(screen.queryByText('Vista previa de jerarquía')).not.toBeInTheDocument();
+        expect(screen.queryByText('Resultado')).not.toBeInTheDocument();
     });
 
     it('uses trace state and emptyReason to explain hierarchy no-data without contributor rows', () => {
@@ -638,7 +649,7 @@ describe('PropertyDock hierarchy aggregation preview', () => {
             },
         });
 
-        expect(screen.getByText('Vista previa de jerarquía')).toBeInTheDocument();
+        expect(screen.getByText('Resultado')).toBeInTheDocument();
         expect(screen.getByText('Sin datos elegibles para esta jerarquía.')).toBeInTheDocument();
         expect(screen.getByText('No se encontró ningún contributor numérico para la variable seleccionada.')).toBeInTheDocument();
         expect(screen.queryByText('Incluidos')).not.toBeInTheDocument();

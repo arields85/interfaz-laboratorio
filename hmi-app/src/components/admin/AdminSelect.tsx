@@ -1,7 +1,12 @@
 import { useEffect, useState, useRef, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import AnchoredOverlay from '../ui/AnchoredOverlay';
-import { ADMIN_SIDEBAR_INPUT_CLS } from './adminSidebarStyles';
+import {
+    ADMIN_SIDEBAR_DROPDOWN_PANEL_CLS,
+    ADMIN_SIDEBAR_INPUT_TRIGGER_CLS,
+    ADMIN_SIDEBAR_INPUT_TRIGGER_DISABLED_CLS,
+    ADMIN_SIDEBAR_INPUT_TRIGGER_ENABLED_CLS,
+} from './adminSidebarStyles';
 
 // =============================================================================
 // AdminSelect
@@ -65,11 +70,7 @@ export default function AdminSelect({ value, options, onChange, className = '', 
                 type="button"
                 disabled={disabled}
                 onClick={handleToggle}
-                className={`${ADMIN_SIDEBAR_INPUT_CLS} flex items-center justify-between gap-1 ${
-                    disabled
-                        ? 'cursor-not-allowed opacity-50 text-white/40'
-                        : 'hover:border-white/20'
-                }`}
+                className={`${ADMIN_SIDEBAR_INPUT_TRIGGER_CLS} ${disabled ? ADMIN_SIDEBAR_INPUT_TRIGGER_DISABLED_CLS : ADMIN_SIDEBAR_INPUT_TRIGGER_ENABLED_CLS}`}
             >
                 <span className="truncate flex items-center gap-1.5">
                     {selected?.icon && <span className="shrink-0 opacity-60">{selected.icon}</span>}
@@ -88,7 +89,7 @@ export default function AdminSelect({ value, options, onChange, className = '', 
                 gap={4}
             >
                 <div
-                    className="rounded-md border border-white/10 shadow-xl py-1"
+                    className={ADMIN_SIDEBAR_DROPDOWN_PANEL_CLS}
                     style={{ background: 'var(--color-industrial-surface)' }}
                 >
                     {options.map(opt => (
