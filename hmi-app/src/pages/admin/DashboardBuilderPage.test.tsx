@@ -7,6 +7,7 @@ import { makeDashboard, makeLayout, makeWidget } from '../../test/fixtures/dashb
 import { useUIStore } from '../../store/ui.store';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import { HEADER_WIDGET_DRAG_MIME } from '../../utils/headerWidgets';
+import type { HierarchyNode } from '../../domain/admin.types';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -23,6 +24,7 @@ const {
     useDataOverviewMock,
     propertyDockMock,
     dashboardHeaderMock,
+    builderCanvasMock,
 } = vi.hoisted(() => ({
     mockNavigate: vi.fn(),
     dashboardStorageMock: {
@@ -50,6 +52,7 @@ const {
     useDataOverviewMock: vi.fn(),
     propertyDockMock: vi.fn(),
     dashboardHeaderMock: vi.fn(),
+    builderCanvasMock: vi.fn(),
 }));
 
 class MockResizeObserver implements ResizeObserver {
@@ -111,15 +114,21 @@ async function syncViewportResize(target: Element, width: number, height: number
     });
 }
 
-async function renderBuilderPage(dashboard = makeDashboard({
-    id: 'dashboard-1',
-    cols: 20,
-    rows: 12,
-    widgets: [makeWidget({ id: 'widget-1', title: 'Widget 1' })],
-    layout: [makeLayout({ widgetId: 'widget-1', x: 0, y: 0, w: 4, h: 3 })],
-})) {
+async function renderBuilderPage(
+    dashboard = makeDashboard({
+        id: 'dashboard-1',
+        cols: 20,
+        rows: 12,
+        widgets: [makeWidget({ id: 'widget-1', title: 'Widget 1' })],
+        layout: [makeLayout({ widgetId: 'widget-1', x: 0, y: 0, w: 4, h: 3 })],
+    }),
+    options?: {
+        allDashboards?: ReturnType<typeof makeDashboard>[];
+        allNodes?: HierarchyNode[];
+    },
+) {
     dashboardStorageMock.getDashboard.mockResolvedValue(dashboard);
-    dashboardStorageMock.getDashboards.mockResolvedValue([dashboard]);
+    dashboardStorageMock.getDashboards.mockResolvedValue(options?.allDashboards ?? [dashboard]);
     dashboardStorageMock.applyTemplate.mockImplementation((currentDashboard, template) => ({
         ...currentDashboard,
         widgets: template.widgetPresets ?? [],
@@ -128,7 +137,7 @@ async function renderBuilderPage(dashboard = makeDashboard({
     if (!templateStorageMock.getTemplates.getMockImplementation()) {
         templateStorageMock.getTemplates.mockResolvedValue([]);
     }
-    hierarchyStorageMock.getNodes.mockResolvedValue([]);
+    hierarchyStorageMock.getNodes.mockResolvedValue(options?.allNodes ?? []);
     variableCatalogStorageMock.getAll.mockResolvedValue([]);
     variableCatalogStorageMock.getAffectedDashboards.mockResolvedValue([]);
     loadNodeTypeLabelsMock.mockResolvedValue(undefined);
@@ -274,19 +283,32 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         rows,
         layout,
         widgets,
+        onWidgetSelect,
     }: {
         cols: number;
         rows: number;
         layout: Array<{ widgetId: string; x: number; y: number; w: number; h: number }>;
-        widgets: Array<{ id: string; type: string }>;
+        widgets: Array<{ id: string; type: string; title?: string }>;
+        onWidgetSelect?: (widgetId: string | undefined) => void;
     }) => (
+        builderCanvasMock({ cols, rows, layout, widgets, onWidgetSelect }),
         <div
             data-testid="builder-canvas-props"
             data-cols={cols}
             data-rows={rows}
             data-layout={JSON.stringify(layout)}
             data-widget-ids={JSON.stringify(widgets.map((widget) => widget.id))}
-        />
+        >
+            {widgets.map((widget) => (
+                <button
+                    key={widget.id}
+                    type="button"
+                    onClick={() => onWidgetSelect?.(widget.id)}
+                >
+                    Seleccionar {widget.title ?? widget.id}
+                </button>
+            ))}
+        </div>
     ),
 }));
 
@@ -308,6 +330,7 @@ describe('DashboardBuilderPage', () => {
             isEnabled: true,
         });
         propertyDockMock.mockReset();
+        builderCanvasMock.mockReset();
         vi.stubGlobal('ResizeObserver', MockResizeObserver);
         vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
             callback(0);
@@ -765,6 +788,108 @@ describe('DashboardBuilderPage', () => {
             machines: [{ unitId: 101, name: 'Extrusora 101', status: 'online', lastSuccess: '2026-04-21T13:00:00.000Z', ageMs: 0, values: {} }],
             dataLoading: true,
             dataError: true,
+        });
+    });
+
+    it('passes hierarchy trace only for the selected hierarchy metric-card', async () => {
+        const user = userEvent.setup();
+        const hierarchyWidget = makeWidget({
+            id: 'widget-hierarchy',
+            title: 'Jerarquía temperatura',
+            hierarchyMode: true,
+            aggregation: 'sum',
+            binding: { mode: 'real_variable', catalogVariableId: 'cv-temperature', unit: '°C' },
+        });
+        const plainWidget = makeWidget({
+            id: 'widget-plain',
+            title: 'Temperatura local',
+            hierarchyMode: false,
+            binding: { mode: 'simulated_value', simulatedValue: 5, catalogVariableId: 'cv-temperature', unit: '°C' },
+        });
+        const dashboard = makeDashboard({
+            id: 'dashboard-1',
+            ownerNodeId: 'root',
+            widgets: [hierarchyWidget, plainWidget],
+            layout: [
+                makeLayout({ widgetId: 'widget-hierarchy', x: 0, y: 0, w: 6, h: 5 }),
+                makeLayout({ widgetId: 'widget-plain', x: 6, y: 0, w: 6, h: 5 }),
+            ],
+        });
+        const childDashboard = makeDashboard({
+            id: 'dashboard-child',
+            status: 'published',
+            widgets: [
+                makeWidget({
+                    id: 'child-widget',
+                    title: 'Descendiente 1',
+                    binding: { mode: 'simulated_value', simulatedValue: 21, catalogVariableId: 'cv-temperature', unit: '°C' },
+                }),
+            ],
+        });
+
+        await renderBuilderPage(dashboard, {
+            allDashboards: [dashboard, childDashboard],
+            allNodes: [
+                { id: 'root', name: 'Root', type: 'plant', parentId: null, order: 0 },
+                { id: 'child-a', name: 'Child A', type: 'line', parentId: 'root', order: 0, linkedDashboardId: 'dashboard-child' },
+            ],
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Jerarquía temperatura' }));
+
+        await waitFor(() => {
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: expect.objectContaining({ id: 'widget-hierarchy' }),
+                hierarchyTrace: expect.objectContaining({
+                    state: 'resolved',
+                    included: [expect.objectContaining({ widgetId: 'child-widget', value: 21 })],
+                }),
+            });
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Temperatura local' }));
+
+        await waitFor(() => {
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: expect.objectContaining({ id: 'widget-plain' }),
+                hierarchyTrace: undefined,
+            });
+        });
+    });
+
+    it('forwards top-level hierarchy empty state from the trace to PropertyDock', async () => {
+        const user = userEvent.setup();
+        const hierarchyWidget = makeWidget({
+            id: 'widget-hierarchy-empty',
+            title: 'Jerarquía vacía',
+            hierarchyMode: true,
+            aggregation: 'sum',
+            binding: { mode: 'real_variable', catalogVariableId: 'cv-temperature', unit: '°C' },
+        });
+        const dashboard = makeDashboard({
+            id: 'dashboard-1',
+            ownerNodeId: 'root',
+            widgets: [hierarchyWidget],
+            layout: [makeLayout({ widgetId: 'widget-hierarchy-empty', x: 0, y: 0, w: 6, h: 5 })],
+        });
+
+        await renderBuilderPage(dashboard, {
+            allDashboards: [dashboard],
+            allNodes: [
+                { id: 'root', name: 'Root', type: 'plant', parentId: null, order: 0 },
+                { id: 'child-a', name: 'Child A', type: 'line', parentId: 'root', order: 0, linkedDashboardId: 'dashboard-missing' },
+            ],
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Jerarquía vacía' }));
+
+        await waitFor(() => {
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                hierarchyTrace: expect.objectContaining({
+                    state: 'empty',
+                    emptyReason: 'no-eligible-contributors',
+                }),
+            });
         });
     });
 

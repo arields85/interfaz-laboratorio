@@ -4,6 +4,98 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import type { ResolvedBinding } from '../../domain/widget.types';
 import { resolveBinding } from './bindingResolver';
 
+export type HierarchyTraceState = 'resolved' | 'empty';
+
+export type HierarchyTraceEmptyReason =
+    | 'missing-current-node'
+    | 'missing-catalog-variable'
+    | 'no-descendants'
+    | 'no-eligible-contributors';
+
+export type HierarchyTraceExclusionReason =
+    | 'missing-dashboard'
+    | 'draft-dashboard'
+    | 'duplicate-dashboard'
+    | 'nested-hierarchy-widget'
+    | 'catalog-mismatch'
+    | 'non-numeric'
+    | 'no-value';
+
+export interface HierarchyTraceContributor {
+    nodeId: string;
+    nodeName: string;
+    dashboardId: string;
+    dashboardName: string;
+    widgetId: string;
+    widgetTitle: string;
+    value: number;
+    unit?: string;
+    status: ResolvedBinding['status'];
+    source: ResolvedBinding['source'];
+}
+
+export interface HierarchyTraceExclusion {
+    nodeId: string;
+    nodeName: string;
+    dashboardId?: string;
+    dashboardName?: string;
+    widgetId?: string;
+    widgetTitle?: string;
+    reason: HierarchyTraceExclusionReason;
+    value?: ResolvedBinding['value'];
+    unit?: string;
+    status?: ResolvedBinding['status'];
+    source?: ResolvedBinding['source'];
+}
+
+export interface HierarchyAggregationTrace {
+    resolved: ResolvedBinding;
+    state: HierarchyTraceState;
+    emptyReason?: HierarchyTraceEmptyReason;
+    catalogVariableId?: string;
+    aggregation: AggregationMode;
+    descendantNodeCount: number;
+    scannedDashboardCount: number;
+    included: HierarchyTraceContributor[];
+    excluded: HierarchyTraceExclusion[];
+}
+
+const EMPTY_REASON_MESSAGES: Record<HierarchyTraceEmptyReason, { title: string; description: string }> = {
+    'missing-current-node': {
+        title: 'Jerarquía sin nodo actual.',
+        description: 'Este dashboard no tiene un nodo asignado dentro de la jerarquía.',
+    },
+    'missing-catalog-variable': {
+        title: 'Falta variable de catálogo.',
+        description: 'Asigná una variable de catálogo antes de calcular la agregación jerárquica.',
+    },
+    'no-descendants': {
+        title: 'Sin descendientes configurados.',
+        description: 'El nodo actual no tiene dashboards descendientes para recorrer.',
+    },
+    'no-eligible-contributors': {
+        title: 'Sin datos elegibles para esta jerarquía.',
+        description: 'No se encontró ningún contributor numérico para la variable seleccionada.',
+    },
+};
+
+const EXCLUSION_REASON_LABELS: Record<HierarchyTraceExclusionReason, string> = {
+    'missing-dashboard': 'Dashboard faltante',
+    'draft-dashboard': 'Dashboard en draft',
+    'duplicate-dashboard': 'Dashboard duplicado',
+    'nested-hierarchy-widget': 'Jerarquía anidada',
+    'catalog-mismatch': 'Variable distinta',
+    'non-numeric': 'Valor no numérico',
+    'no-value': 'Sin valor',
+};
+
+const AGGREGATION_MODE_LABELS: Record<AggregationMode, string> = {
+    sum: 'Suma',
+    avg: 'Promedio',
+    max: 'Máximo',
+    min: 'Mínimo',
+};
+
 // =============================================================================
 // hierarchyResolver
 // Resolver genérico de agregación jerárquica.
@@ -48,77 +140,158 @@ export function resolveHierarchyBinding(
     equipmentMap: Map<string, EquipmentSummary>,
     machines?: ContractMachine[],
 ): ResolvedBinding {
+    return buildHierarchyAggregationTrace(widget, hierarchyContext, equipmentMap, machines).resolved;
+}
+
+export function buildHierarchyAggregationTrace(
+    widget: WidgetConfig,
+    hierarchyContext: HierarchyContext,
+    equipmentMap: Map<string, EquipmentSummary>,
+    machines?: ContractMachine[],
+): HierarchyAggregationTrace {
     const { allNodes, allDashboards, currentNodeId } = hierarchyContext;
-
-    // Sin nodo actual → no se puede resolver jerarquía
-    if (!currentNodeId) {
-        return noDataResult('Dashboard sin nodo de jerarquía asignado');
-    }
-
-    const targetCatalogVariableId = widget.binding?.catalogVariableId;
-    if (!targetCatalogVariableId) {
-        return noDataResult('Widget jerárquico sin variable de catálogo asignada');
-    }
-
     const aggregation: AggregationMode = widget.aggregation ?? 'sum';
+    const targetCatalogVariableId = widget.binding?.catalogVariableId;
+    const baseTrace = createBaseTrace({
+        aggregation,
+        catalogVariableId: targetCatalogVariableId,
+    });
 
-    // Recolectar TODOS los IDs de nodos descendientes recursivamente
+    if (!currentNodeId) {
+        return {
+            ...baseTrace,
+            emptyReason: 'missing-current-node',
+        };
+    }
+
+    if (!targetCatalogVariableId) {
+        return {
+            ...baseTrace,
+            emptyReason: 'missing-catalog-variable',
+        };
+    }
+
     const descendantNodeIds = collectDescendants(currentNodeId, allNodes);
 
     if (descendantNodeIds.length === 0) {
-        return noDataResult('Nodo sin descendientes');
+        return {
+            ...baseTrace,
+            descendantNodeCount: 0,
+            emptyReason: 'no-descendants',
+        };
     }
 
-    // Indexar dashboards por ID para O(1) lookup
     const dashboardMap = new Map(allDashboards.map(d => [d.id, d]));
-
-    // Recolectar valores numéricos de widgets compatibles en dashboards hijos
     const values: number[] = [];
     const processedDashboardIds = new Set<string>();
+    const included: HierarchyTraceContributor[] = [];
+    const excluded: HierarchyTraceExclusion[] = [];
+    const nodeMap = new Map(allNodes.map((node) => [node.id, node]));
+    let scannedDashboardCount = 0;
 
     for (const nodeId of descendantNodeIds) {
-        const node = allNodes.find(n => n.id === nodeId);
+        const node = nodeMap.get(nodeId);
         if (!node?.linkedDashboardId) continue;
-        if (processedDashboardIds.has(node.linkedDashboardId)) continue;
+
+        if (processedDashboardIds.has(node.linkedDashboardId)) {
+            excluded.push(createNodeExclusion(node, node.linkedDashboardId, 'duplicate-dashboard'));
+            continue;
+        }
+
+        scannedDashboardCount += 1;
 
         const dashboard = dashboardMap.get(node.linkedDashboardId);
-        if (!dashboard) continue;
+        if (!dashboard) {
+            excluded.push(createNodeExclusion(node, node.linkedDashboardId, 'missing-dashboard'));
+            continue;
+        }
 
-        if (dashboard.status === 'draft') continue;
+        if (dashboard.status === 'draft') {
+            excluded.push(createNodeExclusion(node, node.linkedDashboardId, 'draft-dashboard', dashboard));
+            continue;
+        }
 
         processedDashboardIds.add(node.linkedDashboardId);
 
-        // Buscar widgets compatibles con la misma variable canónica en este dashboard
         for (const childWidget of dashboard.widgets) {
-            // Solo considerar widgets que NO estén en modo jerárquico ellos mismos
-            // (evita recursión infinita y doble conteo)
-            if (childWidget.hierarchyMode) continue;
+            if (childWidget.hierarchyMode) {
+                excluded.push(createWidgetExclusion(node, dashboard, childWidget, 'nested-hierarchy-widget'));
+                continue;
+            }
 
-            if (childWidget.binding?.catalogVariableId !== targetCatalogVariableId) continue;
+            if (childWidget.binding?.catalogVariableId !== targetCatalogVariableId) {
+                excluded.push(createWidgetExclusion(node, dashboard, childWidget, 'catalog-mismatch'));
+                continue;
+            }
 
-            // Resolver el valor del widget hijo
             const resolved = resolveBinding(childWidget, equipmentMap, machines);
 
-            // Solo agregar valores numéricos válidos
-            if (typeof resolved.value === 'number' && resolved.status !== 'no-data') {
-                values.push(resolved.value);
+            if (resolved.value == null) {
+                excluded.push(createWidgetExclusion(node, dashboard, childWidget, 'no-value', resolved));
+                continue;
             }
+
+            if (typeof resolved.value !== 'number') {
+                excluded.push(createWidgetExclusion(node, dashboard, childWidget, 'non-numeric', resolved));
+                continue;
+            }
+
+            values.push(resolved.value);
+            included.push({
+                nodeId: node.id,
+                nodeName: node.name,
+                dashboardId: dashboard.id,
+                dashboardName: dashboardName(dashboard),
+                widgetId: childWidget.id,
+                widgetTitle: childWidget.title || childWidget.id,
+                value: resolved.value,
+                unit: resolved.unit ?? childWidget.binding?.unit,
+                status: resolved.status,
+                source: resolved.source,
+            });
         }
     }
 
     if (values.length === 0) {
-        return noDataResult('Sin datos para la variable configurada en descendientes');
+        return {
+            ...baseTrace,
+            descendantNodeCount: descendantNodeIds.length,
+            scannedDashboardCount,
+            included,
+            excluded,
+            emptyReason: 'no-eligible-contributors',
+        };
     }
 
-    // Aplicar función de agregación
     const aggregatedValue = aggregate(values, aggregation);
 
     return {
-        value: aggregatedValue,
-        unit: widget.binding?.unit ?? '',
-        status: 'normal',
-        source: 'real',
+        resolved: {
+            value: aggregatedValue,
+            unit: widget.binding?.unit ?? included[0]?.unit ?? '',
+            status: 'normal',
+            source: 'real',
+        },
+        state: 'resolved',
+        catalogVariableId: targetCatalogVariableId,
+        aggregation,
+        descendantNodeCount: descendantNodeIds.length,
+        scannedDashboardCount,
+        included,
+        excluded,
     };
+}
+
+export function getHierarchyTraceEmptyStateMessage(reason: HierarchyTraceEmptyReason): { title: string; description: string } {
+    return EMPTY_REASON_MESSAGES[reason];
+}
+
+export function getHierarchyTraceExclusionReasonLabel(reason: HierarchyTraceExclusionReason): string {
+    return EXCLUSION_REASON_LABELS[reason];
+}
+
+export function getHierarchyAggregationModeLabel(mode: AggregationMode): string {
+    return AGGREGATION_MODE_LABELS[mode];
 }
 
 // -----------------------------------------------------------------------------
@@ -161,6 +334,66 @@ function aggregate(values: number[], mode: AggregationMode): number {
         case 'min':
             return Math.min(...values);
     }
+}
+
+function createBaseTrace({
+    aggregation,
+    catalogVariableId,
+}: {
+    aggregation: AggregationMode;
+    catalogVariableId?: string;
+}): HierarchyAggregationTrace {
+    return {
+        resolved: noDataResult(),
+        state: 'empty',
+        catalogVariableId,
+        aggregation,
+        descendantNodeCount: 0,
+        scannedDashboardCount: 0,
+        included: [],
+        excluded: [],
+    };
+}
+
+function createNodeExclusion(
+    node: HierarchyNode,
+    dashboardId: string,
+    reason: HierarchyTraceExclusionReason,
+    dashboard?: Dashboard,
+): HierarchyTraceExclusion {
+    return {
+        nodeId: node.id,
+        nodeName: node.name,
+        dashboardId,
+        dashboardName: dashboard ? dashboardName(dashboard) : undefined,
+        reason,
+    };
+}
+
+function createWidgetExclusion(
+    node: HierarchyNode,
+    dashboard: Dashboard,
+    widget: WidgetConfig,
+    reason: HierarchyTraceExclusionReason,
+    resolved?: ResolvedBinding,
+): HierarchyTraceExclusion {
+    return {
+        nodeId: node.id,
+        nodeName: node.name,
+        dashboardId: dashboard.id,
+        dashboardName: dashboardName(dashboard),
+        widgetId: widget.id,
+        widgetTitle: widget.title || widget.id,
+        reason,
+        value: resolved?.value,
+        unit: resolved?.unit ?? widget.binding?.unit,
+        status: resolved?.status,
+        source: resolved?.source,
+    };
+}
+
+function dashboardName(dashboard: Dashboard): string {
+    return dashboard.headerConfig?.title?.trim() || dashboard.name;
 }
 
 function noDataResult(reason?: string): ResolvedBinding {

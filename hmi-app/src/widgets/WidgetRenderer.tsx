@@ -14,7 +14,7 @@ import ActivityAnalyticsWidget from './renderers/ActivityAnalyticsWidget';
 import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
-import { hasNestedInteractiveNavigation } from '../utils/widgetCapabilities';
+import { hasNestedInteractiveNavigationForConfig } from '../utils/widgetCapabilities';
 
 // =============================================================================
 // WidgetRenderer — Dispatcher central
@@ -232,7 +232,7 @@ export default function WidgetRenderer({
 
     const navigationTargetDashboardId = widget.navigationTargetDashboardId?.trim() ?? '';
     const isViewerNavigable = navigationTargetDashboardId !== '' && Boolean(onNavigateDashboard);
-    const supportsWrapperKeyboardNavigation = !hasNestedInteractiveNavigation(widget.type);
+    const supportsWrapperKeyboardNavigation = !hasNestedInteractiveNavigationForConfig(widget);
 
     if (!isViewerNavigable) {
         return renderedWidget;

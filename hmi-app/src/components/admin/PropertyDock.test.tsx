@@ -15,6 +15,7 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
 } from '../../utils/activityAnalyticsWidgetDefaults';
 import PropertyDock from './PropertyDock';
+import type { HierarchyAggregationTrace } from '../../widgets/resolvers/hierarchyResolver';
 
 vi.mock('../ui/AnchoredOverlay', () => ({
     default: ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) => (isOpen ? <div>{children}</div> : null),
@@ -89,6 +90,7 @@ function renderPropertyDock(options?: {
     dataEnabled?: boolean;
     availableDashboards?: Dashboard[];
     currentDashboardId?: string;
+    hierarchyTrace?: HierarchyAggregationTrace;
 }) {
     const updates: WidgetConfig[] = [];
 
@@ -113,6 +115,7 @@ function renderPropertyDock(options?: {
                 dataEnabled={options?.dataEnabled ?? true}
                 availableDashboards={options?.availableDashboards ?? []}
                 currentDashboardId={options?.currentDashboardId}
+                hierarchyTrace={options?.hierarchyTrace}
                 onCreateVariable={vi.fn()}
                 onDeleteVariable={vi.fn()}
                 onUpdateWidget={(nextWidget) => {
@@ -521,6 +524,125 @@ describe('PropertyDock text-title', () => {
         await user.click(screen.getByRole('button', { name: 'Línea A' }));
 
         expect(updates.at(-1)?.navigationTargetDashboardId).toBe('dashboard-linea-a');
+    });
+});
+
+describe('PropertyDock hierarchy aggregation preview', () => {
+    const hierarchyTrace: HierarchyAggregationTrace = {
+        resolved: { value: 30, unit: '°C', status: 'normal', source: 'real' },
+        state: 'resolved',
+        catalogVariableId: 'cv-temperature',
+        aggregation: 'sum',
+        descendantNodeCount: 3,
+        scannedDashboardCount: 2,
+        included: [
+            {
+                nodeId: 'node-a',
+                nodeName: 'Línea A',
+                dashboardId: 'dashboard-a',
+                dashboardName: 'Dashboard A',
+                widgetId: 'widget-a',
+                widgetTitle: 'Temperatura Línea A',
+                value: 10,
+                unit: '°C',
+                status: 'normal',
+                source: 'real',
+            },
+            {
+                nodeId: 'node-b',
+                nodeName: 'Línea B',
+                dashboardId: 'dashboard-b',
+                dashboardName: 'Dashboard B',
+                widgetId: 'widget-b',
+                widgetTitle: 'Temperatura Línea B',
+                value: 20,
+                unit: '°C',
+                status: 'normal',
+                source: 'real',
+            },
+        ],
+        excluded: [
+            {
+                nodeId: 'node-c',
+                nodeName: 'Línea C',
+                dashboardId: 'dashboard-c',
+                dashboardName: 'Dashboard C',
+                widgetId: 'widget-c',
+                widgetTitle: 'Presión Línea C',
+                reason: 'catalog-mismatch',
+                value: 99,
+                unit: 'bar',
+                status: 'normal',
+                source: 'simulated',
+            },
+        ],
+    };
+
+    it('renders hierarchy preview details only for hierarchy metric-cards', () => {
+        const { rerender } = renderPropertyDock({
+            type: 'metric-card',
+            title: 'Temperatura agregada',
+            binding: { mode: 'real_variable', catalogVariableId: 'cv-temperature', unit: '°C' },
+            hierarchyTrace,
+        });
+
+        expect(screen.getByText('Vista previa de jerarquía')).toBeInTheDocument();
+        expect(screen.getByText('Suma actual · 30 °C')).toBeInTheDocument();
+        expect(screen.getByText('2 incluidos · 1 excluido · 2 dashboards')).toBeInTheDocument();
+        expect(screen.getByText('Temperatura Línea A')).toBeInTheDocument();
+        expect(screen.getByText('Temperatura Línea B')).toBeInTheDocument();
+        expect(screen.getByText('Presión Línea C')).toBeInTheDocument();
+        expect(screen.getByText('Variable distinta')).toBeInTheDocument();
+
+        rerender(
+            <PropertyDock
+                selectedWidget={{
+                    ...makeWidget({ mode: 'real_variable', catalogVariableId: 'cv-temperature', unit: '°C' }),
+                    type: 'kpi',
+                    title: 'KPI local',
+                    displayOptions: {},
+                }}
+                selectedLayout={DEFAULT_LAYOUT}
+                equipmentMap={new Map()}
+                catalogVariables={[]}
+                usedCatalogVariableIds={[]}
+                machines={MACHINES}
+                dataEnabled
+                hierarchyTrace={hierarchyTrace}
+                availableDashboards={[]}
+                onCreateVariable={vi.fn()}
+                onDeleteVariable={vi.fn()}
+                onUpdateWidget={vi.fn()}
+                onUpdateLayout={vi.fn()}
+                onDelete={vi.fn()}
+                onDuplicate={vi.fn()}
+                onDeselect={vi.fn()}
+            />,
+        );
+
+        expect(screen.queryByText('Vista previa de jerarquía')).not.toBeInTheDocument();
+    });
+
+    it('uses trace state and emptyReason to explain hierarchy no-data without contributor rows', () => {
+        renderPropertyDock({
+            type: 'metric-card',
+            title: 'Temperatura agregada',
+            binding: { mode: 'real_variable', catalogVariableId: 'cv-temperature', unit: '°C' },
+            hierarchyTrace: {
+                ...hierarchyTrace,
+                resolved: { value: null, status: 'no-data', source: 'error' },
+                state: 'empty',
+                emptyReason: 'no-eligible-contributors',
+                included: [],
+                excluded: [],
+            },
+        });
+
+        expect(screen.getByText('Vista previa de jerarquía')).toBeInTheDocument();
+        expect(screen.getByText('Sin datos elegibles para esta jerarquía.')).toBeInTheDocument();
+        expect(screen.getByText('No se encontró ningún contributor numérico para la variable seleccionada.')).toBeInTheDocument();
+        expect(screen.queryByText('Incluidos')).not.toBeInTheDocument();
+        expect(screen.queryByText('Excluidos')).not.toBeInTheDocument();
     });
 });
 

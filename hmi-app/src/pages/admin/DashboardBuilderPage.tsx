@@ -11,7 +11,7 @@ import type { CatalogVariable } from '../../domain';
 import type { Dashboard, DashboardHeaderConfig, DashboardVisualStatus, HierarchyNode, WidgetType, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import { getDashboardVisualStatus } from '../../domain/admin.types';
 import type { EquipmentSummary, MetricValue } from '../../domain/equipment.types';
-import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
+import { buildHierarchyAggregationTrace, type HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import AdminWorkspaceLayout from '../../components/admin/AdminWorkspaceLayout';
 import BuilderCanvas from '../../components/admin/BuilderCanvas';
 import WidgetCatalogRail from '../../components/admin/WidgetCatalogRail';
@@ -397,6 +397,9 @@ export default function DashboardBuilderPage() {
     } else {
         const selectedWidget = draft.widgets.find(w => w.id === selectedWidgetId);
         const usedCatalogVariableIds = getUsedCatalogVariableIdsForWidget(draft.widgets, selectedWidget?.id);
+        const selectedHierarchyTrace = selectedWidget?.type === 'metric-card' && selectedWidget.hierarchyMode && hierarchyContext
+            ? buildHierarchyAggregationTrace(selectedWidget, hierarchyContext, equipmentMap, machines)
+            : undefined;
         const isSelectedHeaderWidget = selectedWidgetId ? headerWidgetIds.has(selectedWidgetId) : false;
         const ownerNode = draft.ownerNodeId
             ? allNodes.find((node) => node.id === draft.ownerNodeId)
@@ -1265,6 +1268,7 @@ export default function DashboardBuilderPage() {
                 dataEnabled={dataEnabled}
                 catalogVariables={allCatalogVariables}
                 usedCatalogVariableIds={usedCatalogVariableIds}
+                hierarchyTrace={selectedHierarchyTrace}
                 availableDashboards={allDashboards}
                 currentDashboardId={draft.id}
                 onCreateVariable={handleCreateVariable}

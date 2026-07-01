@@ -7,9 +7,11 @@ import type {
     ActivityAnalyticsWidgetConfig,
     AlertHistoryWidgetConfig,
     MachineActivityWidgetConfig,
+    MetricCardWidgetConfig,
     ProdHistoryWidgetConfig,
     TrendChartV2WidgetConfig,
 } from '../domain/admin.types';
+import type { HierarchyContext } from './resolvers/hierarchyResolver';
 import { isDataHistoryEnabled } from '../config/dataConnection.config';
 import { useTemporalSettings } from '../hooks/useTemporalSettings';
 import { useActivitySeries } from '../queries/useActivitySeries';
@@ -110,6 +112,58 @@ const machines: ContractMachine[] = [{
     },
 }];
 
+function makeMetricCardWidget(overrides?: Partial<MetricCardWidgetConfig>): MetricCardWidgetConfig {
+    return {
+        id: 'metric-card-1',
+        type: 'metric-card',
+        title: 'Potencia agregada',
+        position: { x: 0, y: 0 },
+        size: { w: 6, h: 5 },
+        binding: {
+            mode: 'real_variable',
+            bindingVersion: 'node-red-v1',
+            catalogVariableId: 'cv-active-power',
+            unit: 'kW',
+        },
+        displayOptions: {},
+        ...overrides,
+    };
+}
+
+const hierarchyMetricCardContext: HierarchyContext = {
+    currentNodeId: 'node-root',
+    allNodes: [
+        { id: 'node-root', name: 'Planta', parentId: null },
+        { id: 'node-linea-a', name: 'Línea A', parentId: 'node-root', linkedDashboardId: 'dashboard-linea-a' },
+    ],
+    allDashboards: [
+        {
+            id: 'dashboard-linea-a',
+            name: 'Dashboard Línea A',
+            status: 'published',
+            widgets: [
+                {
+                    id: 'metric-card-child',
+                    type: 'metric-card',
+                    title: 'Potencia Línea A',
+                    position: { x: 0, y: 0 },
+                    size: { w: 4, h: 3 },
+                    binding: {
+                        mode: 'real_variable',
+                        bindingVersion: 'node-red-v1',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        catalogVariableId: 'cv-active-power',
+                        unit: 'kW',
+                    },
+                    displayOptions: {},
+                },
+            ],
+            layout: [],
+        },
+    ],
+};
+
 function makeTrendChartV2Response(): DataHistoryResponseV2 {
     return {
         contractVersion: '1.1.0',
@@ -195,6 +249,100 @@ describe('WidgetRenderer', () => {
         );
 
         const surface = screen.getByRole('button', { name: 'Actividad de Máquina' });
+
+        await user.click(surface);
+        fireEvent.keyDown(surface, { key: 'Enter' });
+
+        expect(onNavigateDashboard).toHaveBeenNthCalledWith(1, 'dashboard-linea-a');
+        expect(onNavigateDashboard).toHaveBeenNthCalledWith(2, 'dashboard-linea-a');
+    });
+
+    it('keeps hierarchy metric-card disclosure interactions from navigating while preserving card-surface pointer navigation', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+
+        render(
+            <WidgetRenderer
+                widget={makeMetricCardWidget({
+                    hierarchyMode: true,
+                    navigationTargetDashboardId: 'dashboard-linea-a',
+                })}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                hierarchyContext={hierarchyMetricCardContext}
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: 'Potencia agregada' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Ver detalle de agregación de Potencia agregada' }));
+
+        expect(onNavigateDashboard).not.toHaveBeenCalled();
+        expect(screen.getByText('Potencia Línea A')).toBeInTheDocument();
+
+        await user.click(screen.getByText('Potencia agregada'));
+
+        expect(onNavigateDashboard).toHaveBeenCalledWith('dashboard-linea-a');
+    });
+
+    it('keeps hierarchy detail interactions informational and read-only across pointer and keyboard use', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+
+        render(
+            <WidgetRenderer
+                widget={makeMetricCardWidget({
+                    hierarchyMode: true,
+                    navigationTargetDashboardId: 'dashboard-linea-a',
+                })}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                hierarchyContext={hierarchyMetricCardContext}
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        const disclosure = screen.getByRole('button', {
+            name: 'Ver detalle de agregación de Potencia agregada',
+        });
+
+        disclosure.focus();
+
+        expect(disclosure).toHaveFocus();
+        expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+
+        await user.click(disclosure);
+
+        expect(onNavigateDashboard).not.toHaveBeenCalled();
+        expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByText('Potencia Línea A')).toBeInTheDocument();
+
+        await user.keyboard(' ');
+
+        expect(onNavigateDashboard).not.toHaveBeenCalled();
+        expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByText('Potencia Línea A')).not.toBeInTheDocument();
+    });
+
+    it('keeps non-hierarchy metric-cards on the shared keyboard-navigation wrapper', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+
+        render(
+            <WidgetRenderer
+                widget={makeMetricCardWidget({
+                    navigationTargetDashboardId: 'dashboard-linea-a',
+                })}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        const surface = screen.getByRole('button', { name: 'Potencia agregada' });
+
+        expect(screen.queryByRole('button', { name: 'Ver detalle de agregación de Potencia agregada' })).not.toBeInTheDocument();
 
         await user.click(surface);
         fireEvent.keyDown(surface, { key: 'Enter' });

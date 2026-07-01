@@ -1,4 +1,4 @@
-import type { WidgetType } from '../domain/admin.types';
+import type { WidgetConfig, WidgetType } from '../domain/admin.types';
 
 /**
  * Capability flags available for each widget type.
@@ -68,6 +68,16 @@ export function supportsHierarchy(widgetType: string): boolean {
  */
 export function hasNestedInteractiveNavigation(widgetType: string): boolean {
     return getWidgetCapabilities(widgetType).nestedInteractiveNavigation;
+}
+
+/**
+ * Returns true when a concrete widget config needs nested-interactive navigation handling.
+ */
+export function hasNestedInteractiveNavigationForConfig(widget: Pick<WidgetConfig, 'type' | 'hierarchyMode'>): boolean {
+    const capabilities = getWidgetCapabilities(widget.type);
+
+    return capabilities.nestedInteractiveNavigation
+        || (capabilities.hierarchy && widget.hierarchyMode === true);
 }
 
 /**

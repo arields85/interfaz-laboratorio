@@ -1,4 +1,12 @@
+import { useId, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { HierarchyAggregationTrace } from '../../widgets/resolvers/hierarchyResolver';
+import {
+    getHierarchyAggregationModeLabel,
+    getHierarchyTraceEmptyStateMessage,
+    getHierarchyTraceExclusionReasonLabel,
+} from '../../widgets/resolvers/hierarchyResolver';
 import WidgetHeader from './WidgetHeader';
 
 // =============================================================================
@@ -28,6 +36,7 @@ interface MetricCardProps {
     isLoading?: boolean;
     /** Si true, muestra estado de error */
     isError?: boolean;
+    hierarchyTrace?: HierarchyAggregationTrace;
     className?: string;
 }
 
@@ -60,8 +69,11 @@ export default function MetricCard({
     subtext,
     isLoading = false,
     isError = false,
+    hierarchyTrace,
     className = '',
 }: MetricCardProps) {
+    const [isHierarchyDetailOpen, setIsHierarchyDetailOpen] = useState(false);
+    const hierarchyRegionId = useId();
     const styles = STATUS_STYLES[status];
 
     if (isLoading) {
@@ -98,6 +110,7 @@ export default function MetricCard({
         fontSize: 'var(--font-size-widget-unit)',
         letterSpacing: 'var(--tracking-widget-value)',
     };
+    const hasHierarchyTrace = hierarchyTrace !== undefined;
 
     return (
         <div className={`p-5 flex flex-col justify-between w-full h-full transition-colors duration-300 group ${styles.card} ${className}`}>
@@ -126,6 +139,96 @@ export default function MetricCard({
                     {subtext}
                 </div>
             )}
+
+            {hasHierarchyTrace && (
+                <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
+                    <button
+                        type="button"
+                        aria-expanded={isHierarchyDetailOpen}
+                        aria-controls={hierarchyRegionId}
+                        aria-label={`Ver detalle de agregación de ${label}`}
+                        data-widget-navigation-ignore="true"
+                        className="flex items-center justify-between gap-2 rounded-md border border-white/10 bg-black/10 px-3 py-2 text-left text-xs uppercase tracking-wide text-industrial-muted transition-colors hover:text-white"
+                        onClick={() => setIsHierarchyDetailOpen((current) => !current)}
+                    >
+                        <span>Detalle de agregación</span>
+                        <ChevronDown
+                            aria-hidden="true"
+                            className={`h-4 w-4 transition-transform ${isHierarchyDetailOpen ? 'rotate-180' : ''}`}
+                        />
+                    </button>
+
+                    {isHierarchyDetailOpen && (
+                        <div
+                            id={hierarchyRegionId}
+                            data-testid="metric-card-hierarchy-trace"
+                            data-widget-navigation-ignore="true"
+                            className="hmi-scrollbar flex max-h-44 min-h-0 flex-col gap-3 overflow-y-auto rounded-md border border-white/10 bg-black/20 px-3 py-3"
+                        >
+                            {hierarchyTrace.state === 'resolved' ? (
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-sm text-white">
+                                        {`${getHierarchyAggregationModeLabel(hierarchyTrace.aggregation)} actual · ${formatHierarchyTraceValue(hierarchyTrace.resolved.value, hierarchyTrace.resolved.unit)}`}
+                                    </span>
+                                    <span className="text-xs text-industrial-muted">
+                                        {`${hierarchyTrace.included.length} ${hierarchyTrace.included.length === 1 ? 'incluido' : 'incluidos'} · ${hierarchyTrace.excluded.length} ${hierarchyTrace.excluded.length === 1 ? 'excluido' : 'excluidos'} · ${hierarchyTrace.scannedDashboardCount} ${hierarchyTrace.scannedDashboardCount === 1 ? 'dashboard' : 'dashboards'}`}
+                                    </span>
+                                </div>
+                            ) : hierarchyTrace.emptyReason ? (
+                                (() => {
+                                    const message = getHierarchyTraceEmptyStateMessage(hierarchyTrace.emptyReason);
+                                    return (
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-sm text-white">{message.title}</span>
+                                            <span className="text-xs text-industrial-muted">{message.description}</span>
+                                        </div>
+                                    );
+                                })()
+                            ) : null}
+
+                            {hierarchyTrace.included.length > 0 && (
+                                <div className="flex flex-col gap-2">
+                                    <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Incluidos</span>
+                                    <div className="flex flex-col gap-2">
+                                        {hierarchyTrace.included.map((entry) => (
+                                            <div key={`${entry.nodeId}-${entry.widgetId}`} className="rounded border border-white/5 bg-white/5 px-2 py-2">
+                                                <div className="text-sm text-white">{entry.widgetTitle}</div>
+                                                <div className="text-xs text-industrial-muted">
+                                                    {`${entry.nodeName} · ${formatHierarchyTraceValue(entry.value, entry.unit)}`}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {hierarchyTrace.excluded.length > 0 && (
+                                <div className="flex flex-col gap-2">
+                                    <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Excluidos</span>
+                                    <div className="flex flex-col gap-2">
+                                        {hierarchyTrace.excluded.map((entry, index) => (
+                                            <div key={`${entry.nodeId}-${entry.widgetId ?? entry.dashboardId ?? index}`} className="rounded border border-white/5 bg-white/5 px-2 py-2">
+                                                <div className="text-sm text-white">{entry.widgetTitle ?? entry.dashboardName ?? entry.nodeName}</div>
+                                                <div className="text-xs text-industrial-muted">
+                                                    {getHierarchyTraceExclusionReasonLabel(entry.reason)}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
+}
+
+function formatHierarchyTraceValue(value: number | string | null | undefined, unit?: string): string {
+    if (value == null || value === '') {
+        return '—';
+    }
+
+    return unit ? `${value} ${unit}` : String(value);
 }

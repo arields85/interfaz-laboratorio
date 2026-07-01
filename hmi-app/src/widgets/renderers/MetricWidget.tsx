@@ -4,7 +4,7 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import MetricCard from '../../components/ui/MetricCard';
 import ConnectionBadge from '../../components/ui/ConnectionBadge';
 import { resolveBinding } from '../resolvers/bindingResolver';
-import { resolveHierarchyBinding, type HierarchyContext } from '../resolvers/hierarchyResolver';
+import { buildHierarchyAggregationTrace, type HierarchyContext } from '../resolvers/hierarchyResolver';
 import { toCardStatus } from '../resolvers/thresholdEvaluator';
 import { Gauge, Activity, Thermometer, Zap, Droplet, Wind, Settings, Fan, FoldVertical, HelpCircle, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 
@@ -59,9 +59,10 @@ export default function MetricWidget({
         return <MetricCard label={widget.title ?? '—'} value={undefined} isLoading className={className} />;
     }
 
-    const resolved = widget.hierarchyMode && hierarchyContext
-        ? resolveHierarchyBinding(widget, hierarchyContext, equipmentMap, machines)
-        : resolveBinding(widget, equipmentMap, machines);
+    const hierarchyTrace = widget.hierarchyMode && hierarchyContext
+        ? buildHierarchyAggregationTrace(widget, hierarchyContext, equipmentMap, machines)
+        : undefined;
+    const resolved = hierarchyTrace?.resolved ?? resolveBinding(widget, equipmentMap, machines);
     const cardStatus = toCardStatus(resolved.status);
 
     // --- Construcción del subtext (footer) ---
@@ -119,6 +120,7 @@ export default function MetricWidget({
                 subtitle={subtitle}
                 subtext={subtext}
                 isError={resolved.source === 'error' && resolved.status === 'no-data'}
+                hierarchyTrace={hierarchyTrace}
                 className="flex-1 min-h-0"
             />
             {showConnectionBadge && resolved.connectionState && (

@@ -11,6 +11,12 @@ import {
 import type { CatalogVariable } from '../../domain';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
+import {
+    getHierarchyAggregationModeLabel,
+    getHierarchyTraceEmptyStateMessage,
+    getHierarchyTraceExclusionReasonLabel,
+    type HierarchyAggregationTrace,
+} from '../../widgets/resolvers/hierarchyResolver';
 import AdminSelect from './AdminSelect';
 import AdminNumberInput from './AdminNumberInput';
 import AdminEmptyState from './AdminEmptyState';
@@ -67,6 +73,7 @@ interface PropertyDockProps {
     dataEnabled?: boolean;
     catalogVariables: CatalogVariable[];
     usedCatalogVariableIds: string[];
+    hierarchyTrace?: HierarchyAggregationTrace;
     onCreateVariable: (name: string, unit: string) => void;
     onDeleteVariable: (variableId: string) => void;
     onUpdateWidget: (w: WidgetConfig) => void;
@@ -170,6 +177,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         dataEnabled = false,
         catalogVariables,
         usedCatalogVariableIds,
+        hierarchyTrace,
         onCreateVariable,
         onDeleteVariable,
         onUpdateWidget,
@@ -990,6 +998,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     const isCatalogVariableRequired = isHierarchyModeEnabled || hasCatalogVariablesForUnit;
     const isUnitLocked = Boolean(binding.catalogVariableId);
     const showThresholds = isKpi || selectedWidget?.type === 'metric-card';
+    const shouldShowHierarchyPreview = selectedWidget?.type === 'metric-card' && hierarchyTrace !== undefined;
     const isProdHistory = selectedWidget?.type === 'prod-history';
     const prodHistoryOptions = isProdHistory
         ? (selectedWidget.displayOptions as ProdHistoryDisplayOptions | undefined)
@@ -1549,6 +1558,68 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 ]}
                                             />
                                         </DockFieldRow>
+
+                                        {shouldShowHierarchyPreview && (
+                                            <div className="flex flex-col gap-2 rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[11px] uppercase tracking-wide text-industrial-muted">
+                                                        Vista previa de jerarquía
+                                                    </span>
+                                                    {hierarchyTrace.state === 'resolved' ? (
+                                                        <>
+                                                            <span className="text-sm text-white">
+                                                                {`${getHierarchyAggregationModeLabel(hierarchyTrace.aggregation)} actual · ${formatHierarchyTraceValue(hierarchyTrace.resolved.value, hierarchyTrace.resolved.unit)}`}
+                                                            </span>
+                                                            <span className="text-xs text-industrial-muted">
+                                                                {`${hierarchyTrace.included.length} ${hierarchyTrace.included.length === 1 ? 'incluido' : 'incluidos'} · ${hierarchyTrace.excluded.length} ${hierarchyTrace.excluded.length === 1 ? 'excluido' : 'excluidos'} · ${hierarchyTrace.scannedDashboardCount} ${hierarchyTrace.scannedDashboardCount === 1 ? 'dashboard' : 'dashboards'}`}
+                                                            </span>
+                                                        </>
+                                                    ) : hierarchyTrace.emptyReason ? (
+                                                        (() => {
+                                                            const message = getHierarchyTraceEmptyStateMessage(hierarchyTrace.emptyReason);
+                                                            return (
+                                                                <>
+                                                                    <span className="text-sm text-white">{message.title}</span>
+                                                                    <span className="text-xs text-industrial-muted">{message.description}</span>
+                                                                </>
+                                                            );
+                                                        })()
+                                                    ) : null}
+                                                </div>
+
+                                                {hierarchyTrace.included.length > 0 && (
+                                                    <div className="flex flex-col gap-2">
+                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Incluidos</span>
+                                                        <div className="flex flex-col gap-2">
+                                                            {hierarchyTrace.included.map((entry) => (
+                                                                <div key={`${entry.nodeId}-${entry.widgetId}`} className="rounded border border-white/5 bg-white/5 px-2 py-2">
+                                                                    <div className="text-sm text-white">{entry.widgetTitle}</div>
+                                                                    <div className="text-xs text-industrial-muted">
+                                                                        {`${entry.nodeName} · ${formatHierarchyTraceValue(entry.value, entry.unit)}`}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {hierarchyTrace.excluded.length > 0 && (
+                                                    <div className="flex flex-col gap-2">
+                                                        <span className="text-[11px] uppercase tracking-wide text-industrial-muted">Excluidos</span>
+                                                        <div className="flex flex-col gap-2">
+                                                            {hierarchyTrace.excluded.map((entry, index) => (
+                                                                <div key={`${entry.nodeId}-${entry.widgetId ?? entry.dashboardId ?? index}`} className="rounded border border-white/5 bg-white/5 px-2 py-2">
+                                                                    <div className="text-sm text-white">{entry.widgetTitle ?? entry.dashboardName ?? entry.nodeName}</div>
+                                                                    <div className="text-xs text-industrial-muted">
+                                                                        {getHierarchyTraceExclusionReasonLabel(entry.reason)}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </>
                                         )}
 
@@ -2640,6 +2711,15 @@ function DockFieldRow({
             </div>
         </div>
     );
+}
+
+function formatHierarchyTraceValue(value: number | string | null, unit?: string): string {
+    if (value == null) {
+        return 'Sin datos';
+    }
+
+    const trimmedUnit = unit?.trim();
+    return trimmedUnit ? `${value} ${trimmedUnit}` : String(value);
 }
 
 // =============================================================================
