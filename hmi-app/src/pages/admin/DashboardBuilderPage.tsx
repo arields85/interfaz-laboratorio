@@ -671,7 +671,7 @@ export default function DashboardBuilderPage() {
                     ? {
                         id: newId,
                         type,
-                        title: 'Análisis de Actividad',
+                        title: 'ACT-ANALYTICS',
                         position: { x: 0, y: 0 },
                         size: { w: defaultWidth, h: defaultHeight },
                         binding: {

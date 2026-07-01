@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
+import { ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS } from './adminSidebarStyles';
 import DockSliderField from './DockSliderField';
 
 function ControlledDockSliderField({
@@ -60,5 +61,11 @@ describe('DockSliderField', () => {
 
         expect(input).toHaveValue('65');
         expect(slider).toHaveValue('65');
+    });
+
+    it('uses the shared canonical value-input width by default', () => {
+        render(<ControlledDockSliderField />);
+
+        expect(screen.getByRole('textbox', { name: 'Opacity value' }).parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
     });
 });

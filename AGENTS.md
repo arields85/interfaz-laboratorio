@@ -132,6 +132,7 @@ Incluso en esos casos, mantené el criterio de mínimo alcance y no conviertas u
 6. ¿Estoy usando `widgetCapabilities.ts` para chequear capacidades en vez de hardcodear `widget.type === 'xxx'`?
 7. ¿Pregunta de control: **"¿Esto refuerza una interfaz observadora, premium, industrial, clara y escalable?"**
 8. ¿Escribí el test antes del código cuando corresponde (utils, adapters, services, resolvers, bugs)?
+9. Si voy a crear/corregir un widget property panel, ¿cargué y seguí la skill de proyecto `.opencode/skills/widget-property-panel/SKILL.md`?
 
 ### Prohibido:
 

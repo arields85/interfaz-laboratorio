@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react';
 import AdminNumberInput from './AdminNumberInput';
-import { ADMIN_SIDEBAR_LABEL_CLS } from './adminSidebarStyles';
+import {
+    ADMIN_SIDEBAR_LABEL_CLS,
+    ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS,
+} from './adminSidebarStyles';
 
 export interface DockSliderFieldProps {
     label: ReactNode;
@@ -10,6 +13,8 @@ export interface DockSliderFieldProps {
     step?: number;
     onChange: (value: number) => void;
     ariaLabel?: string;
+    numberInputAriaLabel?: string;
+    numberInputClassName?: string;
     disabled?: boolean;
     className?: string;
 }
@@ -36,10 +41,14 @@ export default function DockSliderField({
     step = 1,
     onChange,
     ariaLabel,
+    numberInputAriaLabel,
+    numberInputClassName = ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS,
     disabled = false,
     className = '',
 }: DockSliderFieldProps) {
     const resolvedAriaLabel = ariaLabel ?? (typeof label === 'string' ? label : undefined);
+    const resolvedNumberInputAriaLabel = numberInputAriaLabel
+        ?? (resolvedAriaLabel ? `${resolvedAriaLabel} value` : undefined);
 
     const handleNumericChange = (nextValue: string) => {
         const parsedValue = Number(nextValue);
@@ -65,8 +74,8 @@ export default function DockSliderField({
                     step={step}
                     disabled={disabled}
                     commitOnBlur
-                    ariaLabel={resolvedAriaLabel ? `${resolvedAriaLabel} value` : undefined}
-                    className="w-24 max-w-full shrink-0"
+                    ariaLabel={resolvedNumberInputAriaLabel}
+                    className={numberInputClassName}
                     onChange={handleNumericChange}
                 />
             </div>

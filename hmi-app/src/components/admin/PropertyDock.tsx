@@ -21,9 +21,11 @@ import AdminSelect from './AdminSelect';
 import AdminNumberInput from './AdminNumberInput';
 import AdminEmptyState from './AdminEmptyState';
 import CatalogVariableSelector from './CatalogVariableSelector';
+import DockColorField from './DockColorField';
 import DockInfoDropdown from './DockInfoDropdown';
 import DockInfoBox from './DockInfoBox';
 import DockInlineControlRow from './DockInlineControlRow';
+import DockSliderField from './DockSliderField';
 import {
     DEFAULT_STATUS_LABELS,
     EQUIPMENT_STATUS_VALUES,
@@ -55,6 +57,7 @@ import {
     resolveActivityAnalyticsGroupBarWidthForGroup,
     resolveActivityAnalyticsProdTrendBandBlendMode,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import { resolveActivityAnalyticsDisplayTitle } from '../../utils/activityAnalyticsTitle';
 import {
     resolveActivityAnalyticsDisplayRules,
     type ActivityAnalyticsSupportedRange,
@@ -144,12 +147,23 @@ const ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS = [
     { key: 'groupedBars' as const, label: 'Barras agrupadas' },
     { key: 'donut' as const, label: 'Donut' },
 ];
-const ACTIVITY_ANALYTICS_HEX_PATTERN = /^#[0-9a-f]{6}$/i;
+const ACTIVITY_ANALYTICS_HEX_CODE_PATTERN = /^[0-9a-f]{6}$/i;
 type ActivityAnalyticsGradientSlotIndex = 0 | 1;
 type ActivityAnalyticsProdTrendBandSlotIndex = 0 | 1 | 2;
 type ActivityAnalyticsSurfaceKey = 'groupedBars' | 'donut';
 type ActivityAnalyticsHexDraftKey = `${ActivityAnalyticsStateGradientKey}-${ActivityAnalyticsGradientSlotIndex}`;
 type ActivityAnalyticsProdTrendBandHexDraftKey = `prod-trend-band-${ActivityAnalyticsProdTrendBandSlotIndex}`;
+
+const formatActivityAnalyticsHexCode = (value: string | undefined): string => value?.replace(/^#/, '').toLowerCase() ?? '';
+const parseActivityAnalyticsHexCode = (value: string): string | null => {
+    const normalizedValue = value.trim().replace(/^#/, '').toLowerCase();
+
+    if (!ACTIVITY_ANALYTICS_HEX_CODE_PATTERN.test(normalizedValue)) {
+        return null;
+    }
+
+    return `#${normalizedValue}`;
+};
 
 const STATUS_TEXT_FIELDS: Array<{ key: keyof StatusDisplayOptions; label: string; placeholder: string }> = [
     { key: 'runningText', label: 'Running', placeholder: DEFAULT_STATUS_LABELS.running },
@@ -368,7 +382,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         slotIndex: ActivityAnalyticsGradientSlotIndex,
     ): ActivityAnalyticsHexDraftKey => `${stateKey}-${slotIndex}`;
 
-    const isValidActivityAnalyticsHex = (value: string): boolean => ACTIVITY_ANALYTICS_HEX_PATTERN.test(value.trim());
+    const isValidActivityAnalyticsHexCode = (value: string): boolean => ACTIVITY_ANALYTICS_HEX_CODE_PATTERN.test(value.trim().replace(/^#/, ''));
 
     const handleActivityAnalyticsHexDraftChange = (
         stateKey: ActivityAnalyticsStateGradientKey,
@@ -376,18 +390,20 @@ export default function PropertyDock(props: PropertyDockProps) {
         value: string,
     ) => {
         const draftKey = getActivityAnalyticsHexDraftKey(stateKey, slotIndex);
-        const normalizedValue = value.trim();
+        const normalizedValue = value.trim().replace(/^#/, '');
 
         setActivityAnalyticsHexDrafts((currentDrafts) => ({
             ...currentDrafts,
-            [draftKey]: value,
+            [draftKey]: normalizedValue,
         }));
 
-        if (!isValidActivityAnalyticsHex(normalizedValue)) {
+        const nextColor = parseActivityAnalyticsHexCode(normalizedValue);
+
+        if (!nextColor) {
             return;
         }
 
-        handleActivityAnalyticsStateGradientChange(stateKey, slotIndex, normalizedValue.toLowerCase());
+        handleActivityAnalyticsStateGradientChange(stateKey, slotIndex, nextColor);
         setActivityAnalyticsHexDrafts((currentDrafts) => ({
             ...currentDrafts,
             [draftKey]: normalizedValue.toLowerCase(),
@@ -406,17 +422,17 @@ export default function PropertyDock(props: PropertyDockProps) {
             return;
         }
 
-        if (isValidActivityAnalyticsHex(draftValue)) {
+        if (isValidActivityAnalyticsHexCode(draftValue)) {
             setActivityAnalyticsHexDrafts((currentDrafts) => ({
                 ...currentDrafts,
-                [draftKey]: draftValue.trim().toLowerCase(),
+                [draftKey]: draftValue.trim().replace(/^#/, '').toLowerCase(),
             }));
             return;
         }
 
         setActivityAnalyticsHexDrafts((currentDrafts) => ({
             ...currentDrafts,
-            [draftKey]: resolvedValue,
+            [draftKey]: formatActivityAnalyticsHexCode(resolvedValue),
         }));
     };
 
@@ -429,7 +445,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
         setActivityAnalyticsHexDrafts((currentDrafts) => ({
             ...currentDrafts,
-            [getActivityAnalyticsHexDraftKey(stateKey, slotIndex)]: normalizedValue,
+            [getActivityAnalyticsHexDraftKey(stateKey, slotIndex)]: formatActivityAnalyticsHexCode(normalizedValue),
         }));
         handleActivityAnalyticsStateGradientChange(stateKey, slotIndex, normalizedValue);
     };
@@ -469,11 +485,11 @@ export default function PropertyDock(props: PropertyDockProps) {
         value: string,
     ) => {
         const draftKey = getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex);
-        const normalizedValue = value.trim();
+        const normalizedValue = value.trim().replace(/^#/, '');
 
         setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
             ...currentDrafts,
-            [draftKey]: value,
+            [draftKey]: normalizedValue,
         }));
 
         if (normalizedValue.length === 0) {
@@ -481,15 +497,16 @@ export default function PropertyDock(props: PropertyDockProps) {
             return;
         }
 
-        if (!isValidActivityAnalyticsHex(normalizedValue)) {
+        const nextColor = parseActivityAnalyticsHexCode(normalizedValue);
+
+        if (!nextColor) {
             return;
         }
 
-        const nextColor = normalizedValue.toLowerCase();
         handleActivityAnalyticsProdTrendBandColorChange(slotIndex, nextColor);
         setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
             ...currentDrafts,
-            [draftKey]: nextColor,
+            [draftKey]: normalizedValue.toLowerCase(),
         }));
     };
 
@@ -514,17 +531,17 @@ export default function PropertyDock(props: PropertyDockProps) {
             return;
         }
 
-        if (isValidActivityAnalyticsHex(normalizedDraftValue)) {
+        if (isValidActivityAnalyticsHexCode(normalizedDraftValue)) {
             setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
                 ...currentDrafts,
-                [draftKey]: normalizedDraftValue,
+                [draftKey]: normalizedDraftValue.replace(/^#/, ''),
             }));
             return;
         }
 
         setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
             ...currentDrafts,
-            [draftKey]: resolvedValue,
+            [draftKey]: formatActivityAnalyticsHexCode(resolvedValue),
         }));
     };
 
@@ -536,7 +553,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
         setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
             ...currentDrafts,
-            [getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)]: normalizedValue,
+            [getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)]: formatActivityAnalyticsHexCode(normalizedValue),
         }));
         handleActivityAnalyticsProdTrendBandColorChange(slotIndex, normalizedValue);
     };
@@ -556,17 +573,18 @@ export default function PropertyDock(props: PropertyDockProps) {
     };
 
     const handleActivityAnalyticsCoverageColorDraftChange = (value: string) => {
-        const normalizedValue = value.trim();
+        const normalizedValue = value.trim().replace(/^#/, '');
 
-        setActivityAnalyticsCoverageColorDraft(value);
+        setActivityAnalyticsCoverageColorDraft(normalizedValue);
 
-        if (!isValidActivityAnalyticsHex(normalizedValue)) {
+        const nextColor = parseActivityAnalyticsHexCode(normalizedValue);
+
+        if (!nextColor) {
             return;
         }
 
-        const nextColor = normalizedValue.toLowerCase();
         handleActivityAnalyticsCoverageColorChange(nextColor);
-        setActivityAnalyticsCoverageColorDraft(nextColor);
+        setActivityAnalyticsCoverageColorDraft(normalizedValue.toLowerCase());
     };
 
     const handleActivityAnalyticsCoverageColorDraftBlur = (resolvedValue: string) => {
@@ -574,12 +592,12 @@ export default function PropertyDock(props: PropertyDockProps) {
             return;
         }
 
-        if (isValidActivityAnalyticsHex(activityAnalyticsCoverageColorDraft)) {
-            setActivityAnalyticsCoverageColorDraft(activityAnalyticsCoverageColorDraft.trim().toLowerCase());
+        if (isValidActivityAnalyticsHexCode(activityAnalyticsCoverageColorDraft)) {
+            setActivityAnalyticsCoverageColorDraft(activityAnalyticsCoverageColorDraft.trim().replace(/^#/, '').toLowerCase());
             return;
         }
 
-        setActivityAnalyticsCoverageColorDraft(resolvedValue);
+        setActivityAnalyticsCoverageColorDraft(formatActivityAnalyticsHexCode(resolvedValue));
     };
 
     const handleActivityAnalyticsStateGradientAlphaChange = (
@@ -1072,6 +1090,9 @@ export default function PropertyDock(props: PropertyDockProps) {
             activityAnalyticsOptions.groupBarWidth,
         )
         : 1;
+    const propertyDockContextTitle = selectedWidget
+        ? resolveActivityAnalyticsDisplayTitle(selectedWidget)
+        : '';
     const shouldShowGeneralIconField = selectedWidget
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'text-title'
@@ -1161,7 +1182,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                     <Settings2 size={14} className="text-industrial-muted" />
                     <span className={ADMIN_SIDEBAR_PANEL_TITLE_CLS}>Propiedades</span>
                     <span className="px-2 py-0.5 rounded uppercase admin-accent-ghost">
-                        {selectedWidget.type}
+                        {propertyDockContextTitle}
                     </span>
                 </div>
             </div>
@@ -1888,24 +1909,15 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         options={ACTIVITY_ANALYTICS_GROUP_OPTIONS.filter((option) => activityAnalyticsDisplayRules?.allowedGroups.includes(option.value) ?? false)}
                                     />
                                 </DockFieldRow>
-                                <div className="flex flex-col gap-2">
-                                    <span className={LABEL_CLS}>Ancho</span>
-                                    <div className="flex w-full items-center gap-3">
-                                        <input
-                                            type="range"
-                                            min="0.1"
-                                            max="1.5"
-                                            step="0.1"
-                                            value={activityAnalyticsBarWidth}
-                                            onChange={(e) => handleActivityAnalyticsGroupBarWidthChange(Number(e.target.value))}
-                                            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10"
-                                            style={{ accentColor: 'var(--color-admin-accent)' }}
-                                        />
-                                        <span className="w-10 text-right text-industrial-muted">
-                                            ×{activityAnalyticsBarWidth.toFixed(1)}
-                                        </span>
-                                    </div>
-                                </div>
+                                <DockSliderField
+                                    label="Ancho"
+                                    value={activityAnalyticsBarWidth}
+                                    min={0.1}
+                                    max={1.5}
+                                    step={0.1}
+                                    ariaLabel="Ancho"
+                                    onChange={handleActivityAnalyticsGroupBarWidthChange}
+                                />
                             </DockSection>
                         )}
 
@@ -2024,233 +2036,154 @@ export default function PropertyDock(props: PropertyDockProps) {
                         )}
 
                         {isActivityAnalytics && activityAnalyticsOptions && (
-                            <DockSection icon={<Sliders size={11} />} title="Visualización">
-                                <div className="flex flex-col gap-4">
-                                    {ACTIVITY_ANALYTICS_STATE_GRADIENT_ROWS.map(({ key, label }) => {
-                                        const stateGradients = activityAnalyticsOptions.stateGradients as Record<ActivityAnalyticsStateGradientKey, [string, string]>;
-                                        const stateGradientAlphas = activityAnalyticsOptions.stateGradientAlphas as Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair>;
-                                        const gradient = stateGradients[key];
-                                        const gradientAlphas = stateGradientAlphas[key];
+                            <>
+                                {ACTIVITY_ANALYTICS_STATE_GRADIENT_ROWS.map(({ key, label }) => {
+                                    const stateGradients = activityAnalyticsOptions.stateGradients as Record<ActivityAnalyticsStateGradientKey, [string, string]>;
+                                    const stateGradientAlphas = activityAnalyticsOptions.stateGradientAlphas as Record<ActivityAnalyticsStateGradientKey, ActivityAnalyticsAlphaPair>;
+                                    const gradient = stateGradients[key];
+                                    const gradientAlphas = stateGradientAlphas[key];
+                                    const sectionTitle = key === 'prod' ? 'COLORES PRODUCCION' : `COLORES ${label.toUpperCase()}`;
+
+                                    return (
+                                        <DockSection key={key} icon={<Sliders size={11} />} title={sectionTitle}>
+                                            {ACTIVITY_ANALYTICS_GRADIENT_STOPS.map(({ slotIndex, key: stopKey, label: stopLabel }) => {
+                                                const resolvedHexValue = gradient[slotIndex];
+                                                const draftKey = getActivityAnalyticsHexDraftKey(key, slotIndex);
+                                                const displayedHexValue = activityAnalyticsHexDrafts[draftKey] ?? formatActivityAnalyticsHexCode(resolvedHexValue);
+                                                const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHexCode(displayedHexValue);
+
+                                                return (
+                                                    <DockColorField
+                                                        key={`${key}-${stopKey}`}
+                                                        label={stopLabel}
+                                                        color={resolvedHexValue}
+                                                        hexCode={displayedHexValue}
+                                                        alpha={gradientAlphas[slotIndex]}
+                                                        invalid={isDraftInvalid}
+                                                        swatchAriaLabel={`${label} color ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                        hexInputAriaLabel={`${label} hex ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                        alphaInputAriaLabel={`${label} alfa ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                        onColorChange={(nextValue) => handleActivityAnalyticsColorPickerChange(key, slotIndex, nextValue)}
+                                                        onHexCodeChange={(nextValue) => handleActivityAnalyticsHexDraftChange(key, slotIndex, nextValue)}
+                                                        onHexCodeBlur={() => handleActivityAnalyticsHexDraftBlur(key, slotIndex, resolvedHexValue)}
+                                                        onAlphaChange={(nextValue) => handleActivityAnalyticsStateGradientAlphaChange(key, slotIndex, nextValue)}
+                                                    />
+                                                );
+                                            })}
+                                        </DockSection>
+                                    );
+                                })}
+
+                                <DockSection icon={<TrendingUp size={11} />} title="BANDAS TENDENCIA % PROD">
+                                    {ACTIVITY_ANALYTICS_PROD_TREND_BAND_STOPS.map(({ slotIndex, label: stopLabel }) => {
+                                        const resolvedHexValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? '';
+                                        const displayedHexValue = activityAnalyticsProdTrendBandHexDrafts[getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)]
+                                            ?? formatActivityAnalyticsHexCode(resolvedHexValue);
+                                        const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHexCode(displayedHexValue);
+                                        const pickerValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT;
 
                                         return (
-                                            <div key={key} className="flex flex-col gap-2">
-                                                <div className="text-sm text-white">{label}</div>
-                                                <div className="flex flex-col gap-2">
-                                                    {ACTIVITY_ANALYTICS_GRADIENT_STOPS.map(({ slotIndex, key: stopKey, label: stopLabel, hexLabel, alphaLabel }) => {
-                                                        const resolvedHexValue = gradient[slotIndex];
-                                                        const draftKey = getActivityAnalyticsHexDraftKey(key, slotIndex);
-                                                        const draftValue = activityAnalyticsHexDrafts[draftKey];
-                                                        const displayedHexValue = draftValue ?? resolvedHexValue;
-                                                        const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHex(displayedHexValue);
-
-                                                        return (
-                                                            <div key={`${key}-${stopKey}`} className="grid gap-2 xl:grid-cols-[80px,auto,minmax(0,1fr),120px] xl:items-center">
-                                                                <span className="text-xs text-industrial-muted">{stopLabel.toLowerCase()}</span>
-                                                                    <label className="flex items-center gap-2 text-industrial-muted">
-                                                                        <span className="sr-only">{`${label} ${stopLabel}`}</span>
-                                                                        <input
-                                                                            type="color"
-                                                                            value={resolvedHexValue}
-                                                                            onChange={(event) => handleActivityAnalyticsColorPickerChange(key, slotIndex, event.target.value)}
-                                                                            className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-1"
-                                                                            aria-label={`${label} color ${slotIndex === 0 ? 'inicial' : 'final'}`}
-                                                                        />
-                                                                    </label>
-                                                                    <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                                        <span className="shrink-0 text-xs text-industrial-muted">{`${hexLabel.toLowerCase()} #`}</span>
-                                                                        <input
-                                                                            type="text"
-                                                                            inputMode="text"
-                                                                            spellCheck={false}
-                                                                            value={displayedHexValue}
-                                                                            onChange={(event) => handleActivityAnalyticsHexDraftChange(key, slotIndex, event.target.value)}
-                                                                            onBlur={() => handleActivityAnalyticsHexDraftBlur(key, slotIndex, resolvedHexValue)}
-                                                                            aria-invalid={isDraftInvalid}
-                                                                            aria-label={`${label} hex ${slotIndex === 0 ? 'inicial' : 'final'}`}
-                                                                            className={`${INPUT_CLS} ${isDraftInvalid ? 'border-status-error bg-status-error/10' : ''}`.trim()}
-                                                                            placeholder="#RRGGBB"
-                                                                        />
-                                                                    </label>
-                                                                    <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                                        <span className="shrink-0 text-xs text-industrial-muted">{alphaLabel.toLowerCase()}</span>
-                                                                        <AdminNumberInput
-                                                                            value={gradientAlphas[slotIndex]}
-                                                                            min={0}
-                                                                            max={100}
-                                                                            step={1}
-                                                                            commitOnBlur
-                                                                            ariaLabel={`${label} alfa ${slotIndex === 0 ? 'inicial' : 'final'}`}
-                                                                            onChange={(nextValue) => handleActivityAnalyticsStateGradientAlphaChange(key, slotIndex, nextValue)}
-                                                                        />
-                                                                    </label>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
+                                            <DockColorField
+                                                key={`prod-trend-band-${slotIndex}`}
+                                                label={stopLabel}
+                                                color={pickerValue}
+                                                hexCode={displayedHexValue}
+                                                alpha={activityAnalyticsOptions.prodTrendBands.alphas[slotIndex]}
+                                                invalid={isDraftInvalid}
+                                                swatchAriaLabel={`Bandas tendencia color ${stopLabel.toLowerCase()}`}
+                                                hexInputAriaLabel={`Bandas tendencia hex ${stopLabel.toLowerCase()}`}
+                                                alphaInputAriaLabel={`Bandas tendencia alfa ${stopLabel.toLowerCase()}`}
+                                                onColorChange={(nextValue) => handleActivityAnalyticsProdTrendBandColorPickerChange(slotIndex, nextValue)}
+                                                onHexCodeChange={(nextValue) => handleActivityAnalyticsProdTrendBandHexDraftChange(slotIndex, nextValue)}
+                                                onHexCodeBlur={() => handleActivityAnalyticsProdTrendBandHexDraftBlur(slotIndex, resolvedHexValue)}
+                                                onAlphaChange={(nextValue) => handleActivityAnalyticsProdTrendBandAlphaChange(slotIndex, nextValue)}
+                                            />
                                         );
                                     })}
 
-                                    <div className="flex flex-col gap-2">
-                                        <div className="text-sm text-white">Bandas tendencia % PROD</div>
-                                        <div className="flex flex-col gap-2">
-                                            {ACTIVITY_ANALYTICS_PROD_TREND_BAND_STOPS.map(({ slotIndex, label: stopLabel, hexLabel, alphaLabel }) => {
-                                                const resolvedHexValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? '';
-                                                const displayedHexValue = activityAnalyticsProdTrendBandHexDrafts[getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)] ?? resolvedHexValue;
-                                                const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHex(displayedHexValue);
-                                                const pickerValue = activityAnalyticsOptions.prodTrendBands.colors[slotIndex] ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT;
+                                    <DockFieldRow label="Blend">
+                                        <AdminSelect
+                                            value={activityAnalyticsOptions.prodTrendBands.blendMode}
+                                            onChange={handleActivityAnalyticsProdTrendBandBlendModeChange}
+                                            options={ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS.map((blendMode) => ({
+                                                value: blendMode,
+                                                label: ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE_LABELS[blendMode],
+                                            }))}
+                                        />
+                                    </DockFieldRow>
+                                </DockSection>
 
-                                                return (
-                                                    <div key={`prod-trend-band-${slotIndex}`} className="grid gap-2 xl:grid-cols-[80px,auto,minmax(0,1fr),120px] xl:items-center">
-                                                        <span className="text-xs text-industrial-muted">{stopLabel.toLowerCase()}</span>
-                                                            <label className="flex items-center gap-2 text-industrial-muted">
-                                                                <span className="sr-only">{`Bandas tendencia ${stopLabel}`}</span>
-                                                                <input
-                                                                    type="color"
-                                                                    value={pickerValue}
-                                                                    onChange={(event) => handleActivityAnalyticsProdTrendBandColorPickerChange(slotIndex, event.target.value)}
-                                                                    className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-1"
-                                                                    aria-label={`Bandas tendencia color ${stopLabel.toLowerCase()}`}
-                                                                />
-                                                            </label>
-                                                            <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                                <span className="shrink-0 text-xs text-industrial-muted">{`${hexLabel.toLowerCase()} #`}</span>
-                                                                <input
-                                                                    type="text"
-                                                                    inputMode="text"
-                                                                    spellCheck={false}
-                                                                    value={displayedHexValue}
-                                                                    onChange={(event) => handleActivityAnalyticsProdTrendBandHexDraftChange(slotIndex, event.target.value)}
-                                                                    onBlur={() => handleActivityAnalyticsProdTrendBandHexDraftBlur(slotIndex, resolvedHexValue)}
-                                                                    aria-invalid={isDraftInvalid}
-                                                                    aria-label={`Bandas tendencia hex ${stopLabel.toLowerCase()}`}
-                                                                    className={`${INPUT_CLS} ${isDraftInvalid ? 'border-status-error bg-status-error/10' : ''}`.trim()}
-                                                                    placeholder="#RRGGBB"
-                                                                />
-                                                            </label>
-                                                            <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                                <span className="shrink-0 text-xs text-industrial-muted">{alphaLabel.toLowerCase()}</span>
-                                                                <AdminNumberInput
-                                                                    value={activityAnalyticsOptions.prodTrendBands.alphas[slotIndex]}
-                                                                    min={0}
-                                                                    max={100}
-                                                                    step={1}
-                                                                    commitOnBlur
-                                                                    ariaLabel={`Bandas tendencia alfa ${stopLabel.toLowerCase()}`}
-                                                                    onChange={(nextValue) => handleActivityAnalyticsProdTrendBandAlphaChange(slotIndex, nextValue)}
-                                                                />
-                                                            </label>
-                                                    </div>
-                                                );
-                                            })}
+                                {(() => {
+                                    const displayedCoverageColor = activityAnalyticsCoverageColorDraft ?? formatActivityAnalyticsHexCode(activityAnalyticsOptions.coverageColor);
+                                    const isCoverageDraftInvalid = displayedCoverageColor.length > 0
+                                        && !isValidActivityAnalyticsHexCode(displayedCoverageColor);
 
-                                            <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                <span className={`${LABEL_CLS} w-auto`}>Blend</span>
-                                                <AdminSelect
-                                                    value={activityAnalyticsOptions.prodTrendBands.blendMode}
-                                                    onChange={handleActivityAnalyticsProdTrendBandBlendModeChange}
-                                                    options={ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS.map((blendMode) => ({
-                                                        value: blendMode,
-                                                        label: ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE_LABELS[blendMode],
-                                                    }))}
+                                    return (
+                                        <DockSection icon={<AreaChart size={11} />} title="COBERTURA SIN DATOS">
+                                            <DockColorField
+                                                label="Cobertura"
+                                                color={activityAnalyticsOptions.coverageColor}
+                                                hexCode={displayedCoverageColor}
+                                                alpha={100}
+                                                showAlpha={false}
+                                                invalid={isCoverageDraftInvalid}
+                                                swatchAriaLabel="Cobertura / sin datos color"
+                                                hexInputAriaLabel="Cobertura / sin datos hex"
+                                                onColorChange={(nextValue) => {
+                                                    setActivityAnalyticsCoverageColorDraft(formatActivityAnalyticsHexCode(nextValue));
+                                                    handleActivityAnalyticsCoverageColorChange(nextValue);
+                                                }}
+                                                onHexCodeChange={handleActivityAnalyticsCoverageColorDraftChange}
+                                                onHexCodeBlur={() => handleActivityAnalyticsCoverageColorDraftBlur(activityAnalyticsOptions.coverageColor)}
+                                                onAlphaChange={() => undefined}
+                                                className="gap-2"
+                                            />
+                                        </DockSection>
+                                    );
+                                })()}
+
+                                {ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS.map(({ key, label }) => {
+                                    const surfaceEffects = (key === 'groupedBars'
+                                        ? activityAnalyticsOptions.visualEffects.groupedBars
+                                        : activityAnalyticsOptions.visualEffects.donut) as ActivityAnalyticsSurfaceEffects;
+
+                                    return (
+                                        <DockSection key={key} icon={<Settings size={11} />} title={label.toUpperCase()}>
+                                            <DockFieldRow label="Glow">
+                                                <AdminNumberInput
+                                                    value={surfaceEffects.glow}
+                                                    min={0}
+                                                    max={100}
+                                                    step={1}
+                                                    commitOnBlur
+                                                    ariaLabel={`${label} glow`}
+                                                    onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'glow', nextValue)}
+                                                />
+                                            </DockFieldRow>
+                                            <DockFieldRow label="Blur">
+                                                <AdminNumberInput
+                                                    value={surfaceEffects.blur}
+                                                    min={0}
+                                                    max={8}
+                                                    step={0.1}
+                                                    commitOnBlur
+                                                    ariaLabel={`${label} blur`}
+                                                    onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'blur', nextValue)}
+                                                />
+                                            </DockFieldRow>
+                                            <label className="flex items-center justify-between gap-3 text-industrial-text">
+                                                <span>Top cap</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={surfaceEffects.topCap}
+                                                    onChange={(event) => handleActivityAnalyticsSurfaceEffectChange(key, 'topCap', event.target.checked)}
+                                                    aria-label={`${label} top cap`}
                                                 />
                                             </label>
-                                        </div>
-                                    </div>
-
-                                    {(() => {
-                                        const displayedCoverageColor = activityAnalyticsCoverageColorDraft ?? activityAnalyticsOptions.coverageColor;
-                                        const isCoverageDraftInvalid = displayedCoverageColor.length > 0
-                                            && !isValidActivityAnalyticsHex(displayedCoverageColor);
-
-                                        return (
-                                            <div className="flex flex-col gap-2">
-                                                <div className="text-sm text-white">Cobertura / sin datos</div>
-                                                <div className="grid gap-2 xl:grid-cols-[auto,minmax(0,1fr)] xl:items-center">
-                                                    <label className="flex items-center gap-2 text-industrial-muted">
-                                                        <span className="sr-only">Cobertura / sin datos</span>
-                                                        <input
-                                                            type="color"
-                                                            value={activityAnalyticsOptions.coverageColor}
-                                                            onChange={(event) => {
-                                                                const nextColor = event.target.value.trim().toLowerCase();
-                                                                setActivityAnalyticsCoverageColorDraft(nextColor);
-                                                                handleActivityAnalyticsCoverageColorChange(nextColor);
-                                                            }}
-                                                            className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-1"
-                                                            aria-label="Cobertura / sin datos color"
-                                                        />
-                                                    </label>
-                                                    <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                        <span className="shrink-0 text-xs text-industrial-muted">hex #</span>
-                                                        <input
-                                                            type="text"
-                                                            inputMode="text"
-                                                            spellCheck={false}
-                                                            value={displayedCoverageColor}
-                                                            onChange={(event) => handleActivityAnalyticsCoverageColorDraftChange(event.target.value)}
-                                                            onBlur={() => handleActivityAnalyticsCoverageColorDraftBlur(activityAnalyticsOptions.coverageColor)}
-                                                            aria-invalid={isCoverageDraftInvalid}
-                                                            aria-label="Cobertura / sin datos hex"
-                                                            className={`${INPUT_CLS} ${isCoverageDraftInvalid ? 'border-status-error bg-status-error/10' : ''}`.trim()}
-                                                            placeholder="#RRGGBB"
-                                                        />
-                                                    </label>
-                                                </div>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    <div className="grid gap-4 xl:grid-cols-2">
-                                        {ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS.map(({ key, label }) => {
-                                            const surfaceEffects = (key === 'groupedBars'
-                                                ? activityAnalyticsOptions.visualEffects.groupedBars
-                                                : activityAnalyticsOptions.visualEffects.donut) as ActivityAnalyticsSurfaceEffects;
-
-                                            return (
-                                                <div key={key} className="flex flex-col gap-2">
-                                                    <div className="text-sm text-white">{label}</div>
-                                                    <div className="flex flex-col gap-2">
-                                                        <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                            <span className={`${LABEL_CLS} w-auto`}>Glow</span>
-                                                            <AdminNumberInput
-                                                                value={surfaceEffects.glow}
-                                                                min={0}
-                                                                max={100}
-                                                                step={1}
-                                                                commitOnBlur
-                                                                ariaLabel={`${label} glow`}
-                                                                onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'glow', nextValue)}
-                                                            />
-                                                        </label>
-                                                        <label className="flex min-w-0 items-center gap-2 text-industrial-muted">
-                                                            <span className={`${LABEL_CLS} w-auto`}>Blur</span>
-                                                            <AdminNumberInput
-                                                                value={surfaceEffects.blur}
-                                                                min={0}
-                                                                max={8}
-                                                                step={0.1}
-                                                                commitOnBlur
-                                                                ariaLabel={`${label} blur`}
-                                                                onChange={(nextValue) => handleActivityAnalyticsSurfaceEffectChange(key, 'blur', nextValue)}
-                                                            />
-                                                        </label>
-                                                        <label className="flex items-center justify-between gap-3 text-industrial-text">
-                                                            <span>Top cap</span>
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={surfaceEffects.topCap}
-                                                                onChange={(event) => handleActivityAnalyticsSurfaceEffectChange(key, 'topCap', event.target.checked)}
-                                                                aria-label={`${label} top cap`}
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </DockSection>
+                                        </DockSection>
+                                    );
+                                })}
+                            </>
                         )}
 
                         {isMachineActivity && (

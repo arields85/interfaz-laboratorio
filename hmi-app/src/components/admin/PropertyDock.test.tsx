@@ -14,6 +14,7 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import { ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS } from './adminSidebarStyles';
 import PropertyDock from './PropertyDock';
 import type { HierarchyAggregationTrace } from '../../widgets/resolvers/hierarchyResolver';
 
@@ -148,7 +149,8 @@ function getFieldButton(label: string) {
 }
 
 function getSection(title: string) {
-    const sectionHeader = screen.getByRole('button', { name: new RegExp(title, 'i') });
+    const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const sectionHeader = screen.getByRole('button', { name: new RegExp(`^${escapedTitle}$`, 'i') });
     const section = sectionHeader.closest('section');
 
     if (!section) {
@@ -1125,6 +1127,34 @@ describe('PropertyDock machine-activity', () => {
 });
 
 describe('PropertyDock activity-analytics', () => {
+    it('shows the selected-widget property context with the normalized activity analytics title instead of the uppercase type badge', () => {
+        renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'ACTIVITY-ANALYTICS',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+        });
+
+        expect(screen.getByText('ACT-ANALYTICS')).toBeInTheDocument();
+        expect(screen.queryByText(/^activity-analytics$/i)).not.toBeInTheDocument();
+    });
+
+    it('normalizes legacy spanish activity analytics titles in the selected-widget property context badge', () => {
+        renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+        });
+
+        expect(screen.getByText('ACT-ANALYTICS')).toBeInTheDocument();
+        expect(screen.queryByText('Análisis de Actividad')).not.toBeInTheDocument();
+    });
+
     it('renders dedicated machine, range, grouping and threshold controls without variable or generic unit controls', () => {
         renderPropertyDock({
             type: 'activity-analytics',
@@ -1142,10 +1172,10 @@ describe('PropertyDock activity-analytics', () => {
             },
         });
 
-        expect(screen.getByRole('button', { name: /general/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /datos/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /agrupación/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /estados productivos/i })).toBeInTheDocument();
+        expect(getSection('General')).toBeInTheDocument();
+        expect(getSection('Datos')).toBeInTheDocument();
+        expect(getSection('Agrupación')).toBeInTheDocument();
+        expect(getSection('Estados Productivos')).toBeInTheDocument();
         expect(screen.queryByText('Variable')).not.toBeInTheDocument();
         expect(screen.queryByText('Origen')).not.toBeInTheDocument();
         expect(screen.queryByText('Unidad')).not.toBeInTheDocument();
@@ -1154,7 +1184,7 @@ describe('PropertyDock activity-analytics', () => {
         expect(getFieldButtonInSection('Datos', 'Rango')).toHaveTextContent('7 días');
         expect(getFieldButtonInSection('Agrupación', 'Grupo')).toHaveTextContent('Día');
         expect(within(getSection('Agrupación')).getByRole('slider')).toHaveValue('1');
-        expect(within(getSection('Agrupación')).getByText('×1.0')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('1');
         expect(within(getSection('Agrupación')).queryByText('Layout')).not.toBeInTheDocument();
 
         const productiveStatesSection = getSection('Estados Productivos');
@@ -1212,7 +1242,7 @@ describe('PropertyDock activity-analytics', () => {
                 week: 1.4,
             },
         });
-        expect(within(getSection('Agrupación')).getByText('×1.4')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('1.4');
 
         fireEvent.change(groupBarWidthSlider, { target: { value: '9' } });
 
@@ -1221,7 +1251,7 @@ describe('PropertyDock activity-analytics', () => {
                 week: 1.5,
             },
         });
-        expect(within(getSection('Agrupación')).getByText('×1.5')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('1.5');
 
         fireEvent.change(groupBarWidthSlider, { target: { value: '0.1' } });
 
@@ -1230,7 +1260,7 @@ describe('PropertyDock activity-analytics', () => {
                 week: 0.1,
             },
         });
-        expect(within(getSection('Agrupación')).getByText('×0.1')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('0.1');
     });
 
     it('edits and restores activity analytics bar width independently per selected group', async () => {
@@ -1256,7 +1286,7 @@ describe('PropertyDock activity-analytics', () => {
         const getSlider = () => within(getSection('Agrupación')).getByRole('slider');
 
         expect(getSlider()).toHaveValue('0.3');
-        expect(within(getSection('Agrupación')).getByText('×0.3')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('0.3');
 
         fireEvent.change(getSlider(), { target: { value: '0.2' } });
         expect(updates.at(-1)?.displayOptions).toMatchObject({
@@ -1271,7 +1301,7 @@ describe('PropertyDock activity-analytics', () => {
         await user.click(getFieldButtonInSection('Agrupación', 'Grupo'));
         await user.click(screen.getByRole('button', { name: 'Mes' }));
         expect(getSlider()).toHaveValue('1.4');
-        expect(within(getSection('Agrupación')).getByText('×1.4')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('1.4');
 
         fireEvent.change(getSlider(), { target: { value: '1.2' } });
         expect(updates.at(-1)?.displayOptions).toMatchObject({
@@ -1287,7 +1317,7 @@ describe('PropertyDock activity-analytics', () => {
         await user.click(getFieldButtonInSection('Agrupación', 'Grupo'));
         await user.click(screen.getByRole('button', { name: 'Turno' }));
         expect(getSlider()).toHaveValue('0.2');
-        expect(within(getSection('Agrupación')).getByText('×0.2')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('0.2');
     });
 
     it('uses legacy global bar width as fallback seed when per-group widths are missing', () => {
@@ -1307,10 +1337,10 @@ describe('PropertyDock activity-analytics', () => {
 
         const groupBarWidthSlider = within(getSection('Agrupación')).getByRole('slider');
         expect(groupBarWidthSlider).toHaveValue('0.4');
-        expect(within(getSection('Agrupación')).getByText('×0.4')).toBeInTheDocument();
+        expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('0.4');
     });
 
-    it('renders activity analytics flat visual controls with paired color, hex, alpha, and independent surface effect defaults', () => {
+    it('renders split activity analytics visual sections with shared color fields and independent surface effect defaults', () => {
         renderPropertyDock({
             type: 'activity-analytics',
             title: 'Análisis de Actividad',
@@ -1327,39 +1357,45 @@ describe('PropertyDock activity-analytics', () => {
             },
         });
 
-        const visualSection = getSection('Visualización');
+        const productionColorsSection = getSection('COLORES PRODUCCION');
+        const setupColorsSection = getSection('COLORES SETUP');
+        const stoppedColorsSection = getSection('COLORES DETENIDA');
+        const coverageSection = getSection('COBERTURA SIN DATOS');
+        const trendBandsSection = getSection('BANDAS TENDENCIA % PROD');
+        const groupedBarsSection = getSection('BARRAS AGRUPADAS');
+        const donutSection = getSection('DONUT');
 
-        expect(within(visualSection).getByText('Producción')).toBeInTheDocument();
-        expect(within(visualSection).getByText('Setup')).toBeInTheDocument();
-        expect(within(visualSection).getByText('Detenida')).toBeInTheDocument();
-        expect(within(visualSection).getAllByText('Cobertura / sin datos').length).toBeGreaterThan(0);
+        expect(within(productionColorsSection).getByText('Color inicial')).toBeInTheDocument();
+        expect(within(setupColorsSection).getByText('Color inicial')).toBeInTheDocument();
+        expect(within(stoppedColorsSection).getByText('Color inicial')).toBeInTheDocument();
 
-        expect(within(visualSection).getByLabelText('Producción color inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0]);
-        expect(within(visualSection).getByLabelText('Producción hex inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0]);
-        expect(within(visualSection).getByLabelText('Producción alfa inicial')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[0]));
-        expect(within(visualSection).getByLabelText('Producción color final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1]);
-        expect(within(visualSection).getByLabelText('Producción hex final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1]);
-        expect(within(visualSection).getByLabelText('Cobertura / sin datos color')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
-        expect(within(visualSection).getByLabelText('Cobertura / sin datos hex')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
-        expect(within(visualSection).getByLabelText('Producción alfa final')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[1]));
+        expect(within(productionColorsSection).getByLabelText('Producción color inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0]);
+        expect(within(productionColorsSection).getByLabelText('Producción hex inicial')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[0].slice(1));
+        expect(within(productionColorsSection).getByLabelText('Producción alfa inicial')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[0]));
+        expect(within(productionColorsSection).getByLabelText('Producción alfa inicial slider')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[0]));
+        expect(within(productionColorsSection).getByLabelText('Producción color final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1]);
+        expect(within(productionColorsSection).getByLabelText('Producción hex final')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod[1].slice(1));
+        expect(within(productionColorsSection).getByLabelText('Producción alfa final')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod[1]));
 
-        expect(within(visualSection).getByText('Bandas tendencia % PROD')).toBeInTheDocument();
-        expect(within(visualSection).getByLabelText('Bandas tendencia color superior')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT);
-        expect(within(visualSection).getByLabelText('Bandas tendencia hex superior')).toHaveValue('');
-        expect(within(visualSection).getByLabelText('Bandas tendencia alfa superior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[0]));
-        expect(within(visualSection).getByLabelText('Bandas tendencia alfa centro')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[1]));
-        expect(within(visualSection).getByLabelText('Bandas tendencia alfa inferior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[2]));
-        expect(within(visualSection).getByRole('button', { name: 'Blend' })).toHaveTextContent(/overlay/i);
+        expect(within(coverageSection).getByLabelText('Cobertura / sin datos color')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
+        expect(within(coverageSection).getByLabelText('Cobertura / sin datos hex')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR.slice(1));
 
-        expect(within(visualSection).getByLabelText('Barras agrupadas glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.glow));
-        expect(within(visualSection).getByLabelText('Barras agrupadas blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.blur));
-        expect(within(visualSection).getByLabelText('Barras agrupadas top cap')).not.toBeChecked();
-        expect(within(visualSection).queryByLabelText('Barras agrupadas top cap glow')).not.toBeInTheDocument();
+        expect(within(trendBandsSection).getByLabelText('Bandas tendencia color superior')).toHaveValue(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT);
+        expect(within(trendBandsSection).getByLabelText('Bandas tendencia hex superior')).toHaveValue('');
+        expect(within(trendBandsSection).getByLabelText('Bandas tendencia alfa superior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[0]));
+        expect(within(trendBandsSection).getByLabelText('Bandas tendencia alfa centro')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[1]));
+        expect(within(trendBandsSection).getByLabelText('Bandas tendencia alfa inferior')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS[2]));
+        expect(getFieldButtonInSection('BANDAS TENDENCIA % PROD', 'Blend')).toHaveTextContent(/overlay/i);
 
-        expect(within(visualSection).getByLabelText('Donut glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.glow));
-        expect(within(visualSection).getByLabelText('Donut blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.blur));
-        expect(within(visualSection).getByLabelText('Donut top cap')).toBeChecked();
-        expect(within(visualSection).queryByLabelText('Donut top cap glow')).not.toBeInTheDocument();
+        expect(within(groupedBarsSection).getByLabelText('Barras agrupadas glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.glow));
+        expect(within(groupedBarsSection).getByLabelText('Barras agrupadas blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS.blur));
+        expect(within(groupedBarsSection).getByRole('checkbox', { name: 'Barras agrupadas top cap' })).not.toBeChecked();
+        expect(within(groupedBarsSection).queryByLabelText('Barras agrupadas top cap glow')).not.toBeInTheDocument();
+
+        expect(within(donutSection).getByLabelText('Donut glow')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.glow));
+        expect(within(donutSection).getByLabelText('Donut blur')).toHaveValue(String(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS.blur));
+        expect(within(donutSection).getByRole('checkbox', { name: 'Donut top cap' })).toBeChecked();
+        expect(within(donutSection).queryByLabelText('Donut top cap glow')).not.toBeInTheDocument();
     });
 
     it('commits valid pasted hex values and keeps the paired picker in sync for activity analytics stops', async () => {
@@ -1382,7 +1418,7 @@ describe('PropertyDock activity-analytics', () => {
         const prodStartHex = screen.getByLabelText('Producción hex inicial');
 
         await user.clear(prodStartHex);
-        await user.type(prodStartHex, '#abcdef');
+        await user.type(prodStartHex, 'abcdef');
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             stateGradients: {
@@ -1390,7 +1426,7 @@ describe('PropertyDock activity-analytics', () => {
             },
         });
         expect(screen.getByLabelText('Producción color inicial')).toHaveValue('#abcdef');
-        expect(prodStartHex).toHaveValue('#abcdef');
+        expect(prodStartHex).toHaveValue('abcdef');
     });
 
     it('updates the shared coverage/no-data color from the activity analytics visual section', async () => {
@@ -1408,7 +1444,7 @@ describe('PropertyDock activity-analytics', () => {
 
         const coverageHex = screen.getByLabelText('Cobertura / sin datos hex');
 
-        fireEvent.change(coverageHex, { target: { value: '#abcdef' } });
+        fireEvent.change(coverageHex, { target: { value: 'abcdef' } });
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             coverageColor: '#abcdef',
@@ -1436,7 +1472,7 @@ describe('PropertyDock activity-analytics', () => {
 
         const trendBandMiddleHex = screen.getByLabelText('Bandas tendencia hex centro');
         await user.clear(trendBandMiddleHex);
-        await user.type(trendBandMiddleHex, '#abcdef');
+        await user.type(trendBandMiddleHex, 'abcdef');
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             coverageColor: '#123456',
@@ -1460,7 +1496,7 @@ describe('PropertyDock activity-analytics', () => {
             },
         });
 
-        await user.click(screen.getByRole('button', { name: 'Blend' }));
+        await user.click(getFieldButtonInSection('BANDAS TENDENCIA % PROD', 'Blend'));
         await user.click(screen.getByRole('button', { name: 'Normal' }));
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
@@ -1491,13 +1527,13 @@ describe('PropertyDock activity-analytics', () => {
         const prodStartHex = screen.getByLabelText('Producción hex inicial');
 
         await user.clear(prodStartHex);
-        await user.type(prodStartHex, '#12');
+        await user.type(prodStartHex, '12');
 
         expect(prodStartHex).toHaveAttribute('aria-invalid', 'true');
 
         await user.tab();
 
-        expect(prodStartHex).toHaveValue('#123456');
+        expect(prodStartHex).toHaveValue('123456');
         expect(prodStartHex).toHaveAttribute('aria-invalid', 'false');
         expect(updates).toHaveLength(0);
     });
@@ -1623,6 +1659,55 @@ describe('PropertyDock activity-analytics', () => {
                 },
             },
         });
+        expect(typeof (updates.at(-1)?.displayOptions as {
+            visualEffects?: {
+                donut?: {
+                    topCap?: unknown;
+                };
+            };
+        }).visualEffects?.donut?.topCap).toBe('boolean');
+
+        fireEvent.click(screen.getByLabelText('Barras agrupadas top cap'));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            visualEffects: {
+                groupedBars: {
+                    glow: 10,
+                    blur: 1,
+                    topCap: false,
+                    topCapGlow: 20,
+                },
+                donut: {
+                    glow: 70,
+                    blur: 4.5,
+                    topCap: true,
+                    topCapGlow: 5,
+                },
+            },
+        });
+        expect(typeof (updates.at(-1)?.displayOptions as {
+            visualEffects?: {
+                groupedBars?: {
+                    topCap?: unknown;
+                };
+            };
+        }).visualEffects?.groupedBars?.topCap).toBe('boolean');
+    });
+
+    it('keeps the activity analytics color hex field width aligned with the alpha numeric field width primitive', () => {
+        renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+        });
+
+        expect(screen.getByLabelText('Producción hex inicial').parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
+        expect(screen.getByLabelText('Producción hex inicial').parentElement).toHaveClass('ml-auto');
+        expect(screen.getByLabelText('Producción hex inicial')).not.toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
+        expect(screen.getByLabelText('Producción alfa inicial').parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
     });
 
     it('clamps activity analytics alpha and surface effect text commits before persisting', () => {

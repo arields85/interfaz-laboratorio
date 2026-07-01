@@ -478,7 +478,7 @@ describe('WidgetRenderer', () => {
         const activityAnalyticsWidget: ActivityAnalyticsWidgetConfig = {
             id: 'activity-analytics-1',
             type: 'activity-analytics',
-            title: 'Análisis de Actividad',
+            title: 'ACT-ANALYTICS',
             position: { x: 0, y: 0 },
             size: { w: 11, h: 9 },
             binding: {
@@ -531,7 +531,7 @@ describe('WidgetRenderer', () => {
             />,
         );
 
-        expect(screen.getByText('Análisis de Actividad')).toBeInTheDocument();
+        expect(screen.getByText('ACT-ANALYTICS')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-summary-text')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-runtime-controls')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
@@ -544,7 +544,7 @@ describe('WidgetRenderer', () => {
         const activityAnalyticsWidget: ActivityAnalyticsWidgetConfig = {
             id: 'activity-analytics-1',
             type: 'activity-analytics',
-            title: 'Análisis de Actividad',
+            title: 'ACT-ANALYTICS',
             position: { x: 0, y: 0 },
             size: { w: 11, h: 9 },
             binding: {
@@ -598,6 +598,8 @@ describe('WidgetRenderer', () => {
                 onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
             />,
         );
+
+        expect(screen.getByText('ACT-ANALYTICS')).toBeInTheDocument();
 
         expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');

@@ -15,6 +15,7 @@ export const ADMIN_SIDEBAR_SECTION_BUTTON_CLS = 'flex w-full items-center justif
 export const ADMIN_SIDEBAR_SECTION_BODY_CLS = 'flex flex-col gap-2 px-3 pb-3';
 export const ADMIN_SIDEBAR_SECTION_HEADER_CLS = 'mb-2 flex items-center gap-1.5 uppercase text-industrial-muted';
 export const ADMIN_SIDEBAR_LABEL_CLS = 'w-14 whitespace-nowrap text-industrial-muted';
+export const ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS = 'w-24 max-w-full shrink-0';
 export const ADMIN_SIDEBAR_INPUT_CLS = 'w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-white transition-colors focus:border-admin-accent/50 focus:outline-none';
 export const ADMIN_SIDEBAR_INPUT_TRIGGER_CLS = `${ADMIN_SIDEBAR_INPUT_CLS} flex items-center justify-between gap-1`;
 export const ADMIN_SIDEBAR_INPUT_TRIGGER_DISABLED_CLS = 'cursor-not-allowed opacity-50 text-white/40';

@@ -628,7 +628,7 @@ describe('DashboardBuilderPage', () => {
             expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
                 selectedWidget: {
                     type: 'activity-analytics',
-                    title: 'Análisis de Actividad',
+                    title: 'ACT-ANALYTICS',
                     size: { w: 11, h: 9 },
                     binding: {
                         mode: 'real_variable',

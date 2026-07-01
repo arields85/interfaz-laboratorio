@@ -70,6 +70,8 @@ Todo widget nuevo debe:
 
 El panel de propiedades debe ser compacto, legible y consistente. Su estructura se compone de secciones colapsables (`DockSection`), filas de propiedad (`DockFieldRow`), controles reutilizables y ayudas contextuales (`DockInfoBox`). No debe parecer un panel dentro de otro panel.
 
+> **Regla dura: Primitive-first es obligatorio.** Si existe una primitive compartida para el patrón del control, se usa esa primitive. No se permite markup local ad-hoc de property panel para color, slider, toggle o dropdown cuando la primitive correspondiente ya existe. Si la primitive no alcanza, primero se corrige o crea la primitive reutilizable y recién después se usa en el widget. Overrides locales de ancho o tipografía no son válidos: requieren actualizar la regla/primitiva reutilizable, no abrir excepciones por widget.
+
 - Dentro de una sección colapsable (`DockSection`), no crear contenedores visuales anidados para resumir o agrupar información.
 - Dentro de una sección colapsable, solo el título de la sección puede usar mayúsculas sostenidas.
 - Los labels internos de filas de propiedad (`DockFieldRow`) usan capitalización normal: primera letra en mayúscula y el resto en minúscula cuando corresponda.
@@ -87,6 +89,7 @@ El panel de propiedades debe ser compacto, legible y consistente. Su estructura 
 - La información secundaria, listas de detalle o auditoría debe ir compactada detrás de controles reutilizables: `AdminSelect` cuando se elige una opción, o `DockInfoDropdown` cuando solo se muestra información.
 - No mostrar listas completas abiertas por defecto dentro de una sección colapsable.
 - Para selectores/dropdowns de opciones del panel admin, priorizar `AdminSelect`. Si el caso no es selección sino expansión de detalle, reutilizar `DockInfoDropdown` (o crear la primitive compartida correspondiente) antes de inventar marcado local.
+- No reimplementar markup local de dropdown/select, slider/range, toggle visual, color swatch + Hex + Alfa o ayudas/leyendas cuando ya existe una primitive compartida para ese patrón.
 - Si una corrección necesaria para cumplir estas reglas puede cambiar semántica visible o datos guardados —por ejemplo renombrar el título de un widget—, no asumir. Preguntar al usuario y esperar confirmación antes de modificar.
 - Los títulos visibles del widget deben quedar en una sola línea. Usar como referencia máxima 17 caracteres y separar palabras con guion (`-`) cuando sea necesario abreviar.
 - Si una sección colapsable queda demasiado larga, dividirla en secciones colapsables específicas en vez de crear una única sección gigante.
@@ -95,25 +98,32 @@ El panel de propiedades debe ser compacto, legible y consistente. Su estructura 
 - Evitar espacios vacíos dentro de una fila. Ordenar controles para aprovechar la línea completa.
 - Los subtítulos internos excepcionales pueden usar color blanco, pero deben conservar la tipografía y tamaño estándar del panel.
 - Los campos internos no pueden superar el ancho estándar de un control de `DockFieldRow`: label `w-14` + control `flex-1`. Pueden ser menores, nunca mayores.
+- No overridear anchos o tipografía de primitives compartidas con clases locales. Si hace falta cambiar eso, actualizar la regla/primitiva reutilizable y obtener aprobación explícita si introduce una nueva convención reusable.
 - Para configuración de color, usar una estructura plana:
   - label del color, por ejemplo `Color inicial`
   - primera línea: swatch/cuadrado de color sin tarjeta, marco ni contenedor visual adicional + texto `Hex #` + campo de código
   - el campo de código contiene solo el valor hexadecimal, sin `#`
   - segunda línea: `Alfa (%)` + campo numérico
+- Todo selector de color del property panel debe usar `components/admin/DockColorField.tsx`. No reimplementar markup local para swatch + hex + alfa.
+- Las opciones visuales booleanas del property panel deben usar la primitive de toggle compartida (`DockToggleField`) en lugar de checkboxes sueltos, salvo que el checkbox sea semánticamente necesario.
 - No usar cajas, tarjetas o bloques internos para cada color si la sección colapsable padre ya define el contexto visual.
 
 #### Primitives recomendadas para paneles de propiedades
 
 Estas reglas deben cristalizarse en primitives reutilizables siempre que el patrón se repita. No resolver cada widget con marcado local si existe o corresponde crear una primitive compartida.
 
+- `DockSection` — sección colapsable del panel. Usarla para agrupar propiedades; no inventar contenedores visuales paralelos.
+- `DockFieldRow` — fila canónica label/control del panel. Usarla como estructura base de propiedades estándar.
+- `AdminSelect` — selector canónico del panel admin para elección de opciones.
 - `DockInfoBox` — ayuda contextual o leyenda aclaratoria breve. Ya existe en `components/admin/DockInfoBox.tsx`.
 - `DockInfoDropdown` — dropdown informativo read-only con el mismo chrome cerrado de `AdminSelect`. Usarlo para listas secundarias o detalle no seleccionable.
 - `DockDetailDisclosure` — detalle expandible, listas secundarias o auditoría compactada detrás de una expansión. Crear/reutilizar antes de mostrar listas abiertas por defecto.
 - `DockColorField` — edición de color con layout canónico: swatch + `Hex #` + campo, y debajo `Alfa (%)` + campo numérico.
+- `DockToggleField` — toggle booleano alineado al extremo derecho para opciones visuales compactas. Usarlo en vez de checkboxes locales cuando el patrón sea on/off.
 - `DockInlineControlRow` — fila interna compacta para casos donde una propiedad necesita varios controles alineados sin exceder el ancho estándar de `DockFieldRow`.
 - `DockSliderField` — slider con label arriba, campo numérico editable a la derecha y rango full-width debajo. Usarlo para controles deslizables en vez de marcado local con `input[type="range"]`.
 
-Si una primitive requerida todavía no existe, crearla en `components/admin/` antes de corregir múltiples widgets con el mismo patrón.
+- Si una primitive requerida todavía no existe o no alcanza, crearla/ajustarla en `components/admin/` antes de corregir widgets con markup local paralelo.
 
 ### Diseño y semántica
 - Usar tokens de `index.css`.

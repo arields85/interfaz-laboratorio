@@ -33,6 +33,7 @@ import {
     resolveActivityAnalyticsDisplayOptions,
     type ResolvedActivityAnalyticsVisualEffects,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import { resolveActivityAnalyticsDisplayTitle } from '../../utils/activityAnalyticsTitle';
 import { buildActivityAnalyticsSummarySegments, type ActivityAnalyticsSummarySegmentBar } from '../../utils/activityAnalyticsSummarySegments';
 import {
     buildAreaPath,
@@ -612,7 +613,7 @@ export default function ActivityAnalyticsWidget({
         <div className="grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] -translate-y-1 gap-y-0 min-w-0 shrink-0">
             <div className="row-start-1 flex items-center justify-between gap-3">
                 <span className="min-w-0 flex-1 truncate uppercase text-industrial-muted group-hover:text-white transition-colors">
-                    {widget.title ?? 'Análisis de Actividad'}
+                    {resolveActivityAnalyticsDisplayTitle(widget)}
                 </span>
 
                 <div className="flex shrink-0 items-center gap-4">
