@@ -981,7 +981,7 @@ describe('ActivityAnalyticsWidget', () => {
         const groupSelector = screen.getByTestId('activity-analytics-runtime-group-selector');
         const rangeSelector = screen.getByTestId('activity-analytics-runtime-range-selector');
         const headerIcon = screen.getByTestId('activity-analytics-widget-header-icon');
-        const headerTitle = screen.getByText('ACT-ANALYTICS');
+        const headerTitle = screen.getByText('Análisis de Actividad');
 
         expect(headerIcon.compareDocumentPosition(headerTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(runtimeControls.className).not.toContain('absolute');

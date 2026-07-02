@@ -34,7 +34,7 @@ import {
     resolveActivityAnalyticsDisplayOptions,
     type ResolvedActivityAnalyticsVisualEffects,
 } from '../../utils/activityAnalyticsWidgetDefaults';
-import { resolveActivityAnalyticsDisplayTitle } from '../../utils/activityAnalyticsTitle';
+import { DEFAULT_ACTIVITY_ANALYTICS_TITLE } from '../../utils/activityAnalyticsTitle';
 import { buildActivityAnalyticsSummarySegments, type ActivityAnalyticsSummarySegmentBar } from '../../utils/activityAnalyticsSummarySegments';
 import {
     buildAreaPath,
@@ -612,7 +612,7 @@ export default function ActivityAnalyticsWidget({
 
     const header = (
         <WidgetHeader
-            title={resolveActivityAnalyticsDisplayTitle(widget)}
+            title={widget.title?.trim() || DEFAULT_ACTIVITY_ANALYTICS_TITLE}
             icon={BarChart2}
             iconPosition="left"
             iconTestId="activity-analytics-widget-header-icon"

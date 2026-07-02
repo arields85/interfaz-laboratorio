@@ -1127,10 +1127,10 @@ describe('PropertyDock machine-activity', () => {
 });
 
 describe('PropertyDock activity-analytics', () => {
-    it('shows the selected-widget property context with the normalized activity analytics title instead of the uppercase type badge', () => {
+    it('shows the canonical activity analytics identity badge instead of the editable widget title', () => {
         renderPropertyDock({
             type: 'activity-analytics',
-            title: 'ACTIVITY-ANALYTICS',
+            title: 'prueba',
             binding: {
                 mode: 'real_variable',
                 bindingVersion: 'node-red-v1',
@@ -1153,6 +1153,28 @@ describe('PropertyDock activity-analytics', () => {
 
         expect(screen.getByText('ACT-ANALYTICS')).toBeInTheDocument();
         expect(screen.queryByText('Análisis de Actividad')).not.toBeInTheDocument();
+    });
+
+    it('keeps the canonical activity analytics badge when editing Título', async () => {
+        const { user } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'ACT-ANALYTICS',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+        });
+
+        const badge = screen.getByTestId('property-dock-context-badge');
+        const titleInput = getInputInSection('General', 'Título');
+
+        expect(badge).toHaveTextContent('ACT-ANALYTICS');
+
+        await user.clear(titleInput);
+        await user.type(titleInput, 'prueba');
+
+        expect(titleInput).toHaveValue('prueba');
+        expect(badge).toHaveTextContent('ACT-ANALYTICS');
     });
 
     it('renders dedicated machine, range, grouping and threshold controls without variable or generic unit controls', () => {
@@ -1911,10 +1933,10 @@ describe('PropertyDock activity-analytics', () => {
 });
 
 describe('PropertyDock prod-trend', () => {
-    it('renders dedicated prod-trend sections, normalizes the dock badge title, and excludes generic variable/unit controls', () => {
+    it('renders dedicated prod-trend sections, keeps the canonical dock badge, and excludes generic variable/unit controls', () => {
         renderPropertyDock({
             type: 'prod-trend',
-            title: 'TENDENCIA % PROD',
+            title: 'prueba',
             binding: {
                 mode: 'real_variable',
                 bindingVersion: 'node-red-v1',
@@ -1937,6 +1959,28 @@ describe('PropertyDock prod-trend', () => {
         expect(screen.queryByText('Unidad')).not.toBeInTheDocument();
         expect(getFieldButtonInSection('Datos', 'Rango')).toHaveTextContent('7 días');
         expect(getFieldButtonInSection('Agrupación', 'Grupo')).toHaveTextContent('Día');
+    });
+
+    it('keeps the canonical prod-trend badge when editing Título', async () => {
+        const { user } = renderPropertyDock({
+            type: 'prod-trend',
+            title: 'PROD-TREND',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+        });
+
+        const badge = screen.getByTestId('property-dock-context-badge');
+        const titleInput = getInputInSection('General', 'Título');
+
+        expect(badge).toHaveTextContent('PROD-TREND');
+
+        await user.clear(titleInput);
+        await user.type(titleInput, 'cambio libre');
+
+        expect(titleInput).toHaveValue('cambio libre');
+        expect(badge).toHaveTextContent('PROD-TREND');
     });
 
     it('updates prod-trend range, grouping, line colors, and band blend mode', async () => {

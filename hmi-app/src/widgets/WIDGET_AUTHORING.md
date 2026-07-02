@@ -29,6 +29,9 @@ Todo widget nuevo debe:
 - No duplicar la lógica de header dentro del renderer.
 - `WidgetHeader` soporta `iconPosition?: 'left' | 'right'` (default: `'right'`). Usar `'left'` cuando el ícono debe preceder al título (ej. widgets de chart con controles overlay a la derecha).
 - El título se lee de `widget.title` (campo que escribe el PropertyDock). El renderer debe usar `widget.title ?? displayOptions?.chartTitle ?? 'Título Default'`.
+- En el `PropertyDock`, el badge junto a `PROPIEDADES` NO es el `Título`. Ese badge representa la identidad canónica del widget (tipo/metadata), no un texto editable del usuario.
+- La identidad canónica del badge debe mantenerse estable por tipo/metadata. Si hace falta abreviar, usar una sola línea, máximo de referencia ~17 caracteres y palabras separadas con guion (`-`).
+- El campo `Título` es contenido editable del widget/header. Puede usar copy de negocio libre y NO debe mutar la identidad canónica del badge.
 - Los títulos largos se truncan automáticamente con puntos suspensivos gracias a `grid-cols-[minmax(0,1fr)]` en el grid del header.
 - El comportamiento hover está integrado en `WidgetHeader`: el ícono transiciona `opacity-70 → opacity-100`, el título transiciona `text-industrial-muted → text-white`. Requiere la clase `group` en el `glass-panel` ancestro.
 
@@ -91,7 +94,7 @@ El panel de propiedades debe ser compacto, legible y consistente. Su estructura 
 - Para selectores/dropdowns de opciones del panel admin, priorizar `AdminSelect`. Si el caso no es selección sino expansión de detalle, reutilizar `DockInfoDropdown` (o crear la primitive compartida correspondiente) antes de inventar marcado local.
 - No reimplementar markup local de dropdown/select, slider/range, toggle visual, color swatch + Hex + Alfa o ayudas/leyendas cuando ya existe una primitive compartida para ese patrón.
 - Si una corrección necesaria para cumplir estas reglas puede cambiar semántica visible o datos guardados —por ejemplo renombrar el título de un widget—, no asumir. Preguntar al usuario y esperar confirmación antes de modificar.
-- Los títulos visibles del widget deben quedar en una sola línea. Usar como referencia máxima 17 caracteres y separar palabras con guion (`-`) cuando sea necesario abreviar.
+- La regla de una sola línea, referencia máxima ~17 caracteres y separación con guion (`-`) aplica a identidades canónicas/badges del panel, no al campo editable `Título` del contenido del widget.
 - Si una sección colapsable queda demasiado larga, dividirla en secciones colapsables específicas en vez de crear una única sección gigante.
   - Ejemplos: `COLORES PRODUCCION`, `COLORES SETUP`, `COLORES DETENIDA`, `COBERTURA SIN DATOS`, `BANDAS TENDENCIA % PROD`, `BARRAS AGRUPADAS`, `DONUT`.
 - Si un control horizontal se superpone con su label, mover el control debajo y permitir que ocupe todo el ancho útil de la sección.

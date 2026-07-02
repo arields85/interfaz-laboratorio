@@ -475,11 +475,11 @@ describe('WidgetRenderer', () => {
         expect(screen.getByText('12:00')).toBeInTheDocument();
     });
 
-    it('dispatches activity-analytics widgets to the dedicated runtime renderer', () => {
+    it('dispatches activity-analytics widgets to the dedicated runtime renderer and preserves the editable widget title in the header', () => {
         const activityAnalyticsWidget: ActivityAnalyticsWidgetConfig = {
             id: 'activity-analytics-1',
             type: 'activity-analytics',
-            title: 'ACT-ANALYTICS',
+            title: 'prueba',
             position: { x: 0, y: 0 },
             size: { w: 11, h: 9 },
             binding: {
@@ -532,11 +532,11 @@ describe('WidgetRenderer', () => {
             />,
         );
 
-        expect(screen.getByText('ACT-ANALYTICS')).toBeInTheDocument();
+        expect(screen.getByText('prueba')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-summary-text')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-runtime-controls')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Mes' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'MES' })).toBeDisabled();
         expect(screen.queryByText('hidden')).not.toBeInTheDocument();
     });
 
@@ -663,7 +663,7 @@ describe('WidgetRenderer', () => {
         expect(screen.getByText('ACT-ANALYTICS')).toBeInTheDocument();
 
         expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('keeps runtime grouping local in the dispatched activity-analytics renderer while preserving the runtime control row', async () => {
@@ -726,15 +726,15 @@ describe('WidgetRenderer', () => {
             />,
         );
 
-        expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Mes' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'MES' })).toBeDisabled();
         expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'false');
-        expect(screen.getByRole('button', { name: 'Semana' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toHaveAttribute('aria-pressed', 'false');
 
-        await user.click(screen.getByRole('button', { name: 'Turno' }));
+        await user.click(screen.getByRole('button', { name: 'TURNO' }));
 
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
         expect(onPersistWidgetDisplayOptions).not.toHaveBeenCalled();
     });
 });

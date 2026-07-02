@@ -60,7 +60,7 @@ import {
 import {
     resolveProdTrendDisplayOptions,
 } from '../../utils/prodTrendWidgetDefaults';
-import { resolveActivityAnalyticsDisplayTitle } from '../../utils/activityAnalyticsTitle';
+import { resolveCanonicalWidgetIdentityLabel } from '../../utils/activityAnalyticsTitle';
 import {
     resolveActivityAnalyticsDisplayRules,
     type ActivityAnalyticsSupportedRange,
@@ -1244,7 +1244,7 @@ export default function PropertyDock(props: PropertyDockProps) {
             )
         : 1;
     const propertyDockContextTitle = selectedWidget
-        ? resolveActivityAnalyticsDisplayTitle(selectedWidget)
+        ? resolveCanonicalWidgetIdentityLabel(selectedWidget.type)
         : '';
     const shouldShowGeneralIconField = selectedWidget
         && selectedWidget.type !== 'connection-status'
@@ -1336,7 +1336,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                 <div className="flex items-center gap-2">
                     <Settings2 size={14} className="text-industrial-muted" />
                     <span className={ADMIN_SIDEBAR_PANEL_TITLE_CLS}>Propiedades</span>
-                    <span className="px-2 py-0.5 rounded uppercase admin-accent-ghost">
+                    <span data-testid="property-dock-context-badge" className="px-2 py-0.5 rounded uppercase admin-accent-ghost">
                         {propertyDockContextTitle}
                     </span>
                 </div>

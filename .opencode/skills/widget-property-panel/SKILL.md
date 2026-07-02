@@ -26,6 +26,9 @@ Use this skill when creating, editing, reviewing, or fixing widget property-pane
 - If a convention-compliant fix may change visible semantics or saved data, ask the user first.
 - If visual acceptance already exists, do not make layout changes without explicit user confirmation.
 - Preserve the HMI read-only rule: never introduce plant writes or control actions.
+- The PropertyDock badge beside `PROPIEDADES` is the canonical widget identity label (type/metadata), NOT the editable widget `Título` field.
+- Editing `Título` must only change widget content/header text. It must never rename the PropertyDock badge.
+- Canonical badge labels should stay short (reference max ~17 chars) and use hyphen-separated abbreviations when needed.
 
 ## Decision Table
 
