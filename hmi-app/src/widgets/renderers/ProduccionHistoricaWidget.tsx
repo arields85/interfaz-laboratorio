@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
     Activity,
     Droplet,
-    Eye,
-    EyeOff,
     Fan,
     FoldVertical,
     Gauge,
@@ -36,7 +34,14 @@ import {
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
-import WidgetSegmentedControl from '../../components/ui/WidgetSegmentedControl';
+import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
+import WidgetRuntimeCheckbox from '../../components/ui/WidgetRuntimeCheckbox';
+import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
+import {
+    resolveWidgetChartLayoutMetrics,
+    WIDGET_CHART_CONTAINER_CLASS,
+    WIDGET_CHART_HEADER_CLASS,
+} from '../../components/ui/WidgetChartLayout.shared';
 import {
     smoothPath,
     buildAreaPath,
@@ -47,6 +52,11 @@ import {
     getChartLetterSpacingPx,
     getChartTextFont,
 } from '../../utils/chartHelpers';
+
+const PROD_HISTORY_LAYOUT_BASE_MARGIN = { top: 17, right: 16, bottom: 30, left: 48 } as const;
+const PROD_HISTORY_RIGHT_AXIS_MARGIN_RIGHT = 48;
+const PROD_HISTORY_TOP_ADORNMENT_RESERVED_HEIGHT = 11;
+const PROD_HISTORY_TOP_ADORNMENT_OFFSET = 12;
 
 // Resolución de ícono del header por nombre declarado en `displayOptions.icon`.
 // El set disponible coincide con el selector de íconos del PropertyDock, así que
@@ -75,6 +85,13 @@ function resolveHeaderIcon(iconName: string | null | undefined): LucideIcon | nu
     if (iconName === null) return null;
     if (iconName === undefined || iconName === '') return History;
     return HEADER_ICON_MAP[iconName] ?? History;
+}
+
+function toSentenceCase(value: string): string {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return trimmed;
+
+    return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1).toLowerCase()}`;
 }
 
 const TOKEN = {
@@ -247,18 +264,43 @@ function ProdHistoryBarsSvg({
     hoveredIndex,
     onHoverChange,
 }: ProdHistoryBarsSvgProps) {
-    if (width <= 0 || height <= 0 || data.length < 2) return null;
+    const layoutId = useId().replace(/:/g, '-');
 
+    if (width <= 0 || height <= 0 || data.length < 2) return null;
     const showRightAxis = showOee && useSecondaryAxis;
-    const margin = { top: 28, right: showRightAxis ? 48 : 16, bottom: 30, left: 48 } as const;
-    const plotWidth = Math.max(width - margin.left - margin.right, 1);
-    const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
+    const productionTicks = Array.from({ length: 5 }, (_, index) => ({
+        value: productionDomain[1] - (((productionDomain[1] - productionDomain[0]) * index) / 4),
+    }));
+    const oeeTicks = Array.from({ length: 5 }, (_, index) => ({
+        value: oeeDomain[1] - (((oeeDomain[1] - oeeDomain[0]) * index) / 4),
+    }));
+    const chartLayout = resolveWidgetChartLayoutMetrics({
+        width,
+        height,
+        hasTopAdornments: true,
+        firstXAxisLabel: data[0]?.label ?? '',
+        lastXAxisLabel: data[data.length - 1]?.label ?? '',
+        yAxisTickLabels: productionTicks.map((tick) => formatTick(tick.value)),
+        idPrefix: `${widgetId}-${layoutId}`,
+        font: getChartTextFont(),
+        letterSpacing: getChartLetterSpacingPx(),
+        baseMargin: {
+            ...PROD_HISTORY_LAYOUT_BASE_MARGIN,
+            right: showRightAxis ? PROD_HISTORY_RIGHT_AXIS_MARGIN_RIGHT : PROD_HISTORY_LAYOUT_BASE_MARGIN.right,
+        },
+        topAdornmentReservedHeight: PROD_HISTORY_TOP_ADORNMENT_RESERVED_HEIGHT,
+        topAdornmentOffset: PROD_HISTORY_TOP_ADORNMENT_OFFSET,
+        alignPlotAreaToXAxisLabels: true,
+    });
+    const plotWidth = chartLayout.plotArea.width;
+    const plotHeight = chartLayout.plotArea.height;
     const safeBarFactor = clamp(barWidthFactor, 0.5, 1.5);
-    const barW = Math.max((plotWidth / Math.max(data.length, 1)) * 0.35 * safeBarFactor, 6);
+    const baseStep = data.length > 1 ? Math.max(chartLayout.xAxisLabels.plotWidth / (data.length - 1), 1) : chartLayout.xAxisLabels.plotWidth;
+    const barW = Math.max(baseStep * 0.35 * safeBarFactor, 6);
     const padX = barW * 1.0;
     const usableW = Math.max(plotWidth - (2 * padX), 1);
     const step = data.length > 1 ? usableW / (data.length - 1) : 0;
-    const x0 = margin.left + padX;
+    const x0 = chartLayout.plotArea.left + padX;
 
     const productionRange = Math.max(productionDomain[1] - productionDomain[0], 1);
     const oeeRenderDomain = showOee && useSecondaryAxis ? oeeDomain : productionDomain;
@@ -266,12 +308,12 @@ function ProdHistoryBarsSvg({
 
     const toProductionY = (value: number) => {
         const ratio = clamp((value - productionDomain[0]) / productionRange, 0, 1);
-        return margin.top + plotHeight - (ratio * plotHeight);
+        return chartLayout.plotArea.top + plotHeight - (ratio * plotHeight);
     };
 
     const toOeeY = (value: number) => {
         const ratio = clamp((value - oeeRenderDomain[0]) / oeeRange, 0, 1);
-        return margin.top + plotHeight - (ratio * plotHeight);
+        return chartLayout.plotArea.top + plotHeight - (ratio * plotHeight);
     };
 
     const productionPoints = data.map((item, index) => ({
@@ -285,287 +327,300 @@ function ProdHistoryBarsSvg({
     }));
 
     const productionPath = smoothPath(productionPoints);
-    const productionAreaPath = buildAreaPath(productionPath, productionPoints, margin.top + plotHeight);
+    const productionAreaPath = buildAreaPath(productionPath, productionPoints, chartLayout.plotArea.bottom);
     const oeePath = smoothPath(oeePoints);
-    const oeeAreaPath = buildAreaPath(oeePath, oeePoints, margin.top + plotHeight);
+    const oeeAreaPath = buildAreaPath(oeePath, oeePoints, chartLayout.plotArea.bottom);
     const productionPing = productionPoints[productionPoints.length - 1];
     const oeePing = oeePoints[oeePoints.length - 1];
 
-    const productionTicks = Array.from({ length: 5 }, (_, index) => ({
-        value: productionDomain[1] - (((productionDomain[1] - productionDomain[0]) * index) / 4),
-        y: margin.top + ((index / 4) * plotHeight),
+    const resolvedProductionTicks = productionTicks.map((tick, index) => ({
+        ...tick,
+        y: chartLayout.plotArea.top + ((index / 4) * plotHeight),
     }));
 
-    const oeeTicks = Array.from({ length: 5 }, (_, index) => ({
-        value: oeeDomain[1] - (((oeeDomain[1] - oeeDomain[0]) * index) / 4),
-        y: margin.top + ((index / 4) * plotHeight),
+    const resolvedOeeTicks = oeeTicks.map((tick, index) => ({
+        ...tick,
+        y: chartLayout.plotArea.top + ((index / 4) * plotHeight),
     }));
 
     const gridLines = Array.from({ length: 5 }, (_, index) => ({
-        y: margin.top + ((index / 4) * plotHeight),
+        y: chartLayout.plotArea.top + ((index / 4) * plotHeight),
     }));
 
     const prodBarGradientId = `prod-bar-grad-${widgetId}`;
     const prodAreaGradientId = `prod-area-grad-${widgetId}`;
     const oeeGradientId = `oee-grad-${widgetId}`;
-    const oeeClipId = `oee-clip-${widgetId}`;
     const prodGlowId = `prod-glow-${widgetId}`;
     const oeeGlowId = `oee-glow-${widgetId}`;
+    const productionPingY = productionPing?.y ?? null;
+    const oeePingY = oeePing?.y ?? null;
 
     return (
-        <svg width={width} height={height}>
-            <defs>
-                <linearGradient id={prodBarGradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={TOKEN.production} stopOpacity={0.55} />
-                    <stop offset="100%" stopColor={TOKEN.production} stopOpacity={0.10} />
-                </linearGradient>
-                <linearGradient id={prodAreaGradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={TOKEN.production} stopOpacity={0.30} />
-                    <stop offset="95%" stopColor={TOKEN.production} stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id={oeeGradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={TOKEN.oee} stopOpacity={0.30} />
-                    <stop offset="95%" stopColor={TOKEN.oee} stopOpacity={0} />
-                </linearGradient>
-                <clipPath id={oeeClipId}>
-                    <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} />
-                </clipPath>
-                <filter id={prodGlowId} x="-20%" y="-50%" width="140%" height="200%">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
-                    <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                </filter>
-                <filter id={oeeGlowId} x="-20%" y="-50%" width="140%" height="200%">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
-                    <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                </filter>
-            </defs>
-
-            {showGrid && gridLines.map(({ y }) => (
-                <line
-                    key={`grid-${y}`}
-                    x1={margin.left}
-                    x2={margin.left + plotWidth}
-                    y1={y}
-                    y2={y}
-                    stroke={TOKEN.grid}
-                    strokeDasharray="3 3"
-                />
-            ))}
-
-            <text
-                x={margin.left - 18}
-                y={margin.top - 12}
-                textAnchor="middle"
-                fill={TOKEN.muted}
-                fontSize="var(--font-size-chart)"
-                fontFamily="var(--font-chart)"
-                fontWeight="var(--font-weight-chart)"
-                letterSpacing="var(--tracking-chart)"
-                opacity={0.8}
-            >
-                {productionUnit}
-            </text>
-
-            {showOee && oeeShowArea && oeeAreaPath.length > 0 && (
-                <path d={oeeAreaPath} fill={`url(#${oeeGradientId})`} clipPath={`url(#${oeeClipId})`} />
-            )}
-
-            {productionMode === 'bars'
-                ? data.map((item, index) => {
-                    const cx = x0 + (index * step);
-                    const barTop = toProductionY(item.production);
-                    const barBase = margin.top + plotHeight;
-                    const barHeight = Math.max(barBase - barTop, 0);
-                    const barX = cx - (barW / 2);
-                    const capHeight = Math.min(5, barHeight);
-
-                    return (
-                        <g key={item.bucketKey}>
-                            <rect x={barX} y={barTop} width={barW} height={barHeight} fill={`url(#${prodBarGradientId})`} />
-                            <rect
-                                x={barX}
-                                y={barTop}
-                                width={barW}
-                                height={capHeight}
-                                fill={TOKEN.production}
-                                style={{ filter: `drop-shadow(0 0 6px ${TOKEN.production})` }}
-                            />
-                        </g>
-                    );
-                })
-                : productionAreaPath.length > 0 && (
-                    <path d={productionAreaPath} fill={`url(#${prodAreaGradientId})`} />
-                )}
-
-            {productionMode === 'area' && productionPath.length > 0 && (
-                <path
-                    d={productionPath}
-                    stroke={TOKEN.production}
-                    strokeWidth={2.5}
-                    fill="none"
-                    filter={`url(#${prodGlowId})`}
-                />
-            )}
-
-            {showOee && oeePath.length > 0 && (
-                <path
-                    d={oeePath}
-                    stroke={TOKEN.oee}
-                    strokeWidth={2.5}
-                    fill="none"
-                    clipPath={`url(#${oeeClipId})`}
-                    filter={`url(#${oeeGlowId})`}
-                />
-            )}
-
-            {showOee && oeeShowPoints && oeePoints.map((point, index) => (
-                <circle
-                    key={`oee-point-${data[index].bucketKey}`}
-                    cx={point.x}
-                    cy={point.y}
-                    r={3}
-                    fill={TOKEN.oee}
-                    stroke={TOKEN.background}
-                    strokeWidth={1}
-                />
-            ))}
-
-            {productionPing && (
-                <g>
-                    <circle
-                        cx={productionPing.x}
-                        cy={productionPing.y}
-                        r={9}
-                        fill={TOKEN.production}
-                        fillOpacity={0.4}
-                        className="animate-ping"
-                        style={{ animationDuration: '2s', transformOrigin: `${productionPing.x}px ${productionPing.y}px` }}
-                    />
-                    <circle
-                        cx={productionPing.x}
-                        cy={productionPing.y}
-                        r={4}
-                        fill={TOKEN.production}
-                        stroke={TOKEN.background}
-                        strokeWidth={1.5}
-                    />
-                </g>
-            )}
-
-            {showOee && oeePing && (
-                <g>
-                    <circle
-                        cx={oeePing.x}
-                        cy={oeePing.y}
-                        r={9}
-                        fill={TOKEN.oee}
-                        fillOpacity={0.4}
-                        className="animate-ping"
-                        style={{ animationDuration: '2s', transformOrigin: `${oeePing.x}px ${oeePing.y}px` }}
-                    />
-                    <circle
-                        cx={oeePing.x}
-                        cy={oeePing.y}
-                        r={4}
-                        fill={TOKEN.oee}
-                        stroke={TOKEN.background}
-                        strokeWidth={1.5}
-                    />
-                </g>
-            )}
-
-            {(() => {
+        <WidgetChartLayout
+            layout={chartLayout}
+            svgTestId="prod-history-widget-chart"
+            overlaySvgTestId="prod-history-widget-overlay-svg"
+            renderMain={(layout) => {
                 const xLabels = data.map((item) => item.label);
-                const xPositions = data.map((_, index) => x0 + (index * step));
+                const xPositions = productionPoints.map((point) => point.x);
                 const visibleIndices = computeVisibleLabelIndices(
                     xLabels,
                     xPositions,
                     getChartTextFont(),
                     8,
-                    margin.left + plotWidth,
+                    layout.plotArea.right,
                     getChartLetterSpacingPx(),
                 );
-                return data.map((item, index) => {
-                    if (!visibleIndices.has(index)) return null;
-                    return (
+
+                return (
+                    <>
+                        <defs>
+                            <linearGradient id={prodBarGradientId} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={TOKEN.production} stopOpacity={0.55} />
+                                <stop offset="100%" stopColor={TOKEN.production} stopOpacity={0.10} />
+                            </linearGradient>
+                            <linearGradient id={prodAreaGradientId} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor={TOKEN.production} stopOpacity={0.30} />
+                                <stop offset="95%" stopColor={TOKEN.production} stopOpacity={0} />
+                            </linearGradient>
+                            <linearGradient id={oeeGradientId} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor={TOKEN.oee} stopOpacity={0.30} />
+                                <stop offset="95%" stopColor={TOKEN.oee} stopOpacity={0} />
+                            </linearGradient>
+                            <filter id={prodGlowId} x="-20%" y="-50%" width="140%" height="200%">
+                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feMerge>
+                                    <feMergeNode in="blur" />
+                                    <feMergeNode in="SourceGraphic" />
+                                </feMerge>
+                            </filter>
+                            <filter id={oeeGlowId} x="-20%" y="-50%" width="140%" height="200%">
+                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feMerge>
+                                    <feMergeNode in="blur" />
+                                    <feMergeNode in="SourceGraphic" />
+                                </feMerge>
+                            </filter>
+                        </defs>
+
+                        {showGrid && gridLines.map(({ y }) => (
+                            <line
+                                key={`grid-${y}`}
+                                x1={layout.plotArea.left}
+                                x2={layout.plotArea.right}
+                                y1={y}
+                                y2={y}
+                                stroke={TOKEN.grid}
+                                strokeDasharray="3 3"
+                            />
+                        ))}
+
                         <text
-                            key={`x-label-${item.bucketKey}`}
-                            x={x0 + (index * step)}
-                            y={margin.top + plotHeight + 16}
+                            data-testid="prod-history-widget-y-axis-unit"
+                            x={layout.plotArea.left - 18}
+                            y={layout.plotArea.top - 12}
                             textAnchor="middle"
                             fill={TOKEN.muted}
                             fontSize="var(--font-size-chart)"
                             fontFamily="var(--font-chart)"
                             fontWeight="var(--font-weight-chart)"
                             letterSpacing="var(--tracking-chart)"
+                            opacity={0.8}
                         >
-                            {item.label}
+                            {productionUnit}
                         </text>
-                    );
-                });
-            })()}
 
-            {productionTicks.map((tick, index) => (
-                <text
-                    key={`production-tick-${index}`}
-                    x={margin.left - 8}
-                    y={tick.y}
-                    dy={4}
-                    textAnchor="end"
-                    fill={TOKEN.muted}
-                    fontSize="var(--font-size-chart)"
-                    fontFamily="var(--font-chart)"
-                    fontWeight="var(--font-weight-chart)"
-                    letterSpacing="var(--tracking-chart)"
-                >
-                    {formatTick(tick.value)}
-                </text>
-            ))}
+                        <g clipPath={`url(#${layout.plotClipPathId})`}>
+                            {showOee && oeeShowArea && oeeAreaPath.length > 0 && (
+                                <path d={oeeAreaPath} fill={`url(#${oeeGradientId})`} />
+                            )}
 
-            {showRightAxis && oeeTicks.map((tick, index) => (
-                <text
-                    key={`oee-tick-${index}`}
-                    x={margin.left + plotWidth + 8}
-                    y={tick.y}
-                    dy={4}
-                    textAnchor="start"
-                    fill={TOKEN.muted}
-                    fontSize="var(--font-size-chart)"
-                    fontFamily="var(--font-chart)"
-                    fontWeight="var(--font-weight-chart)"
-                    letterSpacing="var(--tracking-chart)"
-                >
-                    {formatTick(tick.value)}
-                </text>
-            ))}
+                            {productionMode === 'bars'
+                                ? data.map((item, index) => {
+                                    const cx = x0 + (index * step);
+                                    const barTop = toProductionY(item.production);
+                                    const barBase = chartLayout.plotArea.bottom;
+                                    const barHeight = Math.max(barBase - barTop, 0);
+                                    const barX = cx - (barW / 2);
+                                    const capHeight = Math.min(5, barHeight);
 
-            <ChartHoverLayer
-                dataLength={data.length}
-                x0={x0}
-                step={step}
-                marginTop={margin.top}
-                marginLeft={margin.left}
-                plotWidth={plotWidth}
-                plotHeight={plotHeight}
-                hoveredIndex={hoveredIndex}
-                onHoverChange={onHoverChange}
-                indicatorColor={TOKEN.muted}
-                highlightBorderColor={TOKEN.background}
-                highlights={hoveredIndex !== null && hoveredIndex >= 0 && hoveredIndex < data.length
-                    ? [
-                        { x: productionPoints[hoveredIndex].x, y: productionPoints[hoveredIndex].y, color: TOKEN.production },
-                        ...(showOee ? [{ x: oeePoints[hoveredIndex].x, y: oeePoints[hoveredIndex].y, color: TOKEN.oee }] : []),
-                    ]
-                    : undefined
-                }
-            />
-        </svg>
+                                    return (
+                                        <g key={item.bucketKey}>
+                                            <rect x={barX} y={barTop} width={barW} height={barHeight} fill={`url(#${prodBarGradientId})`} />
+                                            <rect
+                                                x={barX}
+                                                y={barTop}
+                                                width={barW}
+                                                height={capHeight}
+                                                fill={TOKEN.production}
+                                                style={{ filter: `drop-shadow(0 0 6px ${TOKEN.production})` }}
+                                            />
+                                        </g>
+                                    );
+                                })
+                                : productionAreaPath.length > 0 && (
+                                    <path d={productionAreaPath} fill={`url(#${prodAreaGradientId})`} />
+                                )}
+
+                            {productionMode === 'area' && productionPath.length > 0 && (
+                                <path
+                                    d={productionPath}
+                                    stroke={TOKEN.production}
+                                    strokeWidth={2.5}
+                                    fill="none"
+                                    filter={`url(#${prodGlowId})`}
+                                />
+                            )}
+
+                            {showOee && oeePath.length > 0 && (
+                                <path
+                                    d={oeePath}
+                                    stroke={TOKEN.oee}
+                                    strokeWidth={2.5}
+                                    fill="none"
+                                    filter={`url(#${oeeGlowId})`}
+                                />
+                            )}
+
+                            {showOee && oeeShowPoints && oeePoints.map((point, index) => (
+                                <circle
+                                    key={`oee-point-${data[index].bucketKey}`}
+                                    cx={point.x}
+                                    cy={point.y}
+                                    r={3}
+                                    fill={TOKEN.oee}
+                                    stroke={TOKEN.background}
+                                    strokeWidth={1}
+                                />
+                            ))}
+                        </g>
+
+                        {data.map((item, index) => {
+                            if (!visibleIndices.has(index)) return null;
+                            return (
+                                <text
+                                    key={`x-label-${item.bucketKey}`}
+                                    data-testid="prod-history-widget-x-axis-label"
+                                    x={xPositions[index]}
+                                    y={layout.xAxisLabels.y}
+                                    textAnchor="middle"
+                                    fill={TOKEN.muted}
+                                    fontSize="var(--font-size-chart)"
+                                    fontFamily="var(--font-chart)"
+                                    fontWeight="var(--font-weight-chart)"
+                                    letterSpacing="var(--tracking-chart)"
+                                >
+                                    {item.label}
+                                </text>
+                            );
+                        })}
+
+                        {resolvedProductionTicks.map((tick, index) => (
+                            <text
+                                key={`production-tick-${index}`}
+                                x={layout.plotArea.left - 8}
+                                y={tick.y}
+                                dy={4}
+                                textAnchor="end"
+                                fill={TOKEN.muted}
+                                fontSize="var(--font-size-chart)"
+                                fontFamily="var(--font-chart)"
+                                fontWeight="var(--font-weight-chart)"
+                                letterSpacing="var(--tracking-chart)"
+                            >
+                                {formatTick(tick.value)}
+                            </text>
+                        ))}
+
+                        {showRightAxis && resolvedOeeTicks.map((tick, index) => (
+                            <text
+                                data-testid="prod-history-widget-right-axis-tick"
+                                key={`oee-tick-${index}`}
+                                x={layout.plotArea.right + 8}
+                                y={tick.y}
+                                dy={4}
+                                textAnchor="start"
+                                fill={TOKEN.muted}
+                                fontSize="var(--font-size-chart)"
+                                fontFamily="var(--font-chart)"
+                                fontWeight="var(--font-weight-chart)"
+                                letterSpacing="var(--tracking-chart)"
+                            >
+                                {formatTick(tick.value)}
+                            </text>
+                        ))}
+
+                        <ChartHoverLayer
+                            dataLength={data.length}
+                            x0={x0}
+                            step={step}
+                            marginTop={layout.plotArea.top}
+                            marginLeft={layout.plotArea.left}
+                            plotWidth={plotWidth}
+                            plotHeight={plotHeight}
+                            hoveredIndex={hoveredIndex}
+                            onHoverChange={onHoverChange}
+                            indicatorColor={TOKEN.muted}
+                            highlightBorderColor={TOKEN.background}
+                            highlights={hoveredIndex !== null && hoveredIndex >= 0 && hoveredIndex < data.length
+                                ? [
+                                    { x: productionPoints[hoveredIndex].x, y: productionPoints[hoveredIndex].y, color: TOKEN.production },
+                                    ...(showOee ? [{ x: oeePoints[hoveredIndex].x, y: oeePoints[hoveredIndex].y, color: TOKEN.oee }] : []),
+                                ]
+                                : undefined
+                            }
+                        />
+                    </>
+                );
+            }}
+            renderOverlay={() => (productionPing || (showOee && oeePing)) ? (
+                <g data-testid="prod-history-widget-latest-overlay" pointerEvents="none">
+                    {productionPing && productionPingY !== null && (
+                        <g>
+                            <circle
+                                cx={productionPing.x}
+                                cy={productionPingY}
+                                r={9}
+                                fill={TOKEN.production}
+                                fillOpacity={0.4}
+                                className="animate-ping"
+                                style={{ animationDuration: '2s', transformOrigin: `${productionPing.x}px ${productionPingY}px` }}
+                            />
+                            <circle
+                                cx={productionPing.x}
+                                cy={productionPingY}
+                                r={4}
+                                fill={TOKEN.production}
+                                stroke={TOKEN.background}
+                                strokeWidth={1.5}
+                            />
+                        </g>
+                    )}
+
+                    {showOee && oeePing && oeePingY !== null && (
+                        <g>
+                            <circle
+                                cx={oeePing.x}
+                                cy={oeePingY}
+                                r={9}
+                                fill={TOKEN.oee}
+                                fillOpacity={0.4}
+                                className="animate-ping"
+                                style={{ animationDuration: '2s', transformOrigin: `${oeePing.x}px ${oeePingY}px` }}
+                            />
+                            <circle
+                                cx={oeePing.x}
+                                cy={oeePingY}
+                                r={4}
+                                fill={TOKEN.oee}
+                                stroke={TOKEN.background}
+                                strokeWidth={1.5}
+                            />
+                        </g>
+                    )}
+                </g>
+            ) : null}
+        />
     );
 }
 
@@ -641,7 +696,7 @@ export default function ProdHistoryWidget({
     const chartTitle = widget.title ?? displayOptions?.chartTitle ?? 'PRODUCCIÓN HISTÓRICA';
     const productionBaseLabel = displayOptions?.productionLabel ?? 'Producción';
     const productionUnit: ProductionUnit = displayOptions?.productionUnit ?? 'unidades';
-    const productionLabel = `${productionBaseLabel} (${productionUnit})`;
+    const productionLabel = `${toSentenceCase(productionBaseLabel)} (${productionUnit})`;
     const oeeLabel = displayOptions?.oeeLabel ?? 'OEE (%)';
     const productionChartMode = displayOptions?.productionChartMode ?? 'bars';
     const useSecondaryAxis = displayOptions?.useSecondaryAxis ?? true;
@@ -690,49 +745,56 @@ export default function ProdHistoryWidget({
 
     return (
         <div className={`glass-panel group relative w-full h-full p-5 flex flex-col ${className ?? ''}`}>
-            {/* Widget-local controls overlay — positioned absolutely relative to the
-                glass-panel container. Separate layer from the WidgetHeader. */}
-            <WidgetSegmentedControl
-                options={GROUPING_OPTIONS}
-                value={bucket}
-                onChange={setBucket}
-            >
-                <button
-                    type="button"
-                    onClick={() => setShowOee((current) => !current)}
-                    className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 uppercase transition-colors ${showOee
-                        ? 'border-admin-accent/30 bg-admin-accent/10 text-admin-accent'
-                        : 'border-industrial-border text-industrial-muted hover:text-industrial-text'
-                        }`}
-                >
-                    {showOee ? <Eye size={12} /> : <EyeOff size={12} />}
-                    OEE
-                </button>
-            </WidgetSegmentedControl>
+            <div className={WIDGET_CHART_HEADER_CLASS} data-testid="prod-history-widget-header-area">
+                <WidgetHeader
+                    title={chartTitle}
+                    icon={HeaderIcon ?? undefined}
+                    iconTestId="prod-history-widget-header-icon"
+                    iconColor={TOKEN.icon}
+                    iconPosition="left"
+                    className="min-w-0"
+                    trailing={(
+                        <WidgetHeaderTemporalControls
+                            variant="pill"
+                            testId="prod-history-widget-runtime-controls"
+                            indicatorTestId="prod-history-widget-runtime-control-indicator"
+                            groups={[
+                                {
+                                    testId: 'prod-history-widget-runtime-group-selector',
+                                    options: GROUPING_OPTIONS,
+                                    selectedValue: bucket,
+                                    onSelect: (value) => setBucket(value as TemporalBucket),
+                                },
+                            ]}
+                        />
+                    )}
+                />
 
-            <WidgetHeader
-                title={chartTitle}
-                icon={HeaderIcon ?? undefined}
-                iconColor={TOKEN.icon}
-                iconPosition="left"
-                className="mb-3 shrink-0 min-w-0 max-w-[calc(100%-220px)]"
-            />
+                <div className="flex justify-end" data-testid="prod-history-widget-legend-controls">
+                    <div className="flex items-center gap-4" data-testid="prod-history-widget-legend-controls-group">
+                        <div className="flex items-center gap-1">
+                            <span className={`h-2 w-2 shrink-0 ${productionChartMode === 'bars' ? 'rounded-[2px]' : 'rounded-full'}`} style={{ backgroundColor: TOKEN.production }} />
+                            <span className="text-industrial-muted">{productionLabel}</span>
+                        </div>
 
-            <div className="mb-3 flex items-center gap-4">
-                <div className="flex items-center gap-1">
-                    <span className={`h-2 w-2 shrink-0 ${productionChartMode === 'bars' ? 'rounded-[2px]' : 'rounded-full'}`} style={{ backgroundColor: TOKEN.production }} />
-                    <span className="uppercase text-industrial-muted">{productionLabel}</span>
-                </div>
-
-                {showOee && (
-                    <div className="flex items-center gap-1">
-                        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: TOKEN.oee }} />
-                        <span className="uppercase text-industrial-muted">{oeeLabel}</span>
+                        <label className="flex items-center gap-2 text-industrial-muted cursor-pointer">
+                            <span className="flex items-center gap-1">
+                                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: TOKEN.oee }} />
+                                <span>{oeeLabel}</span>
+                            </span>
+                            <WidgetRuntimeCheckbox
+                                ariaLabel="Mostrar OEE (%)"
+                                checked={showOee}
+                                onCheckedChange={setShowOee}
+                                visualTestId="prod-history-widget-oee-checkbox-visual"
+                                checkTestId="prod-history-widget-oee-checkbox-check"
+                            />
+                        </label>
                     </div>
-                )}
+                </div>
             </div>
 
-            <div className="min-h-0 flex-1 -mx-2 -mb-2">
+            <div className={WIDGET_CHART_CONTAINER_CLASS} data-testid="prod-history-widget-chart-shell">
                 <ProdHistoryBarsContainer
                     widgetId={widget.id}
                     data={groupedData}

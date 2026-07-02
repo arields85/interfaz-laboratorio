@@ -7,6 +7,7 @@ import {
     computeVisibleLabelIndices,
     getChartLetterSpacingPx,
     getChartTextFont,
+    measureChartTextWidthPx,
 } from './chartHelpers';
 
 const PRESET_DURATION_MS: Record<Exclude<HistoryRangeV2, 'custom'>, number> = {
@@ -62,6 +63,10 @@ interface BuildTrendChartV2VisibleTickValuesOptions {
     plotWidth: number;
     range: HistoryRangeV2;
     timezone: string;
+    minLabelX?: number;
+    maxLabelX?: number;
+    font?: string;
+    letterSpacing?: number;
 }
 
 export function resolveTrendChartV2VisibleWindow({
@@ -194,13 +199,21 @@ export function buildTrendChartV2VisibleTickValues({
     plotWidth,
     range,
     timezone,
+    minLabelX,
+    maxLabelX,
+    font = getChartTextFont(),
+    letterSpacing = getChartLetterSpacingPx(),
 }: BuildTrendChartV2VisibleTickValuesOptions): number[] {
     const finitePoints = points.filter((point) => Number.isFinite(point.timestampMs));
     const anchorTicks = finitePoints.length > 0
         ? dedupeSortedTimestamps([startMs, ...finitePoints.map((point) => point.timestampMs), endMs])
         : [startMs, endMs];
     const widestLabelPx = Math.max(
-        ...anchorTicks.map((timestampMs) => estimateLabelWidthPx(formatTrendChartV2Timestamp({ timestampMs, range, timezone }))),
+        ...anchorTicks.map((timestampMs) => measureChartTextWidthPx(
+            formatTrendChartV2Timestamp({ timestampMs, range, timezone }),
+            font,
+            letterSpacing,
+        )),
         1,
     );
     const estimatedMaxTickCount = Math.max(
@@ -218,26 +231,26 @@ export function buildTrendChartV2VisibleTickValues({
             x0: plotLeft,
             plotWidth,
         }));
-        const adjustedPositions = positions.map((position, index) => {
-            const halfWidth = estimateLabelWidthPx(labels[index]) / 2;
+        const effectiveMinLabelX = minLabelX ?? Number.NEGATIVE_INFINITY;
+        const effectiveMaxLabelX = maxLabelX ?? Number.POSITIVE_INFINITY;
+        const fitsCenteredBounds = labels.every((label, index) => {
+            const halfWidth = measureChartTextWidthPx(label, font, letterSpacing) / 2;
+            const position = positions[index] ?? 0;
 
-            if (index === 0) {
-                return position + halfWidth;
-            }
-
-            if (index === candidates.length - 1) {
-                return position - halfWidth;
-            }
-
-            return position;
+            return (position - halfWidth) >= effectiveMinLabelX && (position + halfWidth) <= effectiveMaxLabelX;
         });
+
+        if (!fitsCenteredBounds) {
+            continue;
+        }
+
         const visibleIndices = computeVisibleLabelIndices(
             labels,
-            adjustedPositions,
-            getChartTextFont(),
+            positions,
+            font,
             8,
-            plotLeft + plotWidth,
-            getChartLetterSpacingPx(),
+            maxLabelX,
+            letterSpacing,
         );
 
         if (visibleIndices.size === candidates.length) {
@@ -322,8 +335,4 @@ function dedupeSortedTimestamps(values: number[]): number[] {
     }
 
     return uniqueValues;
-}
-
-function estimateLabelWidthPx(label: string): number {
-    return Math.max(label.length * 7, 0);
 }

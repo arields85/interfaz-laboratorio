@@ -51,6 +51,12 @@ export default function NewWidgetTemplate({
             <WidgetHeader
               title={widget.title ?? 'Nuevo widget'}
               // iconPosition="left"  ← descomentar si el ícono debe preceder al título
+              // trailing={(
+              //   <WidgetHeaderTemporalControls
+              //     variant="underline"
+              //     groups={[...]}
+              //   />
+              // )} ← usar para escalas temporales simples o dobles
             />
           )}
         >
@@ -63,6 +69,12 @@ export default function NewWidgetTemplate({
           <WidgetHeader
             title={widget.title ?? 'Nuevo widget'}
             // iconPosition="left"  ← descomentar si el ícono debe preceder al título
+            // trailing={(
+            //   <WidgetHeaderTemporalControls
+            //     variant="pill"
+            //     groups={[...]}
+            //   />
+            // )} ← usar para escalas temporales simples o dobles
             className="mb-2 shrink-0"
           />
 
@@ -85,6 +97,7 @@ export default function NewWidgetTemplate({
               {controls}
           </div>
 
+          Usar WidgetHeader.trailing para controles horizontales compactos como WidgetHeaderTemporalControls.
           NO usar WidgetHeader.trailing para bloques multi-fila.
           Ver ProduccionHistoricaWidget como referencia. */}
     </div>

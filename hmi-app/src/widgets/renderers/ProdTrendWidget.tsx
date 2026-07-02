@@ -2,9 +2,16 @@ import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, 
 import { AlertTriangle, BarChart2, Loader2, PlugZap, TrendingUp } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
+import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
+import {
+    resolveWidgetChartLayoutMetrics,
+    WIDGET_CHART_CONTAINER_CLASS,
+    WIDGET_CHART_HEADER_CLASS,
+} from '../../components/ui/WidgetChartLayout.shared';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import type { ProdTrendWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
@@ -15,7 +22,6 @@ import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalyti
 import { computeActivityAnalytics, resolveActivityAnalyticsComparableProductivityRatio } from '../../utils/activityAnalyticsComputation';
 import { resolveActivityAnalyticsDisplayRules } from '../../utils/activityAnalyticsDisplayRules';
 import { resolveActivityAnalyticsTimezone } from '../../utils/activityAnalyticsGrouping';
-import { clampActivityAnalyticsGroupBarWidth } from '../../utils/activityAnalyticsWidgetDefaults';
 import { buildAreaPath, computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx, measureSmoothPathLength, resolveAnimationDurationSecondsFromPathLength, smoothPath } from '../../utils/chartHelpers';
 import { createDefaultProdTrendDisplayOptions, resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 
@@ -203,91 +209,48 @@ export default function ProdTrendWidget({ widget, machines, isLoadingData = fals
             icon={TrendingUp}
             iconPosition="left"
             iconTestId="prod-trend-widget-header-icon"
-            className="mb-3 shrink-0 min-w-0"
+            className={WIDGET_CHART_HEADER_CLASS}
             trailing={(
-                <div
-                    data-testid="prod-trend-widget-runtime-controls"
-                    className="flex items-center gap-2.5"
-                >
-                    <div
-                        data-testid="prod-trend-widget-runtime-range-selector"
-                        className="flex flex-nowrap items-center justify-end gap-0"
-                    >
-                        {RANGE_OPTIONS.map((option) => {
-                            const isActive = option.value === activeDisplayOptions.range;
+                <WidgetHeaderTemporalControls
+                    variant="pill"
+                    testId="prod-trend-widget-runtime-controls"
+                    indicatorTestId="prod-trend-widget-runtime-control-indicator"
+                    groups={[
+                        {
+                            testId: 'prod-trend-widget-runtime-range-selector',
+                            options: RANGE_OPTIONS,
+                            selectedValue: activeDisplayOptions.range,
+                            onSelect: (value) => {
+                                const nextRange = value as ResolvedProdTrendDisplayOptions['range'];
+                                const nextDisplayOptions = {
+                                    ...widget.displayOptions,
+                                    ...activeDisplayOptions,
+                                    range: nextRange,
+                                    start: undefined,
+                                    end: undefined,
+                                } satisfies ResolvedProdTrendDisplayOptions;
 
-                            return (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    aria-pressed={isActive}
-                                    onClick={() => {
-                                        const nextDisplayOptions = {
-                                            ...widget.displayOptions,
-                                            ...activeDisplayOptions,
-                                            range: option.value,
-                                            start: undefined,
-                                            end: undefined,
-                                        } satisfies ResolvedProdTrendDisplayOptions;
+                                setRuntimeViewState((current) => ({
+                                    ...current,
+                                    selectionOverride: nextDisplayOptions,
+                                }));
+                            },
+                        },
+                        {
+                            testId: 'prod-trend-widget-runtime-group-selector',
+                            options: groupBySelectOptions,
+                            selectedValue: activeGroupBy,
+                            onSelect: (value) => {
+                                const nextGroupBy = value as RuntimeProdTrendGroupBy;
 
-                                        setRuntimeViewState((current) => ({
-                                            ...current,
-                                            selectionOverride: nextDisplayOptions,
-                                        }));
-                                    }}
-                                    className={getRuntimeControlButtonClass(isActive, false, true)}
-                                >
-                                    <span className="flex flex-col items-center">
-                                        <span className="translate-y-[1.5px]">{option.label}</span>
-                                        <span
-                                            aria-hidden="true"
-                                            data-testid="prod-trend-widget-runtime-control-indicator"
-                                            className={getRuntimeControlIndicatorClass(isActive)}
-                                        />
-                                    </span>
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    <div
-                        data-testid="prod-trend-widget-runtime-group-selector"
-                        className="flex flex-nowrap items-center justify-end gap-0 border-l border-industrial-muted/25 pl-2.5"
-                    >
-                        {groupBySelectOptions.map((option) => {
-                            const isActive = option.value === activeGroupBy;
-
-                            return (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    aria-pressed={isActive}
-                                    disabled={option.disabled}
-                                    onClick={() => {
-                                        if (option.disabled) {
-                                            return;
-                                        }
-
-                                        setRuntimeViewState((current) => ({
-                                            ...current,
-                                            runtimeGroupBy: option.value,
-                                        }));
-                                    }}
-                                    className={getRuntimeControlButtonClass(isActive, option.disabled, true)}
-                                >
-                                    <span className="flex flex-col items-center">
-                                        <span className="translate-y-[1.5px]">{option.label}</span>
-                                        <span
-                                            aria-hidden="true"
-                                            data-testid="prod-trend-widget-runtime-control-indicator"
-                                            className={getRuntimeControlIndicatorClass(isActive, option.disabled)}
-                                        />
-                                    </span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
+                                setRuntimeViewState((current) => ({
+                                    ...current,
+                                    runtimeGroupBy: nextGroupBy,
+                                }));
+                            },
+                        },
+                    ]}
+                />
             )}
         />
     );
@@ -378,18 +341,12 @@ export default function ProdTrendWidget({ widget, machines, isLoadingData = fals
     }
 
     const chartViewportWidth = Math.max(bodySize?.width ?? 640, CHART_MIN_WIDTH_PX);
-    const chartLayout = resolveProdTrendChartLayout(bodySize?.height ?? 180);
+    const chartHeight = resolveProdTrendChartHeight(bodySize?.height ?? 180);
     const groupsLayout = resolveGroupsLayout(chartViewportWidth, grouped.length);
-    const barWidthFactor = activeDisplayOptions.groupBarWidths[activeGroupBy] ?? activeDisplayOptions.groupBarWidth;
     const xAxisModel = resolveXAxisModel({
         grouped,
         width: chartViewportWidth,
         layout: groupsLayout,
-        chartMargin: {
-            left: chartLayout.chartMargin.left,
-            right: chartLayout.chartMargin.right,
-        },
-        barWidthFactor,
     });
 
     return (
@@ -398,7 +355,7 @@ export default function ProdTrendWidget({ widget, machines, isLoadingData = fals
             <div className="flex min-h-0 flex-1 flex-col" data-testid="prod-trend-widget-body">
                 <div
                     ref={bodyRef}
-                    className="relative mt-2 flex min-h-0 flex-1 flex-col"
+                    className={WIDGET_CHART_CONTAINER_CLASS}
                     data-testid="prod-trend-widget-chart-shell"
                 >
                     <div
@@ -411,10 +368,10 @@ export default function ProdTrendWidget({ widget, machines, isLoadingData = fals
                             data-testid="prod-trend-widget-content"
                         >
                             <ProdTrendChart
+                                widgetId={widget.id}
                                 grouped={grouped}
                                 width={xAxisModel.chartWidth}
-                                height={chartLayout.chartHeight}
-                                chartMargin={chartLayout.chartMargin}
+                                height={chartHeight}
                                 lineColors={displayOptions.trendLineColors}
                                 lineColorAlphas={displayOptions.trendLineColorAlphas}
                                 prodTrendBands={displayOptions.prodTrendBands}
@@ -426,29 +383,6 @@ export default function ProdTrendWidget({ widget, machines, isLoadingData = fals
             </div>
         </div>
     );
-}
-
-function getRuntimeControlButtonClass(isActive: boolean, isDisabled = false, useCompactHorizontalPadding = false) {
-    const baseClassName = 'group/control uppercase transition-colors';
-    const spacingClassName = `${useCompactHorizontalPadding ? 'px-2' : 'px-2.5'} py-1`;
-
-    if (isDisabled) {
-        return `${baseClassName} ${spacingClassName} cursor-default text-industrial-muted/50`;
-    }
-
-    return `${baseClassName} ${spacingClassName} ${isActive ? 'text-industrial-text' : 'text-industrial-muted hover:text-industrial-text focus-visible:text-industrial-text'}`;
-}
-
-function getRuntimeControlIndicatorClass(isActive: boolean, isDisabled = false) {
-    const baseClassName = 'mt-0.5 block h-[1.5px] w-1/4 min-w-[0.45rem] rounded-full transition-colors';
-
-    if (isDisabled) {
-        return `${baseClassName} bg-transparent`;
-    }
-
-    return isActive
-        ? `${baseClassName} bg-current group-hover/control:bg-current group-focus-visible/control:bg-current`
-        : `${baseClassName} bg-transparent group-hover/control:bg-current group-focus-visible/control:bg-current`;
 }
 
 function createRuntimeViewState(displayOptions: ResolvedProdTrendDisplayOptions): ProdTrendRuntimeViewState {
@@ -465,19 +399,19 @@ function createDisplayOptionsSyncKey(displayOptions: ResolvedProdTrendDisplayOpt
 }
 
 const ProdTrendChart = memo(function ProdTrendChart({
+    widgetId,
     grouped,
     width,
     height,
-    chartMargin,
     lineColors,
     lineColorAlphas,
     prodTrendBands,
     xAxisModel,
 }: {
+    widgetId: string;
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     width: number;
     height: number;
-    chartMargin: { top: number; right: number; bottom: number; left: number };
     lineColors: [string, string];
     lineColorAlphas: [number, number];
     prodTrendBands: ReturnType<typeof resolveProdTrendDisplayOptions>['prodTrendBands'];
@@ -493,22 +427,53 @@ const ProdTrendChart = memo(function ProdTrendChart({
     const travelingGlowFilterId = `${gradientPrefix}-prod-trend-traveling-glow`;
     const bandGradientId = `${gradientPrefix}-prod-trend-band-gradient`;
     const travelingGlowAuraGradientId = `${gradientPrefix}-prod-trend-traveling-glow-aura`;
-    const plotClipPathId = `${gradientPrefix}-prod-trend-plot-clip`;
-    const yAxisLabelX = chartMargin.left - 8;
-    const plotWidth = Math.max(width - chartMargin.left - chartMargin.right, 1);
-    const plotHeight = Math.max(height - chartMargin.top - chartMargin.bottom, 1);
-    const baselineY = chartMargin.top + plotHeight;
-    const { positions, labels, visibleLabelIndices } = xAxisModel;
+    const { labels, sampleLabels } = xAxisModel;
+    const chartFont = getChartTextFont();
+    const chartLetterSpacing = getChartLetterSpacingPx();
+    const chartLayout = resolveWidgetChartLayoutMetrics({
+        width,
+        height,
+        hasTopAdornments: true,
+        firstXAxisLabel: labels[0] ?? '',
+        lastXAxisLabel: labels[labels.length - 1] ?? '',
+        yAxisTickLabels: ['100', '75', '50', '25', '0'],
+        idPrefix: `${widgetId}-${gradientPrefix}`,
+        alignPlotAreaToXAxisLabels: true,
+    });
+    const plotWidth = chartLayout.plotArea.width;
+    const plotHeight = chartLayout.plotArea.height;
+    const baselineY = chartLayout.plotArea.bottom;
+    const positions = grouped.length > 1
+        ? grouped.map((_, index) => chartLayout.xAxisLabels.left + ((chartLayout.xAxisLabels.plotWidth * index) / (grouped.length - 1)))
+        : grouped.map(() => chartLayout.xAxisLabels.left + (chartLayout.xAxisLabels.plotWidth / 2));
+    const visibleLabelIndices = sampleLabels
+        ? computeVisibleLabelIndices(
+            labels,
+            positions,
+            chartFont,
+            8,
+            chartLayout.xAxisLabels.right,
+            chartLetterSpacing,
+        )
+        : new Set(grouped.map((_, index) => index));
+    ensureLastXAxisLabelVisibility({
+        visibleLabelIndices,
+        labels,
+        positions,
+        font: chartFont,
+        letterSpacing: chartLetterSpacing,
+        minGap: 8,
+    });
     const renderablePoints = grouped.map((bucket, index) => {
         const productivityRatio = resolveGroupedTrendProductivityRatio(bucket);
         const y = productivityRatio === null
             ? null
-            : chartMargin.top + plotHeight - (clamp(productivityRatio, 0, 1) * plotHeight);
+            : chartLayout.plotArea.top + plotHeight - (clamp(productivityRatio, 0, 1) * plotHeight);
 
         return {
             bucketKey: bucket.bucketKey,
             isPartial: bucket.isInProgress || bucket.hasInProgressContribution === true,
-            x: positions[index] ?? (chartMargin.left + (plotWidth / 2)),
+            x: positions[index] ?? (chartLayout.plotArea.left + (plotWidth / 2)),
             y,
             markerY: y ?? baselineY,
             valueState: productivityRatio === null ? 'missing' : 'measured',
@@ -517,7 +482,7 @@ const ProdTrendChart = memo(function ProdTrendChart({
     const lineSegments = buildLineSegments(renderablePoints);
     const yTicks = Array.from({ length: 5 }, (_, index) => ({
         value: 100 - (index * 25),
-        y: chartMargin.top + ((index / 4) * plotHeight),
+        y: chartLayout.plotArea.top + ((index / 4) * plotHeight),
     }));
     const gradientStops = getVisualGradientStops(lineColors, lineColorAlphas);
     const prodTrendBandStopColors = prodTrendBands.colors.map((color) => color ?? 'var(--color-chart-grid)') as [string, string, string];
@@ -529,7 +494,7 @@ const ProdTrendChart = memo(function ProdTrendChart({
     const latestValueLabelAnchor = 'middle';
     const latestValueLabelX = latestPoint?.x ?? 0;
     const latestValueLabelY = latestPoint?.y != null
-        ? Math.max(chartMargin.top + 10, latestPoint.y - LATEST_VALUE_LABEL_Y_OFFSET_PX)
+        ? Math.max(chartLayout.plotArea.top + 10, latestPoint.y - LATEST_VALUE_LABEL_Y_OFFSET_PX)
         : 0;
     const hoveredPoint = hoverInfo && hoverInfo.index >= 0 && hoverInfo.index < renderablePoints.length
         ? renderablePoints[hoverInfo.index] ?? null
@@ -545,7 +510,7 @@ const ProdTrendChart = memo(function ProdTrendChart({
             .filter((interval) => interval.index % 2 === 0 && interval.width > 0)
         : [];
     const hitStep = grouped.length > 1
-        ? Math.max((positions[1] ?? chartMargin.left) - (positions[0] ?? chartMargin.left), 1)
+        ? Math.max((positions[1] ?? chartLayout.plotArea.left) - (positions[0] ?? chartLayout.plotArea.left), 1)
         : Math.max(plotWidth, 1);
     const travelingGlowTarget = resolveTravelingGlowTarget(lineSegments);
     const travelingGlowSegment = travelingGlowTarget ? lineSegments[travelingGlowTarget.index] ?? null : null;
@@ -572,21 +537,23 @@ const ProdTrendChart = memo(function ProdTrendChart({
 
     return (
         <>
-            <svg
-                width={width}
-                height={height}
-                viewBox={`0 0 ${width} ${height}`}
-                data-testid="prod-trend-widget-chart"
-                data-y-domain-min="0"
-                data-y-domain-max="100"
-            >
-                <defs>
-                    <linearGradient id={lineGradientId} gradientUnits="userSpaceOnUse" x1={chartMargin.left} y1="0" x2={chartMargin.left + plotWidth} y2="0">
+            <WidgetChartLayout
+                layout={chartLayout}
+                svgTestId="prod-trend-widget-chart"
+                overlaySvgTestId="prod-trend-widget-overlay-svg"
+                svgProps={{
+                    'data-y-domain-min': '0',
+                    'data-y-domain-max': '100',
+                }}
+                renderMain={(layout) => (
+                    <>
+                        <defs>
+                            <linearGradient id={lineGradientId} gradientUnits="userSpaceOnUse" x1={layout.plotArea.left} y1="0" x2={layout.plotArea.right} y2="0">
                         <stop offset="0%" stopColor={gradientStops.startColor} stopOpacity={Math.max(gradientStops.startOpacity, 0.72)} />
                         <stop offset="100%" stopColor={gradientStops.endColor} stopOpacity={Math.max(gradientStops.endOpacity, 0.92)} />
                     </linearGradient>
 
-                    <linearGradient id={areaGradientId} gradientUnits="userSpaceOnUse" x1={chartMargin.left} y1="0" x2={chartMargin.left + plotWidth} y2="0">
+                    <linearGradient id={areaGradientId} gradientUnits="userSpaceOnUse" x1={layout.plotArea.left} y1="0" x2={layout.plotArea.right} y2="0">
                         <stop offset="0%" stopColor={gradientStops.startColor} stopOpacity={0.3} />
                         <stop offset="100%" stopColor={gradientStops.endColor} stopOpacity={0.46} />
                     </linearGradient>
@@ -613,10 +580,6 @@ const ProdTrendChart = memo(function ProdTrendChart({
                         <rect x="0" y="0" width="1" height="1" fill={`url(#${fadeGradientId})`} />
                     </mask>
 
-                    <clipPath id={plotClipPathId}>
-                        <rect x={chartMargin.left} y={chartMargin.top} width={plotWidth} height={plotHeight} />
-                    </clipPath>
-
                     <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
                         <feGaussianBlur stdDeviation="3" result="blur" />
                         <feMerge>
@@ -640,14 +603,14 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             <feMergeNode in="SourceGraphic" />
                         </feMerge>
                     </filter>
-                </defs>
+                        </defs>
 
-                <g clipPath={`url(#${plotClipPathId})`} data-testid="prod-trend-widget-band-layer" style={{ mixBlendMode: prodTrendBands.blendMode }}>
+                        <g clipPath={`url(#${layout.plotClipPathId})`} data-testid="prod-trend-widget-band-layer" style={{ mixBlendMode: prodTrendBands.blendMode }}>
                     {activeBandIntervals.map((interval) => (
                         <g key={`prod-trend-band-${interval.index}`} data-testid="prod-trend-widget-band-group">
                             <rect
                                 x={interval.x}
-                                y={chartMargin.top}
+                                y={layout.plotArea.top}
                                 width={interval.width}
                                 height={plotHeight}
                                 fill={`url(#${bandGradientId})`}
@@ -656,7 +619,7 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             <line
                                 x1={interval.x}
                                 x2={interval.x}
-                                y1={chartMargin.top}
+                                y1={layout.plotArea.top}
                                 y2={baselineY}
                                 stroke="var(--color-chart-grid)"
                                 strokeOpacity={0.42}
@@ -666,7 +629,7 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             <line
                                 x1={interval.x + interval.width}
                                 x2={interval.x + interval.width}
-                                y1={chartMargin.top}
+                                y1={layout.plotArea.top}
                                 y2={baselineY}
                                 stroke="var(--color-chart-grid)"
                                 strokeOpacity={0.42}
@@ -675,25 +638,36 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             />
                         </g>
                     ))}
-                </g>
+                        </g>
 
-                {yTicks.map((tick) => (
+                        {yTicks.map((tick) => (
                     <line
                         key={`prod-trend-grid-${tick.value}`}
-                        x1={chartMargin.left}
-                        x2={chartMargin.left + plotWidth}
+                        x1={layout.plotArea.left}
+                        x2={layout.plotArea.right}
                         y1={tick.y}
                         y2={tick.y}
                         stroke="var(--color-chart-grid)"
                         strokeDasharray="3 3"
                         data-testid="prod-trend-widget-y-grid-line"
                     />
-                ))}
+                        ))}
 
-                <line x1={chartMargin.left} x2={chartMargin.left + plotWidth} y1={baselineY} y2={baselineY} stroke="var(--color-industrial-border)" />
-                <line x1={chartMargin.left} x2={chartMargin.left} y1={chartMargin.top} y2={baselineY} stroke="var(--color-industrial-border)" />
+                        <line x1={layout.plotArea.left} x2={layout.plotArea.right} y1={baselineY} y2={baselineY} stroke="var(--color-industrial-border)" />
+                        <line x1={layout.plotArea.left} x2={layout.plotArea.left} y1={layout.plotArea.top} y2={baselineY} stroke="var(--color-industrial-border)" />
 
-                {lineSegments.map((segment, index) => {
+                        <text
+                            x={layout.yAxisUnitSlot.x}
+                            y={layout.yAxisUnitSlot.y}
+                            textAnchor={layout.yAxisUnitSlot.textAnchor}
+                            fill="var(--color-widget-icon)"
+                            style={GENERAL_TYPOGRAPHY_STYLE}
+                            data-testid="prod-trend-widget-y-axis-unit"
+                        >
+                            %
+                        </text>
+
+                        {lineSegments.map((segment, index) => {
                     const linePath = segment.length >= 2 ? smoothPath(segment) : '';
                     const areaPath = segment.length >= 2 ? buildAreaPath(linePath, segment, baselineY) : '';
 
@@ -720,12 +694,12 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             )}
                         </g>
                     );
-                })}
+                        })}
 
-                {travelingGlowPathId && activeTravelingGlowFrame && (
+                        {travelingGlowPathId && activeTravelingGlowFrame && (
                     <g
                         key={`prod-traveling-glow-cycle-${travelingGlowCycleKey}`}
-                        clipPath={`url(#${plotClipPathId})`}
+                        clipPath={`url(#${layout.plotClipPathId})`}
                         pointerEvents="none"
                         aria-hidden="true"
                         className="activity-analytics-prod-trend-traveling-glow"
@@ -770,107 +744,14 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             data-testid="prod-trend-widget-traveling-glow-core"
                         />
                     </g>
-                )}
-
-                {latestPoint && (
-                    <g data-testid="prod-trend-widget-latest-point-overlay" pointerEvents="none">
-                        <g data-testid="prod-trend-widget-latest-point" data-bucket-key={latestPoint.bucketKey}>
-                        {latestValueLabel && latestPoint.y !== null && (
-                            <text
-                                x={latestValueLabelX}
-                                y={latestValueLabelY}
-                                textAnchor={latestValueLabelAnchor}
-                                fill={gradientStops.endColor}
-                                className="activity-analytics-prod-trend-latest-value-float"
-                                style={{
-                                    ...PROD_TREND_LATEST_VALUE_TEXT_STYLE,
-                                    transformBox: 'fill-box',
-                                    transformOrigin: 'center bottom',
-                                }}
-                                data-testid="prod-trend-widget-latest-value-label"
-                            >
-                                {latestValueLabel}
-                            </text>
                         )}
-                        {latestPoint.y !== null ? (
-                            <g aria-hidden="true" style={{ mixBlendMode: 'screen' }}>
-                                <circle
-                                    data-testid="prod-trend-widget-final-point-pulse"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={9}
-                                    fill={gradientStops.endColor}
-                                    fillOpacity={0.45}
-                                    className="animate-ping"
-                                    style={{ animationDuration: '2s', transformOrigin: `${latestPoint.x}px ${latestPoint.y}px` }}
-                                />
-                                <circle
-                                    data-testid="prod-trend-widget-final-point-aura"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={13.5}
-                                    fill={`url(#${travelingGlowAuraGradientId})`}
-                                    fillOpacity={0.3}
-                                    filter={`url(#${travelingGlowFilterId})`}
-                                    className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-aura"
-                                />
-                                <circle
-                                    data-testid="prod-trend-widget-final-point-halo"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={8.75}
-                                    fill={`url(#${travelingGlowAuraGradientId})`}
-                                    fillOpacity={0.48}
-                                    filter={`url(#${travelingGlowFilterId})`}
-                                    className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-halo"
-                                />
-                                <circle
-                                    data-testid="prod-trend-widget-final-point-core"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={3}
-                                    fill={gradientStops.endColor}
-                                    stroke={gradientStops.startColor}
-                                    strokeOpacity={0.42}
-                                    strokeWidth={0.9}
-                                />
-                            </g>
-                        ) : (
-                            <>
-                                <circle
-                                    data-testid="prod-trend-widget-final-missing-pulse"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.markerY}
-                                    r={8}
-                                    fill="none"
-                                    stroke="var(--color-industrial-muted)"
-                                    strokeOpacity={0.7}
-                                    strokeWidth={1.5}
-                                    className="animate-pulse"
-                                    style={{ transformOrigin: `${latestPoint.x}px ${latestPoint.markerY}px` }}
-                                />
-                                <circle
-                                    data-testid="prod-trend-widget-final-missing-core"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.markerY}
-                                    r={4}
-                                    fill="var(--color-industrial-bg)"
-                                    stroke="var(--color-industrial-muted)"
-                                    strokeDasharray="2 2"
-                                    strokeWidth={1.5}
-                                />
-                            </>
-                        )}
-                        </g>
-                    </g>
-                )}
 
-                {hoveredPoint && (
+                        {hoveredPoint && (
                     <g pointerEvents="none" data-testid="prod-trend-widget-hover-affordance">
                         <line
                             x1={hoveredPoint.x}
                             x2={hoveredPoint.x}
-                            y1={chartMargin.top}
+                            y1={layout.plotArea.top}
                             y2={baselineY}
                             stroke="var(--color-industrial-muted)"
                             strokeWidth={1}
@@ -890,12 +771,12 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             />
                         )}
                     </g>
-                )}
+                        )}
 
-                {yTicks.map((tick) => (
+                        {yTicks.map((tick) => (
                     <text
                         key={`prod-trend-y-tick-${tick.value}`}
-                        x={yAxisLabelX}
+                        x={layout.plotArea.left - 8}
                         y={tick.y}
                         dy={4}
                         textAnchor="end"
@@ -903,26 +784,24 @@ const ProdTrendChart = memo(function ProdTrendChart({
                         style={CHART_TYPOGRAPHY_STYLE}
                         data-testid="prod-trend-widget-y-axis-tick"
                     >
-                        {tick.value}%
+                        {tick.value}
                     </text>
-                ))}
+                        ))}
 
-                {grouped.map((bucket, index) => {
+                        {grouped.map((bucket, index) => {
                     if (!visibleLabelIndices.has(index)) {
                         return null;
                     }
 
-                    const x = positions[index] ?? (chartMargin.left + (plotWidth / 2));
+                    const x = positions[index] ?? (layout.plotArea.left + (plotWidth / 2));
                     const label = labels[index] ?? '';
-
-                    const lastIndex = grouped.length - 1;
 
                     return (
                         <text
                             key={`prod-trend-x-tick-${bucket.bucketKey}`}
                             x={x}
-                            y={height - 8}
-                            textAnchor={index === 0 ? 'start' : index === lastIndex ? 'end' : 'middle'}
+                            y={layout.xAxisLabels.y}
+                            textAnchor="middle"
                             fill="var(--color-industrial-muted)"
                             style={CHART_TYPOGRAPHY_STYLE}
                             data-testid="prod-trend-widget-x-axis-label"
@@ -930,12 +809,12 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             {label}
                         </text>
                     );
-                })}
+                        })}
 
-                {!hasRenderableTrend && (
+                        {!hasRenderableTrend && (
                     <text
-                        x={chartMargin.left + (plotWidth / 2)}
-                        y={chartMargin.top + (plotHeight / 2)}
+                        x={layout.plotArea.left + (plotWidth / 2)}
+                        y={layout.plotArea.top + (plotHeight / 2)}
                         textAnchor="middle"
                         fill="var(--color-industrial-muted)"
                         style={GENERAL_TYPOGRAPHY_STYLE}
@@ -943,17 +822,17 @@ const ProdTrendChart = memo(function ProdTrendChart({
                     >
                         {hasLabels ? 'Sin datos comparables' : 'Sin datos'}
                     </text>
-                )}
+                        )}
 
-                {grouped.map((bucket, index) => {
-                    const centerX = positions[index] ?? (chartMargin.left + (plotWidth / 2));
+                        {grouped.map((bucket, index) => {
+                    const centerX = positions[index] ?? (layout.plotArea.left + (plotWidth / 2));
                     const hitWidth = grouped.length > 1 ? hitStep : plotWidth;
 
                     return (
                         <rect
                             key={`prod-trend-hit-${bucket.bucketKey}`}
-                            x={Math.max(centerX - (hitWidth / 2), chartMargin.left)}
-                            y={chartMargin.top}
+                            x={Math.max(centerX - (hitWidth / 2), layout.plotArea.left)}
+                            y={layout.plotArea.top}
                             width={Math.min(hitWidth, plotWidth)}
                             height={plotHeight}
                             fill="transparent"
@@ -963,8 +842,102 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             onMouseLeave={() => setHoverInfo(null)}
                         />
                     );
-                })}
-            </svg>
+                        })}
+                    </>
+                )}
+                renderOverlay={() => latestPoint ? (
+                    <g data-testid="prod-trend-widget-latest-point-overlay" pointerEvents="none">
+                        <g data-testid="prod-trend-widget-latest-point" data-bucket-key={latestPoint.bucketKey}>
+                            {latestValueLabel && latestPoint.y !== null && (
+                                <text
+                                    x={latestValueLabelX}
+                                    y={latestValueLabelY}
+                                    textAnchor={latestValueLabelAnchor}
+                                    fill={gradientStops.endColor}
+                                    className="activity-analytics-prod-trend-latest-value-float"
+                                    style={{
+                                        ...PROD_TREND_LATEST_VALUE_TEXT_STYLE,
+                                        transformBox: 'fill-box',
+                                        transformOrigin: 'center bottom',
+                                    }}
+                                    data-testid="prod-trend-widget-latest-value-label"
+                                >
+                                    {latestValueLabel}
+                                </text>
+                            )}
+                            {latestPoint.y !== null ? (
+                                <g aria-hidden="true" style={{ mixBlendMode: 'screen' }}>
+                                    <circle
+                                        data-testid="prod-trend-widget-final-point-pulse"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={9}
+                                        fill={gradientStops.endColor}
+                                        fillOpacity={0.45}
+                                        className="animate-ping"
+                                        style={{ animationDuration: '2s', transformOrigin: `${latestPoint.x}px ${latestPoint.y}px` }}
+                                    />
+                                    <circle
+                                        data-testid="prod-trend-widget-final-point-aura"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={13.5}
+                                        fill={`url(#${travelingGlowAuraGradientId})`}
+                                        fillOpacity={0.3}
+                                        filter={`url(#${travelingGlowFilterId})`}
+                                        className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-aura"
+                                    />
+                                    <circle
+                                        data-testid="prod-trend-widget-final-point-halo"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={8.75}
+                                        fill={`url(#${travelingGlowAuraGradientId})`}
+                                        fillOpacity={0.48}
+                                        filter={`url(#${travelingGlowFilterId})`}
+                                        className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-halo"
+                                    />
+                                    <circle
+                                        data-testid="prod-trend-widget-final-point-core"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={3}
+                                        fill={gradientStops.endColor}
+                                        stroke={gradientStops.startColor}
+                                        strokeOpacity={0.42}
+                                        strokeWidth={0.9}
+                                    />
+                                </g>
+                            ) : (
+                                <>
+                                    <circle
+                                        data-testid="prod-trend-widget-final-missing-pulse"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.markerY}
+                                        r={8}
+                                        fill="none"
+                                        stroke="var(--color-industrial-muted)"
+                                        strokeOpacity={0.7}
+                                        strokeWidth={1.5}
+                                        className="animate-pulse"
+                                        style={{ transformOrigin: `${latestPoint.x}px ${latestPoint.markerY}px` }}
+                                    />
+                                    <circle
+                                        data-testid="prod-trend-widget-final-missing-core"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.markerY}
+                                        r={4}
+                                        fill="var(--color-industrial-bg)"
+                                        stroke="var(--color-industrial-muted)"
+                                        strokeDasharray="2 2"
+                                        strokeWidth={1.5}
+                                    />
+                                </>
+                            )}
+                        </g>
+                    </g>
+                ) : null}
+            />
 
             {hoverInfo && hoverInfo.index < grouped.length && (
                 <ChartTooltip
@@ -984,14 +957,11 @@ function buildTooltipSeries(bucket: ReturnType<typeof computeActivityAnalytics>[
     return [{ name: 'Prod.', value: resolveGroupedVisibleProductivityLabel(bucket), color, shape: 'square' }];
 }
 
-function resolveProdTrendChartLayout(panelHeight: number) {
-    return {
-        chartMargin: CHART_MARGIN,
-        chartHeight: Math.max(
-            Math.round(panelHeight),
-            CHART_MARGIN.top + CHART_MARGIN.bottom + STANDARD_CHART_MIN_HEIGHT_PX,
-        ),
-    };
+function resolveProdTrendChartHeight(panelHeight: number) {
+    return Math.max(
+        Math.round(panelHeight),
+        CHART_MARGIN.top + CHART_MARGIN.bottom + STANDARD_CHART_MIN_HEIGHT_PX,
+    );
 }
 
 function resolveGroupsLayout(width: number, groupCount: number) {
@@ -1007,61 +977,20 @@ function resolveXAxisModel({
     grouped,
     width,
     layout,
-    chartMargin,
-    barWidthFactor,
 }: {
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     width: number;
     layout: { density: 'fit' | 'compress' | 'scroll'; minSlotWidthPx: number; sampleLabels: boolean };
-    chartMargin: { left: number; right: number };
-    barWidthFactor: number;
 }) {
     const chartWidth = layout.density === 'scroll'
-        ? Math.max(width, chartMargin.left + chartMargin.right + (grouped.length * layout.minSlotWidthPx))
+        ? Math.max(width, CHART_MARGIN.left + CHART_MARGIN.right + (grouped.length * layout.minSlotWidthPx))
         : width;
-    const plotWidth = Math.max(chartWidth - chartMargin.left - chartMargin.right, 1);
-    const safeBarWidthFactor = clampActivityAnalyticsGroupBarWidth(barWidthFactor);
-    const slotWidth = Math.max(plotWidth / Math.max(grouped.length, 1), 1);
-    const targetGap = clamp(
-        slotWidth * (layout.density === 'fit' ? 0.26 : layout.density === 'compress' ? 0.2 : 0.16),
-        layout.density === 'fit' ? 18 : layout.density === 'compress' ? 10 : 8,
-        layout.density === 'fit' ? 30 : layout.density === 'compress' ? 20 : 16,
-    );
-    const baseBarWidth = Math.max(
-        Math.min(slotWidth * (layout.density === 'fit' ? 0.68 : layout.density === 'compress' ? 0.62 : 0.56), slotWidth - targetGap),
-        6,
-    );
-    const barWidth = clamp(baseBarWidth * safeBarWidthFactor, 6, Math.max(slotWidth - 4, 6));
-    const horizontalPadding = Math.max(barWidth * (layout.density === 'fit' ? 0.54 : layout.density === 'compress' ? 0.42 : 0.48), 6);
-    const usablePlotWidth = Math.max(plotWidth - (2 * horizontalPadding), 1);
-    const positions = grouped.length > 1
-        ? grouped.map((_, index) => chartMargin.left + ((plotWidth * index) / (grouped.length - 1)))
-        : grouped.map(() => chartMargin.left + horizontalPadding + (usablePlotWidth / 2));
     const labels = grouped.map((bucket) => bucket.label.replace(/\s+\((?:en\s+curso)\)$/i, '').trim());
-    const visibleLabelIndices = layout.sampleLabels
-        ? computeVisibleLabelIndices(
-            labels,
-            positions,
-            getChartTextFont(),
-            8,
-            chartMargin.left + plotWidth,
-            getChartLetterSpacingPx(),
-        )
-        : new Set(grouped.map((_, index) => index));
-    ensureLastXAxisLabelVisibility({
-        visibleLabelIndices,
-        labels,
-        positions,
-        font: getChartTextFont(),
-        letterSpacing: getChartLetterSpacingPx(),
-        minGap: 8,
-    });
 
     return {
         chartWidth,
-        positions,
         labels,
-        visibleLabelIndices,
+        sampleLabels: layout.sampleLabels,
     };
 }
 
@@ -1092,7 +1021,7 @@ function ensureLastXAxisLabelVisibility({
     const lastBounds = resolveXAxisLabelBounds({
         x: positions[lastIndex] ?? 0,
         width: measureChartTextWidthPx(labels[lastIndex] ?? '', font, letterSpacing),
-        anchor: 'end',
+        anchor: 'middle',
     });
 
     Array.from(visibleLabelIndices)
@@ -1100,11 +1029,10 @@ function ensureLastXAxisLabelVisibility({
         .sort((left, right) => right - left)
         .forEach((index) => {
             const width = measureChartTextWidthPx(labels[index] ?? '', font, letterSpacing);
-            const anchor = index === 0 ? 'start' : 'middle';
             const bounds = resolveXAxisLabelBounds({
                 x: positions[index] ?? 0,
                 width,
-                anchor,
+                anchor: 'middle',
             });
 
             if (bounds.right > lastBounds.left - minGap) {
@@ -1298,27 +1226,22 @@ function usePrefersReducedMotion() {
 function useTravelingEffectCycle({ enabled, durationSeconds }: { enabled: boolean; durationSeconds: number }) {
     const prefersReducedMotion = usePrefersReducedMotion();
     const [cycleKey, setCycleKey] = useState(0);
-    const [progress, setProgress] = useState(0);
-    const [isPaused, setIsPaused] = useState(false);
+    const [travelState, setTravelState] = useState({ cycleKey: 0, progress: 0, isPaused: false });
 
     useEffect(() => {
         if (!enabled || prefersReducedMotion) {
-            setProgress(0);
-            setIsPaused(false);
             return undefined;
         }
 
         const travelDurationMs = durationSeconds * 1000;
         const pauseMs = Math.round(TRAVELING_GLOW_PAUSE_MIN_MS + (Math.random() * (TRAVELING_GLOW_PAUSE_MAX_MS - TRAVELING_GLOW_PAUSE_MIN_MS)));
         const startTime = performance.now();
+        const activeCycleKey = cycleKey;
         let frameId = 0;
-
-        setProgress(0);
-        setIsPaused(false);
 
         const animate = (now: number) => {
             const nextProgress = clamp(now - startTime, 0, travelDurationMs) / travelDurationMs;
-            setProgress(nextProgress);
+            setTravelState({ cycleKey: activeCycleKey, progress: nextProgress, isPaused: false });
 
             if (nextProgress < 1) {
                 frameId = window.requestAnimationFrame(animate);
@@ -1327,8 +1250,7 @@ function useTravelingEffectCycle({ enabled, durationSeconds }: { enabled: boolea
 
         frameId = window.requestAnimationFrame(animate);
         const hideTimerId = window.setTimeout(() => {
-            setProgress(1);
-            setIsPaused(true);
+            setTravelState({ cycleKey: activeCycleKey, progress: 1, isPaused: true });
         }, travelDurationMs);
         const restartTimerId = window.setTimeout(() => setCycleKey((current) => current + 1), travelDurationMs + pauseMs);
 
@@ -1338,6 +1260,11 @@ function useTravelingEffectCycle({ enabled, durationSeconds }: { enabled: boolea
             window.clearTimeout(restartTimerId);
         };
     }, [cycleKey, durationSeconds, enabled, prefersReducedMotion]);
+
+    const isAnimationDisabled = !enabled || prefersReducedMotion;
+    const isCurrentCycleState = travelState.cycleKey === cycleKey;
+    const progress = isAnimationDisabled || !isCurrentCycleState ? 0 : travelState.progress;
+    const isPaused = isAnimationDisabled || !isCurrentCycleState ? false : travelState.isPaused;
 
     return { prefersReducedMotion, cycleKey, progress, isPaused };
 }

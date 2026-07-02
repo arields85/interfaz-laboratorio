@@ -8,6 +8,11 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
+import {
+    resolveWidgetChartLayoutMetrics,
+    WIDGET_CHART_CONTAINER_CLASS,
+    WIDGET_CHART_HEADER_CLASS,
+} from '../../components/ui/WidgetChartLayout.shared';
 import { DEFAULT_PROD_TREND_LINE_COLORS } from '../../utils/prodTrendWidgetDefaults';
 import ProdTrendWidget from './ProdTrendWidget';
 
@@ -63,6 +68,19 @@ function makeWidget(overrides?: Partial<ProdTrendWidgetConfig>): ProdTrendWidget
         displayOptions: { range: '7d', groupBy: 'day', setupThresholdKw: 0.15, prodThresholdKw: 0.25 },
         ...overrides,
     };
+}
+
+function resolveExpectedProdTrendLayout(firstLabel: string, lastLabel: string) {
+    return resolveWidgetChartLayoutMetrics({
+        width: 640,
+        height: 180,
+        hasTopAdornments: true,
+        firstXAxisLabel: firstLabel,
+        lastXAxisLabel: lastLabel,
+        yAxisTickLabels: ['100', '75', '50', '25', '0'],
+        idPrefix: 'prod-trend-test-layout',
+        alignPlotAreaToXAxisLabels: true,
+    });
 }
 
 function buildDenseActivitySeries(startIso: string, points: number, bucketMs: number, value: number) {
@@ -133,35 +151,58 @@ describe('ProdTrendWidget', () => {
         expect(chart).toHaveAttribute('data-y-domain-max', '100');
         expect(screen.queryByTestId('prod-trend-widget-panel')).not.toBeInTheDocument();
         expect(screen.getByTestId('prod-trend-widget-chart-shell')).toBeInTheDocument();
+        expect(screen.getByText('PROD-TREND').closest(`.${WIDGET_CHART_HEADER_CLASS.split(' ').join('.')}`)).toHaveClass(...WIDGET_CHART_HEADER_CLASS.split(' '));
+        expect(screen.getByTestId('prod-trend-widget-chart-shell')).toHaveClass(...WIDGET_CHART_CONTAINER_CLASS.split(' '));
+        expect(screen.getByTestId('prod-trend-widget-y-axis-unit')).toHaveTextContent('%');
         expect(screen.getAllByTestId('prod-trend-widget-y-axis-tick').map((node) => node.textContent)).toEqual([
-            '100%',
-            '75%',
-            '50%',
-            '25%',
-            '0%',
+            '100',
+            '75',
+            '50',
+            '25',
+            '0',
         ]);
         const xAxisLabels = screen.getAllByTestId('prod-trend-widget-x-axis-label');
-        expect(xAxisLabels[0]).toHaveAttribute('x', '38');
-        expect(xAxisLabels[0]).toHaveAttribute('text-anchor', 'start');
+        const expectedLayout = resolveExpectedProdTrendLayout(
+            xAxisLabels[0]?.textContent ?? '',
+            xAxisLabels.at(-1)?.textContent ?? '',
+        );
+        xAxisLabels.forEach((label) => {
+            expect(label).toHaveAttribute('text-anchor', 'middle');
+        });
+        expect(xAxisLabels[0]).toHaveAttribute('x', String(expectedLayout.xAxisLabels.left));
+        expect(xAxisLabels.at(-1)).toHaveAttribute('x', String(expectedLayout.xAxisLabels.right));
         expect(screen.getByTestId('prod-trend-widget-final-point-pulse')).toBeInTheDocument();
         expect(screen.getByTestId('prod-trend-widget-final-point-aura')).toHaveClass(
             'activity-analytics-prod-trend-final-point-flicker',
             'activity-analytics-prod-trend-final-point-flicker-aura',
         );
+        const chartSvg = screen.getByTestId('prod-trend-widget-chart');
+        const overlaySvg = screen.getByTestId('prod-trend-widget-overlay-svg');
+        const pulse = screen.getByTestId('prod-trend-widget-final-point-pulse');
+        const latestValueLabel = screen.getByTestId('prod-trend-widget-latest-value-label');
+
+        expect(overlaySvg).toHaveClass('pointer-events-none', 'absolute', 'left-0');
+        expect(overlaySvg).toHaveStyle({ top: '-20px', overflow: 'visible' });
+        expect(overlaySvg).toHaveAttribute('viewBox', '0 -20 660 200');
         expect(screen.getByTestId('prod-trend-widget-latest-point-overlay')).not.toHaveAttribute('clip-path');
-        expect(screen.getByTestId('prod-trend-widget-final-point-pulse').parentElement).not.toHaveAttribute('clip-path');
-        expect(screen.getByTestId('prod-trend-widget-latest-value-label').parentElement).not.toHaveAttribute('clip-path');
-        expect(screen.getByTestId('prod-trend-widget-latest-value-label')).toHaveAttribute(
+        expect(pulse.closest('svg')).toBe(overlaySvg);
+        expect(latestValueLabel.closest('svg')).toBe(overlaySvg);
+        expect(chartSvg).not.toContainElement(pulse);
+        expect(chartSvg).not.toContainElement(latestValueLabel);
+        expect(latestValueLabel).toHaveAttribute(
             'x',
-            screen.getByTestId('prod-trend-widget-final-point-pulse').getAttribute('cx') ?? '',
+            pulse.getAttribute('cx') ?? '',
         );
-        expect(screen.getByTestId('prod-trend-widget-latest-value-label')).toHaveAttribute('text-anchor', 'middle');
+        expect(pulse).toHaveAttribute('cx', String(expectedLayout.plotArea.right));
+        expect(latestValueLabel).toHaveAttribute('text-anchor', 'middle');
         expect(screen.getByTestId('prod-trend-widget-traveling-glow')).toBeInTheDocument();
+        expect(screen.getByTestId('prod-trend-widget-chart-shell')).toHaveClass('-mx-3', '-mb-3');
+        expect(screen.getByTestId('prod-trend-widget-chart-shell')).not.toHaveClass('mt-2');
         expect(screen.getByTestId('prod-trend-widget-viewport')).toHaveClass('overflow-hidden');
         expect(screen.getByTestId('prod-trend-widget-viewport')).not.toHaveClass('hmi-scrollbar', 'overflow-x-auto');
     });
 
-    it('applies the ACT-ANALYTICS temporal header selectors to range and grouping at runtime', async () => {
+    it('applies the PROD-TREND temporal header selectors to range and grouping at runtime', async () => {
         const user = userEvent.setup();
 
         vi.mocked(useActivitySeries).mockReturnValue({
@@ -194,38 +235,38 @@ describe('ProdTrendWidget', () => {
         expect(getGroupButton('MES')).toBeDisabled();
         expect(getGroupButton('SEMANA')).toHaveClass('cursor-default');
         expect(getGroupButton('SEMANA')).not.toHaveClass('disabled:cursor-not-allowed');
-        expect(initialRangeButton).toHaveClass('group/control', 'text-industrial-text');
-        expect(initialRangeButton).not.toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
+        expect(initialRangeButton).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(initialRangeButton).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expect(initialRangeLabel).toHaveClass('translate-y-[1.5px]');
-        expect(initialRangeButton).not.toHaveClass('border-b-2', 'border-current', 'rounded-md', 'bg-admin-accent/10', 'border-admin-accent/30', 'text-admin-accent');
-        expectRuntimeControlIndicator(initialRangeButton, ['bg-current', 'group-hover/control:bg-current'], ['group-hover:bg-current', 'bg-industrial-muted']);
-        expect(getGroupButton('DÍA')).toHaveClass('group/control', 'text-industrial-text');
-        expect(getGroupButton('DÍA')).not.toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
+        expectRuntimeControlIndicator(initialRangeButton, ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
+        expect(getGroupButton('DÍA')).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(getGroupButton('DÍA')).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expect(initialGroupLabel).toHaveClass('translate-y-[1.5px]');
-        expectRuntimeControlIndicator(getGroupButton('DÍA'), ['bg-current', 'group-hover/control:bg-current'], ['group-hover:bg-current', 'bg-industrial-muted']);
+        expectRuntimeControlIndicator(getGroupButton('DÍA'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
 
         await user.click(screen.getByRole('button', { name: '30d' }));
 
         expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: '30d' })).toHaveClass('text-industrial-text');
-        expect(screen.getByRole('button', { name: '30d' })).not.toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expectRuntimeControlIndicator(screen.getByRole('button', { name: '30d' }), ['bg-current', 'group-hover/control:bg-current'], ['group-hover:bg-current', 'bg-industrial-muted']);
+        expect(screen.getByRole('button', { name: '30d' })).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(screen.getByRole('button', { name: '30d' })).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
+        expectRuntimeControlIndicator(screen.getByRole('button', { name: '30d' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(screen.getByRole('button', { name: '7d' })).toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expectRuntimeControlIndicator(screen.getByRole('button', { name: '7d' }), ['bg-transparent', 'group-hover/control:bg-current'], ['group-hover:bg-current']);
+        expect(screen.getByRole('button', { name: '7d' })).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expectRuntimeControlIndicator(screen.getByRole('button', { name: '7d' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current']);
         expect(vi.mocked(useActivitySeries)).toHaveBeenLastCalledWith({ machineId: 101, range: '30d' });
         expect(getGroupButton('DÍA')).toHaveAttribute('aria-pressed', 'true');
 
         await user.click(screen.getByRole('button', { name: '12m' }));
 
         expect(screen.getByRole('button', { name: '12m' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: '12m' })).toHaveClass('text-industrial-text');
-        expect(screen.getByRole('button', { name: '12m' })).not.toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expectRuntimeControlIndicator(screen.getByRole('button', { name: '12m' }), ['bg-current', 'group-hover/control:bg-current'], ['group-hover:bg-current', 'bg-industrial-muted']);
+        expect(screen.getByRole('button', { name: '12m' })).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(screen.getByRole('button', { name: '12m' })).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
+        expectRuntimeControlIndicator(screen.getByRole('button', { name: '12m' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(vi.mocked(useActivitySeries)).toHaveBeenLastCalledWith({ machineId: 101, range: '12m' });
         expect(getGroupButton('TURNO')).toHaveAttribute('aria-pressed', 'true');
-        expect(getGroupButton('TURNO')).toHaveClass('text-industrial-text');
-        expect(getGroupButton('TURNO')).not.toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expectRuntimeControlIndicator(getGroupButton('TURNO'), ['bg-current', 'group-hover/control:bg-current'], ['group-hover:bg-current', 'bg-industrial-muted']);
+        expect(getGroupButton('TURNO')).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(getGroupButton('TURNO')).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
+        expectRuntimeControlIndicator(getGroupButton('TURNO'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(getGroupButton('SEMANA')).toBeDisabled();
         expect(getGroupButton('MES')).toBeEnabled();
         expect(getGroupButton('SEMANA')).toHaveClass('cursor-default', 'text-industrial-muted/50');
@@ -234,11 +275,12 @@ describe('ProdTrendWidget', () => {
         await user.click(getGroupButton('MES'));
 
         expect(getGroupButton('MES')).toHaveAttribute('aria-pressed', 'true');
-        expect(getGroupButton('MES')).toHaveClass('text-industrial-text');
-        expect(getGroupButton('MES')).not.toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expectRuntimeControlIndicator(getGroupButton('MES'), ['bg-current', 'group-hover/control:bg-current'], ['group-hover:bg-current', 'bg-industrial-muted']);
+        expect(getGroupButton('MES')).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(getGroupButton('MES')).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
+        expectRuntimeControlIndicator(getGroupButton('MES'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(getGroupButton('TURNO')).toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expectRuntimeControlIndicator(getGroupButton('TURNO'), ['bg-transparent', 'group-hover/control:bg-current'], ['group-hover:bg-current']);
+        expect(getGroupButton('TURNO')).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expectRuntimeControlIndicator(getGroupButton('TURNO'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current']);
     });
 
     it('renders temporal controls in one horizontal row with the separator restored', () => {
@@ -374,7 +416,7 @@ describe('ProdTrendWidget', () => {
         expect(chart.innerHTML).toContain(DEFAULT_PROD_TREND_LINE_COLORS[0]);
     });
 
-    it('keeps the final sampled X-axis label visible and right-anchored at the chart edge', () => {
+    it('keeps the final sampled X-axis label visible and centered on the safe plot boundary', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: {
                 contractVersion: '1.0.0',
@@ -406,10 +448,22 @@ describe('ProdTrendWidget', () => {
 
         const xAxisLabels = screen.getAllByTestId('prod-trend-widget-x-axis-label');
         const lastXAxisLabel = xAxisLabels.at(-1);
+        const expectedLayout = resolveExpectedProdTrendLayout(
+            xAxisLabels[0]?.textContent ?? '',
+            lastXAxisLabel?.textContent ?? '',
+        );
+        const finalPointPulse = screen.getByTestId('prod-trend-widget-final-point-pulse');
 
         expect(xAxisLabels.length).toBeLessThan(13);
         expect(lastXAxisLabel).toHaveTextContent('30/06');
-        expect(lastXAxisLabel).toHaveAttribute('text-anchor', 'end');
+        xAxisLabels.forEach((label) => {
+            expect(label).toHaveAttribute('text-anchor', 'middle');
+            expect(label).not.toHaveAttribute('text-anchor', 'start');
+            expect(label).not.toHaveAttribute('text-anchor', 'end');
+        });
+        expect(lastXAxisLabel).toHaveAttribute('x', String(expectedLayout.xAxisLabels.right));
+        expect(finalPointPulse).toHaveAttribute('cx', String(expectedLayout.plotArea.right));
+        expect(lastXAxisLabel).toHaveAttribute('x', finalPointPulse.getAttribute('cx') ?? '');
     });
 
     it('shows the missing-machine fallback when no machine is configured', () => {

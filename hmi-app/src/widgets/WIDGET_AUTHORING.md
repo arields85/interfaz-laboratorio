@@ -22,6 +22,7 @@ Todo widget nuevo debe:
 
 ### Header
 - Si el widget tiene encabezado, usar `components/ui/WidgetHeader.tsx`.
+- Para escalas temporales compactas en el extremo derecho del header, usar `components/ui/WidgetHeaderTemporalControls.tsx` dentro de `WidgetHeader.trailing`.
 - `subtitle` = texto secundario del header.
 - `subtext` = texto inferior/footer del widget.
 - Usar `WidgetHeader` con alineación estándar (default). No pasar `alignment` salvo excepción justificada.
@@ -34,6 +35,7 @@ Todo widget nuevo debe:
 - El campo `Título` es contenido editable del widget/header. Puede usar copy de negocio libre y NO debe mutar la identidad canónica del badge.
 - Los títulos largos se truncan automáticamente con puntos suspensivos gracias a `grid-cols-[minmax(0,1fr)]` en el grid del header.
 - El comportamiento hover está integrado en `WidgetHeader`: el ícono transiciona `opacity-70 → opacity-100`, el título transiciona `text-industrial-muted → text-white`. Requiere la clase `group` en el `glass-panel` ancestro.
+- `WidgetHeaderTemporalControls` soporta variantes `pill` y `underline`, un grupo simple o dos grupos separados por divisor vertical, labels/values arbitrarios y disabled con `cursor-default`.
 
 ### Layout (elegir patrón explícito)
 - **Patrón A — flujo natural (`header + body + footer`)**:
@@ -47,6 +49,7 @@ Todo widget nuevo debe:
   - Usar cuando el widget tiene controles interactivos (selectores, toggles) que deben flotar sobre el header sin participar de su layout.
   - Los controles se posicionan con `absolute right-5 top-5 z-10` como hijo directo del `glass-panel`.
   - El `WidgetHeader` NO debe usar `trailing` para controles multi-fila; usar overlay en su lugar.
+  - Para controles temporales horizontales compactos de una o dos escalas, preferir `WidgetHeaderTemporalControls` en `WidgetHeader.trailing` antes que overlay.
   - Ejemplo: `prod-history` con selector de bucket + toggle OEE como overlay.
 
 ### Acciones y selección
@@ -171,6 +174,7 @@ Estas reglas deben cristalizarse en primitives reutilizables siempre que el patr
 ## Primitives canónicas
 
 - `hmi-app/src/components/ui/WidgetHeader.tsx`
+- `hmi-app/src/components/ui/WidgetHeaderTemporalControls.tsx`
 - `hmi-app/src/components/ui/WidgetCenteredContentLayout.tsx`
 - `hmi-app/src/components/ui/WidgetHoverActions.tsx`
 - `hmi-app/src/components/ui/GridSelectionFrame.tsx`

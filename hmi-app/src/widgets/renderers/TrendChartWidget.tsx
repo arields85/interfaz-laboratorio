@@ -17,17 +17,29 @@ import {
     buildAreaPath,
     formatTick,
     clamp,
-    computeVisibleLabelIndices,
     getChartLetterSpacingPx,
     getChartTextFont,
     type Point,
 } from '../../utils/chartHelpers';
 import WidgetHeader from '../../components/ui/WidgetHeader';
-import WidgetSegmentedControl from '../../components/ui/WidgetSegmentedControl';
-import type { SegmentedOption } from '../../components/ui/WidgetSegmentedControl';
+import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
+import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
+import {
+    resolveWidgetChartLayoutMetrics,
+    WIDGET_CHART_CONTAINER_CLASS,
+    WIDGET_CHART_HEADER_CLASS,
+} from '../../components/ui/WidgetChartLayout.shared';
+import { buildTrendChartVisibleLabelIndices } from './trendChartVisibleLabels';
+
+const SYSTEM_TEXT_STYLE = {
+    fontSize: 'var(--font-size-system)',
+    fontFamily: 'var(--font-system)',
+    fontWeight: 'var(--font-weight-system)',
+    letterSpacing: 'var(--tracking-system)',
+} as const;
 
 // =============================================================================
 // TrendChartWidget
@@ -54,6 +66,13 @@ const TOKEN = {
     icon: 'var(--color-widget-icon)',
 } as const;
 
+const TREND_CHART_LAYOUT_MARGIN = {
+    top: 10,
+    right: 12,
+    bottom: 24,
+    left: 45,
+} as const;
+
 interface TrendChartWidgetProps {
     widget: TrendChartWidgetConfig;
     equipmentMap: Map<string, EquipmentSummary>;
@@ -69,6 +88,12 @@ interface TrendChartSvgProps {
     data: Array<{ time: string; value: number }>;
     domainMin: number;
     domainMax: number;
+    unit?: string;
+    summary?: {
+        min: number | null;
+        max: number | null;
+        avg: number | null;
+    };
     thresholds?: ThresholdRule[];
     hoveredIndex: number | null;
     onHoverChange: (index: number | null, x?: number) => void;
@@ -82,11 +107,16 @@ interface TrendChartContainerProps {
     thresholds?: ThresholdRule[];
     seriesName: string;
     unit?: string;
+    summary?: {
+        min: number | null;
+        max: number | null;
+        avg: number | null;
+    };
 }
 
 const MONTH_SHORT_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] as const;
 
-const HISTORY_RANGE_OPTIONS: SegmentedOption<HistoryRange>[] = HISTORY_RANGES.map((range) => ({
+const HISTORY_RANGE_OPTIONS = HISTORY_RANGES.map((range) => ({
     value: range,
     label: HISTORY_RANGE_LABELS[range],
 }));
@@ -122,6 +152,13 @@ function formatSummaryValue(value: number | null): string {
     return value === null ? '--' : formatTick(value);
 }
 
+function formatSummarySlotValue(value: number | null, unit?: string): string {
+    const formattedValue = formatSummaryValue(value);
+    const normalizedUnit = unit?.trim().toLowerCase();
+
+    return normalizedUnit ? `${formattedValue}${normalizedUnit}` : formattedValue;
+}
+
 function TrendChartSvg({
     widgetId,
     width,
@@ -129,22 +166,46 @@ function TrendChartSvg({
     data,
     domainMin,
     domainMax,
+    unit,
+    summary,
     thresholds,
     hoveredIndex,
     onHoverChange,
 }: TrendChartSvgProps) {
     if (width <= 0 || height <= 0 || data.length === 0) return null;
 
-    const margin = { top: 10, right: 12, bottom: 24, left: 45 } as const;
-    const plotWidth = Math.max(width - margin.left - margin.right, 1);
-    const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
+    const xLabels = data.map((item) => item.time);
+    const chartFont = getChartTextFont();
+    const chartLetterSpacing = getChartLetterSpacingPx();
+    const hasUnit = Boolean(unit);
+    const hasSummary = Boolean(summary);
+    const yTicks = Array.from({ length: 5 }, (_, index) => ({
+        value: domainMax - (((domainMax - domainMin) * index) / 4),
+    }));
+    const chartLayout = resolveWidgetChartLayoutMetrics({
+        width,
+        height,
+        hasTopAdornments: hasUnit || hasSummary,
+        firstXAxisLabel: xLabels[0] ?? '',
+        lastXAxisLabel: xLabels[xLabels.length - 1] ?? '',
+        yAxisTickLabels: yTicks.map((tick) => formatTick(tick.value)),
+        idPrefix: widgetId,
+        font: chartFont,
+        letterSpacing: chartLetterSpacing,
+        baseMargin: TREND_CHART_LAYOUT_MARGIN,
+        topAdornmentReservedHeight: 12,
+        topAdornmentOffset: 11,
+        alignPlotAreaToXAxisLabels: true,
+    });
+    const plotWidth = chartLayout.plotArea.width;
+    const plotHeight = chartLayout.plotArea.height;
     const step = plotWidth / Math.max(data.length - 1, 1);
-    const x0 = margin.left;
+    const x0 = chartLayout.plotArea.left;
 
     const range = Math.max(domainMax - domainMin, 1);
     const toY = (value: number) => {
         const ratio = clamp((value - domainMin) / range, 0, 1);
-        return margin.top + plotHeight - (ratio * plotHeight);
+        return chartLayout.plotArea.top + plotHeight - (ratio * plotHeight);
     };
 
     const points: Point[] = data.map((item, index) => ({
@@ -153,16 +214,16 @@ function TrendChartSvg({
     }));
 
     const linePath = smoothPath(points);
-    const areaPath = buildAreaPath(linePath, points, margin.top + plotHeight);
+    const areaPath = buildAreaPath(linePath, points, chartLayout.plotArea.bottom);
     const lastPoint = points[points.length - 1];
 
     const gridLines = Array.from({ length: 5 }, (_, index) => ({
-        y: margin.top + ((index / 4) * plotHeight),
+        y: chartLayout.plotArea.top + ((index / 4) * plotHeight),
     }));
 
-    const yTicks = Array.from({ length: 5 }, (_, index) => ({
-        value: domainMax - (((domainMax - domainMin) * index) / 4),
-        y: margin.top + ((index / 4) * plotHeight),
+    const resolvedYTicks = yTicks.map((tick, index) => ({
+        ...tick,
+        y: chartLayout.plotArea.top + ((index / 4) * plotHeight),
     }));
 
     const lineGradientId = `trend-line-grad-${widgetId}`;
@@ -172,120 +233,231 @@ function TrendChartSvg({
     const glowId = `trend-glow-${widgetId}`;
 
     return (
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-            <defs>
-                {/* Horizontal gradient for line stroke */}
-                <linearGradient id={lineGradientId} x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor={TOKEN.gradientFrom} stopOpacity={0.7} />
-                    <stop offset="100%" stopColor={TOKEN.gradientTo} stopOpacity={0.7} />
-                </linearGradient>
-
-                {/* Horizontal gradient for area color */}
-                <linearGradient id={colorGradientId} x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor={TOKEN.gradientFrom} />
-                    <stop offset="100%" stopColor={TOKEN.gradientTo} />
-                </linearGradient>
-
-                {/* Vertical fade for area mask */}
-                <linearGradient id={fadeGradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="white" stopOpacity={0.7} />
-                    <stop offset="100%" stopColor="white" stopOpacity={0} />
-                </linearGradient>
-
-                <mask id={maskId} maskContentUnits="objectBoundingBox">
-                    <rect x="0" y="0" width="1" height="1" fill={`url(#${fadeGradientId})`} />
-                </mask>
-
-                {/* Glow filter for line */}
-                <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
-                    <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                </filter>
-            </defs>
-
-            {gridLines.map(({ y }) => (
-                <line
-                    key={y}
-                    x1={margin.left}
-                    x2={margin.left + plotWidth}
-                    y1={y}
-                    y2={y}
-                    stroke={TOKEN.grid}
-                    strokeDasharray="3 3"
-                />
-            ))}
-
-            <line
-                x1={margin.left}
-                y1={margin.top}
-                x2={margin.left}
-                y2={margin.top + plotHeight}
-                stroke={TOKEN.border}
-            />
-            <line
-                x1={margin.left}
-                y1={margin.top + plotHeight}
-                x2={margin.left + plotWidth}
-                y2={margin.top + plotHeight}
-                stroke={TOKEN.border}
-            />
-
-            {thresholds?.map((t, idx) => {
-                const ty = toY(t.value);
-                if (ty < margin.top || ty > margin.top + plotHeight) return null;
-                const color = t.severity === 'critical' ? TOKEN.statusCritical : TOKEN.statusWarning;
+        <WidgetChartLayout
+            layout={chartLayout}
+            svgTestId="trend-chart-svg"
+            overlaySvgTestId="trend-chart-overlay-svg"
+            renderMain={(layout) => {
+                const xPositions = data.map((_, index) => x0 + (index * step));
+                const visibleIndices = new Set(buildTrendChartVisibleLabelIndices({
+                    labels: xLabels,
+                    positions: xPositions,
+                    plotWidth,
+                    font: chartFont,
+                    letterSpacing: chartLetterSpacing,
+                    minGap: 8,
+                }));
 
                 return (
-                    <g key={`threshold-${idx}`}>
+                    <>
+                        <defs>
+                            <linearGradient id={lineGradientId} x1="0" y1="0" x2="1" y2="0">
+                                <stop offset="0%" stopColor={TOKEN.gradientFrom} stopOpacity={0.7} />
+                                <stop offset="100%" stopColor={TOKEN.gradientTo} stopOpacity={0.7} />
+                            </linearGradient>
+
+                            <linearGradient id={colorGradientId} x1="0" y1="0" x2="1" y2="0">
+                                <stop offset="0%" stopColor={TOKEN.gradientFrom} />
+                                <stop offset="100%" stopColor={TOKEN.gradientTo} />
+                            </linearGradient>
+
+                            <linearGradient id={fadeGradientId} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="white" stopOpacity={0.7} />
+                                <stop offset="100%" stopColor="white" stopOpacity={0} />
+                            </linearGradient>
+
+                            <mask id={maskId} maskContentUnits="objectBoundingBox">
+                                <rect x="0" y="0" width="1" height="1" fill={`url(#${fadeGradientId})`} />
+                            </mask>
+
+                            <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
+                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feMerge>
+                                    <feMergeNode in="blur" />
+                                    <feMergeNode in="SourceGraphic" />
+                                </feMerge>
+                            </filter>
+                        </defs>
+
+                        {hasUnit && (
+                            <text
+                                data-testid="trend-chart-y-axis-unit"
+                                x={layout.yAxisUnitSlot.x}
+                                y={layout.yAxisUnitSlot.y}
+                                textAnchor={layout.yAxisUnitSlot.textAnchor}
+                                fill={TOKEN.icon}
+                                fontSize={SYSTEM_TEXT_STYLE.fontSize}
+                                fontFamily={SYSTEM_TEXT_STYLE.fontFamily}
+                                fontWeight={SYSTEM_TEXT_STYLE.fontWeight}
+                                letterSpacing={SYSTEM_TEXT_STYLE.letterSpacing}
+                            >
+                                {unit?.toUpperCase()}
+                            </text>
+                        )}
+
+                        {summary && (
+                            <text
+                                data-testid="trend-chart-summary"
+                                x={layout.topMetaSlot.x}
+                                y={layout.topMetaSlot.y}
+                                textAnchor={layout.topMetaSlot.textAnchor}
+                                fill={TOKEN.muted}
+                                fontSize={SYSTEM_TEXT_STYLE.fontSize}
+                                fontFamily={SYSTEM_TEXT_STYLE.fontFamily}
+                                fontWeight={SYSTEM_TEXT_STYLE.fontWeight}
+                                letterSpacing={SYSTEM_TEXT_STYLE.letterSpacing}
+                            >
+                                <tspan data-testid="trend-chart-summary-min">
+                                    {`min ${formatSummarySlotValue(summary.min, unit)}`}
+                                </tspan>
+                                <tspan data-testid="trend-chart-summary-max" dx="12">
+                                    {`max ${formatSummarySlotValue(summary.max, unit)}`}
+                                </tspan>
+                                <tspan data-testid="trend-chart-summary-avg" dx="12">
+                                    {`avg ${formatSummarySlotValue(summary.avg, unit)}`}
+                                </tspan>
+                            </text>
+                        )}
+
+                        {gridLines.map(({ y }) => (
+                            <line
+                                key={y}
+                                x1={layout.plotArea.left}
+                                x2={layout.plotArea.right}
+                                y1={y}
+                                y2={y}
+                                stroke={TOKEN.grid}
+                                strokeDasharray="3 3"
+                            />
+                        ))}
+
                         <line
-                            x1={margin.left}
-                            x2={margin.left + plotWidth}
-                            y1={ty}
-                            y2={ty}
-                            stroke={color}
-                            strokeDasharray="6 3"
-                            strokeWidth={1.5}
+                            x1={layout.plotArea.left}
+                            y1={layout.plotArea.top}
+                            x2={layout.plotArea.left}
+                            y2={layout.plotArea.bottom}
+                            stroke={TOKEN.border}
                         />
-                        <text
-                            x={margin.left + plotWidth - 4}
-                            y={ty - 6}
-                            textAnchor="end"
-                            fill={color}
-                            fontSize="var(--font-size-chart)"
-                            fontFamily="var(--font-chart)"
-                            fontWeight="var(--font-weight-chart)"
-                            letterSpacing="var(--tracking-chart)"
-                        >
-                            {t.label || (t.severity === 'critical' ? 'CRIT' : 'WARN')}
-                        </text>
-                    </g>
+                        <line
+                            x1={layout.plotArea.left}
+                            y1={layout.plotArea.bottom}
+                            x2={layout.plotArea.right}
+                            y2={layout.plotArea.bottom}
+                            stroke={TOKEN.border}
+                        />
+
+                        {thresholds?.map((t, idx) => {
+                            const ty = toY(t.value);
+                            if (ty < layout.plotArea.top || ty > layout.plotArea.bottom) return null;
+                            const color = t.severity === 'critical' ? TOKEN.statusCritical : TOKEN.statusWarning;
+
+                            return (
+                                <g key={`threshold-${idx}`}>
+                                    <line
+                                        x1={layout.plotArea.left}
+                                        x2={layout.plotArea.right}
+                                        y1={ty}
+                                        y2={ty}
+                                        stroke={color}
+                                        strokeDasharray="6 3"
+                                        strokeWidth={1.5}
+                                    />
+                                    <text
+                                        x={layout.plotArea.right - 4}
+                                        y={ty - 6}
+                                        textAnchor="end"
+                                        fill={color}
+                                        fontSize="var(--font-size-chart)"
+                                        fontFamily="var(--font-chart)"
+                                        fontWeight="var(--font-weight-chart)"
+                                        letterSpacing="var(--tracking-chart)"
+                                    >
+                                        {t.label || (t.severity === 'critical' ? 'CRIT' : 'WARN')}
+                                    </text>
+                                </g>
+                            );
+                        })}
+
+                        <g clipPath={`url(#${layout.plotClipPathId})`}>
+                            {areaPath.length > 0 && (
+                                <path
+                                    d={areaPath}
+                                    fill={`url(#${colorGradientId})`}
+                                    mask={`url(#${maskId})`}
+                                />
+                            )}
+
+                            {linePath.length > 0 && (
+                                <path
+                                    d={linePath}
+                                    stroke={`url(#${lineGradientId})`}
+                                    strokeWidth={2.5}
+                                    fill="none"
+                                    filter={`url(#${glowId})`}
+                                />
+                            )}
+                        </g>
+
+                        {data.map((item, index) => {
+                            if (!visibleIndices.has(index)) return null;
+                            return (
+                                <text
+                                    key={`x-label-${index}`}
+                                    data-testid="trend-chart-x-axis-label"
+                                    x={x0 + (index * step)}
+                                    y={layout.xAxisLabels.y}
+                                    textAnchor="middle"
+                                    fill={TOKEN.muted}
+                                    fontSize="var(--font-size-chart)"
+                                    fontFamily="var(--font-chart)"
+                                    fontWeight="var(--font-weight-chart)"
+                                    letterSpacing="var(--tracking-chart)"
+                                >
+                                    {item.time}
+                                </text>
+                            );
+                        })}
+
+                        {resolvedYTicks.map((tick, index) => (
+                            <text
+                                key={`y-tick-${index}`}
+                                x={layout.plotArea.left - 8}
+                                y={tick.y}
+                                dy={4}
+                                textAnchor="end"
+                                fill={TOKEN.muted}
+                                fontSize="var(--font-size-chart)"
+                                fontFamily="var(--font-chart)"
+                                fontWeight="var(--font-weight-chart)"
+                                letterSpacing="var(--tracking-chart)"
+                            >
+                                {formatTick(tick.value)}
+                            </text>
+                        ))}
+
+                        <ChartHoverLayer
+                            dataLength={data.length}
+                            x0={x0}
+                            step={step}
+                            marginTop={layout.plotArea.top}
+                            marginLeft={layout.plotArea.left}
+                            plotWidth={plotWidth}
+                            plotHeight={plotHeight}
+                            hoveredIndex={hoveredIndex}
+                            onHoverChange={onHoverChange}
+                            indicatorColor={TOKEN.muted}
+                            highlightBorderColor={TOKEN.background}
+                            highlights={hoveredIndex !== null && hoveredIndex >= 0 && hoveredIndex < data.length
+                                ? [{ x: points[hoveredIndex].x, y: points[hoveredIndex].y, color: TOKEN.gradientTo }]
+                                : undefined}
+                        />
+                    </>
                 );
-            })}
-
-            {areaPath.length > 0 && (
-                <path
-                    d={areaPath}
-                    fill={`url(#${colorGradientId})`}
-                    mask={`url(#${maskId})`}
-                />
-            )}
-
-            {linePath.length > 0 && (
-                <path
-                    d={linePath}
-                    stroke={`url(#${lineGradientId})`}
-                    strokeWidth={2.5}
-                    fill="none"
-                    filter={`url(#${glowId})`}
-                />
-            )}
-
-            {lastPoint && (
-                <g>
+            }}
+            renderOverlay={() => lastPoint ? (
+                <g pointerEvents="none">
                     <circle
+                        data-testid="trend-chart-final-point-pulse"
                         cx={lastPoint.x}
                         cy={lastPoint.y}
                         r={9}
@@ -295,6 +467,7 @@ function TrendChartSvg({
                         style={{ animationDuration: '2s', transformOrigin: `${lastPoint.x}px ${lastPoint.y}px` }}
                     />
                     <circle
+                        data-testid="trend-chart-final-point-core"
                         cx={lastPoint.x}
                         cy={lastPoint.y}
                         r={4}
@@ -303,73 +476,8 @@ function TrendChartSvg({
                         strokeWidth={1.5}
                     />
                 </g>
-            )}
-
-            {(() => {
-                const xLabels = data.map((item) => item.time);
-                const xPositions = data.map((_, index) => x0 + (index * step));
-                const visibleIndices = computeVisibleLabelIndices(
-                    xLabels,
-                    xPositions,
-                    getChartTextFont(),
-                    8,
-                    margin.left + plotWidth,
-                    getChartLetterSpacingPx(),
-                );
-                return data.map((item, index) => {
-                    if (!visibleIndices.has(index)) return null;
-                    return (
-                        <text
-                            key={`x-label-${index}`}
-                            x={x0 + (index * step)}
-                            y={margin.top + plotHeight + 16}
-                            textAnchor="middle"
-                            fill={TOKEN.muted}
-                            fontSize="var(--font-size-chart)"
-                            fontFamily="var(--font-chart)"
-                            fontWeight="var(--font-weight-chart)"
-                            letterSpacing="var(--tracking-chart)"
-                        >
-                            {item.time}
-                        </text>
-                    );
-                });
-            })()}
-
-            {yTicks.map((tick, index) => (
-                <text
-                    key={`y-tick-${index}`}
-                    x={margin.left - 8}
-                    y={tick.y}
-                    dy={4}
-                    textAnchor="end"
-                    fill={TOKEN.muted}
-                    fontSize="var(--font-size-chart)"
-                    fontFamily="var(--font-chart)"
-                    fontWeight="var(--font-weight-chart)"
-                    letterSpacing="var(--tracking-chart)"
-                >
-                    {formatTick(tick.value)}
-                </text>
-            ))}
-
-            <ChartHoverLayer
-                dataLength={data.length}
-                x0={x0}
-                step={step}
-                marginTop={margin.top}
-                marginLeft={margin.left}
-                plotWidth={plotWidth}
-                plotHeight={plotHeight}
-                hoveredIndex={hoveredIndex}
-                onHoverChange={onHoverChange}
-                indicatorColor={TOKEN.muted}
-                highlightBorderColor={TOKEN.background}
-                highlights={hoveredIndex !== null && hoveredIndex >= 0 && hoveredIndex < data.length
-                    ? [{ x: points[hoveredIndex].x, y: points[hoveredIndex].y, color: TOKEN.gradientTo }]
-                    : undefined}
-            />
-        </svg>
+            ) : null}
+        />
     );
 }
 
@@ -381,6 +489,7 @@ function TrendChartContainer({
     thresholds,
     seriesName,
     unit,
+    summary,
 }: TrendChartContainerProps) {
     const ref = useRef<HTMLDivElement>(null);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -414,6 +523,8 @@ function TrendChartContainer({
                 data={data}
                 domainMin={domainMin}
                 domainMax={domainMax}
+                unit={unit}
+                summary={summary}
                 thresholds={thresholds}
                 hoveredIndex={hoveredIndex}
                 onHoverChange={handleHoverChange}
@@ -504,6 +615,9 @@ export default function TrendChartWidget({
     const domainMax = yValues.length > 0 ? Math.ceil(yMax + yPadding) : 0;
     const resolvedUnit = historyData?.unit ?? (resolved.unit ? String(resolved.unit) : undefined);
     const hasBinding = bindingMachineId !== undefined && Boolean(bindingVariableKey);
+    const chartSummary = historyData?.summary && chartData === historyTrendData && historyTrendData.length > 0
+        ? historyData.summary
+        : undefined;
 
     // Modo real cargando → skeleton; Modo simulado no muestra loading por histórico
     const isRealLoading = !isSimulated && historyParams !== null && isLoadingHistory;
@@ -524,30 +638,30 @@ export default function TrendChartWidget({
 
     return (
         <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
-            <WidgetSegmentedControl
-                options={HISTORY_RANGE_OPTIONS}
-                value={range}
-                onChange={setRange}
-            />
-
             <WidgetHeader
                 title={widget.title ?? 'Trend Chart'}
                 icon={TrendingUp}
                 iconColor={TOKEN.icon}
                 iconPosition="left"
-                subtitle={resolvedUnit ? resolvedUnit.toUpperCase() : undefined}
-                className="mb-3 shrink-0 min-w-0 max-w-[calc(100%-220px)]"
+                className={WIDGET_CHART_HEADER_CLASS}
+                trailing={(
+                    <WidgetHeaderTemporalControls
+                        variant="pill"
+                        testId="trend-chart-widget-runtime-controls"
+                        indicatorTestId="trend-chart-widget-runtime-control-indicator"
+                        groups={[
+                            {
+                                testId: 'trend-chart-widget-runtime-range-selector',
+                                options: HISTORY_RANGE_OPTIONS,
+                                selectedValue: range,
+                                onSelect: (value) => setRange(value as HistoryRange),
+                            },
+                        ]}
+                    />
+                )}
             />
 
-            {historyData?.summary && chartData === historyTrendData && historyTrendData.length > 0 && (
-                <div className="mb-3 flex items-center justify-center gap-4 shrink-0">
-                    <span className="uppercase text-industrial-muted">Min {formatSummaryValue(historyData.summary.min)}</span>
-                    <span className="uppercase text-industrial-muted">Max {formatSummaryValue(historyData.summary.max)}</span>
-                    <span className="uppercase text-industrial-muted">Avg {formatSummaryValue(historyData.summary.avg)}</span>
-                </div>
-            )}
-
-            <div className="flex-1 min-h-0 -mx-3 -mb-3 relative">
+            <div className={WIDGET_CHART_CONTAINER_CLASS}>
                 {isNoData ? (
                     <div className="h-full w-full flex flex-col items-center justify-center gap-2">
                         <span className="text-white leading-none">--</span>
@@ -566,6 +680,7 @@ export default function TrendChartWidget({
                         thresholds={widget.thresholds}
                         seriesName={widget.title ?? 'Valor'}
                         unit={resolvedUnit}
+                        summary={chartSummary}
                     />
                 )}
             </div>

@@ -3,10 +3,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrendChartV2WidgetConfig } from '../../domain/admin.types';
 import type { DataHistoryResponseV2 } from '../../domain/dataContract.types';
+import { WIDGET_CHART_CONTAINER_CLASS, WIDGET_CHART_HEADER_CLASS } from '../../components/ui/WidgetChartLayout.shared';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useDataHistory } from '../../queries/useDataHistory';
 import { isDataHistoryResponseV2 } from '../../utils/dataHistoryResponseV2';
+import { getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx } from '../../utils/chartHelpers';
 import TrendChartV2Widget from './TrendChartV2Widget';
 
 vi.mock('../../config/dataConnection.config', () => ({
@@ -262,6 +264,52 @@ describe('TrendChartV2Widget', () => {
         expect(screen.getAllByTestId('trend-chart-v2-segment')).toHaveLength(3);
     });
 
+    it('keeps first and last x-axis labels centered while distributing visible ticks from start to end', () => {
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const labels = screen.getAllByTestId('trend-chart-v2-x-axis-label');
+        const xPositions = labels.map((label) => Number(label.getAttribute('x')));
+        const gaps = xPositions.slice(1).map((x, index) => x - xPositions[index]);
+        const smallestGap = Math.min(...gaps);
+        const largestGap = Math.max(...gaps);
+        const lastLabel = labels[labels.length - 1];
+        const expectedRightEdge = 320 - Math.ceil((measureChartTextWidthPx('14:00', getChartTextFont(), getChartLetterSpacingPx()) / 2) + 2);
+
+        expect(labels.length).toBeGreaterThanOrEqual(2);
+        expect(labels[0]).toHaveTextContent('12:00');
+        expect(lastLabel).toHaveTextContent('14:00');
+        labels.forEach((label) => {
+            expect(label).toHaveAttribute('text-anchor', 'middle');
+        });
+        expect(largestGap).toBeLessThanOrEqual(smallestGap * 2);
+        expect(Number(lastLabel.getAttribute('x'))).toBeCloseTo(expectedRightEdge, 3);
+    });
+
+    it('aligns the final point with the last x-axis label when the latest sample reaches the visible window end', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: makeHistoryResponse({
+                series: [
+                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 45 },
+                    { timestamp: '2026-06-18T13:00:00.000Z', timestampMs: Date.parse('2026-06-18T13:00:00.000Z'), value: 47 },
+                    { timestamp: '2026-06-18T14:00:00.000Z', timestampMs: Date.parse('2026-06-18T14:00:00.000Z'), value: 53 },
+                ],
+            }),
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const labels = screen.getAllByTestId('trend-chart-v2-x-axis-label');
+        const lastLabel = labels[labels.length - 1];
+        const finalPoint = screen.getByTestId('trend-chart-v2-final-point-core');
+
+        expect(lastLabel).toHaveTextContent('14:00');
+        expect(Number(finalPoint.getAttribute('cx'))).toBeCloseTo(Number(lastLabel.getAttribute('x')), 3);
+    });
+
     it('keeps 1h and 7d preset lines renderable when backend bucket metadata is much smaller than the observed cadence', () => {
         vi.mocked(useDataHistory).mockImplementation((params) => ({
             data: params?.range === '7d'
@@ -460,7 +508,7 @@ describe('TrendChartV2Widget', () => {
         const firstLineSegment = screen.getByTestId('trend-chart-v2-line-segment');
 
         expect(firstLineSegment.getAttribute('d')).toMatch(/^M 38 /);
-        expect(firstLineSegment.getAttribute('d')).toMatch(/308 /);
+        expect(firstLineSegment.getAttribute('d')).toMatch(/307 /);
     });
 
     it('starts the connected 12m line at plot-left when a leading edge singleton is suppressed', () => {
@@ -528,7 +576,7 @@ describe('TrendChartV2Widget', () => {
         expect(screen.getByTestId('trend-chart-v2-final-point-core')).toBeInTheDocument();
     });
 
-    it('renders the unit through the shared widget header subtitle', () => {
+    it('renders the unit as an independent svg label centered over the y-axis tick-label block instead of the widget header subtitle', () => {
         vi.mocked(useDataHistory).mockReturnValue({
             data: makeHistoryResponse({
                 range: '12m',
@@ -549,14 +597,34 @@ describe('TrendChartV2Widget', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '12m' }));
 
-        const allUnitLabels = screen.getAllByText(/^W$/);
+        const unitLabel = screen.getByTestId('trend-chart-v2-unit-label');
+        const headerSubtitle = document.querySelector('.row-start-2');
+        const yTickLabels = screen.getAllByTestId('trend-chart-v2-y-tick-label');
+        const yTickLabelRightEdge = Number(yTickLabels[0].getAttribute('x'));
+        const expectedCenterX = yTickLabelRightEdge - (
+            Math.max(
+                ...yTickLabels.map((label) => measureChartTextWidthPx(
+                    label.textContent ?? '',
+                    getChartTextFont(),
+                    getChartLetterSpacingPx(),
+                )),
+            ) / 2
+        );
 
-        expect(screen.queryByTestId('trend-chart-v2-unit-label')).not.toBeInTheDocument();
-        expect(allUnitLabels).toHaveLength(1);
-        expect(allUnitLabels[0].closest('svg')).toBeNull();
+        expect(unitLabel).toHaveTextContent('W');
+        expect(unitLabel).toHaveAttribute('text-anchor', 'middle');
+        expect(Number(unitLabel.getAttribute('x'))).toBeCloseTo(expectedCenterX, 3);
+        expect(unitLabel).toHaveAttribute('y', '8');
+        expect(unitLabel).toHaveAttribute('font-size', 'var(--font-size-system)');
+        expect(unitLabel).toHaveAttribute('font-family', 'var(--font-system)');
+        expect(unitLabel).toHaveAttribute('font-weight', 'var(--font-weight-system)');
+        expect(unitLabel).toHaveAttribute('letter-spacing', 'var(--tracking-system)');
+        expect(unitLabel).toHaveAttribute('fill', 'var(--color-widget-icon)');
+        expect(headerSubtitle).toHaveAttribute('aria-hidden', 'true');
+        expect(headerSubtitle).not.toHaveTextContent('W');
     });
 
-    it('keeps a wider unit label in the shared widget header subtitle', () => {
+    it('keeps wider units inside the svg instead of the widget header subtitle', () => {
         vi.mocked(useDataHistory).mockReturnValue({
             data: makeHistoryResponse({
                 range: '12m',
@@ -577,13 +645,14 @@ describe('TrendChartV2Widget', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '12m' }));
 
-        const unitLabel = screen.getByText('KW');
+        const unitLabel = screen.getByTestId('trend-chart-v2-unit-label');
 
-        expect(screen.queryByTestId('trend-chart-v2-unit-label')).not.toBeInTheDocument();
-        expect(unitLabel.closest('svg')).toBeNull();
+        expect(unitLabel).toHaveTextContent('KW');
+        expect(unitLabel.closest('svg')).not.toBeNull();
+        expect(document.querySelector('.row-start-2')).not.toHaveTextContent('KW');
     });
 
-    it('keeps the top y-axis tick inside the svg while the unit remains in the header', () => {
+    it('keeps the top y-axis tick inside the svg while lifting the independent unit label above it', () => {
         vi.mocked(useDataHistory).mockReturnValue({
             data: makeHistoryResponse({
                 range: '12m',
@@ -605,16 +674,45 @@ describe('TrendChartV2Widget', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '12m' }));
 
-        const unitLabel = screen.getByText('KW');
+        const unitLabel = screen.getByTestId('trend-chart-v2-unit-label');
         const topTickLabel = screen.getAllByTestId('trend-chart-v2-y-tick-label')[0];
         const topTickX = Number(topTickLabel.getAttribute('x'));
+        const topTickY = Number(topTickLabel.getAttribute('y'));
+        const unitLabelY = Number(unitLabel.getAttribute('y'));
 
         expect(unitLabel).toHaveTextContent('KW');
         expect(topTickLabel).toHaveTextContent('3.2');
-        expect(unitLabel.closest('svg')).toBeNull();
+        expect(unitLabel.closest('svg')).not.toBeNull();
         expect(topTickLabel.closest('svg')).not.toBeNull();
         expect(topTickLabel.getAttribute('text-anchor')).toBe('end');
         expect(topTickX).toBe(30);
+        expect(topTickY).toBe(19);
+        expect(unitLabelY).toBe(8);
+        expect(unitLabelY).toBeLessThan(topTickY);
+    });
+
+    it('preserves tooltip unit rendering after moving the axis unit label out of the header', () => {
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
+        Object.defineProperty(overlay, 'getBoundingClientRect', {
+            configurable: true,
+            value: () => ({
+                x: 38,
+                y: 19,
+                width: 270,
+                height: 137,
+                top: 19,
+                left: 38,
+                right: 308,
+                bottom: 156,
+                toJSON: () => ({}),
+            }),
+        });
+
+        fireEvent.mouseMove(overlay, { clientX: 128, clientY: 60 });
+
+        expect(screen.getByText('47 °C')).toBeInTheDocument();
     });
 
     it('restores chart polish with y-axis ticks, scoped gradients, and a pulsing final-point marker', () => {
@@ -622,8 +720,15 @@ describe('TrendChartV2Widget', () => {
 
         expect(screen.getAllByTestId('trend-chart-v2-y-tick-label')).toHaveLength(5);
         expect(screen.getAllByTestId('trend-chart-v2-y-grid-line')).toHaveLength(5);
-        expect(screen.getByTestId('trend-chart-v2-final-point-pulse')).toBeInTheDocument();
-        expect(screen.getByTestId('trend-chart-v2-final-point-core')).toBeInTheDocument();
+        const pulse = screen.getByTestId('trend-chart-v2-final-point-pulse');
+        const finalPoint = screen.getByTestId('trend-chart-v2-final-point-core');
+        const overlaySvg = screen.getByTestId('trend-chart-v2-overlay-svg');
+
+        expect(pulse).toBeInTheDocument();
+        expect(finalPoint).toBeInTheDocument();
+        expect(overlaySvg).toHaveAttribute('viewBox', '0 -20 340 200');
+        expect(pulse.closest('svg')).toBe(overlaySvg);
+        expect(finalPoint.closest('svg')).toBe(overlaySvg);
 
         const svg = screen.getByTestId('trend-chart-v2-svg');
         expect(svg?.innerHTML).toContain('trend-v2-1-line-gradient');
@@ -648,6 +753,16 @@ describe('TrendChartV2Widget', () => {
 
         expect(icon).toHaveClass('lucide-chart-line');
         expect(iconRow?.innerHTML.indexOf('svg')).toBeLessThan(iconRow?.innerHTML.indexOf('Trend Chart V2') ?? Number.MAX_SAFE_INTEGER);
+    });
+
+    it('applies only a tiny negative top offset on the chart container to tighten the external header gap', () => {
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const header = screen.getByText('Trend Chart V2').closest('div[class*="grid-cols"]');
+        const chartContainer = screen.getByTestId('trend-chart-v2-svg').parentElement;
+
+        expect(header).toHaveClass(...WIDGET_CHART_HEADER_CLASS.split(' '));
+        expect(chartContainer).toHaveClass(...WIDGET_CHART_CONTAINER_CLASS.split(' '));
     });
 
     it('removes isolated one-point artifacts inside multi-segment series while keeping the final marker only', () => {
@@ -733,16 +848,25 @@ describe('TrendChartV2Widget', () => {
         render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
 
         const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
+        const overlayX = Number(overlay.getAttribute('x'));
+        const overlayWidth = Number(overlay.getAttribute('width'));
+        const domainStartMs = Date.parse('2026-06-18T12:00:00.000Z');
+        const domainEndMs = Date.parse('2026-06-18T14:00:00.000Z');
+        const domainDurationMs = domainEndMs - domainStartMs;
+        const selectionStartRatio = (92 - overlayX) / overlayWidth;
+        const selectionEndRatio = (227 - overlayX) / overlayWidth;
+        const expectedStartIso = new Date(domainStartMs + (domainDurationMs * selectionStartRatio)).toISOString();
+        const expectedEndIso = new Date(domainStartMs + (domainDurationMs * selectionEndRatio)).toISOString();
         Object.defineProperty(overlay, 'getBoundingClientRect', {
             configurable: true,
             value: () => ({
-                x: 38,
+                x: overlayX,
                 y: 0,
-                width: 320,
+                width: overlayWidth,
                 height: 180,
                 top: 0,
-                left: 38,
-                right: 358,
+                left: overlayX,
+                right: overlayX + overlayWidth,
                 bottom: 180,
                 toJSON: () => ({}),
             }),
@@ -756,8 +880,8 @@ describe('TrendChartV2Widget', () => {
             machineId: 101,
             variableKey: 'temperature',
             range: 'custom',
-            start: '2026-06-18T12:24:00.000Z',
-            end: '2026-06-18T13:24:00.000Z',
+            start: expectedStartIso,
+            end: expectedEndIso,
             maxPoints: 1500,
         });
         expect(screen.getByRole('button', { name: 'Back to preset' })).toBeInTheDocument();
@@ -798,7 +922,7 @@ describe('TrendChartV2Widget', () => {
         expect(screen.getAllByTestId('trend-chart-v2-segment').length).toBeGreaterThan(0);
     });
 
-    it('shows legacy-style backend min max avg summary for presets without the shift-summary cards', () => {
+    it('shows lowercase summary stats with a lowercase unit suffix and right-aligns them to the safe plot-right edge', () => {
         const widget: TrendChartV2WidgetConfig = {
             ...makeWidget(),
             displayOptions: {
@@ -837,11 +961,44 @@ describe('TrendChartV2Widget', () => {
 
         render(<TrendChartV2Widget widget={widget} equipmentMap={new Map()} machines={[]} />);
 
-        expect(screen.getByText('Min 45')).toBeInTheDocument();
-        expect(screen.getByText('Max 53')).toBeInTheDocument();
-        expect(screen.getByText('Avg 49')).toBeInTheDocument();
+        const summary = screen.getByTestId('trend-chart-v2-summary');
+        const unitLabel = screen.getByTestId('trend-chart-v2-unit-label');
+        const expectedSummaryX = 320 - Math.ceil((measureChartTextWidthPx('14:00', getChartTextFont(), getChartLetterSpacingPx()) / 2) + 2);
+
+        expect(screen.getByTestId('trend-chart-v2-summary-min')).toHaveTextContent('min 45°c');
+        expect(screen.getByTestId('trend-chart-v2-summary-max')).toHaveTextContent('max 53°c');
+        expect(screen.getByTestId('trend-chart-v2-summary-avg')).toHaveTextContent('avg 49°c');
+        expect(summary).toHaveAttribute('text-anchor', 'end');
+        expect(Number(summary.getAttribute('x'))).toBeCloseTo(expectedSummaryX, 3);
+        expect(summary.getAttribute('y')).toBe(unitLabel.getAttribute('y'));
+        expect(summary).toHaveAttribute('font-size', 'var(--font-size-system)');
+        expect(summary).toHaveAttribute('font-family', 'var(--font-system)');
+        expect(summary).toHaveAttribute('font-weight', 'var(--font-weight-system)');
+        expect(summary).toHaveAttribute('letter-spacing', 'var(--tracking-system)');
+        expect(summary).toHaveAttribute('fill', 'var(--color-industrial-muted)');
         expect(screen.queryByText(/^LAST /)).not.toBeInTheDocument();
         expect(screen.queryByText('Turno A')).not.toBeInTheDocument();
+    });
+
+    it('keeps the compact top plot offset whenever summary adornments exist even if the backend unit is empty', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: makeHistoryResponse({
+                unit: '',
+            }),
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const summary = screen.getByTestId('trend-chart-v2-summary');
+        const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
+
+        expect(screen.queryByTestId('trend-chart-v2-unit-label')).not.toBeInTheDocument();
+        expect(summary).toHaveAttribute('y', '8');
+        expect(Number(overlay.getAttribute('y'))).toBe(19);
     });
 
     it('keeps rendering legacy-compatible preset payloads whose timestamps are far from the current client time', () => {
@@ -867,7 +1024,7 @@ describe('TrendChartV2Widget', () => {
         const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
 
         expect(Number(overlay.getAttribute('height'))).toBeGreaterThanOrEqual(120);
-        expect(Number(overlay.getAttribute('y'))).toBeLessThanOrEqual(10);
+        expect(Number(overlay.getAttribute('y'))).toBe(19);
     });
 
     it('preserves the last valid chart dimensions when ResizeObserver emits a transient zero measurement', () => {
@@ -1188,7 +1345,7 @@ describe('TrendChartV2Widget', () => {
 
         expect(screen.getAllByTestId('trend-chart-v2-shift-line')).not.toHaveLength(0);
         expect(screen.queryByText(/^LAST /)).not.toBeInTheDocument();
-        expect(screen.getByText('Min 45')).toBeInTheDocument();
+        expect(screen.getByTestId('trend-chart-v2-summary-min')).toHaveTextContent('min 45°c');
     });
 
     it('renders configured shift lines instead of bands when the widget requests line mode', () => {

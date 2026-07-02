@@ -36,7 +36,6 @@ import {
     resolveTrendChartV2TooltipShiftLabel,
 } from '../../utils/trendChartV2Shifts';
 import {
-    buildTrendChartV2TickValues,
     buildTrendChartV2VisibleTickValues,
     formatTrendChartV2Timestamp,
     resolveTrendChartV2Timezone,
@@ -46,12 +45,28 @@ import {
 import {
     buildAreaPath,
     formatTick,
+    getChartLetterSpacingPx,
+    getChartTextFont,
     smoothPath,
 } from '../../utils/chartHelpers';
 import TrendChartV2InteractionLayer from '../../components/ui/TrendChartV2InteractionLayer';
 import ChartTooltip from '../../components/ui/ChartTooltip';
-import WidgetSegmentedControl from '../../components/ui/WidgetSegmentedControl';
+import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
+import {
+    resolveWidgetChartLayoutMetrics,
+    WIDGET_CHART_CONTAINER_CLASS,
+    WIDGET_CHART_HEADER_CLASS,
+    WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE,
+} from '../../components/ui/WidgetChartLayout.shared';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
+
+const SYSTEM_TEXT_STYLE = {
+    fontSize: 'var(--font-size-system)',
+    fontFamily: 'var(--font-system)',
+    fontWeight: 'var(--font-weight-system)',
+    letterSpacing: 'var(--tracking-system)',
+} as const;
 
 interface TrendChartV2WidgetProps {
     widget: TrendChartV2WidgetConfig;
@@ -74,12 +89,6 @@ const RANGE_OPTIONS: Array<{ value: Exclude<HistoryRangeV2, 'custom'>; label: st
     { value: '12m', label: '12m' },
 ];
 
-const MARGIN = { top: 8, right: 12, bottom: 24, left: 38 } as const;
-const Y_AXIS_LABEL_X = MARGIN.left - 8;
-const MIN_RENDERABLE_CHART_SIZE = {
-    width: MARGIN.left + MARGIN.right + 24,
-    height: MARGIN.top + MARGIN.bottom + 24,
-} as const;
 const TOKEN = {
     gradientFrom: 'var(--color-widget-gradient-from)',
     gradientTo: 'var(--color-widget-gradient-to)',
@@ -88,7 +97,12 @@ const TOKEN = {
     text: 'var(--color-industrial-text)',
     muted: 'var(--color-industrial-muted)',
     grid: 'var(--color-chart-grid)',
+    icon: 'var(--color-widget-icon)',
 } as const;
+
+function formatTrendChartV2SummaryValue(value: number, unit: string | undefined): string {
+    return `${formatTick(value)}${unit ? unit.toLowerCase() : ''}`;
+}
 
 const HEADER_ICON_MAP: Record<string, LucideIcon> = {
     Gauge,
@@ -259,8 +273,11 @@ export default function TrendChartV2Widget({
         range: activeRange,
         series: v2Data?.series ?? [],
     }), [activeRange, customWindow, v2Data?.series, v2Data?.window]);
+    const resolvedUnit = v2Data?.unit ?? (resolved.unit ? String(resolved.unit) : undefined);
+    const hasUnit = Boolean(resolvedUnit);
     const timezone = resolveTrendChartV2Timezone(v2Data?.window?.timezone, resolvedTimezone);
-
+    const chartFont = getChartTextFont();
+    const chartLetterSpacing = getChartLetterSpacingPx();
     const numericPoints = useMemo(() => (v2Data?.series ?? []).filter((point): point is HistoryDataPointV2 => (
         Number.isFinite(point.timestampMs)
         && point.timestampMs >= visibleWindow.startMs
@@ -281,50 +298,6 @@ export default function TrendChartV2Widget({
         const padding = Math.max((max - min) * 0.15, 1);
         return { min: min - padding, max: max + padding };
     }, [numericPoints]);
-
-    const chartModel = useMemo(() => {
-        const plotWidth = Math.max(dimensions.width - MARGIN.left - MARGIN.right, 1);
-        const plotHeight = Math.max(dimensions.height - MARGIN.top - MARGIN.bottom, 1);
-        const rangeY = Math.max(valueDomain.max - valueDomain.min, 1);
-        const toY = (value: number) => MARGIN.top + plotHeight - (((value - valueDomain.min) / rangeY) * plotHeight);
-        const gapThresholdMs = resolveTrendChartV2GapThresholdMs({
-            bucketMs: v2Data?.window?.bucketMs,
-            range: customWindow ? 'custom' : range,
-            points: numericPoints,
-        });
-        const segments = buildTrendChartV2Segments({
-            points: numericPoints,
-            gapThresholdMs,
-        });
-        const interactionPoints = numericPoints
-            .filter((point): point is HistoryDataPointV2 & { value: number } => typeof point.value === 'number')
-            .map((point) => ({
-                ...point,
-                x: scaleTimestampToChartX({
-                    timestampMs: point.timestampMs,
-                    startMs: visibleWindow.startMs,
-                    endMs: visibleWindow.endMs,
-                    x0: MARGIN.left,
-                    plotWidth,
-                }),
-                y: toY(point.value),
-            }));
-
-        const valueTicks = Array.from({ length: 5 }, (_, index) => ({
-            value: valueDomain.max - (((valueDomain.max - valueDomain.min) * index) / 4),
-            y: MARGIN.top + ((index / 4) * plotHeight),
-        }));
-
-        return {
-            plotWidth,
-            plotHeight,
-            segments,
-            interactionPoints,
-            toY,
-            tickValues: buildTrendChartV2TickValues(visibleWindow.startMs, visibleWindow.endMs),
-            valueTicks,
-        };
-    }, [customWindow, dimensions.height, dimensions.width, numericPoints, range, v2Data?.window?.bucketMs, valueDomain.max, valueDomain.min, visibleWindow.endMs, visibleWindow.startMs]);
 
     const shiftIntervals = useMemo(() => buildTrendChartV2ShiftIntervals({
         shifts,
@@ -362,6 +335,75 @@ export default function TrendChartV2Widget({
             avg: total / values.length,
         };
     }, [customWindow, numericPoints, v2Data]);
+    const hasSummary = Boolean(visibleSummary);
+    const hasTopChartAdornments = hasUnit || hasSummary;
+    const rangeForLabels = customWindow ? 'custom' : range;
+    const firstXAxisLabel = useMemo(() => formatTrendChartV2Timestamp({
+        timestampMs: visibleWindow.startMs,
+        range: rangeForLabels,
+        timezone,
+    }), [rangeForLabels, timezone, visibleWindow.startMs]);
+    const lastXAxisLabel = useMemo(() => formatTrendChartV2Timestamp({
+        timestampMs: visibleWindow.endMs,
+        range: rangeForLabels,
+        timezone,
+    }), [rangeForLabels, timezone, visibleWindow.endMs]);
+    const valueTickValues = useMemo(() => Array.from({ length: 5 }, (_, index) => (
+        valueDomain.max - (((valueDomain.max - valueDomain.min) * index) / 4)
+    )), [valueDomain.max, valueDomain.min]);
+    const chartLayout = useMemo(() => resolveWidgetChartLayoutMetrics({
+        width: dimensions.width,
+        height: dimensions.height,
+        hasTopAdornments: hasTopChartAdornments,
+        firstXAxisLabel,
+        lastXAxisLabel,
+        yAxisTickLabels: valueTickValues.map((value) => formatTick(value)),
+        idPrefix: widget.id,
+        font: chartFont,
+        letterSpacing: chartLetterSpacing,
+    }), [chartFont, chartLetterSpacing, dimensions.height, dimensions.width, firstXAxisLabel, hasTopChartAdornments, lastXAxisLabel, valueTickValues, widget.id]);
+    const chartModel = useMemo(() => {
+        const plotWidth = chartLayout.plotArea.width;
+        const plotHeight = chartLayout.plotArea.height;
+        const rangeY = Math.max(valueDomain.max - valueDomain.min, 1);
+        const toY = (value: number) => chartLayout.plotArea.top + plotHeight - (((value - valueDomain.min) / rangeY) * plotHeight);
+        const gapThresholdMs = resolveTrendChartV2GapThresholdMs({
+            bucketMs: v2Data?.window?.bucketMs,
+            range: customWindow ? 'custom' : range,
+            points: numericPoints,
+        });
+        const segments = buildTrendChartV2Segments({
+            points: numericPoints,
+            gapThresholdMs,
+        });
+        const interactionPoints = numericPoints
+            .filter((point): point is HistoryDataPointV2 & { value: number } => typeof point.value === 'number')
+            .map((point) => ({
+                ...point,
+                x: scaleTimestampToChartX({
+                    timestampMs: point.timestampMs,
+                    startMs: visibleWindow.startMs,
+                    endMs: visibleWindow.endMs,
+                    x0: chartLayout.plotArea.left,
+                    plotWidth,
+                }),
+                y: toY(point.value),
+            }));
+
+        const valueTicks = valueTickValues.map((value, index) => ({
+            value,
+            y: chartLayout.plotArea.top + ((index / 4) * plotHeight),
+        }));
+
+        return {
+            plotWidth,
+            plotHeight,
+            segments,
+            interactionPoints,
+            toY,
+            valueTicks,
+        };
+    }, [chartLayout.plotArea.height, chartLayout.plotArea.left, chartLayout.plotArea.top, chartLayout.plotArea.width, customWindow, numericPoints, range, v2Data?.window?.bucketMs, valueDomain.max, valueDomain.min, valueTickValues, visibleWindow.endMs, visibleWindow.startMs]);
 
     const hoveredPoint = hoveredTimestampMs === null
         ? null
@@ -377,12 +419,15 @@ export default function TrendChartV2Widget({
         points: numericPoints,
         startMs: visibleWindow.startMs,
         endMs: visibleWindow.endMs,
-        plotLeft: MARGIN.left,
-        plotWidth: chartModel.plotWidth,
+        plotLeft: chartLayout.xAxisLabels.left,
+        plotWidth: chartLayout.xAxisLabels.plotWidth,
         range: customWindow ? 'custom' : range,
         timezone,
-    }), [chartModel.plotWidth, customWindow, numericPoints, range, timezone, visibleWindow.endMs, visibleWindow.startMs]);
-    const resolvedUnit = v2Data?.unit ?? (resolved.unit ? String(resolved.unit) : undefined);
+        minLabelX: 0,
+        maxLabelX: dimensions.width,
+        font: chartFont,
+        letterSpacing: chartLetterSpacing,
+    }), [chartFont, chartLetterSpacing, chartLayout.xAxisLabels.left, chartLayout.xAxisLabels.plotWidth, customWindow, dimensions.width, numericPoints, range, timezone, visibleWindow.endMs, visibleWindow.startMs]);
     const lastRenderablePoint = chartModel.interactionPoints.at(-1) ?? null;
     const leadingEdgeAnchor = useMemo(() => resolveLeadingEdgeAnchor({
         range: activeRange,
@@ -417,8 +462,8 @@ export default function TrendChartV2Widget({
 
     const hasData = chartModel.interactionPoints.length > 0;
     const showLoading = isLoadingData || (historyParams !== null && isLoading);
-    const hasRenderableDimensions = dimensions.width >= MIN_RENDERABLE_CHART_SIZE.width
-        && dimensions.height >= MIN_RENDERABLE_CHART_SIZE.height;
+    const hasRenderableDimensions = dimensions.width >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.width
+        && dimensions.height >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.height;
     const emptyStateMessage = isError
         ? (error?.message || 'Error loading history')
         : hasData && !hasRenderableDimensions
@@ -429,46 +474,51 @@ export default function TrendChartV2Widget({
 
     return (
         <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
-            <WidgetSegmentedControl
-                options={RANGE_OPTIONS}
-                value={range}
-                onChange={(nextRange) => {
-                    setRange(nextRange);
-                    setCustomWindow(null);
-                    setHoveredTimestampMs(null);
-                    setZoomMessage(null);
-                }}
-            >
-                {customWindow && (
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setCustomWindow(null);
-                            setZoomMessage(null);
-                        }}
-                        className="rounded-md border border-admin-accent/30 bg-admin-accent/10 px-2.5 py-1 uppercase text-admin-accent"
-                    >
-                        Back to preset
-                    </button>
-                )}
-            </WidgetSegmentedControl>
-
             <WidgetHeader
                 title={widget.title || 'Trend Chart V2'}
-                subtitle={resolvedUnit ? resolvedUnit.toUpperCase() : undefined}
                 icon={HeaderIcon ?? undefined}
+                iconColor={TOKEN.icon}
                 iconPosition="left"
                 iconTestId="trend-chart-v2-header-icon"
-                className="mb-3 shrink-0 min-w-0 max-w-[calc(100%-220px)]"
-            />
+                className={WIDGET_CHART_HEADER_CLASS}
+                trailing={(
+                    <div className="flex items-center gap-2">
+                        <WidgetHeaderTemporalControls
+                            variant="pill"
+                            testId="trend-chart-v2-widget-runtime-controls"
+                            indicatorTestId="trend-chart-v2-widget-runtime-control-indicator"
+                            groups={[
+                                {
+                                    testId: 'trend-chart-v2-widget-runtime-range-selector',
+                                    options: RANGE_OPTIONS,
+                                    selectedValue: range,
+                                    onSelect: (value) => {
+                                        const nextRange = value as Exclude<HistoryRangeV2, 'custom'>;
 
-            {visibleSummary && (
-                <div className="mb-2 flex items-center justify-center gap-4 shrink-0">
-                    <span className="uppercase text-industrial-muted">Min {formatTick(visibleSummary.min)}</span>
-                    <span className="uppercase text-industrial-muted">Max {formatTick(visibleSummary.max)}</span>
-                    <span className="uppercase text-industrial-muted">Avg {formatTick(visibleSummary.avg)}</span>
-                </div>
-            )}
+                                        setRange(nextRange);
+                                        setCustomWindow(null);
+                                        setHoveredTimestampMs(null);
+                                        setZoomMessage(null);
+                                    },
+                                },
+                            ]}
+                        />
+
+                        {customWindow && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setCustomWindow(null);
+                                    setZoomMessage(null);
+                                }}
+                                className="rounded-md border border-admin-accent/30 bg-admin-accent/10 px-2.5 py-1 uppercase text-admin-accent"
+                            >
+                                Back to preset
+                            </button>
+                        )}
+                    </div>
+                )}
+            />
 
             {zoomMessage && hasData && hasRenderableDimensions && (
                 <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] uppercase text-industrial-muted">
@@ -476,7 +526,7 @@ export default function TrendChartV2Widget({
                 </div>
             )}
 
-            <div ref={containerRef} className="relative flex-1 min-h-0 -mx-3 -mb-3">
+            <div ref={containerRef} className={WIDGET_CHART_CONTAINER_CLASS}>
                 {showLoading ? (
                     <div className="flex h-full w-full items-center justify-center">
                         <div className="animate-pulse text-industrial-muted uppercase">
@@ -490,14 +540,19 @@ export default function TrendChartV2Widget({
                     </div>
                 ) : (
                     <>
-                        <svg data-testid="trend-chart-v2-svg" width={dimensions.width} height={dimensions.height} viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}>
-                            <defs>
-                                <linearGradient id={lineGradientId} gradientUnits="userSpaceOnUse" x1={MARGIN.left} y1="0" x2={MARGIN.left + chartModel.plotWidth} y2="0">
+                        <WidgetChartLayout
+                            layout={chartLayout}
+                            svgTestId="trend-chart-v2-svg"
+                            overlaySvgTestId="trend-chart-v2-overlay-svg"
+                            renderMain={(layout) => (
+                                <>
+                                    <defs>
+                                    <linearGradient id={lineGradientId} gradientUnits="userSpaceOnUse" x1={layout.plotArea.left} y1="0" x2={layout.plotArea.right} y2="0">
                                     <stop offset="0%" stopColor={TOKEN.gradientFrom} stopOpacity={0.7} />
                                     <stop offset="100%" stopColor={TOKEN.gradientTo} stopOpacity={0.98} />
                                 </linearGradient>
 
-                                <linearGradient id={areaGradientId} gradientUnits="userSpaceOnUse" x1={MARGIN.left} y1="0" x2={MARGIN.left + chartModel.plotWidth} y2="0">
+                                <linearGradient id={areaGradientId} gradientUnits="userSpaceOnUse" x1={layout.plotArea.left} y1="0" x2={layout.plotArea.right} y2="0">
                                     <stop offset="0%" stopColor={TOKEN.gradientFrom} stopOpacity={0.42} />
                                     <stop offset="100%" stopColor={TOKEN.gradientTo} stopOpacity={0.66} />
                                 </linearGradient>
@@ -518,14 +573,54 @@ export default function TrendChartV2Widget({
                                         <feMergeNode in="SourceGraphic" />
                                     </feMerge>
                                 </filter>
-                            </defs>
+                                    </defs>
+
+                            {hasUnit && (
+                                <text
+                                    data-testid="trend-chart-v2-unit-label"
+                                    x={layout.yAxisUnitSlot.x}
+                                    y={layout.yAxisUnitSlot.y}
+                                    textAnchor={layout.yAxisUnitSlot.textAnchor}
+                                    fill={TOKEN.icon}
+                                    fontSize={SYSTEM_TEXT_STYLE.fontSize}
+                                    fontFamily={SYSTEM_TEXT_STYLE.fontFamily}
+                                    fontWeight={SYSTEM_TEXT_STYLE.fontWeight}
+                                    letterSpacing={SYSTEM_TEXT_STYLE.letterSpacing}
+                                >
+                                    {resolvedUnit?.toUpperCase()}
+                                </text>
+                            )}
+
+                            {visibleSummary && (
+                                <text
+                                    data-testid="trend-chart-v2-summary"
+                                    x={layout.topMetaSlot.x}
+                                    y={layout.topMetaSlot.y}
+                                    textAnchor={layout.topMetaSlot.textAnchor}
+                                    fill={TOKEN.muted}
+                                    fontSize={SYSTEM_TEXT_STYLE.fontSize}
+                                    fontFamily={SYSTEM_TEXT_STYLE.fontFamily}
+                                    fontWeight={SYSTEM_TEXT_STYLE.fontWeight}
+                                    letterSpacing={SYSTEM_TEXT_STYLE.letterSpacing}
+                                >
+                                    <tspan data-testid="trend-chart-v2-summary-min">
+                                        {`min ${formatTrendChartV2SummaryValue(visibleSummary.min, resolvedUnit)}`}
+                                    </tspan>
+                                    <tspan data-testid="trend-chart-v2-summary-max" dx="12">
+                                        {`max ${formatTrendChartV2SummaryValue(visibleSummary.max, resolvedUnit)}`}
+                                    </tspan>
+                                    <tspan data-testid="trend-chart-v2-summary-avg" dx="12">
+                                        {`avg ${formatTrendChartV2SummaryValue(visibleSummary.avg, resolvedUnit)}`}
+                                    </tspan>
+                                </text>
+                            )}
 
                             {chartModel.valueTicks.map((tick) => (
                                 <line
                                     key={`grid-${tick.y}`}
                                     data-testid="trend-chart-v2-y-grid-line"
-                                    x1={MARGIN.left}
-                                    x2={MARGIN.left + chartModel.plotWidth}
+                                    x1={layout.plotArea.left}
+                                    x2={layout.plotArea.right}
                                     y1={tick.y}
                                     y2={tick.y}
                                     stroke={TOKEN.grid}
@@ -533,19 +628,20 @@ export default function TrendChartV2Widget({
                                 />
                             ))}
 
-                            {showShifts && shiftIntervals.map((interval) => {
+                            <g clipPath={`url(#${layout.plotClipPathId})`}>
+                                {showShifts && shiftIntervals.map((interval) => {
                                 const x = scaleTimestampToChartX({
                                     timestampMs: interval.startMs,
                                     startMs: visibleWindow.startMs,
                                     endMs: visibleWindow.endMs,
-                                    x0: MARGIN.left,
+                                    x0: layout.plotArea.left,
                                     plotWidth: chartModel.plotWidth,
                                 });
                                 const endX = scaleTimestampToChartX({
                                     timestampMs: interval.endMs,
                                     startMs: visibleWindow.startMs,
                                     endMs: visibleWindow.endMs,
-                                    x0: MARGIN.left,
+                                    x0: layout.plotArea.left,
                                     plotWidth: chartModel.plotWidth,
                                 });
 
@@ -553,9 +649,9 @@ export default function TrendChartV2Widget({
                                     ? (
                                         <rect
                                             key={`${interval.shiftId}-${interval.startMs}`}
-                                             data-testid="trend-chart-v2-shift-band"
+                                              data-testid="trend-chart-v2-shift-band"
                                             x={x}
-                                            y={MARGIN.top}
+                                            y={layout.plotArea.top}
                                             width={Math.max(endX - x, 1)}
                                             height={chartModel.plotHeight}
                                             fill="var(--color-admin-accent)"
@@ -568,22 +664,19 @@ export default function TrendChartV2Widget({
                                             data-testid="trend-chart-v2-shift-line"
                                             x1={x}
                                             x2={x}
-                                            y1={MARGIN.top}
-                                            y2={MARGIN.top + chartModel.plotHeight}
+                                            y1={layout.plotArea.top}
+                                            y2={layout.plotArea.top + chartModel.plotHeight}
                                             stroke="var(--color-admin-accent)"
                                             strokeOpacity={0.28}
                                             strokeDasharray="4 4"
                                         />
                                     );
-                            })}
+                                })}
 
-                            <line x1={MARGIN.left} y1={MARGIN.top + chartModel.plotHeight} x2={MARGIN.left + chartModel.plotWidth} y2={MARGIN.top + chartModel.plotHeight} stroke="var(--color-industrial-border)" />
-                            <line x1={MARGIN.left} y1={MARGIN.top} x2={MARGIN.left} y2={MARGIN.top + chartModel.plotHeight} stroke="var(--color-industrial-border)" />
-
-                            {chartModel.segments.map((segment, index) => {
+                                {chartModel.segments.map((segment, index) => {
                                 const anchorPoint = leadingEdgeAnchor?.segmentIndex === index
                                     ? {
-                                        x: MARGIN.left,
+                                        x: layout.plotArea.left,
                                         y: chartModel.toY(leadingEdgeAnchor.point.value),
                                     }
                                     : null;
@@ -596,7 +689,7 @@ export default function TrendChartV2Widget({
                                             timestampMs: point.timestampMs,
                                             startMs: visibleWindow.startMs,
                                             endMs: visibleWindow.endMs,
-                                            x0: MARGIN.left,
+                                            x0: layout.plotArea.left,
                                             plotWidth: chartModel.plotWidth,
                                         }),
                                         y: chartModel.toY(point.value),
@@ -604,7 +697,7 @@ export default function TrendChartV2Widget({
                                 ];
                                 const linePath = renderablePoints.length >= 2 ? smoothPath(renderablePoints) : '';
                                 const areaPath = renderablePoints.length >= 2
-                                    ? buildAreaPath(linePath, renderablePoints, MARGIN.top + chartModel.plotHeight)
+                                    ? buildAreaPath(linePath, renderablePoints, layout.plotArea.top + chartModel.plotHeight)
                                     : '';
 
                                 const isOnlyVisibleFinitePoint = renderablePoints.length === 1
@@ -640,10 +733,73 @@ export default function TrendChartV2Widget({
                                         ) : null}
                                     </g>
                                 );
+                                })}
+                            </g>
+
+                            <line x1={layout.plotArea.left} y1={layout.plotArea.top + chartModel.plotHeight} x2={layout.plotArea.right} y2={layout.plotArea.top + chartModel.plotHeight} stroke="var(--color-industrial-border)" />
+                            <line x1={layout.plotArea.left} y1={layout.plotArea.top} x2={layout.plotArea.left} y2={layout.plotArea.top + chartModel.plotHeight} stroke="var(--color-industrial-border)" />
+
+                            {xTickValues.map((tickValue) => {
+                                return (
+                                    <text
+                                        data-testid="trend-chart-v2-x-axis-label"
+                                        key={tickValue}
+                                        x={scaleTimestampToChartX({
+                                            timestampMs: tickValue,
+                                            startMs: visibleWindow.startMs,
+                                            endMs: visibleWindow.endMs,
+                                            x0: layout.xAxisLabels.left,
+                                            plotWidth: layout.xAxisLabels.plotWidth,
+                                        })}
+                                        y={layout.xAxisLabels.y}
+                                        textAnchor="middle"
+                                        fill="var(--color-industrial-muted)"
+                                        fontSize="var(--font-size-chart)"
+                                        fontFamily="var(--font-chart)"
+                                        letterSpacing="var(--tracking-chart)"
+                                    >
+                                        {formatTrendChartV2Timestamp({
+                                            timestampMs: tickValue,
+                                            range: customWindow ? 'custom' : range,
+                                            timezone,
+                                        })}
+                                    </text>
+                                );
                             })}
 
-                            {lastRenderablePoint && (
-                                <g>
+                            {chartModel.valueTicks.map((tick, index) => (
+                                <text
+                                    key={`y-tick-${index}`}
+                                    data-testid="trend-chart-v2-y-tick-label"
+                                    x={layout.chartMargin.left - 8}
+                                    y={tick.y}
+                                    dy={4}
+                                    textAnchor="end"
+                                    fill={TOKEN.muted}
+                                    fontSize="var(--font-size-chart)"
+                                    fontFamily="var(--font-chart)"
+                                >
+                                    {formatTick(tick.value)}
+                                </text>
+                            ))}
+
+                            <TrendChartV2InteractionLayer
+                                plotLeft={layout.plotArea.left}
+                                plotTop={layout.plotArea.top}
+                                plotWidth={chartModel.plotWidth}
+                                plotHeight={chartModel.plotHeight}
+                                domainStartMs={visibleWindow.startMs}
+                                domainEndMs={visibleWindow.endMs}
+                                points={chartModel.interactionPoints}
+                                hoveredTimestampMs={hoveredTimestampMs}
+                                onHoverChange={setHoveredTimestampMs}
+                                onZoomSelection={handleZoomSelection}
+                                onInvalidSelection={handleInvalidZoomSelection}
+                            />
+                                </>
+                            )}
+                            renderOverlay={() => lastRenderablePoint ? (
+                                <g pointerEvents="none">
                                     <circle
                                         data-testid="trend-chart-v2-final-point-pulse"
                                         cx={lastRenderablePoint.x}
@@ -664,66 +820,8 @@ export default function TrendChartV2Widget({
                                         strokeWidth={1.5}
                                     />
                                 </g>
-                            )}
-
-                            {xTickValues.map((tickValue, index) => {
-                                const lastIndex = xTickValues.length - 1;
-
-                                return (
-                                    <text
-                                        key={tickValue}
-                                        x={scaleTimestampToChartX({
-                                            timestampMs: tickValue,
-                                            startMs: visibleWindow.startMs,
-                                            endMs: visibleWindow.endMs,
-                                            x0: MARGIN.left,
-                                            plotWidth: chartModel.plotWidth,
-                                        })}
-                                        y={dimensions.height - 8}
-                                        textAnchor={index === 0 ? 'start' : index === lastIndex ? 'end' : 'middle'}
-                                        fill="var(--color-industrial-muted)"
-                                        fontSize="var(--font-size-chart)"
-                                        fontFamily="var(--font-chart)"
-                                    >
-                                        {formatTrendChartV2Timestamp({
-                                            timestampMs: tickValue,
-                                            range: customWindow ? 'custom' : range,
-                                            timezone,
-                                        })}
-                                    </text>
-                                );
-                            })}
-
-                            {chartModel.valueTicks.map((tick, index) => (
-                                <text
-                                    key={`y-tick-${index}`}
-                                    data-testid="trend-chart-v2-y-tick-label"
-                                    x={Y_AXIS_LABEL_X}
-                                    y={tick.y}
-                                    dy={4}
-                                    textAnchor="end"
-                                    fill={TOKEN.muted}
-                                    fontSize="var(--font-size-chart)"
-                                    fontFamily="var(--font-chart)"
-                                >
-                                    {formatTick(tick.value)}
-                                </text>
-                            ))}
-
-                            <TrendChartV2InteractionLayer
-                                plotLeft={MARGIN.left}
-                                plotTop={MARGIN.top}
-                                plotWidth={chartModel.plotWidth}
-                                plotHeight={chartModel.plotHeight}
-                                domainStartMs={visibleWindow.startMs}
-                                domainEndMs={visibleWindow.endMs}
-                                points={chartModel.interactionPoints}
-                                hoveredTimestampMs={hoveredTimestampMs}
-                                onHoverChange={setHoveredTimestampMs}
-                                onZoomSelection={handleZoomSelection}
-                                onInvalidSelection={handleInvalidZoomSelection}
-                            />
-                        </svg>
+                            ) : null}
+                        />
 
                         {hoveredPoint && (
                             <ChartTooltip

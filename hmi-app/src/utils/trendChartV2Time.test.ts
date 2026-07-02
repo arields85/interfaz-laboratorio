@@ -7,6 +7,7 @@ import {
     resolveTrendChartV2VisibleWindow,
     scaleTimestampToChartX,
 } from './trendChartV2Time';
+import { measureChartTextWidthPx } from './chartHelpers';
 
 const ONE_MINUTE_MS = 60 * 1000;
 
@@ -308,5 +309,49 @@ describe('trendChartV2Time', () => {
         expect(ticks[0]).toBe(Date.parse(timestamps[0]));
         expect(ticks.at(-1)).toBe(Date.parse(timestamps[timestamps.length - 1]));
         expect(largestGap).toBeLessThanOrEqual(smallestGap * 2);
+    });
+
+    it('keeps centered first and last labels inside the available svg bounds', () => {
+        const timestamps = [
+            '2026-06-18T12:00:00.000Z',
+            '2026-06-18T12:30:00.000Z',
+            '2026-06-18T13:00:00.000Z',
+            '2026-06-18T13:30:00.000Z',
+            '2026-06-18T14:00:00.000Z',
+        ];
+        const plotLeft = 38;
+        const plotWidth = 98;
+        const maxLabelX = 160;
+        const ticks = buildTrendChartV2VisibleTickValues({
+            points: makeSeries(timestamps.map((timestamp, index) => [timestamp, index])),
+            startMs: Date.parse(timestamps[0]),
+            endMs: Date.parse(timestamps[timestamps.length - 1]),
+            plotLeft,
+            plotWidth,
+            range: '24h',
+            timezone: 'UTC',
+            minLabelX: 0,
+            maxLabelX,
+            font: '400 12px monospace',
+            letterSpacing: 0,
+        });
+
+        expect(ticks[0]).toBe(Date.parse(timestamps[0]));
+        expect(ticks.at(-1)).toBe(Date.parse(timestamps[timestamps.length - 1]));
+
+        ticks.forEach((tick) => {
+            const label = formatTrendChartV2Timestamp({ timestampMs: tick, range: '24h', timezone: 'UTC' });
+            const position = scaleTimestampToChartX({
+                timestampMs: tick,
+                startMs: Date.parse(timestamps[0]),
+                endMs: Date.parse(timestamps[timestamps.length - 1]),
+                x0: plotLeft,
+                plotWidth,
+            });
+            const halfWidth = measureChartTextWidthPx(label, '400 12px monospace', 0) / 2;
+
+            expect(position - halfWidth).toBeGreaterThanOrEqual(0);
+            expect(position + halfWidth).toBeLessThanOrEqual(maxLabelX);
+        });
     });
 });

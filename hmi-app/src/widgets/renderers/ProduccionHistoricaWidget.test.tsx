@@ -1,6 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProdHistoryWidgetConfig } from '../../domain/admin.types';
+import {
+    resolveWidgetChartLayoutMetrics,
+    WIDGET_CHART_CONTAINER_CLASS,
+    WIDGET_CHART_HEADER_CLASS,
+} from '../../components/ui/WidgetChartLayout.shared';
 import ProduccionHistoricaWidget from './ProduccionHistoricaWidget';
 
 const mockState = vi.hoisted(() => ({
@@ -131,6 +136,27 @@ function makeWidget(overrides?: Partial<ProdHistoryWidgetConfig>): ProdHistoryWi
     };
 }
 
+function resolveExpectedProdHistoryLayout(showRightAxis: boolean) {
+    return resolveWidgetChartLayoutMetrics({
+        width: mockState.width,
+        height: mockState.height,
+        hasTopAdornments: true,
+        firstXAxisLabel: mockState.groupedDataByBucket.hour[0]?.label ?? '',
+        lastXAxisLabel: mockState.groupedDataByBucket.hour.at(-1)?.label ?? '',
+        yAxisTickLabels: ['130', '120', '110', '100', '90'],
+        idPrefix: 'prod-history-test-layout',
+        baseMargin: {
+            top: 17,
+            right: showRightAxis ? 48 : 16,
+            bottom: 30,
+            left: 48,
+        },
+        topAdornmentReservedHeight: 11,
+        topAdornmentOffset: 12,
+        alignPlotAreaToXAxisLabels: true,
+    });
+}
+
 describe('ProduccionHistoricaWidget', () => {
     beforeEach(() => {
         resetMockData();
@@ -176,7 +202,15 @@ describe('ProduccionHistoricaWidget', () => {
         expect(screen.getByText('Turno A')).toBeInTheDocument();
     });
 
-    it('toggles OEE legend and tooltip series when the control is pressed', () => {
+    it('uses sentence case for production legend text and keeps OEE uppercase', () => {
+        render(<ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} />);
+
+        expect(screen.getByText('Producción (unidades)')).toBeInTheDocument();
+        expect(screen.getByText('OEE (%)')).toBeInTheDocument();
+        expect(screen.queryByText('PRODUCCIÓN (UNIDADES)')).not.toBeInTheDocument();
+    });
+
+    it('toggles OEE visibility and tooltip series from the legend checkbox', () => {
         render(
             <ProduccionHistoricaWidget
                 widget={makeWidget({
@@ -189,17 +223,19 @@ describe('ProduccionHistoricaWidget', () => {
             />,
         );
 
-        expect(screen.queryByText('OEE (%)')).not.toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole('button', { name: /oee/i }));
-
         expect(screen.getByText('OEE (%)')).toBeInTheDocument();
+        const oeeToggle = screen.getByRole('checkbox', { name: 'Mostrar OEE (%)' });
+        expect(oeeToggle).not.toBeChecked();
+
+        fireEvent.click(oeeToggle);
+
+        expect(oeeToggle).toBeChecked();
         fireEvent.click(screen.getByRole('button', { name: 'Hover first point' }));
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('OEE (%)');
         expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '2');
 
-        fireEvent.click(screen.getByRole('button', { name: /oee/i }));
-        expect(screen.queryByText('OEE (%)')).not.toBeInTheDocument();
+        fireEvent.click(oeeToggle);
+        expect(oeeToggle).not.toBeChecked();
 
         fireEvent.click(screen.getByRole('button', { name: 'Hover first point' }));
         expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Producción (unidades)');
@@ -215,6 +251,110 @@ describe('ProduccionHistoricaWidget', () => {
         expect(screen.getByText('Producción Histórica')).toBeInTheDocument();
         expect(container.querySelector('svg[width="320"]')).not.toBeInTheDocument();
         expect(screen.queryByTestId('hover-layer')).not.toBeInTheDocument();
+    });
+
+    it('renders the header icon before the title', () => {
+        render(<ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} />);
+
+        const icon = screen.getByTestId('prod-history-widget-header-icon');
+        const title = screen.getByText('Producción Histórica');
+        const titleContainer = title.closest('div');
+
+        expect(titleContainer).not.toBeNull();
+        expect(titleContainer?.firstElementChild).toBe(icon);
+    });
+
+    it('renders the legend controls grouped below the header controls without a standalone OEE button', () => {
+        render(<ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} />);
+
+        const headerArea = screen.getByTestId('prod-history-widget-header-area');
+        const legendControls = screen.getByTestId('prod-history-widget-legend-controls');
+        const legendControlsGroup = screen.getByTestId('prod-history-widget-legend-controls-group');
+        const runtimeControls = screen.getByTestId('prod-history-widget-runtime-controls');
+        const oeeToggle = screen.getByRole('checkbox', { name: 'Mostrar OEE (%)' });
+
+        expect(runtimeControls).not.toContainElement(oeeToggle);
+        expect(headerArea).toContainElement(legendControls);
+        expect(headerArea.lastElementChild).toBe(legendControls);
+        expect(legendControlsGroup).not.toHaveClass('border', 'rounded-md', 'bg-industrial-panel/40');
+        expect(oeeToggle).toBeVisible();
+        expect(oeeToggle).not.toHaveClass('sr-only');
+        expect(screen.getByTestId('prod-history-widget-oee-checkbox-visual')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /oee/i })).not.toBeInTheDocument();
+        expect(headerArea).toHaveClass(...WIDGET_CHART_HEADER_CLASS.split(' '));
+        expect(screen.getByTestId('prod-history-widget-chart-shell')).toHaveClass(...WIDGET_CHART_CONTAINER_CLASS.split(' '));
+    });
+
+    it('renders through WidgetChartLayout while preserving the left unit placement and overlay layer', () => {
+        render(<ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} />);
+
+        const layout = resolveExpectedProdHistoryLayout(true);
+        const chartSvg = screen.getByTestId('prod-history-widget-chart');
+        const overlaySvg = screen.getByTestId('prod-history-widget-overlay-svg');
+        const unit = screen.getByTestId('prod-history-widget-y-axis-unit');
+        const xAxisLabels = screen.getAllByTestId('prod-history-widget-x-axis-label');
+        const barRects = Array.from(chartSvg.querySelectorAll('g[clip-path] rect')).filter((_, index) => index % 2 === 0);
+
+        expect(chartSvg.querySelector('clipPath')).not.toBeNull();
+        expect(overlaySvg).toHaveClass('pointer-events-none', 'absolute', 'left-0');
+        expect(unit).toHaveTextContent('unidades');
+        expect(unit).toHaveAttribute('x', String(layout.plotArea.left - 18));
+        expect(unit).toHaveAttribute('y', String(layout.plotArea.top - 12));
+        expect(unit).toHaveAttribute('font-family', 'var(--font-chart)');
+        expect(unit).toHaveAttribute('letter-spacing', 'var(--tracking-chart)');
+        expect(barRects).toHaveLength(3);
+        xAxisLabels.forEach((label, index) => {
+            const bar = barRects[index];
+            const barX = Number(bar?.getAttribute('x'));
+            const barWidth = Number(bar?.getAttribute('width'));
+            expect(label).toHaveAttribute('x', String(barX + (barWidth / 2)));
+        });
+    });
+
+    it('keeps the OEE legend checkbox visually stable between unchecked and checked states', () => {
+        render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: false,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        const oeeToggle = screen.getByRole('checkbox', { name: 'Mostrar OEE (%)' });
+        const oeeCheckboxVisual = screen.getByTestId('prod-history-widget-oee-checkbox-visual');
+
+        expect(oeeToggle).not.toBeChecked();
+        expect(oeeToggle).toHaveClass('absolute', 'opacity-0', 'cursor-pointer');
+        expect(oeeToggle).not.toHaveClass('sr-only', 'accent-admin-accent', 'accent-blue');
+        expect(oeeCheckboxVisual).toHaveClass(
+            'h-3.5',
+            'w-3.5',
+            'border-admin-accent/30',
+            'bg-admin-accent/10',
+            'text-transparent',
+            'group-hover/runtime-checkbox:border-admin-accent',
+            'group-hover/runtime-checkbox:bg-admin-accent/20',
+            'transition-colors',
+        );
+        expect(oeeCheckboxVisual).not.toHaveClass('text-admin-accent');
+        expect(screen.queryByTestId('prod-history-widget-oee-checkbox-check')).not.toBeInTheDocument();
+
+        fireEvent.click(oeeToggle);
+
+        expect(oeeToggle).toBeChecked();
+        expect(oeeCheckboxVisual).toHaveClass(
+            'border-admin-accent/30',
+            'bg-admin-accent/10',
+            'text-admin-accent',
+            'group-hover/runtime-checkbox:border-admin-accent',
+            'group-hover/runtime-checkbox:bg-admin-accent/20',
+        );
+        expect(oeeCheckboxVisual).not.toHaveClass('text-transparent');
+        expect(screen.getByTestId('prod-history-widget-oee-checkbox-check')).toBeInTheDocument();
     });
 
     it('uses manual axis bounds when auto scale is disabled with valid values', () => {
@@ -239,6 +379,32 @@ describe('ProduccionHistoricaWidget', () => {
         expect(screen.getByText('10')).toBeInTheDocument();
         expect(screen.getByText('90')).toBeInTheDocument();
         expect(screen.getAllByText('20')).toHaveLength(2);
+    });
+
+    it('shows the right OEE axis only when OEE is active and keeps it aligned to plot right', () => {
+        render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: true,
+                        useSecondaryAxis: true,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        const withOeeLayout = resolveExpectedProdHistoryLayout(true);
+        const rightAxisTicks = screen.getAllByTestId('prod-history-widget-right-axis-tick');
+        expect(rightAxisTicks).toHaveLength(5);
+        rightAxisTicks.forEach((tick) => {
+            expect(tick).toHaveAttribute('x', String(withOeeLayout.plotArea.right + 8));
+        });
+
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Mostrar OEE (%)' }));
+
+        expect(screen.queryByTestId('prod-history-widget-right-axis-tick')).not.toBeInTheDocument();
     });
 
     it('falls back to auto domains when manual bounds are invalid', () => {
@@ -267,7 +433,7 @@ describe('ProduccionHistoricaWidget', () => {
     });
 
     it('renders area mode without grid lines or secondary axis and shows OEE points', () => {
-        const { container } = render(
+        render(
             <ProduccionHistoricaWidget
                 widget={makeWidget({
                     title: undefined,
@@ -293,10 +459,13 @@ describe('ProduccionHistoricaWidget', () => {
         expect(screen.getByText('Output (kg)')).toBeInTheDocument();
         expect(screen.getByText('OEE (%)')).toBeInTheDocument();
 
-        const svg = container.querySelector('svg[width="320"]');
+        const svg = screen.getByTestId('prod-history-widget-chart');
+        const overlaySvg = screen.getByTestId('prod-history-widget-overlay-svg');
         expect(svg).toBeInTheDocument();
         expect(svg?.querySelectorAll('line')).toHaveLength(0);
-        expect(svg?.querySelectorAll('circle')).toHaveLength(7);
+        expect(svg?.querySelectorAll('circle')).toHaveLength(3);
+        expect(overlaySvg.querySelectorAll('circle')).toHaveLength(4);
         expect(screen.queryByText('84')).not.toBeInTheDocument();
     });
+
 });
