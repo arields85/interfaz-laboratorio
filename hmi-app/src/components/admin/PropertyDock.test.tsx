@@ -1910,6 +1910,75 @@ describe('PropertyDock activity-analytics', () => {
     });
 });
 
+describe('PropertyDock prod-trend', () => {
+    it('renders dedicated prod-trend sections, normalizes the dock badge title, and excludes generic variable/unit controls', () => {
+        renderPropertyDock({
+            type: 'prod-trend',
+            title: 'TENDENCIA % PROD',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '7d',
+                groupBy: 'day',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+            },
+        });
+
+        expect(getSection('Datos')).toBeInTheDocument();
+        expect(getSection('Agrupación')).toBeInTheDocument();
+        expect(getSection('Estados Productivos')).toBeInTheDocument();
+        expect(screen.getByText('PROD-TREND')).toBeInTheDocument();
+        expect(getSection('COLORES TENDENCIA % PROD')).toBeInTheDocument();
+        expect(getSection('BANDAS TENDENCIA % PROD')).toBeInTheDocument();
+        expect(screen.queryByText('Variable')).not.toBeInTheDocument();
+        expect(screen.queryByText('Unidad')).not.toBeInTheDocument();
+        expect(getFieldButtonInSection('Datos', 'Rango')).toHaveTextContent('7 días');
+        expect(getFieldButtonInSection('Agrupación', 'Grupo')).toHaveTextContent('Día');
+    });
+
+    it('updates prod-trend range, grouping, line colors, and band blend mode', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'prod-trend',
+            title: 'TENDENCIA % PROD',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+            displayOptions: {
+                range: '7d',
+                groupBy: 'day',
+                trendLineColors: ['#123456', '#654321'],
+                trendLineColorAlphas: [90, 80],
+                prodTrendBands: {
+                    colors: ['#111111', '#222222', '#333333'],
+                    alphas: [10, 20, 30],
+                    blendMode: 'overlay',
+                },
+            },
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Rango'));
+        await user.click(screen.getByRole('button', { name: '30 días' }));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ range: '30d' });
+
+        await user.click(getFieldButtonInSection('Agrupación', 'Grupo'));
+        await user.click(screen.getByRole('button', { name: 'Semana' }));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ groupBy: 'week' });
+
+        const lineStartHex = screen.getByLabelText('Tendencia % Prod hex inicial');
+        await user.clear(lineStartHex);
+        await user.type(lineStartHex, 'abcdef');
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ trendLineColors: ['#abcdef', '#654321'] });
+
+        await user.click(getFieldButtonInSection('BANDAS TENDENCIA % PROD', 'Blend'));
+        await user.click(screen.getByRole('button', { name: 'Normal' }));
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ prodTrendBands: { blendMode: 'normal' } });
+    });
+});
+
 describe('PropertyDock prod-history', () => {
     it('renders prod-history sections and updates general, data, series, scales and layout controls', async () => {
         const { user, updates } = renderPropertyDock({

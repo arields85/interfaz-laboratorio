@@ -23,6 +23,7 @@ const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
     'kpi': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'Gauge' },
     'machine-activity': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 10 }, defaultIcon: 'HeartPulse' },
     'activity-analytics': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 11, h: 9 }, defaultIcon: null },
+    'prod-trend': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 11, h: 4 }, defaultIcon: 'TrendingUp' },
     'metric-card': { catalogVariable: true, hierarchy: true, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 5 }, defaultIcon: 'BarChart2' },
     'trend-chart': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },
     'trend-chart-v2': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 11, h: 9 }, defaultIcon: 'TrendingUp' },

@@ -191,7 +191,8 @@ export type WidgetType =
     | 'section-title'
     | 'text-title'
     | 'machine-activity'
-    | 'activity-analytics';
+    | 'activity-analytics'
+    | 'prod-trend';
 
 // --- AGREGACIÓN JERÁRQUICA ---
 
@@ -436,6 +437,20 @@ export interface ActivityAnalyticsDisplayOptions {
     };
 }
 
+export interface ProdTrendDisplayOptions {
+    range?: ActivityAnalyticsRange;
+    start?: string;
+    end?: string;
+    groupBy?: ActivityAnalyticsGroupBy;
+    setupThresholdKw?: number;
+    prodThresholdKw?: number;
+    groupBarWidth?: number;
+    groupBarWidths?: ActivityAnalyticsGroupBarWidths;
+    trendLineColors?: ActivityAnalyticsStateGradient;
+    trendLineColorAlphas?: ActivityAnalyticsAlphaPair;
+    prodTrendBands?: ActivityAnalyticsProdTrendBandsDisplayOptions;
+}
+
 export interface ActivityAnalyticsPersistedDisplayPatch {
     range: ActivityAnalyticsRange;
     start?: string;
@@ -625,6 +640,11 @@ export interface ActivityAnalyticsWidgetConfig extends WidgetConfigBase {
     displayOptions?: ActivityAnalyticsDisplayOptions;
 }
 
+export interface ProdTrendWidgetConfig extends WidgetConfigBase {
+    type: 'prod-trend';
+    displayOptions?: ProdTrendDisplayOptions;
+}
+
 export interface TextTitleWidgetConfig extends WidgetConfigBase {
     type: 'text-title';
     displayOptions?: TextTitleDisplayOptions;
@@ -632,7 +652,7 @@ export interface TextTitleWidgetConfig extends WidgetConfigBase {
 
 /** Variante genérica para todos los tipos de widget sin displayOptions específicos. */
 export interface GenericWidgetConfig extends WidgetConfigBase {
-    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'activity-analytics' | 'text-title'>;
+    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'activity-analytics' | 'prod-trend' | 'text-title'>;
     displayOptions?: BaseDisplayOptions;
 }
 
@@ -651,6 +671,7 @@ export type WidgetConfig =
     | StatusWidgetConfig
     | MachineActivityWidgetConfig
     | ActivityAnalyticsWidgetConfig
+    | ProdTrendWidgetConfig
     | TextTitleWidgetConfig
     | GenericWidgetConfig;
 
@@ -680,6 +701,10 @@ export function isAlertHistoryWidget(w: WidgetConfig): w is AlertHistoryWidgetCo
 
 export function isActivityAnalyticsWidget(w: WidgetConfig): w is ActivityAnalyticsWidgetConfig {
     return w.type === 'activity-analytics';
+}
+
+export function isProdTrendWidget(w: WidgetConfig): w is ProdTrendWidgetConfig {
+    return w.type === 'prod-trend';
 }
 
 // --- TEMPLATE ---

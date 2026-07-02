@@ -831,22 +831,22 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getAllByText('Agrupación runtime: shift').length).toBeGreaterThan(0);
         expect(screen.getByTestId('activity-analytics-summary-bars')).toHaveTextContent('88%');
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
 
         const runtimeGroupSelector = screen.getByTestId('activity-analytics-runtime-group-selector');
 
-        expect(within(runtimeGroupSelector).getByRole('button', { name: 'Turno' })).toBeInTheDocument();
-        expect(within(runtimeGroupSelector).getByRole('button', { name: 'Día' })).toBeInTheDocument();
-        expect(within(runtimeGroupSelector).getByRole('button', { name: 'Semana' })).toBeDisabled();
-        expect(within(runtimeGroupSelector).getByRole('button', { name: 'Semana' })).toHaveAttribute('aria-disabled', 'true');
-        expect(within(runtimeGroupSelector).getByRole('button', { name: 'Mes' })).toBeDisabled();
+        expect(within(runtimeGroupSelector).getByRole('button', { name: 'TURNO' })).toBeInTheDocument();
+        expect(within(runtimeGroupSelector).getByRole('button', { name: 'DÍA' })).toBeInTheDocument();
+        expect(within(runtimeGroupSelector).getByRole('button', { name: 'SEMANA' })).toBeDisabled();
+        expect(within(runtimeGroupSelector).getByRole('button', { name: 'SEMANA' })).toHaveAttribute('aria-disabled', 'true');
+        expect(within(runtimeGroupSelector).getByRole('button', { name: 'MES' })).toBeDisabled();
 
         expect(screen.queryByRole('button', { name: '1h' })).not.toBeInTheDocument();
 
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getAllByText('Agrupación runtime: shift').length).toBeGreaterThan(0);
         expect(screen.getByTestId('activity-analytics-summary-bars')).toHaveTextContent('88%');
         expect(screen.getByTestId('activity-analytics-comparison')).toHaveTextContent('sin comparación');
@@ -868,9 +868,9 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getAllByText('Agrupación runtime: day').length).toBeGreaterThan(0);
-        expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'TURNO' })).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
     });
 
@@ -935,7 +935,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.queryByLabelText('Hasta')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
 
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
 
         rerender(
             <ActivityAnalyticsWidget
@@ -954,14 +954,14 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: 'Día' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toBeDisabled();
         expect(screen.queryByLabelText('Desde')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Hasta')).not.toBeInTheDocument();
     });
 
-    it('renders range buttons before granularity buttons in a single runtime header row', () => {
+    it('renders the header icon on the left and keeps range buttons before granularity buttons in a single runtime header row', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -980,26 +980,71 @@ describe('ActivityAnalyticsWidget', () => {
         const runtimeControls = screen.getByTestId('activity-analytics-runtime-controls');
         const groupSelector = screen.getByTestId('activity-analytics-runtime-group-selector');
         const rangeSelector = screen.getByTestId('activity-analytics-runtime-range-selector');
+        const headerIcon = screen.getByTestId('activity-analytics-widget-header-icon');
+        const headerTitle = screen.getByText('ACT-ANALYTICS');
 
+        expect(headerIcon.compareDocumentPosition(headerTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(runtimeControls.className).not.toContain('absolute');
         expect(runtimeControls.children).toHaveLength(2);
         expect(runtimeControls.children[0]).toBe(rangeSelector);
         expect(runtimeControls.children[1]).toBe(groupSelector);
+        expect(rangeSelector).toHaveClass('gap-0');
+        expect(groupSelector).toHaveClass('gap-0', 'border-industrial-muted/25');
         expect(within(runtimeControls).getAllByRole('button').map((button) => button.textContent)).toEqual([
             '7d',
             '30d',
             '12m',
-            'Turno',
-            'Día',
-            'Semana',
-            'Mes',
+            'TURNO',
+            'DÍA',
+            'SEMANA',
+            'MES',
         ]);
-        expect(within(groupSelector).getByRole('button', { name: 'Turno' })).toBeInTheDocument();
-        expect(within(groupSelector).getByRole('button', { name: 'Día' })).toBeInTheDocument();
-        expect(within(groupSelector).getByRole('button', { name: 'Semana' })).toBeDisabled();
-        expect(within(groupSelector).getByRole('button', { name: 'Mes' })).toBeDisabled();
+        expect(within(groupSelector).getByRole('button', { name: 'TURNO' })).toBeInTheDocument();
+        expect(within(groupSelector).getByRole('button', { name: 'DÍA' })).toBeInTheDocument();
+        expect(within(groupSelector).getByRole('button', { name: 'SEMANA' })).toBeDisabled();
+        expect(within(groupSelector).getByRole('button', { name: 'MES' })).toBeDisabled();
         expect(screen.queryByRole('button', { name: '1h' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Custom' })).not.toBeInTheDocument();
+    });
+
+    it('renders ACT pill-selected temporal selectors without underline and keeps disabled default cursor', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        const activeRangeButton = screen.getByRole('button', { name: '7d' });
+        const activeRangeIndicator = within(activeRangeButton).getByTestId('activity-analytics-runtime-control-indicator');
+        const activeGroupButton = screen.getByRole('button', { name: 'DÍA' });
+        const activeGroupIndicator = within(activeGroupButton).getByTestId('activity-analytics-runtime-control-indicator');
+        const disabledGroupButton = screen.getByRole('button', { name: 'SEMANA' });
+        const disabledGroupIndicator = within(disabledGroupButton).getByTestId('activity-analytics-runtime-control-indicator');
+        const activeRangeLabel = within(activeRangeButton).getByText('7d');
+        const activeGroupLabel = within(activeGroupButton).getByText('DÍA');
+
+        expect(activeRangeButton).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'px-2', 'py-1', 'text-admin-accent');
+        expect(activeRangeButton).not.toHaveClass('text-industrial-text', 'text-industrial-muted');
+        expect(activeRangeLabel).toHaveClass('translate-y-[1.5px]');
+        expect(activeRangeIndicator).toHaveClass('h-[1.5px]', 'w-1/4', 'min-w-[0.45rem]', 'bg-transparent');
+        expect(activeRangeIndicator).not.toHaveClass('bg-current', 'group-hover/control:bg-current', 'group-focus-visible/control:bg-current');
+        expect(activeGroupButton).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'px-2', 'py-1', 'text-admin-accent');
+        expect(activeGroupButton).not.toHaveClass('text-industrial-text', 'text-industrial-muted');
+        expect(activeGroupLabel).toHaveClass('translate-y-[1.5px]');
+        expect(activeGroupIndicator).toHaveClass('bg-transparent');
+        expect(activeGroupIndicator).not.toHaveClass('bg-current', 'group-hover/control:bg-current', 'group-focus-visible/control:bg-current');
+        expect(disabledGroupButton).toHaveClass('cursor-default', 'text-industrial-muted/50');
+        expect(disabledGroupButton).not.toHaveClass('disabled:cursor-not-allowed');
+        expect(disabledGroupIndicator).toHaveClass('bg-transparent');
     });
 
     it('keeps all granularity buttons visible and disables unavailable ones for each range', () => {
@@ -1018,7 +1063,7 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        const expectAvailability = (expected: Record<'Turno' | 'Día' | 'Semana' | 'Mes', boolean>) => {
+        const expectAvailability = (expected: Record<'TURNO' | 'DÍA' | 'SEMANA' | 'MES', boolean>) => {
             (Object.entries(expected) as Array<[keyof typeof expected, boolean]>).forEach(([label, enabled]) => {
                 const button = screen.getByRole('button', { name: label });
 
@@ -1031,7 +1076,7 @@ describe('ActivityAnalyticsWidget', () => {
             });
         };
 
-        expectAvailability({ Turno: true, Día: true, Semana: false, Mes: false });
+        expectAvailability({ TURNO: true, DÍA: true, SEMANA: false, MES: false });
 
         rerender(
             <ActivityAnalyticsWidget
@@ -1040,7 +1085,7 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expectAvailability({ Turno: true, Día: true, Semana: true, Mes: false });
+        expectAvailability({ TURNO: true, DÍA: true, SEMANA: true, MES: false });
 
         rerender(
             <ActivityAnalyticsWidget
@@ -1049,7 +1094,7 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expectAvailability({ Turno: true, Día: false, Semana: false, Mes: true });
+        expectAvailability({ TURNO: true, DÍA: false, SEMANA: false, MES: true });
     });
 
     it('renders shared Friday-night rollover labels while hiding Sunday sin turno in Turno Detalle', async () => {
@@ -3699,15 +3744,15 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-turno-mode')).toBeInTheDocument();
         expect(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Resumen' })).toHaveAttribute('aria-pressed', 'true');
         expect(within(screen.getByTestId('activity-analytics-turno-mode')).getByRole('button', { name: 'Detalle' })).toHaveAttribute('aria-pressed', 'false');
-        expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Día' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'TURNO' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'DÍA' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toBeDisabled();
 
         await user.click(screen.getByRole('button', { name: '30d' }));
 
-        expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Día' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Semana' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'TURNO' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'DÍA' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toBeEnabled();
         expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '1h' })).not.toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(3);
@@ -3719,10 +3764,10 @@ describe('ActivityAnalyticsWidget', () => {
 
         await user.click(screen.getByRole('button', { name: '12m' }));
 
-        expect(screen.getByRole('button', { name: 'Turno' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Día' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Mes' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'TURNO' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'DÍA' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'MES' })).toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-turno-mode')).not.toBeInTheDocument();
         expect(screen.getAllByTestId('activity-analytics-group-stack')).toHaveLength(3);
         expect(screen.getAllByText('Turno 1').length).toBeGreaterThan(0);
@@ -3769,22 +3814,22 @@ describe('ActivityAnalyticsWidget', () => {
         await user.click(screen.getByRole('button', { name: 'Detalle' }));
         expectGroupsTitle('RENDIMIENTO POR TURNO (ÚLTIMOS 7 DÍAS)');
 
-        await user.click(screen.getByRole('button', { name: 'Día' }));
+        await user.click(screen.getByRole('button', { name: 'DÍA' }));
         expectGroupsTitle('RENDIMIENTO DIARIO (ÚLTIMOS 7 DÍAS)');
 
         await user.click(screen.getByRole('button', { name: '30d' }));
         expectGroupsTitle('RENDIMIENTO DIARIO (ÚLTIMOS 30 DÍAS)');
 
-        await user.click(screen.getByRole('button', { name: 'Turno' }));
+        await user.click(screen.getByRole('button', { name: 'TURNO' }));
         expectGroupsTitle('RENDIMIENTO POR TURNO (ÚLTIMOS 30 DÍAS)');
 
-        await user.click(screen.getByRole('button', { name: 'Semana' }));
+        await user.click(screen.getByRole('button', { name: 'SEMANA' }));
         expectGroupsTitle('RENDIMIENTO SEMANAL (ÚLTIMOS 30 DÍAS)');
 
         await user.click(screen.getByRole('button', { name: '12m' }));
         expectGroupsTitle('RENDIMIENTO POR TURNO (ÚLTIMOS 12 MESES)');
 
-        await user.click(screen.getByRole('button', { name: 'Mes' }));
+        await user.click(screen.getByRole('button', { name: 'MES' }));
         expectGroupsTitle('RENDIMIENTO MENSUAL (ÚLTIMOS 12 MESES)');
     });
 
@@ -3814,8 +3859,8 @@ describe('ActivityAnalyticsWidget', () => {
         expect(vi.mocked(useActivitySeries)).toHaveBeenCalledWith({ machineId: 101, range: '7d' });
         expect(screen.queryByRole('button', { name: '24h' })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: 'Día' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-turno-mode')).toBeInTheDocument();
     });
 
@@ -3847,19 +3892,19 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        const disabledWeekButton = screen.getByRole('button', { name: 'Semana' });
-        const disabledMonthButton = screen.getByRole('button', { name: 'Mes' });
+        const disabledWeekButton = screen.getByRole('button', { name: 'SEMANA' });
+        const disabledMonthButton = screen.getByRole('button', { name: 'MES' });
 
         expect(disabledWeekButton).toBeDisabled();
         expect(disabledMonthButton).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
 
         await user.click(disabledWeekButton);
         await user.click(disabledMonthButton);
 
-        expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: 'Semana' })).toHaveAttribute('aria-pressed', 'false');
-        expect(screen.getByRole('button', { name: 'Mes' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'SEMANA' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'MES' })).toHaveAttribute('aria-pressed', 'false');
     });
 
     it('keeps the last 7d Día bucket outlined as en curso when the live window end lags slightly', () => {

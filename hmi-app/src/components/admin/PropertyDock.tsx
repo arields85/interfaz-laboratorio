@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode } from '../../domain/admin.types';
+import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -57,6 +57,9 @@ import {
     resolveActivityAnalyticsGroupBarWidthForGroup,
     resolveActivityAnalyticsProdTrendBandBlendMode,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    resolveProdTrendDisplayOptions,
+} from '../../utils/prodTrendWidgetDefaults';
 import { resolveActivityAnalyticsDisplayTitle } from '../../utils/activityAnalyticsTitle';
 import {
     resolveActivityAnalyticsDisplayRules,
@@ -130,6 +133,10 @@ const ACTIVITY_ANALYTICS_GRADIENT_STOPS = [
     { slotIndex: 0 as const, key: 'start', label: 'Color inicial', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
     { slotIndex: 1 as const, key: 'end', label: 'Color final', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
 ];
+const PROD_TREND_LINE_STOPS = [
+    { slotIndex: 0 as const, key: 'start', label: 'Color inicial' },
+    { slotIndex: 1 as const, key: 'end', label: 'Color final' },
+];
 const ACTIVITY_ANALYTICS_PROD_TREND_BAND_STOPS = [
     { slotIndex: 0 as const, key: 'top', label: 'Superior', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
     { slotIndex: 1 as const, key: 'middle', label: 'Centro', hexLabel: 'HEX', alphaLabel: 'Alfa (%)' },
@@ -153,6 +160,7 @@ type ActivityAnalyticsProdTrendBandSlotIndex = 0 | 1 | 2;
 type ActivityAnalyticsSurfaceKey = 'groupedBars' | 'donut';
 type ActivityAnalyticsHexDraftKey = `${ActivityAnalyticsStateGradientKey}-${ActivityAnalyticsGradientSlotIndex}`;
 type ActivityAnalyticsProdTrendBandHexDraftKey = `prod-trend-band-${ActivityAnalyticsProdTrendBandSlotIndex}`;
+type ProdTrendLineHexDraftKey = `prod-trend-line-${ActivityAnalyticsGradientSlotIndex}`;
 
 const formatActivityAnalyticsHexCode = (value: string | undefined): string => value?.replace(/^#/, '').toLowerCase() ?? '';
 const parseActivityAnalyticsHexCode = (value: string): string | null => {
@@ -209,6 +217,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     const [activityAnalyticsHexDrafts, setActivityAnalyticsHexDrafts] = useState<Partial<Record<ActivityAnalyticsHexDraftKey, string>>>({});
     const [activityAnalyticsProdTrendBandHexDrafts, setActivityAnalyticsProdTrendBandHexDrafts] = useState<Partial<Record<ActivityAnalyticsProdTrendBandHexDraftKey, string>>>({});
     const [activityAnalyticsCoverageColorDraft, setActivityAnalyticsCoverageColorDraft] = useState<string | null>(null);
+    const [prodTrendLineHexDrafts, setProdTrendLineHexDrafts] = useState<Partial<Record<ProdTrendLineHexDraftKey, string>>>({});
     void selectedLayout;
 
     useEffect(() => {
@@ -219,6 +228,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         setActivityAnalyticsHexDrafts({});
         setActivityAnalyticsProdTrendBandHexDrafts({});
         setActivityAnalyticsCoverageColorDraft(null);
+        setProdTrendLineHexDrafts({});
     }, [selectedWidget?.id]);
 
     // -------------------------------------------------------------------------
@@ -285,11 +295,13 @@ export default function PropertyDock(props: PropertyDockProps) {
     };
 
     const handleActivityAnalyticsRangeChange = (nextRange: string) => {
-        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+        if (!selectedWidget || (selectedWidget.type !== 'activity-analytics' && selectedWidget.type !== 'prod-trend')) {
             return;
         }
 
-        const currentOptions = resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined);
+        const currentOptions = selectedWidget.type === 'activity-analytics'
+            ? resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined)
+            : resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
         const nextRules = resolveActivityAnalyticsDisplayRules({
             range: nextRange,
             groupBy: currentOptions.groupBy,
@@ -493,7 +505,11 @@ export default function PropertyDock(props: PropertyDockProps) {
         }));
 
         if (normalizedValue.length === 0) {
-            handleActivityAnalyticsProdTrendBandColorChange(slotIndex, undefined);
+            if (selectedWidget?.type === 'prod-trend') {
+                handleProdTrendBandColorChange(slotIndex, undefined);
+            } else {
+                handleActivityAnalyticsProdTrendBandColorChange(slotIndex, undefined);
+            }
             return;
         }
 
@@ -503,7 +519,11 @@ export default function PropertyDock(props: PropertyDockProps) {
             return;
         }
 
-        handleActivityAnalyticsProdTrendBandColorChange(slotIndex, nextColor);
+        if (selectedWidget?.type === 'prod-trend') {
+            handleProdTrendBandColorChange(slotIndex, nextColor);
+        } else {
+            handleActivityAnalyticsProdTrendBandColorChange(slotIndex, nextColor);
+        }
         setActivityAnalyticsProdTrendBandHexDrafts((currentDrafts) => ({
             ...currentDrafts,
             [draftKey]: normalizedValue.toLowerCase(),
@@ -555,7 +575,11 @@ export default function PropertyDock(props: PropertyDockProps) {
             ...currentDrafts,
             [getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)]: formatActivityAnalyticsHexCode(normalizedValue),
         }));
-        handleActivityAnalyticsProdTrendBandColorChange(slotIndex, normalizedValue);
+        if (selectedWidget?.type === 'prod-trend') {
+            handleProdTrendBandColorChange(slotIndex, normalizedValue);
+        } else {
+            handleActivityAnalyticsProdTrendBandColorChange(slotIndex, normalizedValue);
+        }
     };
 
     const handleActivityAnalyticsCoverageColorChange = (value: string) => {
@@ -758,6 +782,117 @@ export default function PropertyDock(props: PropertyDockProps) {
                 },
             },
         });
+    };
+
+    const handleProdTrendThresholdChange = (key: 'setupThresholdKw' | 'prodThresholdKw', value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') {
+            return;
+        }
+
+        const nextValue = value === '' ? 0 : Number(value);
+
+        if (!Number.isFinite(nextValue) || nextValue < 0) {
+            return;
+        }
+
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const nextSetupThresholdKw = key === 'setupThresholdKw' ? nextValue : currentOptions.setupThresholdKw;
+        const nextProdThresholdKw = key === 'prodThresholdKw' ? nextValue : currentOptions.prodThresholdKw;
+
+        if (nextProdThresholdKw <= nextSetupThresholdKw) {
+            setActivityAnalyticsThresholdWarning('Prod. debe ser mayor que Setup.');
+            return;
+        }
+
+        setActivityAnalyticsThresholdWarning(null);
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, [key]: nextValue } });
+    };
+
+    const handleProdTrendRangeChange = (nextRange: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        const nextRules = resolveActivityAnalyticsDisplayRules({ range: nextRange, start: undefined, end: undefined, groupBy: resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined).groupBy });
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, range: nextRules.range, groupBy: nextRules.groupBy, start: undefined, end: undefined } });
+    };
+
+    const handleProdTrendGroupChange = (nextGroupBy: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const nextRules = resolveActivityAnalyticsDisplayRules({ range: currentOptions.range, start: currentOptions.start, end: currentOptions.end, groupBy: nextGroupBy });
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, range: nextRules.range, groupBy: nextRules.groupBy } });
+    };
+
+    const handleProdTrendGroupBarWidthChange = (nextValue: number) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, groupBarWidths: { ...(selectedWidget.displayOptions?.groupBarWidths ?? {}), [currentOptions.groupBy]: clampActivityAnalyticsGroupBarWidth(nextValue) } } });
+    };
+
+    const handleProdTrendLineColorChange = (slotIndex: 0 | 1, value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const nextColors: [string, string] = [...currentOptions.trendLineColors];
+        nextColors[slotIndex] = value;
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, trendLineColors: nextColors } });
+    };
+
+    const handleProdTrendLineAlphaChange = (slotIndex: 0 | 1, value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const nextAlphas: [number, number] = [...currentOptions.trendLineColorAlphas];
+        const nextValue = Number(value);
+        if (!Number.isFinite(nextValue)) return;
+        nextAlphas[slotIndex] = Math.min(100, Math.max(0, nextValue));
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, trendLineColorAlphas: nextAlphas } });
+    };
+
+    const handleProdTrendLineHexDraftChange = (slotIndex: 0 | 1, value: string) => {
+        const draftKey = `prod-trend-line-${slotIndex}` as ProdTrendLineHexDraftKey;
+        const normalizedValue = value.trim().replace(/^#/, '');
+        setProdTrendLineHexDrafts((currentDrafts) => ({ ...currentDrafts, [draftKey]: normalizedValue }));
+        const nextColor = parseActivityAnalyticsHexCode(normalizedValue);
+        if (!nextColor) return;
+        handleProdTrendLineColorChange(slotIndex, nextColor);
+        setProdTrendLineHexDrafts((currentDrafts) => ({ ...currentDrafts, [draftKey]: normalizedValue.toLowerCase() }));
+    };
+
+    const handleProdTrendLineHexDraftBlur = (slotIndex: 0 | 1, resolvedValue: string) => {
+        const draftKey = `prod-trend-line-${slotIndex}` as ProdTrendLineHexDraftKey;
+        const draftValue = prodTrendLineHexDrafts[draftKey];
+        if (draftValue == null) return;
+        if (isValidActivityAnalyticsHexCode(draftValue)) {
+            setProdTrendLineHexDrafts((currentDrafts) => ({ ...currentDrafts, [draftKey]: draftValue.trim().replace(/^#/, '').toLowerCase() }));
+            return;
+        }
+        setProdTrendLineHexDrafts((currentDrafts) => ({ ...currentDrafts, [draftKey]: formatActivityAnalyticsHexCode(resolvedValue) }));
+    };
+
+    const handleProdTrendLineColorPickerChange = (slotIndex: 0 | 1, value: string) => {
+        const normalizedValue = value.trim().toLowerCase();
+        setProdTrendLineHexDrafts((currentDrafts) => ({ ...currentDrafts, [`prod-trend-line-${slotIndex}`]: formatActivityAnalyticsHexCode(normalizedValue) }));
+        handleProdTrendLineColorChange(slotIndex, normalizedValue);
+    };
+
+    const handleProdTrendBandColorChange = (slotIndex: ActivityAnalyticsProdTrendBandSlotIndex, value: string | undefined) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const nextColors: [string | undefined, string | undefined, string | undefined] = [...currentOptions.prodTrendBands.colors];
+        nextColors[slotIndex] = value;
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, prodTrendBands: { ...selectedWidget.displayOptions?.prodTrendBands, colors: nextColors } } });
+    };
+
+    const handleProdTrendBandAlphaChange = (slotIndex: ActivityAnalyticsProdTrendBandSlotIndex, value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const nextAlphas: [number, number, number] = [...currentOptions.prodTrendBands.alphas];
+        const nextValue = Number(value);
+        if (!Number.isFinite(nextValue)) return;
+        nextAlphas[slotIndex] = Math.min(100, Math.max(0, nextValue));
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, prodTrendBands: { ...selectedWidget.displayOptions?.prodTrendBands, alphas: nextAlphas } } });
+    };
+
+    const handleProdTrendBandBlendModeChange = (blendMode: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
+        onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, prodTrendBands: { ...selectedWidget.displayOptions?.prodTrendBands, blendMode: resolveActivityAnalyticsProdTrendBandBlendMode(blendMode) } } });
     };
 
     const handleUnitChange = (val: string) => {
@@ -988,6 +1123,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     const isKpi = selectedWidget?.type === 'kpi';
     const isMachineActivity = selectedWidget?.type === 'machine-activity';
     const isActivityAnalytics = selectedWidget?.type === 'activity-analytics';
+    const isProdTrend = selectedWidget?.type === 'prod-trend';
     const isDashboardTitle = selectedWidget?.type === 'text-title';
     const navigationDashboardOptions = availableDashboards
         .filter((dashboard) => dashboard.id !== currentDashboardId)
@@ -1033,12 +1169,23 @@ export default function PropertyDock(props: PropertyDockProps) {
     const activityAnalyticsOptions = isActivityAnalytics
         ? resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined)
         : null;
+    const prodTrendOptions = isProdTrend
+        ? resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined)
+        : null;
     const activityAnalyticsDisplayRules = activityAnalyticsOptions
         ? resolveActivityAnalyticsDisplayRules({
             range: activityAnalyticsOptions.range,
             start: activityAnalyticsOptions.start,
             end: activityAnalyticsOptions.end,
             groupBy: activityAnalyticsOptions.groupBy,
+        })
+        : null;
+    const prodTrendDisplayRules = prodTrendOptions
+        ? resolveActivityAnalyticsDisplayRules({
+            range: prodTrendOptions.range,
+            start: prodTrendOptions.start,
+            end: prodTrendOptions.end,
+            groupBy: prodTrendOptions.groupBy,
         })
         : null;
     const isTrendChartV2 = selectedWidget ? isTrendChartV2Widget(selectedWidget) : false;
@@ -1089,6 +1236,12 @@ export default function PropertyDock(props: PropertyDockProps) {
             activityAnalyticsOptions.groupBarWidths,
             activityAnalyticsOptions.groupBarWidth,
         )
+        : prodTrendOptions
+            ? resolveActivityAnalyticsGroupBarWidthForGroup(
+                prodTrendOptions.groupBy,
+                prodTrendOptions.groupBarWidths,
+                prodTrendOptions.groupBarWidth,
+            )
         : 1;
     const propertyDockContextTitle = selectedWidget
         ? resolveActivityAnalyticsDisplayTitle(selectedWidget)
@@ -1097,7 +1250,8 @@ export default function PropertyDock(props: PropertyDockProps) {
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'text-title'
         && selectedWidget.type !== 'status'
-        && selectedWidget.type !== 'activity-analytics';
+        && selectedWidget.type !== 'activity-analytics'
+        && selectedWidget.type !== 'prod-trend';
     const genericDataUnitField = selectedWidget
         && selectedWidget.type !== 'alert-history'
         && selectedWidget.type !== 'prod-history'
@@ -1105,6 +1259,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         && selectedWidget.type !== 'kpi'
         && selectedWidget.type !== 'machine-activity'
         && selectedWidget.type !== 'activity-analytics'
+        && selectedWidget.type !== 'prod-trend'
         ? (() => {
             const currentUnit = selectedWidget?.binding?.unit || '';
             const isPreset = isPresetUnit(currentUnit);
@@ -1491,7 +1646,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     </DockFieldRow>
                                 )}
 
-                                {isActivityAnalytics ? (
+                                {isActivityAnalytics || isProdTrend ? (
                                     <>
                                         <DockFieldRow label="Equipo">
                                             {dataLoading ? (
@@ -1530,8 +1685,8 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                                         <DockFieldRow label="Rango">
                                             <AdminSelect
-                                                value={activityAnalyticsOptions?.range ?? '7d'}
-                                                onChange={handleActivityAnalyticsRangeChange}
+                                                value={isActivityAnalytics ? (activityAnalyticsOptions?.range ?? '7d') : (prodTrendOptions?.range ?? '7d')}
+                                                onChange={isActivityAnalytics ? handleActivityAnalyticsRangeChange : handleProdTrendRangeChange}
                                                 options={ACTIVITY_ANALYTICS_RANGE_OPTIONS}
                                             />
                                         </DockFieldRow>
@@ -1900,13 +2055,13 @@ export default function PropertyDock(props: PropertyDockProps) {
                             </DockSection>
                         )}
 
-                        {isActivityAnalytics && (
+                        {(isActivityAnalytics || isProdTrend) && (
                             <DockSection icon={<BarChart2 size={11} />} title="Agrupación">
                                 <DockFieldRow label="Grupo">
                                     <AdminSelect
-                                        value={activityAnalyticsOptions?.groupBy ?? 'day'}
-                                        onChange={handleActivityAnalyticsGroupChange}
-                                        options={ACTIVITY_ANALYTICS_GROUP_OPTIONS.filter((option) => activityAnalyticsDisplayRules?.allowedGroups.includes(option.value) ?? false)}
+                                        value={isActivityAnalytics ? (activityAnalyticsOptions?.groupBy ?? 'day') : (prodTrendOptions?.groupBy ?? 'day')}
+                                        onChange={isActivityAnalytics ? handleActivityAnalyticsGroupChange : handleProdTrendGroupChange}
+                                        options={ACTIVITY_ANALYTICS_GROUP_OPTIONS.filter((option) => (isActivityAnalytics ? activityAnalyticsDisplayRules : prodTrendDisplayRules)?.allowedGroups.includes(option.value) ?? false)}
                                     />
                                 </DockFieldRow>
                                 <DockSliderField
@@ -1916,7 +2071,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     max={1.5}
                                     step={0.1}
                                     ariaLabel="Ancho"
-                                    onChange={handleActivityAnalyticsGroupBarWidthChange}
+                                    onChange={isActivityAnalytics ? handleActivityAnalyticsGroupBarWidthChange : handleProdTrendGroupBarWidthChange}
                                 />
                             </DockSection>
                         )}
@@ -2009,30 +2164,93 @@ export default function PropertyDock(props: PropertyDockProps) {
                             </DockSection>
                         )}
 
-                        {isActivityAnalytics && (
+                        {(isActivityAnalytics || isProdTrend) && (
                             <DockSection icon={<Activity size={11} />} title="Estados Productivos">
                                 <DockFieldRow label="Setup ≥">
                                     <AdminNumberInput
-                                        value={activityAnalyticsOptions?.setupThresholdKw ?? 0.15}
+                                        value={isActivityAnalytics ? (activityAnalyticsOptions?.setupThresholdKw ?? 0.15) : (prodTrendOptions?.setupThresholdKw ?? 0.15)}
                                         min={0}
                                         step={0.01}
                                         commitOnBlur
-                                        onChange={val => handleActivityAnalyticsThresholdChange('setupThresholdKw', val)}
+                                        onChange={val => (isActivityAnalytics ? handleActivityAnalyticsThresholdChange('setupThresholdKw', val) : handleProdTrendThresholdChange('setupThresholdKw', val))}
                                     />
                                 </DockFieldRow>
                                 <DockFieldRow label="Prod. ≥">
                                     <AdminNumberInput
-                                        value={activityAnalyticsOptions?.prodThresholdKw ?? 0.25}
+                                        value={isActivityAnalytics ? (activityAnalyticsOptions?.prodThresholdKw ?? 0.25) : (prodTrendOptions?.prodThresholdKw ?? 0.25)}
                                         min={0}
                                         step={0.01}
                                         commitOnBlur
-                                        onChange={val => handleActivityAnalyticsThresholdChange('prodThresholdKw', val)}
+                                        onChange={val => (isActivityAnalytics ? handleActivityAnalyticsThresholdChange('prodThresholdKw', val) : handleProdTrendThresholdChange('prodThresholdKw', val))}
                                     />
                                 </DockFieldRow>
                                 {activityAnalyticsThresholdWarning && (
                                     <DockInfoBox variant="warning" text={activityAnalyticsThresholdWarning} />
                                 )}
                             </DockSection>
+                        )}
+
+                        {isProdTrend && prodTrendOptions && (
+                            <>
+                                <DockSection icon={<TrendingUp size={11} />} title="COLORES TENDENCIA % PROD">
+                                    {PROD_TREND_LINE_STOPS.map(({ slotIndex, label: stopLabel }) => {
+                                        const resolvedHexValue = prodTrendOptions.trendLineColors[slotIndex];
+                                        const draftKey = `prod-trend-line-${slotIndex}` as ProdTrendLineHexDraftKey;
+                                        const displayedHexValue = prodTrendLineHexDrafts[draftKey] ?? formatActivityAnalyticsHexCode(resolvedHexValue);
+                                        const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHexCode(displayedHexValue);
+                                        return (
+                                            <DockColorField
+                                                key={draftKey}
+                                                label={stopLabel}
+                                                color={resolvedHexValue}
+                                                hexCode={displayedHexValue}
+                                                alpha={prodTrendOptions.trendLineColorAlphas[slotIndex]}
+                                                invalid={isDraftInvalid}
+                                                swatchAriaLabel={`Tendencia % Prod color ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                hexInputAriaLabel={`Tendencia % Prod hex ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                alphaInputAriaLabel={`Tendencia % Prod alfa ${slotIndex === 0 ? 'inicial' : 'final'}`}
+                                                onColorChange={(nextValue) => handleProdTrendLineColorPickerChange(slotIndex, nextValue)}
+                                                onHexCodeChange={(nextValue) => handleProdTrendLineHexDraftChange(slotIndex, nextValue)}
+                                                onHexCodeBlur={() => handleProdTrendLineHexDraftBlur(slotIndex, resolvedHexValue)}
+                                                onAlphaChange={(nextValue) => handleProdTrendLineAlphaChange(slotIndex, nextValue)}
+                                            />
+                                        );
+                                    })}
+                                </DockSection>
+
+                                <DockSection icon={<TrendingUp size={11} />} title="BANDAS TENDENCIA % PROD">
+                                    {ACTIVITY_ANALYTICS_PROD_TREND_BAND_STOPS.map(({ slotIndex, label: stopLabel }) => {
+                                        const resolvedHexValue = prodTrendOptions.prodTrendBands.colors[slotIndex] ?? '';
+                                        const displayedHexValue = activityAnalyticsProdTrendBandHexDrafts[getActivityAnalyticsProdTrendBandHexDraftKey(slotIndex)] ?? formatActivityAnalyticsHexCode(resolvedHexValue);
+                                        const isDraftInvalid = displayedHexValue.length > 0 && !isValidActivityAnalyticsHexCode(displayedHexValue);
+                                        const pickerValue = prodTrendOptions.prodTrendBands.colors[slotIndex] ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT;
+                                        return (
+                                            <DockColorField
+                                                key={`prod-trend-standalone-band-${slotIndex}`}
+                                                label={stopLabel}
+                                                color={pickerValue}
+                                                hexCode={displayedHexValue}
+                                                alpha={prodTrendOptions.prodTrendBands.alphas[slotIndex]}
+                                                invalid={isDraftInvalid}
+                                                swatchAriaLabel={`Bandas tendencia standalone color ${stopLabel.toLowerCase()}`}
+                                                hexInputAriaLabel={`Bandas tendencia standalone hex ${stopLabel.toLowerCase()}`}
+                                                alphaInputAriaLabel={`Bandas tendencia standalone alfa ${stopLabel.toLowerCase()}`}
+                                                onColorChange={(nextValue) => handleProdTrendBandColorChange(slotIndex, nextValue)}
+                                                onHexCodeChange={(nextValue) => handleActivityAnalyticsProdTrendBandHexDraftChange(slotIndex, nextValue)}
+                                                onHexCodeBlur={() => handleActivityAnalyticsProdTrendBandHexDraftBlur(slotIndex, resolvedHexValue)}
+                                                onAlphaChange={(nextValue) => handleProdTrendBandAlphaChange(slotIndex, nextValue)}
+                                            />
+                                        );
+                                    })}
+                                    <DockFieldRow label="Blend">
+                                        <AdminSelect
+                                            value={prodTrendOptions.prodTrendBands.blendMode}
+                                            onChange={handleProdTrendBandBlendModeChange}
+                                            options={ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS.map((blendMode) => ({ value: blendMode, label: ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE_LABELS[blendMode] }))}
+                                        />
+                                    </DockFieldRow>
+                                </DockSection>
+                            </>
                         )}
 
                         {isActivityAnalytics && activityAnalyticsOptions && (

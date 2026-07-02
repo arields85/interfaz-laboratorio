@@ -51,4 +51,18 @@ describe('WidgetCatalogRail', () => {
 
         expect(onAddWidget).toHaveBeenCalledWith('activity-analytics');
     });
+
+    it('shows PROD-TREND in the catalog and dispatches the widget type on click', async () => {
+        const user = userEvent.setup();
+        const onAddWidget = vi.fn();
+
+        render(<WidgetCatalogRail onAddWidget={onAddWidget} />);
+
+        const button = screen.getByRole('button', { name: 'PROD-TREND' });
+        expect(button).toBeInTheDocument();
+
+        await user.click(button);
+
+        expect(onAddWidget).toHaveBeenCalledWith('prod-trend');
+    });
 });

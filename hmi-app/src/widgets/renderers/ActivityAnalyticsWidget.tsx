@@ -8,6 +8,7 @@ import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredConte
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
+import WidgetHeader from '../../components/ui/WidgetHeader';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
@@ -88,10 +89,10 @@ const RANGE_OPTIONS: Array<{ value: ResolvedActivityAnalyticsDisplayOptions['ran
 ];
 
 const GROUP_BY_OPTIONS: Array<{ value: ResolvedActivityAnalyticsDisplayOptions['groupBy']; label: string }> = [
-    { value: 'shift', label: 'Turno' },
-    { value: 'day', label: 'Día' },
-    { value: 'week', label: 'Semana' },
-    { value: 'month', label: 'Mes' },
+    { value: 'shift', label: 'TURNO' },
+    { value: 'day', label: 'DÍA' },
+    { value: 'week', label: 'SEMANA' },
+    { value: 'month', label: 'MES' },
 ];
 
 const GENERAL_TYPOGRAPHY_STYLE: CSSProperties = {
@@ -610,105 +611,107 @@ export default function ActivityAnalyticsWidget({
     };
 
     const header = (
-        <div className="grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] -translate-y-1 gap-y-0 min-w-0 shrink-0">
-            <div className="row-start-1 flex items-center justify-between gap-3">
-                <span className="min-w-0 flex-1 truncate uppercase text-industrial-muted group-hover:text-white transition-colors">
-                    {resolveActivityAnalyticsDisplayTitle(widget)}
-                </span>
-
-                <div className="flex shrink-0 items-center gap-4">
+        <WidgetHeader
+            title={resolveActivityAnalyticsDisplayTitle(widget)}
+            icon={BarChart2}
+            iconPosition="left"
+            iconTestId="activity-analytics-widget-header-icon"
+            className="min-w-0 shrink-0"
+            trailing={(
+                <div
+                    data-testid="activity-analytics-runtime-controls"
+                    className="flex items-center gap-2.5"
+                >
                     <div
-                        data-testid="activity-analytics-runtime-controls"
-                        className="flex items-center gap-2.5"
+                        data-testid="activity-analytics-runtime-range-selector"
+                        className="flex flex-nowrap items-center justify-end gap-0"
                     >
-                        <div
-                            data-testid="activity-analytics-runtime-range-selector"
-                            className="flex flex-nowrap items-center justify-end gap-0.5"
-                        >
-                            {RANGE_OPTIONS.map((option) => {
-                                const isActive = option.value === activeDisplayOptions.range;
+                        {RANGE_OPTIONS.map((option) => {
+                            const isActive = option.value === activeDisplayOptions.range;
 
-                                return (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        aria-pressed={isActive}
-                                        onClick={() => {
-                                            const nextDisplayOptions = {
-                                                ...widget.displayOptions,
-                                                ...activeDisplayOptions,
-                                                range: option.value,
-                                                start: undefined,
-                                                end: undefined,
-                                            } satisfies ResolvedActivityAnalyticsDisplayOptions;
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    aria-pressed={isActive}
+                                    onClick={() => {
+                                        const nextDisplayOptions = {
+                                            ...widget.displayOptions,
+                                            ...activeDisplayOptions,
+                                            range: option.value,
+                                            start: undefined,
+                                            end: undefined,
+                                        } satisfies ResolvedActivityAnalyticsDisplayOptions;
 
-                                            setRuntimeViewState((current) => ({
-                                                ...current,
-                                                selectionOverride: nextDisplayOptions,
-                                                turnoMode: 'summary',
-                                            }));
-                                            onPersistDisplayOptions?.({
-                                                range: option.value,
-                                                start: undefined,
-                                                end: undefined,
-                                            });
-                                        }}
-                                        className={getRuntimeControlButtonClass(isActive)}
-                                    >
-                                        {option.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
-
-                        <div
-                            data-testid="activity-analytics-runtime-group-selector"
-                            className="flex flex-nowrap items-center justify-end gap-0.5 border-l border-industrial-border pl-2.5"
-                        >
-                            {GROUP_BY_OPTIONS.map((option) => {
-                                const isAvailable = activeDisplayRules.allowedGroups.includes(option.value);
-                                const isActive = option.value === activeGroupBy;
-
-                                return (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        disabled={!isAvailable}
-                                        aria-disabled={!isAvailable}
-                                        aria-pressed={isActive}
-                                        onClick={() => {
-                                            if (!isAvailable) {
-                                                return;
-                                            }
-
-                                            setRuntimeViewState((current) => ({
-                                                ...current,
-                                                runtimeGroupBy: option.value,
-                                                turnoMode: option.value === 'shift' ? current.turnoMode : 'summary',
-                                            }));
-                                        }}
-                                        className={getRuntimeControlButtonClass(isActive, !isAvailable)}
-                                    >
-                                        {option.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                                        setRuntimeViewState((current) => ({
+                                            ...current,
+                                            selectionOverride: nextDisplayOptions,
+                                            turnoMode: 'summary',
+                                        }));
+                                        onPersistDisplayOptions?.({
+                                            range: option.value,
+                                            start: undefined,
+                                            end: undefined,
+                                        });
+                                    }}
+                                    className={getTemporalRuntimeControlButtonClass(isActive, false, true)}
+                                >
+                                    <span className="flex flex-col items-center">
+                                        <span className="translate-y-[1.5px]">{option.label}</span>
+                                        <span
+                                            aria-hidden="true"
+                                            data-testid="activity-analytics-runtime-control-indicator"
+                                            className={getTemporalRuntimeControlIndicatorClass(isActive)}
+                                        />
+                                    </span>
+                                </button>
+                            );
+                        })}
                     </div>
 
-                    <BarChart2
-                        size={24}
-                        strokeWidth={2}
-                        className="shrink-0 opacity-70 group-hover:opacity-100 transition-opacity"
-                        style={{ color: 'var(--color-widget-icon)' }}
-                    />
-                </div>
-            </div>
+                    <div
+                        data-testid="activity-analytics-runtime-group-selector"
+                        className="flex flex-nowrap items-center justify-end gap-0 border-l border-industrial-muted/25 pl-2.5"
+                    >
+                        {GROUP_BY_OPTIONS.map((option) => {
+                            const isAvailable = activeDisplayRules.allowedGroups.includes(option.value);
+                            const isActive = option.value === activeGroupBy;
 
-            <span className="row-start-2 min-w-0 -mt-0.5 invisible truncate uppercase" aria-hidden="true">
-                &nbsp;
-            </span>
-        </div>
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    disabled={!isAvailable}
+                                    aria-disabled={!isAvailable}
+                                    aria-pressed={isActive}
+                                    onClick={() => {
+                                        if (!isAvailable) {
+                                            return;
+                                        }
+
+                                        setRuntimeViewState((current) => ({
+                                            ...current,
+                                            runtimeGroupBy: option.value,
+                                            turnoMode: option.value === 'shift' ? current.turnoMode : 'summary',
+                                        }));
+                                    }}
+                                    className={getTemporalRuntimeControlButtonClass(isActive, !isAvailable, true)}
+                                >
+                                    <span className="flex flex-col items-center">
+                                        <span className="translate-y-[1.5px]">{option.label}</span>
+                                        <span
+                                            aria-hidden="true"
+                                            data-testid="activity-analytics-runtime-control-indicator"
+                                            className={getTemporalRuntimeControlIndicatorClass(isActive, !isAvailable)}
+                                        />
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        />
     );
 
     if (machineBinding.status === 'missing') {
@@ -850,6 +853,29 @@ function getRuntimeControlButtonClass(isActive: boolean, isDisabled = false, com
     return isActive
         ? `${baseClassName} border border-admin-accent/30 bg-admin-accent/10 ${spacingClassName} text-admin-accent`
         : `${baseClassName} ${spacingClassName} text-industrial-muted hover:text-industrial-text`;
+}
+
+function getTemporalRuntimeControlButtonClass(isActive: boolean, isDisabled = false, useCompactHorizontalPadding = false) {
+    const baseClassName = 'group/control uppercase transition-colors';
+    const spacingClassName = `${useCompactHorizontalPadding ? 'px-2' : 'px-2.5'} py-1`;
+
+    if (isDisabled) {
+        return `${baseClassName} ${spacingClassName} cursor-default text-industrial-muted/50`;
+    }
+
+    return `${baseClassName} ${spacingClassName} ${isActive
+        ? 'rounded-md border border-admin-accent/30 bg-admin-accent/10 text-admin-accent'
+        : 'text-industrial-muted hover:text-industrial-text focus-visible:text-industrial-text'}`;
+}
+
+function getTemporalRuntimeControlIndicatorClass(isActive: boolean, isDisabled = false) {
+    const baseClassName = 'mt-0.5 block h-[1.5px] w-1/4 min-w-[0.45rem] rounded-full transition-colors';
+
+    if (isDisabled || isActive) {
+        return `${baseClassName} bg-transparent`;
+    }
+
+    return `${baseClassName} bg-transparent`;
 }
 
 function resolveActivityAnalyticsGroupsTitle({

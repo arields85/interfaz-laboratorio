@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
     isActivityAnalyticsWidget,
+    isProdTrendWidget,
     type ActivityAnalyticsWidgetConfig,
+    type ProdTrendWidgetConfig,
     isTrendChartV2Widget,
     type TemporalSettingsConfig,
     type TrendChartV2WidgetConfig,
@@ -73,5 +75,27 @@ describe('admin.types trend-chart-v2 contracts', () => {
         expect(widget.displayOptions?.prodThresholdKw).toBe(15);
         expect(ACTIVITY_ANALYTICS_RANGE_OPTIONS).toEqual(['1h', '24h', '7d', '30d', '12m', 'custom']);
         expect(response.purpose).toBe('activity-analytics');
+    });
+
+    it('narrows prod-trend widgets and reuses activity analytics range contracts', () => {
+        const widget: ProdTrendWidgetConfig = {
+            id: 'prod-trend-1',
+            type: 'prod-trend',
+            title: 'PROD-TREND',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 4 },
+            binding: { mode: 'real_variable', bindingVersion: 'node-red-v1', machineId: 101 },
+            displayOptions: {
+                range: '30d',
+                groupBy: 'week',
+                setupThresholdKw: 5,
+                prodThresholdKw: 15,
+                trendLineColors: ['#22d3ee', '#10b981'],
+            },
+        };
+
+        expect(isProdTrendWidget(widget)).toBe(true);
+        expect(widget.displayOptions?.groupBy).toBe('week');
+        expect(widget.displayOptions?.trendLineColors?.[0]).toBe('#22d3ee');
     });
 });

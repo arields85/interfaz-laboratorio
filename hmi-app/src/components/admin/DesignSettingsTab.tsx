@@ -123,7 +123,7 @@ const COLOR_GROUPS = [
             { key: '--color-industrial-border', label: 'Borde Industrial', defaultValue: '#ffffff14' },
             { key: '--color-industrial-text', label: 'Texto Principal', defaultValue: '#f1f5f9' },
             { key: '--color-industrial-text-soft', label: 'Texto Suave', defaultValue: '#c5c9d1' },
-            { key: '--color-industrial-muted', label: 'Texto Secundario', defaultValue: '#94a3b8' },
+            { key: '--color-industrial-muted', label: 'Texto e íconos base', defaultValue: '#94a3b8' },
         ],
     },
     {

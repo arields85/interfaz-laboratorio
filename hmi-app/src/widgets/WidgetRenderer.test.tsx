@@ -8,6 +8,7 @@ import type {
     AlertHistoryWidgetConfig,
     MachineActivityWidgetConfig,
     MetricCardWidgetConfig,
+    ProdTrendWidgetConfig,
     ProdHistoryWidgetConfig,
     TrendChartV2WidgetConfig,
 } from '../domain/admin.types';
@@ -537,6 +538,66 @@ describe('WidgetRenderer', () => {
         expect(screen.getByRole('button', { name: 'Semana' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Mes' })).toBeDisabled();
         expect(screen.queryByText('hidden')).not.toBeInTheDocument();
+    });
+
+    it('dispatches prod-trend widgets to the dedicated standalone trend renderer', () => {
+        const prodTrendWidget: ProdTrendWidgetConfig = {
+            id: 'prod-trend-1',
+            type: 'prod-trend',
+            title: 'PROD-TREND',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 4 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+            },
+            displayOptions: {
+                range: '7d',
+                groupBy: 'day',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+            },
+        };
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'Total kW',
+                range: '7d',
+                unit: 'kW',
+                purpose: 'activity-analytics',
+                window: {
+                    start: '2026-06-18T12:00:00.000Z',
+                    end: '2026-06-18T14:00:00.000Z',
+                    timezone: 'UTC',
+                    bucket: '5m',
+                    bucketMs: 300000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 0.3 },
+                    { timestamp: '2026-06-18T13:00:00.000Z', timestampMs: Date.parse('2026-06-18T13:00:00.000Z'), value: 0.05 },
+                ],
+                summary: { hidden: true },
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(
+            <WidgetRenderer
+                widget={prodTrendWidget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                isLoadingData={false}
+            />,
+        );
+
+        expect(screen.getByTestId('prod-trend-widget-root')).toBeInTheDocument();
+        expect(screen.getByTestId('prod-trend-widget-chart')).toHaveAttribute('data-y-domain-max', '100');
     });
 
     it('forwards activity-analytics persistence callbacks to the dedicated runtime renderer', () => {

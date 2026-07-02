@@ -39,6 +39,7 @@ import {
     createDefaultConnectionStatusDisplayOptions,
 } from '../../utils/connectionWidget';
 import { createDefaultActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
+import { createDefaultProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
 import { getAncestors } from '../../utils/hierarchyTree';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
@@ -679,6 +680,19 @@ export default function DashboardBuilderPage() {
                             bindingVersion: 'node-red-v1',
                         },
                         displayOptions: createDefaultActivityAnalyticsDisplayOptions(),
+                    }
+                : type === 'prod-trend'
+                    ? {
+                        id: newId,
+                        type,
+                        title: 'PROD-TREND',
+                        position: { x: 0, y: 0 },
+                        size: { w: defaultWidth, h: defaultHeight },
+                        binding: {
+                            mode: 'real_variable',
+                            bindingVersion: 'node-red-v1',
+                        },
+                        displayOptions: createDefaultProdTrendDisplayOptions(),
                     }
                 : type === 'kpi'
                     ? {

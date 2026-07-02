@@ -17,6 +17,7 @@ const ACTIONS: RailAction[] = [
     { type: 'kpi', label: 'Indicador (KPI)', icon: Gauge },
     { type: 'machine-activity', label: 'Actividad de Máquina', icon: HeartPulse },
     { type: 'activity-analytics', label: 'Análisis de Actividad', icon: BarChart2 },
+    { type: 'prod-trend', label: 'PROD-TREND', icon: TrendingUp },
     { type: 'metric-card', label: 'Tarjeta de Métrica', icon: BarChart2 },
     { type: 'trend-chart', label: 'Gráfico de Tendencia', icon: TrendingUp },
     { type: 'trend-chart-v2', label: 'Trend-Chart-V2', icon: TrendingUp },

@@ -11,6 +11,7 @@ import TrendChartV2Widget from './renderers/TrendChartV2Widget';
 import KpiWidget from './renderers/KpiWidget';
 import MachineActivityWidget from './renderers/MachineActivityWidget';
 import ActivityAnalyticsWidget from './renderers/ActivityAnalyticsWidget';
+import ProdTrendWidget from './renderers/ProdTrendWidget';
 import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
@@ -141,6 +142,17 @@ export default function WidgetRenderer({
                     isLoadingData={isLoadingData}
                     className={className}
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
+                />
+            );
+            break;
+
+        case 'prod-trend':
+            renderedWidget = (
+                <ProdTrendWidget
+                    widget={widget}
+                    machines={machines}
+                    isLoadingData={isLoadingData}
+                    className={className}
                 />
             );
             break;

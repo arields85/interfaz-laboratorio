@@ -51,6 +51,19 @@ describe('widgetCapabilities', () => {
         expect(supportsHierarchy('activity-analytics')).toBe(false);
     });
 
+    it('marks prod-trend as non-catalog and non-hierarchical', () => {
+        expect(getWidgetCapabilities('prod-trend')).toEqual({
+            catalogVariable: false,
+            hierarchy: false,
+            nestedInteractiveNavigation: false,
+            defaultSize: { w: 11, h: 4 },
+            defaultIcon: 'TrendingUp',
+        });
+        expect(hasNestedInteractiveNavigation('prod-trend')).toBe(false);
+        expect(supportsCatalogVariable('prod-trend')).toBe(false);
+        expect(supportsHierarchy('prod-trend')).toBe(false);
+    });
+
     it('marks widgets with runtime controls as nested-interactive navigation surfaces', () => {
         expect(hasNestedInteractiveNavigation('alert-history')).toBe(true);
         expect(hasNestedInteractiveNavigation('prod-history')).toBe(true);
@@ -64,6 +77,7 @@ describe('widgetCapabilities', () => {
         expect(getDefaultSize('trend-chart')).toEqual({ w: 11, h: 9 });
         expect(getDefaultSize('trend-chart-v2')).toEqual({ w: 11, h: 9 });
         expect(getDefaultSize('activity-analytics')).toEqual({ w: 11, h: 9 });
+        expect(getDefaultSize('prod-trend')).toEqual({ w: 11, h: 4 });
         expect(getDefaultSize('prod-history')).toEqual({ w: 11, h: 9 });
         expect(getDefaultSize('status')).toEqual({ w: 4, h: 4 });
         expect(getDefaultSize('connection-status')).toEqual({ w: 5, h: 5 });
@@ -82,6 +96,7 @@ describe('widgetCapabilities', () => {
         expect(getDefaultIcon('trend-chart')).toBe('TrendingUp');
         expect(getDefaultIcon('trend-chart-v2')).toBe('TrendingUp');
         expect(getDefaultIcon('activity-analytics')).toBeNull();
+        expect(getDefaultIcon('prod-trend')).toBe('TrendingUp');
         expect(getDefaultIcon('prod-history')).toBe('LineChart');
         expect(getDefaultIcon('alert-history')).toBe('Siren');
         expect(getDefaultIcon('status')).toBeNull();

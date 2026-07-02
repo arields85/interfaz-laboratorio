@@ -221,7 +221,7 @@ vi.mock('../../components/admin/AdminWorkspaceLayout', () => ({
 }));
 
 vi.mock('../../components/admin/WidgetCatalogRail', () => ({
-    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart-v2' | 'activity-analytics') => void }) => (
+    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart-v2' | 'activity-analytics' | 'prod-trend') => void }) => (
         <div data-testid="widget-catalog-rail">
             <button type="button" onClick={() => onAddWidget('kpi')}>
                 Agregar KPI
@@ -237,6 +237,9 @@ vi.mock('../../components/admin/WidgetCatalogRail', () => ({
             </button>
             <button type="button" onClick={() => onAddWidget('activity-analytics')}>
                 Agregar Análisis de Actividad
+            </button>
+            <button type="button" onClick={() => onAddWidget('prod-trend')}>
+                Agregar PROD-TREND
             </button>
         </div>
     ),
@@ -640,6 +643,47 @@ describe('DashboardBuilderPage', () => {
                         setupThresholdKw: 0.15,
                         prodThresholdKw: 0.25,
                         displayMode: 'kpis-and-bars',
+                    },
+                },
+            });
+        });
+    });
+
+    it('adds prod-trend widgets with activity-series trend defaults', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [],
+            layout: [],
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Agregar PROD-TREND' }));
+
+        await waitFor(() => {
+            const snapshot = getBuilderCanvasSnapshot();
+            expect(snapshot.layout).toHaveLength(1);
+            expect(snapshot.layout[0]).toMatchObject({ x: 0, y: 0, w: 11, h: 4 });
+        });
+
+        await waitFor(() => {
+            expect(propertyDockMock).toHaveBeenCalled();
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: {
+                    type: 'prod-trend',
+                    title: 'PROD-TREND',
+                    size: { w: 11, h: 4 },
+                    binding: {
+                        mode: 'real_variable',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        range: '7d',
+                        groupBy: 'shift',
+                        setupThresholdKw: 0.15,
+                        prodThresholdKw: 0.25,
                     },
                 },
             });
