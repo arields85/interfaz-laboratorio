@@ -26,12 +26,14 @@ import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTempor
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
+import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
 import {
     resolveWidgetChartLayoutMetrics,
     WIDGET_CHART_CONTAINER_CLASS,
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
+import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
 import { buildTrendChartVisibleLabelIndices } from './trendChartVisibleLabels';
 
 const SYSTEM_TEXT_STYLE = {
@@ -573,6 +575,7 @@ export default function TrendChartWidget({
         data: historyData,
         isLoading: isLoadingHistory,
         isError: isHistoryError,
+        error: historyError,
     } = useDataHistory(historyParams);
 
     const baseValue = resolved.value == null
@@ -618,6 +621,9 @@ export default function TrendChartWidget({
     const chartSummary = historyData?.summary && chartData === historyTrendData && historyTrendData.length > 0
         ? historyData.summary
         : undefined;
+    const noDataRuntimeState = isHistoryError
+        ? (isDataHistoryConnectionError(historyError) ? 'disconnected' : 'error')
+        : 'empty';
 
     // Modo real cargando → skeleton; Modo simulado no muestra loading por histórico
     const isRealLoading = !isSimulated && historyParams !== null && isLoadingHistory;
@@ -629,9 +635,7 @@ export default function TrendChartWidget({
     if (isLoadingData || isRealLoading) {
         return (
             <div className={`glass-panel p-5 w-full h-full flex items-center justify-center ${className ?? ''}`}>
-                <div className="animate-pulse text-industrial-muted uppercase">
-                    Cargando datos...
-                </div>
+                <WidgetRuntimeState state="loading" testId="trend-chart-widget-loading" />
             </div>
         );
     }
@@ -663,14 +667,12 @@ export default function TrendChartWidget({
 
             <div className={WIDGET_CHART_CONTAINER_CLASS}>
                 {isNoData ? (
-                    <div className="h-full w-full flex flex-col items-center justify-center gap-2">
-                        <span className="text-white leading-none">--</span>
-                        {!isSimulated && (
-                            <span className="uppercase text-industrial-muted">
-                                {isHistoryError ? 'Error al cargar datos' : 'Sin datos'}
-                            </span>
-                        )}
-                    </div>
+                    !isSimulated ? (
+                        <WidgetRuntimeState
+                            state={noDataRuntimeState}
+                            testId="trend-chart-widget-state"
+                        />
+                    ) : null
                 ) : (
                     <TrendChartContainer
                         widgetId={widget.id}

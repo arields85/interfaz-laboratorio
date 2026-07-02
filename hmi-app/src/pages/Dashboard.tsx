@@ -33,7 +33,12 @@ export default function Dashboard() {
     const [isLoading, setIsLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
-    const { connection, machines } = useDataOverview();
+    const {
+        connection,
+        machines,
+        isLoading: isLoadingOverview,
+        isError: hasOverviewError,
+    } = useDataOverview();
     const setSelectedPlant = useUIStore((state) => state.setSelectedPlant);
 
     // Mapeo de equipos simulado (para resolver bindings)
@@ -286,6 +291,8 @@ export default function Dashboard() {
                     equipmentMap={equipmentMap}
                     machines={machines}
                     connection={connection}
+                    isLoadingOverview={isLoadingOverview}
+                    hasOverviewError={hasOverviewError}
                     headerWidgetIds={headerWidgetIds}
                     hierarchyContext={hierarchyContext}
                     cols={activeDashboard.cols}

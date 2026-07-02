@@ -17,12 +17,14 @@ Use this skill when creating, editing, reviewing, or fixing widget property-pane
 
 - Primitive-first is MANDATORY.
 - Reuse existing admin primitives before writing local markup.
-- Use `DockSection` for sections, `DockFieldRow` for rows, `AdminSelect` for selectors, `DockInfoDropdown` for informational dropdowns, `DockInfoBox` for help legends, `DockColorField` for colors, `DockSliderField` for sliders, `DockToggleField` for visual booleans, and `DockInlineControlRow` only for compact internal sub-rows inside a compliant primitive/layout.
-- Do NOT add local ad-hoc `text-sm`, `text-xs`, `font-*`, `tracking-*`, `leading-*`, custom input widths, or local range/color/toggle/checkbox markup when a primitive exists.
+- Use `DockSection` for sections, `DockFieldRow` for rows, `AdminSelect` for selectors, `DockInfoDropdown` for informational dropdowns, `DockInfoBox` for help legends, `DockColorField` for colors, `DockSliderField` for sliders, `DockCheckboxField` for checkbox semantics, and `DockInlineControlRow` only for compact internal sub-rows inside a compliant primitive/layout.
+- For property-panel booleans, choose the control by semantics and visual fit: `DockToggleField` is allowed for compact on/off switches, but a checkbox is allowed when it is clearer, matches the requested/reference style, or avoids misleading switch semantics.
+- Property-panel primitives are for admin/widget property panels; do NOT force `Dock*` controls into runtime widget legends, in-widget overlays, or viewer controls. Runtime boolean controls still must not use invented ad-hoc checkbox/toggle markup: reuse an existing context-appropriate primitive such as `WidgetRuntimeCheckbox`, or create a runtime/shared primitive first.
+- Do NOT add local ad-hoc `text-sm`, `text-xs`, `font-*`, `tracking-*`, `leading-*`, custom input widths, or local range/color/toggle markup when a primitive exists. Checkbox markup is allowed only when the boolean decision gate chooses a checkbox.
 - Do NOT override primitive width classes unless the user explicitly approves a new reusable rule.
 - If a primitive is insufficient, update/create the reusable primitive first, then consume it.
 - `DockColorField` owns the canonical color behavior: compact swatch, right-aligned Hex field, Hex value without `#`, alpha via `DockSliderField`.
-- Visual/options booleans use `DockToggleField`, not loose checkboxes, unless checkbox semantics are genuinely required.
+- Visual/options booleans do NOT require `DockToggleField` by default; use the boolean decision gate below.
 - If a convention-compliant fix may change visible semantics or saved data, ask the user first.
 - If visual acceptance already exists, do not make layout changes without explicit user confirmation.
 - Preserve the HMI read-only rule: never introduce plant writes or control actions.
@@ -41,7 +43,9 @@ Use this skill when creating, editing, reviewing, or fixing widget property-pane
 | Context/help legend | `DockInfoBox` |
 | Color editing | `DockColorField` |
 | Slider/range editing | `DockSliderField` |
-| Visual on/off option | `DockToggleField` |
+| Compact on/off switch in a property panel | `DockToggleField` |
+| Boolean where checkbox is clearer, requested, or matches existing reference style | `DockCheckboxField` |
+| Runtime widget legend, in-widget overlay, or viewer control | Use a context-appropriate runtime/shared primitive; do not invent ad-hoc checkbox/toggle markup |
 | Compact inner control alignment inside a primitive | `DockInlineControlRow` |
 
 ## Execution Steps
@@ -65,6 +69,7 @@ Use this skill when creating, editing, reviewing, or fixing widget property-pane
 - `AGENTS.md`
 - `hmi-app/src/widgets/WIDGET_AUTHORING.md`
 - `hmi-app/src/components/admin/DockColorField.tsx`
+- `hmi-app/src/components/admin/DockCheckboxField.tsx`
 - `hmi-app/src/components/admin/DockSliderField.tsx`
 - `hmi-app/src/components/admin/DockToggleField.tsx`
 - `hmi-app/src/components/admin/DockInfoDropdown.tsx`

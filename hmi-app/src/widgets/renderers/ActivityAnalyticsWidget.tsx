@@ -1,8 +1,8 @@
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { AlertTriangle, BarChart2, Loader2, PlugZap } from 'lucide-react';
+import { BarChart2 } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
-import type { ContractMachine } from '../../domain/dataContract.types';
+import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
@@ -10,6 +10,7 @@ import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
+import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
@@ -50,6 +51,9 @@ import {
 interface ActivityAnalyticsWidgetProps {
     widget: ActivityAnalyticsWidgetConfig;
     machines?: ContractMachine[];
+    connection?: ConnectionHealth;
+    isLoadingOverview?: boolean;
+    hasOverviewError?: boolean;
     isLoadingData?: boolean;
     className?: string;
     onPersistDisplayOptions?: (displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
@@ -389,6 +393,9 @@ type SummaryDonutGeometry = Readonly<{
 export default function ActivityAnalyticsWidget({
     widget,
     machines,
+    connection,
+    isLoadingOverview = false,
+    hasOverviewError = false,
     isLoadingData = false,
     className,
     onPersistDisplayOptions,
@@ -450,6 +457,10 @@ export default function ActivityAnalyticsWidget({
         }));
     }
     const machineBinding = resolveActivityAnalyticsMachineBinding(widget.binding?.machineId, machines);
+    const isOverviewUnavailable = isActivityOverviewUnavailable({
+        connection,
+        hasOverviewError,
+    });
     const { config, shifts } = useTemporalSettings();
 
     const activitySeries = useActivitySeries(machineBinding.machineId != null ? {
@@ -674,32 +685,45 @@ export default function ActivityAnalyticsWidget({
     );
 
     if (machineBinding.status === 'missing') {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
-            title: 'Seleccione una máquina',
-            message: 'Este widget necesita una máquina vinculada para consultar Activity-Series.',
-            icon: <PlugZap size={20} className="text-industrial-muted" />,
+            label: 'Seleccione una máquina',
+            state: 'invalid-config',
         });
     }
 
     if (machineBinding.status === 'invalid') {
-        return renderStateCard({
+        if (isLoadingOverview && machineBinding.reason === 'machine_lookup_pending_or_missing') {
+            return renderRuntimeState({
+                className,
+                header,
+                state: 'loading',
+            });
+        }
+
+        if (isOverviewUnavailable) {
+            return renderRuntimeState({
+                className,
+                header,
+                state: 'disconnected',
+            });
+        }
+
+        return renderRuntimeState({
             className,
             header,
-            title: 'Seleccione una máquina válida',
-            message: 'La máquina configurada ya no coincide con el contrato disponible para Activity-Series.',
-            icon: <AlertTriangle size={20} className="text-status-warning" />,
+            label: 'Seleccione una máquina válida',
+            state: 'invalid-config',
         });
     }
 
     if (!isDataActivitySeriesEnabled()) {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
-            title: 'Endpoint Activity-Series no configurado',
-            message: 'Configure el endpoint Activity-Series para habilitar este widget.',
-            icon: <AlertTriangle size={20} className="text-status-warning" />,
+            label: 'Endpoint Activity-Series no configurado',
+            state: 'invalid-config',
         });
     }
 
@@ -709,27 +733,24 @@ export default function ActivityAnalyticsWidget({
             prodKw: activeDisplayOptions.prodThresholdKw,
         });
     } catch {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
-            title: 'Configuración de umbrales inválida',
-            message: 'Prod. debe ser mayor que Setup para clasificar la actividad.',
-            icon: <AlertTriangle size={20} className="text-status-warning" />,
+            label: 'Configuración de umbrales inválida',
+            state: 'invalid-config',
         });
     }
 
     if (isLoadingData || activitySeries.isLoading) {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
-            title: 'Cargando actividad…',
-            message: 'Consultando la serie de actividad configurada.',
-            icon: <Loader2 size={20} className="animate-spin text-industrial-muted" />,
+            state: 'loading',
         });
     }
 
     if (activitySeries.isError) {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
             ...resolveErrorState(activitySeries.error),
@@ -737,19 +758,18 @@ export default function ActivityAnalyticsWidget({
     }
 
     if (!activityData || activityData.series.length === 0) {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
-            title: 'Sin datos de actividad',
-            message: 'La consulta no devolvió puntos para la ventana seleccionada.',
-            icon: <BarChart2 size={20} className="text-industrial-muted" />,
+            label: 'Sin datos de actividad',
+            state: 'empty',
         });
     }
 
     try {
         validateComputedAnalytics(computedAnalytics);
     } catch (error) {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
             ...resolveProcessingErrorState(error),
@@ -757,12 +777,11 @@ export default function ActivityAnalyticsWidget({
     }
 
     if (computedAnalytics.grouped.length === 0) {
-        return renderStateCard({
+        return renderRuntimeState({
             className,
             header,
-            title: 'Sin grupos para mostrar',
-            message: 'Ajuste la agrupación o los turnos globales para ver resultados agrupados.',
-            icon: <AlertTriangle size={20} className="text-status-warning" />,
+            label: 'Sin grupos para mostrar',
+            state: 'empty',
         });
     }
 
@@ -853,41 +872,36 @@ function resolveActivityAnalyticsGroupsTitle({
 function resolveErrorState(error: Error | null) {
     if (error instanceof ActivitySeriesAdapterError) {
         return {
-            title: 'Activity-Series devolvió datos inválidos',
-            message: 'La respuesta recibida no cumple el contrato esperado para esta analítica.',
-            icon: <AlertTriangle size={20} className="text-status-warning" />,
+            label: 'Activity-Series devolvió datos inválidos',
+            state: 'error' as const,
         };
     }
 
     if (error instanceof DataServiceError) {
         if (typeof error.statusCode === 'number') {
             return {
-                title: 'Activity-Series rechazó la consulta',
-                message: error.message,
-                icon: <AlertTriangle size={20} className="text-status-warning" />,
+                label: 'Activity-Series rechazó la consulta',
+                state: 'error' as const,
             };
         }
 
         return {
-            title: 'No se pudo conectar con Activity-Series',
-            message: 'Revise la conectividad con la fuente de datos e intente nuevamente.',
-            icon: <PlugZap size={20} className="text-status-warning" />,
+            label: 'No se pudo conectar con Activity-Series',
+            state: 'error' as const,
         };
     }
 
     return {
-        title: 'No se pudo interpretar Activity-Series',
-        message: 'La respuesta recibida no pudo procesarse para esta analítica.',
-        icon: <AlertTriangle size={20} className="text-status-warning" />,
+        label: 'No se pudo interpretar Activity-Series',
+        state: 'error' as const,
     };
 }
 
 function resolveProcessingErrorState(error: unknown) {
     if (error instanceof Error && error.message.includes('bucketMs')) {
         return {
-            title: 'Ventana temporal inválida',
-            message: 'Activity-Series no devolvió una resolución temporal válida para calcular la analítica.',
-            icon: <AlertTriangle size={20} className="text-status-warning" />,
+            label: 'Ventana temporal inválida',
+            state: 'error' as const,
         };
     }
 
@@ -915,6 +929,13 @@ function resolveActivityAnalyticsMachineBinding(rawMachineId: unknown, machines?
                 selectedMachine,
             };
         }
+
+        return {
+            status: 'invalid' as const,
+            machineId: null,
+            selectedMachine: undefined,
+            reason: 'machine_lookup_pending_or_missing' as const,
+        };
     }
 
     if (machineId === null) {
@@ -922,6 +943,7 @@ function resolveActivityAnalyticsMachineBinding(rawMachineId: unknown, machines?
             status: 'invalid' as const,
             machineId: null,
             selectedMachine: undefined,
+            reason: 'malformed_binding' as const,
         };
     }
 
@@ -932,6 +954,7 @@ function resolveActivityAnalyticsMachineBinding(rawMachineId: unknown, machines?
             status: 'invalid' as const,
             machineId: null,
             selectedMachine: undefined,
+            reason: 'machine_lookup_pending_or_missing' as const,
         };
     }
 
@@ -965,27 +988,25 @@ function toPositiveInteger(value: unknown): number | null {
     return null;
 }
 
-function renderStateCard({
+function renderRuntimeState({
     className,
     header,
-    title,
-    message,
-    icon,
+    label,
+    state,
 }: {
     className?: string;
     header: React.ReactNode;
-    title: string;
-    message: string;
-    icon: React.ReactNode;
+    label?: string;
+    state: 'loading' | 'disconnected' | 'error' | 'invalid-config' | 'empty';
 }) {
     return (
         <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
             <WidgetCenteredContentLayout header={header} contentClassName="pt-14">
-                <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
-                    {icon}
-                    <div className="uppercase text-industrial-text" style={GENERAL_TYPOGRAPHY_STYLE}>{title}</div>
-                    <div className="text-industrial-muted" style={GENERAL_TYPOGRAPHY_STYLE}>{message}</div>
-                </div>
+                <WidgetRuntimeState
+                    state={state}
+                    labelOverride={label}
+                    testId="activity-analytics-widget-runtime-state"
+                />
             </WidgetCenteredContentLayout>
         </div>
     );
@@ -1806,19 +1827,6 @@ function ProdTrendChart({
                 );
             })}
 
-                {!hasRenderableTrend && (
-                    <text
-                        x={chartMargin.left + (plotWidth / 2)}
-                        y={chartMargin.top + (plotHeight / 2)}
-                        textAnchor="middle"
-                        fill="var(--color-industrial-muted)"
-                        style={GENERAL_TYPOGRAPHY_STYLE}
-                        data-testid="activity-analytics-prod-trend-empty"
-                    >
-                        {hasLabels ? 'Sin datos comparables' : 'Sin datos'}
-                    </text>
-                )}
-
                 {grouped.map((bucket, index) => {
                     const centerX = positions[index] ?? (chartMargin.left + (plotWidth / 2));
                     const hitWidth = grouped.length > 1 ? hitStep : plotWidth;
@@ -1841,6 +1849,14 @@ function ProdTrendChart({
                 })}
             </svg>
 
+            {!hasRenderableTrend && (
+                <WidgetRuntimeState
+                    state={hasLabels ? 'empty-comparable' : 'empty'}
+                    className="absolute inset-0"
+                    testId="activity-analytics-prod-trend-empty"
+                />
+            )}
+
             {hoverInfo && hoverInfo.index < grouped.length && (
                 <ChartTooltip
                     label={resolveGroupedTooltipLabel(grouped[hoverInfo.index]?.label ?? '')}
@@ -1853,6 +1869,20 @@ function ProdTrendChart({
             )}
         </>
     );
+}
+
+function isActivityOverviewUnavailable({
+    connection,
+    hasOverviewError,
+}: {
+    connection?: ConnectionHealth;
+    hasOverviewError: boolean;
+}) {
+    if (hasOverviewError) {
+        return true;
+    }
+
+    return connection?.globalStatus === 'offline' || connection?.globalStatus === 'unknown';
 }
 
 function buildProdTrendLineSegments(points: Array<{ x: number; y: number | null }>) {

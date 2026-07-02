@@ -472,5 +472,68 @@ describe('ProdTrendWidget', () => {
         render(<ProdTrendWidget widget={makeWidget({ binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' } })} machines={MACHINES} />);
 
         expect(screen.getByText('Seleccione una máquina')).toBeInTheDocument();
+        expect(screen.getByTestId('prod-trend-widget-runtime-state')).not.toHaveTextContent('Este widget necesita una máquina vinculada para consultar Activity-Series.');
+        expect(screen.getByTestId('prod-trend-widget-runtime-state').querySelector('svg')).toBeNull();
+    });
+
+    it('shows a no-connection fallback instead of invalid-machine when overview is unavailable', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({ data: null, isLoading: false, isError: false, error: null, isEnabled: false });
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget()}
+                machines={[]}
+                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
+                hasOverviewError
+            />,
+        );
+
+        expect(screen.getByText('Sin conexión')).toBeInTheDocument();
+        expect(screen.queryByText('Seleccione una máquina válida')).not.toBeInTheDocument();
+        expect(screen.queryByText('No se pudo validar la máquina porque la fuente de datos no está disponible.')).not.toBeInTheDocument();
+        expect(screen.getByText('Sin conexión')).not.toHaveClass('uppercase');
+        expect(screen.getByTestId('prod-trend-widget-runtime-state')).toHaveClass('flex', 'items-center', 'justify-center');
+        expect(screen.getByTestId('prod-trend-widget-runtime-state').querySelector('svg')).toBeNull();
+        expect(screen.getByTestId('prod-trend-widget-root')).toHaveClass('glass-panel', 'group', 'relative', 'flex', 'h-full', 'w-full', 'flex-col', 'overflow-hidden', 'p-5');
+    });
+
+    it('keeps the loading state while overview is still loading and machine validation depends on overview machines', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({ data: null, isLoading: false, isError: false, error: null, isEnabled: false });
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget()}
+                machines={[]}
+                isLoadingOverview
+            />,
+        );
+
+        expect(screen.getByTestId('prod-trend-widget-runtime-state')).toHaveTextContent('Cargando_');
+        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
+        expect(screen.queryByText('Seleccione una máquina válida')).not.toBeInTheDocument();
+        expect(screen.getByTestId('prod-trend-widget-runtime-state').querySelector('svg')).toBeNull();
+    });
+
+    it('keeps the invalid-machine fallback when the contract is available but the configured machine is missing', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({ data: null, isLoading: false, isError: false, error: null, isEnabled: false });
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'real_variable',
+                        bindingVersion: 'node-red-v1',
+                        machineId: 999,
+                    },
+                })}
+                machines={MACHINES}
+                connection={{ globalStatus: 'online', lastSuccess: '2026-06-18T12:00:00.000Z', ageMs: 0 }}
+            />,
+        );
+
+        expect(screen.getByText('Seleccione una máquina válida')).toBeInTheDocument();
+        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
+        expect(screen.getByTestId('prod-trend-widget-runtime-state')).not.toHaveTextContent('La máquina configurada ya no coincide con el contrato disponible para Activity-Series.');
+        expect(screen.getByTestId('prod-trend-widget-runtime-state').querySelector('svg')).toBeNull();
     });
 });

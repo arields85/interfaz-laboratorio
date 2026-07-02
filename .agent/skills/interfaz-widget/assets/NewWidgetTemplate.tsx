@@ -2,6 +2,7 @@ import type { WidgetConfig } from '../../../../hmi-app/src/domain/admin.types';
 import type { EquipmentSummary } from '../../../../hmi-app/src/domain/equipment.types';
 import WidgetCenteredContentLayout from '../../../../hmi-app/src/components/ui/WidgetCenteredContentLayout';
 import WidgetHeader from '../../../../hmi-app/src/components/ui/WidgetHeader';
+import WidgetRuntimeState from '../../../../hmi-app/src/components/ui/WidgetRuntimeState';
 
 interface NewWidgetTemplateProps {
   widget: WidgetConfig;
@@ -21,6 +22,8 @@ interface NewWidgetTemplateProps {
  * - `navigationTargetDashboardId` ya viene heredado desde `WidgetConfigBase`
  * - NO agregar `onClick` de navegación en el renderer: el wrapper compartido de `WidgetRenderer` lo resuelve en viewer
  * - el PropertyDock compartido agrega `Navegación` al final del panel automáticamente
+ * - runtime/fallback técnico por defecto con `WidgetRuntimeState`
+ * - no escribir `Cargando datos...` local, no usar cards ricas con ícono+mensaje, no exponer errores raw del backend
  */
 export default function NewWidgetTemplate({
   widget,
@@ -36,12 +39,24 @@ export default function NewWidgetTemplate({
   if (isLoadingData) {
     return (
       <div className={`glass-panel group p-5 w-full h-full flex items-center justify-center ${className ?? ''}`}>
-        <div className="animate-pulse text-industrial-muted text-xs font-bold uppercase tracking-widest">
-          Cargando datos...
-        </div>
+        <WidgetRuntimeState state="loading" />
       </div>
     );
   }
+
+  // Runtime/fallback states should use WidgetRuntimeState by default.
+  // Canonical labels:
+  // - loading | preparing | layout | chart-not-ready -> Cargando_
+  // - disconnected -> Sin conexión
+  // - error -> No se pudieron cargar los datos
+  // - invalid-config -> Configuración incompleta
+  // - empty -> Sin datos
+  // - empty-comparable -> Sin datos comparables
+  // - stale -> Dato desactualizado
+  // Use labelOverride only for concise domain-specific wording.
+  // Do not render local "Cargando datos...", rich icon/message cards, raw backend errors,
+  // placeholder "--" above runtime legends, or uppercase runtime legends.
+  // Domain/operational content states are separate. KPI/Metric remain excluded unless product direction changes.
 
   return (
     <div className={`glass-panel group p-5 w-full h-full flex flex-col ${className ?? ''}`}>

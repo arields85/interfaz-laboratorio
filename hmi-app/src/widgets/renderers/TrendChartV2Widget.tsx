@@ -60,6 +60,8 @@ import {
 } from '../../components/ui/WidgetChartLayout.shared';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
+import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
+import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
 
 const SYSTEM_TEXT_STYLE = {
     fontSize: 'var(--font-size-system)',
@@ -464,13 +466,14 @@ export default function TrendChartV2Widget({
     const showLoading = isLoadingData || (historyParams !== null && isLoading);
     const hasRenderableDimensions = dimensions.width >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.width
         && dimensions.height >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.height;
-    const emptyStateMessage = isError
-        ? (error?.message || 'Error loading history')
-        : hasData && !hasRenderableDimensions
-            ? 'Preparing chart...'
-            : 'Sin datos';
-    const emptyStateTone = isError ? 'text-admin-accent' : 'text-industrial-muted';
     const shouldShowState = showLoading || isError || !hasData || !hasRenderableDimensions;
+    const runtimeState = showLoading
+        ? 'loading'
+        : isError
+            ? (isDataHistoryConnectionError(error) ? 'disconnected' : 'error')
+            : hasData && !hasRenderableDimensions
+                ? 'chart-not-ready'
+                : 'empty';
 
     return (
         <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
@@ -528,16 +531,12 @@ export default function TrendChartV2Widget({
 
             <div ref={containerRef} className={WIDGET_CHART_CONTAINER_CLASS}>
                 {showLoading ? (
-                    <div className="flex h-full w-full items-center justify-center">
-                        <div className="animate-pulse text-industrial-muted uppercase">
-                            Cargando datos...
-                        </div>
-                    </div>
+                    <WidgetRuntimeState state={runtimeState} testId="trend-chart-v2-state" />
                 ) : shouldShowState ? (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-industrial-border bg-industrial-surface/60 px-4 text-center text-sm text-industrial-muted">
-                        <span className="text-industrial-text leading-none">--</span>
-                        <span className={`uppercase ${emptyStateTone}`}>{emptyStateMessage}</span>
-                    </div>
+                    <WidgetRuntimeState
+                        state={runtimeState}
+                        testId="trend-chart-v2-state"
+                    />
                 ) : (
                     <>
                         <WidgetChartLayout

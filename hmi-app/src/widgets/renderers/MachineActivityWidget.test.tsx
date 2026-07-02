@@ -186,7 +186,10 @@ describe('MachineActivityWidget', () => {
             />,
         );
 
-        expect(screen.getByText((_, element) => element?.className.includes('animate-pulse') ?? false)).toBeInTheDocument();
+        const loadingState = screen.getByTestId('machine-activity-widget-loading');
+
+        expect(loadingState).toHaveTextContent('Cargando_');
+        expect(loadingState.querySelector('.widget-runtime-state-caret')).not.toBeNull();
 
         loadingView.unmount();
 

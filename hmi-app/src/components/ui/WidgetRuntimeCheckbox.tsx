@@ -4,6 +4,7 @@ export interface WidgetRuntimeCheckboxProps {
     checked: boolean;
     ariaLabel: string;
     onCheckedChange: (checked: boolean) => void;
+    disabled?: boolean;
     inputClassName?: string;
     visualTestId?: string;
     checkTestId?: string;
@@ -13,19 +14,22 @@ export default function WidgetRuntimeCheckbox({
     checked,
     ariaLabel,
     onCheckedChange,
+    disabled = false,
     inputClassName,
     visualTestId,
     checkTestId,
 }: WidgetRuntimeCheckboxProps) {
     return (
-        <span className="group/runtime-checkbox relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] focus-within:ring-1 focus-within:ring-industrial-border/70 focus-within:ring-offset-0">
+        <span className={`group/runtime-checkbox relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] focus-within:ring-1 focus-within:ring-industrial-border/70 focus-within:ring-offset-0 ${disabled ? 'opacity-40' : ''}`.trim()}>
             <input
                 type="checkbox"
                 aria-label={ariaLabel}
                 checked={checked}
+                disabled={disabled}
                 onChange={(event) => onCheckedChange(event.currentTarget.checked)}
                 className={[
-                    'absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 focus-visible:outline-none',
+                    'absolute inset-0 z-10 m-0 h-full w-full opacity-0 focus-visible:outline-none',
+                    disabled ? 'cursor-not-allowed' : 'cursor-pointer',
                     inputClassName,
                 ].filter(Boolean).join(' ')}
             />

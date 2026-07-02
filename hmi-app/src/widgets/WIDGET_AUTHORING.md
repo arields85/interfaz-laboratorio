@@ -47,6 +47,7 @@ Todo widget nuevo debe:
   - Ejemplo típico: indicador central (badge/estado/gauge puntual) con header informativo arriba.
 - **Patrón C — overlay controls (controles locales flotantes)**:
   - Usar cuando el widget tiene controles interactivos (selectores, toggles) que deben flotar sobre el header sin participar de su layout.
+  - Para controles booleanos runtime —checkboxes, toggles o controles de leyenda— no inventar markup local ad-hoc si existe una primitive contextual. Reutilizar la primitive runtime/shared existente, o crear/ajustar una primitive contextual antes de usarla.
   - Los controles se posicionan con `absolute right-5 top-5 z-10` como hijo directo del `glass-panel`.
   - El `WidgetHeader` NO debe usar `trailing` para controles multi-fila; usar overlay en su lugar.
   - Para controles temporales horizontales compactos de una o dos escalas, preferir `WidgetHeaderTemporalControls` en `WidgetHeader.trailing` antes que overlay.
@@ -76,7 +77,7 @@ Todo widget nuevo debe:
 
 El panel de propiedades debe ser compacto, legible y consistente. Su estructura se compone de secciones colapsables (`DockSection`), filas de propiedad (`DockFieldRow`), controles reutilizables y ayudas contextuales (`DockInfoBox`). No debe parecer un panel dentro de otro panel.
 
-> **Regla dura: Primitive-first es obligatorio.** Si existe una primitive compartida para el patrón del control, se usa esa primitive. No se permite markup local ad-hoc de property panel para color, slider, toggle o dropdown cuando la primitive correspondiente ya existe. Si la primitive no alcanza, primero se corrige o crea la primitive reutilizable y recién después se usa en el widget. Overrides locales de ancho o tipografía no son válidos: requieren actualizar la regla/primitiva reutilizable, no abrir excepciones por widget.
+> **Regla dura: Primitive-first es obligatorio.** Si existe una primitive compartida para el patrón del control, se usa esa primitive. No se permite markup local ad-hoc de property panel para color, slider, toggle o dropdown cuando la primitive correspondiente ya existe. Para booleanos, elegir por semántica y legibilidad: `DockToggleField` no es obligatorio por defecto y un checkbox es válido cuando comunica mejor el patrón, coincide con la referencia visual pedida o evita una semántica de switch engañosa. Si la primitive no alcanza, primero se corrige o crea la primitive reutilizable y recién después se usa en el widget. Overrides locales de ancho o tipografía no son válidos: requieren actualizar la regla/primitiva reutilizable, no abrir excepciones por widget.
 
 - Dentro de una sección colapsable (`DockSection`), no crear contenedores visuales anidados para resumir o agrupar información.
 - Dentro de una sección colapsable, solo el título de la sección puede usar mayúsculas sostenidas.
@@ -95,7 +96,7 @@ El panel de propiedades debe ser compacto, legible y consistente. Su estructura 
 - La información secundaria, listas de detalle o auditoría debe ir compactada detrás de controles reutilizables: `AdminSelect` cuando se elige una opción, o `DockInfoDropdown` cuando solo se muestra información.
 - No mostrar listas completas abiertas por defecto dentro de una sección colapsable.
 - Para selectores/dropdowns de opciones del panel admin, priorizar `AdminSelect`. Si el caso no es selección sino expansión de detalle, reutilizar `DockInfoDropdown` (o crear la primitive compartida correspondiente) antes de inventar marcado local.
-- No reimplementar markup local de dropdown/select, slider/range, toggle visual, color swatch + Hex + Alfa o ayudas/leyendas cuando ya existe una primitive compartida para ese patrón.
+- No reimplementar markup local de dropdown/select, slider/range, toggle visual, color swatch + Hex + Alfa o ayudas/leyendas cuando ya existe una primitive compartida para ese patrón. En booleanos, aplicar primero el criterio de semántica: checkbox y toggle son patrones distintos, no reemplazos automáticos.
 - Si una corrección necesaria para cumplir estas reglas puede cambiar semántica visible o datos guardados —por ejemplo renombrar el título de un widget—, no asumir. Preguntar al usuario y esperar confirmación antes de modificar.
 - La regla de una sola línea, referencia máxima ~17 caracteres y separación con guion (`-`) aplica a identidades canónicas/badges del panel, no al campo editable `Título` del contenido del widget.
 - Si una sección colapsable queda demasiado larga, dividirla en secciones colapsables específicas en vez de crear una única sección gigante.
@@ -111,7 +112,7 @@ El panel de propiedades debe ser compacto, legible y consistente. Su estructura 
   - el campo de código contiene solo el valor hexadecimal, sin `#`
   - segunda línea: `Alfa (%)` + campo numérico
 - Todo selector de color del property panel debe usar `components/admin/DockColorField.tsx`. No reimplementar markup local para swatch + hex + alfa.
-- Las opciones visuales booleanas del property panel deben usar la primitive de toggle compartida (`DockToggleField`) en lugar de checkboxes sueltos, salvo que el checkbox sea semánticamente necesario.
+- Las opciones visuales booleanas del property panel no deben usar `DockToggleField` automáticamente. Usar `DockToggleField` para switches compactos on/off; usar `DockCheckboxField` cuando el patrón sea checkbox, cuando esa semántica sea más clara, cuando el usuario pida esa estética o cuando exista una referencia visual estable que deba respetarse.
 - No usar cajas, tarjetas o bloques internos para cada color si la sección colapsable padre ya define el contexto visual.
 
 #### Primitives recomendadas para paneles de propiedades
@@ -125,7 +126,8 @@ Estas reglas deben cristalizarse en primitives reutilizables siempre que el patr
 - `DockInfoDropdown` — dropdown informativo read-only con el mismo chrome cerrado de `AdminSelect`. Usarlo para listas secundarias o detalle no seleccionable.
 - `DockDetailDisclosure` — detalle expandible, listas secundarias o auditoría compactada detrás de una expansión. Crear/reutilizar antes de mostrar listas abiertas por defecto.
 - `DockColorField` — edición de color con layout canónico: swatch + `Hex #` + campo, y debajo `Alfa (%)` + campo numérico.
-- `DockToggleField` — toggle booleano alineado al extremo derecho para opciones visuales compactas. Usarlo en vez de checkboxes locales cuando el patrón sea on/off.
+- `DockCheckboxField` — checkbox booleano alineado al extremo derecho con la referencia visual aprobada del panel/admin. Usarlo cuando la semántica correcta sea checkbox o cuando haya que respetar el estilo checkbox aprobado.
+- `DockToggleField` — toggle booleano alineado al extremo derecho para opciones visuales compactas. Usarlo solo cuando el patrón sea realmente un switch on/off y su estética sea la deseada; no reemplaza automáticamente a checkboxes.
 - `DockInlineControlRow` — fila interna compacta para casos donde una propiedad necesita varios controles alineados sin exceder el ancho estándar de `DockFieldRow`.
 - `DockSliderField` — slider con label arriba, campo numérico editable a la derecha y rango full-width debajo. Usarlo para controles deslizables en vez de marcado local con `input[type="range"]`.
 
@@ -139,6 +141,14 @@ Estas reglas deben cristalizarse en primitives reutilizables siempre que el patr
   - `EquipmentStatus`
   - `ConnectionState`
   - `MetricStatus`
+
+### Runtime / fallback states
+- Todo widget nuevo debe usar `components/ui/WidgetRuntimeState.tsx` como default para estados runtime/fallback de carga, desconexión, error técnico, configuración incompleta, vacío o dato desactualizado.
+- Estados canónicos: `loading` / `preparing` / `layout` / `chart-not-ready` → `Cargando_`; `disconnected` → `Sin conexión`; `error` → `No se pudieron cargar los datos`; `invalid-config` → `Configuración incompleta`; `empty` → `Sin datos`; `empty-comparable` → `Sin datos comparables`; `stale` → `Dato desactualizado`.
+- Si hace falta copy de dominio puntual, usar `labelOverride` sobre la primitive; no recrear la UI del estado.
+- No escribir `Cargando datos...` local, no usar cards enriquecidas con ícono + mensaje para overlays runtime/fallback, no exponer errores raw del backend, no mostrar placeholder `--` arriba de la leyenda runtime y no usar leyendas en MAYÚSCULAS.
+- Excepción: estados de contenido operacional/dominio (por ejemplo, instrucciones o resultados propios del widget) no se reemplazan automáticamente por esta primitive.
+- `KpiWidget` y `MetricWidget` siguen fuera de esta convención salvo cambio explícito de dirección de producto.
 
 ## Prohibido
 
@@ -176,6 +186,7 @@ Estas reglas deben cristalizarse en primitives reutilizables siempre que el patr
 - `hmi-app/src/components/ui/WidgetHeader.tsx`
 - `hmi-app/src/components/ui/WidgetHeaderTemporalControls.tsx`
 - `hmi-app/src/components/ui/WidgetCenteredContentLayout.tsx`
+- `hmi-app/src/components/ui/WidgetRuntimeState.tsx`
 - `hmi-app/src/components/ui/WidgetHoverActions.tsx`
 - `hmi-app/src/components/ui/GridSelectionFrame.tsx`
 - `hmi-app/src/components/ui/HeaderSelectionFrame.tsx`

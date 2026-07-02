@@ -5,6 +5,7 @@ import type { DataHistoryResponse, ContractMachine } from '../../domain/dataCont
 import { WIDGET_CHART_CONTAINER_CLASS, WIDGET_CHART_HEADER_CLASS } from '../../components/ui/WidgetChartLayout.shared';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useDataHistory } from '../../queries/useDataHistory';
+import { DataHistoryServiceError } from '../../services/dataHistory.service';
 import { getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx } from '../../utils/chartHelpers';
 import TrendChartWidget from './TrendChartWidget';
 import { buildTrendChartVisibleLabelIndices } from './trendChartVisibleLabels';
@@ -280,7 +281,7 @@ describe('TrendChartWidget', () => {
         expect(headerSubtitle).not.toHaveTextContent('°C');
     });
 
-    it('shows the loading skeleton while history is loading', () => {
+    it('shows the canonical loading legend while history is loading', () => {
         vi.mocked(useDataHistory).mockReturnValue({
             data: null,
             isLoading: true,
@@ -297,7 +298,11 @@ describe('TrendChartWidget', () => {
             />,
         );
 
-        expect(screen.getByText('Cargando datos...')).toBeInTheDocument();
+        const loadingState = screen.getByTestId('trend-chart-widget-loading');
+
+        expect(loadingState).toHaveTextContent('Cargando_');
+        expect(loadingState.querySelector('.widget-runtime-state-caret')).not.toBeNull();
+        expect(loadingState.querySelector('.font-system')).not.toHaveClass('animate-pulse');
     });
 
     it('shows empty state when history is disabled and binding is real', () => {
@@ -312,8 +317,8 @@ describe('TrendChartWidget', () => {
         );
 
         expect(useDataHistory).toHaveBeenCalledWith(null);
-        expect(screen.queryByText('Cargando datos...')).not.toBeInTheDocument();
-        expect(screen.getByText('--')).toBeInTheDocument();
+        expect(screen.queryByTestId('trend-chart-widget-loading')).not.toBeInTheDocument();
+        expect(screen.queryByText('--')).not.toBeInTheDocument();
         expect(screen.getByText('Sin datos')).toBeInTheDocument();
     });
 
@@ -332,9 +337,52 @@ describe('TrendChartWidget', () => {
         );
 
         expect(useDataHistory).toHaveBeenCalledWith(null);
-        expect(screen.queryByText('Cargando datos...')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('trend-chart-widget-loading')).not.toBeInTheDocument();
         expect(screen.queryByText('--')).not.toBeInTheDocument();
         expect(screen.queryByText('Sin datos')).not.toBeInTheDocument();
+    });
+
+    it('uses the disconnected runtime legend for data-history connection failures', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: null,
+            isLoading: false,
+            isError: true,
+            error: new DataHistoryServiceError('Network error fetching data history', 'network'),
+            isEnabled: true,
+        });
+
+        render(
+            <TrendChartWidget
+                widget={makeWidget()}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(50)}
+            />,
+        );
+
+        expect(screen.getByTestId('trend-chart-widget-state')).toHaveTextContent('Sin conexión');
+        expect(screen.queryByText('No se pudieron cargar los datos')).not.toBeInTheDocument();
+    });
+
+    it('uses the canonical history error legend instead of the legacy copy', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: null,
+            isLoading: false,
+            isError: true,
+            error: new DataHistoryServiceError('Data history request could not be completed', 'http', 422),
+            isEnabled: true,
+        });
+
+        render(
+            <TrendChartWidget
+                widget={makeWidget()}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(50)}
+            />,
+        );
+
+        expect(screen.getByTestId('trend-chart-widget-state')).toHaveTextContent('No se pudieron cargar los datos');
+        expect(screen.queryByText('Error al cargar datos')).not.toBeInTheDocument();
+        expect(screen.queryByText('upstream failed')).not.toBeInTheDocument();
     });
 
     it('keeps the first and last x-axis labels visible with middle anchoring', () => {

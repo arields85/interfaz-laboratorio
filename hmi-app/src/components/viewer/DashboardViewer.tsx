@@ -12,6 +12,8 @@ interface DashboardViewerProps {
     equipmentMap: Map<string, EquipmentSummary>;
     machines?: ContractMachine[];
     connection?: ConnectionHealth;
+    isLoadingOverview?: boolean;
+    hasOverviewError?: boolean;
     /**
      * IDs de widgets asignados al header del dashboard.
      * Estos widgets son EXCLUSIVOS del header y se omiten del grid.
@@ -47,6 +49,8 @@ export default function DashboardViewer({
     equipmentMap,
     machines,
     connection,
+    isLoadingOverview = false,
+    hasOverviewError = false,
     headerWidgetIds,
     hierarchyContext,
     cols = DEFAULT_COLS,
@@ -107,9 +111,11 @@ export default function DashboardViewer({
                                         equipmentMap={equipmentMap} 
                                         machines={machines}
                                         connection={connection}
+                                        isLoadingOverview={isLoadingOverview}
+                                        hasOverviewError={hasOverviewError}
                                         isLoadingData={false} 
-                                     siblingWidgets={widgets}
-                                     hierarchyContext={hierarchyContext}
+                                      siblingWidgets={widgets}
+                                      hierarchyContext={hierarchyContext}
                                       className="w-full h-full"
                                       onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
                                       onNavigateDashboard={onNavigateDashboard}

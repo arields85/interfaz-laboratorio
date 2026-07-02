@@ -6,6 +6,7 @@ import { Activity, Thermometer, Zap, Droplet, Wind, Settings, Gauge, Fan, FoldVe
 import GaugeDisplay, { CIRCULAR_VIEWBOX_SIZE } from '../../components/ui/GaugeDisplay';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
+import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { useMachineActivity } from '../../hooks/useMachineActivity';
 import { getStateVisuals } from '../utils/machineActivity';
 import { resolveBinding } from '../resolvers/bindingResolver';
@@ -405,9 +406,8 @@ export default function MachineActivityWidget({
 
     if (isLoadingData) {
         return (
-            <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
-                <div className="h-4 w-24 bg-industrial-hover rounded mb-6" />
-                <div className="h-20 w-full bg-industrial-hover rounded-full" />
+            <div className={`glass-panel p-5 w-full h-full flex items-center justify-center ${className ?? ''}`}>
+                <WidgetRuntimeState state="loading" testId="machine-activity-widget-loading" />
             </div>
         );
     }

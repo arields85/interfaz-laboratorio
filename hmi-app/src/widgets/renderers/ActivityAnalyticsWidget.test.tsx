@@ -526,6 +526,8 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(screen.getByText('Seleccione una máquina')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).not.toHaveTextContent('Este widget necesita una máquina vinculada para consultar Activity-Series.');
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
     });
 
     it('shows an invalid-machine state before loading when the binding stores a non-numeric equipment key', () => {
@@ -552,6 +554,8 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getByText('Seleccione una máquina válida')).toBeInTheDocument();
         expect(screen.queryByText('Cargando actividad…')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).not.toHaveTextContent('La máquina configurada ya no coincide con el contrato disponible para Activity-Series.');
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
     });
 
     it('resolves legacy machine-name bindings to the contract unit id before querying', () => {
@@ -613,6 +617,62 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getByText('Seleccione una máquina válida')).toBeInTheDocument();
         expect(screen.queryByText('Cargando actividad…')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
+    });
+
+    it('shows a no-connection fallback instead of invalid-machine when overview is unavailable', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: null,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: false,
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget()}
+                machines={[]}
+                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
+                hasOverviewError
+            />,
+        );
+
+        expect(screen.getByText('Sin conexión')).toBeInTheDocument();
+        expect(screen.queryByText('Seleccione una máquina válida')).not.toBeInTheDocument();
+        expect(screen.queryByText('No se pudo validar la máquina porque la fuente de datos no está disponible.')).not.toBeInTheDocument();
+        expect(screen.getByText('Sin conexión')).not.toHaveClass('uppercase');
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).toHaveClass('flex', 'items-center', 'justify-center');
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
+    });
+
+    it('keeps the loading state while overview is still loading and machine validation depends on overview machines', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: null,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: false,
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'real_variable',
+                        bindingVersion: 'node-red-v1',
+                        machineId: 'Reiner' as unknown as number,
+                    },
+                })}
+                machines={[]}
+                isLoadingOverview
+            />,
+        );
+
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).toHaveTextContent('Cargando_');
+        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
+        expect(screen.queryByText('Seleccione una máquina válida')).not.toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
     });
 
     it('shows an endpoint-not-configured state when activity-series is disabled', () => {
@@ -626,6 +686,8 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(screen.getByText('Endpoint Activity-Series no configurado')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).not.toHaveTextContent('Configure el endpoint Activity-Series para habilitar este widget.');
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
     });
 
     it('shows a loading state while the activity-series query is pending', () => {
@@ -644,7 +706,8 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByText('Cargando actividad…')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).toHaveTextContent('Cargando_');
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
     });
 
     it('shows a clear invalid-threshold state for legacy invalid configs', () => {
@@ -664,6 +727,8 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(screen.getByText('Configuración de umbrales inválida')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).not.toHaveTextContent('Prod. debe ser mayor que Setup para clasificar la actividad.');
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
     });
 
     it('keeps persisted custom windows internal while still querying with explicit bounds', () => {
@@ -6046,7 +6111,7 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(screen.getByText('Activity-Series devolvió datos inválidos')).toBeInTheDocument();
-        expect(screen.getByText('La respuesta recibida no cumple el contrato esperado para esta analítica.')).toBeInTheDocument();
+        expect(screen.queryByText('La respuesta recibida no cumple el contrato esperado para esta analítica.')).not.toBeInTheDocument();
         expect(screen.queryByText('No fue posible calcular la analítica de actividad.')).not.toBeInTheDocument();
     });
 
@@ -6056,12 +6121,7 @@ describe('ActivityAnalyticsWidget', () => {
         const dayGroupedWidget = makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } });
         const { rerender } = render(<ActivityAnalyticsWidget widget={dayGroupedWidget} machines={MACHINES} />);
 
-        expect(screen.getByText('Endpoint Activity-Series no configurado')).toHaveStyle({
-            fontFamily: 'var(--font-system)',
-            fontWeight: 'var(--font-weight-system)',
-            fontSize: 'var(--font-size-system)',
-            letterSpacing: 'var(--tracking-system)',
-        });
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('.font-system')).toHaveTextContent('Endpoint Activity-Series no configurado');
 
         vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
         vi.mocked(useActivitySeries).mockReturnValue({

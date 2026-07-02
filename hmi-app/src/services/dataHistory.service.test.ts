@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as dataConnectionConfig from '../config/dataConnection.config';
 import type { DataHistoryResponse, DataHistoryResponseV2 } from '../domain/dataContract.types';
 import { DataServiceError } from './dataOverview.service';
-import { fetchDataHistory } from './dataHistory.service';
+import {
+    DATA_HISTORY_REQUEST_TIMEOUT_MS,
+    DataHistoryServiceError,
+    fetchDataHistory,
+} from './dataHistory.service';
 
 describe('dataHistory.service', () => {
     afterEach(() => {
@@ -47,10 +51,11 @@ describe('dataHistory.service', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             'https://api.local/api/hmi/history?machineId=7&variableKey=flow+rate&range=hora',
-            {
+            expect.objectContaining({
                 method: 'GET',
                 headers: { Accept: 'application/json' },
-            }
+                signal: expect.any(AbortSignal),
+            })
         );
     });
 
@@ -82,10 +87,11 @@ describe('dataHistory.service', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             'https://api.local/api/hmi/history?machineId=7&variableKey=flow+rate&range=24h&maxPoints=2000',
-            {
+            expect.objectContaining({
                 method: 'GET',
                 headers: { Accept: 'application/json' },
-            }
+                signal: expect.any(AbortSignal),
+            })
         );
     });
 
@@ -128,10 +134,11 @@ describe('dataHistory.service', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             'https://api.local/api/hmi/history?machineId=7&variableKey=flow+rate&range=custom&start=2026-06-18T10%3A00%3A00.000Z&end=2026-06-18T12%3A00%3A00.000Z&maxPoints=100',
-            {
+            expect.objectContaining({
                 method: 'GET',
                 headers: { Accept: 'application/json' },
-            }
+                signal: expect.any(AbortSignal),
+            })
         );
     });
 
@@ -208,10 +215,11 @@ describe('dataHistory.service', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             'https://api.local/api/hmi/history?machineId=7&variableKey=flow+rate&range=24h',
-            {
+            expect.objectContaining({
                 method: 'GET',
                 headers: { Accept: 'application/json' },
-            }
+                signal: expect.any(AbortSignal),
+            })
         );
     });
 
@@ -329,8 +337,27 @@ describe('dataHistory.service', () => {
         await expect(
             fetchDataHistory({ machineId: 7, variableKey: 'pressure', range: 'hora' })
         ).rejects.toEqual(
-            new DataServiceError('Network error fetching data history: socket hang up')
+            new DataHistoryServiceError('Network error fetching data history', 'network')
         );
+    });
+
+    it('aborts unreachable requests and classifies them as timeout errors', async () => {
+        vi.useFakeTimers();
+        vi.spyOn(dataConnectionConfig, 'getDataHistoryUrl').mockReturnValue(
+            'https://api.local/api/hmi/history'
+        );
+        vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })));
+
+        const request = fetchDataHistory({ machineId: 7, variableKey: 'pressure', range: 'hora' });
+        const expectation = expect(request).rejects.toEqual(
+            new DataHistoryServiceError('Data history request timed out', 'timeout')
+        );
+
+        await vi.advanceTimersByTimeAsync(DATA_HISTORY_REQUEST_TIMEOUT_MS);
+
+        await expectation;
     });
 
     it('exposes the upstream status code when the history fetch fails', async () => {
@@ -348,6 +375,24 @@ describe('dataHistory.service', () => {
 
         await expect(
             fetchDataHistory({ machineId: 7, variableKey: 'pressure', range: 'hora' })
-        ).rejects.toEqual(new DataServiceError('Data history returned 503: Service Unavailable', 503));
+        ).rejects.toEqual(new DataHistoryServiceError('Data history data is temporarily unavailable', 'http', 503));
+    });
+
+    it('sanitizes 4xx history failures into a generic client error', async () => {
+        vi.spyOn(dataConnectionConfig, 'getDataHistoryUrl').mockReturnValue(
+            'https://api.local/api/hmi/history'
+        );
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: false,
+                status: 422,
+                statusText: 'Unprocessable Entity',
+            })
+        );
+
+        await expect(
+            fetchDataHistory({ machineId: 7, variableKey: 'pressure', range: 'hora' })
+        ).rejects.toEqual(new DataHistoryServiceError('Data history request could not be completed', 'http', 422));
     });
 });

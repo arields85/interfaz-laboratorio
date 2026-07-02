@@ -14,6 +14,30 @@ import type { HistoryQueryParamsAny } from '../domain/dataContract.types';
 import { validateAndNormalizeHistoryQueryParams } from '../utils/historyQueryValidation';
 import { DataServiceError } from './dataOverview.service';
 
+export const DATA_HISTORY_REQUEST_TIMEOUT_MS = 10_000;
+
+const DATA_HISTORY_NETWORK_ERROR_MESSAGE = 'Network error fetching data history';
+const DATA_HISTORY_TIMEOUT_ERROR_MESSAGE = 'Data history request timed out';
+const DATA_HISTORY_CLIENT_ERROR_MESSAGE = 'Data history request could not be completed';
+const DATA_HISTORY_SERVER_ERROR_MESSAGE = 'Data history data is temporarily unavailable';
+
+export type DataHistoryServiceErrorKind = 'network' | 'timeout' | 'http';
+
+export class DataHistoryServiceError extends DataServiceError {
+    public readonly kind: DataHistoryServiceErrorKind;
+
+    constructor(message: string, kind: DataHistoryServiceErrorKind, statusCode?: number) {
+        super(message, statusCode);
+        this.name = 'DataHistoryServiceError';
+        this.kind = kind;
+    }
+}
+
+export function isDataHistoryConnectionError(error: unknown): error is DataHistoryServiceError {
+    return error instanceof DataHistoryServiceError
+        && (error.kind === 'network' || error.kind === 'timeout');
+}
+
 /**
  * Fetch crudo al endpoint de histórico.
  * Devuelve el JSON tal cual viene — sin transformar ni validar.
@@ -52,6 +76,12 @@ export async function fetchDataHistory(params: HistoryQueryParamsAny): Promise<u
     }
 
     let response: Response;
+    const abortController = new AbortController();
+    let didTimeout = false;
+    const timeoutId = setTimeout(() => {
+        didTimeout = true;
+        abortController.abort();
+    }, DATA_HISTORY_REQUEST_TIMEOUT_MS);
 
     try {
         response = await fetch(url.toString(), {
@@ -59,21 +89,39 @@ export async function fetchDataHistory(params: HistoryQueryParamsAny): Promise<u
             headers: {
                 Accept: 'application/json',
             },
+            signal: abortController.signal,
         });
-    } catch (error) {
-        throw new DataServiceError(
-            `Network error fetching data history: ${(error as Error).message}`
-        );
+    } catch {
+        if (didTimeout) {
+            throw new DataHistoryServiceError(DATA_HISTORY_TIMEOUT_ERROR_MESSAGE, 'timeout');
+        }
+
+        throw new DataHistoryServiceError(DATA_HISTORY_NETWORK_ERROR_MESSAGE, 'network');
+    } finally {
+        clearTimeout(timeoutId);
     }
 
     if (!response.ok) {
-        throw new DataServiceError(
-            `Data history returned ${response.status}: ${response.statusText}`,
+        throw new DataHistoryServiceError(
+            getSanitizedDataHistoryHttpMessage(response.status),
+            'http',
             response.status
         );
     }
 
     return response.json();
+}
+
+function getSanitizedDataHistoryHttpMessage(statusCode: number): string {
+    if (statusCode >= 500) {
+        return DATA_HISTORY_SERVER_ERROR_MESSAGE;
+    }
+
+    if (statusCode >= 400) {
+        return DATA_HISTORY_CLIENT_ERROR_MESSAGE;
+    }
+
+    return `Data history request failed with status ${statusCode}`;
 }
 
 function createHistoryQueryError(reason: 'invalid-machine-id' | 'invalid-variable-key' | 'invalid-range' | 'invalid-timestamp' | 'start-not-before-end' | 'duration-too-large'): DataServiceError {

@@ -175,7 +175,10 @@ describe('ProduccionHistoricaWidget', () => {
     it('renders the loading state', () => {
         render(<ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} isLoadingData />);
 
-        expect(screen.getByText('Cargando datos...')).toBeInTheDocument();
+        const loadingState = screen.getByTestId('prod-history-widget-loading');
+
+        expect(loadingState).toHaveTextContent('Cargando');
+        expect(loadingState.querySelector('.widget-runtime-state-caret')).not.toBeNull();
         expect(screen.queryByTestId('hover-layer')).not.toBeInTheDocument();
     });
 

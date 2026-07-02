@@ -207,6 +207,31 @@ describe('Dashboard page layout', () => {
         );
     });
 
+    it('passes overview loading and error state to the viewer pipeline', async () => {
+        useDataOverviewMock.mockReturnValue({
+            connection: { globalStatus: 'unknown', lastSuccess: null, ageMs: null },
+            machines: [],
+            isLoading: true,
+            isError: true,
+            error: new Error('overview unavailable'),
+            dataUpdatedAt: 0,
+            isEnabled: true,
+        });
+
+        renderDashboard();
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        });
+
+        expect(dashboardViewerMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                isLoadingOverview: true,
+                hasOverviewError: true,
+            }),
+        );
+    });
+
     it('passes contract connection and machines to the header pipeline', async () => {
         const connection: ConnectionHealth = {
             globalStatus: 'degradado',

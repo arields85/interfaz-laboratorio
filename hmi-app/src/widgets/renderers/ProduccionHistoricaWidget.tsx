@@ -36,6 +36,7 @@ import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeCheckbox from '../../components/ui/WidgetRuntimeCheckbox';
+import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
 import {
     resolveWidgetChartLayoutMetrics,
@@ -736,9 +737,7 @@ export default function ProdHistoryWidget({
     if (isLoadingData) {
         return (
             <div className={`glass-panel p-5 w-full h-full flex items-center justify-center ${className ?? ''}`}>
-                <div className="animate-pulse text-industrial-muted uppercase">
-                    Cargando datos...
-                </div>
+                <WidgetRuntimeState state="loading" testId="prod-history-widget-loading" />
             </div>
         );
     }

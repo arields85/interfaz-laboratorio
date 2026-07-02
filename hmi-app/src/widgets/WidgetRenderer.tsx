@@ -16,6 +16,7 @@ import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
 import { hasNestedInteractiveNavigationForConfig } from '../utils/widgetCapabilities';
+import WidgetRuntimeState from '../components/ui/WidgetRuntimeState';
 
 // =============================================================================
 // WidgetRenderer — Dispatcher central
@@ -43,6 +44,8 @@ interface WidgetRendererProps {
     equipmentMap: Map<string, EquipmentSummary>;
     machines?: ContractMachine[];
     connection?: ConnectionHealth;
+    isLoadingOverview?: boolean;
+    hasOverviewError?: boolean;
     isLoadingData?: boolean;
     className?: string;
     /**
@@ -87,6 +90,8 @@ export default function WidgetRenderer({
     equipmentMap,
     machines,
     connection,
+    isLoadingOverview = false,
+    hasOverviewError = false,
     isLoadingData = false,
     className,
     siblingWidgets,
@@ -139,6 +144,9 @@ export default function WidgetRenderer({
                 <ActivityAnalyticsWidget
                     widget={widget}
                     machines={machines}
+                    connection={connection}
+                    isLoadingOverview={isLoadingOverview}
+                    hasOverviewError={hasOverviewError}
                     isLoadingData={isLoadingData}
                     className={className}
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
@@ -151,6 +159,9 @@ export default function WidgetRenderer({
                 <ProdTrendWidget
                     widget={widget}
                     machines={machines}
+                    connection={connection}
+                    isLoadingOverview={isLoadingOverview}
+                    hasOverviewError={hasOverviewError}
                     isLoadingData={isLoadingData}
                     className={className}
                 />
@@ -292,16 +303,14 @@ export default function WidgetRenderer({
 // -----------------------------------------------------------------------------
 // UnsupportedWidget — placeholder para tipos no implementados aún
 // -----------------------------------------------------------------------------
-function UnsupportedWidget({ type, title }: { type: string; title?: string }) {
+function UnsupportedWidget({ type }: { type: string; title?: string }) {
     return (
-        <div className="glass-panel p-4 flex flex-col gap-1 opacity-50">
-            <span className="uppercase text-industrial-muted">
-                Widget no implementado
-            </span>
-            <span className="text-industrial-muted font-mono">
-                type: {type}
-            </span>
-            {title && <span className="text-slate-500">{title}</span>}
+        <div className="glass-panel group flex h-full w-full items-center justify-center p-4">
+            <WidgetRuntimeState
+                state="invalid-config"
+                labelOverride="Widget no soportado"
+                testId={`unsupported-widget-${type}`}
+            />
         </div>
     );
 }

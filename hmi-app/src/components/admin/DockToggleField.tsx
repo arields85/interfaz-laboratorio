@@ -11,7 +11,7 @@ interface DockToggleFieldProps {
     labelClassName?: string;
 }
 
-const DOCK_TOGGLE_TRACK_CLS = "relative block h-4 w-7 rounded-full border border-transparent bg-white/10 transition-all peer-checked:border-white/30 peer-checked:bg-white/20 peer-disabled:opacity-40 peer-disabled:after:bg-white/60 after:absolute after:left-[2px] after:top-[2px] after:h-3 after:w-3 after:rounded-full after:bg-white after:transition-all peer-checked:after:translate-x-full";
+const DOCK_TOGGLE_TRACK_CLS = "relative block h-3.5 w-6 shrink-0 rounded-full border border-transparent bg-white/10 transition-all peer-checked:border-white/30 peer-checked:bg-white/20 peer-disabled:opacity-40 peer-disabled:after:bg-white/60 after:absolute after:left-[2px] after:top-1/2 after:h-2.5 after:w-2.5 after:-translate-y-1/2 after:rounded-full after:bg-white after:transition-all peer-checked:after:translate-x-full";
 
 export default function DockToggleField({
     label,

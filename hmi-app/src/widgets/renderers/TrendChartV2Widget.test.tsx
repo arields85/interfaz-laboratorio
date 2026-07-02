@@ -7,6 +7,7 @@ import { WIDGET_CHART_CONTAINER_CLASS, WIDGET_CHART_HEADER_CLASS } from '../../c
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useDataHistory } from '../../queries/useDataHistory';
+import { DataHistoryServiceError } from '../../services/dataHistory.service';
 import { isDataHistoryResponseV2 } from '../../utils/dataHistoryResponseV2';
 import { getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx } from '../../utils/chartHelpers';
 import TrendChartV2Widget from './TrendChartV2Widget';
@@ -177,7 +178,7 @@ describe('TrendChartV2Widget', () => {
         MockResizeObserver.reset();
     });
 
-    it('shows an explicit chart sizing state when valid data exists before a non-zero measurement is available', () => {
+    it('shows the canonical loading legend while chart layout is still not renderable', () => {
         class ZeroFirstResizeObserver extends MockResizeObserver {
             public observe(target: Element): void {
                 this.emit(0, 0, target);
@@ -188,12 +189,16 @@ describe('TrendChartV2Widget', () => {
 
         render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
 
-        expect(screen.getByText('Preparing chart...')).toBeInTheDocument();
+        const state = screen.getByTestId('trend-chart-v2-state');
+
+        expect(state).toHaveTextContent('Cargando_');
+        expect(state.querySelector('.widget-runtime-state-caret')).not.toBeNull();
+        expect(screen.queryByText('Preparing chart...')).not.toBeInTheDocument();
         expect(screen.queryByText('Drag on the chart to zoom into a custom window.')).not.toBeInTheDocument();
         expect(screen.queryByTestId('trend-chart-v2-svg')).not.toBeInTheDocument();
     });
 
-    it('matches the legacy loader copy and pulse styling while keeping the widget shell stable', () => {
+    it('uses the canonical loading legend and cursor styling while keeping the widget shell stable', () => {
         vi.mocked(useDataHistory).mockReturnValue({
             data: undefined,
             isLoading: true,
@@ -204,11 +209,49 @@ describe('TrendChartV2Widget', () => {
 
         render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
 
-        const loader = screen.getByText('Cargando datos...');
+        const loader = screen.getByTestId('trend-chart-v2-state');
 
-        expect(loader).toBeInTheDocument();
-        expect(loader).toHaveClass('animate-pulse', 'text-industrial-muted', 'uppercase');
+        expect(loader).toHaveTextContent('Cargando_');
+        expect(loader.querySelector('.font-system')).toHaveTextContent('Cargando_');
+        expect(loader.querySelector('.font-system')).not.toHaveClass('animate-pulse');
+        expect(loader.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
         expect(screen.queryByText('Loading history...')).not.toBeInTheDocument();
+        expect(screen.queryByText('Cargando datos...')).not.toBeInTheDocument();
+    });
+
+    it('maps data-history connection failures to the canonical disconnected legend', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: undefined,
+            isLoading: false,
+            isError: true,
+            error: new DataHistoryServiceError('Data history request timed out', 'timeout'),
+            isEnabled: true,
+        });
+
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const state = screen.getByTestId('trend-chart-v2-state');
+
+        expect(state).toHaveTextContent('Sin conexión');
+        expect(state).not.toHaveTextContent('No se pudieron cargar los datos');
+    });
+
+    it('replaces raw backend error copy with the canonical data-load failure legend', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: undefined,
+            isLoading: false,
+            isError: true,
+            error: new DataHistoryServiceError('Data history request could not be completed', 'http', 422),
+            isEnabled: true,
+        });
+
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const state = screen.getByTestId('trend-chart-v2-state');
+
+        expect(state).toHaveTextContent('No se pudieron cargar los datos');
+        expect(state).not.toHaveTextContent('--');
+        expect(screen.queryByText('Error loading history')).not.toBeInTheDocument();
     });
 
     it('keeps operator/dashboard rendering free from historical density controls', () => {
