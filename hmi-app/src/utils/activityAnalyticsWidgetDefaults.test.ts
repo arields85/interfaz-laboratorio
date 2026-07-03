@@ -5,6 +5,14 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_DONUT_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUP_BAR_WIDTHS,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUPED_BAR_EFFECTS,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_ALPHAS,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_BLEND_MODE,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_COLORS,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENT_ALPHAS,
+    DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENTS,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
@@ -30,27 +38,24 @@ describe('activityAnalyticsWidgetDefaults', () => {
     it('defaults unsupported legacy display modes back to kpis-and-bars', () => {
         expect(createDefaultActivityAnalyticsDisplayOptions().displayMode).toBe('kpis-and-bars');
         expect(createDefaultActivityAnalyticsDisplayOptions().range).toBe('7d');
-        expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidth).toBe(1);
-        expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidths).toEqual({
-            shift: 1,
-            day: 1,
-            week: 1,
-            month: 1,
-        });
+        expect(createDefaultActivityAnalyticsDisplayOptions().groupBy).toBe('shift');
+        expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidth).toBe(0.2);
+        expect(createDefaultActivityAnalyticsDisplayOptions().groupBarWidths).toEqual(DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUP_BAR_WIDTHS);
         expect(createDefaultActivityAnalyticsDisplayOptions().coverageColor).toBe(DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR);
         expect(createDefaultActivityAnalyticsDisplayOptions().stateGradients).toEqual(
-            DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
+            DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENTS,
         );
         expect(createDefaultActivityAnalyticsDisplayOptions().stateGradientAlphas).toEqual(
-            DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
+            DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENT_ALPHAS,
         );
         expect(createDefaultActivityAnalyticsDisplayOptions().visualEffects).toEqual({
-            groupedBars: DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
-            donut: DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
+            groupedBars: DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUPED_BAR_EFFECTS,
+            donut: DEFAULT_ACTIVITY_ANALYTICS_INITIAL_DONUT_EFFECTS,
         });
         expect(createDefaultActivityAnalyticsDisplayOptions().prodTrendBands).toEqual({
-            alphas: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
-            blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+            colors: DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_COLORS,
+            alphas: DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_ALPHAS,
+            blendMode: DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_BLEND_MODE,
         });
         expect(
             resolveActivityAnalyticsDisplayOptions({

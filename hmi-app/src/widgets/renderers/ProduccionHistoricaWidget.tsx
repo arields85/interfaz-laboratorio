@@ -23,6 +23,7 @@ import type {
     ProductionUnit,
     ProdHistoryWidgetConfig,
     TemporalBucket,
+    ProdHistoryPersistedDisplayPatch,
 } from '../../domain/admin.types';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import type { EquipmentSummary } from '../../domain/equipment.types';
@@ -36,6 +37,7 @@ import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeCheckbox from '../../components/ui/WidgetRuntimeCheckbox';
+import WidgetRuntimeToggle from '../../components/ui/WidgetRuntimeToggle';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
 import {
@@ -58,6 +60,7 @@ const PROD_HISTORY_LAYOUT_BASE_MARGIN = { top: 17, right: 16, bottom: 30, left: 
 const PROD_HISTORY_RIGHT_AXIS_MARGIN_RIGHT = 48;
 const PROD_HISTORY_TOP_ADORNMENT_RESERVED_HEIGHT = 11;
 const PROD_HISTORY_TOP_ADORNMENT_OFFSET = 12;
+const PROD_HISTORY_TOP_CAP_HEIGHT_PX = 2;
 
 // Resolución de ícono del header por nombre declarado en `displayOptions.icon`.
 // El set disponible coincide con el selector de íconos del PropertyDock, así que
@@ -123,6 +126,7 @@ interface ProdHistoryWidgetProps {
     equipmentMap: Map<string, EquipmentSummary>;
     isLoadingData?: boolean;
     className?: string;
+    onPersistDisplayOptions?: (displayOptions: ProdHistoryPersistedDisplayPatch) => void;
 }
 
 interface ManualBounds {
@@ -443,7 +447,7 @@ function ProdHistoryBarsSvg({
                                     const barBase = chartLayout.plotArea.bottom;
                                     const barHeight = Math.max(barBase - barTop, 0);
                                     const barX = cx - (barW / 2);
-                                    const capHeight = Math.min(5, barHeight);
+                                    const capHeight = Math.min(PROD_HISTORY_TOP_CAP_HEIGHT_PX, barHeight);
 
                                     return (
                                         <g key={item.bucketKey}>
@@ -692,6 +696,7 @@ export default function ProdHistoryWidget({
     widget,
     isLoadingData = false,
     className,
+    onPersistDisplayOptions,
 }: ProdHistoryWidgetProps) {
     const displayOptions = widget.displayOptions;
     const chartTitle = widget.title ?? displayOptions?.chartTitle ?? 'PRODUCCIÓN HISTÓRICA';
@@ -699,11 +704,10 @@ export default function ProdHistoryWidget({
     const productionUnit: ProductionUnit = displayOptions?.productionUnit ?? 'unidades';
     const productionLabel = `${toSentenceCase(productionBaseLabel)} (${productionUnit})`;
     const oeeLabel = displayOptions?.oeeLabel ?? 'OEE (%)';
-    const productionChartMode = displayOptions?.productionChartMode ?? 'bars';
+    const [productionChartMode, setProductionChartMode] = useState<ProductionChartMode>(() => displayOptions?.productionChartMode ?? 'bars');
     const useSecondaryAxis = displayOptions?.useSecondaryAxis ?? true;
     const autoScale = displayOptions?.autoScale ?? true;
     const showGrid = displayOptions?.showGrid ?? true;
-    const oeeShowArea = displayOptions?.oeeShowArea ?? false;
     const oeeShowPoints = displayOptions?.oeeShowPoints ?? false;
     const barWidthFactor = clamp(displayOptions?.productionBarWidth ?? 1, 0.5, 1.5);
     const HeaderIcon = resolveHeaderIcon(displayOptions?.icon);
@@ -711,6 +715,23 @@ export default function ProdHistoryWidget({
     const [bucket, setBucket] = useState<TemporalBucket>(() => displayOptions?.defaultTemporalGrouping ?? 'hour');
     const [showOee, setShowOee] = useState<boolean>(() => displayOptions?.defaultShowOee ?? true);
     const rawSeries = useMemo(() => generateHistoricalSeries(bucket, new Date()), [bucket]);
+
+    useEffect(() => {
+        setProductionChartMode(displayOptions?.productionChartMode ?? 'bars');
+    }, [displayOptions?.productionChartMode]);
+
+    const effectiveProductionChartMode = productionChartMode;
+    const effectiveShowOee = showOee;
+
+    const handleProductionModeToggle = useCallback((checked: boolean) => {
+        const nextMode: ProductionChartMode = checked ? 'area' : 'bars';
+        setProductionChartMode(nextMode);
+        onPersistDisplayOptions?.({ productionChartMode: nextMode });
+    }, [onPersistDisplayOptions]);
+
+    const handleOeeCheckedChange = useCallback((checked: boolean) => {
+        setShowOee(checked);
+    }, []);
 
     const groupedData = useMemo(() => groupByTemporalBucket(rawSeries, bucket), [rawSeries, bucket]);
 
@@ -772,7 +793,7 @@ export default function ProdHistoryWidget({
                 <div className="flex justify-end" data-testid="prod-history-widget-legend-controls">
                     <div className="flex items-center gap-4" data-testid="prod-history-widget-legend-controls-group">
                         <div className="flex items-center gap-1">
-                            <span className={`h-2 w-2 shrink-0 ${productionChartMode === 'bars' ? 'rounded-[2px]' : 'rounded-full'}`} style={{ backgroundColor: TOKEN.production }} />
+                            <span className={`h-2 w-2 shrink-0 ${effectiveProductionChartMode === 'bars' ? 'rounded-[2px]' : 'rounded-full'}`} style={{ backgroundColor: TOKEN.production }} />
                             <span className="text-industrial-muted">{productionLabel}</span>
                         </div>
 
@@ -783,12 +804,22 @@ export default function ProdHistoryWidget({
                             </span>
                             <WidgetRuntimeCheckbox
                                 ariaLabel="Mostrar OEE (%)"
-                                checked={showOee}
-                                onCheckedChange={setShowOee}
+                                checked={effectiveShowOee}
+                                onCheckedChange={handleOeeCheckedChange}
                                 visualTestId="prod-history-widget-oee-checkbox-visual"
                                 checkTestId="prod-history-widget-oee-checkbox-check"
                             />
                         </label>
+
+                        <div className="flex items-center gap-2 text-industrial-muted">
+                            <span>Barras/Area</span>
+                            <WidgetRuntimeToggle
+                                ariaLabel="Cambiar modo de producción entre barras y área"
+                                title={effectiveProductionChartMode === 'area' ? 'Modo área activado' : 'Modo barras activado'}
+                                checked={effectiveProductionChartMode === 'area'}
+                                onCheckedChange={handleProductionModeToggle}
+                            />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -797,11 +828,11 @@ export default function ProdHistoryWidget({
                 <ProdHistoryBarsContainer
                     widgetId={widget.id}
                     data={groupedData}
-                    productionMode={productionChartMode}
-                    showOee={showOee}
+                    productionMode={effectiveProductionChartMode}
+                    showOee={effectiveShowOee}
                     useSecondaryAxis={useSecondaryAxis}
                     showGrid={showGrid}
-                    oeeShowArea={oeeShowArea}
+                    oeeShowArea={displayOptions?.oeeShowArea ?? false}
                     oeeShowPoints={oeeShowPoints}
                     barWidthFactor={barWidthFactor}
                     productionDomain={productionDomain}

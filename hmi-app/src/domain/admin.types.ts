@@ -457,6 +457,10 @@ export interface ActivityAnalyticsPersistedDisplayPatch {
     end?: string;
 }
 
+export type ProdHistoryPersistedDisplayPatch = Pick<ProdHistoryDisplayOptions, 'productionChartMode' | 'oeeShowArea'>;
+
+export type ViewerPersistedWidgetDisplayPatch = ActivityAnalyticsPersistedDisplayPatch | ProdHistoryPersistedDisplayPatch;
+
 export type TemporalBucket = 'hour' | 'shift' | 'day' | 'month';
 export type ProductionChartMode = 'bars' | 'area';
 

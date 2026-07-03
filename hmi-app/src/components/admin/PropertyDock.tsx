@@ -58,6 +58,7 @@ import {
     resolveActivityAnalyticsProdTrendBandBlendMode,
 } from '../../utils/activityAnalyticsWidgetDefaults';
 import {
+    resolveProdTrendThemeDefaultLineColors,
     resolveProdTrendDisplayOptions,
 } from '../../utils/prodTrendWidgetDefaults';
 import { resolveCanonicalWidgetIdentityLabel } from '../../utils/activityAnalyticsTitle';
@@ -224,6 +225,8 @@ export default function PropertyDock(props: PropertyDockProps) {
         setActivityAnalyticsThresholdWarning(null);
     }, [selectedWidget?.id]);
 
+    const prodTrendThemeDefaultLineColors = resolveProdTrendThemeDefaultLineColors();
+
     useEffect(() => {
         setActivityAnalyticsHexDrafts({});
         setActivityAnalyticsProdTrendBandHexDrafts({});
@@ -301,7 +304,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
         const currentOptions = selectedWidget.type === 'activity-analytics'
             ? resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined)
-            : resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+            : resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         const nextRules = resolveActivityAnalyticsDisplayRules({
             range: nextRange,
             groupBy: currentOptions.groupBy,
@@ -795,7 +798,7 @@ export default function PropertyDock(props: PropertyDockProps) {
             return;
         }
 
-        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         const nextSetupThresholdKw = key === 'setupThresholdKw' ? nextValue : currentOptions.setupThresholdKw;
         const nextProdThresholdKw = key === 'prodThresholdKw' ? nextValue : currentOptions.prodThresholdKw;
 
@@ -810,26 +813,26 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     const handleProdTrendRangeChange = (nextRange: string) => {
         if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
-        const nextRules = resolveActivityAnalyticsDisplayRules({ range: nextRange, start: undefined, end: undefined, groupBy: resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined).groupBy });
+        const nextRules = resolveActivityAnalyticsDisplayRules({ range: nextRange, start: undefined, end: undefined, groupBy: resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors).groupBy });
         onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, range: nextRules.range, groupBy: nextRules.groupBy, start: undefined, end: undefined } });
     };
 
     const handleProdTrendGroupChange = (nextGroupBy: string) => {
         if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
-        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         const nextRules = resolveActivityAnalyticsDisplayRules({ range: currentOptions.range, start: currentOptions.start, end: currentOptions.end, groupBy: nextGroupBy });
         onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, range: nextRules.range, groupBy: nextRules.groupBy } });
     };
 
     const handleProdTrendGroupBarWidthChange = (nextValue: number) => {
         if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
-        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, groupBarWidths: { ...(selectedWidget.displayOptions?.groupBarWidths ?? {}), [currentOptions.groupBy]: clampActivityAnalyticsGroupBarWidth(nextValue) } } });
     };
 
     const handleProdTrendLineColorChange = (slotIndex: 0 | 1, value: string) => {
         if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
-        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         const nextColors: [string, string] = [...currentOptions.trendLineColors];
         nextColors[slotIndex] = value;
         onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, trendLineColors: nextColors } });
@@ -837,7 +840,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     const handleProdTrendLineAlphaChange = (slotIndex: 0 | 1, value: string) => {
         if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
-        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         const nextAlphas: [number, number] = [...currentOptions.trendLineColorAlphas];
         const nextValue = Number(value);
         if (!Number.isFinite(nextValue)) return;
@@ -874,7 +877,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     const handleProdTrendBandColorChange = (slotIndex: ActivityAnalyticsProdTrendBandSlotIndex, value: string | undefined) => {
         if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
-        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         const nextColors: [string | undefined, string | undefined, string | undefined] = [...currentOptions.prodTrendBands.colors];
         nextColors[slotIndex] = value;
         onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, prodTrendBands: { ...selectedWidget.displayOptions?.prodTrendBands, colors: nextColors } } });
@@ -882,7 +885,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     const handleProdTrendBandAlphaChange = (slotIndex: ActivityAnalyticsProdTrendBandSlotIndex, value: string) => {
         if (!selectedWidget || selectedWidget.type !== 'prod-trend') return;
-        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined);
+        const currentOptions = resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors);
         const nextAlphas: [number, number, number] = [...currentOptions.prodTrendBands.alphas];
         const nextValue = Number(value);
         if (!Number.isFinite(nextValue)) return;
@@ -1170,7 +1173,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         ? resolveActivityAnalyticsDisplayOptions(selectedWidget.displayOptions as ActivityAnalyticsDisplayOptions | undefined)
         : null;
     const prodTrendOptions = isProdTrend
-        ? resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined)
+        ? resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors)
         : null;
     const activityAnalyticsDisplayRules = activityAnalyticsOptions
         ? resolveActivityAnalyticsDisplayRules({

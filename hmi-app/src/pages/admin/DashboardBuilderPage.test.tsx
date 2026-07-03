@@ -623,7 +623,7 @@ describe('DashboardBuilderPage', () => {
         await waitFor(() => {
             const snapshot = getBuilderCanvasSnapshot();
             expect(snapshot.layout).toHaveLength(1);
-            expect(snapshot.layout[0]).toMatchObject({ x: 0, y: 0, w: 11, h: 9 });
+            expect(snapshot.layout[0]).toMatchObject({ x: 0, y: 0, w: 15, h: 24 });
         });
 
         await waitFor(() => {
@@ -632,7 +632,7 @@ describe('DashboardBuilderPage', () => {
                 selectedWidget: {
                     type: 'activity-analytics',
                     title: 'ACT-ANALYTICS',
-                    size: { w: 11, h: 9 },
+                    size: { w: 15, h: 24 },
                     binding: {
                         mode: 'real_variable',
                         bindingVersion: 'node-red-v1',
@@ -643,6 +643,43 @@ describe('DashboardBuilderPage', () => {
                         setupThresholdKw: 0.15,
                         prodThresholdKw: 0.25,
                         displayMode: 'kpis-and-bars',
+                        groupBarWidth: 0.2,
+                        groupBarWidths: {
+                            shift: 0.2,
+                            day: 0.3,
+                            week: 0.2,
+                            month: 0.2,
+                        },
+                        coverageColor: '#94a3b8',
+                        stateGradients: {
+                            prod: ['#ff9f65', '#e25290'],
+                            setup: ['#5250e2', '#d470e0'],
+                            stopped: ['#69a2ef', '#746be2'],
+                        },
+                        stateGradientAlphas: {
+                            prod: [100, 100],
+                            setup: [100, 100],
+                            stopped: [100, 100],
+                        },
+                        prodTrendBands: {
+                            colors: ['#ff9f65', '#ff9f65', '#ff9f65'],
+                            alphas: [0, 15, 0],
+                            blendMode: 'normal',
+                        },
+                        visualEffects: {
+                            groupedBars: {
+                                glow: 72,
+                                blur: 0,
+                                topCap: true,
+                                topCapGlow: 100,
+                            },
+                            donut: {
+                                glow: 75,
+                                blur: 0,
+                                topCap: true,
+                                topCapGlow: 100,
+                            },
+                        },
                     },
                 },
             });
@@ -665,7 +702,7 @@ describe('DashboardBuilderPage', () => {
         await waitFor(() => {
             const snapshot = getBuilderCanvasSnapshot();
             expect(snapshot.layout).toHaveLength(1);
-            expect(snapshot.layout[0]).toMatchObject({ x: 0, y: 0, w: 11, h: 4 });
+            expect(snapshot.layout[0]).toMatchObject({ x: 0, y: 0, w: 11, h: 9 });
         });
 
         await waitFor(() => {
@@ -674,7 +711,7 @@ describe('DashboardBuilderPage', () => {
                 selectedWidget: {
                     type: 'prod-trend',
                     title: 'PROD-TREND',
-                    size: { w: 11, h: 4 },
+                    size: { w: 11, h: 9 },
                     binding: {
                         mode: 'real_variable',
                         bindingVersion: 'node-red-v1',

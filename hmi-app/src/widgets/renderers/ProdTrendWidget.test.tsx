@@ -13,8 +13,7 @@ import {
     WIDGET_CHART_CONTAINER_CLASS,
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
-import { DEFAULT_PROD_TREND_LINE_COLORS } from '../../utils/prodTrendWidgetDefaults';
-import ProdTrendWidget from './ProdTrendWidget';
+import ProdTrendWidget, { resolveProdTrendLatestValueLabelPlacement } from './ProdTrendWidget';
 
 function expectRuntimeControlIndicator(button: HTMLElement, expectedClasses: string[], unexpectedClasses: string[] = []) {
     const indicator = within(button).getByTestId('prod-trend-widget-runtime-control-indicator');
@@ -387,7 +386,12 @@ describe('ProdTrendWidget', () => {
         expect(screen.getByTestId('prod-trend-widget-final-point-pulse')).toBeInTheDocument();
     });
 
-    it('uses ACT-ANALYTICS prod colors as the default trend gradient', () => {
+    it('keeps the latest PROD-TREND label above by default, but flips below when float clearance would collide with the top clamp', () => {
+        expect(resolveProdTrendLatestValueLabelPlacement({ latestPointY: 20, chartTop: 8 })).toBe('below');
+        expect(resolveProdTrendLatestValueLabelPlacement({ latestPointY: 80, chartTop: 8 })).toBe('above');
+    });
+
+    it('renders the default PROD-TREND gradient from the inverted resolved theme colors when no explicit widget colors are saved', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: {
                 contractVersion: '1.0.0',
@@ -412,8 +416,44 @@ describe('ProdTrendWidget', () => {
         render(<ProdTrendWidget widget={makeWidget({ displayOptions: undefined })} machines={MACHINES} />);
 
         const chart = screen.getByTestId('prod-trend-widget-chart');
-        expect(chart.innerHTML).toContain(DEFAULT_PROD_TREND_LINE_COLORS[1]);
-        expect(chart.innerHTML).toContain(DEFAULT_PROD_TREND_LINE_COLORS[0]);
+        const lineGradient = chart.querySelector('linearGradient[id$="-line-gradient"]');
+        const lineStops = Array.from(lineGradient?.querySelectorAll('stop') ?? []).map((stop) => stop.getAttribute('stop-color'));
+
+        expect(lineStops).toEqual([
+            'var(--color-widget-gradient-from)',
+            'var(--color-widget-gradient-to)',
+        ]);
+    });
+
+    it('keeps explicit PROD-TREND line colors above the general widget gradient defaults', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'Total kW',
+                range: '7d',
+                unit: 'kW',
+                purpose: 'activity-analytics',
+                window: { start: '2026-06-18T12:00:00.000Z', end: '2026-06-20T12:00:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
+                series: [
+                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 0.3 },
+                    { timestamp: '2026-06-19T12:00:00.000Z', timestampMs: Date.parse('2026-06-19T12:00:00.000Z'), value: 0.05 },
+                ],
+                summary: null,
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { trendLineColors: ['#123456', '#654321'] } })} machines={MACHINES} />);
+
+        const chart = screen.getByTestId('prod-trend-widget-chart');
+        const lineGradient = chart.querySelector('linearGradient[id$="-line-gradient"]');
+        const lineStops = Array.from(lineGradient?.querySelectorAll('stop') ?? []).map((stop) => stop.getAttribute('stop-color'));
+
+        expect(lineStops).toEqual(['#654321', '#123456']);
     });
 
     it('keeps the final sampled X-axis label visible and centered on the safe plot boundary', () => {

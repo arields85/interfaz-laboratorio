@@ -279,13 +279,159 @@ describe('ProduccionHistoricaWidget', () => {
         expect(runtimeControls).not.toContainElement(oeeToggle);
         expect(headerArea).toContainElement(legendControls);
         expect(headerArea.lastElementChild).toBe(legendControls);
+        expect(legendControls).toHaveClass('flex', 'justify-end');
+        expect(legendControlsGroup).toHaveClass('flex', 'items-center', 'gap-4');
         expect(legendControlsGroup).not.toHaveClass('border', 'rounded-md', 'bg-industrial-panel/40');
         expect(oeeToggle).toBeVisible();
         expect(oeeToggle).not.toHaveClass('sr-only');
         expect(screen.getByTestId('prod-history-widget-oee-checkbox-visual')).toBeInTheDocument();
+        expect(screen.getByText('Barras/Area')).toBeInTheDocument();
+        expect(screen.getByRole('checkbox', { name: 'Cambiar modo de producción entre barras y área' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /oee/i })).not.toBeInTheDocument();
         expect(headerArea).toHaveClass(...WIDGET_CHART_HEADER_CLASS.split(' '));
         expect(screen.getByTestId('prod-history-widget-chart-shell')).toHaveClass(...WIDGET_CHART_CONTAINER_CLASS.split(' '));
+    });
+
+    it('defaults the runtime toggle to off and renders production bars', () => {
+        const { container } = render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: true,
+                        productionChartMode: 'bars',
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        const modeToggle = screen.getByRole('checkbox', { name: 'Cambiar modo de producción entre barras y área' });
+
+        expect(modeToggle).not.toBeChecked();
+        expect(modeToggle).toHaveAttribute('title', 'Modo barras activado');
+        expect(container.querySelectorAll('g[clip-path] rect')).toHaveLength(6);
+    });
+
+    it('uses the runtime toggle to switch production to area mode without forcing OEE', () => {
+        const onPersistDisplayOptions = vi.fn();
+
+        const { container } = render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: true,
+                        productionChartMode: 'bars',
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                onPersistDisplayOptions={onPersistDisplayOptions}
+            />,
+        );
+
+        const modeToggle = screen.getByRole('checkbox', { name: 'Cambiar modo de producción entre barras y área' });
+        const oeeToggle = screen.getByRole('checkbox', { name: 'Mostrar OEE (%)' });
+
+        expect(modeToggle).not.toBeChecked();
+        expect(oeeToggle).toBeChecked();
+        expect(container.querySelectorAll('g[clip-path] rect')).toHaveLength(6);
+
+        fireEvent.click(modeToggle);
+
+        expect(modeToggle).toBeChecked();
+        expect(modeToggle).toHaveAttribute('title', 'Modo área activado');
+        expect(container.querySelectorAll('g[clip-path] rect')).toHaveLength(0);
+        expect(oeeToggle).toBeChecked();
+        expect(onPersistDisplayOptions).toHaveBeenCalledTimes(1);
+        expect(onPersistDisplayOptions).toHaveBeenCalledWith({ productionChartMode: 'area' });
+
+        fireEvent.click(oeeToggle);
+
+        expect(oeeToggle).not.toBeChecked();
+        fireEvent.click(screen.getByRole('button', { name: 'Hover first point' }));
+        expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '1');
+    });
+
+    it('persists area mode when the runtime toggle turns on', () => {
+        const onPersistDisplayOptions = vi.fn();
+
+        render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget()}
+                equipmentMap={equipmentMap}
+                onPersistDisplayOptions={onPersistDisplayOptions}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Cambiar modo de producción entre barras y área' }));
+
+        expect(onPersistDisplayOptions).toHaveBeenCalledWith({ productionChartMode: 'area' });
+    });
+
+    it('persists bars mode when the runtime toggle turns off', () => {
+        const onPersistDisplayOptions = vi.fn();
+
+        render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: true,
+                        productionChartMode: 'area',
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                onPersistDisplayOptions={onPersistDisplayOptions}
+            />,
+        );
+
+        const modeToggle = screen.getByRole('checkbox', { name: 'Cambiar modo de producción entre barras y área' });
+
+        expect(modeToggle).toBeChecked();
+
+        fireEvent.click(modeToggle);
+
+        expect(onPersistDisplayOptions).toHaveBeenCalledWith({ productionChartMode: 'bars' });
+    });
+
+    it('keeps the OEE checkbox user-controlled in area mode and hides OEE line and area when unchecked', () => {
+        const { container } = render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: true,
+                        productionChartMode: 'bars',
+                        oeeShowArea: true,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        const modeToggle = screen.getByRole('checkbox', { name: 'Cambiar modo de producción entre barras y área' });
+        const oeeToggle = screen.getByRole('checkbox', { name: 'Mostrar OEE (%)' });
+
+        fireEvent.click(modeToggle);
+
+        expect(modeToggle).toBeChecked();
+        expect(oeeToggle).toBeChecked();
+        expect(container.querySelectorAll('g[clip-path] path')).toHaveLength(4);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Hover first point' }));
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('OEE (%)');
+        expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '2');
+
+        fireEvent.click(oeeToggle);
+
+        expect(oeeToggle).not.toBeChecked();
+        expect(container.querySelectorAll('g[clip-path] path')).toHaveLength(2);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Hover first point' }));
+        expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('Producción (unidades)');
+        expect(screen.getByTestId('chart-tooltip')).not.toHaveTextContent('OEE (%)');
+        expect(screen.getByTestId('hover-layer')).toHaveAttribute('data-highlights', '1');
     });
 
     it('renders through WidgetChartLayout while preserving the left unit placement and overlay layer', () => {
@@ -296,7 +442,9 @@ describe('ProduccionHistoricaWidget', () => {
         const overlaySvg = screen.getByTestId('prod-history-widget-overlay-svg');
         const unit = screen.getByTestId('prod-history-widget-y-axis-unit');
         const xAxisLabels = screen.getAllByTestId('prod-history-widget-x-axis-label');
-        const barRects = Array.from(chartSvg.querySelectorAll('g[clip-path] rect')).filter((_, index) => index % 2 === 0);
+        const allRects = Array.from(chartSvg.querySelectorAll('g[clip-path] rect'));
+        const barRects = allRects.filter((_, index) => index % 2 === 0);
+        const capRects = allRects.filter((_, index) => index % 2 === 1);
 
         expect(chartSvg.querySelector('clipPath')).not.toBeNull();
         expect(overlaySvg).toHaveClass('pointer-events-none', 'absolute', 'left-0');
@@ -306,11 +454,17 @@ describe('ProduccionHistoricaWidget', () => {
         expect(unit).toHaveAttribute('font-family', 'var(--font-chart)');
         expect(unit).toHaveAttribute('letter-spacing', 'var(--tracking-chart)');
         expect(barRects).toHaveLength(3);
+        expect(capRects).toHaveLength(3);
         xAxisLabels.forEach((label, index) => {
             const bar = barRects[index];
             const barX = Number(bar?.getAttribute('x'));
             const barWidth = Number(bar?.getAttribute('width'));
             expect(label).toHaveAttribute('x', String(barX + (barWidth / 2)));
+        });
+        capRects.forEach((cap, index) => {
+            expect(cap).toHaveAttribute('height', '2');
+            expect(cap).toHaveAttribute('width', barRects[index]?.getAttribute('width') ?? '');
+            expect(cap).toHaveAttribute('x', barRects[index]?.getAttribute('x') ?? '');
         });
     });
 

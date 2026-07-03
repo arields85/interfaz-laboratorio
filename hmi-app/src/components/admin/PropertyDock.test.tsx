@@ -2021,6 +2021,64 @@ describe('PropertyDock prod-trend', () => {
         await user.click(screen.getByRole('button', { name: 'Normal' }));
         expect(updates.at(-1)?.displayOptions).toMatchObject({ prodTrendBands: { blendMode: 'normal' } });
     });
+
+    it('reads inverted default PROD-TREND line colors from general design settings and still lets explicit widget colors win', () => {
+        document.documentElement.style.setProperty('--color-widget-gradient-from', '#112233');
+        document.documentElement.style.setProperty('--color-widget-gradient-to', '#445566');
+
+        try {
+            const { rerender } = renderPropertyDock({
+                type: 'prod-trend',
+                title: 'TENDENCIA % PROD',
+                binding: {
+                    mode: 'real_variable',
+                    bindingVersion: 'node-red-v1',
+                },
+                displayOptions: {
+                    range: '7d',
+                    groupBy: 'day',
+                },
+            });
+
+            expect(screen.getByLabelText('Tendencia % Prod hex inicial')).toHaveValue('445566');
+            expect(screen.getByLabelText('Tendencia % Prod hex final')).toHaveValue('112233');
+
+            rerender(
+                <PropertyDock
+                    selectedWidget={{
+                        ...makeWidget({ mode: 'real_variable', bindingVersion: 'node-red-v1' }),
+                        type: 'prod-trend',
+                        title: 'TENDENCIA % PROD',
+                        displayOptions: {
+                            range: '7d',
+                            groupBy: 'day',
+                            trendLineColors: ['#abcdef', '#fedcba'],
+                        },
+                    }}
+                    selectedLayout={DEFAULT_LAYOUT}
+                    equipmentMap={new Map()}
+                    catalogVariables={[]}
+                    usedCatalogVariableIds={[]}
+                    machines={MACHINES}
+                    dataEnabled
+                    availableDashboards={[]}
+                    onCreateVariable={vi.fn()}
+                    onDeleteVariable={vi.fn()}
+                    onUpdateWidget={vi.fn()}
+                    onUpdateLayout={vi.fn()}
+                    onDelete={vi.fn()}
+                    onDuplicate={vi.fn()}
+                    onDeselect={vi.fn()}
+                />,
+            );
+
+            expect(screen.getByLabelText('Tendencia % Prod hex inicial')).toHaveValue('abcdef');
+            expect(screen.getByLabelText('Tendencia % Prod hex final')).toHaveValue('fedcba');
+        } finally {
+            document.documentElement.style.removeProperty('--color-widget-gradient-from');
+            document.documentElement.style.removeProperty('--color-widget-gradient-to');
+        }
+    });
 });
 
 describe('PropertyDock prod-history', () => {

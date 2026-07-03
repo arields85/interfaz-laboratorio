@@ -3,7 +3,7 @@ import { AlertTriangle, Loader2, Link2Off } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { dashboardStorage } from '../services/DashboardStorageService';
 import { hierarchyStorage } from '../services/HierarchyStorageService';
-import type { ActivityAnalyticsPersistedDisplayPatch, Dashboard, HierarchyNode } from '../domain/admin.types';
+import type { Dashboard, HierarchyNode, ViewerPersistedWidgetDisplayPatch } from '../domain/admin.types';
 import DashboardViewer from '../components/viewer/DashboardViewer';
 import DashboardHeader from '../components/viewer/DashboardHeader';
 import { mockEquipmentList } from '../mocks/equipment.mock';
@@ -198,7 +198,7 @@ export default function Dashboard() {
         setSelectedPlant(null);
     }, [activeDashboard?.ownerNodeId, allNodes, setSelectedPlant]);
 
-    const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => {
+    const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => {
         if (!activeDashboard) {
             return;
         }

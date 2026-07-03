@@ -1,5 +1,5 @@
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
-import type { ActivityAnalyticsPersistedDisplayPatch, WidgetConfig } from '../domain/admin.types';
+import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig } from '../domain/admin.types';
 import type { EquipmentSummary } from '../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../domain/dataContract.types';
 import type { HierarchyContext } from './resolvers/hierarchyResolver';
@@ -60,7 +60,7 @@ interface WidgetRendererProps {
      * Ignorado por renderers que no soportan modo jerárquico.
      */
     hierarchyContext?: HierarchyContext;
-    onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
+    onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
 }
 
@@ -221,6 +221,7 @@ export default function WidgetRenderer({
                     equipmentMap={equipmentMap}
                     isLoadingData={isLoadingData}
                     className={className}
+                    onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
                 />
             );
             break;

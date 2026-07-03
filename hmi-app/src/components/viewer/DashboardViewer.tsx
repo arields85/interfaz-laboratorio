@@ -1,5 +1,5 @@
 import { WidgetRenderer } from '../../widgets';
-import type { ActivityAnalyticsPersistedDisplayPatch, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
+import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
@@ -23,7 +23,7 @@ interface DashboardViewerProps {
     hierarchyContext?: HierarchyContext;
     cols?: number;
     rows?: number;
-    onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
+    onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
 }
 

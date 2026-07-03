@@ -163,8 +163,13 @@ const PROD_TREND_PANEL_MIN_HEIGHT_PX = PROD_TREND_COMPACT_CHROME_BUDGET_PX + PRO
 const PROD_TREND_PANEL_CHROME_HEIGHT_PX = PROD_TREND_PANEL_HEIGHT_PX - PROD_TREND_CHART_HEIGHT_PX;
 const PROD_TREND_CHART_MARGIN = { top: 8, right: 12, bottom: 24, left: 38 } as const;
 const PROD_TREND_COMPACT_CHART_MARGIN = { top: 4, right: 10, bottom: 14, left: 32 } as const;
+const PROD_TREND_OVERLAY_TOP_PADDING_PX = 20;
 const PROD_TREND_LATEST_VALUE_LABEL_Y_OFFSET_PX = 16;
 const PROD_TREND_LATEST_VALUE_LABEL_EDGE_PADDING_PX = 28;
+const PROD_TREND_LATEST_VALUE_LABEL_TOP_CLAMP_PADDING_PX = 10;
+const PROD_TREND_LATEST_VALUE_LABEL_FLOAT_TRAVEL_PX = 2.75;
+const PROD_TREND_LATEST_VALUE_LABEL_FLOAT_SAFETY_MARGIN_PX = 2;
+const PROD_TREND_LATEST_VALUE_LABEL_FLOAT_CLEARANCE_PX = PROD_TREND_LATEST_VALUE_LABEL_FLOAT_TRAVEL_PX + PROD_TREND_LATEST_VALUE_LABEL_FLOAT_SAFETY_MARGIN_PX;
 const PROD_TREND_TRAVELING_GLOW_SPEED_PX_PER_SECOND = 323;
 const PROD_TREND_TRAVELING_GLOW_DURATION_MIN_SECONDS = 0.9;
 const PROD_TREND_TRAVELING_GLOW_DURATION_MAX_SECONDS = 3.2;
@@ -181,6 +186,8 @@ const SUMMARY_DONUT_TOP_CAP_LENGTH_MULTIPLIER = 0.2;
 const SUMMARY_DONUT_TRAVELING_TOP_CAP_LENGTH_MULTIPLIER = 0.3;
 const SUMMARY_DONUT_TRAVELING_TOP_CAP_THICKNESS_MULTIPLIER = 1.25;
 const SUMMARY_DONUT_TOP_CAP_MIN_LENGTH = 1;
+const GROUPED_STATIC_TOP_CAP_HEIGHT_PX = 2;
+const GROUPED_MOVING_TOP_CAP_HEIGHT_PX = 2;
 const GROUPED_CURRENT_BAR_TOP_LABEL_OFFSET_PX = 8;
 const SUMMARY_DONUT_GEOMETRY_RULES = {
     chartHeightPx: {
@@ -274,16 +281,8 @@ const COMPARISON_LAYOUT_RULES = {
         max: 18,
     },
     externalWidthPx: {
-        min: 150,
-        preferred: 186,
+        min: 132,
         max: 208,
-    },
-    preferredContentWidthPx: 148,
-    sideBreathingPx: 19,
-    responsiveContainerWidthPx: {
-        compact: 320,
-        preferred: 420,
-        expanded: 760,
     },
     widthPx: {
         compact: 104,
@@ -1385,9 +1384,22 @@ function ProdTrendChart({
     const latestValueLabelX = latestPoint
         ? clamp(latestPoint.x, chartMargin.left + 4, width - chartMargin.right - 4)
         : 0;
+    const latestValueLabelPlacement = latestPoint?.y !== null && latestPoint?.y !== undefined
+        ? resolveProdTrendLatestValueLabelPlacement({
+            latestPointY: latestPoint.y,
+            chartTop: chartMargin.top,
+        })
+        : 'above';
     const latestValueLabelY = latestPoint?.y !== null && latestPoint?.y !== undefined
-        ? Math.max(chartMargin.top + 10, latestPoint.y - PROD_TREND_LATEST_VALUE_LABEL_Y_OFFSET_PX)
+        ? latestValueLabelPlacement === 'below'
+            ? latestPoint.y + PROD_TREND_LATEST_VALUE_LABEL_Y_OFFSET_PX + PROD_TREND_LATEST_VALUE_LABEL_FLOAT_CLEARANCE_PX
+            : Math.max(
+                chartMargin.top + PROD_TREND_LATEST_VALUE_LABEL_TOP_CLAMP_PADDING_PX,
+                latestPoint.y - PROD_TREND_LATEST_VALUE_LABEL_Y_OFFSET_PX,
+            )
         : 0;
+    const overlayHeight = height + PROD_TREND_OVERLAY_TOP_PADDING_PX;
+    const overlayViewBox = `0 -${PROD_TREND_OVERLAY_TOP_PADDING_PX} ${width} ${overlayHeight}`;
     const hoveredPoint = hoverInfo && hoverInfo.index >= 0 && hoverInfo.index < renderablePoints.length
         ? renderablePoints[hoverInfo.index] ?? null
         : null;
@@ -1663,105 +1675,6 @@ function ProdTrendChart({
                 </g>
             )}
 
-            {latestPoint && (
-                <g
-                    data-testid="activity-analytics-prod-trend-latest-point"
-                    data-bucket-key={latestPoint.bucketKey}
-                    data-partial={latestPoint.isPartial ? 'true' : 'false'}
-                    data-value-state={latestPoint.valueState}
-                >
-                    {latestValueLabel && latestPoint.y !== null && (
-                        <text
-                            x={latestValueLabelX}
-                            y={latestValueLabelY}
-                            textAnchor={latestValueLabelAnchor}
-                            fill={prodGradientStops.endColor}
-                            className="activity-analytics-prod-trend-latest-value-float"
-                            style={{
-                                ...PROD_TREND_LATEST_VALUE_TEXT_STYLE,
-                                transformBox: 'fill-box',
-                                transformOrigin: 'center bottom',
-                            }}
-                            pointerEvents="none"
-                            data-testid="activity-analytics-prod-trend-latest-value-label"
-                        >
-                            {latestValueLabel}
-                        </text>
-                    )}
-                    {latestPoint.y !== null ? (
-                        <>
-                            <g clipPath={`url(#${plotClipPathId})`} pointerEvents="none" aria-hidden="true" style={{ mixBlendMode: 'screen' }}>
-                                <circle
-                                    data-testid="activity-analytics-prod-trend-final-point-pulse"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={9}
-                                    fill={prodGradientStops.endColor}
-                                    fillOpacity={0.45}
-                                    className="animate-ping"
-                                    style={{ animationDuration: '2s', transformOrigin: `${latestPoint.x}px ${latestPoint.y}px` }}
-                                />
-                                <circle
-                                    data-testid="activity-analytics-prod-trend-final-point-aura"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={13.5}
-                                    fill={`url(#${travelingGlowAuraGradientId})`}
-                                    fillOpacity={0.3}
-                                    filter={`url(#${travelingGlowFilterId})`}
-                                    className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-aura"
-                                />
-                                <circle
-                                    data-testid="activity-analytics-prod-trend-final-point-halo"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={8.75}
-                                    fill={`url(#${travelingGlowAuraGradientId})`}
-                                    fillOpacity={0.48}
-                                    filter={`url(#${travelingGlowFilterId})`}
-                                    className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-halo"
-                                />
-                                <circle
-                                    data-testid="activity-analytics-prod-trend-final-point-core"
-                                    cx={latestPoint.x}
-                                    cy={latestPoint.y}
-                                    r={3}
-                                    fill={prodGradientStops.endColor}
-                                    stroke={prodGradientStops.startColor}
-                                    strokeOpacity={0.42}
-                                    strokeWidth={0.9}
-                                />
-                            </g>
-                        </>
-                    ) : (
-                        <>
-                            <circle
-                                data-testid="activity-analytics-prod-trend-final-missing-pulse"
-                                cx={latestPoint.x}
-                                cy={latestPoint.markerY}
-                                r={8}
-                                fill="none"
-                                stroke="var(--color-industrial-muted)"
-                                strokeOpacity={0.7}
-                                strokeWidth={1.5}
-                                className="animate-pulse"
-                                style={{ transformOrigin: `${latestPoint.x}px ${latestPoint.markerY}px` }}
-                            />
-                            <circle
-                                data-testid="activity-analytics-prod-trend-final-missing-core"
-                                cx={latestPoint.x}
-                                cy={latestPoint.markerY}
-                                r={4}
-                                fill="var(--color-industrial-bg)"
-                                stroke="var(--color-industrial-muted)"
-                                strokeDasharray="2 2"
-                                strokeWidth={1.5}
-                            />
-                        </>
-                    )}
-                </g>
-            )}
-
             {hoveredPoint && (
                 <g pointerEvents="none" data-testid="activity-analytics-prod-trend-hover-affordance">
                     <line
@@ -1848,6 +1761,118 @@ function ProdTrendChart({
                     );
                 })}
             </svg>
+
+            {latestPoint && (
+                <svg
+                    width={width}
+                    height={overlayHeight}
+                    viewBox={overlayViewBox}
+                    className="pointer-events-none absolute left-0"
+                    style={{ top: `-${PROD_TREND_OVERLAY_TOP_PADDING_PX}px`, overflow: 'visible' }}
+                    aria-hidden="true"
+                    data-testid="activity-analytics-prod-trend-overlay-svg"
+                >
+                    <g
+                        data-testid="activity-analytics-prod-trend-latest-point-overlay"
+                    >
+                        <g
+                            data-testid="activity-analytics-prod-trend-latest-point"
+                            data-bucket-key={latestPoint.bucketKey}
+                            data-partial={latestPoint.isPartial ? 'true' : 'false'}
+                            data-value-state={latestPoint.valueState}
+                        >
+                            {latestValueLabel && latestPoint.y !== null && (
+                                <text
+                                    x={latestValueLabelX}
+                                    y={latestValueLabelY}
+                                    textAnchor={latestValueLabelAnchor}
+                                    fill={prodGradientStops.endColor}
+                                    className="activity-analytics-prod-trend-latest-value-float"
+                                style={{
+                                    ...PROD_TREND_LATEST_VALUE_TEXT_STYLE,
+                                    transformBox: 'fill-box',
+                                    transformOrigin: 'center bottom',
+                                }}
+                                pointerEvents="none"
+                                data-testid="activity-analytics-prod-trend-latest-value-label"
+                                data-label-placement={latestValueLabelPlacement}
+                            >
+                                {latestValueLabel}
+                            </text>
+                            )}
+                            {latestPoint.y !== null ? (
+                                <g pointerEvents="none" style={{ mixBlendMode: 'screen' }}>
+                                    <circle
+                                        data-testid="activity-analytics-prod-trend-final-point-pulse"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={9}
+                                        fill={prodGradientStops.endColor}
+                                        fillOpacity={0.45}
+                                        className="animate-ping"
+                                        style={{ animationDuration: '2s', transformOrigin: `${latestPoint.x}px ${latestPoint.y}px` }}
+                                    />
+                                    <circle
+                                        data-testid="activity-analytics-prod-trend-final-point-aura"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={13.5}
+                                        fill={`url(#${travelingGlowAuraGradientId})`}
+                                        fillOpacity={0.3}
+                                        filter={`url(#${travelingGlowFilterId})`}
+                                        className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-aura"
+                                    />
+                                    <circle
+                                        data-testid="activity-analytics-prod-trend-final-point-halo"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={8.75}
+                                        fill={`url(#${travelingGlowAuraGradientId})`}
+                                        fillOpacity={0.48}
+                                        filter={`url(#${travelingGlowFilterId})`}
+                                        className="activity-analytics-prod-trend-final-point-flicker activity-analytics-prod-trend-final-point-flicker-halo"
+                                    />
+                                    <circle
+                                        data-testid="activity-analytics-prod-trend-final-point-core"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.y}
+                                        r={3}
+                                        fill={prodGradientStops.endColor}
+                                        stroke={prodGradientStops.startColor}
+                                        strokeOpacity={0.42}
+                                        strokeWidth={0.9}
+                                    />
+                                </g>
+                            ) : (
+                                <>
+                                    <circle
+                                        data-testid="activity-analytics-prod-trend-final-missing-pulse"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.markerY}
+                                        r={8}
+                                        fill="none"
+                                        stroke="var(--color-industrial-muted)"
+                                        strokeOpacity={0.7}
+                                        strokeWidth={1.5}
+                                        className="animate-pulse"
+                                        style={{ transformOrigin: `${latestPoint.x}px ${latestPoint.markerY}px` }}
+                                    />
+                                    <circle
+                                        data-testid="activity-analytics-prod-trend-final-missing-core"
+                                        cx={latestPoint.x}
+                                        cy={latestPoint.markerY}
+                                        r={4}
+                                        fill="var(--color-industrial-bg)"
+                                        stroke="var(--color-industrial-muted)"
+                                        strokeDasharray="2 2"
+                                        strokeWidth={1.5}
+                                    />
+                                </>
+                            )}
+                        </g>
+                    </g>
+                </svg>
+            )}
 
             {!hasRenderableTrend && (
                 <WidgetRuntimeState
@@ -2262,27 +2287,21 @@ function isGroupedBucketMarkedInProgress(bucket: ReturnType<typeof computeActivi
 }
 
 function resolveTopRegionComparisonColumnWidth(containerWidth: number): number {
-    const { compact, preferred, expanded } = COMPARISON_LAYOUT_RULES.responsiveContainerWidthPx;
     const { min, max } = COMPARISON_LAYOUT_RULES.externalWidthPx;
-    const preferredWidth = COMPARISON_LAYOUT_RULES.preferredContentWidthPx + (COMPARISON_LAYOUT_RULES.sideBreathingPx * 2);
+    const summaryPriorityWidth = Math.min(containerWidth, SUMMARY_CHART_MAX_WIDTH_PX);
+    const spareWidthAfterSummaryPriority = Math.max(containerWidth - summaryPriorityWidth, 0);
 
-    if (containerWidth <= compact) {
+    if (spareWidthAfterSummaryPriority <= min) {
         return Math.min(containerWidth, min);
     }
 
-    if (containerWidth <= preferred) {
-        const progress = normalizeRange(containerWidth, compact, preferred);
-
-        return Number((min + ((preferredWidth - min) * progress)).toFixed(2));
-    }
-
-    if (containerWidth >= expanded) {
+    if (spareWidthAfterSummaryPriority >= max) {
         return max;
     }
 
-    const progress = normalizeRange(containerWidth, preferred, expanded);
+    const progress = normalizeRange(spareWidthAfterSummaryPriority, min, max);
 
-    return Number((preferredWidth + ((max - preferredWidth) * progress)).toFixed(2));
+    return Number((min + ((max - min) * progress)).toFixed(2));
 }
 
 function resolveComparisonGridColumnGap(containerWidth: number): number {
@@ -2823,10 +2842,10 @@ const GroupStatusLegend = memo(function GroupStatusLegend({
     return (
         <div className={compact ? 'flex items-center gap-2 normal-case' : 'flex items-center gap-3 normal-case'} data-testid="activity-analytics-groups-header-legend">
                 {[
-                    { key: 'stopped' as const, label: 'Detenida', color: visualPalette.stopped.initialSolid },
+                    { key: 'stopped' as const, label: 'Det.', color: visualPalette.stopped.initialSolid },
                     { key: 'setup' as const, label: 'Setup', color: visualPalette.setup.solid },
                     { key: 'prod' as const, label: 'Prod.', color: visualPalette.prod.initialSolid },
-                    { key: 'noData' as const, label: 'Cobertura incompleta', color: visualPalette.noData.solid },
+                    { key: 'noData' as const, label: 'Cob. incompleta', color: visualPalette.noData.solid },
                 ].map((item) => (
                 <span key={item.key} className={compact ? 'flex items-center gap-1 whitespace-nowrap text-industrial-text' : 'flex items-center gap-1.5 whitespace-nowrap text-industrial-text'}>
                     <span
@@ -2895,6 +2914,19 @@ const SummaryDetailTextCard = memo(function SummaryDetailTextCard({
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
+}
+
+export function resolveProdTrendLatestValueLabelPlacement({
+    latestPointY,
+    chartTop,
+}: {
+    latestPointY: number;
+    chartTop: number;
+}): 'above' | 'below' {
+    return latestPointY - PROD_TREND_LATEST_VALUE_LABEL_Y_OFFSET_PX - PROD_TREND_LATEST_VALUE_LABEL_FLOAT_CLEARANCE_PX
+        < chartTop + PROD_TREND_LATEST_VALUE_LABEL_TOP_CLAMP_PADDING_PX
+        ? 'below'
+        : 'above';
 }
 
 function normalizeRange(value: number, min: number, max: number): number {
@@ -3569,7 +3601,7 @@ function GroupedStackedBarsChart({
                         .filter((segment) => segment.key !== 'noData' && segment.value > 0)
                         .map((segment) => ({
                             ...segment,
-                            topCapHeight: Math.max(Math.min(segment.height - 0.75, 3), 0),
+                            topCapHeight: GROUPED_STATIC_TOP_CAP_HEIGHT_PX,
                         }))
                         .filter((segment) => segment.topCapHeight > 0);
                     const isCurrentPartialBucket = bucket.bucketKey === currentPartialBucketKey;
@@ -4459,7 +4491,7 @@ function resolveGroupedTravelingTopCapFrame({
     const trackY = plotTop + plotHeight - trackHeight;
     const key = resolveGroupedTravelingTopCapStateKey(renderedSegments);
     const height = Math.min(
-        Math.max(barWidth * SUMMARY_DONUT_TRAVELING_TOP_CAP_LENGTH_MULTIPLIER, SUMMARY_DONUT_TOP_CAP_MIN_LENGTH),
+        GROUPED_MOVING_TOP_CAP_HEIGHT_PX,
         trackHeight,
     );
     const travelDistance = Math.max(trackHeight - height, 0);

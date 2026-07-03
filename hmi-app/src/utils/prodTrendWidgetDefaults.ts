@@ -11,16 +11,26 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
     DEFAULT_ACTIVITY_ANALYTICS_RANGE,
     DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW,
-    DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     resolveActivityAnalyticsDisplayOptions,
     resolveActivityAnalyticsGroupBarWidths,
     resolveActivityAnalyticsProdTrendBands,
 } from './activityAnalyticsWidgetDefaults';
 
+const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+const PROD_TREND_THEME_DEFAULT_LINE_COLOR_TOKENS = [
+    'var(--color-widget-gradient-to)',
+    'var(--color-widget-gradient-from)',
+] as const satisfies ActivityAnalyticsStateGradient;
+const PROD_TREND_THEME_DEFAULT_LINE_COLOR_KEYS = [
+    '--color-widget-gradient-to',
+    '--color-widget-gradient-from',
+] as const;
+
 export const DEFAULT_PROD_TREND_GROUP_BY = 'shift' as const;
 export const DEFAULT_PROD_TREND_LINE_COLORS: ActivityAnalyticsStateGradient = [
-    ...DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS.prod,
+    '#3b82f6',
+    '#a855f7',
 ];
 export const DEFAULT_PROD_TREND_LINE_COLOR_ALPHAS: ActivityAnalyticsAlphaPair = [
     ...DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS.prod,
@@ -33,6 +43,39 @@ export type ResolvedProdTrendDisplayOptions = Required<Pick<
     prodTrendBands: ReturnType<typeof resolveActivityAnalyticsProdTrendBands>;
 };
 
+function resolveProdTrendLineColorSlot(value: unknown, fallback: string): string {
+    return typeof value === 'string' && HEX_COLOR_PATTERN.test(value.trim())
+        ? value.trim().toLowerCase()
+        : fallback;
+}
+
+function resolveProdTrendLineColors(
+    trendLineColors: unknown,
+    fallback: ActivityAnalyticsStateGradient,
+): ActivityAnalyticsStateGradient {
+    if (!Array.isArray(trendLineColors)) {
+        return [...fallback];
+    }
+
+    return [
+        resolveProdTrendLineColorSlot(trendLineColors[0], fallback[0]),
+        resolveProdTrendLineColorSlot(trendLineColors[1], fallback[1]),
+    ];
+}
+
+export function resolveProdTrendThemeDefaultLineColors(): ActivityAnalyticsStateGradient {
+    if (typeof document === 'undefined') {
+        return [...DEFAULT_PROD_TREND_LINE_COLORS];
+    }
+
+    const rootStyle = getComputedStyle(document.documentElement);
+
+    return PROD_TREND_THEME_DEFAULT_LINE_COLOR_KEYS.map((key, index) => {
+        const resolvedValue = rootStyle.getPropertyValue(key).trim();
+        return HEX_COLOR_PATTERN.test(resolvedValue) ? resolvedValue.toLowerCase() : DEFAULT_PROD_TREND_LINE_COLORS[index];
+    }) as ActivityAnalyticsStateGradient;
+}
+
 export function createDefaultProdTrendDisplayOptions(): ProdTrendDisplayOptions {
     return {
         range: DEFAULT_ACTIVITY_ANALYTICS_RANGE,
@@ -41,7 +84,6 @@ export function createDefaultProdTrendDisplayOptions(): ProdTrendDisplayOptions 
         prodThresholdKw: DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         groupBarWidth: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
         groupBarWidths: resolveActivityAnalyticsGroupBarWidths(undefined, DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH),
-        trendLineColors: [...DEFAULT_PROD_TREND_LINE_COLORS],
         trendLineColorAlphas: [...DEFAULT_PROD_TREND_LINE_COLOR_ALPHAS],
         prodTrendBands: {
             alphas: [...DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS],
@@ -52,6 +94,7 @@ export function createDefaultProdTrendDisplayOptions(): ProdTrendDisplayOptions 
 
 export function resolveProdTrendDisplayOptions(
     displayOptions?: ProdTrendDisplayOptions,
+    trendLineColorFallback: ActivityAnalyticsStateGradient = PROD_TREND_THEME_DEFAULT_LINE_COLOR_TOKENS,
 ): ResolvedProdTrendDisplayOptions {
     const resolvedActivityAnalytics = resolveActivityAnalyticsDisplayOptions({
         range: displayOptions?.range,
@@ -83,7 +126,7 @@ export function resolveProdTrendDisplayOptions(
         prodThresholdKw: resolvedActivityAnalytics.prodThresholdKw,
         groupBarWidth: resolvedActivityAnalytics.groupBarWidth,
         groupBarWidths: resolvedActivityAnalytics.groupBarWidths,
-        trendLineColors: [...(resolvedActivityAnalytics.stateGradients.prod ?? DEFAULT_PROD_TREND_LINE_COLORS)],
+        trendLineColors: resolveProdTrendLineColors(displayOptions?.trendLineColors, trendLineColorFallback),
         trendLineColorAlphas: [...(resolvedActivityAnalytics.stateGradientAlphas.prod ?? DEFAULT_PROD_TREND_LINE_COLOR_ALPHAS)],
         prodTrendBands: resolvedActivityAnalytics.prodTrendBands,
     };

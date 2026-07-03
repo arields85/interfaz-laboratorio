@@ -24,10 +24,32 @@ export const DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW = 0.15;
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW = 0.25;
 export const DEFAULT_ACTIVITY_ANALYTICS_DISPLAY_MODE = 'kpis-and-bars' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 1;
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUP_BAR_WIDTHS = {
+    shift: 0.2,
+    day: 0.3,
+    week: 0.2,
+    month: 0.2,
+} as const;
 export const MIN_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 0.1;
 export const MAX_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH = 1.5;
 export const ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS = ['shift', 'day', 'week', 'month'] as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR = '#94a3b8';
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENTS: Record<
+    ActivityAnalyticsStateGradientKey,
+    ActivityAnalyticsStateGradient
+> = {
+    prod: ['#ff9f65', '#e25290'],
+    setup: ['#5250e2', '#d470e0'],
+    stopped: ['#69a2ef', '#746be2'],
+};
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENT_ALPHAS: Record<
+    ActivityAnalyticsStateGradientKey,
+    ActivityAnalyticsAlphaPair
+> = {
+    prod: [100, 100],
+    setup: [100, 100],
+    stopped: [100, 100],
+};
 export const DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS: Record<
     ActivityAnalyticsStateGradientKey,
     ActivityAnalyticsStateGradient
@@ -50,7 +72,19 @@ export const DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS: ActivityAnalyticsSu
     topCap: false,
     topCapGlow: 100,
 };
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUPED_BAR_EFFECTS: ActivityAnalyticsSurfaceEffects = {
+    glow: 72,
+    blur: 0,
+    topCap: true,
+    topCapGlow: 100,
+};
 export const DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS: ActivityAnalyticsSurfaceEffects = {
+    glow: 75,
+    blur: 0,
+    topCap: true,
+    topCapGlow: 100,
+};
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_DONUT_EFFECTS: ActivityAnalyticsSurfaceEffects = {
     glow: 75,
     blur: 0,
     topCap: true,
@@ -59,6 +93,9 @@ export const DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS: ActivityAnalyticsSurfaceE
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS = [0, 50, 0] as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE = 'overlay' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT = DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR;
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_COLORS = ['#ff9f65', '#ff9f65', '#ff9f65'] as const;
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_ALPHAS = [0, 15, 0] as const;
+export const DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_BLEND_MODE = 'normal' as const;
 
 export { ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS };
 
@@ -89,10 +126,7 @@ export type ResolvedActivityAnalyticsDisplayOptionsWithTrendBands = ResolvedActi
 
 function createDefaultActivityAnalyticsGroupBarWidths(): Record<typeof ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH_GROUPS[number], number> {
     return {
-        shift: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
-        day: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
-        week: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
-        month: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
+        ...DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUP_BAR_WIDTHS,
     };
 }
 
@@ -329,24 +363,27 @@ export function resolveActivityAnalyticsGroupBarWidthForGroup(
 }
 
 export function createDefaultActivityAnalyticsDisplayOptions(): ActivityAnalyticsDisplayOptions {
+    const groupBarWidths = createDefaultActivityAnalyticsGroupBarWidths();
+
     return {
         range: DEFAULT_ACTIVITY_ANALYTICS_RANGE,
         groupBy: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY,
         setupThresholdKw: DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW,
         prodThresholdKw: DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         displayMode: normalizeActivityAnalyticsDisplayMode(),
-        groupBarWidth: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
-        groupBarWidths: createDefaultActivityAnalyticsGroupBarWidths(),
+        groupBarWidth: groupBarWidths[DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY],
+        groupBarWidths,
         coverageColor: DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
-        stateGradients: cloneActivityAnalyticsStateGradients(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS),
-        stateGradientAlphas: cloneActivityAnalyticsStateGradientAlphas(DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS),
+        stateGradients: cloneActivityAnalyticsStateGradients(DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENTS),
+        stateGradientAlphas: cloneActivityAnalyticsStateGradientAlphas(DEFAULT_ACTIVITY_ANALYTICS_INITIAL_STATE_GRADIENT_ALPHAS),
         prodTrendBands: {
-            alphas: [...DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS] as ActivityAnalyticsTrendBandAlphaTriple,
-            blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
+            colors: [...DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_COLORS] as ActivityAnalyticsProdTrendBandsDisplayOptions['colors'],
+            alphas: [...DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_ALPHAS] as ActivityAnalyticsTrendBandAlphaTriple,
+            blendMode: DEFAULT_ACTIVITY_ANALYTICS_INITIAL_PROD_TREND_BAND_BLEND_MODE,
         },
         visualEffects: {
-            groupedBars: cloneActivityAnalyticsSurfaceEffects(DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS),
-            donut: cloneActivityAnalyticsSurfaceEffects(DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS),
+            groupedBars: cloneActivityAnalyticsSurfaceEffects(DEFAULT_ACTIVITY_ANALYTICS_INITIAL_GROUPED_BAR_EFFECTS),
+            donut: cloneActivityAnalyticsSurfaceEffects(DEFAULT_ACTIVITY_ANALYTICS_INITIAL_DONUT_EFFECTS),
         },
     };
 }

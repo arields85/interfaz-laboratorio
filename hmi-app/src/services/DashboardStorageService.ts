@@ -1,4 +1,4 @@
-import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, Dashboard, Template, WidgetConfig, WidgetLayout } from '../domain/admin.types';
+import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, Dashboard, Template, ViewerPersistedWidgetDisplayPatch, WidgetConfig, WidgetLayout } from '../domain/admin.types';
 import { mockDashboards } from '../mocks/admin.mock';
 import { clampWidgetBounds, DEFAULT_COLS, isTemplateApplicable } from '../utils/gridConfig';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
@@ -121,7 +121,7 @@ class DashboardStorageService {
         localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
     }
 
-    async persistPublishedWidgetDisplayOptions(dashboardId: string, widgetId: string, displayOptions: ActivityAnalyticsPersistedDisplayPatch): Promise<Dashboard | null> {
+    async persistPublishedWidgetDisplayOptions(dashboardId: string, widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch): Promise<Dashboard | null> {
         await new Promise((resolve) => setTimeout(resolve, 200));
         const dashboards = await this.readStorage();
         const dashboard = dashboards.find((currentDashboard) => currentDashboard.id === dashboardId) ?? null;
@@ -367,20 +367,21 @@ class DashboardStorageService {
     }
 }
 
-function applyPersistedActivityAnalyticsDisplayPatch(widget: WidgetConfig, displayOptions: ActivityAnalyticsPersistedDisplayPatch): WidgetConfig {
+function applyPersistedActivityAnalyticsDisplayPatch(widget: WidgetConfig, displayOptions: ViewerPersistedWidgetDisplayPatch): WidgetConfig {
     if (widget.type !== 'activity-analytics') {
         return { ...widget, displayOptions: { ...widget.displayOptions, ...displayOptions } } as WidgetConfig;
     }
 
     const activityWidget = widget as ActivityAnalyticsWidgetConfig;
+    const activityDisplayOptions = displayOptions as ActivityAnalyticsPersistedDisplayPatch;
 
     return {
         ...activityWidget,
         displayOptions: {
             ...activityWidget.displayOptions,
-            range: displayOptions.range,
-            start: displayOptions.range === 'custom' ? displayOptions.start : undefined,
-            end: displayOptions.range === 'custom' ? displayOptions.end : undefined,
+            range: activityDisplayOptions.range,
+            start: activityDisplayOptions.range === 'custom' ? activityDisplayOptions.start : undefined,
+            end: activityDisplayOptions.range === 'custom' ? activityDisplayOptions.end : undefined,
         },
     } satisfies ActivityAnalyticsWidgetConfig;
 }

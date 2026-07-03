@@ -43,7 +43,7 @@ describe('widgetCapabilities', () => {
             catalogVariable: false,
             hierarchy: false,
             nestedInteractiveNavigation: true,
-            defaultSize: { w: 11, h: 9 },
+            defaultSize: { w: 15, h: 24 },
             defaultIcon: null,
         });
         expect(hasNestedInteractiveNavigation('activity-analytics')).toBe(true);
@@ -56,7 +56,7 @@ describe('widgetCapabilities', () => {
             catalogVariable: false,
             hierarchy: false,
             nestedInteractiveNavigation: false,
-            defaultSize: { w: 11, h: 4 },
+            defaultSize: { w: 11, h: 9 },
             defaultIcon: 'TrendingUp',
         });
         expect(hasNestedInteractiveNavigation('prod-trend')).toBe(false);
@@ -76,8 +76,8 @@ describe('widgetCapabilities', () => {
         expect(getDefaultSize('metric-card')).toEqual({ w: 6, h: 5 });
         expect(getDefaultSize('trend-chart')).toEqual({ w: 11, h: 9 });
         expect(getDefaultSize('trend-chart-v2')).toEqual({ w: 11, h: 9 });
-        expect(getDefaultSize('activity-analytics')).toEqual({ w: 11, h: 9 });
-        expect(getDefaultSize('prod-trend')).toEqual({ w: 11, h: 4 });
+        expect(getDefaultSize('activity-analytics')).toEqual({ w: 15, h: 24 });
+        expect(getDefaultSize('prod-trend')).toEqual({ w: 11, h: 9 });
         expect(getDefaultSize('prod-history')).toEqual({ w: 11, h: 9 });
         expect(getDefaultSize('status')).toEqual({ w: 4, h: 4 });
         expect(getDefaultSize('connection-status')).toEqual({ w: 5, h: 5 });

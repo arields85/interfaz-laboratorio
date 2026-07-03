@@ -14,7 +14,7 @@ import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComp
 import { groupActivityAnalyticsIntervals } from '../../utils/activityAnalyticsGrouping';
 import { buildActivityAnalyticsSummarySegments } from '../../utils/activityAnalyticsSummarySegments';
 import { DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS } from '../../utils/activityAnalyticsWidgetDefaults';
-import ActivityAnalyticsWidget, { resolveSummaryTravelingTopCapRoute } from './ActivityAnalyticsWidget';
+import ActivityAnalyticsWidget, { resolveProdTrendLatestValueLabelPlacement, resolveSummaryTravelingTopCapRoute } from './ActivityAnalyticsWidget';
 
 class MockResizeObserver implements ResizeObserver {
     private static instances: MockResizeObserver[] = [];
@@ -416,8 +416,8 @@ function getGradientStopsByIdSuffix(container: HTMLElement, idSuffix: string) {
     return Array.from(gradient.querySelectorAll('stop'));
 }
 
-function resolveExpectedGroupedTopCapHeight(segmentHeight: number) {
-    return Math.max(Math.min(segmentHeight - 0.75, 3), 0);
+function resolveExpectedGroupedTopCapHeight() {
+    return 2;
 }
 
 function parseVisibleStrokeLength(strokeDashArray: string | null): number {
@@ -1444,8 +1444,8 @@ describe('ActivityAnalyticsWidget', () => {
             'Cobertura',
         ]);
         const groupsHeaderLegend = within(groupsPanel).getByTestId('activity-analytics-groups-header-legend');
-        expect(within(groupsHeaderLegend).getAllByText(/^(Detenida|Setup|Prod\.)$/).map((item) => item.textContent)).toEqual([
-            'Detenida',
+        expect(within(groupsHeaderLegend).getAllByText(/^(Det\.|Setup|Prod\.)$/).map((item) => item.textContent)).toEqual([
+            'Det.',
             'Setup',
             'Prod.',
         ]);
@@ -1561,7 +1561,7 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         act(() => {
-            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 800 });
         });
 
         const trendChart = screen.getByTestId('activity-analytics-prod-trend-chart');
@@ -1572,9 +1572,21 @@ describe('ActivityAnalyticsWidget', () => {
         const latestPointAura = screen.getByTestId('activity-analytics-prod-trend-final-point-aura');
         const latestPointHalo = screen.getByTestId('activity-analytics-prod-trend-final-point-halo');
         const latestPointCore = screen.getByTestId('activity-analytics-prod-trend-final-point-core');
+        const overlaySvg = screen.getByTestId('activity-analytics-prod-trend-overlay-svg');
+        const overlayHeight = Number(trendChart.getAttribute('height')) + 20;
 
         expect(lineStops.map((stop) => stop.getAttribute('stop-color'))).toEqual(reverseGradientStops(CUSTOM_STATE_GRADIENTS.prod));
         expect(areaStops.map((stop) => stop.getAttribute('stop-color'))).toEqual(reverseGradientStops(CUSTOM_STATE_GRADIENTS.prod));
+        expect(overlaySvg).toHaveClass('pointer-events-none', 'absolute', 'left-0');
+        expect(overlaySvg).toHaveStyle({ top: '-20px', overflow: 'visible' });
+        expect(overlaySvg).toHaveAttribute('viewBox', `0 -20 640 ${overlayHeight}`);
+        expect(screen.getByTestId('activity-analytics-prod-trend-latest-point-overlay')).not.toHaveAttribute('clip-path');
+        expect(latestPointPulse.closest('svg')).toBe(overlaySvg);
+        expect(latestValueLabel.closest('svg')).toBe(overlaySvg);
+        expect(latestValueLabel).toHaveAttribute('data-label-placement', 'below');
+        expect(Number(latestValueLabel.getAttribute('y'))).toBeGreaterThan(Number(latestPointCore.getAttribute('cy')));
+        expect(trendChart).not.toContainElement(latestPointPulse);
+        expect(trendChart).not.toContainElement(latestValueLabel);
         expect(latestValueLabel).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
         expect(latestPointPulse).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
         expect(latestPointAura.getAttribute('fill')).toMatch(/^url\(#.+-prod-trend-traveling-glow-aura\)$/);
@@ -2875,8 +2887,9 @@ describe('ActivityAnalyticsWidget', () => {
         expect(latestValueLabel).toHaveTextContent('50%');
         expect(latestValueLabel).toHaveClass('activity-analytics-prod-trend-latest-value-float');
         expect(latestValueLabel).toHaveAttribute('pointer-events', 'none');
+        expect(latestValueLabel).toHaveAttribute('data-label-placement', 'below');
         expect(Number(latestValueLabel.getAttribute('x'))).toBe(Number(latestPointCore.getAttribute('cx')));
-        expect(Number(latestValueLabel.getAttribute('y'))).toBeLessThanOrEqual(Number(latestPointCore.getAttribute('cy')) + 2);
+        expect(Number(latestValueLabel.getAttribute('y'))).toBeGreaterThan(Number(latestPointCore.getAttribute('cy')));
         expect(Number(latestPointPulse.getAttribute('cx'))).toBe(Number(latestPointCore.getAttribute('cx')));
         expect(Number(latestPointPulse.getAttribute('cy'))).toBe(Number(latestPointCore.getAttribute('cy')));
         expect(Number(latestPointPulse.getAttribute('cy'))).toBeCloseTo(Number.parseFloat(renderablePointY[2] ?? 'NaN'));
@@ -2891,6 +2904,11 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.queryByTestId('activity-analytics-prod-trend-final-missing-pulse')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-prod-trend-final-missing-core')).not.toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-groups')).toBeInTheDocument();
+    });
+
+    it('keeps the latest % PROD label above the endpoint when the float clearance still fits inside the top clamp', () => {
+        expect(resolveProdTrendLatestValueLabelPlacement({ latestPointY: 20, chartTop: 8 })).toBe('below');
+        expect(resolveProdTrendLatestValueLabelPlacement({ latestPointY: 80, chartTop: 8 })).toBe('above');
     });
 
     it('renders the latest null productivity bucket as a final missing pulse at the latest x-axis bucket without inventing a numeric point', () => {
@@ -3202,6 +3220,8 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-gap-px', '12.00');
         expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-comparison')).toBeInTheDocument();
+        expect(screen.getByTestId('activity-analytics-comparison-column')).toHaveAttribute('data-comparison-column-width-px', '132.00');
+        expect(screen.getByTestId('activity-analytics-summary-column')).toHaveAttribute('data-summary-column-width-px', '376.00');
         expect(screen.queryByTestId('activity-analytics-summary-text')).not.toBeInTheDocument();
         expect(screen.getByTestId('activity-analytics-groups-panel')).toHaveAttribute('data-groups-density', 'text-fallback');
     });
@@ -3317,7 +3337,7 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(detailMarkers[1]?.getAttribute('fill')).toBe(CUSTOM_STATE_GRADIENTS.setup[1]);
         expect((legendSwatches[1] as HTMLElement | undefined)?.style.backgroundColor).toBe(hexToRgbCss(detailMarkers[1]?.getAttribute('fill') ?? ''));
-        expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cobertura incompleta');
+        expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cob. incompleta');
         expect(topCaps).toHaveLength(0);
         comparisonFills.forEach((segment) => {
             expect(parsePercentHeight((segment as HTMLElement).style.height)).toBeCloseTo((2 / 3) * 100, 5);
@@ -3512,7 +3532,7 @@ describe('ActivityAnalyticsWidget', () => {
         ]);
         expect(detailMarkers[1]?.getAttribute('fill')).toBe(hexToRgbaCss(CUSTOM_STATE_GRADIENTS.setup[1], CUSTOM_STATE_GRADIENT_ALPHAS.setup[1]));
         expect((legendSwatches[1] as HTMLElement | undefined)?.style.backgroundColor).toBe(detailMarkers[1]?.getAttribute('fill'));
-        expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cobertura incompleta');
+        expect(screen.getByTestId('activity-analytics-groups-header-legend')).toHaveTextContent('Cob. incompleta');
         comparisonFills.forEach((segment) => {
             expect(segment.getAttribute('style')).toContain(`linear-gradient(to top, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[0], CUSTOM_STATE_GRADIENT_ALPHAS.prod[0])} 0%, ${hexToRgbaCss(CUSTOM_STATE_GRADIENTS.prod[1], CUSTOM_STATE_GRADIENT_ALPHAS.prod[1])} 100%)`);
         });
@@ -3603,7 +3623,7 @@ describe('ActivityAnalyticsWidget', () => {
         const summaryChart = screen.getByTestId('activity-analytics-summary-chart');
         const chartWidth = Number(summaryChart.getAttribute('width'));
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-gap-px', '12.00');
-        expect(chartWidth).toBe(158);
+        expect(chartWidth).toBe(176);
         expect(within(summaryChart).queryAllByTestId('activity-analytics-summary-segment-label')).toHaveLength(0);
     });
 
@@ -3653,7 +3673,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(wideSummaryWidth + wideComparisonWidth + Number(wideTopRegion.getAttribute('data-top-gap-px'))).toBeCloseTo(847, 1);
     });
 
-    it('keeps Panel B compact near the measured narrow breakpoint and caps its growth at wider widths', () => {
+    it('keeps Panel B at its content-min width until the donut has used the available top-row width, then caps its growth at wider widths', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -3685,8 +3705,8 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-gap-px', '12.00');
-        expect(comparisonWidthAt420).toBeCloseTo(181.68, 1);
-        expect(summaryWidthAt420).toBeCloseTo(226.32, 1);
+        expect(comparisonWidthAt420).toBe(132);
+        expect(summaryWidthAt420).toBe(276);
         expect(Number(summaryChart.getAttribute('width'))).toBeCloseTo(summaryWidthAt420, 0);
         expect(Number(summaryChart.getAttribute('width'))).toBeLessThanOrEqual(480);
 
@@ -3717,10 +3737,10 @@ describe('ActivityAnalyticsWidget', () => {
         const widthAt520 = Number(summaryColumn.getAttribute('data-summary-column-width-px'));
         const comparisonWidthAt520 = Number(comparisonColumn.getAttribute('data-comparison-column-width-px'));
 
-        expect(comparisonWidthAt603).toBeCloseTo(197.06, 1);
+        expect(comparisonWidthAt603).toBe(132);
         expect(widthAt603 + comparisonWidthAt603 + Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-gap-px'))).toBeCloseTo(603, 1);
         expect(widthAt520).toBeLessThan(widthAt603);
-        expect(comparisonWidthAt520).toBeCloseTo(191.69, 1);
+        expect(comparisonWidthAt520).toBe(132);
         expect(widthAt520 + comparisonWidthAt520 + Number(screen.getByTestId('activity-analytics-top-region').getAttribute('data-top-gap-px'))).toBeCloseTo(520, 1);
         expect(screen.getByTestId('activity-analytics-top-region')).toHaveAttribute('data-top-layout', 'side-by-side');
     });
@@ -4983,13 +5003,13 @@ describe('ActivityAnalyticsWidget', () => {
             expect(capMetrics.centerX).toBeCloseTo(segmentMetrics.centerX, 5);
             expect(capMetrics.width).toBeCloseTo(segmentMetrics.width, 5);
             expect(capMetrics.y).toBe(segmentMetrics.y);
-            expect(capMetrics.height).toBeCloseTo(resolveExpectedGroupedTopCapHeight(segmentMetrics.height), 5);
+            expect(capMetrics.height).toBeCloseTo(resolveExpectedGroupedTopCapHeight(), 5);
             expect(capMetrics.height).toBeLessThan(segmentMetrics.height);
         });
         expect(partialOutline).not.toBeInTheDocument();
     });
 
-    it('caps grouped top-cap height at a fixed 3px', () => {
+    it('uses a fixed 2px grouped top-cap height', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -5040,7 +5060,7 @@ describe('ActivityAnalyticsWidget', () => {
         const segmentByKey = new Map(segments.map((segment) => [segment.getAttribute('data-segment-key') ?? '', segment]));
         const capByKey = new Map(topCaps.map((cap) => [cap.getAttribute('data-segment-key') ?? '', cap]));
 
-        expect(Number(capByKey.get('prod')?.getAttribute('height'))).toBeCloseTo(3, 5);
+        expect(Number(capByKey.get('prod')?.getAttribute('height'))).toBeCloseTo(2, 5);
 
         topCaps.forEach((cap) => {
             const key = cap.getAttribute('data-segment-key') ?? '';
@@ -5048,10 +5068,10 @@ describe('ActivityAnalyticsWidget', () => {
 
             expect(segment).toBeDefined();
             expect(Number(cap.getAttribute('height'))).toBeCloseTo(
-                resolveExpectedGroupedTopCapHeight(Number(segment?.getAttribute('height'))),
+                resolveExpectedGroupedTopCapHeight(),
                 5,
             );
-            expect(Number(cap.getAttribute('height'))).toBeLessThanOrEqual(3);
+            expect(Number(cap.getAttribute('height'))).toBe(2);
         });
     });
 
@@ -5134,7 +5154,7 @@ describe('ActivityAnalyticsWidget', () => {
 
             expect(segment).toBeDefined();
             expect(Number(cap.getAttribute('height'))).toBeCloseTo(
-                resolveExpectedGroupedTopCapHeight(Number(segment?.getAttribute('height'))),
+                resolveExpectedGroupedTopCapHeight(),
                 5,
             );
         });
@@ -6941,6 +6961,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(currentTravelingTopCapCore).toHaveAttribute('fill', CUSTOM_STATE_GRADIENTS.prod[0]);
         expect(Number(currentTravelingTopCap.getAttribute('data-track-height'))).toBeCloseTo(outlineMetrics.height, 2);
         expect(Number(currentTravelingTopCap.getAttribute('data-track-height'))).toBeGreaterThan(visibleFilledHeight);
+        expect(currentTopCapMetrics.height).toBe(2);
         expect(currentTopCapMetrics.y).toBeGreaterThanOrEqual(outlineMetrics.y);
         expect(currentTopCapMetrics.y + currentTopCapMetrics.height).toBeLessThanOrEqual(outlineMetrics.y + outlineMetrics.height + 0.05);
     });

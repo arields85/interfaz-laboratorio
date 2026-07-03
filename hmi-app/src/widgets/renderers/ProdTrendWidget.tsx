@@ -87,6 +87,10 @@ const CHART_MARGIN = { top: 8, right: 12, bottom: 24, left: 38 } as const;
 const STANDARD_CHART_MIN_HEIGHT_PX = 24;
 const CHART_MIN_WIDTH_PX = CHART_MARGIN.left + CHART_MARGIN.right + 24;
 const LATEST_VALUE_LABEL_Y_OFFSET_PX = 16;
+const LATEST_VALUE_LABEL_TOP_CLAMP_PADDING_PX = 10;
+const LATEST_VALUE_LABEL_FLOAT_TRAVEL_PX = 2.75;
+const LATEST_VALUE_LABEL_FLOAT_SAFETY_MARGIN_PX = 2;
+const LATEST_VALUE_LABEL_FLOAT_CLEARANCE_PX = LATEST_VALUE_LABEL_FLOAT_TRAVEL_PX + LATEST_VALUE_LABEL_FLOAT_SAFETY_MARGIN_PX;
 const TRAVELING_GLOW_SPEED_PX_PER_SECOND = 323;
 const TRAVELING_GLOW_DURATION_MIN_SECONDS = 0.9;
 const TRAVELING_GLOW_DURATION_MAX_SECONDS = 3.2;
@@ -524,8 +528,19 @@ const ProdTrendChart = memo(function ProdTrendChart({
         : null;
     const latestValueLabelAnchor = 'middle';
     const latestValueLabelX = latestPoint?.x ?? 0;
+    const latestValueLabelPlacement = latestPoint?.y != null
+        ? resolveProdTrendLatestValueLabelPlacement({
+            latestPointY: latestPoint.y,
+            chartTop: chartLayout.plotArea.top,
+        })
+        : 'above';
     const latestValueLabelY = latestPoint?.y != null
-        ? Math.max(chartLayout.plotArea.top + 10, latestPoint.y - LATEST_VALUE_LABEL_Y_OFFSET_PX)
+        ? latestValueLabelPlacement === 'below'
+            ? latestPoint.y + LATEST_VALUE_LABEL_Y_OFFSET_PX + LATEST_VALUE_LABEL_FLOAT_CLEARANCE_PX
+            : Math.max(
+                chartLayout.plotArea.top + LATEST_VALUE_LABEL_TOP_CLAMP_PADDING_PX,
+                latestPoint.y - LATEST_VALUE_LABEL_Y_OFFSET_PX,
+            )
         : 0;
     const hoveredPoint = hoverInfo && hoverInfo.index >= 0 && hoverInfo.index < renderablePoints.length
         ? renderablePoints[hoverInfo.index] ?? null
@@ -1358,6 +1373,19 @@ function formatPercent(value: number) {
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
+}
+
+export function resolveProdTrendLatestValueLabelPlacement({
+    latestPointY,
+    chartTop,
+}: {
+    latestPointY: number;
+    chartTop: number;
+}): 'above' | 'below' {
+    return latestPointY - LATEST_VALUE_LABEL_Y_OFFSET_PX - LATEST_VALUE_LABEL_FLOAT_CLEARANCE_PX
+        < chartTop + LATEST_VALUE_LABEL_TOP_CLAMP_PADDING_PX
+        ? 'below'
+        : 'above';
 }
 
 function getVisualGradientStops(gradient: readonly [string, string], gradientAlpha: readonly [number, number]) {
