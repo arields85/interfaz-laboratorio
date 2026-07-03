@@ -221,7 +221,7 @@ vi.mock('../../components/admin/AdminWorkspaceLayout', () => ({
 }));
 
 vi.mock('../../components/admin/WidgetCatalogRail', () => ({
-    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart-v2' | 'activity-analytics' | 'prod-trend') => void }) => (
+    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart' | 'trend-chart-v2' | 'activity-analytics' | 'prod-trend') => void }) => (
         <div data-testid="widget-catalog-rail">
             <button type="button" onClick={() => onAddWidget('kpi')}>
                 Agregar KPI
@@ -231,6 +231,9 @@ vi.mock('../../components/admin/WidgetCatalogRail', () => ({
             </button>
             <button type="button" onClick={() => onAddWidget('machine-activity')}>
                 Agregar Actividad de Máquina
+            </button>
+            <button type="button" onClick={() => onAddWidget('trend-chart')}>
+                Agregar Gráfico de Tendencia
             </button>
             <button type="button" onClick={() => onAddWidget('trend-chart-v2')}>
                 Agregar Trend Chart V2
@@ -604,6 +607,27 @@ describe('DashboardBuilderPage', () => {
                     },
                 },
             });
+        });
+    });
+
+    it('adds legacy trend-chart widgets without unsupported icon display options', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard());
+
+        await user.click(screen.getByRole('button', { name: 'Agregar Gráfico de Tendencia' }));
+
+        await waitFor(() => {
+            expect(propertyDockMock).toHaveBeenCalled();
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: {
+                    type: 'trend-chart',
+                    title: 'Trend Chart',
+                    size: { w: 11, h: 9 },
+                    binding: { mode: 'simulated_value', simulatedValue: 50 },
+                },
+            });
+            expect(propertyDockMock.mock.calls.at(-1)?.[0].selectedWidget.displayOptions).toBeUndefined();
         });
     });
 

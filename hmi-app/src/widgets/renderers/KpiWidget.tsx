@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { KpiWidgetConfig, ThresholdRule } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
@@ -6,6 +7,10 @@ import { Activity, Thermometer, Zap, Droplet, Wind, Settings, Gauge, Fan, FoldVe
 import GaugeDisplay from '../../components/ui/GaugeDisplay';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
+import {
+    DEFAULT_GAUGE_VALUE_FONT_SIZE,
+    resolveActivityAnalyticsDonutCenterValueFontSize,
+} from '../../utils/activityAnalyticsWidgetDefaults';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     'Gauge': Gauge,
@@ -71,6 +76,12 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
 
     const opts = widget.displayOptions;
     const mode = opts?.kpiMode ?? 'circular';
+    const valueTextFontSize = resolveActivityAnalyticsDonutCenterValueFontSize(opts?.valueFontSize)
+        ?? DEFAULT_GAUGE_VALUE_FONT_SIZE;
+    const valueTextStyle = {
+        ...WIDGET_VALUE_TEXT_STYLE,
+        fontSize: `${valueTextFontSize}px`,
+    };
     const min = opts?.min ?? 0;
     const max = opts?.max ?? 100;
     const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
@@ -130,9 +141,9 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
             >
                 <div className="w-full h-full min-h-0">
                     {mode === 'circular' ? (
-                        <CircularKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} />
+                        <CircularKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
                     ) : (
-                        <BarKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} />
+                        <BarKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
                     )}
                 </div>
             </WidgetCenteredContentLayout>
@@ -216,7 +227,7 @@ function getGaugeVisuals(value: number | null, dynamicColor?: boolean, threshold
     };
 }
 
-function CircularKpi({ value, min, max, unit, dynamicColor, thresholds }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[] }) {
+function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties }) {
     const safeValue = value ?? min;
     const clamp = Math.min(Math.max(safeValue, min), max);
     const range = max - min;
@@ -231,14 +242,14 @@ function CircularKpi({ value, min, max, unit, dynamicColor, thresholds }: { valu
                 mode="circular"
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-white leading-none mb-1" style={WIDGET_VALUE_TEXT_STYLE}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>
+                <span className="text-white leading-none mb-1" style={valueTextStyle}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>
                 {unit && value !== null && <span className="text-industrial-muted uppercase" style={WIDGET_UNIT_TEXT_STYLE}>{unit}</span>}
             </div>
         </div>
     );
 }
 
-function BarKpi({ value, min, max, unit, dynamicColor, thresholds }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[] }) {
+function BarKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties }) {
     const safeValue = value ?? min;
     const clamp = Math.min(Math.max(safeValue, min), max);
     const range = max - min;
@@ -248,7 +259,7 @@ function BarKpi({ value, min, max, unit, dynamicColor, thresholds }: { value: nu
     return (
         <div className="flex flex-col w-full h-full justify-center px-2">
             <div className="flex items-baseline gap-2 mb-3">
-                <span className="text-white leading-none" style={WIDGET_VALUE_TEXT_STYLE}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>
+                <span className="text-white leading-none" style={valueTextStyle}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>
                 {unit && value !== null && <span className="text-industrial-muted uppercase" style={WIDGET_UNIT_TEXT_STYLE}>{unit}</span>}
             </div>
             

@@ -20,6 +20,10 @@ import {
 
 export const DEFAULT_ACTIVITY_ANALYTICS_RANGE = '7d' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY = 'shift' as const;
+export const MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE = 12;
+export const MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE = 200;
+export const DEFAULT_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE = 40;
+export const DEFAULT_GAUGE_VALUE_FONT_SIZE = 60;
 export const DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW = 0.15;
 export const DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW = 0.25;
 export const DEFAULT_ACTIVITY_ANALYTICS_DISPLAY_MODE = 'kpis-and-bars' as const;
@@ -119,7 +123,7 @@ export type ResolvedActivityAnalyticsProdTrendBands = {
 export type ResolvedActivityAnalyticsDisplayOptions = Required<Pick<
     ActivityAnalyticsDisplayOptions,
     'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode' | 'groupBarWidth' | 'groupBarWidths' | 'coverageColor' | 'stateGradients' | 'stateGradientAlphas' | 'visualEffects'
->> & Pick<ActivityAnalyticsDisplayOptions, 'start' | 'end'>;
+>> & Pick<ActivityAnalyticsDisplayOptions, 'start' | 'end' | 'donutCenterValueFontSize'>;
 export type ResolvedActivityAnalyticsDisplayOptionsWithTrendBands = ResolvedActivityAnalyticsDisplayOptions & {
     prodTrendBands: ResolvedActivityAnalyticsProdTrendBands;
 };
@@ -204,6 +208,17 @@ export function clampActivityAnalyticsVisualEffectBlur(value: unknown, fallback:
     return Math.min(
         MAX_ACTIVITY_ANALYTICS_VISUAL_EFFECT_BLUR,
         Math.max(MIN_ACTIVITY_ANALYTICS_VISUAL_EFFECT_BLUR, Number(value)),
+    );
+}
+
+export function resolveActivityAnalyticsDonutCenterValueFontSize(value: unknown): number | undefined {
+    if (!Number.isFinite(value)) {
+        return undefined;
+    }
+
+    return Math.min(
+        MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+        Math.max(MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE, Number(value)),
     );
 }
 
@@ -408,6 +423,7 @@ export function resolveActivityAnalyticsDisplayOptions(
         start: displayOptions?.start,
         end: displayOptions?.end,
         groupBy: displayRules.groupBy,
+        donutCenterValueFontSize: resolveActivityAnalyticsDonutCenterValueFontSize(displayOptions?.donutCenterValueFontSize),
         setupThresholdKw: displayOptions?.setupThresholdKw ?? DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW,
         prodThresholdKw: displayOptions?.prodThresholdKw ?? DEFAULT_ACTIVITY_ANALYTICS_PROD_THRESHOLD_KW,
         displayMode: normalizeActivityAnalyticsDisplayMode(displayOptions?.displayMode),

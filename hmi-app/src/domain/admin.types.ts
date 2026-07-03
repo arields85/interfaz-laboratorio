@@ -271,6 +271,7 @@ export interface KpiDisplayOptions {
     subtext?: string;
     icon?: string | null;
     kpiMode?: 'circular' | 'bar';
+    valueFontSize?: number;
     min?: number;
     max?: number;
     dynamicColor?: boolean;
@@ -299,9 +300,11 @@ export interface MetricCardDisplayOptions {
  *
  * TrendChart no usa subtitle ni subtext propios: su header muestra la unidad
  * del binding como subtítulo (derivado de `resolved.unit`), no de displayOptions.
- * Se reserva la interfaz para extensión futura (intervalo, tipo de línea, etc.)
  */
-export type TrendChartDisplayOptions = Record<never, never>;
+export interface TrendChartDisplayOptions {
+    lineStrokeWidth?: number;
+    lineGlowBlur?: number;
+}
 
 export type HistoricalDensity = 'low' | 'normal' | 'high';
 export type TrendChartV2ShiftDisplayMode = 'auto' | 'bands' | 'lines';
@@ -311,6 +314,8 @@ export interface TrendChartV2DisplayOptions {
     historicalDensity?: HistoricalDensity;
     shiftDisplayMode?: TrendChartV2ShiftDisplayMode;
     showShifts?: boolean;
+    lineStrokeWidth?: number;
+    lineGlowBlur?: number;
     /** @deprecated Visual summaries now always follow the visible range like legacy trend-chart. */
     showShiftSummary?: boolean;
 }
@@ -367,6 +372,7 @@ export type ProductiveState = 'stopped' | 'calibrating' | 'producing';
 export interface MachineActivityDisplayOptions {
     icon?: string | null;
     kpiMode?: 'circular' | 'bar';
+    valueFontSize?: number;
     unit?: string;
     unitOverride?: boolean;
     thresholdStopped?: number;
@@ -420,6 +426,7 @@ export interface ActivityAnalyticsDisplayOptions {
     start?: string;
     end?: string;
     groupBy?: ActivityAnalyticsGroupBy;
+    donutCenterValueFontSize?: number;
     setupThresholdKw?: number;
     prodThresholdKw?: number;
     displayMode?: ActivityAnalyticsDisplayMode;
@@ -449,6 +456,8 @@ export interface ProdTrendDisplayOptions {
     trendLineColors?: ActivityAnalyticsStateGradient;
     trendLineColorAlphas?: ActivityAnalyticsAlphaPair;
     prodTrendBands?: ActivityAnalyticsProdTrendBandsDisplayOptions;
+    lineStrokeWidth?: number;
+    lineGlowBlur?: number;
 }
 
 export interface ActivityAnalyticsPersistedDisplayPatch {
@@ -519,6 +528,10 @@ export interface ProdHistoryDisplayOptions {
     productionAxisMax?: number;
     oeeAxisMin?: number;
     oeeAxisMax?: number;
+    oeeLineStrokeWidth?: number;
+    oeeLineGlowBlur?: number;
+    productionLineStrokeWidth?: number;
+    productionLineGlowBlur?: number;
     productionVariableKey?: string;
     oeeVariableKey?: string;
     defaultTemporalGrouping?: TemporalBucket;

@@ -31,7 +31,9 @@ import {
     type ActivityAnalyticsSummaryLayout,
 } from '../../utils/activityAnalyticsVisualLayout';
 import {
+    DEFAULT_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
     clampActivityAnalyticsGroupBarWidth,
+    resolveActivityAnalyticsDonutCenterValueFontSize,
     resolveActivityAnalyticsGroupBarWidthForGroup,
     resolveActivityAnalyticsDisplayOptions,
     type ResolvedActivityAnalyticsVisualEffects,
@@ -122,10 +124,10 @@ const CHART_TYPOGRAPHY_STYLE: CSSProperties = {
 };
 
 const WIDGET_VALUE_TEXT_STYLE: CSSProperties = {
-    fontFamily: 'var(--font-widget-value-activity-analytics)',
-    fontWeight: 'var(--font-weight-widget-value-activity-analytics)',
-    fontSize: 'var(--font-size-widget-value-activity-analytics)',
-    letterSpacing: 'var(--tracking-widget-value-activity-analytics)',
+    fontFamily: 'var(--font-widget-value-gauge)',
+    fontWeight: 'var(--font-weight-widget-value-gauge)',
+    fontSize: 'var(--font-size-widget-value-gauge)',
+    letterSpacing: 'var(--tracking-widget-value-gauge)',
 };
 
 const PROD_TREND_LATEST_VALUE_TEXT_STYLE: CSSProperties = {
@@ -238,7 +240,7 @@ const SUMMARY_DONUT_GEOMETRY_RULES = {
         },
     },
 } as const;
-const SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX = 20;
+const SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX = DEFAULT_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE;
 const SUMMARY_DONUT_CENTER_LABEL_FONT_SIZE_FALLBACK_PX = 11;
 const SUMMARY_DONUT_CENTER_LABEL_GAP_RATIO = 0.45;
 const TOP_REGION_SHARED_HEIGHT_RULES = {
@@ -794,6 +796,7 @@ export default function ActivityAnalyticsWidget({
                     comparison={displayComparison}
                     grouped={displayGrouped}
                     visualPalette={visualPalette}
+                    donutCenterValueFontSize={displayOptions.donutCenterValueFontSize}
                     prodTrendBands={selectedDisplayOptions.prodTrendBands}
                     visualEffects={selectedDisplayOptions.visualEffects as ResolvedActivityAnalyticsVisualEffects}
                     visualLayout={visualLayout}
@@ -1057,6 +1060,7 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     comparison,
     grouped,
     visualPalette,
+    donutCenterValueFontSize,
     prodTrendBands,
     visualEffects,
     visualLayout,
@@ -1077,6 +1081,7 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
     comparison: ReturnType<typeof computeActivityAnalytics>['comparison'];
     grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
     visualPalette: ActivityAnalyticsVisualPalette;
+    donutCenterValueFontSize?: number;
     prodTrendBands: ResolvedActivityAnalyticsDisplayOptions['prodTrendBands'];
     visualEffects: ResolvedActivityAnalyticsVisualEffects;
     visualLayout: ActivityAnalyticsVisualLayout;
@@ -1167,7 +1172,7 @@ const AnalyticsVisualPanels = memo(function AnalyticsVisualPanels({
                     data-testid="activity-analytics-summary-column"
                     data-summary-column-width-px={resolvedSummaryColumnWidth.toFixed(2)}
                 >
-                    <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={summaryChartWidth} chartHeight={summaryChartHeight} panelHeight={topRegionSharedHeight} visualPalette={visualPalette} donutEffects={visualEffects.donut} />
+                    <SummaryPanel analytics={analytics} summaryLayout={visualLayout.summary} chartWidth={summaryChartWidth} chartHeight={summaryChartHeight} panelHeight={topRegionSharedHeight} visualPalette={visualPalette} donutEffects={visualEffects.donut} donutCenterValueFontSize={donutCenterValueFontSize} />
                 </div>
                 <div
                     className="relative z-[2] min-w-0 shrink-0 self-stretch"
@@ -2548,6 +2553,7 @@ const SummaryPanel = memo(function SummaryPanel({
     panelHeight,
     visualPalette,
     donutEffects,
+    donutCenterValueFontSize,
 }: {
     analytics: ReturnType<typeof computeActivityAnalytics>['analytics'];
     summaryLayout: ActivityAnalyticsSummaryLayout;
@@ -2556,6 +2562,7 @@ const SummaryPanel = memo(function SummaryPanel({
     panelHeight: number;
     visualPalette: ActivityAnalyticsVisualPalette;
     donutEffects: ResolvedActivityAnalyticsVisualEffects['donut'];
+    donutCenterValueFontSize?: number;
 }) {
     const summaryDisplay = createSummaryDisplayModel(analytics, visualPalette);
     if (summaryLayout.mode === 'text-fallback') {
@@ -2590,6 +2597,7 @@ const SummaryPanel = memo(function SummaryPanel({
                     detailRows={summaryDisplay.detailRows}
                     visualPalette={visualPalette}
                     donutEffects={donutEffects}
+                    donutCenterValueFontSize={donutCenterValueFontSize}
                 />
             </div>
         </div>
@@ -3042,6 +3050,7 @@ function SummaryBarsChart({
     detailRows,
     visualPalette,
     donutEffects,
+    donutCenterValueFontSize,
 }: {
     bars: ReadonlyArray<ActivityAnalyticsSummarySegmentBar>;
     width: number;
@@ -3052,6 +3061,7 @@ function SummaryBarsChart({
     detailRows: readonly SummaryDetailRow[];
     visualPalette: ActivityAnalyticsVisualPalette;
     donutEffects: ResolvedActivityAnalyticsVisualEffects['donut'];
+    donutCenterValueFontSize?: number;
 }) {
     const gradientPrefix = useId().replace(/:/g, '-');
     const glowFilterId = `${gradientPrefix}-summary-glow`;
@@ -3127,18 +3137,34 @@ function SummaryBarsChart({
     const centerValueRef = useRef<SVGTextElement | null>(null);
     const centerLabelRef = useRef<SVGTextElement | null>(null);
     const [centerLabelLayout, setCenterLabelLayout] = useState<SummaryCenterLabelLayout>(() => resolveSummaryCenterLabelLayout({
-        valueFontSizePx: SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX,
+        valueFontSizePx: donutCenterValueFontSize ?? SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX,
         labelFontSizePx: SUMMARY_DONUT_CENTER_LABEL_FONT_SIZE_FALLBACK_PX,
     }));
+    const centerValueTextStyle = useMemo<CSSProperties>(() => {
+        const resolvedFontSize = resolveActivityAnalyticsDonutCenterValueFontSize(donutCenterValueFontSize);
+
+        return resolvedFontSize === undefined
+            ? {
+                ...WIDGET_VALUE_TEXT_STYLE,
+                fontSize: `${SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX}px`,
+            }
+            : {
+                ...WIDGET_VALUE_TEXT_STYLE,
+                fontSize: `${resolvedFontSize}px`,
+            };
+    }, [donutCenterValueFontSize]);
 
     useLayoutEffect(() => {
         const nextLayout = resolveSummaryCenterLabelLayout({
-            valueFontSizePx: readSvgTextFontSizePx(centerValueRef.current, SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX),
+            valueFontSizePx: readSvgTextFontSizePx(
+                centerValueRef.current,
+                donutCenterValueFontSize ?? SUMMARY_DONUT_CENTER_VALUE_FONT_SIZE_FALLBACK_PX,
+            ),
             labelFontSizePx: readSvgTextFontSizePx(centerLabelRef.current, SUMMARY_DONUT_CENTER_LABEL_FONT_SIZE_FALLBACK_PX),
         });
 
         setCenterLabelLayout((currentLayout) => areSummaryCenterLabelLayoutsEqual(currentLayout, nextLayout) ? currentLayout : nextLayout);
-    }, []);
+    }, [donutCenterValueFontSize]);
 
     return (
         <svg
@@ -3306,7 +3332,7 @@ function SummaryBarsChart({
                         textAnchor="middle"
                         dominantBaseline="middle"
                         fill="var(--color-industrial-text)"
-                        style={WIDGET_VALUE_TEXT_STYLE}
+                        style={centerValueTextStyle}
                         data-testid="activity-analytics-summary-total-value"
                     >
                         {centerValue}

@@ -625,4 +625,64 @@ describe('ProduccionHistoricaWidget', () => {
         expect(screen.queryByText('84')).not.toBeInTheDocument();
     });
 
+    it('uses independent production and OEE line style display options in area mode', () => {
+        render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: true,
+                        productionChartMode: 'area',
+                        productionLineStrokeWidth: 4.4,
+                        productionLineGlowBlur: 5.2,
+                        oeeLineStrokeWidth: 1.8,
+                        oeeLineGlowBlur: 2.1,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        const svg = screen.getByTestId('prod-history-widget-chart');
+        const gaussianBlurs = svg.querySelectorAll('filter feGaussianBlur');
+        const strokedPaths = Array.from(svg.querySelectorAll('path[stroke]'));
+
+        expect(gaussianBlurs).toHaveLength(2);
+        expect(gaussianBlurs[0]).toHaveAttribute('stdDeviation', '5.2');
+        expect(gaussianBlurs[1]).toHaveAttribute('stdDeviation', '2.1');
+        expect(strokedPaths).toHaveLength(2);
+        expect(strokedPaths[0]).toHaveAttribute('stroke-width', '4.4');
+        expect(strokedPaths[1]).toHaveAttribute('stroke-width', '1.8');
+    });
+
+    it('falls back to current independent line style defaults when prod-history values are invalid', () => {
+        render(
+            <ProduccionHistoricaWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        defaultTemporalGrouping: 'hour',
+                        defaultShowOee: true,
+                        productionChartMode: 'area',
+                        productionLineStrokeWidth: Number.NaN,
+                        productionLineGlowBlur: -1,
+                        oeeLineStrokeWidth: 99,
+                        oeeLineGlowBlur: Number.NaN,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        const svg = screen.getByTestId('prod-history-widget-chart');
+        const gaussianBlurs = svg.querySelectorAll('filter feGaussianBlur');
+        const strokedPaths = Array.from(svg.querySelectorAll('path[stroke]'));
+
+        expect(gaussianBlurs).toHaveLength(2);
+        expect(gaussianBlurs[0]).toHaveAttribute('stdDeviation', '0');
+        expect(gaussianBlurs[1]).toHaveAttribute('stdDeviation', '3');
+        expect(strokedPaths).toHaveLength(2);
+        expect(strokedPaths[0]).toHaveAttribute('stroke-width', '2.5');
+        expect(strokedPaths[1]).toHaveAttribute('stroke-width', '6');
+    });
+
 });

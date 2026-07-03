@@ -28,8 +28,10 @@ describe('DesignSettingsTab typography controls', () => {
         expect(screen.getByText('TEXTOS TÉCNICOS')).toBeInTheDocument();
         expect(screen.getByText('TEXTOS WIDGET GRÁFICOS')).toBeInTheDocument();
         expect(screen.getByText('TÍTULOS DE DASHBOARD')).toBeInTheDocument();
-        expect(screen.getAllByText('VALORES NUMERICOS MOSTRADOS POR:')).toHaveLength(3);
+        expect(screen.getAllByText('VALORES NUMERICOS MOSTRADOS POR:')).toHaveLength(2);
+        expect(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS', 'KPI', 'MACHINE-ACTIVITY')).toBeInTheDocument();
         expect(getTypographyGroup('VALOR FLOTANTE FINAL MOSTRADO POR:', 'ACTIVITY-ANALYTICS', '% PROD')).toBeInTheDocument();
+        expect(screen.queryByText('VALORES EN ACTIVITY-ANALYTICS tamaño base')).not.toBeInTheDocument();
 
         expect(screen.queryByText('Textos, titulos, UI')).not.toBeInTheDocument();
         expect(screen.queryByText('Codigo, URLs, valores')).not.toBeInTheDocument();
@@ -86,7 +88,6 @@ describe('DesignSettingsTab typography controls', () => {
             ['TEXTOS WIDGET GRÁFICOS'],
             ['TÍTULOS DE DASHBOARD'],
             ['VALORES NUMERICOS MOSTRADOS POR:', 'METRIC-CARD'],
-            ['VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS'],
             ['VALOR FLOTANTE FINAL MOSTRADO POR:', 'ACTIVITY-ANALYTICS', '% PROD'],
         ] as const;
 
@@ -122,8 +123,7 @@ describe('DesignSettingsTab typography controls', () => {
         const [systemSizeInput] = within(getTypographyGroup('TEXTOS EN GENERAL')).getAllByRole('textbox');
         const [titleSizeInput] = within(getTypographyGroup('TÍTULOS DE DASHBOARD')).getAllByRole('textbox');
         const [metricValueInput, metricTrackingInput, metricUnitInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'METRIC-CARD')).getAllByRole('textbox');
-        const [gaugeValueInput, gaugeTrackingInput, gaugeUnitInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'KPI', 'MACHINE-ACTIVITY')).getAllByRole('textbox');
-        const [activityAnalyticsValueInput, activityAnalyticsTrackingInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS')).getAllByRole('textbox');
+        const [gaugeValueInput, gaugeTrackingInput, gaugeUnitInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS', 'KPI', 'MACHINE-ACTIVITY')).getAllByRole('textbox');
         const [activityAnalyticsProdTrendValueInput, activityAnalyticsProdTrendTrackingInput] = within(getTypographyGroup('VALOR FLOTANTE FINAL MOSTRADO POR:', 'ACTIVITY-ANALYTICS', '% PROD')).getAllByRole('textbox');
 
         expect(systemSizeInput).toHaveValue('11');
@@ -134,8 +134,6 @@ describe('DesignSettingsTab typography controls', () => {
         expect(gaugeValueInput).toHaveValue('35');
         expect(gaugeTrackingInput).toHaveValue('0');
         expect(gaugeUnitInput).toHaveValue('20');
-        expect(activityAnalyticsValueInput).toHaveValue('20');
-        expect(activityAnalyticsTrackingInput).toHaveValue('0');
         expect(activityAnalyticsProdTrendValueInput).toHaveValue('10');
         expect(activityAnalyticsProdTrendTrackingInput).toHaveValue('0');
 
@@ -146,8 +144,6 @@ describe('DesignSettingsTab typography controls', () => {
         fireEvent.change(gaugeValueInput, { target: { value: '68' } });
         fireEvent.change(gaugeTrackingInput, { target: { value: '1.2' } });
         fireEvent.change(gaugeUnitInput, { target: { value: '28' } });
-        fireEvent.change(activityAnalyticsValueInput, { target: { value: '24' } });
-        fireEvent.change(activityAnalyticsTrackingInput, { target: { value: '0.4' } });
         fireEvent.change(activityAnalyticsProdTrendValueInput, { target: { value: '15' } });
         fireEvent.change(activityAnalyticsProdTrendTrackingInput, { target: { value: '0.7' } });
 
@@ -158,16 +154,25 @@ describe('DesignSettingsTab typography controls', () => {
         expect(document.documentElement.style.getPropertyValue('--font-size-widget-value-gauge')).toBe('68px');
         expect(document.documentElement.style.getPropertyValue('--tracking-widget-value-gauge')).toBe('1.2px');
         expect(document.documentElement.style.getPropertyValue('--font-size-widget-unit-gauge')).toBe('28px');
-        expect(document.documentElement.style.getPropertyValue('--font-size-widget-value-activity-analytics')).toBe('24px');
-        expect(document.documentElement.style.getPropertyValue('--tracking-widget-value-activity-analytics')).toBe('0.4px');
         expect(document.documentElement.style.getPropertyValue('--font-size-widget-value-activity-analytics-prod-trend')).toBe('15px');
         expect(document.documentElement.style.getPropertyValue('--tracking-widget-value-activity-analytics-prod-trend')).toBe('0.7px');
+    });
+
+    it('does not render a dedicated activity analytics numeric typography group and keeps the gauge unit control', () => {
+        render(<DesignSettingsTab />);
+
+        expect(screen.queryByLabelText('VALORES EN ACTIVITY-ANALYTICS tamaño base')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('VALORES EN ACTIVITY-ANALYTICS tracking')).not.toBeInTheDocument();
+
+        const gaugeInputs = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS', 'KPI', 'MACHINE-ACTIVITY')).getAllByRole('textbox');
+        expect(gaugeInputs).toHaveLength(3);
+        expect(gaugeInputs[2]).toHaveValue('20');
     });
 
     it('wraps the KPI and machine-activity controls without horizontal overflow', () => {
         render(<DesignSettingsTab />);
 
-        const [gaugeSizeInput, , gaugeUnitInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'KPI', 'MACHINE-ACTIVITY')).getAllByRole('textbox');
+        const [gaugeSizeInput, , gaugeUnitInput] = within(getTypographyGroup('VALORES NUMERICOS MOSTRADOS POR:', 'ACTIVITY-ANALYTICS', 'KPI', 'MACHINE-ACTIVITY')).getAllByRole('textbox');
         const gaugeSizeRow = gaugeSizeInput.parentElement?.parentElement?.parentElement;
         const gaugeUnitRow = gaugeUnitInput.parentElement?.parentElement?.parentElement;
 

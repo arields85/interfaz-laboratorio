@@ -50,6 +50,20 @@ describe('designSettingsTypography', () => {
         });
     });
 
+    it('migrates legacy activity analytics donut typography overrides to the shared gauge token when missing', () => {
+        expect(normalizeStoredFontOverrides({
+            '--font-widget-value-activity-analytics': 'Magistral',
+            '--font-weight-widget-value-activity-analytics': '500',
+            '--font-size-widget-value-activity-analytics': '24px',
+            '--tracking-widget-value-activity-analytics': '0.6px',
+        })).toMatchObject({
+            '--font-widget-value-gauge': 'Magistral',
+            '--font-weight-widget-value-gauge': '500',
+            '--font-size-widget-value-gauge': '24px',
+            '--tracking-widget-value-gauge': '0.6px',
+        });
+    });
+
     it('resolves CSS values with the correct fallback stacks', () => {
         expect(resolveFontCssVariableValue('--font-system', 'Magistral')).toBe('"Magistral"');
         expect(resolveFontCssVariableValue('--font-mono', 'IBMPlexMono')).toBe('"IBMPlexMono"');

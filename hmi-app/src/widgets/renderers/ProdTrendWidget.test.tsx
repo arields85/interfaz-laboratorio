@@ -13,7 +13,7 @@ import {
     WIDGET_CHART_CONTAINER_CLASS,
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
-import ProdTrendWidget, { resolveProdTrendLatestValueLabelPlacement } from './ProdTrendWidget';
+import ProdTrendWidget, { clampLineGlowBlur, clampLineStrokeWidth, resolveProdTrendLatestValueLabelPlacement } from './ProdTrendWidget';
 
 function expectRuntimeControlIndicator(button: HTMLElement, expectedClasses: string[], unexpectedClasses: string[] = []) {
     const indicator = within(button).getByTestId('prod-trend-widget-runtime-control-indicator');
@@ -400,11 +400,8 @@ describe('ProdTrendWidget', () => {
                 range: '7d',
                 unit: 'kW',
                 purpose: 'activity-analytics',
-                window: { start: '2026-06-18T12:00:00.000Z', end: '2026-06-20T12:00:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
-                series: [
-                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 0.3 },
-                    { timestamp: '2026-06-19T12:00:00.000Z', timestampMs: Date.parse('2026-06-19T12:00:00.000Z'), value: 0.05 },
-                ],
+                window: { start: '2026-06-18T00:00:00.000Z', end: '2026-06-20T23:55:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
+                series: DENSE_ACTIVITY_SERIES,
                 summary: null,
             },
             isLoading: false,
@@ -454,6 +451,49 @@ describe('ProdTrendWidget', () => {
         const lineStops = Array.from(lineGradient?.querySelectorAll('stop') ?? []).map((stop) => stop.getAttribute('stop-color'));
 
         expect(lineStops).toEqual(['#654321', '#123456']);
+    });
+
+    it('uses PROD-TREND line style display options with clamped fallbacks', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'Total kW',
+                range: '7d',
+                unit: 'kW',
+                purpose: 'activity-analytics',
+                window: { start: '2026-06-18T12:00:00.000Z', end: '2026-06-20T12:00:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
+                series: [
+                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 0.3 },
+                    { timestamp: '2026-06-19T12:00:00.000Z', timestampMs: Date.parse('2026-06-19T12:00:00.000Z'), value: 0.05 },
+                ],
+                summary: null,
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        const { rerender, container } = render(<ProdTrendWidget widget={makeWidget()} machines={MACHINES} />);
+
+        const getBlur = () => container.querySelector('filter feGaussianBlur');
+
+        expect(clampLineStrokeWidth(undefined)).toBe(2.5);
+        expect(clampLineStrokeWidth(4.1)).toBe(4.1);
+        expect(clampLineStrokeWidth(Number.NaN)).toBe(2.5);
+        expect(getBlur()).toHaveAttribute('stdDeviation', '3');
+
+        rerender(<ProdTrendWidget widget={makeWidget({ displayOptions: { range: '7d', groupBy: 'day', setupThresholdKw: 0.15, prodThresholdKw: 0.25, lineStrokeWidth: 4.1, lineGlowBlur: 5.4 } })} machines={MACHINES} />);
+
+        expect(clampLineStrokeWidth(4.1)).toBe(4.1);
+        expect(getBlur()).toHaveAttribute('stdDeviation', '5.4');
+
+        rerender(<ProdTrendWidget widget={makeWidget({ displayOptions: { range: '7d', groupBy: 'day', setupThresholdKw: 0.15, prodThresholdKw: 0.25, lineStrokeWidth: Number.NaN, lineGlowBlur: -2 } })} machines={MACHINES} />);
+
+        expect(clampLineStrokeWidth(Number.NaN)).toBe(2.5);
+        expect(clampLineGlowBlur(-2)).toBe(0);
+        expect(getBlur()).toHaveAttribute('stdDeviation', '0');
     });
 
     it('keeps the final sampled X-axis label visible and centered on the safe plot boundary', () => {

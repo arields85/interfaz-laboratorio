@@ -23,7 +23,7 @@ import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalyti
 import { computeActivityAnalytics, resolveActivityAnalyticsComparableProductivityRatio } from '../../utils/activityAnalyticsComputation';
 import { resolveActivityAnalyticsDisplayRules } from '../../utils/activityAnalyticsDisplayRules';
 import { resolveActivityAnalyticsTimezone } from '../../utils/activityAnalyticsGrouping';
-import { buildAreaPath, computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx, measureSmoothPathLength, resolveAnimationDurationSecondsFromPathLength, smoothPath } from '../../utils/chartHelpers';
+import { buildAreaPath, clamp, computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx, measureSmoothPathLength, resolveAnimationDurationSecondsFromPathLength, smoothPath } from '../../utils/chartHelpers';
 import { createDefaultProdTrendDisplayOptions, resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 
 interface ProdTrendWidgetProps {
@@ -96,6 +96,28 @@ const TRAVELING_GLOW_DURATION_MIN_SECONDS = 0.9;
 const TRAVELING_GLOW_DURATION_MAX_SECONDS = 3.2;
 const TRAVELING_GLOW_PAUSE_MIN_MS = 8_000;
 const TRAVELING_GLOW_PAUSE_MAX_MS = 20_000;
+const DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const DEFAULT_LINE_GLOW_BLUR = 3;
+const MIN_LINE_STROKE_WIDTH = 0.5;
+const MAX_LINE_STROKE_WIDTH = 6;
+const MIN_LINE_GLOW_BLUR = 0;
+const MAX_LINE_GLOW_BLUR = 8;
+
+export function clampLineStrokeWidth(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_LINE_STROKE_WIDTH;
+    }
+
+    return clamp(value as number, MIN_LINE_STROKE_WIDTH, MAX_LINE_STROKE_WIDTH);
+}
+
+export function clampLineGlowBlur(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_LINE_GLOW_BLUR;
+    }
+
+    return clamp(value as number, MIN_LINE_GLOW_BLUR, MAX_LINE_GLOW_BLUR);
+}
 
 export default function ProdTrendWidget({
     widget,
@@ -107,6 +129,8 @@ export default function ProdTrendWidget({
     className,
 }: ProdTrendWidgetProps) {
     const displayOptions = resolveProdTrendDisplayOptions(widget.displayOptions ?? createDefaultProdTrendDisplayOptions());
+    const lineStrokeWidth = clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth);
+    const lineGlowBlur = clampLineGlowBlur(widget.displayOptions?.lineGlowBlur);
     const [runtimeViewState, setRuntimeViewState] = useState<ProdTrendRuntimeViewState>(() => createRuntimeViewState(displayOptions));
     const bodyRef = useRef<HTMLDivElement | null>(null);
     const [bodySize, setBodySize] = useState<{ width: number; height: number } | null>(null);
@@ -410,6 +434,8 @@ export default function ProdTrendWidget({
                                 lineColors={displayOptions.trendLineColors}
                                 lineColorAlphas={displayOptions.trendLineColorAlphas}
                                 prodTrendBands={displayOptions.prodTrendBands}
+                                lineStrokeWidth={lineStrokeWidth}
+                                lineGlowBlur={lineGlowBlur}
                                 xAxisModel={xAxisModel}
                             />
                         </div>
@@ -441,6 +467,8 @@ const ProdTrendChart = memo(function ProdTrendChart({
     lineColors,
     lineColorAlphas,
     prodTrendBands,
+    lineStrokeWidth,
+    lineGlowBlur,
     xAxisModel,
 }: {
     widgetId: string;
@@ -450,6 +478,8 @@ const ProdTrendChart = memo(function ProdTrendChart({
     lineColors: [string, string];
     lineColorAlphas: [number, number];
     prodTrendBands: ReturnType<typeof resolveProdTrendDisplayOptions>['prodTrendBands'];
+    lineStrokeWidth: number;
+    lineGlowBlur: number;
     xAxisModel: ReturnType<typeof resolveXAxisModel>;
 }) {
     const [hoverInfo, setHoverInfo] = useState<{ index: number; x: number } | null>(null);
@@ -627,7 +657,7 @@ const ProdTrendChart = memo(function ProdTrendChart({
                     </mask>
 
                     <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
-                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feGaussianBlur stdDeviation={lineGlowBlur} result="blur" />
                         <feMerge>
                             <feMergeNode in="blur" />
                             <feMergeNode in="SourceGraphic" />
@@ -733,7 +763,7 @@ const ProdTrendChart = memo(function ProdTrendChart({
                                     d={linePath}
                                     fill="none"
                                     stroke={`url(#${lineGradientId})`}
-                                    strokeWidth={2.5}
+                                    strokeWidth={lineStrokeWidth}
                                     filter={`url(#${glowId})`}
                                     data-testid="prod-trend-widget-line"
                                 />
@@ -1369,10 +1399,6 @@ function parsePercentLabel(value: string | null | undefined) {
 
 function formatPercent(value: number) {
     return `${Math.round(clamp(value, 0, 1) * 100)}%`;
-}
-
-function clamp(value: number, min: number, max: number) {
-    return Math.min(max, Math.max(min, value));
 }
 
 export function resolveProdTrendLatestValueLabelPlacement({

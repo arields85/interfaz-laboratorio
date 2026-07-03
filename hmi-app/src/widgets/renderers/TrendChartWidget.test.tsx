@@ -342,6 +342,47 @@ describe('TrendChartWidget', () => {
         expect(screen.queryByText('Sin datos')).not.toBeInTheDocument();
     });
 
+    it('uses legacy displayOptions to configure line stroke width and glow blur while preserving defaults when absent', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: makeHistoryResponse(),
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        const { container, rerender } = render(
+            <TrendChartWidget
+                widget={makeWidget()}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(50)}
+            />,
+        );
+
+        const getLinePath = () => container.querySelector('path[filter^="url(#trend-glow-"]');
+        const getBlur = () => container.querySelector('filter feGaussianBlur');
+
+        expect(getLinePath()).toHaveAttribute('stroke-width', '2.5');
+        expect(getBlur()).toHaveAttribute('stdDeviation', '3');
+
+        rerender(
+            <TrendChartWidget
+                widget={{
+                    ...makeWidget(),
+                    displayOptions: {
+                        lineStrokeWidth: 4.1,
+                        lineGlowBlur: 5.4,
+                    },
+                }}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(50)}
+            />,
+        );
+
+        expect(getLinePath()).toHaveAttribute('stroke-width', '4.1');
+        expect(getBlur()).toHaveAttribute('stdDeviation', '5.4');
+    });
+
     it('uses the disconnected runtime legend for data-history connection failures', () => {
         vi.mocked(useDataHistory).mockReturnValue({
             data: null,

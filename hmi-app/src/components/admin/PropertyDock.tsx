@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions } from '../../domain/admin.types';
+import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -51,9 +51,14 @@ import {
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
 import {
+    DEFAULT_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+    DEFAULT_GAUGE_VALUE_FONT_SIZE,
     clampActivityAnalyticsGroupBarWidth,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT,
+    MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+    MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
     resolveActivityAnalyticsDisplayOptions,
+    resolveActivityAnalyticsDonutCenterValueFontSize,
     resolveActivityAnalyticsGroupBarWidthForGroup,
     resolveActivityAnalyticsProdTrendBandBlendMode,
 } from '../../utils/activityAnalyticsWidgetDefaults';
@@ -106,6 +111,21 @@ const TREND_CHART_V2_TOGGLE_TRACK_CLS = "w-7 h-4 rounded-full border border-indu
 const TREND_CHART_V2_TOGGLE_LABEL_CLS = 'whitespace-nowrap text-industrial-text-soft transition-all peer-checked:text-industrial-text group-hover:text-industrial-text group-hover:drop-shadow-[0_0_5px_var(--color-admin-accent)]';
 const FIELD_ROW_CLS = 'flex items-center gap-2';
 const FIELD_LABEL_CLS = `${LABEL_CLS} shrink-0`;
+const LEGACY_TREND_CHART_DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const LEGACY_TREND_CHART_DEFAULT_LINE_GLOW_BLUR = 3;
+const LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MIN = 0.5;
+const LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MAX = 6;
+const LEGACY_TREND_CHART_LINE_GLOW_BLUR_MIN = 0;
+const LEGACY_TREND_CHART_LINE_GLOW_BLUR_MAX = 8;
+const LEGACY_TREND_CHART_LINE_STYLE_STEP = 0.1;
+const TREND_CHART_V2_DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const TREND_CHART_V2_DEFAULT_LINE_GLOW_BLUR = 3;
+const PROD_TREND_DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const PROD_TREND_DEFAULT_LINE_GLOW_BLUR = 3;
+const PROD_HISTORY_OEE_DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const PROD_HISTORY_OEE_DEFAULT_LINE_GLOW_BLUR = 3;
+const PROD_HISTORY_PRODUCTION_DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const PROD_HISTORY_PRODUCTION_DEFAULT_LINE_GLOW_BLUR = 3;
 const PRESET_UNITS = ['°C', '°F', 'RPM', '%', 'bar', 'psi', 'kW', 'A', 'V', 'Hz', 'mm', 'kg', 'L/min', 'm³/h', 'N', 'kN'] as const;
 type PresetUnit = (typeof PRESET_UNITS)[number];
 type ConnectionStatusTextFieldKey = 'onlineText' | 'degradadoText' | 'offlineText' | 'unknownText';
@@ -362,6 +382,38 @@ export default function PropertyDock(props: PropertyDockProps) {
                 },
             },
         });
+    };
+
+    const handleActivityAnalyticsDonutCenterValueFontSizeChange = (value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'activity-analytics') {
+            return;
+        }
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...selectedWidget.displayOptions,
+                donutCenterValueFontSize: resolveActivityAnalyticsDonutCenterValueFontSize(
+                    value === '' ? undefined : Number(value),
+                ),
+            },
+        });
+    };
+
+    const handleGaugeValueFontSizeChange = (value: string) => {
+        if (!selectedWidget || (selectedWidget.type !== 'kpi' && selectedWidget.type !== 'machine-activity')) {
+            return;
+        }
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...(selectedWidget.displayOptions ?? {}),
+                valueFontSize: resolveActivityAnalyticsDonutCenterValueFontSize(
+                    value === '' ? undefined : Number(value),
+                ),
+            },
+        } as WidgetConfig);
     };
 
     const handleActivityAnalyticsStateGradientChange = (
@@ -1163,8 +1215,12 @@ export default function PropertyDock(props: PropertyDockProps) {
     const showThresholds = isKpi || selectedWidget?.type === 'metric-card';
     const shouldShowHierarchyPreview = selectedWidget?.type === 'metric-card' && hierarchyTrace !== undefined;
     const isProdHistory = selectedWidget?.type === 'prod-history';
+    const isLegacyTrendChart = selectedWidget?.type === 'trend-chart';
     const prodHistoryOptions = isProdHistory
         ? (selectedWidget.displayOptions as ProdHistoryDisplayOptions | undefined)
+        : undefined;
+    const legacyTrendChartOptions = isLegacyTrendChart
+        ? (selectedWidget.displayOptions as TrendChartDisplayOptions | undefined)
         : undefined;
     const machineActivityOptions = isMachineActivity
         ? (selectedWidget.displayOptions as MachineActivityDisplayOptions | undefined)
@@ -1253,6 +1309,7 @@ export default function PropertyDock(props: PropertyDockProps) {
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'text-title'
         && selectedWidget.type !== 'status'
+        && selectedWidget.type !== 'trend-chart'
         && selectedWidget.type !== 'activity-analytics'
         && selectedWidget.type !== 'prod-trend';
     const genericDataUnitField = selectedWidget
@@ -1445,6 +1502,20 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             { value: 'circular', label: 'Radial' },
                                             { value: 'bar', label: 'Barra' },
                                         ]}
+                                    />
+                                </DockFieldRow>
+                            )}
+                            {(isKpi || isMachineActivity) && (
+                                <DockFieldRow label="Tam. Num">
+                                        <AdminNumberInput
+                                            value={(isMachineActivity ? machineActivityOptions?.valueFontSize : kpiDisplayOptions?.valueFontSize)
+                                            ?? DEFAULT_GAUGE_VALUE_FONT_SIZE}
+                                            min={MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE}
+                                            max={MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE}
+                                        step={1}
+                                        commitOnBlur
+                                        ariaLabel={isMachineActivity ? 'Actividad de Máquina tamaño' : 'KPI tamaño'}
+                                        onChange={handleGaugeValueFontSizeChange}
                                     />
                                 </DockFieldRow>
                             )}
@@ -2370,6 +2441,19 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                                     return (
                                         <DockSection key={key} icon={<Settings size={11} />} title={label.toUpperCase()}>
+                                            {key === 'donut' && (
+                                                <DockFieldRow label="Tam. Num">
+                                                    <AdminNumberInput
+                                                        value={activityAnalyticsOptions.donutCenterValueFontSize ?? DEFAULT_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE}
+                                                        min={MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE}
+                                                        max={MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE}
+                                                        step={1}
+                                                        commitOnBlur
+                                                        ariaLabel="Donut tamaño"
+                                                        onChange={handleActivityAnalyticsDonutCenterValueFontSizeChange}
+                                                    />
+                                                </DockFieldRow>
+                                            )}
                                             <DockFieldRow label="Glow">
                                                 <AdminNumberInput
                                                     value={surfaceEffects.glow}
@@ -2818,6 +2902,77 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         Mostrar grilla
                                     </span>
                                 </label>
+                            </DockSection>
+                        )}
+
+                        {selectedWidget.type === 'prod-history' && (
+                            <DockSection icon={<Sliders size={11} />} title="Línea OEE">
+                                <DockSliderField
+                                    label="Grosor"
+                                    value={prodHistoryOptions?.oeeLineStrokeWidth ?? PROD_HISTORY_OEE_DEFAULT_LINE_STROKE_WIDTH}
+                                    min={LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MIN}
+                                    max={LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MAX}
+                                    step={LEGACY_TREND_CHART_LINE_STYLE_STEP}
+                                    onChange={(value) => handleDisplayOptionChange('oeeLineStrokeWidth', value)}
+                                />
+                                <DockSliderField
+                                    label="Glow"
+                                    value={prodHistoryOptions?.oeeLineGlowBlur ?? PROD_HISTORY_OEE_DEFAULT_LINE_GLOW_BLUR}
+                                    min={LEGACY_TREND_CHART_LINE_GLOW_BLUR_MIN}
+                                    max={LEGACY_TREND_CHART_LINE_GLOW_BLUR_MAX}
+                                    step={LEGACY_TREND_CHART_LINE_STYLE_STEP}
+                                    onChange={(value) => handleDisplayOptionChange('oeeLineGlowBlur', value)}
+                                />
+                            </DockSection>
+                        )}
+
+                        {selectedWidget.type === 'prod-history' && (
+                            <DockSection icon={<Sliders size={11} />} title="Línea producción">
+                                <DockSliderField
+                                    label="Grosor"
+                                    value={prodHistoryOptions?.productionLineStrokeWidth ?? PROD_HISTORY_PRODUCTION_DEFAULT_LINE_STROKE_WIDTH}
+                                    min={LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MIN}
+                                    max={LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MAX}
+                                    step={LEGACY_TREND_CHART_LINE_STYLE_STEP}
+                                    onChange={(value) => handleDisplayOptionChange('productionLineStrokeWidth', value)}
+                                />
+                                <DockSliderField
+                                    label="Glow"
+                                    value={prodHistoryOptions?.productionLineGlowBlur ?? PROD_HISTORY_PRODUCTION_DEFAULT_LINE_GLOW_BLUR}
+                                    min={LEGACY_TREND_CHART_LINE_GLOW_BLUR_MIN}
+                                    max={LEGACY_TREND_CHART_LINE_GLOW_BLUR_MAX}
+                                    step={LEGACY_TREND_CHART_LINE_STYLE_STEP}
+                                    onChange={(value) => handleDisplayOptionChange('productionLineGlowBlur', value)}
+                                />
+                            </DockSection>
+                        )}
+
+                        {(selectedWidget.type === 'trend-chart' || selectedWidget.type === 'trend-chart-v2' || selectedWidget.type === 'prod-trend') && (
+                            <DockSection icon={<Sliders size={11} />} title="Estilo de línea">
+                                <DockSliderField
+                                    label="Grosor"
+                                    value={selectedWidget.type === 'trend-chart'
+                                        ? (legacyTrendChartOptions?.lineStrokeWidth ?? LEGACY_TREND_CHART_DEFAULT_LINE_STROKE_WIDTH)
+                                        : selectedWidget.type === 'trend-chart-v2'
+                                            ? (trendChartV2Options?.lineStrokeWidth ?? TREND_CHART_V2_DEFAULT_LINE_STROKE_WIDTH)
+                                            : (prodTrendOptions?.lineStrokeWidth ?? PROD_TREND_DEFAULT_LINE_STROKE_WIDTH)}
+                                    min={LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MIN}
+                                    max={LEGACY_TREND_CHART_LINE_STROKE_WIDTH_MAX}
+                                    step={LEGACY_TREND_CHART_LINE_STYLE_STEP}
+                                    onChange={(value) => handleDisplayOptionChange('lineStrokeWidth', value)}
+                                />
+                                <DockSliderField
+                                    label="Glow"
+                                    value={selectedWidget.type === 'trend-chart'
+                                        ? (legacyTrendChartOptions?.lineGlowBlur ?? LEGACY_TREND_CHART_DEFAULT_LINE_GLOW_BLUR)
+                                        : selectedWidget.type === 'trend-chart-v2'
+                                            ? (trendChartV2Options?.lineGlowBlur ?? TREND_CHART_V2_DEFAULT_LINE_GLOW_BLUR)
+                                            : (prodTrendOptions?.lineGlowBlur ?? PROD_TREND_DEFAULT_LINE_GLOW_BLUR)}
+                                    min={LEGACY_TREND_CHART_LINE_GLOW_BLUR_MIN}
+                                    max={LEGACY_TREND_CHART_LINE_GLOW_BLUR_MAX}
+                                    step={LEGACY_TREND_CHART_LINE_STYLE_STEP}
+                                    onChange={(value) => handleDisplayOptionChange('lineGlowBlur', value)}
+                                />
                             </DockSection>
                         )}
 

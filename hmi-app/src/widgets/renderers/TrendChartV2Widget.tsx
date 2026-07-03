@@ -44,6 +44,7 @@ import {
 } from '../../utils/trendChartV2Time';
 import {
     buildAreaPath,
+    clamp,
     formatTick,
     getChartLetterSpacingPx,
     getChartTextFont,
@@ -101,6 +102,29 @@ const TOKEN = {
     grid: 'var(--color-chart-grid)',
     icon: 'var(--color-widget-icon)',
 } as const;
+
+const DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const DEFAULT_LINE_GLOW_BLUR = 3;
+const MIN_LINE_STROKE_WIDTH = 0.5;
+const MAX_LINE_STROKE_WIDTH = 6;
+const MIN_LINE_GLOW_BLUR = 0;
+const MAX_LINE_GLOW_BLUR = 8;
+
+function clampLineStrokeWidth(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_LINE_STROKE_WIDTH;
+    }
+
+    return clamp(value as number, MIN_LINE_STROKE_WIDTH, MAX_LINE_STROKE_WIDTH);
+}
+
+function clampLineGlowBlur(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_LINE_GLOW_BLUR;
+    }
+
+    return clamp(value as number, MIN_LINE_GLOW_BLUR, MAX_LINE_GLOW_BLUR);
+}
 
 function formatTrendChartV2SummaryValue(value: number, unit: string | undefined): string {
     return `${formatTick(value)}${unit ? unit.toLowerCase() : ''}`;
@@ -186,6 +210,8 @@ export default function TrendChartV2Widget({
     const HeaderIcon = resolveHeaderIcon(widget.displayOptions?.icon);
     const shiftDisplayMode = normalizeTrendChartV2ShiftDisplayMode(widget.displayOptions?.shiftDisplayMode);
     const showShifts = widget.displayOptions?.showShifts === true;
+    const lineStrokeWidth = clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth);
+    const lineGlowBlur = clampLineGlowBlur(widget.displayOptions?.lineGlowBlur);
     const maxPoints = mapHistoricalDensityToMaxPoints(density);
     const bindingMachineId = widget.binding?.machineId;
     const bindingVariableKey = widget.binding?.variableKey;
@@ -566,7 +592,7 @@ export default function TrendChartV2Widget({
                                 </mask>
 
                                 <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
-                                    <feGaussianBlur stdDeviation="3" result="blur" />
+                                    <feGaussianBlur stdDeviation={lineGlowBlur} result="blur" />
                                     <feMerge>
                                         <feMergeNode in="blur" />
                                         <feMergeNode in="SourceGraphic" />
@@ -718,7 +744,7 @@ export default function TrendChartV2Widget({
                                                 d={linePath}
                                                 fill="none"
                                                 stroke={`url(#${lineGradientId})`}
-                                                strokeWidth={2.5}
+                                                strokeWidth={lineStrokeWidth}
                                                 filter={`url(#${glowId})`}
                                             />
                                         ) : isOnlyVisibleFinitePoint ? (

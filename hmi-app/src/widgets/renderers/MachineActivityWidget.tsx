@@ -10,6 +10,10 @@ import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { useMachineActivity } from '../../hooks/useMachineActivity';
 import { getStateVisuals } from '../utils/machineActivity';
 import { resolveBinding } from '../resolvers/bindingResolver';
+import {
+    DEFAULT_GAUGE_VALUE_FONT_SIZE,
+    resolveActivityAnalyticsDonutCenterValueFontSize,
+} from '../../utils/activityAnalyticsWidgetDefaults';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     Gauge,
@@ -153,6 +157,12 @@ export default function MachineActivityWidget({
         : resolveBinding(widget, equipmentMap, machines);
     const opts = widget.displayOptions ?? {};
     const mode = opts.kpiMode ?? 'circular';
+    const valueFontSizeOverride = resolveActivityAnalyticsDonutCenterValueFontSize(opts.valueFontSize)
+        ?? DEFAULT_GAUGE_VALUE_FONT_SIZE;
+    const valueTextStyle = {
+        ...WIDGET_VALUE_TEXT_STYLE,
+        fontSize: `${valueFontSizeOverride}px`,
+    };
     const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
     const resolvedUnit = resolved.unit?.trim() ?? '';
     const bindingUnit = widget.binding?.unit?.trim() ?? '';
@@ -262,7 +272,7 @@ export default function MachineActivityWidget({
 
         const updateCircularTextSizing = (width: number, height: number) => {
             const renderedSize = Math.min(width, height);
-            const valueFontSize = readCssPixelValue(element, '--font-size-widget-value-gauge');
+            const valueFontSize = valueFontSizeOverride;
             const unitFontSize = readCssPixelValue(element, '--font-size-widget-unit-gauge');
 
             setCircularTextSizing({
@@ -296,7 +306,7 @@ export default function MachineActivityWidget({
             resizeObserver?.disconnect();
             mutationObserver?.disconnect();
         };
-    }, [mode]);
+    }, [mode, valueFontSizeOverride]);
 
     useEffect(() => {
         if (!shouldTrackAnimationState) {
@@ -446,7 +456,7 @@ export default function MachineActivityWidget({
                             <div className="flex items-baseline gap-2 mb-3">
                                 <span
                                     className="text-white leading-none"
-                                    style={WIDGET_VALUE_TEXT_STYLE}
+                                    style={valueTextStyle}
                                 >
                                     {activityIndexLabel}
                                 </span>

@@ -6276,10 +6276,10 @@ describe('ActivityAnalyticsWidget', () => {
         });
         expect(donutCenterValue).toHaveTextContent('57%');
         expect(donutCenterValue).toHaveStyle({
-            fontFamily: 'var(--font-widget-value-activity-analytics)',
-            fontWeight: 'var(--font-weight-widget-value-activity-analytics)',
-            fontSize: 'var(--font-size-widget-value-activity-analytics)',
-            letterSpacing: 'var(--tracking-widget-value-activity-analytics)',
+            fontFamily: 'var(--font-widget-value-gauge)',
+            fontWeight: 'var(--font-weight-widget-value-gauge)',
+            fontSize: '40px',
+            letterSpacing: 'var(--tracking-widget-value-gauge)',
         });
         expect(donutCenterLabel).toHaveTextContent('PROD');
         expect(donutCenterLabel).toHaveStyle({
@@ -6303,6 +6303,52 @@ describe('ActivityAnalyticsWidget', () => {
         expect(wideProdStrokeWidth / wideSetupStrokeWidth).toBeCloseTo(1.75, 5);
         expect(donutCenterValue).not.toHaveTextContent('7.0 h');
         expect(donutCenterLabel).not.toHaveTextContent('Total');
+    });
+
+    it('uses the per-widget donut center value font size override and falls back to 40px when absent', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+            }),
+        ]);
+
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        donutCenterValueFontSize: 72,
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveStyle({
+            fontSize: '72px',
+        });
+        expect(screen.getByTestId('activity-analytics-summary-total-label')).toHaveStyle({
+            fontSize: 'var(--font-size-system)',
+        });
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget()}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getByTestId('activity-analytics-summary-total-value')).toHaveStyle({
+            fontSize: '40px',
+        });
     });
 
     it('renders Cobertura as a fourth summary detail row without a marker while keeping muted aligned text', () => {

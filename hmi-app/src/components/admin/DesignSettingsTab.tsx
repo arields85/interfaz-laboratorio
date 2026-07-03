@@ -13,11 +13,9 @@ import {
 } from './adminSidebarStyles';
 import {
     ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_RANGE,
-    ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_RANGE,
     AVAILABLE_FONTS,
     CHART_FONT_SIZE_RANGE,
     DASHBOARD_TITLE_FONT_SIZE_RANGE,
-    DEFAULT_ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_PX,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_PX,
     DEFAULT_CHART_FONT_SIZE_PX,
     DEFAULT_DASHBOARD_TITLE_FONT_SIZE_PX,
@@ -33,7 +31,6 @@ import {
     getClosestAvailableWeight,
     isFontName,
     normalizeActivityAnalyticsProdTrendValueFontSizeValue,
-    normalizeActivityAnalyticsValueFontSizeValue,
     normalizeChartFontSizeValue,
     normalizeDashboardTitleFontSizeValue,
     normalizeFontTrackingValue,
@@ -44,7 +41,6 @@ import {
     normalizeWidgetUnitFontSizeValue,
     normalizeWidgetValueFontSizeValue,
     parseActivityAnalyticsProdTrendValueFontSizeValue,
-    parseActivityAnalyticsValueFontSizeValue,
     parseChartFontSizeValue,
     parseDashboardTitleFontSizeValue,
     parseFontTrackingValue,
@@ -75,7 +71,6 @@ const FONT_SIZE_TOKEN_KEYS = [
     '--font-size-widget-unit',
     '--font-size-widget-value-gauge',
     '--font-size-widget-unit-gauge',
-    '--font-size-widget-value-activity-analytics',
     '--font-size-widget-value-activity-analytics-prod-trend',
 ] as const;
 
@@ -86,14 +81,13 @@ const TRACKING_TOKEN_KEYS = [
     '--tracking-dashboard-title',
     '--tracking-widget-value',
     '--tracking-widget-value-gauge',
-    '--tracking-widget-value-activity-analytics',
     '--tracking-widget-value-activity-analytics-prod-trend',
 ] as const;
 
 type FontSizeTokenKey = (typeof FONT_SIZE_TOKEN_KEYS)[number];
 type TrackingTokenKey = (typeof TRACKING_TOKEN_KEYS)[number];
-type FontTokenKey = '--font-system' | '--font-mono' | '--font-chart' | '--font-dashboard-title' | '--font-widget-value' | '--font-widget-value-gauge' | '--font-widget-value-activity-analytics' | '--font-widget-value-activity-analytics-prod-trend';
-type InlineFontSizeTokenKey = Extract<FontSizeTokenKey, '--font-size-system' | '--font-size-mono' | '--font-size-chart' | '--font-size-dashboard-title' | '--font-size-widget-value' | '--font-size-widget-value-activity-analytics' | '--font-size-widget-value-activity-analytics-prod-trend'>;
+type FontTokenKey = '--font-system' | '--font-mono' | '--font-chart' | '--font-dashboard-title' | '--font-widget-value' | '--font-widget-value-gauge' | '--font-widget-value-activity-analytics-prod-trend';
+type InlineFontSizeTokenKey = Extract<FontSizeTokenKey, '--font-size-system' | '--font-size-mono' | '--font-size-chart' | '--font-size-dashboard-title' | '--font-size-widget-value' | '--font-size-widget-value-activity-analytics-prod-trend'>;
 type FontToken = {
     key: FontTokenKey;
     label: string;
@@ -109,7 +103,6 @@ const FONT_TOKENS = [
     { key: '--font-dashboard-title', label: 'TÍTULOS DE DASHBOARD', weightKey: '--font-weight-dashboard-title', sizeKey: '--font-size-dashboard-title', trackingKey: '--tracking-dashboard-title' },
     { key: '--font-widget-value', label: 'VALORES NUMERICOS MOSTRADOS POR:', weightKey: '--font-weight-widget-value', sizeKey: '--font-size-widget-value', trackingKey: '--tracking-widget-value' },
     { key: '--font-widget-value-gauge', label: 'VALORES NUMERICOS MOSTRADOS POR:', weightKey: '--font-weight-widget-value-gauge', trackingKey: '--tracking-widget-value-gauge' },
-    { key: '--font-widget-value-activity-analytics', label: 'VALORES NUMERICOS MOSTRADOS POR:', weightKey: '--font-weight-widget-value-activity-analytics', sizeKey: '--font-size-widget-value-activity-analytics', trackingKey: '--tracking-widget-value-activity-analytics' },
     { key: '--font-widget-value-activity-analytics-prod-trend', label: 'VALOR FLOTANTE FINAL MOSTRADO POR:', weightKey: '--font-weight-widget-value-activity-analytics-prod-trend', sizeKey: '--font-size-widget-value-activity-analytics-prod-trend', trackingKey: '--tracking-widget-value-activity-analytics-prod-trend' },
 ] as const satisfies readonly FontToken[];
 
@@ -185,7 +178,6 @@ const DEFAULT_FONT_VALUES: Record<FontTokenKey, FontName> = {
     '--font-dashboard-title': 'Magistral',
     '--font-widget-value': 'Magistral',
     '--font-widget-value-gauge': 'Magistral',
-    '--font-widget-value-activity-analytics': 'Magistral',
     '--font-widget-value-activity-analytics-prod-trend': 'IBMPlexMono',
 };
 
@@ -196,7 +188,6 @@ const DEFAULT_WEIGHT_VALUES: Record<string, string> = {
     '--font-weight-dashboard-title': '400',
     '--font-weight-widget-value': '400',
     '--font-weight-widget-value-gauge': '400',
-    '--font-weight-widget-value-activity-analytics': '400',
     '--font-weight-widget-value-activity-analytics-prod-trend': '400',
 };
 
@@ -249,12 +240,6 @@ const FONT_SIZE_FIELD_CONFIG = {
         normalize: normalizeWidgetGaugeUnitFontSizeValue,
         parse: parseWidgetGaugeUnitFontSizeValue,
     },
-    '--font-size-widget-value-activity-analytics': {
-        defaultValue: String(DEFAULT_ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_PX),
-        range: ACTIVITY_ANALYTICS_VALUE_FONT_SIZE_RANGE,
-        normalize: normalizeActivityAnalyticsValueFontSizeValue,
-        parse: parseActivityAnalyticsValueFontSizeValue,
-    },
     '--font-size-widget-value-activity-analytics-prod-trend': {
         defaultValue: String(DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_PX),
         range: ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_RANGE,
@@ -304,12 +289,6 @@ const TRACKING_FIELD_CONFIG = {
         parse: parseFontTrackingValue,
     },
     '--tracking-widget-value-gauge': {
-        defaultValue: String(DEFAULT_FONT_TRACKING_PX),
-        range: FONT_TRACKING_RANGE,
-        normalize: normalizeFontTrackingValue,
-        parse: parseFontTrackingValue,
-    },
-    '--tracking-widget-value-activity-analytics': {
         defaultValue: String(DEFAULT_FONT_TRACKING_PX),
         range: FONT_TRACKING_RANGE,
         normalize: normalizeFontTrackingValue,
@@ -675,17 +654,6 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
         return getWeightSelectWidthCh(gaugeWeightOptions);
     }, [gaugeWeightOptions]);
 
-    const activityAnalyticsWeightOptions = useMemo(() => {
-        return getAvailableWeightOptions(fontValues['--font-widget-value-activity-analytics']).map((weightOption) => ({
-            value: weightOption.value,
-            label: `${weightOption.name} (${weightOption.value})`,
-        }));
-    }, [fontValues]);
-
-    const activityAnalyticsWeightSelectWidthCh = useMemo(() => {
-        return getWeightSelectWidthCh(activityAnalyticsWeightOptions);
-    }, [activityAnalyticsWeightOptions]);
-
     const activityAnalyticsProdTrendWeightOptions = useMemo(() => {
         return getAvailableWeightOptions(fontValues['--font-widget-value-activity-analytics-prod-trend']).map((weightOption) => ({
             value: weightOption.value,
@@ -963,7 +931,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
         <div className="max-h-[55vh] overflow-y-auto hmi-scrollbar pr-1">
             <section>
                 <div className="space-y-3">
-                    {FONT_TOKENS.filter((fontToken) => fontToken.key !== '--font-widget-value-gauge' && fontToken.key !== '--font-widget-value-activity-analytics').map((fontToken) => {
+                    {FONT_TOKENS.filter((fontToken) => fontToken.key !== '--font-widget-value-gauge').map((fontToken) => {
                         const selectedFont = fontValues[fontToken.key];
                         const availableWeights = fontToken.weightKey
                             ? getAvailableWeightOptions(selectedFont)
@@ -1063,6 +1031,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
                         header={(
                             <>
                                 <span>VALORES NUMERICOS MOSTRADOS POR:</span>
+                                <AdminTag label="ACTIVITY-ANALYTICS" variant="admin" />
                                 <AdminTag label="KPI" variant="admin" />
                                 <AdminTag label="MACHINE-ACTIVITY" variant="admin" />
                             </>
@@ -1125,62 +1094,6 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
                                     max={FONT_SIZE_FIELD_CONFIG['--font-size-widget-unit-gauge'].range.max}
                                     className={TYPOGRAPHY_COMPACT_NUMBER_CLS}
                                     aria-label="VALORES EN KPI / MACHINE-ACTIVITY tamaño de las unidades"
-                                />
-                            </div>
-                        </div>
-                    </TypographySection>
-
-                    <TypographySection
-                        header={(
-                            <>
-                                <span>VALORES NUMERICOS MOSTRADOS POR:</span>
-                                <AdminTag label="ACTIVITY-ANALYTICS" variant="admin" />
-                            </>
-                        )}
-                    >
-                        <div className={TYPOGRAPHY_SECTION_ROW_CLS}>
-                            <AdminSelect
-                                value={fontValues['--font-widget-value-activity-analytics']}
-                                options={fontOptions}
-                                onChange={(value) => handleFontChange('--font-widget-value-activity-analytics', value as FontName)}
-                                className="min-w-fit"
-                                style={{ width: `${FONT_SELECT_WIDTH_CH}ch` }}
-                                placeholder="Seleccionar fuente"
-                            />
-                            <div className="flex items-center gap-2">
-                                <span className={TYPOGRAPHY_CONTROL_LABEL_CLS}>Tamaño</span>
-                                <AdminNumberInput
-                                    value={fontSizeValues['--font-size-widget-value-activity-analytics'] ?? FONT_SIZE_FIELD_CONFIG['--font-size-widget-value-activity-analytics'].defaultValue}
-                                    onChange={(value) => handleFontSizeChange('--font-size-widget-value-activity-analytics', value)}
-                                    onBlur={() => handleFontSizeBlur('--font-size-widget-value-activity-analytics')}
-                                    min={FONT_SIZE_FIELD_CONFIG['--font-size-widget-value-activity-analytics'].range.min}
-                                    max={FONT_SIZE_FIELD_CONFIG['--font-size-widget-value-activity-analytics'].range.max}
-                                    className={TYPOGRAPHY_COMPACT_NUMBER_CLS}
-                                    aria-label="VALORES EN ACTIVITY-ANALYTICS tamaño base"
-                                />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span className={TYPOGRAPHY_CONTROL_LABEL_CLS}>Tracking</span>
-                                <AdminNumberInput
-                                    value={trackingValues['--tracking-widget-value-activity-analytics'] ?? TRACKING_FIELD_CONFIG['--tracking-widget-value-activity-analytics'].defaultValue}
-                                    onChange={(value) => handleTrackingChange('--tracking-widget-value-activity-analytics', value)}
-                                    onBlur={() => handleTrackingBlur('--tracking-widget-value-activity-analytics')}
-                                    min={TRACKING_FIELD_CONFIG['--tracking-widget-value-activity-analytics'].range.min}
-                                    max={TRACKING_FIELD_CONFIG['--tracking-widget-value-activity-analytics'].range.max}
-                                    step={TRACKING_FIELD_CONFIG['--tracking-widget-value-activity-analytics'].range.step}
-                                    className={TYPOGRAPHY_COMPACT_NUMBER_CLS}
-                                    aria-label="VALORES EN ACTIVITY-ANALYTICS tracking"
-                                />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span className={TYPOGRAPHY_CONTROL_LABEL_CLS}>Peso</span>
-                                <AdminSelect
-                                    value={weightValues['--font-weight-widget-value-activity-analytics'] ?? DEFAULT_WEIGHT_VALUES['--font-weight-widget-value-activity-analytics']}
-                                    onChange={(value) => handleWeightChange('--font-weight-widget-value-activity-analytics', value)}
-                                    options={activityAnalyticsWeightOptions}
-                                    className="shrink-0"
-                                    style={{ width: `${activityAnalyticsWeightSelectWidthCh}ch` }}
-                                    placeholder="Seleccionar peso"
                                 />
                             </div>
                         </div>

@@ -80,7 +80,7 @@ class MockResizeObserver implements ResizeObserver {
     }
 }
 
-function makeWidget(): TrendChartV2WidgetConfig {
+function makeWidget(displayOptions: TrendChartV2WidgetConfig['displayOptions'] = { historicalDensity: 'high' }): TrendChartV2WidgetConfig {
     return {
         id: 'trend-v2-1',
         type: 'trend-chart-v2',
@@ -94,7 +94,7 @@ function makeWidget(): TrendChartV2WidgetConfig {
             variableKey: 'temperature',
             unit: '°C',
         },
-        displayOptions: { historicalDensity: 'high' },
+        displayOptions,
     };
 }
 
@@ -778,6 +778,32 @@ describe('TrendChartV2Widget', () => {
         expect(svg?.innerHTML).toContain('trend-v2-1-area-gradient');
         expect(svg?.innerHTML).toContain('trend-v2-1-line-glow');
         expect(svg?.innerHTML).toContain('gradientUnits="userSpaceOnUse"');
+    });
+
+    it('uses trend-chart-v2 line style display options with clamped fallbacks', () => {
+        const { rerender } = render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const getLines = () => screen.getAllByTestId('trend-chart-v2-line-segment');
+        const getBlur = () => document.querySelector('filter feGaussianBlur');
+
+        getLines().forEach((line) => {
+            expect(line).toHaveAttribute('stroke-width', '2.5');
+        });
+        expect(getBlur()).toHaveAttribute('stdDeviation', '3');
+
+        rerender(<TrendChartV2Widget widget={makeWidget({ historicalDensity: 'high', lineStrokeWidth: 4.1, lineGlowBlur: 5.4 })} equipmentMap={new Map()} machines={[]} />);
+
+        getLines().forEach((line) => {
+            expect(line).toHaveAttribute('stroke-width', '4.1');
+        });
+        expect(getBlur()).toHaveAttribute('stdDeviation', '5.4');
+
+        rerender(<TrendChartV2Widget widget={makeWidget({ historicalDensity: 'high', lineStrokeWidth: Number.NaN, lineGlowBlur: -2 })} equipmentMap={new Map()} machines={[]} />);
+
+        getLines().forEach((line) => {
+            expect(line).toHaveAttribute('stroke-width', '2.5');
+        });
+        expect(getBlur()).toHaveAttribute('stdDeviation', '0');
     });
 
     it('uses the shared left-aligned widget header primitive and preserves trend-chart-v2 icon configurability', () => {

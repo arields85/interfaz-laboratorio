@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { KpiWidgetConfig } from '../../domain/admin.types';
+import { DEFAULT_GAUGE_VALUE_FONT_SIZE } from '../../utils/activityAnalyticsWidgetDefaults';
 import KpiWidget from './KpiWidget';
 
 const equipmentMap = new Map();
@@ -235,6 +236,48 @@ describe('KpiWidget', () => {
         expect(screen.getByText('0')).toBeInTheDocument();
         expect(screen.getByText('kW')).toBeInTheDocument();
         expect(screen.getByTestId('gauge-bar-fill')).toHaveStyle({ width: '0%' });
+    });
+
+    it('uses the per-widget numeric value size override and falls back to 60 when absent', () => {
+        const { rerender } = render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 10,
+                        valueFontSize: 72,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        expect(screen.getByText('1.1')).toHaveStyle({
+            fontSize: '72px',
+        });
+        expect(screen.getByText('kW')).toHaveStyle({
+            fontSize: 'var(--font-size-widget-unit-gauge)',
+        });
+
+        rerender(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'bar',
+                        min: 0,
+                        max: 10,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        expect(screen.getByText('1.1')).toHaveStyle({
+            fontSize: `${DEFAULT_GAUGE_VALUE_FONT_SIZE}px`,
+        });
     });
 
     it('uses the placeholder icon when icon selection is pending, hides it when null, and mutes invalid icons', () => {

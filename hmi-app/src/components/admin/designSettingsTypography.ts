@@ -184,6 +184,22 @@ export function normalizeStoredFontOverrides(overrides: Record<string, string>):
         normalizedOverrides['--tracking-widget-value-activity-analytics-prod-trend'] = normalizedOverrides['--tracking-chart'];
     }
 
+    if (normalizedOverrides['--font-widget-value-activity-analytics'] && !normalizedOverrides['--font-widget-value-gauge']) {
+        normalizedOverrides['--font-widget-value-gauge'] = normalizedOverrides['--font-widget-value-activity-analytics'];
+    }
+
+    if (normalizedOverrides['--font-weight-widget-value-activity-analytics'] && !normalizedOverrides['--font-weight-widget-value-gauge']) {
+        normalizedOverrides['--font-weight-widget-value-gauge'] = normalizedOverrides['--font-weight-widget-value-activity-analytics'];
+    }
+
+    if (normalizedOverrides['--font-size-widget-value-activity-analytics'] && !normalizedOverrides['--font-size-widget-value-gauge']) {
+        normalizedOverrides['--font-size-widget-value-gauge'] = normalizedOverrides['--font-size-widget-value-activity-analytics'];
+    }
+
+    if (normalizedOverrides['--tracking-widget-value-activity-analytics'] && !normalizedOverrides['--tracking-widget-value-gauge']) {
+        normalizedOverrides['--tracking-widget-value-gauge'] = normalizedOverrides['--tracking-widget-value-activity-analytics'];
+    }
+
     return normalizedOverrides;
 }
 

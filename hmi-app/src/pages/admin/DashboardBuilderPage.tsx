@@ -652,9 +652,6 @@ export default function DashboardBuilderPage() {
                     position: { x: 0, y: 0 },
                     size: { w: defaultWidth, h: defaultHeight },
                     binding: { mode: 'simulated_value', simulatedValue: 50 },
-                    displayOptions: {
-                        icon: defaultIcon,
-                    },
                 }
                 : type === 'trend-chart-v2'
                     ? {

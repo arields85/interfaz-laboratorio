@@ -38,10 +38,13 @@ export const DEFAULT_PROD_TREND_LINE_COLOR_ALPHAS: ActivityAnalyticsAlphaPair = 
 
 export type ResolvedProdTrendDisplayOptions = Required<Pick<
     ProdTrendDisplayOptions,
-    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'groupBarWidth' | 'groupBarWidths' | 'trendLineColors' | 'trendLineColorAlphas'
+    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'groupBarWidth' | 'groupBarWidths' | 'trendLineColors' | 'trendLineColorAlphas' | 'lineStrokeWidth' | 'lineGlowBlur'
 >> & Pick<ProdTrendDisplayOptions, 'start' | 'end'> & {
     prodTrendBands: ReturnType<typeof resolveActivityAnalyticsProdTrendBands>;
 };
+
+const DEFAULT_PROD_TREND_LINE_STROKE_WIDTH = 2.5;
+const DEFAULT_PROD_TREND_LINE_GLOW_BLUR = 3;
 
 function resolveProdTrendLineColorSlot(value: unknown, fallback: string): string {
     return typeof value === 'string' && HEX_COLOR_PATTERN.test(value.trim())
@@ -129,5 +132,11 @@ export function resolveProdTrendDisplayOptions(
         trendLineColors: resolveProdTrendLineColors(displayOptions?.trendLineColors, trendLineColorFallback),
         trendLineColorAlphas: [...(resolvedActivityAnalytics.stateGradientAlphas.prod ?? DEFAULT_PROD_TREND_LINE_COLOR_ALPHAS)],
         prodTrendBands: resolvedActivityAnalytics.prodTrendBands,
+        lineStrokeWidth: typeof displayOptions?.lineStrokeWidth === 'number'
+            ? displayOptions.lineStrokeWidth
+            : DEFAULT_PROD_TREND_LINE_STROKE_WIDTH,
+        lineGlowBlur: typeof displayOptions?.lineGlowBlur === 'number'
+            ? displayOptions.lineGlowBlur
+            : DEFAULT_PROD_TREND_LINE_GLOW_BLUR,
     };
 }

@@ -7,7 +7,7 @@ import {
     type HistoryRange,
 } from '../../domain/dataContract.types';
 import { TrendingUp } from 'lucide-react';
-import type { TrendChartWidgetConfig, ThresholdRule } from '../../domain/admin.types';
+import type { TrendChartDisplayOptions, TrendChartWidgetConfig, ThresholdRule } from '../../domain/admin.types';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useDataHistory } from '../../queries/useDataHistory';
 import { resolveBinding } from '../resolvers/bindingResolver';
@@ -75,6 +75,29 @@ const TREND_CHART_LAYOUT_MARGIN = {
     left: 45,
 } as const;
 
+const DEFAULT_LINE_STROKE_WIDTH = 2.5;
+const DEFAULT_LINE_GLOW_BLUR = 3;
+const MIN_LINE_STROKE_WIDTH = 0.5;
+const MAX_LINE_STROKE_WIDTH = 6;
+const MIN_LINE_GLOW_BLUR = 0;
+const MAX_LINE_GLOW_BLUR = 8;
+
+function clampLineStrokeWidth(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_LINE_STROKE_WIDTH;
+    }
+
+    return clamp(value as number, MIN_LINE_STROKE_WIDTH, MAX_LINE_STROKE_WIDTH);
+}
+
+function clampLineGlowBlur(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+        return DEFAULT_LINE_GLOW_BLUR;
+    }
+
+    return clamp(value as number, MIN_LINE_GLOW_BLUR, MAX_LINE_GLOW_BLUR);
+}
+
 interface TrendChartWidgetProps {
     widget: TrendChartWidgetConfig;
     equipmentMap: Map<string, EquipmentSummary>;
@@ -97,6 +120,8 @@ interface TrendChartSvgProps {
         avg: number | null;
     };
     thresholds?: ThresholdRule[];
+    lineStrokeWidth: number;
+    lineGlowBlur: number;
     hoveredIndex: number | null;
     onHoverChange: (index: number | null, x?: number) => void;
 }
@@ -114,6 +139,8 @@ interface TrendChartContainerProps {
         max: number | null;
         avg: number | null;
     };
+    lineStrokeWidth: number;
+    lineGlowBlur: number;
 }
 
 const MONTH_SHORT_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] as const;
@@ -171,6 +198,8 @@ function TrendChartSvg({
     unit,
     summary,
     thresholds,
+    lineStrokeWidth,
+    lineGlowBlur,
     hoveredIndex,
     onHoverChange,
 }: TrendChartSvgProps) {
@@ -273,7 +302,7 @@ function TrendChartSvg({
                             </mask>
 
                             <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
-                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feGaussianBlur stdDeviation={lineGlowBlur} result="blur" />
                                 <feMerge>
                                     <feMergeNode in="blur" />
                                     <feMergeNode in="SourceGraphic" />
@@ -393,7 +422,7 @@ function TrendChartSvg({
                                 <path
                                     d={linePath}
                                     stroke={`url(#${lineGradientId})`}
-                                    strokeWidth={2.5}
+                                    strokeWidth={lineStrokeWidth}
                                     fill="none"
                                     filter={`url(#${glowId})`}
                                 />
@@ -492,6 +521,8 @@ function TrendChartContainer({
     seriesName,
     unit,
     summary,
+    lineStrokeWidth,
+    lineGlowBlur,
 }: TrendChartContainerProps) {
     const ref = useRef<HTMLDivElement>(null);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -528,6 +559,8 @@ function TrendChartContainer({
                 unit={unit}
                 summary={summary}
                 thresholds={thresholds}
+                lineStrokeWidth={lineStrokeWidth}
+                lineGlowBlur={lineGlowBlur}
                 hoveredIndex={hoveredIndex}
                 onHoverChange={handleHoverChange}
             />
@@ -624,6 +657,9 @@ export default function TrendChartWidget({
     const noDataRuntimeState = isHistoryError
         ? (isDataHistoryConnectionError(historyError) ? 'disconnected' : 'error')
         : 'empty';
+    const displayOptions = widget.displayOptions as TrendChartDisplayOptions | undefined;
+    const lineStrokeWidth = clampLineStrokeWidth(displayOptions?.lineStrokeWidth);
+    const lineGlowBlur = clampLineGlowBlur(displayOptions?.lineGlowBlur);
 
     // Modo real cargando → skeleton; Modo simulado no muestra loading por histórico
     const isRealLoading = !isSimulated && historyParams !== null && isLoadingHistory;
@@ -683,6 +719,8 @@ export default function TrendChartWidget({
                         seriesName={widget.title ?? 'Valor'}
                         unit={resolvedUnit}
                         summary={chartSummary}
+                        lineStrokeWidth={lineStrokeWidth}
+                        lineGlowBlur={lineGlowBlur}
                     />
                 )}
             </div>

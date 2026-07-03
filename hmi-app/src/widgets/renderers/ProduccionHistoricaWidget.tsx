@@ -61,6 +61,14 @@ const PROD_HISTORY_RIGHT_AXIS_MARGIN_RIGHT = 48;
 const PROD_HISTORY_TOP_ADORNMENT_RESERVED_HEIGHT = 11;
 const PROD_HISTORY_TOP_ADORNMENT_OFFSET = 12;
 const PROD_HISTORY_TOP_CAP_HEIGHT_PX = 2;
+const DEFAULT_OEE_LINE_STROKE_WIDTH = 2.5;
+const DEFAULT_OEE_LINE_GLOW_BLUR = 3;
+const DEFAULT_PRODUCTION_LINE_STROKE_WIDTH = 2.5;
+const DEFAULT_PRODUCTION_LINE_GLOW_BLUR = 3;
+const MIN_LINE_STROKE_WIDTH = 0.5;
+const MAX_LINE_STROKE_WIDTH = 6;
+const MIN_LINE_GLOW_BLUR = 0;
+const MAX_LINE_GLOW_BLUR = 8;
 
 // Resolución de ícono del header por nombre declarado en `displayOptions.icon`.
 // El set disponible coincide con el selector de íconos del PropertyDock, así que
@@ -147,6 +155,10 @@ interface ProdHistoryBarsSvgProps {
     showGrid: boolean;
     oeeShowArea: boolean;
     oeeShowPoints: boolean;
+    productionLineStrokeWidth: number;
+    productionLineGlowBlur: number;
+    oeeLineStrokeWidth: number;
+    oeeLineGlowBlur: number;
     barWidthFactor: number;
     productionDomain: [number, number];
     oeeDomain: [number, number];
@@ -251,6 +263,22 @@ function resolveDomains(
     return { productionDomain, oeeDomain };
 }
 
+function clampLineStrokeWidth(value: number | undefined, fallback: number): number {
+    if (!Number.isFinite(value)) {
+        return fallback;
+    }
+
+    return clamp(value as number, MIN_LINE_STROKE_WIDTH, MAX_LINE_STROKE_WIDTH);
+}
+
+function clampLineGlowBlur(value: number | undefined, fallback: number): number {
+    if (!Number.isFinite(value)) {
+        return fallback;
+    }
+
+    return clamp(value as number, MIN_LINE_GLOW_BLUR, MAX_LINE_GLOW_BLUR);
+}
+
 function ProdHistoryBarsSvg({
     widgetId,
     width,
@@ -262,6 +290,10 @@ function ProdHistoryBarsSvg({
     showGrid,
     oeeShowArea,
     oeeShowPoints,
+    productionLineStrokeWidth,
+    productionLineGlowBlur,
+    oeeLineStrokeWidth,
+    oeeLineGlowBlur,
     barWidthFactor,
     productionDomain,
     oeeDomain,
@@ -393,14 +425,14 @@ function ProdHistoryBarsSvg({
                                 <stop offset="95%" stopColor={TOKEN.oee} stopOpacity={0} />
                             </linearGradient>
                             <filter id={prodGlowId} x="-20%" y="-50%" width="140%" height="200%">
-                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feGaussianBlur stdDeviation={productionLineGlowBlur} result="blur" />
                                 <feMerge>
                                     <feMergeNode in="blur" />
                                     <feMergeNode in="SourceGraphic" />
                                 </feMerge>
                             </filter>
                             <filter id={oeeGlowId} x="-20%" y="-50%" width="140%" height="200%">
-                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feGaussianBlur stdDeviation={oeeLineGlowBlur} result="blur" />
                                 <feMerge>
                                     <feMergeNode in="blur" />
                                     <feMergeNode in="SourceGraphic" />
@@ -471,7 +503,7 @@ function ProdHistoryBarsSvg({
                                 <path
                                     d={productionPath}
                                     stroke={TOKEN.production}
-                                    strokeWidth={2.5}
+                                    strokeWidth={productionLineStrokeWidth}
                                     fill="none"
                                     filter={`url(#${prodGlowId})`}
                                 />
@@ -481,7 +513,7 @@ function ProdHistoryBarsSvg({
                                 <path
                                     d={oeePath}
                                     stroke={TOKEN.oee}
-                                    strokeWidth={2.5}
+                                    strokeWidth={oeeLineStrokeWidth}
                                     fill="none"
                                     filter={`url(#${oeeGlowId})`}
                                 />
@@ -709,6 +741,22 @@ export default function ProdHistoryWidget({
     const autoScale = displayOptions?.autoScale ?? true;
     const showGrid = displayOptions?.showGrid ?? true;
     const oeeShowPoints = displayOptions?.oeeShowPoints ?? false;
+    const productionLineStrokeWidth = clampLineStrokeWidth(
+        displayOptions?.productionLineStrokeWidth,
+        DEFAULT_PRODUCTION_LINE_STROKE_WIDTH,
+    );
+    const productionLineGlowBlur = clampLineGlowBlur(
+        displayOptions?.productionLineGlowBlur,
+        DEFAULT_PRODUCTION_LINE_GLOW_BLUR,
+    );
+    const oeeLineStrokeWidth = clampLineStrokeWidth(
+        displayOptions?.oeeLineStrokeWidth,
+        DEFAULT_OEE_LINE_STROKE_WIDTH,
+    );
+    const oeeLineGlowBlur = clampLineGlowBlur(
+        displayOptions?.oeeLineGlowBlur,
+        DEFAULT_OEE_LINE_GLOW_BLUR,
+    );
     const barWidthFactor = clamp(displayOptions?.productionBarWidth ?? 1, 0.5, 1.5);
     const HeaderIcon = resolveHeaderIcon(displayOptions?.icon);
 
@@ -834,6 +882,10 @@ export default function ProdHistoryWidget({
                     showGrid={showGrid}
                     oeeShowArea={displayOptions?.oeeShowArea ?? false}
                     oeeShowPoints={oeeShowPoints}
+                    productionLineStrokeWidth={productionLineStrokeWidth}
+                    productionLineGlowBlur={productionLineGlowBlur}
+                    oeeLineStrokeWidth={oeeLineStrokeWidth}
+                    oeeLineGlowBlur={oeeLineGlowBlur}
                     barWidthFactor={barWidthFactor}
                     productionDomain={productionDomain}
                     oeeDomain={oeeDomain}

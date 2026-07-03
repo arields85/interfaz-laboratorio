@@ -6,9 +6,12 @@ import type { Dashboard, WidgetConfig, WidgetLayout } from '../../domain/admin.t
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import {
+    DEFAULT_GAUGE_VALUE_FONT_SIZE,
     DEFAULT_ACTIVITY_ANALYTICS_COVERAGE_COLOR,
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_EFFECTS,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
+    MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+    MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_COLOR_INPUT,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
@@ -766,6 +769,35 @@ describe('PropertyDock machine-activity', () => {
         });
     });
 
+    it('renders and persists the machine-activity Tam. Num control with the 60 default and clamp range', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'machine-activity',
+            title: 'Actividad de Máquina',
+        });
+
+        const generalSection = getSection('General');
+        const fontSizeInput = within(generalSection).getByRole('textbox', { name: 'Actividad de Máquina tamaño' });
+
+        expect(within(generalSection).getByText('Tam. Num')).toBeInTheDocument();
+        expect(fontSizeInput).toHaveValue(String(DEFAULT_GAUGE_VALUE_FONT_SIZE));
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '240');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            valueFontSize: MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+        });
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '8');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            valueFontSize: MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+        });
+    });
+
     it('shows the custom unit toggle for real machine-activity bindings and enables editing only when active', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'machine-activity',
@@ -1340,6 +1372,39 @@ describe('PropertyDock activity-analytics', () => {
         await user.click(screen.getByRole('button', { name: 'Turno' }));
         expect(getSlider()).toHaveValue('0.2');
         expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('0.2');
+    });
+
+    it('renders the donut Tam. Num control with a 40 default and persists a clamped per-widget center value font size override', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            title: 'Análisis de Actividad',
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+            },
+        });
+
+        const donutSection = getSection('DONUT');
+        const fontSizeInput = within(donutSection).getByRole('textbox', { name: 'Donut tamaño' });
+
+        expect(within(donutSection).getByText('Tam. Num')).toBeInTheDocument();
+        expect(fontSizeInput).toHaveValue('40');
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '240');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            donutCenterValueFontSize: MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+        });
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '8');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            donutCenterValueFontSize: MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+        });
     });
 
     it('uses legacy global bar width as fallback seed when per-group widths are missing', () => {
@@ -2122,7 +2187,13 @@ describe('PropertyDock prod-history', () => {
             oeeShowPoints: true,
         });
 
-        const barWidthSlider = screen.getByRole('slider');
+        const barWidthRow = screen.getByText('Ancho barra').closest('div');
+
+        if (!barWidthRow) {
+            throw new Error('No se encontró la fila Ancho barra');
+        }
+
+        const barWidthSlider = within(barWidthRow).getByRole('slider');
         fireEvent.change(barWidthSlider, { target: { value: '1.4' } });
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
@@ -2318,7 +2389,189 @@ describe('PropertyDock prod-history', () => {
     });
 });
 
+describe('PropertyDock legacy trend-chart', () => {
+    it('does not expose the shared header icon control for legacy trend-chart widgets', () => {
+        renderPropertyDock({
+            type: 'trend-chart',
+            title: 'Legacy Trend',
+            displayOptions: {},
+        });
+
+        expect(getSection('General')).not.toHaveTextContent('Ícono');
+    });
+
+    it('renders the line style section with fine-grained stroke and glow controls', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'trend-chart',
+            title: 'Legacy Trend',
+            displayOptions: {},
+        });
+
+        const lineStyleSection = getSection('Estilo de línea');
+        const sliders = within(lineStyleSection).getAllByRole('slider');
+        const [strokeInput, glowInput] = within(lineStyleSection).getAllByRole('textbox');
+
+        expect(within(lineStyleSection).getByText('Grosor')).toBeInTheDocument();
+        expect(within(lineStyleSection).getByText('Glow')).toBeInTheDocument();
+        expect(sliders[0]).toHaveAttribute('min', '0.5');
+        expect(sliders[0]).toHaveAttribute('max', '6');
+        expect(sliders[0]).toHaveAttribute('step', '0.1');
+        expect(sliders[0]).toHaveValue('2.5');
+        expect(sliders[1]).toHaveAttribute('min', '0');
+        expect(sliders[1]).toHaveAttribute('max', '8');
+        expect(sliders[1]).toHaveAttribute('step', '0.1');
+        expect(sliders[1]).toHaveValue('3');
+
+        await user.clear(strokeInput);
+        await user.type(strokeInput, '3.7');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ lineStrokeWidth: 3.7 });
+
+        await user.clear(glowInput);
+        await user.type(glowInput, '4.2');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            lineStrokeWidth: 3.7,
+            lineGlowBlur: 4.2,
+        });
+    });
+
+    it.each([
+        ['trend-chart-v2', 'Trend Chart V2'],
+        ['prod-trend', 'PROD-TREND'],
+    ] as const)('renders the same line style controls for %s', async (type, title) => {
+        const { user, updates } = renderPropertyDock({
+            type,
+            title,
+            displayOptions: {},
+        });
+
+        const lineStyleSection = getSection('Estilo de línea');
+        const sliders = within(lineStyleSection).getAllByRole('slider');
+        const [strokeInput, glowInput] = within(lineStyleSection).getAllByRole('textbox');
+
+        expect(within(lineStyleSection).getByText('Grosor')).toBeInTheDocument();
+        expect(within(lineStyleSection).getByText('Glow')).toBeInTheDocument();
+        expect(sliders[0]).toHaveAttribute('min', '0.5');
+        expect(sliders[0]).toHaveAttribute('max', '6');
+        expect(sliders[0]).toHaveAttribute('step', '0.1');
+        expect(sliders[0]).toHaveValue('2.5');
+        expect(sliders[1]).toHaveAttribute('min', '0');
+        expect(sliders[1]).toHaveAttribute('max', '8');
+        expect(sliders[1]).toHaveAttribute('step', '0.1');
+        expect(sliders[1]).toHaveValue('3');
+
+        await user.clear(strokeInput);
+        await user.type(strokeInput, '3.7');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ lineStrokeWidth: 3.7 });
+
+        await user.clear(glowInput);
+        await user.type(glowInput, '4.2');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            lineStrokeWidth: 3.7,
+            lineGlowBlur: 4.2,
+        });
+    });
+});
+
+describe('PropertyDock prod-history line style', () => {
+    it('renders independent OEE and production line style sections with fine-grained sliders', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'prod-history',
+            title: 'PROD-HISTORY',
+            displayOptions: {},
+        });
+
+        const oeeSection = getSection('Línea OEE');
+        const productionSection = getSection('Línea producción');
+        const oeeSliders = within(oeeSection).getAllByRole('slider');
+        const productionSliders = within(productionSection).getAllByRole('slider');
+        const [oeeStrokeInput, oeeGlowInput] = within(oeeSection).getAllByRole('textbox');
+        const [productionStrokeInput, productionGlowInput] = within(productionSection).getAllByRole('textbox');
+
+        expect(within(oeeSection).getByText('Grosor')).toBeInTheDocument();
+        expect(within(oeeSection).getByText('Glow')).toBeInTheDocument();
+        expect(within(productionSection).getByText('Grosor')).toBeInTheDocument();
+        expect(within(productionSection).getByText('Glow')).toBeInTheDocument();
+
+        [...oeeSliders, ...productionSliders].forEach((slider, index) => {
+            const isGlow = index % 2 === 1;
+            expect(slider).toHaveAttribute('min', isGlow ? '0' : '0.5');
+            expect(slider).toHaveAttribute('max', isGlow ? '8' : '6');
+            expect(slider).toHaveAttribute('step', '0.1');
+        });
+
+        expect(oeeSliders[0]).toHaveValue('2.5');
+        expect(oeeSliders[1]).toHaveValue('3');
+        expect(productionSliders[0]).toHaveValue('2.5');
+        expect(productionSliders[1]).toHaveValue('3');
+
+        await user.clear(oeeStrokeInput);
+        await user.type(oeeStrokeInput, '4.4');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ oeeLineStrokeWidth: 4.4 });
+
+        await user.clear(oeeGlowInput);
+        await user.type(oeeGlowInput, '5.1');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            oeeLineStrokeWidth: 4.4,
+            oeeLineGlowBlur: 5.1,
+        });
+
+        await user.clear(productionStrokeInput);
+        await user.type(productionStrokeInput, '3.3');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            oeeLineStrokeWidth: 4.4,
+            oeeLineGlowBlur: 5.1,
+            productionLineStrokeWidth: 3.3,
+        });
+
+        await user.clear(productionGlowInput);
+        await user.type(productionGlowInput, '6.2');
+        await user.tab();
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            oeeLineStrokeWidth: 4.4,
+            oeeLineGlowBlur: 5.1,
+            productionLineStrokeWidth: 3.3,
+            productionLineGlowBlur: 6.2,
+        });
+    });
+});
+
 describe('PropertyDock KPI thresholds', () => {
+    it('renders and persists the KPI Tam. Num control with the 60 default and clamp range', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'kpi',
+            title: 'KPI local',
+        });
+
+        const generalSection = getSection('General');
+        const fontSizeInput = within(generalSection).getByRole('textbox', { name: 'KPI tamaño' });
+
+        expect(within(generalSection).getByText('Tam. Num')).toBeInTheDocument();
+        expect(fontSizeInput).toHaveValue(String(DEFAULT_GAUGE_VALUE_FONT_SIZE));
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '240');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            valueFontSize: MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+        });
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '8');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            valueFontSize: MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+        });
+    });
+
     it('enables, edits and disables KPI thresholds with deadband', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'kpi',

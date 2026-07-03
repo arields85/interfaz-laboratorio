@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
+import { DEFAULT_GAUGE_VALUE_FONT_SIZE } from '../../utils/activityAnalyticsWidgetDefaults';
 import MachineActivityWidget from './MachineActivityWidget';
 
 const equipmentMap = new Map<string, EquipmentSummary>();
@@ -648,7 +649,7 @@ describe('MachineActivityWidget', () => {
         expect(screen.getByText('°F')).toBeInTheDocument();
     });
 
-    it('updates circular gauge text sizing when the shared gauge font variables change', async () => {
+    it('keeps the default circular value size and still updates the shared unit size when gauge font variables change', async () => {
         render(
             <MachineActivityWidget
                 widget={makeWidget()}
@@ -660,7 +661,7 @@ describe('MachineActivityWidget', () => {
         const gauge = screen.getByTestId('gauge-circular');
         const [valueText, unitText] = Array.from(gauge.querySelectorAll('text'));
 
-        expect(valueText).not.toHaveAttribute('font-size');
+        expect(Number.parseFloat(valueText.getAttribute('font-size') ?? '0')).toBeGreaterThan(0);
         expect(unitText).not.toHaveAttribute('font-size');
 
         act(() => {
@@ -669,8 +670,58 @@ describe('MachineActivityWidget', () => {
         });
 
         await waitFor(() => {
-            expect(valueText).toHaveAttribute('font-size', '76');
+            expect(Number.parseFloat(valueText.getAttribute('font-size') ?? '0')).toBeGreaterThan(0);
             expect(unitText).toHaveAttribute('font-size', '26');
+        });
+    });
+
+    it('uses the per-widget numeric value size override and falls back to 60 when absent', async () => {
+        act(() => {
+            document.documentElement.style.setProperty('--font-size-widget-value-gauge', '76px');
+            document.documentElement.style.setProperty('--font-size-widget-unit-gauge', '26px');
+        });
+
+        const { rerender } = render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateSubtitle: true,
+                        showPowerSubtext: true,
+                        showDynamicColor: true,
+                        showStateAnimation: true,
+                        valueFontSize: 88,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.1)}
+            />,
+        );
+
+        let gauge = screen.getByTestId('gauge-circular');
+        let [valueText, unitText] = Array.from(gauge.querySelectorAll('text'));
+        let overrideFontSize = 0;
+
+        await waitFor(() => {
+            overrideFontSize = Number.parseFloat(valueText.getAttribute('font-size') ?? '0');
+            expect(overrideFontSize).toBeGreaterThan(0);
+            expect(Number.parseFloat(unitText.getAttribute('font-size') ?? '0')).toBeGreaterThan(0);
+        });
+
+        rerender(
+            <MachineActivityWidget
+                widget={makeWidget()}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.1)}
+            />,
+        );
+
+        gauge = screen.getByTestId('gauge-circular');
+        [valueText, unitText] = Array.from(gauge.querySelectorAll('text'));
+
+        await waitFor(() => {
+            expect(Number.parseFloat(valueText.getAttribute('font-size') ?? '0')).toBeLessThan(overrideFontSize);
+            expect(Number.parseFloat(unitText.getAttribute('font-size') ?? '0')).toBeGreaterThan(0);
         });
     });
 
