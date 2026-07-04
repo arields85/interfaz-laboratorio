@@ -103,6 +103,7 @@ const MAX_LINE_STROKE_WIDTH = 6;
 const MIN_LINE_GLOW_BLUR = 0;
 const MAX_LINE_GLOW_BLUR = 8;
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only helper kept colocated with the widget renderer
 export function clampLineStrokeWidth(value: number | undefined): number {
     if (!Number.isFinite(value)) {
         return DEFAULT_LINE_STROKE_WIDTH;
@@ -111,6 +112,7 @@ export function clampLineStrokeWidth(value: number | undefined): number {
     return clamp(value as number, MIN_LINE_STROKE_WIDTH, MAX_LINE_STROKE_WIDTH);
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only helper kept colocated with the widget renderer
 export function clampLineGlowBlur(value: number | undefined): number {
     if (!Number.isFinite(value)) {
         return DEFAULT_LINE_GLOW_BLUR;
@@ -1401,6 +1403,7 @@ function formatPercent(value: number) {
     return `${Math.round(clamp(value, 0, 1) * 100)}%`;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only helper kept colocated with the widget renderer
 export function resolveProdTrendLatestValueLabelPlacement({
     latestPointY,
     chartTop,

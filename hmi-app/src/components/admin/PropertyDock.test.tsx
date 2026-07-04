@@ -17,6 +17,11 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+    DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+    DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+} from '../../utils/kpiTopCapEffects';
 import { ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS } from './adminSidebarStyles';
 import PropertyDock from './PropertyDock';
 import type { HierarchyAggregationTrace } from '../../widgets/resolvers/hierarchyResolver';
@@ -2572,6 +2577,152 @@ describe('PropertyDock KPI thresholds', () => {
         });
     });
 
+    it('renders only fixed top-cap shape/effect controls for circular KPIs and persists them without base geometry writes', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'kpi',
+            title: 'KPI local',
+        });
+
+        const topCapSection = getSection('Top cap fijo');
+
+        expect(within(topCapSection).queryByRole('slider', { name: 'Aura top cap fijo' })).not.toBeInTheDocument();
+
+        await user.click(within(topCapSection).getByRole('button', { name: 'Top cap fijo' }));
+
+        const shapeCheckbox = within(topCapSection).getByRole('checkbox', { name: 'Recto/Pill top cap fijo' });
+        const auraSlider = within(topCapSection).getByRole('slider', { name: 'Aura top cap fijo' });
+        const auraValueInput = within(topCapSection).getByRole('textbox', { name: 'Aura top cap fijo value' });
+
+        expect(within(topCapSection).queryByText('Largo')).not.toBeInTheDocument();
+        expect(within(topCapSection).queryByText('Base grosor')).not.toBeInTheDocument();
+        expect(within(topCapSection).queryByText('Alfa')).not.toBeInTheDocument();
+        expect(within(topCapSection).queryByRole('slider', { name: 'Largo base top cap fijo' })).not.toBeInTheDocument();
+        expect(within(topCapSection).queryByRole('slider', { name: 'Grosor base top cap fijo' })).not.toBeInTheDocument();
+        expect(within(topCapSection).queryByRole('slider', { name: 'Alfa base top cap fijo' })).not.toBeInTheDocument();
+        expect(within(topCapSection).getByText('Recto/Pill')).toBeInTheDocument();
+        expect(within(topCapSection).getByText('Aura')).toBeInTheDocument();
+        expect(within(topCapSection).getByText('Halo')).toBeInTheDocument();
+        expect(within(topCapSection).queryByText('Brillo')).not.toBeInTheDocument();
+        expect(within(topCapSection).queryByRole('slider', { name: 'Brillo top cap fijo' })).not.toBeInTheDocument();
+        expect(within(topCapSection).getByText('Blur')).toBeInTheDocument();
+        expect(within(topCapSection).getByText('Extensión')).toBeInTheDocument();
+        expect(within(topCapSection).getByText('Grosor')).toBeInTheDocument();
+        expect(shapeCheckbox).toBeChecked();
+        expect(auraSlider).toHaveAttribute('min', '0');
+        expect(auraSlider).toHaveAttribute('max', '100');
+        expect(auraValueInput).toHaveValue(String(DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.auraIntensity));
+
+        await user.click(shapeCheckbox);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapShape: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                pill: false,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+
+        fireEvent.change(auraSlider, { target: { value: '42' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapShape: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                pill: false,
+            },
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                auraIntensity: 42,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+
+        await user.clear(auraValueInput);
+        await user.type(auraValueInput, '150');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapShape: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                pill: false,
+            },
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                auraIntensity: 100,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+    });
+
+    it('renders traveling top-cap slider controls for circular KPIs without exposing a shape toggle and persists only traveling effects', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'kpi',
+            title: 'KPI local',
+        });
+
+        const travelingSection = getSection('Top cap viajero');
+
+        expect(within(travelingSection).queryByRole('slider', { name: 'Aura top cap viajero' })).not.toBeInTheDocument();
+
+        await user.click(within(travelingSection).getByRole('button', { name: 'Top cap viajero' }));
+
+        const auraSlider = within(travelingSection).getByRole('slider', { name: 'Aura top cap viajero' });
+        const auraValueInput = within(travelingSection).getByRole('textbox', { name: 'Aura top cap viajero value' });
+        const extensionSlider = within(travelingSection).getByRole('slider', { name: 'Extensión top cap viajero' });
+
+        expect(within(travelingSection).queryByText('Recto/Pill')).not.toBeInTheDocument();
+        expect(within(travelingSection).queryByRole('checkbox', { name: 'Recto/Pill top cap viajero' })).not.toBeInTheDocument();
+        expect(within(travelingSection).getByText('Aura')).toBeInTheDocument();
+        expect(within(travelingSection).getByText('Halo')).toBeInTheDocument();
+        expect(within(travelingSection).queryByText('Brillo')).not.toBeInTheDocument();
+        expect(within(travelingSection).queryByRole('slider', { name: 'Brillo top cap viajero' })).not.toBeInTheDocument();
+        expect(within(travelingSection).getByText('Blur')).toBeInTheDocument();
+        expect(within(travelingSection).getByText('Extensión')).toBeInTheDocument();
+        expect(within(travelingSection).getByText('Grosor')).toBeInTheDocument();
+        expect(auraSlider).toHaveAttribute('min', '0');
+        expect(auraSlider).toHaveAttribute('max', '100');
+        expect(extensionSlider).toHaveAttribute('step', '1');
+        expect(auraValueInput).toHaveValue(String(DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS.auraIntensity));
+
+        fireEvent.change(auraSlider, { target: { value: '37' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            travelingTopCapEffects: {
+                ...DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+                auraIntensity: 37,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('travelingTopCapShape');
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapShape');
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapEffects');
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+
+        await user.clear(auraValueInput);
+        await user.type(auraValueInput, '150');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            travelingTopCapEffects: {
+                ...DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+                auraIntensity: 100,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('travelingTopCapShape');
+    });
+
+    it('hides fixed top-cap slider controls when the KPI is in bar mode', () => {
+        renderPropertyDock({
+            type: 'kpi',
+            displayOptions: {
+                kpiMode: 'bar',
+            },
+        });
+
+        expect(screen.queryByRole('button', { name: 'Top cap fijo' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('slider', { name: 'Aura top cap fijo' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Top cap viajero' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('slider', { name: 'Aura top cap viajero' })).not.toBeInTheDocument();
+    });
+
     it('enables, edits and disables KPI thresholds with deadband', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'kpi',
@@ -2628,5 +2779,22 @@ describe('PropertyDock KPI thresholds', () => {
         await user.click(toggle);
 
         expect(updates.at(-1)?.thresholds).toEqual([]);
+    });
+
+    it('orders KPI circular sections with thresholds before top caps and keeps navigation last', () => {
+        renderPropertyDock({
+            type: 'kpi',
+            title: 'KPI local',
+        });
+
+        const sectionTitles = Array.from(document.querySelectorAll('section')).map((section) =>
+            section.querySelector('button')?.textContent?.trim() ?? '',
+        );
+
+        expect(sectionTitles.indexOf('Umbrales')).toBeGreaterThan(-1);
+        expect(sectionTitles.indexOf('Top cap fijo')).toBeGreaterThan(sectionTitles.indexOf('Umbrales'));
+        expect(sectionTitles.indexOf('Top cap viajero')).toBeGreaterThan(sectionTitles.indexOf('Top cap fijo'));
+        expect(sectionTitles.indexOf('Navegación')).toBeGreaterThan(sectionTitles.indexOf('Top cap viajero'));
+        expect(sectionTitles.at(-1)).toBe('Navegación');
     });
 });

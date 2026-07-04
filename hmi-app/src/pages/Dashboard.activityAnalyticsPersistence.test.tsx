@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from './Dashboard';
 import { makeDashboard, makeLayout, makeWidget } from '../test/fixtures/dashboard.fixture';
@@ -253,9 +254,18 @@ describe('Dashboard activity-analytics viewer persistence', () => {
         const user = userEvent.setup();
 
         const renderDashboard = () => render(
-            <div style={{ width: '1280px', height: '800px' }}>
-                <Dashboard />
-            </div>,
+            <MemoryRouter initialEntries={['/']}>
+                <Routes>
+                    <Route
+                        path="/"
+                        element={(
+                            <div style={{ width: '1280px', height: '800px' }}>
+                                <Dashboard />
+                            </div>
+                        )}
+                    />
+                </Routes>
+            </MemoryRouter>,
         );
 
         const measureViewer = async (expectedActiveRange: '7d' | '30d') => {

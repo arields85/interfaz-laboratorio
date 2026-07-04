@@ -152,7 +152,7 @@ describe('Node-RED null renderer fallbacks', () => {
         expect(screen.queryByText('—')).not.toBeInTheDocument();
     });
 
-    it('renders -- in TrendChartWidget when the resolved contract value is null', () => {
+    it('renders Sin datos in TrendChartWidget when the resolved contract value is null', () => {
         render(
             <TrendChartWidget
                 widget={makeTrendWidget()}
@@ -161,7 +161,7 @@ describe('Node-RED null renderer fallbacks', () => {
             />,
         );
 
-        expect(screen.getByText('--')).toBeInTheDocument();
+        expect(screen.getByText('Sin datos')).toBeInTheDocument();
         expect(screen.queryByText('50')).not.toBeInTheDocument();
     });
 

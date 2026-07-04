@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
-import { DEFAULT_GAUGE_VALUE_FONT_SIZE } from '../../utils/activityAnalyticsWidgetDefaults';
 import MachineActivityWidget from './MachineActivityWidget';
 
 const equipmentMap = new Map<string, EquipmentSummary>();
@@ -136,6 +135,8 @@ describe('MachineActivityWidget', () => {
         expect(gauge).toHaveClass('w-full', 'h-full');
         expect(gauge.style.width).toBe('');
         expect(gauge.style.height).toBe('');
+        expect(screen.queryByTestId('gauge-circular-static-top-cap')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
     });
 
     it('renders invalid/no data state', () => {

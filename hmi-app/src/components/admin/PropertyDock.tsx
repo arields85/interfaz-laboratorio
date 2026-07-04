@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions } from '../../domain/admin.types';
+import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -22,6 +22,7 @@ import AdminNumberInput from './AdminNumberInput';
 import AdminEmptyState from './AdminEmptyState';
 import CatalogVariableSelector from './CatalogVariableSelector';
 import DockColorField from './DockColorField';
+import DockCheckboxField from './DockCheckboxField';
 import DockInfoDropdown from './DockInfoDropdown';
 import DockInfoBox from './DockInfoBox';
 import DockInlineControlRow from './DockInlineControlRow';
@@ -62,6 +63,17 @@ import {
     resolveActivityAnalyticsGroupBarWidthForGroup,
     resolveActivityAnalyticsProdTrendBandBlendMode,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+    DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+    DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+    KPI_TOP_CAP_EFFECT_MAX,
+    KPI_TOP_CAP_EFFECT_MIN,
+    KPI_TOP_CAP_EFFECT_STEP,
+    resolveKpiFixedTopCapEffects,
+    resolveKpiFixedTopCapShape,
+    resolveKpiTravelingTopCapEffects,
+} from '../../utils/kpiTopCapEffects';
 import {
     resolveProdTrendThemeDefaultLineColors,
     resolveProdTrendDisplayOptions,
@@ -175,6 +187,28 @@ const ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS = [
     { key: 'groupedBars' as const, label: 'Barras agrupadas' },
     { key: 'donut' as const, label: 'Donut' },
 ];
+const KPI_FIXED_TOP_CAP_SLIDERS: Array<{
+    key: keyof KpiFixedTopCapEffects;
+    label: string;
+    ariaLabel: string;
+}> = [
+    { key: 'auraIntensity', label: 'Aura', ariaLabel: 'Aura top cap fijo' },
+    { key: 'haloIntensity', label: 'Halo', ariaLabel: 'Halo top cap fijo' },
+    { key: 'blur', label: 'Blur', ariaLabel: 'Blur top cap fijo' },
+    { key: 'extension', label: 'Extensión', ariaLabel: 'Extensión top cap fijo' },
+    { key: 'thickness', label: 'Grosor', ariaLabel: 'Grosor top cap fijo' },
+];
+const KPI_TRAVELING_TOP_CAP_SLIDERS: Array<{
+    key: keyof KpiTravelingTopCapEffects;
+    label: string;
+    ariaLabel: string;
+}> = [
+    { key: 'auraIntensity', label: 'Aura', ariaLabel: 'Aura top cap viajero' },
+    { key: 'haloIntensity', label: 'Halo', ariaLabel: 'Halo top cap viajero' },
+    { key: 'blur', label: 'Blur', ariaLabel: 'Blur top cap viajero' },
+    { key: 'extension', label: 'Extensión', ariaLabel: 'Extensión top cap viajero' },
+    { key: 'thickness', label: 'Grosor', ariaLabel: 'Grosor top cap viajero' },
+];
 const ACTIVITY_ANALYTICS_HEX_CODE_PATTERN = /^[0-9a-f]{6}$/i;
 type ActivityAnalyticsGradientSlotIndex = 0 | 1;
 type ActivityAnalyticsProdTrendBandSlotIndex = 0 | 1 | 2;
@@ -280,6 +314,66 @@ export default function PropertyDock(props: PropertyDockProps) {
 
     const handleNumericDisplayOptionChange = (key: string, value: string) => {
         handleDisplayOptionChange(key, value === '' ? '' : Number(value));
+    };
+
+    const handleKpiFixedTopCapEffectChange = (key: keyof KpiFixedTopCapEffects, value: number) => {
+        if (!selectedWidget || selectedWidget.type !== 'kpi') {
+            return;
+        }
+
+        const currentDisplayOptions = (selectedWidget.displayOptions as KpiDisplayOptions | undefined) ?? {};
+        const currentEffects = resolveKpiFixedTopCapEffects(currentDisplayOptions.fixedTopCapEffects);
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...currentDisplayOptions,
+                fixedTopCapEffects: {
+                    ...currentEffects,
+                    [key]: value,
+                },
+            },
+        });
+    };
+
+    const handleKpiTravelingTopCapEffectChange = (key: keyof KpiTravelingTopCapEffects, value: number) => {
+        if (!selectedWidget || selectedWidget.type !== 'kpi') {
+            return;
+        }
+
+        const currentDisplayOptions = (selectedWidget.displayOptions as KpiDisplayOptions | undefined) ?? {};
+        const currentEffects = resolveKpiTravelingTopCapEffects(currentDisplayOptions.travelingTopCapEffects);
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...currentDisplayOptions,
+                travelingTopCapEffects: {
+                    ...currentEffects,
+                    [key]: value,
+                },
+            },
+        });
+    };
+
+    const handleKpiFixedTopCapShapeChange = (key: keyof KpiTopCapShape, value: boolean) => {
+        if (!selectedWidget || selectedWidget.type !== 'kpi') {
+            return;
+        }
+
+        const currentDisplayOptions = (selectedWidget.displayOptions as KpiDisplayOptions | undefined) ?? {};
+        const currentShape = resolveKpiFixedTopCapShape(currentDisplayOptions.fixedTopCapShape);
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...currentDisplayOptions,
+                fixedTopCapShape: {
+                    ...currentShape,
+                    [key]: value,
+                },
+            },
+        });
     };
 
     const handleActivityAnalyticsThresholdChange = (
@@ -1254,6 +1348,15 @@ export default function PropertyDock(props: PropertyDockProps) {
     const kpiDisplayOptions = isKpi
         ? (selectedWidget.displayOptions as KpiDisplayOptions | undefined)
         : undefined;
+    const kpiFixedTopCapEffects = isKpi
+        ? resolveKpiFixedTopCapEffects(kpiDisplayOptions?.fixedTopCapEffects)
+        : DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS;
+    const kpiFixedTopCapShape = isKpi
+        ? resolveKpiFixedTopCapShape(kpiDisplayOptions?.fixedTopCapShape)
+        : DEFAULT_KPI_FIXED_TOP_CAP_SHAPE;
+    const kpiTravelingTopCapEffects = isKpi
+        ? resolveKpiTravelingTopCapEffects(kpiDisplayOptions?.travelingTopCapEffects)
+        : DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS;
     const widgetUnitDisplayOptions = isMachineActivity
         ? machineActivityOptions
         : isKpi
@@ -2713,6 +2816,46 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         }}
                                     />
                                 </DockFieldRow>
+                            </DockSection>
+                        )}
+
+                        {isKpi && (kpiDisplayOptions?.kpiMode ?? 'circular') === 'circular' && (
+                            <DockSection icon={<Sliders size={11} />} title="Top cap fijo" defaultOpen={false}>
+                                <DockCheckboxField
+                                    label="Recto/Pill"
+                                    ariaLabel="Recto/Pill top cap fijo"
+                                    checked={kpiFixedTopCapShape.pill}
+                                    onChange={(checked) => handleKpiFixedTopCapShapeChange('pill', checked)}
+                                />
+                                {KPI_FIXED_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
+                                    <DockSliderField
+                                        key={key}
+                                        label={label}
+                                        value={kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key]}
+                                        min={KPI_TOP_CAP_EFFECT_MIN}
+                                        max={KPI_TOP_CAP_EFFECT_MAX}
+                                        step={KPI_TOP_CAP_EFFECT_STEP}
+                                        ariaLabel={ariaLabel}
+                                        onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
+                                    />
+                                ))}
+                            </DockSection>
+                        )}
+
+                        {isKpi && (kpiDisplayOptions?.kpiMode ?? 'circular') === 'circular' && (
+                            <DockSection icon={<Sliders size={11} />} title="Top cap viajero" defaultOpen={false}>
+                                {KPI_TRAVELING_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
+                                    <DockSliderField
+                                        key={key}
+                                        label={label}
+                                        value={kpiTravelingTopCapEffects[key] ?? DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS[key]}
+                                        min={KPI_TOP_CAP_EFFECT_MIN}
+                                        max={KPI_TOP_CAP_EFFECT_MAX}
+                                        step={KPI_TOP_CAP_EFFECT_STEP}
+                                        ariaLabel={ariaLabel}
+                                        onChange={(value) => handleKpiTravelingTopCapEffectChange(key, value)}
+                                    />
+                                ))}
                             </DockSection>
                         )}
 

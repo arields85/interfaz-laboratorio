@@ -1,12 +1,23 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { KpiWidgetConfig } from '../../domain/admin.types';
+import { STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS } from '../../components/ui/GaugeDisplay';
 import { DEFAULT_GAUGE_VALUE_FONT_SIZE } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+    DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+    DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+    DEFAULT_KPI_TRAVELING_TOP_CAP_SHAPE,
+} from '../../utils/kpiTopCapEffects';
 import KpiWidget from './KpiWidget';
 
 const equipmentMap = new Map();
+const CIRCULAR_RADIUS = 60;
+const CIRCUMFERENCE = 2 * Math.PI * CIRCULAR_RADIUS;
+const SEGMENT_COUNT = 90;
+const SEGMENT_OVERLAP = 0.75;
 
 function makeWidget(overrides?: Partial<KpiWidgetConfig>): KpiWidgetConfig {
     return {
@@ -62,6 +73,20 @@ function makeSimulatedWidget(simulatedValue: number | string | undefined, overri
     });
 }
 
+function getShapeCenter(element: Element) {
+    if (element.tagName.toLowerCase() === 'rect') {
+        return {
+            x: Number(element.getAttribute('x')) + (Number(element.getAttribute('width')) / 2),
+            y: Number(element.getAttribute('y')) + (Number(element.getAttribute('height')) / 2),
+        };
+    }
+
+    return {
+        x: (Number(element.getAttribute('x1')) + Number(element.getAttribute('x2'))) / 2,
+        y: (Number(element.getAttribute('y1')) + Number(element.getAttribute('y2'))) / 2,
+    };
+}
+
 describe('KpiWidget', () => {
     it('renders a loading skeleton without gauge or resolved value output', () => {
         const { container } = render(
@@ -100,6 +125,37 @@ describe('KpiWidget', () => {
         expect(gauge).toHaveClass('w-full', 'h-full');
         expect(gauge.style.width).toBe('');
         expect(gauge.style.height).toBe('');
+        expect(screen.getByTestId('gauge-circular-static-top-cap')).toBeInTheDocument();
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        expect(movingTopCap).toBeInTheDocument();
+        expect(movingTopCap).not.toHaveAttribute('data-route-step');
+        expect(movingTopCap).not.toHaveAttribute('data-route-count');
+        expect(screen.getAllByTestId('gauge-circular-arc-segment')[0]).toHaveAttribute('stroke-linecap', 'butt');
+
+        const topCapCore = within(movingTopCap).getByTestId('gauge-circular-top-cap-core');
+        const firstSegment = screen.getAllByTestId('gauge-circular-arc-segment')[0];
+        const expectedFullCircleSegmentLength = (CIRCUMFERENCE / SEGMENT_COUNT) + SEGMENT_OVERLAP;
+        const expectedVisibleArcLength = 0.11 * CIRCUMFERENCE;
+        const expectedStaticCapAngleDegrees = (expectedVisibleArcLength * 360) / CIRCUMFERENCE;
+        const expectedStaticCapX = 70 + (Math.cos((expectedStaticCapAngleDegrees * Math.PI) / 180) * CIRCULAR_RADIUS);
+        const expectedStaticCapY = 70 + (Math.sin((expectedStaticCapAngleDegrees * Math.PI) / 180) * CIRCULAR_RADIUS);
+
+        expect(movingTopCap).toHaveAttribute('data-progress', '0.0000');
+        expect(topCapCore.tagName.toLowerCase()).toBe('rect');
+        expect(getShapeCenter(topCapCore).x).toBeCloseTo(Number(movingTopCap.getAttribute('data-cap-x')), 2);
+        expect(getShapeCenter(topCapCore).y).toBeCloseTo(Number(movingTopCap.getAttribute('data-cap-y')), 2);
+        expect(staticTopCap).toHaveAttribute('data-intensity-progress', String(STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS));
+        expect(Number(staticTopCap.getAttribute('data-cap-angle'))).toBeCloseTo(expectedStaticCapAngleDegrees, 2);
+        expect(Number(staticTopCap.getAttribute('data-cap-x'))).toBeCloseTo(expectedStaticCapX, 2);
+        expect(Number(staticTopCap.getAttribute('data-cap-y'))).toBeCloseTo(expectedStaticCapY, 2);
+        expect(within(staticTopCap).queryByTestId('gauge-circular-static-top-cap-base')).not.toBeInTheDocument();
+        expect(Number(staticTopCap.getAttribute('data-cap-length'))).toBeCloseTo(4, 2);
+        expect(Number(staticTopCap.getAttribute('data-cap-thickness'))).toBeCloseTo(8, 2);
+        expect(firstSegment).toHaveAttribute(
+            'stroke-dasharray',
+            `${expectedFullCircleSegmentLength} ${CIRCUMFERENCE - expectedFullCircleSegmentLength}`,
+        );
     });
 
     it('uses the custom unit when unitOverride is enabled', () => {
@@ -121,6 +177,143 @@ describe('KpiWidget', () => {
 
         expect(screen.getByText('%')).toBeInTheDocument();
         expect(screen.queryByText('kW')).not.toBeInTheDocument();
+    });
+
+    it('passes fixed top-cap effects to the static circular cap while ignoring legacy base rect rendering', () => {
+        render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 10,
+                        fixedTopCapBase: {
+                            length: 75,
+                            thickness: 20,
+                            alpha: 45,
+                        },
+                        fixedTopCapEffects: {
+                            ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                            auraIntensity: 35,
+                            haloIntensity: 45,
+                            highlightIntensity: 55,
+                            blur: 65,
+                            extension: 75,
+                            thickness: 85,
+                        },
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-aura', '35');
+        expect(staticTopCap).toHaveAttribute('data-effect-halo', '45');
+        expect(staticTopCap).toHaveAttribute('data-effect-highlight', '55');
+        expect(staticTopCap).toHaveAttribute('data-effect-blur', '65');
+        expect(staticTopCap).toHaveAttribute('data-effect-extension', '75');
+        expect(staticTopCap).toHaveAttribute('data-effect-thickness', '85');
+        expect(within(staticTopCap).queryByTestId('gauge-circular-static-top-cap-base')).not.toBeInTheDocument();
+        expect(Number(staticTopCap.getAttribute('data-cap-length'))).toBeCloseTo(4, 2);
+        expect(Number(staticTopCap.getAttribute('data-cap-thickness'))).toBeCloseTo(8, 2);
+    });
+
+    it('passes isolated traveling top-cap effects to the moving circular cap', () => {
+        render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 10,
+                        fixedTopCapBase: {
+                            length: 75,
+                            thickness: 20,
+                            alpha: 45,
+                        },
+                        fixedTopCapEffects: {
+                            ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                            auraIntensity: 35,
+                            haloIntensity: 45,
+                            highlightIntensity: 55,
+                            blur: 65,
+                            extension: 75,
+                            thickness: 85,
+                        },
+                        travelingTopCapEffects: {
+                            ...DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+                            auraIntensity: 10,
+                            haloIntensity: 20,
+                            highlightIntensity: 30,
+                            blur: 40,
+                            extension: 50,
+                            thickness: 60,
+                        },
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-aura', '35');
+        expect(staticTopCap).toHaveAttribute('data-effect-extension', '75');
+        expect(movingTopCap).toHaveAttribute('data-effect-aura', '10');
+        expect(movingTopCap).toHaveAttribute('data-effect-halo', '20');
+        expect(movingTopCap).toHaveAttribute('data-effect-highlight', '30');
+        expect(movingTopCap).toHaveAttribute('data-effect-blur', '40');
+        expect(movingTopCap).toHaveAttribute('data-effect-extension', '50');
+        expect(movingTopCap).toHaveAttribute('data-effect-thickness', '60');
+        expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-static-top-cap-glow\)$/);
+        expect(within(movingTopCap).getByTestId('gauge-circular-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-traveling-top-cap-glow\)$/);
+    });
+
+    it('keeps the fixed top-cap shape configurable while forcing the traveling top cap to pill', () => {
+        render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 10,
+                        fixedTopCapBase: {
+                            length: 0,
+                            thickness: 0,
+                            alpha: 45,
+                        },
+                        fixedTopCapShape: {
+                            ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                            pill: true,
+                        },
+                        fixedTopCapEffects: DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                        travelingTopCapShape: {
+                            ...DEFAULT_KPI_TRAVELING_TOP_CAP_SHAPE,
+                            pill: false,
+                        },
+                        travelingTopCapEffects: DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const staticAura = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-aura');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        const movingAura = within(movingTopCap).getByTestId('gauge-circular-top-cap-aura');
+
+        expect(staticTopCap).toHaveAttribute('data-shape-pill', 'true');
+        expect(movingTopCap).toHaveAttribute('data-shape-pill', 'true');
+        expect(within(staticTopCap).queryByTestId('gauge-circular-static-top-cap-base')).not.toBeInTheDocument();
+        expect(Number(staticAura.getAttribute('rx'))).toBeGreaterThan(0);
+        expect(Number(movingAura.getAttribute('rx'))).toBeGreaterThan(0);
     });
 
     it('uses the simulated binding unit for the widget and bar scale labels even if a stale custom unit exists', () => {

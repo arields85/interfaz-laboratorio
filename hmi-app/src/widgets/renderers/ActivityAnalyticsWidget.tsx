@@ -2924,6 +2924,7 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only helper kept colocated with the widget renderer
 export function resolveProdTrendLatestValueLabelPlacement({
     latestPointY,
     chartTop,

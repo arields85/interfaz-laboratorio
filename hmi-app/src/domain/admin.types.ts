@@ -277,6 +277,39 @@ export interface KpiDisplayOptions {
     dynamicColor?: boolean;
     unit?: string;
     unitOverride?: boolean;
+    fixedTopCapBase?: KpiFixedTopCapBase;
+    fixedTopCapShape?: KpiTopCapShape;
+    fixedTopCapEffects?: KpiFixedTopCapEffects;
+    travelingTopCapShape?: KpiTopCapShape;
+    travelingTopCapEffects?: KpiTravelingTopCapEffects;
+}
+
+export interface KpiTopCapShape {
+    pill?: boolean;
+}
+
+export interface KpiFixedTopCapBase {
+    length?: number;
+    thickness?: number;
+    alpha?: number;
+}
+
+export interface KpiFixedTopCapEffects {
+    auraIntensity?: number;
+    haloIntensity?: number;
+    highlightIntensity?: number;
+    blur?: number;
+    extension?: number;
+    thickness?: number;
+}
+
+export interface KpiTravelingTopCapEffects {
+    auraIntensity?: number;
+    haloIntensity?: number;
+    highlightIntensity?: number;
+    blur?: number;
+    extension?: number;
+    thickness?: number;
 }
 
 /**

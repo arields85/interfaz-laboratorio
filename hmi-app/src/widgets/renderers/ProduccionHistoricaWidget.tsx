@@ -736,7 +736,14 @@ export default function ProdHistoryWidget({
     const productionUnit: ProductionUnit = displayOptions?.productionUnit ?? 'unidades';
     const productionLabel = `${toSentenceCase(productionBaseLabel)} (${productionUnit})`;
     const oeeLabel = displayOptions?.oeeLabel ?? 'OEE (%)';
-    const [productionChartMode, setProductionChartMode] = useState<ProductionChartMode>(() => displayOptions?.productionChartMode ?? 'bars');
+    const persistedProductionChartMode = displayOptions?.productionChartMode ?? 'bars';
+    const [productionChartModeState, setProductionChartModeState] = useState<{
+        sourceMode: ProductionChartMode;
+        runtimeMode: ProductionChartMode;
+    }>(() => ({
+        sourceMode: persistedProductionChartMode,
+        runtimeMode: persistedProductionChartMode,
+    }));
     const useSecondaryAxis = displayOptions?.useSecondaryAxis ?? true;
     const autoScale = displayOptions?.autoScale ?? true;
     const showGrid = displayOptions?.showGrid ?? true;
@@ -764,16 +771,22 @@ export default function ProdHistoryWidget({
     const [showOee, setShowOee] = useState<boolean>(() => displayOptions?.defaultShowOee ?? true);
     const rawSeries = useMemo(() => generateHistoricalSeries(bucket, new Date()), [bucket]);
 
-    useEffect(() => {
-        setProductionChartMode(displayOptions?.productionChartMode ?? 'bars');
-    }, [displayOptions?.productionChartMode]);
+    if (productionChartModeState.sourceMode !== persistedProductionChartMode) {
+        setProductionChartModeState({
+            sourceMode: persistedProductionChartMode,
+            runtimeMode: persistedProductionChartMode,
+        });
+    }
 
-    const effectiveProductionChartMode = productionChartMode;
+    const effectiveProductionChartMode = productionChartModeState.runtimeMode;
     const effectiveShowOee = showOee;
 
     const handleProductionModeToggle = useCallback((checked: boolean) => {
         const nextMode: ProductionChartMode = checked ? 'area' : 'bars';
-        setProductionChartMode(nextMode);
+        setProductionChartModeState((current) => ({
+            ...current,
+            runtimeMode: nextMode,
+        }));
         onPersistDisplayOptions?.({ productionChartMode: nextMode });
     }, [onPersistDisplayOptions]);
 

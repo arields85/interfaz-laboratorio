@@ -1327,7 +1327,10 @@ export default function DashboardBuilderPage() {
                         />
                     </div>
 
-                    <div data-testid="dashboard-builder-canvas-viewport" className="flex min-h-0 min-w-0 flex-1 overflow-hidden pt-2 pb-3">
+                    <div
+                        data-testid="dashboard-builder-canvas-viewport"
+                        className="flex min-h-0 min-w-0 flex-1 overflow-hidden pt-2 pb-3"
+                    >
                         <BuilderCanvas
                             layout={draft.layout}
                             widgets={draft.widgets}
@@ -1363,13 +1366,13 @@ export default function DashboardBuilderPage() {
     return (
         <>
             <AdminWorkspaceLayout
-            mainScrollable={mainScrollable}
-            contextBarPanel={contextBarPanel}
-            contextBar={contextBar}
-            rail={rail}
-            sidePanel={sidePanel}
-        >
-            {content}
+                mainScrollable={mainScrollable}
+                contextBarPanel={contextBarPanel}
+                contextBar={contextBar}
+                rail={rail}
+                sidePanel={sidePanel}
+            >
+                {content}
             </AdminWorkspaceLayout>
 
             <AdminDialog

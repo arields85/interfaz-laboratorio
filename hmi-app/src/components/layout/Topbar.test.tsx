@@ -137,7 +137,7 @@ describe('Topbar', () => {
         hierarchyStorageMock.getNodes.mockResolvedValue([
             {
                 id: 'node-plant-01',
-                name: 'Steigen',
+                name: 'Planta Demo',
                 type: 'plant',
                 parentId: null,
                 order: 0,
@@ -167,7 +167,7 @@ describe('Topbar', () => {
         hierarchyStorageMock.getNodes.mockResolvedValue([
             {
                 id: 'node-plant-01',
-                name: 'Steigen',
+                name: 'Planta Demo',
                 type: 'plant',
                 parentId: null,
                 order: 0,

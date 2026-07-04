@@ -10,7 +10,7 @@ export type WidgetRuntimeStateKind =
     | 'empty-comparable'
     | 'stale';
 
-export const WIDGET_RUNTIME_STATE_LABELS: Record<WidgetRuntimeStateKind, string> = {
+const WIDGET_RUNTIME_STATE_LABELS: Record<WidgetRuntimeStateKind, string> = {
     loading: 'Cargando',
     preparing: 'Cargando',
     layout: 'Cargando',

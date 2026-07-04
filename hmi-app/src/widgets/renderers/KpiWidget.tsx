@@ -11,6 +11,12 @@ import {
     DEFAULT_GAUGE_VALUE_FONT_SIZE,
     resolveActivityAnalyticsDonutCenterValueFontSize,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    resolveKpiFixedTopCapEffects,
+    resolveKpiFixedTopCapShape,
+    resolveKpiTravelingTopCapEffects,
+    resolveKpiTravelingTopCapShape,
+} from '../../utils/kpiTopCapEffects';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     'Gauge': Gauge,
@@ -84,6 +90,10 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
     };
     const min = opts?.min ?? 0;
     const max = opts?.max ?? 100;
+    const fixedTopCapEffects = resolveKpiFixedTopCapEffects(opts?.fixedTopCapEffects);
+    const fixedTopCapShape = resolveKpiFixedTopCapShape(opts?.fixedTopCapShape);
+    const travelingTopCapEffects = resolveKpiTravelingTopCapEffects(opts?.travelingTopCapEffects);
+    const travelingTopCapShape = resolveKpiTravelingTopCapShape(opts?.travelingTopCapShape);
     const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
     const bindingUnit = widget.binding?.unit?.trim() ?? '';
     const resolvedUnit = resolved.unit?.trim() ?? '';
@@ -141,7 +151,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
             >
                 <div className="w-full h-full min-h-0">
                     {mode === 'circular' ? (
-                        <CircularKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
+                        <CircularKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} fixedTopCapEffects={fixedTopCapEffects} fixedTopCapShape={fixedTopCapShape} travelingTopCapEffects={travelingTopCapEffects} travelingTopCapShape={travelingTopCapShape} />
                     ) : (
                         <BarKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
                     )}
@@ -227,7 +237,7 @@ function getGaugeVisuals(value: number | null, dynamicColor?: boolean, threshold
     };
 }
 
-function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties }) {
+function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle, fixedTopCapEffects, fixedTopCapShape, travelingTopCapEffects, travelingTopCapShape }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties, fixedTopCapEffects: ReturnType<typeof resolveKpiFixedTopCapEffects>, fixedTopCapShape: ReturnType<typeof resolveKpiFixedTopCapShape>, travelingTopCapEffects: ReturnType<typeof resolveKpiTravelingTopCapEffects>, travelingTopCapShape: ReturnType<typeof resolveKpiTravelingTopCapShape> }) {
     const safeValue = value ?? min;
     const clamp = Math.min(Math.max(safeValue, min), max);
     const range = max - min;
@@ -238,8 +248,11 @@ function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTex
         <div className="relative flex items-center justify-center w-full h-full min-h-[140px]">
             <GaugeDisplay
                 normalizedValue={normalizedValue}
+                gradientNormalized={1}
                 color={gaugeVisuals.color}
                 mode="circular"
+                circularBaseSegmentLinecap="butt"
+                circularTopCap={{ enabled: true, staticShape: fixedTopCapShape, staticEffects: fixedTopCapEffects, travelingShape: travelingTopCapShape, travelingEffects: travelingTopCapEffects }}
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-white leading-none mb-1" style={valueTextStyle}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>
