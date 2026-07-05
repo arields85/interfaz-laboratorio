@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { AlertTriangle, Loader2, Link2Off } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { dashboardStorage } from '../services/DashboardStorageService';
@@ -12,6 +12,7 @@ import { useDataOverview } from '../queries/useDataOverview';
 import type { HierarchyContext } from '../widgets/resolvers/hierarchyResolver';
 import { resetShieldContentReady, signalShieldContentReady } from '../shield/shieldContentReadiness';
 import { useUIStore } from '../store/ui.store';
+import { getDefaultDashboardView, materializeDashboardView, normalizeDashboardViews } from '../utils/dashboardViews';
 
 // =============================================================================
 // Dashboard Público (Visor)
@@ -33,6 +34,8 @@ export default function Dashboard() {
     const [isLoading, setIsLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
+    const [selectedViewIds, setSelectedViewIds] = useState<Record<string, string>>({});
+    const handledQueryRef = useRef<string | null>(null);
     const {
         connection,
         machines,
@@ -114,21 +117,55 @@ export default function Dashboard() {
         }
 
         const requestedDashboardId = searchParams.get('dashboardId');
+        const requestedViewId = searchParams.get('viewId');
+        const hasDashboardQuery = requestedDashboardId !== null;
+        const hasViewQuery = requestedViewId !== null;
+        const queryKey = searchParams.toString();
 
-        if (!requestedDashboardId) {
+        if (!hasDashboardQuery && !hasViewQuery) {
+            handledQueryRef.current = null;
             return;
         }
 
-        const requestedDashboardIndex = publishedDashboards.findIndex((dashboard) => dashboard.id === requestedDashboardId);
+        if (handledQueryRef.current === queryKey) {
+            return;
+        }
+
+        handledQueryRef.current = queryKey;
+
+        const requestedDashboardIndex = requestedDashboardId
+            ? publishedDashboards.findIndex((dashboard) => dashboard.id === requestedDashboardId)
+            : -1;
+        const resolvedDashboard = requestedDashboardIndex >= 0
+            ? publishedDashboards[requestedDashboardIndex]
+            : publishedDashboards[activeTab] ?? publishedDashboards[0];
 
         if (requestedDashboardIndex >= 0) {
             setActiveTab(requestedDashboardIndex);
         }
 
+        if (requestedViewId && resolvedDashboard) {
+            const normalizedDashboard = normalizeDashboardViews(resolvedDashboard);
+            const normalizedViews = normalizedDashboard.views ?? [];
+            const requestedView = normalizedViews.find((view) => view.id === requestedViewId);
+
+            if (requestedView) {
+                setSelectedViewIds((previous) => ({
+                    ...previous,
+                    [normalizedDashboard.id]: requestedView.id,
+                }));
+            }
+        }
+
         const nextSearchParams = new URLSearchParams(searchParams);
-        nextSearchParams.delete('dashboardId');
+        if (hasDashboardQuery) {
+            nextSearchParams.delete('dashboardId');
+        }
+        if (hasViewQuery) {
+            nextSearchParams.delete('viewId');
+        }
         setSearchParams(nextSearchParams, { replace: true });
-    }, [isLoading, publishedDashboards, searchParams, setSearchParams]);
+    }, [activeTab, isLoading, publishedDashboards, searchParams, setSearchParams]);
 
     const rawActiveDashboard = publishedDashboards[activeTab] ?? publishedDashboards[0];
 
@@ -136,18 +173,30 @@ export default function Dashboard() {
     // en vez de la working copy (que puede tener cambios pendientes del admin).
     const activeDashboard = useMemo(() => {
         if (!rawActiveDashboard) return rawActiveDashboard;
-        const snap = rawActiveDashboard.publishedSnapshot;
-        if (!snap) return rawActiveDashboard;
-        return {
-            ...rawActiveDashboard,
-            aspect: snap.aspect,
-            cols: snap.cols,
-            rows: snap.rows,
-            widgets: snap.widgets,
-            layout: snap.layout,
-            headerConfig: snap.headerConfig,
-        };
-    }, [rawActiveDashboard]);
+
+        const normalizedDashboard = normalizeDashboardViews(rawActiveDashboard);
+        const snap = normalizedDashboard.publishedSnapshot;
+        const viewerDashboard = snap
+            ? normalizeDashboardViews({
+                ...normalizedDashboard,
+                aspect: snap.aspect,
+                cols: snap.cols,
+                rows: snap.rows,
+                views: snap.views,
+                activeViewId: snap.activeViewId,
+                widgets: snap.widgets,
+                layout: snap.layout,
+                headerConfig: snap.headerConfig,
+            })
+            : normalizedDashboard;
+        const preferredViewId = selectedViewIds[viewerDashboard.id]
+            ?? getDefaultDashboardView(viewerDashboard).id;
+
+        return materializeDashboardView(
+            viewerDashboard,
+            preferredViewId,
+        );
+    }, [rawActiveDashboard, selectedViewIds]);
 
     const dashboardViewState = isLoading
         ? 'loading'
@@ -203,7 +252,12 @@ export default function Dashboard() {
             return;
         }
 
-        const updatedDashboard = await dashboardStorage.persistPublishedWidgetDisplayOptions(activeDashboard.id, widgetId, displayOptions);
+        const updatedDashboard = await dashboardStorage.persistPublishedWidgetDisplayOptions(
+            activeDashboard.id,
+            activeDashboard.activeViewId ?? getDefaultDashboardView(activeDashboard).id ?? 'view-default',
+            widgetId,
+            displayOptions,
+        );
 
         if (!updatedDashboard) {
             return;
@@ -219,6 +273,17 @@ export default function Dashboard() {
         if (nextIndex >= 0) {
             setActiveTab(nextIndex);
         }
+    };
+
+    const handleSelectView = (viewId: string) => {
+        if (!activeDashboard?.views?.some((view) => view.id === viewId)) {
+            return;
+        }
+
+        setSelectedViewIds((previous) => ({
+            ...previous,
+            [activeDashboard.id]: viewId,
+        }));
     };
 
     const renderNoPublishedState = () => (
@@ -276,10 +341,12 @@ export default function Dashboard() {
             {/* HEADER CONFIGURADO DESDE dashboard.headerConfig */}
             <DashboardHeader
                 dashboard={activeDashboard}
+                activeViewId={activeDashboard.activeViewId}
                 equipmentMap={equipmentMap}
                 connection={connection}
                 machines={machines}
                 onNavigateDashboard={handleNavigateDashboard}
+                onSelectView={handleSelectView}
                 hierarchyContext={hierarchyContext}
             />
 

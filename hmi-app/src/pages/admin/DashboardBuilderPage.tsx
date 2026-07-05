@@ -1,14 +1,14 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { DragEvent } from 'react';
 import { useParams, useNavigate, useBlocker } from 'react-router-dom';
-import { Save, ArrowLeft, Loader2, AlertCircle, ChevronRight, AlertTriangle, LayoutGrid } from 'lucide-react';
+import { Save, ArrowLeft, Loader2, AlertCircle, ChevronLeft, ChevronRight, AlertTriangle, LayoutGrid, Plus, Pencil, Trash2 } from 'lucide-react';
 import { dashboardStorage } from '../../services/DashboardStorageService';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { variableCatalogStorage } from '../../services/VariableCatalogStorageService';
 import { mockEquipmentList } from '../../mocks/equipment.mock';
 import type { CatalogVariable } from '../../domain';
-import type { Dashboard, DashboardHeaderConfig, DashboardVisualStatus, HierarchyNode, WidgetType, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
+import type { Dashboard, DashboardHeaderConfig, DashboardViewIconKey, DashboardVisualStatus, HierarchyNode, WidgetType, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import { getDashboardVisualStatus } from '../../domain/admin.types';
 import type { EquipmentSummary, MetricValue } from '../../domain/equipment.types';
 import { buildHierarchyAggregationTrace, type HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
@@ -21,9 +21,10 @@ import DashboardHeader from '../../components/viewer/DashboardHeader';
 import AdminDialog from '../../components/admin/AdminDialog';
 import AdminDestructiveDialog from '../../components/admin/AdminDestructiveDialog';
 import AdminActionButton from '../../components/admin/AdminActionButton';
+import AdminIconToolbarButton from '../../components/admin/AdminIconToolbarButton';
+import AdminSelect from '../../components/admin/AdminSelect';
 import AdminTag from '../../components/admin/AdminTag';
-import ContextBarNotice from '../../components/admin/ContextBarNotice';
-import HoverTooltip from '../../components/ui/HoverTooltip';
+import ContextBarNotice, { CONTEXT_BAR_NOTICE_WARNING_TONE_CLS } from '../../components/admin/ContextBarNotice';
 import { generateWidgetId } from '../../utils/idGenerator';
 import {
     HEADER_WIDGET_DRAG_MIME,
@@ -40,6 +41,8 @@ import {
 } from '../../utils/connectionWidget';
 import { createDefaultActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
 import { createDefaultProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
+import { ADMIN_SIDEBAR_INPUT_CLS } from '../../components/admin/adminSidebarStyles';
+import { getDashboardViewIconComponent } from '../../utils/dashboardViewIcons';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
 import { getAncestors } from '../../utils/hierarchyTree';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
@@ -50,6 +53,36 @@ import { buildCatalogVariableId } from '../../utils/catalogVariableId';
 import { getUsedCatalogVariableIdsForWidget, hasDuplicateCatalogBindings } from '../../utils/catalogBindingIdentity';
 import { useUIStore } from '../../store/ui.store';
 import { useDataOverview } from '../../queries/useDataOverview';
+import {
+    canDeleteDashboardView,
+    createDashboardView,
+    deleteDashboardView,
+    getActiveDashboardView,
+    getAllDashboardWidgets,
+    mapDashboardWidgets,
+    moveDashboardView,
+    updateDashboardView,
+    updateDashboardViewPresentation,
+    normalizeDashboardViews,
+} from '../../utils/dashboardViews';
+import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
+
+const DASHBOARD_BUILDER_WARNING_SLOT_CLS = 'flex w-52 justify-end';
+const DASHBOARD_BUILDER_DIRTY_SAVE_BUTTON_CLS = [
+    'border-status-warning',
+    CONTEXT_BAR_NOTICE_WARNING_TONE_CLS,
+    'hover:border-status-warning',
+    'hover:bg-[color:color-mix(in_srgb,var(--color-status-warning)_10%,transparent)]',
+    'hover:text-status-warning',
+].join(' ');
+const DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS = {
+    size: 16,
+    strokeWidth: 2.25,
+    className: 'shrink-0',
+} as const;
+const AUTO_VIEW_ICON_SELECTION = '__auto__';
+
+type DashboardViewIconSelection = DashboardViewIconKey | typeof AUTO_VIEW_ICON_SELECTION;
 
 // =============================================================================
 // DashboardBuilderPage
@@ -73,10 +106,16 @@ export default function DashboardBuilderPage() {
     
     // 2. Estado de selección
     const [selectedWidgetId, setSelectedWidgetId] = useState<string | undefined>();
+    const [selectedViewId, setSelectedViewId] = useState<string | undefined>();
+    const pendingSelectedViewIdRef = useRef<string | null>(null);
 
     const [draggedWidget, setDraggedWidget] = useState<HeaderWidgetDragPayload | null>(null);
     const [isHeaderDropActive, setIsHeaderDropActive] = useState(false);
     const [dialogMessage, setDialogMessage] = useState<string | null>(null);
+    const [isCreateViewDialogOpen, setIsCreateViewDialogOpen] = useState(false);
+    const [isRenameViewDialogOpen, setIsRenameViewDialogOpen] = useState(false);
+    const [viewNameDraft, setViewNameDraft] = useState('');
+    const [viewIconDraft, setViewIconDraft] = useState<DashboardViewIconSelection>(AUTO_VIEW_ICON_SELECTION);
     const [variableDeletionState, setVariableDeletionState] = useState<VariableDeletionState | null>(null);
     const [, setNodeTypeLabelsVersion] = useState(0);
 
@@ -132,8 +171,7 @@ export default function DashboardBuilderPage() {
     // Dirty check — top-level para permitir useBlocker sin violar las reglas de hooks
     const isDirty = useMemo(() => {
         if (!draft || !originalConfig) return false;
-        return JSON.stringify(draft.widgets) !== JSON.stringify(originalConfig.widgets) ||
-               JSON.stringify(draft.layout) !== JSON.stringify(originalConfig.layout) ||
+        return JSON.stringify(draft.views) !== JSON.stringify(originalConfig.views) ||
                draft.name !== originalConfig.name ||
                draft.dashboardType !== originalConfig.dashboardType ||
                JSON.stringify(draft.headerConfig) !== JSON.stringify(originalConfig.headerConfig);
@@ -201,9 +239,10 @@ export default function DashboardBuilderPage() {
                 setStagedVariables([]);
 
                 if (nextConfig) {
-                    const normalizedConfig = normalizeDashboardBounds(nextConfig);
+                    const normalizedConfig = normalizeDashboardViews(normalizeDashboardBounds(nextConfig));
                     setOriginalConfig(normalizedConfig);
                     setDraft(JSON.parse(JSON.stringify(normalizedConfig))); // Deep copy
+                    setSelectedViewId(normalizedConfig.activeViewId);
                 }
             } catch (error) {
                 console.error("Error cargando dashboard:", error);
@@ -214,6 +253,19 @@ export default function DashboardBuilderPage() {
         loadConfig();
     }, [id]);
 
+    useEffect(() => {
+        if (!draft || !selectedWidgetId) {
+            return;
+        }
+
+        const activeView = getActiveDashboardView(draft, selectedViewId);
+        const widgetStillExists = activeView.widgets.some((widget) => widget.id === selectedWidgetId);
+
+        if (!widgetStillExists) {
+            setSelectedWidgetId(undefined);
+        }
+    }, [draft, selectedViewId, selectedWidgetId]);
+
     const hierarchyContext = useMemo<HierarchyContext | undefined>(() => {
         if (!draft) return undefined;
         return {
@@ -222,6 +274,44 @@ export default function DashboardBuilderPage() {
             currentNodeId: draft.ownerNodeId,
         };
     }, [allDashboards, allNodes, draft]);
+
+    useEffect(() => {
+        if (!draft) {
+            if (selectedViewId !== undefined) {
+                setSelectedViewId(undefined);
+            }
+
+            pendingSelectedViewIdRef.current = null;
+
+            return;
+        }
+
+        const pendingSelectedViewId = pendingSelectedViewIdRef.current;
+
+        if (pendingSelectedViewId && draft.views?.some((view) => view.id === pendingSelectedViewId)) {
+            pendingSelectedViewIdRef.current = null;
+
+            if (pendingSelectedViewId !== selectedViewId) {
+                setSelectedViewId(pendingSelectedViewId);
+            }
+
+            return;
+        }
+
+        if (pendingSelectedViewId && pendingSelectedViewId === selectedViewId) {
+            return;
+        }
+
+        const resolvedViewId = getActiveDashboardView(draft, selectedViewId).id;
+
+        if (resolvedViewId !== selectedViewId) {
+            setSelectedViewId(resolvedViewId);
+        }
+    }, [draft, selectedViewId]);
+
+    const currentActiveView = useMemo(() => (
+        draft ? getActiveDashboardView(draft, selectedViewId) : null
+    ), [draft, selectedViewId]);
 
     const backButton = (
         <button
@@ -237,22 +327,6 @@ export default function DashboardBuilderPage() {
     const contextBarPanel = draft ? (
         <div className="relative flex items-center gap-2 px-3">
             {backButton}
-            <HoverTooltip label={isGridVisible ? 'Ocultar grid' : 'Mostrar grid'} position="right" className="flex">
-                <button
-                    aria-label={isGridVisible ? 'Ocultar grid' : 'Mostrar grid'}
-                    aria-pressed={isGridVisible}
-                    className={[
-                        'h-9 w-9 inline-flex items-center justify-center rounded-md transition-colors',
-                        isGridVisible
-                            ? 'bg-admin-accent/15 text-admin-accent hover:bg-admin-accent/20'
-                            : 'text-industrial-muted hover:bg-white/5 hover:text-white',
-                    ].join(' ')}
-                    type="button"
-                    onClick={toggleGrid}
-                >
-                    <LayoutGrid size={16} />
-                </button>
-            </HoverTooltip>
         </div>
     ) : backButton;
 
@@ -264,6 +338,110 @@ export default function DashboardBuilderPage() {
 
     const handleCancelVariableDeletion = () => {
         setVariableDeletionState(null);
+    };
+
+    const resolveAutoViewIconKey = (fallbackName?: string): DashboardViewIconKey => {
+        return resolveDashboardViewIconKey({ name: fallbackName?.trim() || 'Overview' });
+    };
+
+    const resolvePersistedViewIconKey = (selection: DashboardViewIconSelection): DashboardViewIconKey | undefined => {
+        return selection === AUTO_VIEW_ICON_SELECTION ? undefined : selection;
+    };
+
+    const buildViewIconOptions = (fallbackName?: string) => {
+        const autoIconKey = resolveAutoViewIconKey(fallbackName);
+        const AutoIcon = getDashboardViewIconComponent(autoIconKey);
+        const ProductionIcon = getDashboardViewIconComponent('production');
+        const TechnicalIcon = getDashboardViewIconComponent('technical');
+        const MaintenanceIcon = getDashboardViewIconComponent('maintenance');
+        const DefaultIcon = getDashboardViewIconComponent('default');
+
+        return [
+            { value: AUTO_VIEW_ICON_SELECTION, label: 'Automático', icon: <AutoIcon size={12} /> },
+            { value: 'production', label: 'Producción', icon: <ProductionIcon size={12} /> },
+            { value: 'technical', label: 'Técnica', icon: <TechnicalIcon size={12} /> },
+            { value: 'maintenance', label: 'Mantenimiento', icon: <MaintenanceIcon size={12} /> },
+            { value: 'default', label: 'Predeterminado', icon: <DefaultIcon size={12} /> },
+        ];
+    };
+
+    const handleSelectView = (viewId: string) => {
+        setSelectedViewId(viewId);
+        setSelectedWidgetId(undefined);
+    };
+
+    const handleConfirmCreateView = () => {
+        const trimmedName = viewNameDraft.trim();
+
+        if (!trimmedName) {
+            setDialogMessage('Definí un nombre para la nueva vista.');
+            return;
+        }
+
+        const createdViewId = `view-${Date.now().toString(36)}`;
+
+        setDraft((prev) => {
+            if (!prev) {
+                return prev;
+            }
+
+            return createDashboardView(prev, {
+                id: createdViewId,
+                name: trimmedName,
+                iconKey: resolvePersistedViewIconKey(viewIconDraft),
+            });
+        });
+
+        pendingSelectedViewIdRef.current = createdViewId;
+        setSelectedViewId(createdViewId);
+
+        setSelectedWidgetId(undefined);
+        setViewNameDraft('');
+        setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
+        setIsCreateViewDialogOpen(false);
+    };
+
+    const handleConfirmRenameView = () => {
+        const trimmedName = viewNameDraft.trim();
+
+        if (!trimmedName) {
+            setDialogMessage('Definí un nombre para la vista.');
+            return;
+        }
+
+        if (!currentActiveView) {
+            return;
+        }
+
+        setDraft((prev) => (prev ? updateDashboardViewPresentation(prev, currentActiveView.id, {
+            name: trimmedName,
+            iconKey: resolvePersistedViewIconKey(viewIconDraft),
+        }) : prev));
+        setViewNameDraft('');
+        setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
+        setIsRenameViewDialogOpen(false);
+    };
+
+    const handleMoveCurrentView = (direction: 'left' | 'right') => {
+        if (!currentActiveView) {
+            return;
+        }
+
+        setDraft((prev) => (prev ? moveDashboardView(prev, currentActiveView.id, direction) : prev));
+    };
+
+    const handleDeleteCurrentView = () => {
+        if (!draft || !currentActiveView) {
+            return;
+        }
+
+        if (!canDeleteDashboardView(draft.views ?? [], currentActiveView.id)) {
+            setDialogMessage('No se puede eliminar la última vista del dashboard.');
+            return;
+        }
+
+        setDraft((prev) => (prev ? deleteDashboardView(prev, currentActiveView.id) : prev));
+        setSelectedWidgetId(undefined);
     };
 
     const handleConfirmVariableDeletion = async () => {
@@ -288,7 +466,7 @@ export default function DashboardBuilderPage() {
             });
 
             const affectedDashboards = dashboardsToProcess.filter((dashboard) =>
-                dashboard.widgets.some((widget) => widget.binding?.catalogVariableId === variableId),
+                getAllDashboardWidgets(dashboard).some((widget) => widget.binding?.catalogVariableId === variableId),
             );
 
             await variableCatalogStorage.delete(variableId);
@@ -296,8 +474,7 @@ export default function DashboardBuilderPage() {
             await Promise.all(
                 affectedDashboards.map(async (dashboard) => {
                     const cleanedDashboard: Dashboard = {
-                        ...dashboard,
-                        widgets: dashboard.widgets.map((widget) => {
+                        ...mapDashboardWidgets(dashboard, (widget) => {
                             if (widget.binding?.catalogVariableId !== variableId) {
                                 return widget;
                             }
@@ -328,8 +505,7 @@ export default function DashboardBuilderPage() {
                 }
 
                 return {
-                    ...prev,
-                    widgets: prev.widgets.map((widget) => {
+                    ...mapDashboardWidgets(prev, (widget) => {
                         if (widget.binding?.catalogVariableId !== variableId) {
                             return widget;
                         }
@@ -396,8 +572,10 @@ export default function DashboardBuilderPage() {
             </div>
         );
     } else {
-        const selectedWidget = draft.widgets.find(w => w.id === selectedWidgetId);
-        const usedCatalogVariableIds = getUsedCatalogVariableIdsForWidget(draft.widgets, selectedWidget?.id);
+        const activeView = getActiveDashboardView(draft, selectedViewId);
+        const activeViewIndex = draft.views?.findIndex((view) => view.id === activeView.id) ?? 0;
+        const selectedWidget = activeView.widgets.find((widget) => widget.id === selectedWidgetId);
+        const usedCatalogVariableIds = getUsedCatalogVariableIdsForWidget(activeView.widgets, selectedWidget?.id);
         const selectedHierarchyTrace = selectedWidget?.type === 'metric-card' && selectedWidget.hierarchyMode && hierarchyContext
             ? buildHierarchyAggregationTrace(selectedWidget, hierarchyContext, equipmentMap, machines)
             : undefined;
@@ -408,7 +586,7 @@ export default function DashboardBuilderPage() {
         const ownerNodeBreadcrumbs = ownerNode
             ? getAncestors(ownerNode.id, allNodes)
             : [];
-        const selectedWidgetLayout = draft.layout.find(l => l.widgetId === selectedWidgetId) ?? (
+        const selectedWidgetLayout = activeView.layout.find((layoutItem) => layoutItem.widgetId === selectedWidgetId) ?? (
             selectedWidget && isSelectedHeaderWidget
                 ? {
                     widgetId: selectedWidget.id,
@@ -422,6 +600,9 @@ export default function DashboardBuilderPage() {
         // Estado visual derivado del dashboard persistido (no del draft en memoria)
         const visualStatus: DashboardVisualStatus = getDashboardVisualStatus(originalConfig);
         const isAssigned = Boolean(draft.ownerNodeId);
+        const updateSelectedView = (dashboard: Dashboard, updater: (view: typeof activeView) => typeof activeView) => (
+            updateDashboardView(dashboard, activeView.id, updater)
+        );
 
         const handleSaveDraft = async () => {
             if (!draft) return;
@@ -505,9 +686,27 @@ export default function DashboardBuilderPage() {
         };
 
         const handleHeaderSubtitleChange = (value: string) => {
-            handleUpdateHeaderConfig({
-                ...(draft.headerConfig ?? {}),
-                subtitle: value.trim() || undefined,
+            const trimmedValue = value.trim() || undefined;
+
+            setDraft((prev) => {
+                if (!prev) {
+                    return prev;
+                }
+
+                if ((prev.views?.length ?? 0) <= 1) {
+                    return {
+                        ...prev,
+                        headerConfig: {
+                            ...(prev.headerConfig ?? {}),
+                            subtitle: trimmedValue,
+                        },
+                    };
+                }
+
+                return updateSelectedView(prev, (view) => ({
+                    ...view,
+                    subtitle: trimmedValue,
+                }));
             });
         };
 
@@ -524,7 +723,7 @@ export default function DashboardBuilderPage() {
         };
 
         const handleAssignWidgetToHeader = (widgetId: string) => {
-            const widget = draft.widgets.find(item => item.id === widgetId);
+            const widget = activeView.widgets.find((item) => item.id === widgetId);
 
             if (!widget || !isHeaderCompatibleWidget(widget)) {
                 return;
@@ -551,21 +750,27 @@ export default function DashboardBuilderPage() {
         };
 
         const handleRemoveWidgetFromHeader = (widgetId: string) => {
-            const widget = draft.widgets.find(item => item.id === widgetId);
+            const widget = activeView.widgets.find((item) => item.id === widgetId);
 
             setDraft(prev => {
                 if (!prev) return prev;
 
-                const hasLayoutEntry = prev.layout.some(item => item.widgetId === widgetId);
-                const nextLayout = !hasLayoutEntry && widget
-                    ? [...prev.layout, buildGridLayoutForWidget(widget, prev.layout)]
-                    : prev.layout;
+                const nextDashboard = updateSelectedView(prev, (view) => {
+                    const hasLayoutEntry = view.layout.some((item) => item.widgetId === widgetId);
+                    const nextLayout = !hasLayoutEntry && widget
+                        ? [...view.layout, buildGridLayoutForWidget(widget, view.layout)]
+                        : view.layout;
+
+                    return {
+                        ...view,
+                        layout: nextLayout,
+                    };
+                });
 
                 return {
-                    ...prev,
-                    layout: nextLayout,
+                    ...nextDashboard,
                     headerConfig: {
-                        ...(prev.headerConfig ?? {}),
+                        ...(nextDashboard.headerConfig ?? {}),
                         widgetSlots: (prev.headerConfig?.widgetSlots ?? []).filter(slot => slot.widgetId !== widgetId),
                     },
                 };
@@ -839,11 +1044,11 @@ export default function DashboardBuilderPage() {
 
             setDraft(prev => {
                 if (!prev) return prev;
-                return {
-                    ...prev,
-                    widgets: [...prev.widgets, newWidget],
-                    layout: [...prev.layout, newLayout],
-                };
+                return updateSelectedView(prev, (view) => ({
+                    ...view,
+                    widgets: [...view.widgets, newWidget],
+                    layout: [...view.layout, newLayout],
+                }));
             });
             setSelectedWidgetId(newId);
         };
@@ -894,13 +1099,16 @@ export default function DashboardBuilderPage() {
 
             setDraft(prev => {
                 if (!prev) return prev;
-                const slots = prev.headerConfig?.widgetSlots ?? [];
+                const nextDashboard = updateSelectedView(prev, (view) => ({
+                    ...view,
+                    widgets: [...view.widgets, newWidget],
+                }));
+                const slots = nextDashboard.headerConfig?.widgetSlots ?? [];
                 const nextSlots = [...slots, { widgetId: newId, column: slotIndex }];
                 return {
-                    ...prev,
-                    widgets: [...prev.widgets, newWidget],
+                    ...nextDashboard,
                     headerConfig: {
-                        ...(prev.headerConfig ?? {}),
+                        ...(nextDashboard.headerConfig ?? {}),
                         widgetSlots: nextSlots,
                     },
                 };
@@ -909,7 +1117,7 @@ export default function DashboardBuilderPage() {
         };
 
         const handleDropWidgetAtSlot = (widgetId: string, slotIndex: number) => {
-            const widget = draft.widgets.find(item => item.id === widgetId);
+            const widget = activeView.widgets.find((item) => item.id === widgetId);
 
             if (!widget || !isHeaderCompatibleWidget(widget)) return;
 
@@ -958,8 +1166,8 @@ export default function DashboardBuilderPage() {
 
             if (!targetWidgetId) return;
 
-            const selectedWidget = draft.widgets.find(w => w.id === targetWidgetId);
-            const selectedLayout = draft.layout.find(l => l.widgetId === targetWidgetId);
+            const selectedWidget = activeView.widgets.find((widget) => widget.id === targetWidgetId);
+            const selectedLayout = activeView.layout.find((layoutItem) => layoutItem.widgetId === targetWidgetId);
             if (!selectedWidget || !selectedLayout) return;
 
             const newId = generateWidgetId(selectedWidget.type);
@@ -977,11 +1185,11 @@ export default function DashboardBuilderPage() {
 
             setDraft(prev => {
                 if (!prev) return prev;
-                return {
-                    ...prev,
-                    widgets: [...prev.widgets, duplicatedWidget],
-                    layout: [...prev.layout, newLayout],
-                };
+                return updateSelectedView(prev, (view) => ({
+                    ...view,
+                    widgets: [...view.widgets, duplicatedWidget],
+                    layout: [...view.layout, newLayout],
+                }));
             });
 
             setSelectedWidgetId(newId);
@@ -990,10 +1198,10 @@ export default function DashboardBuilderPage() {
         const handleUpdateWidget = (updatedWidget: WidgetConfig) => {
             setDraft(prev => {
                 if (!prev) return prev;
-                return {
-                    ...prev,
-                    widgets: prev.widgets.map(w => w.id === updatedWidget.id ? updatedWidget : w),
-                };
+                return updateSelectedView(prev, (view) => ({
+                    ...view,
+                    widgets: view.widgets.map((widget) => widget.id === updatedWidget.id ? updatedWidget : widget),
+                }));
             });
         };
 
@@ -1019,11 +1227,12 @@ export default function DashboardBuilderPage() {
                 }
 
                 return {
-                    ...prev,
-                    widgets: prev.widgets.map((widget) => {
-                        if (widget.id !== selectedWidgetId) {
-                            return widget;
-                        }
+                    ...updateSelectedView(prev, (view) => ({
+                        ...view,
+                        widgets: view.widgets.map((widget) => {
+                            if (widget.id !== selectedWidgetId) {
+                                return widget;
+                            }
 
                         return {
                             ...widget,
@@ -1032,9 +1241,10 @@ export default function DashboardBuilderPage() {
                                 mode: widget.binding?.mode ?? 'simulated_value',
                                 catalogVariableId: stagedVariable.id,
                                 unit: stagedVariable.unit,
-                            },
-                        };
-                    }),
+                                },
+                            };
+                        }),
+                    })),
                 };
             });
         };
@@ -1059,7 +1269,7 @@ export default function DashboardBuilderPage() {
                     storedAffectedDashboards.map((dashboard) => [dashboard.id, dashboard]),
                 );
 
-                if (draft && draft.widgets.some((widget) => widget.binding?.catalogVariableId === variableId)) {
+                if (draft && getAllDashboardWidgets(draft).some((widget) => widget.binding?.catalogVariableId === variableId)) {
                     affectedDashboardMap.set(draft.id, {
                         id: draft.id,
                         name: draft.name,
@@ -1085,7 +1295,7 @@ export default function DashboardBuilderPage() {
             dashboard: Dashboard;
             status: Dashboard['status'];
         }): Promise<Dashboard | null> => {
-            const catalogAwareWidgets = dashboard.widgets.filter((widget) => supportsCatalogVariable(widget.type));
+            const catalogAwareWidgets = getAllDashboardWidgets(dashboard).filter((widget) => supportsCatalogVariable(widget.type));
 
             const widgetRequiringCatalogVariable = catalogAwareWidgets.find((widget) => {
                 const unit = widget.binding?.unit;
@@ -1130,8 +1340,7 @@ export default function DashboardBuilderPage() {
                 }
 
                 nextDashboard = {
-                    ...nextDashboard,
-                    widgets: nextDashboard.widgets.map((widget) => {
+                    ...mapDashboardWidgets(nextDashboard, (widget) => {
                         const currentCatalogVariableId = widget.binding?.catalogVariableId;
                         if (!widget.binding || !currentCatalogVariableId || !stagedIdMap.has(currentCatalogVariableId)) {
                             return widget;
@@ -1152,7 +1361,7 @@ export default function DashboardBuilderPage() {
                 setStagedVariables([]);
             }
 
-            if (hasDuplicateCatalogBindings(nextDashboard.widgets.filter((widget) => supportsCatalogVariable(widget.type)))) {
+            if (hasDuplicateCatalogBindings(getAllDashboardWidgets(nextDashboard).filter((widget) => supportsCatalogVariable(widget.type)))) {
                 setDialogMessage('No se permite duplicar la misma variable con el mismo contexto de binding en un mismo dashboard.');
                 return null;
             }
@@ -1166,20 +1375,20 @@ export default function DashboardBuilderPage() {
         const handleUpdateLayout = (updatedLayout: WidgetLayout) => {
             setDraft(prev => {
                 if (!prev) return prev;
-                return {
-                    ...prev,
-                    layout: prev.layout.map(l => l.widgetId === updatedLayout.widgetId ? updatedLayout : l),
-                };
+                return updateSelectedView(prev, (view) => ({
+                    ...view,
+                    layout: view.layout.map((layoutItem) => layoutItem.widgetId === updatedLayout.widgetId ? updatedLayout : layoutItem),
+                }));
             });
         };
 
         const handleResizeLayout = (widgetId: string, w: number, h: number) => {
             setDraft(prev => {
                 if (!prev) return prev;
-                return {
-                    ...prev,
-                    layout: prev.layout.map(l => l.widgetId === widgetId ? { ...l, w, h } : l),
-                };
+                return updateSelectedView(prev, (view) => ({
+                    ...view,
+                    layout: view.layout.map((layoutItem) => layoutItem.widgetId === widgetId ? { ...layoutItem, w, h } : layoutItem),
+                }));
             });
         };
 
@@ -1192,13 +1401,16 @@ export default function DashboardBuilderPage() {
                 if (!prev) return prev;
 
                 const nextHeaderSlots = (prev.headerConfig?.widgetSlots ?? []).filter(slot => slot.widgetId !== targetWidgetId);
+                const nextDashboard = updateSelectedView(prev, (view) => ({
+                    ...view,
+                    widgets: view.widgets.filter((widget) => widget.id !== targetWidgetId),
+                    layout: view.layout.filter((layoutItem) => layoutItem.widgetId !== targetWidgetId),
+                }));
 
                 return {
-                    ...prev,
-                    widgets: prev.widgets.filter(w => w.id !== targetWidgetId),
-                    layout: prev.layout.filter(l => l.widgetId !== targetWidgetId),
+                    ...nextDashboard,
                     headerConfig: {
-                        ...(prev.headerConfig ?? {}),
+                        ...(nextDashboard.headerConfig ?? {}),
                         widgetSlots: nextHeaderSlots,
                     },
                 };
@@ -1240,13 +1452,71 @@ export default function DashboardBuilderPage() {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
-                    {isDirty && (
-                        <ContextBarNotice icon={AlertCircle} label="Cambios sin guardar" />
-                    )}
+                    <div data-testid="dashboard-builder-view-actions" className="flex shrink-0 items-center gap-2">
+                        <AdminIconToolbarButton
+                            label="Nueva vista"
+                            icon={Plus}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            onClick={() => {
+                                setViewNameDraft('');
+                                setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
+                                setIsCreateViewDialogOpen(true);
+                            }}
+                        />
+                        <AdminIconToolbarButton
+                            label="Renombrar"
+                            icon={Pencil}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            onClick={() => {
+                                setViewNameDraft(activeView.name);
+                                setViewIconDraft(activeView.iconKey ?? AUTO_VIEW_ICON_SELECTION);
+                                setIsRenameViewDialogOpen(true);
+                            }}
+                        />
+                        <AdminIconToolbarButton
+                            label="Reordenar vista a la izquierda"
+                            tooltipLabel="Reordenar"
+                            icon={ChevronLeft}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            onClick={() => handleMoveCurrentView('left')}
+                            disabled={activeViewIndex <= 0}
+                        />
+                        <AdminIconToolbarButton
+                            label="Reordenar vista a la derecha"
+                            tooltipLabel="Reordenar"
+                            icon={ChevronRight}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            onClick={() => handleMoveCurrentView('right')}
+                            disabled={activeViewIndex >= ((draft.views?.length ?? 1) - 1)}
+                        />
+                        <AdminIconToolbarButton
+                            label="Eliminar vista"
+                            icon={Trash2}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            onClick={handleDeleteCurrentView}
+                        />
+                        <AdminIconToolbarButton
+                            label={isGridVisible ? 'Ocultar grid' : 'Mostrar grid'}
+                            icon={LayoutGrid}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            aria-pressed={isGridVisible}
+                            className={isGridVisible ? 'bg-admin-accent/15 text-admin-accent hover:bg-admin-accent/20' : undefined}
+                            onClick={toggleGrid}
+                        />
+                    </div>
+                    <div data-testid="dashboard-builder-unsaved-slot" className={DASHBOARD_BUILDER_WARNING_SLOT_CLS}>
+                    </div>
                     <AdminActionButton
                         onClick={handleSaveDraft}
                         disabled={!isDirty || isSaving}
                         variant="secondary"
+                        className={isDirty ? DASHBOARD_BUILDER_DIRTY_SAVE_BUTTON_CLS : undefined}
                     >
                         {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                         {isAssigned && draft.status === 'published' ? 'Guardar Cambios' : 'Guardar Draft'}
@@ -1297,12 +1567,14 @@ export default function DashboardBuilderPage() {
                         <DashboardHeader
                             mode="preview"
                             dashboard={draft}
+                            activeViewId={activeView.id}
                             equipmentMap={equipmentMap}
                             connection={connection}
                             machines={machines}
                             hierarchyContext={hierarchyContext}
                             onTitleChange={handleHeaderTitleChange}
                             onSubtitleChange={handleHeaderSubtitleChange}
+                            onSelectView={handleSelectView}
                             onHeaderDragEnter={() => setIsHeaderDropActive(Boolean(
                                 draggedWidget
                                 && isHeaderCompatibleWidgetType(draggedWidget.widgetType)
@@ -1332,8 +1604,8 @@ export default function DashboardBuilderPage() {
                         className="flex min-h-0 min-w-0 flex-1 overflow-hidden pt-2 pb-3"
                     >
                         <BuilderCanvas
-                            layout={draft.layout}
-                            widgets={draft.widgets}
+                            layout={activeView.layout}
+                            widgets={activeView.widgets}
                             equipmentMap={equipmentMap}
                             connection={connection}
                             machines={machines}
@@ -1374,6 +1646,102 @@ export default function DashboardBuilderPage() {
             >
                 {content}
             </AdminWorkspaceLayout>
+
+            <AdminDialog
+                open={isCreateViewDialogOpen}
+                title="Crear vista interna"
+                onClose={() => {
+                    setIsCreateViewDialogOpen(false);
+                    setViewNameDraft('');
+                    setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
+                }}
+                actions={(
+                    <>
+                        <AdminActionButton variant="secondary" onClick={() => {
+                            setIsCreateViewDialogOpen(false);
+                            setViewNameDraft('');
+                            setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
+                        }}>
+                            Cancelar
+                        </AdminActionButton>
+                        <AdminActionButton variant="primary" onClick={handleConfirmCreateView}>
+                            Crear
+                        </AdminActionButton>
+                    </>
+                )}
+            >
+                <div>
+                    <label className="mb-1.5 block w-auto uppercase text-industrial-muted">
+                        Nombre
+                    </label>
+                    <input
+                        type="text"
+                        value={viewNameDraft}
+                        onChange={(event) => setViewNameDraft(event.target.value)}
+                        placeholder="Nombre de la vista"
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
+                        autoFocus
+                    />
+                </div>
+                <div className="mt-4">
+                    <label className="mb-1.5 block w-auto uppercase text-industrial-muted">
+                        Ícono
+                    </label>
+                    <AdminSelect
+                        value={viewIconDraft}
+                        onChange={(value) => setViewIconDraft(value as DashboardViewIconSelection)}
+                        options={buildViewIconOptions(viewNameDraft)}
+                    />
+                </div>
+            </AdminDialog>
+
+            <AdminDialog
+                open={isRenameViewDialogOpen}
+                title="Renombrar vista interna"
+                onClose={() => {
+                    setIsRenameViewDialogOpen(false);
+                    setViewNameDraft('');
+                    setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
+                }}
+                actions={(
+                    <>
+                        <AdminActionButton variant="secondary" onClick={() => {
+                            setIsRenameViewDialogOpen(false);
+                            setViewNameDraft('');
+                            setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
+                        }}>
+                            Cancelar
+                        </AdminActionButton>
+                        <AdminActionButton variant="primary" onClick={handleConfirmRenameView}>
+                            Guardar
+                        </AdminActionButton>
+                    </>
+                )}
+            >
+                <div>
+                    <label className="mb-1.5 block w-auto uppercase text-industrial-muted">
+                        Nombre
+                    </label>
+                    <input
+                        type="text"
+                        value={viewNameDraft}
+                        onChange={(event) => setViewNameDraft(event.target.value)}
+                        placeholder="Nombre de la vista"
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
+                        autoFocus
+                    />
+                </div>
+                <div className="mt-4">
+                    <label className="mb-1.5 block w-auto uppercase text-industrial-muted">
+                        Ícono
+                    </label>
+                    <AdminSelect
+                        value={viewIconDraft}
+                        onChange={(value) => setViewIconDraft(value as DashboardViewIconSelection)}
+                        options={buildViewIconOptions(viewNameDraft || currentActiveView?.name)}
+                    />
+                </div>
+            </AdminDialog>
 
             <AdminDialog
                 open={Boolean(dialogMessage)}

@@ -3,6 +3,12 @@ import { mockDashboards } from '../mocks/admin.mock';
 import { clampWidgetBounds, DEFAULT_COLS, isTemplateApplicable } from '../utils/gridConfig';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 import { TemplateAspectMismatchError } from '../utils/templateAspectMismatch';
+import {
+    cloneDashboardViewsWithRemappedIds,
+    materializeDashboardView,
+    normalizeDashboardViews,
+    remapDashboardHeaderConfigForView,
+} from '../utils/dashboardViews';
 
 const DEFAULT_DASHBOARD_ASPECT = '16:9' as const;
 const DEFAULT_DASHBOARD_ROWS = 24;
@@ -14,6 +20,26 @@ const DEFAULT_DASHBOARD_ROWS = 24;
 // =============================================================================
 
 class DashboardStorageService {
+    private async writeDashboard(dashboard: Dashboard, delayMs = 400): Promise<Dashboard> {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        const dashboards = await this.readStorage();
+
+        const normalizedDashboard = normalizeDashboardViews({
+            ...dashboard,
+            lastUpdateAt: new Date().toISOString(),
+        });
+
+        const existingIndex = dashboards.findIndex((storedDashboard) => storedDashboard.id === normalizedDashboard.id);
+        if (existingIndex >= 0) {
+            dashboards[existingIndex] = normalizedDashboard;
+        } else {
+            dashboards.push(normalizedDashboard);
+        }
+
+        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
+        return normalizedDashboard;
+    }
+
     // Inicializa el Storage copiando los Mocks si es la primera vez.
     // Si ya existen datos, corrige dashboards publicados sin snapshot o sin
     // aspect/rows persistidos para mantener compatibilidad interna.
@@ -27,7 +53,8 @@ class DashboardStorageService {
         const dashboards: Dashboard[] = JSON.parse(stored);
         let migrated = false;
 
-        for (const dashboard of dashboards) {
+        for (let index = 0; index < dashboards.length; index += 1) {
+            const dashboard = dashboards[index];
             if (!dashboard.aspect) {
                 dashboard.aspect = DEFAULT_DASHBOARD_ASPECT;
                 migrated = true;
@@ -81,6 +108,12 @@ class DashboardStorageService {
                     migrated = true;
                 }
             }
+
+            const normalizedDashboard = normalizeDashboardViews(dashboard);
+            if (JSON.stringify(normalizedDashboard) !== JSON.stringify(dashboard)) {
+                dashboards[index] = normalizedDashboard;
+                migrated = true;
+            }
         }
 
         if (migrated) {
@@ -91,7 +124,7 @@ class DashboardStorageService {
     private async readStorage(): Promise<Dashboard[]> {
         await this.initStorage();
         const stored = localStorage.getItem(DASHBOARDS_STORAGE_KEY);
-        return stored ? JSON.parse(stored) : [];
+        return stored ? JSON.parse(stored).map((dashboard: Dashboard) => normalizeDashboardViews(dashboard)) : [];
     }
 
     async getDashboards(): Promise<Dashboard[]> {
@@ -106,47 +139,73 @@ class DashboardStorageService {
     }
 
     async saveDashboard(dashboard: Dashboard): Promise<void> {
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        const dashboards = await this.readStorage();
-
-        dashboard.lastUpdateAt = new Date().toISOString();
-
-        const existingIndex = dashboards.findIndex((storedDashboard) => storedDashboard.id === dashboard.id);
-        if (existingIndex >= 0) {
-            dashboards[existingIndex] = dashboard;
-        } else {
-            dashboards.push(dashboard);
-        }
-
-        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
+        await this.writeDashboard(dashboard);
     }
 
-    async persistPublishedWidgetDisplayOptions(dashboardId: string, widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch): Promise<Dashboard | null> {
+    async persistPublishedWidgetDisplayOptions(dashboardId: string, widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch): Promise<Dashboard | null>;
+    async persistPublishedWidgetDisplayOptions(dashboardId: string, viewId: string, widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch): Promise<Dashboard | null>;
+    async persistPublishedWidgetDisplayOptions(
+        dashboardId: string,
+        viewIdOrWidgetId: string,
+        widgetIdOrDisplayOptions: string | ViewerPersistedWidgetDisplayPatch,
+        maybeDisplayOptions?: ViewerPersistedWidgetDisplayPatch,
+    ): Promise<Dashboard | null> {
         await new Promise((resolve) => setTimeout(resolve, 200));
         const dashboards = await this.readStorage();
-        const dashboard = dashboards.find((currentDashboard) => currentDashboard.id === dashboardId) ?? null;
+        const dashboardIndex = dashboards.findIndex((currentDashboard) => currentDashboard.id === dashboardId);
+        const dashboard = dashboardIndex >= 0 ? normalizeDashboardViews(dashboards[dashboardIndex]) : null;
 
         if (!dashboard) {
             return null;
         }
 
-        dashboard.widgets = dashboard.widgets.map((widget) => (
-            widget.id === widgetId
-                ? applyPersistedActivityAnalyticsDisplayPatch(widget, displayOptions)
-                : widget
+        const hasExplicitViewId = typeof widgetIdOrDisplayOptions === 'string';
+        const resolvedViewId = hasExplicitViewId ? viewIdOrWidgetId : dashboard.activeViewId ?? dashboard.views?.[0]?.id;
+        const widgetId = hasExplicitViewId ? widgetIdOrDisplayOptions : viewIdOrWidgetId;
+        const displayOptions = (hasExplicitViewId ? maybeDisplayOptions : widgetIdOrDisplayOptions) as ViewerPersistedWidgetDisplayPatch;
+
+        dashboard.views = (dashboard.views ?? []).map((view) => (
+            view.id === resolvedViewId
+                ? {
+                    ...view,
+                    widgets: view.widgets.map((widget) => (
+                        widget.id === widgetId
+                            ? applyPersistedActivityAnalyticsDisplayPatch(widget, displayOptions)
+                            : widget
+                    )),
+                }
+                : view
         ));
 
-        if (dashboard.publishedSnapshot) {
-            dashboard.publishedSnapshot.widgets = dashboard.publishedSnapshot.widgets.map((widget) => (
-                widget.id === widgetId
-                    ? applyPersistedActivityAnalyticsDisplayPatch(widget, displayOptions)
-                    : widget
+        if (dashboard.publishedSnapshot?.views) {
+            dashboard.publishedSnapshot.views = dashboard.publishedSnapshot.views.map((view) => (
+                view.id === resolvedViewId
+                    ? {
+                        ...view,
+                        widgets: view.widgets.map((widget) => (
+                            widget.id === widgetId
+                                ? applyPersistedActivityAnalyticsDisplayPatch(widget, displayOptions)
+                                : widget
+                        )),
+                    }
+                    : view
             ));
         }
 
-        dashboard.lastUpdateAt = new Date().toISOString();
+        const normalizedDashboard = materializeDashboardView({
+            ...dashboard,
+            activeViewId: resolvedViewId,
+            lastUpdateAt: new Date().toISOString(),
+            publishedSnapshot: dashboard.publishedSnapshot
+                ? {
+                    ...dashboard.publishedSnapshot,
+                    activeViewId: resolvedViewId,
+                }
+                : undefined,
+        }, resolvedViewId);
+        dashboards[dashboardIndex] = normalizedDashboard;
         localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
-        return dashboard;
+        return normalizedDashboard;
     }
 
     async createEmptyDashboard(name: string): Promise<Dashboard> {
@@ -164,8 +223,7 @@ class DashboardStorageService {
             widgets: [],
             lastUpdateAt: new Date().toISOString(),
         };
-        await this.saveDashboard(newDashboard);
-        return newDashboard;
+        return this.writeDashboard(newDashboard);
     }
 
     private materializeTemplate(template: Template, cols: number, rows: number) {
@@ -214,17 +272,26 @@ class DashboardStorageService {
 
         const { widgets, layout } = this.materializeTemplate(template, dashboard.cols, dashboard.rows);
 
-        return {
+        return materializeDashboardView({
             ...dashboard,
             widgets,
             layout,
+            views: dashboard.views?.map((view) => (
+                view.id === (dashboard.activeViewId ?? dashboard.views?.[0]?.id)
+                    ? {
+                        ...view,
+                        widgets,
+                        layout,
+                    }
+                    : view
+            )),
             headerConfig: dashboard.headerConfig
                 ? {
                     ...dashboard.headerConfig,
                     widgetSlots: [],
                 }
                 : undefined,
-        };
+        });
     }
 
     async reorderDashboards(orderedIds: string[]): Promise<Dashboard[]> {
@@ -251,40 +318,34 @@ class DashboardStorageService {
         if (!original) return null;
 
         const idSuffix = Date.now().toString(36);
-        const idMap = new Map<string, string>();
-
-        const newWidgets: WidgetConfig[] = original.widgets.map((widget) => {
-            const newId = `${widget.id}-dup-${idSuffix}`;
-            idMap.set(widget.id, newId);
-            return { ...widget, id: newId };
-        });
-
-        const newLayout: WidgetLayout[] = original.layout.map((layout) => ({
-            ...layout,
-            widgetId: idMap.get(layout.widgetId) || layout.widgetId,
-        }));
-
         const resolvedName = newName || `${original.name} (Copia)`;
+        const normalizedOriginal = normalizeDashboardViews(original);
+        const { views, viewIdMap, widgetIdMapByView } = cloneDashboardViewsWithRemappedIds(normalizedOriginal.views ?? [], `dup-${idSuffix}`);
+        const duplicatedActiveViewId = normalizedOriginal.activeViewId
+            ? viewIdMap.get(normalizedOriginal.activeViewId) ?? views[0]?.id
+            : views[0]?.id;
+        const activeViewSourceId = normalizedOriginal.activeViewId ?? normalizedOriginal.views?.[0]?.id ?? '';
+        const activeWidgetIdMap = widgetIdMapByView.get(activeViewSourceId) ?? new Map<string, string>();
 
         const duplicate: Dashboard = {
-            ...original,
+            ...normalizedOriginal,
             id: `dash-${idSuffix}`,
             name: resolvedName,
             status: 'draft',
             version: 1,
             isTemplate: false,
             ownerNodeId: undefined,
-            widgets: newWidgets,
-            layout: newLayout,
+            views,
+            activeViewId: duplicatedActiveViewId,
             headerConfig: {
-                ...original.headerConfig,
+                ...(remapDashboardHeaderConfigForView(normalizedOriginal.headerConfig, activeWidgetIdMap) ?? {}),
                 title: resolvedName,
             },
             lastUpdateAt: new Date().toISOString(),
+            publishedSnapshot: undefined,
         };
 
-        await this.saveDashboard(duplicate);
-        return duplicate;
+        return this.writeDashboard(duplicate);
     }
 
     /**
@@ -312,8 +373,7 @@ class DashboardStorageService {
             lastUpdateAt: new Date().toISOString(),
         };
 
-        await this.saveDashboard(dashboard);
-        return dashboard;
+        return this.writeDashboard(dashboard);
     }
 
     /**
@@ -331,6 +391,8 @@ class DashboardStorageService {
             aspect: dashboard.aspect,
             cols: dashboard.cols,
             rows: dashboard.rows,
+            views: JSON.parse(JSON.stringify(dashboard.views)),
+            activeViewId: dashboard.activeViewId,
             widgets: JSON.parse(JSON.stringify(dashboard.widgets)),
             layout: JSON.parse(JSON.stringify(dashboard.layout)),
             headerConfig: dashboard.headerConfig
@@ -339,8 +401,7 @@ class DashboardStorageService {
             publishedAt: new Date().toISOString(),
         };
 
-        await this.saveDashboard(dashboard);
-        return dashboard;
+        return this.writeDashboard(dashboard);
     }
 
     /**
@@ -355,6 +416,8 @@ class DashboardStorageService {
         dashboard.aspect = dashboard.publishedSnapshot.aspect;
         dashboard.cols = dashboard.publishedSnapshot.cols;
         dashboard.rows = dashboard.publishedSnapshot.rows;
+        dashboard.views = JSON.parse(JSON.stringify(dashboard.publishedSnapshot.views));
+        dashboard.activeViewId = dashboard.publishedSnapshot.activeViewId;
         dashboard.widgets = JSON.parse(JSON.stringify(dashboard.publishedSnapshot.widgets));
         dashboard.layout = JSON.parse(JSON.stringify(dashboard.publishedSnapshot.layout));
         dashboard.headerConfig = dashboard.publishedSnapshot.headerConfig
@@ -362,8 +425,7 @@ class DashboardStorageService {
             : undefined;
         dashboard.lastUpdateAt = new Date().toISOString();
 
-        await this.saveDashboard(dashboard);
-        return dashboard;
+        return this.writeDashboard(dashboard);
     }
 }
 

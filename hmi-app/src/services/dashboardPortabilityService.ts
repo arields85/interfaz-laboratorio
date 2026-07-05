@@ -1,11 +1,20 @@
 import type {
     CatalogVariable,
     Dashboard,
+    DashboardView,
     WidgetConfig,
 } from '../domain';
 
 import { HEADER_WIDGET_SLOT_COUNT, isHeaderCompatibleWidget } from '../utils/headerWidgets';
 import { buildCatalogVariableId } from '../utils/catalogVariableId';
+import {
+    DEFAULT_DASHBOARD_VIEW_ID,
+    DEFAULT_DASHBOARD_VIEW_NAME,
+    cloneDashboardViewsWithRemappedIds,
+    materializeDashboardView,
+    normalizeDashboardViews,
+    remapDashboardHeaderConfigForView,
+} from '../utils/dashboardViews';
 import { supportsCatalogVariable } from '../utils/widgetCapabilities';
 import { dashboardStorage } from './DashboardStorageService';
 import { variableCatalogStorage } from './VariableCatalogStorageService';
@@ -28,6 +37,27 @@ export interface PortableDashboardFileV1 {
     referencedCatalogVariables: CatalogVariable[];
 }
 
+type PortableDashboardDataV2 = Pick<
+    Dashboard,
+    'id' | 'name' | 'description' | 'dashboardType' | 'aspect' | 'cols' | 'rows' | 'headerConfig' | 'views' | 'activeViewId'
+>;
+
+export interface PortableDashboardFileV2 {
+    schemaVersion: 2;
+    exportedAt: string;
+    origin: {
+        app: 'interfaz-laboratorio';
+        dashboardId: string;
+        dashboardName: string;
+        appVersion?: string;
+    };
+    dashboard: PortableDashboardDataV2;
+    referencedCatalogVariables: CatalogVariable[];
+}
+
+type PortableDashboardFile = PortableDashboardFileV1 | PortableDashboardFileV2;
+type NormalizedPortableDashboard = Dashboard & { views: DashboardView[]; activeViewId: string };
+
 export interface DashboardPortabilityIssue {
     code: string;
     path: string;
@@ -44,7 +74,7 @@ export interface DashboardImportResult {
 export interface DashboardExportResult {
     fileName: string;
     json: string;
-    portableFile: PortableDashboardFileV1;
+    portableFile: PortableDashboardFile;
     issues: DashboardPortabilityIssue[];
 }
 
@@ -61,33 +91,34 @@ export class DashboardPortabilityValidationError extends Error {
 class DashboardPortabilityService {
     async exportDashboard(dashboard: Dashboard): Promise<DashboardExportResult> {
         const exportedAt = new Date().toISOString();
-        const { referencedCatalogVariables, issues } = await this.collectReferencedCatalogVariables(dashboard);
+        const normalizedDashboard = normalizeDashboardViews(dashboard);
+        const { referencedCatalogVariables, issues } = await this.collectReferencedCatalogVariables(normalizedDashboard);
 
-        const portableFile: PortableDashboardFileV1 = {
-            schemaVersion: 1,
+        const portableFile: PortableDashboardFileV2 = {
+            schemaVersion: 2,
             exportedAt,
             origin: {
                 app: 'interfaz-laboratorio',
-                dashboardId: dashboard.id,
-                dashboardName: dashboard.name,
+                dashboardId: normalizedDashboard.id,
+                dashboardName: normalizedDashboard.name,
             },
             dashboard: {
-                id: dashboard.id,
-                name: dashboard.name,
-                description: dashboard.description,
-                dashboardType: dashboard.dashboardType,
-                aspect: dashboard.aspect,
-                cols: dashboard.cols,
-                rows: dashboard.rows,
-                widgets: clone(dashboard.widgets),
-                layout: clone(dashboard.layout),
-                headerConfig: clone(dashboard.headerConfig),
+                id: normalizedDashboard.id,
+                name: normalizedDashboard.name,
+                description: normalizedDashboard.description,
+                dashboardType: normalizedDashboard.dashboardType,
+                aspect: normalizedDashboard.aspect,
+                cols: normalizedDashboard.cols,
+                rows: normalizedDashboard.rows,
+                activeViewId: normalizedDashboard.activeViewId,
+                views: clone(normalizedDashboard.views),
+                headerConfig: clone(normalizedDashboard.headerConfig),
             },
             referencedCatalogVariables,
         };
 
         return {
-            fileName: buildPortableDashboardFileName(dashboard.name, exportedAt),
+            fileName: buildPortableDashboardFileName(normalizedDashboard.name, exportedAt),
             json: JSON.stringify(portableFile, null, 2),
             portableFile,
             issues,
@@ -102,59 +133,55 @@ class DashboardPortabilityService {
             throw new DashboardPortabilityValidationError(issues);
         }
 
-        const portableFile = parsedFile as PortableDashboardFileV1;
+        const portableFile = parsedFile as PortableDashboardFile;
 
         const now = new Date().toISOString();
-        const sourceDashboard = portableFile.dashboard;
+        const sourceDashboard = normalizePortableDashboard(portableFile);
+        const sourceViews = sourceDashboard.views;
         const importedDashboardId = `dash-${Date.now().toString(36)}`;
         const referencedVariablesById = new Map(portableFile.referencedCatalogVariables.map((variable) => [variable.id, variable]));
         const { catalogVariableIdMap, createdCatalogVariables } = await this.reconcileCatalogVariables(
-            sourceDashboard.widgets,
+            sourceViews.flatMap((view) => view.widgets),
             referencedVariablesById,
         );
-        const widgetIdMap = new Map(sourceDashboard.widgets.map((widget, index) => [widget.id, `w-imp-${Date.now().toString(36)}-${index}`]));
+        const cloneSeed = Date.now().toString(36);
+        const clonedViewResult = cloneDashboardViewsWithRemappedIds(sourceViews, cloneSeed);
+        const clonedViews = clonedViewResult.views.map((view, viewIndex) => ({
+            ...view,
+            widgets: view.widgets.map((widget, widgetIndex) => {
+                const sourceWidget = sourceViews[viewIndex]?.widgets[widgetIndex];
+                const nextWidget = clone(widget);
 
-        const widgets = sourceDashboard.widgets.map((widget) => {
-            const nextWidget = clone(widget);
-            nextWidget.id = widgetIdMap.get(widget.id) ?? widget.id;
-
-            if (nextWidget.binding?.catalogVariableId) {
-                nextWidget.binding.catalogVariableId = catalogVariableIdMap.get(nextWidget.binding.catalogVariableId)
-                    ?? nextWidget.binding.catalogVariableId;
-            }
-
-            if (nextWidget.type === 'alert-history' && nextWidget.displayOptions?.dashboardId) {
-                if (nextWidget.displayOptions.dashboardId === sourceDashboard.id) {
-                    nextWidget.displayOptions.dashboardId = importedDashboardId;
-                } else {
-                    issues.push({
-                        code: 'external_dashboard_reference_cleared',
-                        path: `dashboard.widgets[${widget.id}].displayOptions.dashboardId`,
-                        message: `Widget "${widget.title}" referenced dashboard "${nextWidget.displayOptions.dashboardId}" from another environment and was cleared during import.`,
-                        severity: 'warning',
-                    });
-                    nextWidget.displayOptions.dashboardId = undefined;
+                if (nextWidget.binding?.catalogVariableId) {
+                    nextWidget.binding.catalogVariableId = catalogVariableIdMap.get(nextWidget.binding.catalogVariableId)
+                        ?? nextWidget.binding.catalogVariableId;
                 }
-            }
 
-            return nextWidget;
-        });
+                if (nextWidget.type === 'alert-history' && nextWidget.displayOptions?.dashboardId) {
+                    if (nextWidget.displayOptions.dashboardId === sourceDashboard.id) {
+                        nextWidget.displayOptions.dashboardId = importedDashboardId;
+                    } else {
+                        issues.push({
+                            code: 'external_dashboard_reference_cleared',
+                            path: `dashboard.views[${sourceViews[viewIndex]?.id}].widgets[${sourceWidget?.id ?? widget.id}].displayOptions.dashboardId`,
+                            message: `Widget "${nextWidget.title}" referenced dashboard "${nextWidget.displayOptions.dashboardId}" from another environment and was cleared during import.`,
+                            severity: 'warning',
+                        });
+                        nextWidget.displayOptions.dashboardId = undefined;
+                    }
+                }
 
-        const layout = sourceDashboard.layout.map((item) => ({
-            ...clone(item),
-            widgetId: widgetIdMap.get(item.widgetId) ?? item.widgetId,
+                return nextWidget;
+            }),
         }));
-        const headerConfig = sourceDashboard.headerConfig
-            ? {
-                ...clone(sourceDashboard.headerConfig),
-                widgetSlots: (sourceDashboard.headerConfig.widgetSlots ?? []).map((slot) => ({
-                    ...slot,
-                    widgetId: widgetIdMap.get(slot.widgetId) ?? slot.widgetId,
-                })),
-            }
-            : undefined;
+        const activeViewId = sourceDashboard.activeViewId
+            ? clonedViewResult.viewIdMap.get(sourceDashboard.activeViewId) ?? clonedViews[0]?.id
+            : clonedViews[0]?.id;
+        const activeSourceViewId = sourceDashboard.activeViewId ?? sourceViews[0]?.id ?? DEFAULT_DASHBOARD_VIEW_ID;
+        const activeWidgetIdMap = clonedViewResult.widgetIdMapByView.get(activeSourceViewId) ?? new Map<string, string>();
+        const headerConfig = remapDashboardHeaderConfigForView(sourceDashboard.headerConfig, activeWidgetIdMap);
 
-        const dashboard: Dashboard = {
+        const dashboard = materializeDashboardView({
             id: importedDashboardId,
             name: sourceDashboard.name,
             description: sourceDashboard.description,
@@ -162,8 +189,8 @@ class DashboardPortabilityService {
             aspect: sourceDashboard.aspect,
             cols: sourceDashboard.cols,
             rows: sourceDashboard.rows,
-            widgets,
-            layout,
+            views: clonedViews,
+            activeViewId,
             headerConfig,
             isTemplate: false,
             version: 1,
@@ -172,7 +199,9 @@ class DashboardPortabilityService {
             templateId: undefined,
             publishedSnapshot: undefined,
             lastUpdateAt: now,
-        };
+            widgets: [],
+            layout: [],
+        }, activeViewId);
 
         await dashboardStorage.saveDashboard(dashboard);
 
@@ -187,7 +216,8 @@ class DashboardPortabilityService {
         dashboard: Dashboard,
     ): Promise<{ referencedCatalogVariables: CatalogVariable[]; issues: DashboardPortabilityIssue[] }> {
         const referencedIds = [...new Set(
-            dashboard.widgets
+            normalizeDashboardViews(dashboard).views
+                ?.flatMap((view) => view.widgets)
                 .map((widget) => widget.binding?.catalogVariableId)
                 .filter((catalogVariableId): catalogVariableId is string => Boolean(catalogVariableId)),
         )];
@@ -248,7 +278,7 @@ class DashboardPortabilityService {
             return issues;
         }
 
-        if (file.schemaVersion !== 1) {
+        if (file.schemaVersion !== 1 && file.schemaVersion !== 2) {
             issues.push({
                 code: 'unsupported_schema_version',
                 path: 'schemaVersion',
@@ -277,20 +307,31 @@ class DashboardPortabilityService {
             });
         }
 
-        if (!Array.isArray(file.dashboard.widgets)) {
-            issues.push({
-                code: 'missing_dashboard_widgets',
-                path: 'dashboard.widgets',
-                message: 'Portable dashboard file must include a dashboard.widgets array.',
-                severity: 'error',
-            });
+        if (file.schemaVersion === 1) {
+            if (!Array.isArray(file.dashboard.widgets)) {
+                issues.push({
+                    code: 'missing_dashboard_widgets',
+                    path: 'dashboard.widgets',
+                    message: 'Portable dashboard file must include a dashboard.widgets array.',
+                    severity: 'error',
+                });
+            }
+
+            if (!Array.isArray(file.dashboard.layout)) {
+                issues.push({
+                    code: 'missing_dashboard_layout',
+                    path: 'dashboard.layout',
+                    message: 'Portable dashboard file must include a dashboard.layout array.',
+                    severity: 'error',
+                });
+            }
         }
 
-        if (!Array.isArray(file.dashboard.layout)) {
+        if (file.schemaVersion === 2 && !Array.isArray((file.dashboard as PortableDashboardDataV2).views)) {
             issues.push({
-                code: 'missing_dashboard_layout',
-                path: 'dashboard.layout',
-                message: 'Portable dashboard file must include a dashboard.layout array.',
+                code: 'missing_dashboard_views',
+                path: 'dashboard.views',
+                message: 'Portable dashboard file must include a dashboard.views array.',
                 severity: 'error',
             });
         }
@@ -299,57 +340,67 @@ class DashboardPortabilityService {
             return issues;
         }
 
-        const portableFile = file as unknown as PortableDashboardFileV1;
+        const portableFile = file as unknown as PortableDashboardFile;
 
-        const widgetById = new Map<string, WidgetConfig>();
         const referencedVariablesById = new Map(portableFile.referencedCatalogVariables.map((variable) => [variable.id, variable]));
+        const normalizedDashboard = normalizePortableDashboard(portableFile);
+        const activeView = normalizedDashboard.views.find((view) => view.id === normalizedDashboard.activeViewId) ?? normalizedDashboard.views[0];
+        const activeWidgetById = new Map<string, WidgetConfig>();
 
-        for (const widget of portableFile.dashboard.widgets) {
-            if (widgetById.has(widget.id)) {
-                issues.push({
-                    code: 'duplicate_widget_id',
-                    path: `dashboard.widgets[${widget.id}]`,
-                    message: `Widget id "${widget.id}" is duplicated in the portable file.`,
-                    severity: 'error',
-                });
-                continue;
+        normalizedDashboard.views.forEach((view) => {
+            const widgetById = new Map<string, WidgetConfig>();
+
+            for (const widget of view.widgets) {
+                if (widgetById.has(widget.id)) {
+                    issues.push({
+                        code: 'duplicate_widget_id',
+                        path: `dashboard.views[${view.id}].widgets[${widget.id}]`,
+                        message: `Widget id "${widget.id}" is duplicated in view "${view.name}".`,
+                        severity: 'error',
+                    });
+                    continue;
+                }
+
+                widgetById.set(widget.id, widget);
+
+                if (view.id === activeView?.id) {
+                    activeWidgetById.set(widget.id, widget);
+                }
+
+                if (widget.binding?.catalogVariableId) {
+                    if (!supportsCatalogVariable(widget.type)) {
+                        issues.push({
+                            code: 'invalid_catalog_binding_widget_type',
+                            path: `dashboard.views[${view.id}].widgets[${widget.id}].binding.catalogVariableId`,
+                            message: `Widget type "${widget.type}" cannot use catalog variable bindings.`,
+                            severity: 'error',
+                        });
+                    }
+
+                    if (!referencedVariablesById.has(widget.binding.catalogVariableId)) {
+                        issues.push({
+                            code: 'missing_referenced_catalog_variable',
+                            path: `dashboard.views[${view.id}].widgets[${widget.id}].binding.catalogVariableId`,
+                            message: `Referenced catalog variable metadata for "${widget.binding.catalogVariableId}" is missing from the portable file.`,
+                            severity: 'error',
+                        });
+                    }
+                }
             }
 
-            widgetById.set(widget.id, widget);
-
-            if (widget.binding?.catalogVariableId) {
-                if (!supportsCatalogVariable(widget.type)) {
+            for (const layoutItem of view.layout) {
+                if (!widgetById.has(layoutItem.widgetId)) {
                     issues.push({
-                        code: 'invalid_catalog_binding_widget_type',
-                        path: `dashboard.widgets[${widget.id}].binding.catalogVariableId`,
-                        message: `Widget type "${widget.type}" cannot use catalog variable bindings.`,
+                        code: 'invalid_layout_widget_reference',
+                        path: `dashboard.views[${view.id}].layout[${layoutItem.widgetId}]`,
+                        message: `Layout item references missing widget "${layoutItem.widgetId}" in view "${view.name}".`,
                         severity: 'error',
                     });
                 }
-
-                if (!referencedVariablesById.has(widget.binding.catalogVariableId)) {
-                    issues.push({
-                        code: 'missing_referenced_catalog_variable',
-                        path: `dashboard.widgets[${widget.id}].binding.catalogVariableId`,
-                        message: `Referenced catalog variable metadata for "${widget.binding.catalogVariableId}" is missing from the portable file.`,
-                        severity: 'error',
-                    });
-                }
             }
-        }
+        });
 
-        for (const layoutItem of portableFile.dashboard.layout) {
-            if (!widgetById.has(layoutItem.widgetId)) {
-                issues.push({
-                    code: 'invalid_layout_widget_reference',
-                    path: `dashboard.layout[${layoutItem.widgetId}]`,
-                    message: `Layout item references missing widget "${layoutItem.widgetId}".`,
-                    severity: 'error',
-                });
-            }
-        }
-
-        const slots = portableFile.dashboard.headerConfig?.widgetSlots ?? [];
+        const slots = normalizedDashboard.headerConfig?.widgetSlots ?? [];
 
         if (slots.length > HEADER_WIDGET_SLOT_COUNT) {
             issues.push({
@@ -363,7 +414,7 @@ class DashboardPortabilityService {
         const occupiedColumns = new Set<number>();
 
         for (const slot of slots) {
-            const widget = widgetById.get(slot.widgetId);
+            const widget = activeWidgetById.get(slot.widgetId);
 
             if (!widget) {
                 issues.push({
@@ -454,6 +505,52 @@ class DashboardPortabilityService {
     }
 }
 
+function normalizePortableDashboard(portableFile: PortableDashboardFile): NormalizedPortableDashboard {
+    if (portableFile.schemaVersion === 2) {
+        return materializeDashboardView({
+            id: portableFile.dashboard.id,
+            name: portableFile.dashboard.name,
+            description: portableFile.dashboard.description,
+            dashboardType: portableFile.dashboard.dashboardType,
+            aspect: portableFile.dashboard.aspect,
+            cols: portableFile.dashboard.cols,
+            rows: portableFile.dashboard.rows,
+            views: clone(portableFile.dashboard.views ?? []),
+            activeViewId: portableFile.dashboard.activeViewId,
+            headerConfig: clone(portableFile.dashboard.headerConfig),
+            isTemplate: false,
+            version: 1,
+            status: 'draft',
+            widgets: [],
+            layout: [],
+        }, portableFile.dashboard.activeViewId) as NormalizedPortableDashboard;
+    }
+
+    return materializeDashboardView({
+        id: portableFile.dashboard.id,
+        name: portableFile.dashboard.name,
+        description: portableFile.dashboard.description,
+        dashboardType: portableFile.dashboard.dashboardType,
+        aspect: portableFile.dashboard.aspect,
+        cols: portableFile.dashboard.cols,
+        rows: portableFile.dashboard.rows,
+        views: [{
+            id: DEFAULT_DASHBOARD_VIEW_ID,
+            name: DEFAULT_DASHBOARD_VIEW_NAME,
+            order: 0,
+            widgets: clone(portableFile.dashboard.widgets),
+            layout: clone(portableFile.dashboard.layout),
+        } satisfies DashboardView],
+        activeViewId: DEFAULT_DASHBOARD_VIEW_ID,
+        headerConfig: clone(portableFile.dashboard.headerConfig),
+        isTemplate: false,
+        version: 1,
+        status: 'draft',
+        widgets: clone(portableFile.dashboard.widgets),
+        layout: clone(portableFile.dashboard.layout),
+    }) as NormalizedPortableDashboard;
+}
+
 function buildUniqueCatalogVariableId(variable: CatalogVariable, existingVariables: CatalogVariable[]): string {
     const existingIds = new Set(existingVariables.map((item) => item.id));
     let candidate = buildCatalogVariableId(variable.name, variable.unit);
@@ -504,7 +601,9 @@ function clone<T>(value: T): T {
         return value;
     }
 
-    return JSON.parse(JSON.stringify(value)) as T;
+    return typeof structuredClone === 'function'
+        ? structuredClone(value)
+        : JSON.parse(JSON.stringify(value)) as T;
 }
 
 export const dashboardPortabilityService = new DashboardPortabilityService();

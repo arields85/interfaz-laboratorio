@@ -1,7 +1,7 @@
 import { Activity, BarChart2, Gauge, HeartPulse, LineChart, Siren, TrendingUp, Type, Wifi } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { WidgetType } from '../../domain/admin.types';
-import HoverTooltip from '../ui/HoverTooltip';
+import AdminIconToolbarButton from './AdminIconToolbarButton';
 
 interface WidgetCatalogRailProps {
     onAddWidget: (type: WidgetType) => void;
@@ -32,16 +32,13 @@ export default function WidgetCatalogRail({ onAddWidget }: WidgetCatalogRailProp
     return (
         <div className="h-full w-full flex flex-col items-center py-3 gap-1">
             {ACTIONS.map(({ type, label, icon: Icon }) => (
-                <HoverTooltip key={type} label={label} position="right" className="flex">
-                    <button
-                        type="button"
-                        aria-label={label}
-                        onClick={() => onAddWidget(type)}
-                        className="h-9 w-9 inline-flex items-center justify-center rounded-md text-industrial-muted transition-colors hover:bg-white/5 hover:text-white"
-                    >
-                        <Icon size={18} />
-                    </button>
-                </HoverTooltip>
+                <AdminIconToolbarButton
+                    key={type}
+                    label={label}
+                    icon={Icon}
+                    tooltipPosition="right"
+                    onClick={() => onAddWidget(type)}
+                />
             ))}
         </div>
     );

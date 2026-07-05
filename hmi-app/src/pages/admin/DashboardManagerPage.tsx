@@ -16,6 +16,7 @@ import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import type { Dashboard, HierarchyNode, Template } from '../../domain/admin.types';
 import { getDashboardVisualStatus } from '../../domain/admin.types';
 import { getDashboardHeaderSubtitle, getDashboardHeaderTitle } from '../../utils/dashboardHeader';
+import { getDefaultDashboardView } from '../../utils/dashboardViews';
 import AdminWorkspaceLayout from '../../components/admin/AdminWorkspaceLayout';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
 import {
@@ -697,6 +698,7 @@ export default function DashboardManagerPage() {
                     {filteredDashboards.map(dash => {
                         const headerTitle = getDashboardHeaderTitle(dash);
                         const headerSubtitle = getVisibleDashboardSubtitle(dash, activeTemplateIds);
+                        const initialViewName = getDefaultDashboardView(dash).name;
                         const dashboardTypeLabel = getDashboardTypeLabel(dash.dashboardType, dash.ownerNodeId, nodeMap);
                         const isAssigned = Boolean(dash.ownerNodeId);
 
@@ -752,6 +754,9 @@ export default function DashboardManagerPage() {
                                         {headerSubtitle}
                                     </p>
                                 )}
+                                <p className="mt-1 truncate text-industrial-muted">
+                                    Vista inicial: {initialViewName}
+                                </p>
                             </div>
 
                             <div className="flex justify-center">

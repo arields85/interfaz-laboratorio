@@ -9,6 +9,7 @@ import {
     type PortableDashboardFileV1,
     dashboardPortabilityService,
 } from './dashboardPortabilityService';
+import { createDefaultDashboardView } from '../utils/dashboardViews';
 
 function makeVariable(overrides: Partial<CatalogVariable> = {}): CatalogVariable {
     return {
@@ -72,6 +73,7 @@ describe('dashboardPortabilityService.exportDashboard', () => {
             templateId: 'template-9',
             status: 'published',
             version: 5,
+            activeViewId: 'view-production',
             widgets: [
                 makeWidget({
                     id: 'widget-speed',
@@ -79,6 +81,19 @@ describe('dashboardPortabilityService.exportDashboard', () => {
                 }),
             ],
             layout: [makeLayout({ widgetId: 'widget-speed', x: 2, y: 3, w: 5, h: 4 })],
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [
+                        makeWidget({
+                            id: 'widget-speed',
+                            binding: { mode: 'real_variable', catalogVariableId: 'cv-rotor-speed-rpm' },
+                        }),
+                    ],
+                    layout: [makeLayout({ widgetId: 'widget-speed', x: 2, y: 3, w: 5, h: 4 })],
+                }),
+            ],
             headerConfig: {
                 title: 'Compression line header',
                 widgetSlots: [{ widgetId: 'widget-speed', column: 1 }],
@@ -106,7 +121,7 @@ describe('dashboardPortabilityService.exportDashboard', () => {
         expect(exportResult.fileName).toBe('interfaz-laboratorio-dashboard-compression-line-20260630-1234.json');
         expect(exportResult.issues).toEqual([]);
         expect(portableFile).toEqual({
-            schemaVersion: 1,
+            schemaVersion: 2,
             exportedAt: '2026-06-30T12:34:56.000Z',
             origin: {
                 app: 'interfaz-laboratorio',
@@ -121,13 +136,20 @@ describe('dashboardPortabilityService.exportDashboard', () => {
                 aspect: '21:9',
                 cols: 24,
                 rows: 18,
-                widgets: [
+                activeViewId: 'view-production',
+                views: [
                     expect.objectContaining({
-                        id: 'widget-speed',
-                        binding: { mode: 'real_variable', catalogVariableId: 'cv-rotor-speed-rpm' },
+                        id: 'view-production',
+                        name: 'Production',
+                        order: 0,
+                        widgets: [
+                            expect.objectContaining({
+                                id: 'widget-speed',
+                                binding: { mode: 'real_variable', catalogVariableId: 'cv-rotor-speed-rpm' },
+                            }),
+                        ],
                     }),
                 ],
-                layout: [expect.objectContaining({ widgetId: 'widget-speed', x: 2, y: 3, w: 5, h: 4 })],
                 headerConfig: {
                     title: 'Compression line header',
                     widgetSlots: [{ widgetId: 'widget-speed', column: 1 }],
@@ -140,6 +162,8 @@ describe('dashboardPortabilityService.exportDashboard', () => {
         expect(portableFile.dashboard).not.toHaveProperty('publishedSnapshot');
         expect(portableFile.dashboard).not.toHaveProperty('status');
         expect(portableFile.dashboard).not.toHaveProperty('version');
+        expect(portableFile.dashboard).not.toHaveProperty('widgets');
+        expect(portableFile.dashboard).not.toHaveProperty('layout');
     });
 
     it('deduplicates referenced catalog variables while preserving widget bindings', async () => {
@@ -187,7 +211,7 @@ describe('dashboardPortabilityService.exportDashboard', () => {
                 description: 'Hydraulic circuit pressure',
             }),
         ]);
-        expect(portableFile.dashboard.widgets).toEqual([
+        expect(portableFile.dashboard.views?.[0]?.widgets).toEqual([
             expect.objectContaining({ binding: { mode: 'real_variable', catalogVariableId: 'cv-rotor-speed-rpm' } }),
             expect.objectContaining({ binding: { mode: 'real_variable', catalogVariableId: 'cv-rotor-speed-rpm' } }),
             expect.objectContaining({ binding: { mode: 'real_variable', catalogVariableId: 'cv-hydraulic-pressure-bar' } }),
@@ -467,5 +491,93 @@ describe('dashboardPortabilityService.importDashboard', () => {
             expect.objectContaining({ id: 'local-pressure-kpa', name: 'Line pressure', unit: 'kPa' }),
             expect.objectContaining({ id: createdPressureVariableId, name: 'Line pressure', unit: 'bar' }),
         ]));
+    });
+
+    it('imports a legacy schema v1 file as a single default internal view', async () => {
+        const importPromise = dashboardPortabilityService.importDashboard(JSON.stringify(makePortableFile({
+            dashboard: {
+                id: 'legacy-dashboard',
+                name: 'Legacy portable dashboard',
+                description: 'Legacy single view payload',
+                dashboardType: 'equipment',
+                aspect: '16:9',
+                cols: 20,
+                rows: 12,
+                widgets: [makeWidget({ id: 'widget-legacy', title: 'Legacy widget' })],
+                layout: [makeLayout({ widgetId: 'widget-legacy', x: 1, y: 2, w: 4, h: 3 })],
+                headerConfig: { title: 'Legacy header' },
+            },
+        })));
+
+        await vi.advanceTimersByTimeAsync(1000);
+        const result = await importPromise;
+
+        expect(result.dashboard.views).toEqual([
+            expect.objectContaining({
+                name: 'Default view',
+                widgets: [expect.objectContaining({ title: 'Legacy widget' })],
+                layout: [expect.objectContaining({ x: 1, y: 2, w: 4, h: 3 })],
+            }),
+        ]);
+        expect(result.dashboard.activeViewId).toBe(result.dashboard.views?.[0]?.id);
+    });
+
+    it('preserves and remaps multi-view exports when importing schema v2 files', async () => {
+        const importPromise = dashboardPortabilityService.importDashboard(JSON.stringify({
+            schemaVersion: 2,
+            exportedAt: '2026-07-01T10:00:00.000Z',
+            origin: {
+                app: 'interfaz-laboratorio',
+                dashboardId: 'source-dashboard-v2',
+                dashboardName: 'Portable dashboard v2',
+            },
+            dashboard: {
+                id: 'source-dashboard-v2',
+                name: 'Portable dashboard v2',
+                description: 'Two views',
+                dashboardType: 'line',
+                aspect: '21:9',
+                cols: 24,
+                rows: 12,
+                activeViewId: 'view-technical',
+                views: [
+                    {
+                        id: 'view-production',
+                        name: 'Production',
+                        order: 0,
+                        widgets: [makeWidget({ id: 'widget-shared', title: 'Production widget' })],
+                        layout: [makeLayout({ widgetId: 'widget-shared', x: 0, y: 0, w: 4, h: 4 })],
+                    },
+                    {
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [
+                            makeWidget({ id: 'widget-grid', title: 'Technical grid widget' }),
+                            { ...makeWidget({ id: 'widget-header', title: 'Technical header widget' }), type: 'status' as const },
+                        ],
+                        layout: [makeLayout({ widgetId: 'widget-grid', x: 4, y: 0, w: 4, h: 4 })],
+                    },
+                ],
+                headerConfig: {
+                    title: 'Portable dashboard v2',
+                    widgetSlots: [{ widgetId: 'widget-header', column: 0 }],
+                },
+            },
+            referencedCatalogVariables: [],
+        }));
+
+        await vi.advanceTimersByTimeAsync(1000);
+        const result = await importPromise;
+
+        expect(result.dashboard.views).toHaveLength(2);
+        expect(result.dashboard.views?.map((view) => view.name)).toEqual(['Production', 'Technical']);
+        expect(result.dashboard.views?.map((view) => view.order)).toEqual([0, 1]);
+        expect(result.dashboard.views?.[0]?.widgets[0]?.id).not.toBe('widget-shared');
+        expect(result.dashboard.views?.[1]?.widgets[0]?.id).not.toBe('widget-shared');
+        expect(result.dashboard.views?.[0]?.widgets[0]?.id).not.toBe(result.dashboard.views?.[1]?.widgets[0]?.id);
+        expect(result.dashboard.activeViewId).toBe(result.dashboard.views?.[1]?.id);
+        expect(result.dashboard.layout).toEqual(result.dashboard.views?.[1]?.layout);
+        expect(result.dashboard.widgets).toEqual(result.dashboard.views?.[1]?.widgets);
     });
 });

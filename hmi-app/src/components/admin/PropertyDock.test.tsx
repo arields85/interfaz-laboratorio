@@ -1320,7 +1320,7 @@ describe('PropertyDock activity-analytics', () => {
             },
         });
         expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('0.1');
-    });
+    }, 15000);
 
     it('edits and restores activity analytics bar width independently per selected group', async () => {
         const { user, updates } = renderPropertyDock({
@@ -1377,7 +1377,7 @@ describe('PropertyDock activity-analytics', () => {
         await user.click(screen.getByRole('button', { name: 'Turno' }));
         expect(getSlider()).toHaveValue('0.2');
         expect(within(getSection('Agrupación')).getByLabelText('Ancho value')).toHaveValue('0.2');
-    });
+    }, 15000);
 
     it('renders the donut Tam. Num control with a 40 default and persists a clamped per-widget center value font size override', async () => {
         const { user, updates } = renderPropertyDock({

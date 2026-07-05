@@ -1,9 +1,11 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from './Dashboard';
 import { makeDashboard } from '../test/fixtures/dashboard.fixture';
 import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.types';
+import type { DashboardView } from '../domain/admin.types';
 import { useUIStore } from '../store/ui.store';
 
 const CONTENT_READY_ATTRIBUTE = 'data-hmi-content-ready';
@@ -31,7 +33,28 @@ vi.mock('../services/HierarchyStorageService', () => ({
 vi.mock('../components/viewer/DashboardHeader', () => ({
     default: (props: Record<string, unknown>) => {
         dashboardHeaderMock(props);
-        return <div data-testid="dashboard-header-title">Header title</div>;
+
+        const dashboard = props.dashboard as { id: string; views?: DashboardView[]; activeViewId?: string; ownerNodeId?: string };
+        const activeViewId = (props.activeViewId as string | undefined) ?? dashboard?.activeViewId;
+        const onSelectView = props.onSelectView as ((viewId: string) => void) | undefined;
+
+        return (
+            <div data-testid="dashboard-header-title">
+                <span data-testid="dashboard-header-dashboard-id">{dashboard?.id}</span>
+                <span data-testid="dashboard-header-owner-node-id">{dashboard?.ownerNodeId ?? 'no-owner'}</span>
+                <span data-testid="dashboard-header-active-view-id">{activeViewId ?? 'no-view'}</span>
+                {dashboard?.views?.map((view) => (
+                    <button
+                        key={view.id}
+                        type="button"
+                        aria-pressed={view.id === activeViewId}
+                        onClick={() => onSelectView?.(view.id)}
+                    >
+                        {view.name}
+                    </button>
+                ))}
+            </div>
+        );
     },
 }));
 
@@ -55,6 +78,28 @@ function renderDashboard(initialEntry = '/', options?: Parameters<typeof render>
         </MemoryRouter>,
         options,
     );
+}
+
+function makeView(id: string, name: string, widgetId = `${id}-widget`): DashboardView {
+    return {
+        id,
+        name,
+        order: 0,
+        widgets: [{
+            id: widgetId,
+            type: 'metric-card',
+            title: `${name} widget`,
+            position: { x: 0, y: 0 },
+            size: { w: 4, h: 3 },
+        }],
+        layout: [{
+            widgetId,
+            x: 0,
+            y: 0,
+            w: 4,
+            h: 3,
+        }],
+    };
 }
 
 describe('Dashboard page layout', () => {
@@ -384,5 +429,141 @@ describe('Dashboard page layout', () => {
                 }),
             );
         });
+    });
+
+    it('opens the requested internal view from the viewId query param and materializes that view without changing dashboard context', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({
+                id: 'dashboard-main',
+                name: 'Dashboard Main',
+                status: 'published',
+                ownerNodeId: 'line-a',
+                views: [
+                    makeView('view-production', 'Production', 'widget-production'),
+                    makeView('view-technical', 'Technical', 'widget-technical'),
+                ],
+                activeViewId: 'view-production',
+            }),
+        ]);
+
+        renderDashboard('/?dashboardId=dashboard-main&viewId=view-technical');
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-header-active-view-id')).toHaveTextContent('view-technical');
+        });
+
+        expect(screen.getByTestId('dashboard-header-dashboard-id')).toHaveTextContent('dashboard-main');
+        expect(screen.getByTestId('dashboard-header-owner-node-id')).toHaveTextContent('line-a');
+        expect(dashboardViewerMock).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                widgets: [expect.objectContaining({ id: 'widget-technical' })],
+                layout: [expect.objectContaining({ widgetId: 'widget-technical' })],
+            }),
+        );
+    });
+
+    it('falls back to the persisted active view when the viewId query param is invalid', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({
+                id: 'dashboard-main',
+                name: 'Dashboard Main',
+                status: 'published',
+                views: [
+                    makeView('view-production', 'Production', 'widget-production'),
+                    makeView('view-technical', 'Technical', 'widget-technical'),
+                ],
+                activeViewId: 'view-technical',
+            }),
+        ]);
+
+        renderDashboard('/?dashboardId=dashboard-main&viewId=view-missing');
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-header-active-view-id')).toHaveTextContent('view-production');
+        });
+
+        expect(dashboardViewerMock).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                widgets: [expect.objectContaining({ id: 'widget-production' })],
+            }),
+        );
+    });
+
+    it('ignores persisted activeViewId on initial viewer load and defaults to the first ordered internal view', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({
+                id: 'dashboard-main',
+                name: 'Dashboard Main',
+                status: 'published',
+                views: [
+                    { ...makeView('view-technical', 'Technical', 'widget-technical'), order: 1 },
+                    { ...makeView('view-production', 'Production', 'widget-production'), order: 0 },
+                ],
+                activeViewId: 'view-technical',
+            }),
+        ]);
+
+        renderDashboard('/?dashboardId=dashboard-main');
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-header-active-view-id')).toHaveTextContent('view-production');
+        });
+
+        expect(dashboardViewerMock).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                widgets: [expect.objectContaining({ id: 'widget-production' })],
+                layout: [expect.objectContaining({ widgetId: 'widget-production' })],
+            }),
+        );
+    });
+
+    it('switches internal views from the header without confusing them with global dashboard navigation', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({
+                id: 'dashboard-a',
+                name: 'Dashboard A',
+                status: 'published',
+                ownerNodeId: 'plant-a',
+                views: [
+                    makeView('view-main', 'Main', 'widget-main'),
+                    makeView('dashboard-b', 'Technical', 'widget-technical'),
+                ],
+                activeViewId: 'view-main',
+            }),
+            makeDashboard({
+                id: 'dashboard-b',
+                name: 'Dashboard B',
+                status: 'published',
+                ownerNodeId: 'plant-b',
+                views: [makeView('view-b', 'Dashboard B main', 'widget-b')],
+                activeViewId: 'view-b',
+            }),
+        ]);
+
+        const user = userEvent.setup();
+        renderDashboard('/?dashboardId=dashboard-a');
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-header-dashboard-id')).toHaveTextContent('dashboard-a');
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Technical' }));
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-header-active-view-id')).toHaveTextContent('dashboard-b');
+        });
+
+        expect(screen.getByTestId('dashboard-header-dashboard-id')).toHaveTextContent('dashboard-a');
+        expect(screen.getByTestId('dashboard-header-owner-node-id')).toHaveTextContent('plant-a');
+        expect(dashboardViewerMock).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                widgets: [expect.objectContaining({ id: 'widget-technical' })],
+            }),
+        );
+        expect(dashboardHeaderMock).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                dashboard: expect.objectContaining({ id: 'dashboard-a', ownerNodeId: 'plant-a' }),
+            }),
+        );
     });
 });

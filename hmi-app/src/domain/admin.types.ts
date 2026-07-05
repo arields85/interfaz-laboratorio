@@ -89,6 +89,8 @@ export interface PublishedSnapshot {
     aspect: DashboardAspect;
     cols: number;
     rows: number;
+    views?: DashboardView[];
+    activeViewId?: string;
     widgets: WidgetConfig[];
     layout: WidgetLayout[];
     headerConfig?: DashboardHeaderConfig;
@@ -114,6 +116,8 @@ export interface Dashboard {
     aspect: DashboardAspect;
     cols: number;
     rows: number;
+    views?: DashboardView[];
+    activeViewId?: string;
     layout: WidgetLayout[];
     widgets: WidgetConfig[];
     lastUpdateAt?: string;
@@ -135,6 +139,18 @@ export interface Dashboard {
      */
     publishedSnapshot?: PublishedSnapshot;
 }
+
+export interface DashboardView {
+    id: string;
+    name: string;
+    subtitle?: string;
+    iconKey?: DashboardViewIconKey;
+    order: number;
+    widgets: WidgetConfig[];
+    layout: WidgetLayout[];
+}
+
+export type DashboardViewIconKey = 'production' | 'technical' | 'maintenance' | 'default';
 
 /**
  * Opciones de visualización unificadas para widgets de conexión.
@@ -798,9 +814,47 @@ export function getDashboardVisualStatus(dashboard: Dashboard): DashboardVisualS
     if (!dashboard.publishedSnapshot) return 'published';
 
     const snap = dashboard.publishedSnapshot;
-    const widgetsMatch = JSON.stringify(dashboard.widgets) === JSON.stringify(snap.widgets);
-    const layoutMatch = JSON.stringify(dashboard.layout) === JSON.stringify(snap.layout);
+    const viewsMatch = JSON.stringify(resolveComparableViews(dashboard.views, dashboard.widgets, dashboard.layout))
+        === JSON.stringify(resolveComparableViews(snap.views, snap.widgets, snap.layout));
+    const activeViewMatch = resolveComparableActiveViewId(dashboard.views, dashboard.activeViewId)
+        === resolveComparableActiveViewId(snap.views, snap.activeViewId);
     const headerMatch = JSON.stringify(dashboard.headerConfig) === JSON.stringify(snap.headerConfig);
 
-    return (widgetsMatch && layoutMatch && headerMatch) ? 'published' : 'pending';
+    return (viewsMatch && activeViewMatch && headerMatch) ? 'published' : 'pending';
+}
+
+function resolveComparableViews(
+    views: DashboardView[] | undefined,
+    widgets: WidgetConfig[] | undefined,
+    layout: WidgetLayout[] | undefined,
+): DashboardView[] {
+    if (views && views.length > 0) {
+        return views.map((view, index) => ({
+            id: view.id,
+            name: view.name,
+            subtitle: view.subtitle,
+            iconKey: view.iconKey,
+            order: view.order ?? index,
+            widgets: view.widgets,
+            layout: view.layout,
+        }));
+    }
+
+    return [{
+        id: 'view-default',
+        name: 'Default view',
+        order: 0,
+        widgets: widgets ?? [],
+        layout: layout ?? [],
+    }];
+}
+
+function resolveComparableActiveViewId(views: DashboardView[] | undefined, activeViewId: string | undefined): string {
+    const resolvedViews = views && views.length > 0
+        ? views
+        : [{ id: 'view-default', name: 'Default view', order: 0, widgets: [], layout: [] }];
+
+    return resolvedViews.some((view) => view.id === activeViewId)
+        ? activeViewId as string
+        : resolvedViews[0].id;
 }

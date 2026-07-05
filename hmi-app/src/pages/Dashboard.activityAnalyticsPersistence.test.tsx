@@ -7,6 +7,7 @@ import Dashboard from './Dashboard';
 import { makeDashboard, makeLayout, makeWidget } from '../test/fixtures/dashboard.fixture';
 import { dashboardStorage } from '../services/DashboardStorageService';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
+import { createDefaultDashboardView } from '../utils/dashboardViews';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -204,6 +205,54 @@ describe('Dashboard activity-analytics viewer persistence', () => {
             name: 'Published activity analytics',
             status: 'published',
             ownerNodeId: 'node-1',
+            activeViewId: 'view-technical',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({
+                        id: 'activity-widget',
+                        type: 'activity-analytics',
+                        title: 'Activity analytics',
+                        binding: {
+                            mode: 'real_variable',
+                            bindingVersion: 'node-red-v1',
+                            machineId: 101,
+                        },
+                        displayOptions: {
+                            range: '7d',
+                            groupBy: 'day',
+                            setupThresholdKw: 0.15,
+                            prodThresholdKw: 0.25,
+                            displayMode: 'kpis-and-bars',
+                        },
+                    } as never)],
+                    layout: [makeLayout({ widgetId: 'activity-widget', x: 0, y: 0, w: 11, h: 9 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({
+                        id: 'activity-widget',
+                        type: 'activity-analytics',
+                        title: 'Activity analytics',
+                        binding: {
+                            mode: 'real_variable',
+                            bindingVersion: 'node-red-v1',
+                            machineId: 101,
+                        },
+                        displayOptions: {
+                            range: '24h',
+                            groupBy: 'day',
+                            setupThresholdKw: 0.15,
+                            prodThresholdKw: 0.25,
+                            displayMode: 'kpis-and-bars',
+                        },
+                    } as never)],
+                    layout: [makeLayout({ widgetId: 'activity-widget', x: 4, y: 0, w: 11, h: 9 })],
+                }),
+            ],
             widgets: [makeWidget({
                 id: 'activity-widget',
                 type: 'activity-analytics',
@@ -221,11 +270,59 @@ describe('Dashboard activity-analytics viewer persistence', () => {
                     displayMode: 'kpis-and-bars',
                 },
             } as never)],
-            layout: [makeLayout({ widgetId: 'activity-widget', x: 0, y: 0, w: 11, h: 9 })],
+            layout: [makeLayout({ widgetId: 'activity-widget', x: 4, y: 0, w: 11, h: 9 })],
             publishedSnapshot: {
                 aspect: '16:9',
                 cols: 40,
                 rows: 24,
+                views: [
+                    createDefaultDashboardView({
+                        id: 'view-production',
+                        name: 'Production',
+                        widgets: [makeWidget({
+                            id: 'activity-widget',
+                            type: 'activity-analytics',
+                            title: 'Activity analytics',
+                            binding: {
+                                mode: 'real_variable',
+                                bindingVersion: 'node-red-v1',
+                                machineId: 101,
+                            },
+                            displayOptions: {
+                                range: '7d',
+                                groupBy: 'day',
+                                setupThresholdKw: 0.15,
+                                prodThresholdKw: 0.25,
+                                displayMode: 'kpis-and-bars',
+                            },
+                        } as never)],
+                        layout: [makeLayout({ widgetId: 'activity-widget', x: 0, y: 0, w: 11, h: 9 })],
+                    }),
+                    createDefaultDashboardView({
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [makeWidget({
+                            id: 'activity-widget',
+                            type: 'activity-analytics',
+                            title: 'Activity analytics',
+                            binding: {
+                                mode: 'real_variable',
+                                bindingVersion: 'node-red-v1',
+                                machineId: 101,
+                            },
+                            displayOptions: {
+                                range: '24h',
+                                groupBy: 'day',
+                                setupThresholdKw: 0.15,
+                                prodThresholdKw: 0.25,
+                                displayMode: 'kpis-and-bars',
+                            },
+                        } as never)],
+                        layout: [makeLayout({ widgetId: 'activity-widget', x: 4, y: 0, w: 11, h: 9 })],
+                    }),
+                ],
+                activeViewId: 'view-technical',
                 widgets: [makeWidget({
                     id: 'activity-widget',
                     type: 'activity-analytics',
@@ -254,7 +351,7 @@ describe('Dashboard activity-analytics viewer persistence', () => {
         const user = userEvent.setup();
 
         const renderDashboard = () => render(
-            <MemoryRouter initialEntries={['/']}>
+            <MemoryRouter initialEntries={['/?dashboardId=dashboard-activity-analytics&viewId=view-technical']}>
                 <Routes>
                     <Route
                         path="/"
@@ -293,7 +390,7 @@ describe('Dashboard activity-analytics viewer persistence', () => {
         await user.click(screen.getByRole('button', { name: '30d' }));
 
         await waitFor(() => {
-            expect(persistSpy).toHaveBeenCalledWith('dashboard-activity-analytics', 'activity-widget', {
+            expect(persistSpy).toHaveBeenCalledWith('dashboard-activity-analytics', 'view-technical', 'activity-widget', {
                 range: '30d',
                 start: undefined,
                 end: undefined,
@@ -307,6 +404,8 @@ describe('Dashboard activity-analytics viewer persistence', () => {
         await waitFor(() => {
             const storedDashboards = JSON.parse(localStorage.getItem(DASHBOARDS_STORAGE_KEY) ?? '[]');
             expect(storedDashboards[0]?.publishedSnapshot?.widgets[0]?.displayOptions?.range).toBe('30d');
+            expect(storedDashboards[0]?.publishedSnapshot?.views[1]?.widgets[0]?.displayOptions?.range).toBe('30d');
+            expect(storedDashboards[0]?.publishedSnapshot?.views[0]?.widgets[0]?.displayOptions?.range).toBe('7d');
         });
 
         initialRender.unmount();

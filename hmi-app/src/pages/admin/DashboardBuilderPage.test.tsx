@@ -4,10 +4,11 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardBuilderPage from './DashboardBuilderPage';
 import { makeDashboard, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
+import { createDefaultDashboardView } from '../../utils/dashboardViews';
 import { useUIStore } from '../../store/ui.store';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import { HEADER_WIDGET_DRAG_MIME } from '../../utils/headerWidgets';
-import type { HierarchyNode } from '../../domain/admin.types';
+import type { Dashboard, HierarchyNode } from '../../domain/admin.types';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -125,10 +126,41 @@ async function renderBuilderPage(
     options?: {
         allDashboards?: ReturnType<typeof makeDashboard>[];
         allNodes?: HierarchyNode[];
+        statefulDashboard?: Dashboard;
     },
 ) {
-    dashboardStorageMock.getDashboard.mockResolvedValue(dashboard);
-    dashboardStorageMock.getDashboards.mockResolvedValue(options?.allDashboards ?? [dashboard]);
+    if (options?.statefulDashboard) {
+        const state = options.statefulDashboard;
+        dashboardStorageMock.getDashboard.mockImplementation(async (dashboardId: string) => (
+            state.id === dashboardId ? structuredClone(state) : null
+        ));
+        dashboardStorageMock.getDashboards.mockImplementation(async () => {
+            const dashboards = options.allDashboards ?? [state];
+            return dashboards.map((item) => (item.id === state.id ? structuredClone(state) : structuredClone(item)));
+        });
+        dashboardStorageMock.saveDashboard.mockImplementation(async (nextDashboard: Dashboard) => {
+            Object.assign(state, structuredClone(nextDashboard));
+        });
+        dashboardStorageMock.publishDashboard.mockImplementation(async (dashboardId: string) => {
+            expect(dashboardId).toBe(state.id);
+            state.status = 'published';
+            state.publishedSnapshot = {
+                aspect: state.aspect,
+                cols: state.cols,
+                rows: state.rows,
+                views: structuredClone(state.views),
+                activeViewId: state.activeViewId,
+                widgets: structuredClone(state.widgets),
+                layout: structuredClone(state.layout),
+                headerConfig: structuredClone(state.headerConfig),
+                publishedAt: '2026-07-04T12:30:00.000Z',
+            };
+            return structuredClone(state);
+        });
+    } else {
+        dashboardStorageMock.getDashboard.mockResolvedValue(dashboard);
+        dashboardStorageMock.getDashboards.mockResolvedValue(options?.allDashboards ?? [dashboard]);
+    }
     dashboardStorageMock.applyTemplate.mockImplementation((currentDashboard, template) => ({
         ...currentDashboard,
         widgets: template.widgetPresets ?? [],
@@ -163,6 +195,12 @@ function getBuilderCanvasSnapshot() {
         widgetIds: JSON.parse(node.getAttribute('data-widget-ids') ?? '[]') as string[],
         layout: JSON.parse(node.getAttribute('data-layout') ?? '[]') as Array<{ widgetId: string; x: number; y: number; w: number; h: number }>,
     };
+}
+
+function getLatestPropertyDockProps() {
+    return propertyDockMock.mock.calls.at(-1)?.[0] as {
+        onDuplicate?: () => void;
+    } | undefined;
 }
 
 vi.mock('react-router-dom', () => ({
@@ -263,17 +301,37 @@ vi.mock('../../components/viewer/DashboardHeader', () => ({
     default: ({
         dashboard,
         onAddHeaderWidget,
+        onSelectView,
+        activeViewId,
         ...props
     }: {
-        dashboard: { headerConfig?: { widgetSlots?: Array<{ widgetId: string; column?: number }> } };
+        dashboard: {
+            headerConfig?: { widgetSlots?: Array<{ widgetId: string; column?: number }> };
+            views?: Array<{ id: string; name: string }>;
+        };
         onAddHeaderWidget?: (type: 'status', slotIndex: number) => void;
+        onSelectView?: (viewId: string) => void;
+        activeViewId?: string;
         connection?: ConnectionHealth;
         machines?: ContractMachine[];
     }) => (
         (() => {
-            dashboardHeaderMock({ dashboard, onAddHeaderWidget, ...props });
+            dashboardHeaderMock({ dashboard, onAddHeaderWidget, onSelectView, activeViewId, ...props });
             return (
                 <div data-testid="dashboard-header" data-header-slot-count={dashboard.headerConfig?.widgetSlots?.length ?? 0}>
+                    <div data-testid="dashboard-header-view-actions">
+                        {dashboard.views?.map((view) => (
+                            <button
+                                key={view.id}
+                                type="button"
+                                aria-label={view.name}
+                                aria-pressed={view.id === activeViewId}
+                                onClick={() => onSelectView?.(view.id)}
+                            >
+                                {view.id === activeViewId ? 'active' : 'inactive'}
+                            </button>
+                        ))}
+                    </div>
                     <button type="button" onClick={() => onAddHeaderWidget?.('status', 0)}>
                         Agregar widget header
                     </button>
@@ -391,12 +449,24 @@ describe('DashboardBuilderPage', () => {
         );
     });
 
-    it('keeps only the grid toggle next to Volver and persists its preference', async () => {
+    it('moves the grid toggle into view actions while keeping its persisted preference', async () => {
         const user = userEvent.setup();
         const firstRender = await renderBuilderPage();
         const viewport = screen.getByTestId('dashboard-builder-canvas-viewport');
+        const contextBarPanel = screen.getByTestId('context-bar-panel');
+        const viewActions = screen.getByTestId('dashboard-builder-view-actions');
 
         expect(viewport.parentElement).toHaveClass('flex', 'h-full', 'min-h-0', 'flex-col');
+        expect(contextBarPanel).toContainElement(screen.getByRole('button', { name: 'Volver' }));
+        expect(contextBarPanel).not.toContainElement(screen.getByRole('button', { name: 'Ocultar grid' }));
+        expect(Array.from(viewActions.querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))).toEqual([
+            'Nueva vista',
+            'Renombrar',
+            'Reordenar vista a la izquierda',
+            'Reordenar vista a la derecha',
+            'Eliminar vista',
+            'Ocultar grid',
+        ]);
 
         const gridButton = screen.getByRole('button', { name: 'Ocultar grid' });
         expect(gridButton).toHaveAttribute('aria-pressed', 'true');
@@ -426,10 +496,14 @@ describe('DashboardBuilderPage', () => {
         expect(screen.getByRole('button', { name: 'Mostrar grid' })).toHaveAttribute('aria-pressed', 'false');
     });
 
-    it('shows hover tooltips only for the remaining grid action', async () => {
+    it('shows hover tooltips for the grid action from the internal view-actions group', async () => {
         const user = userEvent.setup();
 
         await renderBuilderPage();
+
+        expect(screen.getByTestId('dashboard-builder-view-actions')).toContainElement(
+            screen.getByRole('button', { name: 'Ocultar grid' }),
+        );
 
         await user.hover(screen.getByRole('button', { name: 'Ocultar grid' }));
         expect(await screen.findByRole('tooltip')).toHaveTextContent('Ocultar grid');
@@ -894,6 +968,574 @@ describe('DashboardBuilderPage', () => {
             dataLoading: true,
             dataError: true,
         });
+    });
+
+    it('creates, selects, renames, reorders, and deletes internal views without allowing the final view to disappear', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-views',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-technical', x: 4, y: 0, w: 4, h: 3 })],
+                }),
+            ],
+            activeViewId: 'view-production',
+            widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+            layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+        }));
+
+        expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-production']);
+
+        await user.click(screen.getByRole('button', { name: 'Nueva vista' }));
+        await user.type(screen.getByPlaceholderText('Nombre de la vista'), 'Maintenance');
+        await user.click(screen.getByRole('button', { name: 'Crear' }));
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Maintenance' })).toHaveAttribute('aria-pressed', 'true');
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual([]);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Renombrar' }));
+        const renameInput = screen.getByPlaceholderText('Nombre de la vista');
+        await user.clear(renameInput);
+        await user.type(renameInput, 'Maintenance East');
+        await user.click(screen.getByRole('button', { name: 'Guardar' }));
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Maintenance East' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Reordenar vista a la izquierda' }));
+
+        await waitFor(() => {
+            expect(screen.getAllByTestId('dashboard-header-view-actions')[0].querySelectorAll('button')).toHaveLength(3);
+            expect(Array.from(screen.getAllByTestId('dashboard-header-view-actions')[0].querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))).toEqual(['Production', 'Maintenance East', 'Technical']);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Eliminar vista' }));
+
+        await waitFor(() => {
+            expect(screen.queryByRole('button', { name: 'Maintenance East' })).not.toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Production' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Technical' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-technical']);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Eliminar vista' }));
+        await waitFor(() => {
+            expect(screen.queryByRole('button', { name: 'Technical' })).not.toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Production' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Eliminar vista' }));
+
+        expect(await screen.findByText('No se puede eliminar la última vista del dashboard.')).toBeInTheDocument();
+        expect(Array.from(screen.getAllByTestId('dashboard-header-view-actions')[0].querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))).toEqual(['Production']);
+    });
+
+    it('lets the builder set and update persisted internal-view icon keys from a closed selector', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-view-icons',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({ id: 'view-production', name: 'Production' }),
+                createDefaultDashboardView({ id: 'view-technical', name: 'Technical', order: 1 }),
+            ],
+            activeViewId: 'view-production',
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Nueva vista' }));
+        await user.type(screen.getByPlaceholderText('Nombre de la vista'), 'Maintenance');
+        await user.click(screen.getByRole('button', { name: 'Automático' }));
+        await user.click(screen.getByRole('button', { name: 'Predeterminado' }));
+        await user.click(screen.getByRole('button', { name: 'Crear' }));
+
+        await waitFor(() => {
+            const latestHeaderProps = dashboardHeaderMock.mock.calls.at(-1)?.[0] as {
+                dashboard: { views?: Array<{ id: string; name: string; iconKey?: string }> };
+            };
+            expect(latestHeaderProps.dashboard.views).toEqual(expect.arrayContaining([
+                expect.objectContaining({ name: 'Maintenance', iconKey: 'default' }),
+            ]));
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Renombrar' }));
+        const renameInput = screen.getByPlaceholderText('Nombre de la vista');
+        await user.clear(renameInput);
+        await user.type(renameInput, 'Maintenance East');
+        await user.click(screen.getByRole('button', { name: 'Predeterminado' }));
+        await user.click(screen.getByRole('button', { name: 'Mantenimiento' }));
+        await user.click(screen.getByRole('button', { name: 'Guardar' }));
+
+        await waitFor(() => {
+            const latestHeaderProps = dashboardHeaderMock.mock.calls.at(-1)?.[0] as {
+                dashboard: { views?: Array<{ id: string; name: string; iconKey?: string }> };
+            };
+            expect(latestHeaderProps.dashboard.views).toEqual(expect.arrayContaining([
+                expect.objectContaining({ name: 'Maintenance East', iconKey: 'maintenance' }),
+            ]));
+        });
+    });
+
+    it('moves internal-view management controls into the context bar and keeps a stable trailing slot while dirty state moves onto the save button', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-toolbar',
+            name: 'Toolbar dashboard',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({ id: 'view-production', name: 'Production' }),
+                createDefaultDashboardView({ id: 'view-technical', name: 'Technical', order: 1 }),
+            ],
+            activeViewId: 'view-production',
+            widgets: [],
+            layout: [],
+        }));
+
+        const contextBar = screen.getByTestId('context-bar');
+        const createButton = screen.getByRole('button', { name: 'Nueva vista' });
+        const renameButton = screen.getByRole('button', { name: 'Renombrar' });
+        const moveLeftButton = screen.getByRole('button', { name: 'Reordenar vista a la izquierda' });
+        const moveRightButton = screen.getByRole('button', { name: 'Reordenar vista a la derecha' });
+        const deleteButton = screen.getByRole('button', { name: 'Eliminar vista' });
+
+        expect(contextBar).toContainElement(createButton);
+        expect(contextBar).toContainElement(renameButton);
+        expect(contextBar).toContainElement(moveLeftButton);
+        expect(contextBar).toContainElement(moveRightButton);
+        expect(contextBar).toContainElement(deleteButton);
+        expect(contextBar).toContainElement(screen.getByRole('button', { name: 'Guardar Draft' }));
+
+        expect(createButton).not.toHaveTextContent('Nueva vista');
+        expect(renameButton).not.toHaveTextContent('Renombrar');
+        expect(moveLeftButton).not.toHaveTextContent('Reordenar');
+        expect(moveRightButton).not.toHaveTextContent('Reordenar');
+        expect(deleteButton).not.toHaveTextContent('Eliminar vista');
+
+        const warningSlot = screen.getByTestId('dashboard-builder-unsaved-slot');
+        expect(warningSlot).toBeInTheDocument();
+        expect(warningSlot).not.toHaveTextContent('Cambios sin guardar');
+        expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Nueva vista' }));
+        await user.type(screen.getByPlaceholderText('Nombre de la vista'), 'Maintenance');
+        await user.click(screen.getByRole('button', { name: 'Crear' }));
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Guardar Draft' })).toBeEnabled();
+        });
+
+        expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Guardar Draft' }).className).toContain('border-status-warning');
+        expect(screen.getByRole('button', { name: 'Guardar Draft' }).className).toContain('text-status-warning');
+        expect(screen.getByRole('button', { name: 'Guardar Draft' }).className).toContain('bg-[color:color-mix(in_srgb,var(--color-status-warning)_10%,transparent)]');
+        expect(screen.getByTestId('dashboard-builder-unsaved-slot')).toBeEmptyDOMElement();
+    });
+
+    it('uses the existing tooltip primitive with icon-only internal-view management buttons and shared reorder copy', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-toolbar-tooltips',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({ id: 'view-production', name: 'Production' }),
+                createDefaultDashboardView({ id: 'view-technical', name: 'Technical', order: 1 }),
+            ],
+            activeViewId: 'view-production',
+        }));
+
+        await user.hover(screen.getByRole('button', { name: 'Nueva vista' }));
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('Nueva vista');
+        await user.unhover(screen.getByRole('button', { name: 'Nueva vista' }));
+
+        await waitFor(() => {
+            expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+        });
+
+        await user.hover(screen.getByRole('button', { name: 'Reordenar vista a la izquierda' }));
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('Reordenar');
+        await user.unhover(screen.getByRole('button', { name: 'Reordenar vista a la izquierda' }));
+
+        await waitFor(() => {
+            expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+        });
+
+        await user.hover(screen.getByRole('button', { name: 'Reordenar vista a la derecha' }));
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('Reordenar');
+    });
+
+    it('renders recognizable lucide svg icons for internal-view management buttons at the shared icon-only size', async () => {
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-toolbar-icons',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({ id: 'view-production', name: 'Production' }),
+                createDefaultDashboardView({ id: 'view-technical', name: 'Technical', order: 1 }),
+            ],
+            activeViewId: 'view-production',
+        }));
+
+        const createButton = screen.getByRole('button', { name: 'Nueva vista' });
+        const renameButton = screen.getByRole('button', { name: 'Renombrar' });
+        const moveLeftButton = screen.getByRole('button', { name: 'Reordenar vista a la izquierda' });
+        const moveRightButton = screen.getByRole('button', { name: 'Reordenar vista a la derecha' });
+        const deleteButton = screen.getByRole('button', { name: 'Eliminar vista' });
+
+        expect(createButton.querySelector('.lucide-plus')).toHaveAttribute('width', '16');
+        expect(createButton.querySelector('.lucide-plus')).toHaveAttribute('height', '16');
+        expect(renameButton.querySelector('.lucide-pencil')).toHaveAttribute('width', '16');
+        expect(renameButton.querySelector('.lucide-pencil')).toHaveAttribute('height', '16');
+        expect(moveLeftButton.querySelector('.lucide-chevron-left')).toHaveAttribute('width', '16');
+        expect(moveLeftButton.querySelector('.lucide-chevron-left')).toHaveAttribute('height', '16');
+        expect(moveRightButton.querySelector('.lucide-chevron-right')).toHaveAttribute('width', '16');
+        expect(moveRightButton.querySelector('.lucide-chevron-right')).toHaveAttribute('height', '16');
+        expect(deleteButton.querySelector('.lucide-trash-2')).toHaveAttribute('width', '16');
+        expect(deleteButton.querySelector('.lucide-trash-2')).toHaveAttribute('height', '16');
+    });
+
+    it('keeps disabled reorder controls tooltip-driven while preserving their directional accessible labels', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-toolbar-shared-style',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({ id: 'view-production', name: 'Production' }),
+                createDefaultDashboardView({ id: 'view-technical', name: 'Technical', order: 1 }),
+            ],
+            activeViewId: 'view-production',
+        }));
+
+        const createButton = screen.getByRole('button', { name: 'Nueva vista' });
+        const renameButton = screen.getByRole('button', { name: 'Renombrar' });
+        const moveLeftButton = screen.getByRole('button', { name: 'Reordenar vista a la izquierda' });
+        const moveRightButton = screen.getByRole('button', { name: 'Reordenar vista a la derecha' });
+        const deleteButton = screen.getByRole('button', { name: 'Eliminar vista' });
+
+        expect(createButton).toBeEnabled();
+        expect(renameButton).toBeEnabled();
+        expect(moveLeftButton).toBeDisabled();
+        expect(moveRightButton).toBeEnabled();
+        expect(deleteButton).toBeEnabled();
+
+        await user.hover(moveLeftButton);
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('Reordenar');
+    });
+
+    it('keeps disabled reorder controls recognizable by preserving their svg icon render', async () => {
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-toolbar-disabled-icons',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({ id: 'view-production', name: 'Production' }),
+                createDefaultDashboardView({ id: 'view-technical', name: 'Technical', order: 1 }),
+            ],
+            activeViewId: 'view-production',
+        }));
+
+        const moveLeftButton = screen.getByRole('button', { name: 'Reordenar vista a la izquierda' });
+
+        expect(moveLeftButton).toBeDisabled();
+        expect(moveLeftButton.querySelector('.lucide-chevron-left')).toHaveAttribute('width', '16');
+        expect(moveLeftButton.querySelector('.lucide-chevron-left')).toHaveAttribute('height', '16');
+    });
+
+    it('uses the first ordered internal view as the builder default while keeping exploration local until a real edit', async () => {
+        const user = userEvent.setup();
+
+        const dashboardState = makeDashboard({
+            id: 'dashboard-1',
+            name: 'Builder dashboard',
+            ownerNodeId: 'node-1',
+            status: 'published',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-technical', x: 4, y: 0, w: 4, h: 3 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    order: 0,
+                    widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                }),
+            ],
+            activeViewId: 'view-technical',
+            widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+            layout: [makeLayout({ widgetId: 'widget-technical', x: 4, y: 0, w: 4, h: 3 })],
+        });
+
+        await renderBuilderPage(dashboardState, {
+            allDashboards: [dashboardState],
+            statefulDashboard: dashboardState,
+        });
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Production' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-production']);
+        expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Technical' }));
+
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-technical']);
+        });
+
+        expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+    });
+
+    it('keeps builder internal-view switching inside the header instead of rendering text tabs above the title', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-view-header-placement',
+            name: 'Builder dashboard',
+            ownerNodeId: 'node-1',
+            views: [
+                createDefaultDashboardView({ id: 'view-production', name: 'Production' }),
+                createDefaultDashboardView({ id: 'view-technical', name: 'Technical', order: 1 }),
+            ],
+            activeViewId: 'view-production',
+        }));
+
+        expect(screen.queryByTestId('dashboard-view-tabs')).not.toBeInTheDocument();
+
+        const headerActions = screen.getByTestId('dashboard-header-view-actions');
+        const productionButton = screen.getByRole('button', { name: 'Production' });
+        const technicalButton = screen.getByRole('button', { name: 'Technical' });
+
+        expect(headerActions).toContainElement(productionButton);
+        expect(headerActions).toContainElement(technicalButton);
+        expect(productionButton).toHaveAttribute('aria-pressed', 'true');
+        expect(technicalButton).toHaveAttribute('aria-pressed', 'false');
+
+        await user.click(technicalButton);
+
+        expect(screen.getByRole('button', { name: 'Technical' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('treats internal-view tab switching as local navigation and keeps the persisted default view unchanged until a real edit is saved', async () => {
+        const user = userEvent.setup();
+
+        const dashboardState = makeDashboard({
+            id: 'dashboard-1',
+            name: 'Builder dashboard',
+            ownerNodeId: 'node-1',
+            status: 'published',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-technical', x: 4, y: 0, w: 4, h: 3 })],
+                }),
+            ],
+            activeViewId: 'view-production',
+            widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+            layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+            publishedSnapshot: {
+                aspect: '16:9',
+                cols: 40,
+                rows: 24,
+                views: [
+                    createDefaultDashboardView({
+                        id: 'view-production',
+                        name: 'Production',
+                        widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                        layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                    }),
+                    createDefaultDashboardView({
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+                        layout: [makeLayout({ widgetId: 'widget-technical', x: 4, y: 0, w: 4, h: 3 })],
+                    }),
+                ],
+                activeViewId: 'view-production',
+                widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                publishedAt: '2026-07-04T12:00:00.000Z',
+            },
+        });
+
+        await renderBuilderPage(dashboardState, {
+            allDashboards: [dashboardState],
+            statefulDashboard: dashboardState,
+        });
+
+        expect(screen.getByRole('button', { name: 'Guardar Cambios' })).toBeDisabled();
+
+        await user.click(screen.getByRole('button', { name: 'Technical' }));
+
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-technical']);
+        });
+
+        expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Guardar Cambios' })).toBeDisabled();
+        expect(dashboardStorageMock.saveDashboard).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Guardar Cambios' })).toBeEnabled();
+        });
+
+        expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Guardar Cambios' }).className).toContain('border-status-warning');
+        expect(screen.getByRole('button', { name: 'Guardar Cambios' }).className).toContain('text-status-warning');
+
+        await user.click(screen.getByRole('button', { name: 'Guardar Cambios' }));
+
+        await waitFor(() => {
+            expect(dashboardStorageMock.saveDashboard).toHaveBeenCalledTimes(1);
+        });
+
+        const savedDashboard = dashboardStorageMock.saveDashboard.mock.calls.at(-1)?.[0] as Dashboard;
+        expect(savedDashboard.activeViewId).toBe('view-production');
+        expect(savedDashboard.views?.find((view) => view.id === 'view-production')?.widgets).toEqual([
+            expect.objectContaining({ id: 'widget-production', title: 'Production widget' }),
+        ]);
+        expect(savedDashboard.views?.find((view) => view.id === 'view-technical')?.widgets).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ id: 'widget-technical', title: 'Technical widget' }),
+            ]),
+        );
+        expect(savedDashboard.views?.find((view) => view.id === 'view-technical')?.widgets).toHaveLength(2);
+    });
+
+    it('targets widget duplicate, save, and publish operations to the active internal view without any control HTTP mutations', async () => {
+        const user = userEvent.setup();
+        const fetchSpy = vi.fn();
+        vi.stubGlobal('fetch', fetchSpy);
+
+        const dashboardState = makeDashboard({
+            id: 'dashboard-1',
+            name: 'Builder dashboard',
+            ownerNodeId: 'node-1',
+            status: 'published',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-technical', x: 4, y: 0, w: 4, h: 3 })],
+                }),
+            ],
+            activeViewId: 'view-production',
+            widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+            layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+            publishedSnapshot: {
+                aspect: '16:9',
+                cols: 40,
+                rows: 24,
+                views: [
+                    createDefaultDashboardView({
+                        id: 'view-production',
+                        name: 'Production',
+                        widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                        layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                    }),
+                    createDefaultDashboardView({
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+                        layout: [makeLayout({ widgetId: 'widget-technical', x: 4, y: 0, w: 4, h: 3 })],
+                    }),
+                ],
+                activeViewId: 'view-production',
+                widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                layout: [makeLayout({ widgetId: 'widget-production', x: 0, y: 0, w: 4, h: 3 })],
+                publishedAt: '2026-07-04T12:00:00.000Z',
+            },
+        });
+
+        await renderBuilderPage(dashboardState, {
+            allDashboards: [dashboardState],
+            statefulDashboard: dashboardState,
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Technical' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-technical']);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Technical widget' }));
+        await act(async () => {
+            getLatestPropertyDockProps()?.onDuplicate?.();
+        });
+
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(3);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Guardar Cambios' }));
+
+        await waitFor(() => {
+            expect(dashboardStorageMock.saveDashboard).toHaveBeenCalled();
+        });
+
+        const savedDashboard = dashboardStorageMock.saveDashboard.mock.calls.at(-1)?.[0] as Dashboard;
+        expect(savedDashboard.activeViewId).toBe('view-production');
+        expect(savedDashboard.widgets.map((widget) => widget.id)).toEqual(expect.arrayContaining(['widget-production']));
+        expect(savedDashboard.views?.find((view) => view.id === 'view-production')?.widgets).toEqual([
+            expect.objectContaining({ id: 'widget-production', title: 'Production widget' }),
+        ]);
+        expect(savedDashboard.views?.find((view) => view.id === 'view-technical')?.widgets).toHaveLength(3);
+
+        await user.click(screen.getByRole('button', { name: 'Publicar' }));
+
+        await waitFor(() => {
+            expect(dashboardStorageMock.publishDashboard).toHaveBeenCalledWith('dashboard-1');
+        });
+
+        expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it('passes hierarchy trace only for the selected hierarchy metric-card', async () => {

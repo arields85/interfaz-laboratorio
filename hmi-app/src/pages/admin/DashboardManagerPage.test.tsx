@@ -122,6 +122,39 @@ describe('DashboardManagerPage', () => {
         loadNodeTypeLabelsMock.mockResolvedValue(undefined);
     });
 
+    it('shows the initial view explicitly from the first ordered internal view in the dashboard row', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({
+                id: 'dashboard-1',
+                name: 'Principal',
+                description: 'Resumen general',
+                ownerNodeId: 'node-1',
+                views: [
+                    {
+                        id: 'view-technical',
+                        name: 'Técnica',
+                        order: 1,
+                        widgets: [],
+                        layout: [],
+                    },
+                    {
+                        id: 'view-production',
+                        name: 'Producción',
+                        order: 0,
+                        widgets: [],
+                        layout: [],
+                    },
+                ],
+                activeViewId: 'view-technical',
+            }),
+        ]);
+
+        render(<DashboardManagerPage />);
+
+        expect(await screen.findByText('Vista inicial: Producción')).toBeInTheDocument();
+        expect(screen.getByText('Resumen general')).toBeInTheDocument();
+    });
+
     it('shows hover tooltips for dashboard rail and icon-only actions', async () => {
         const user = userEvent.setup();
 

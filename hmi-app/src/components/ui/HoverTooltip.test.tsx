@@ -225,4 +225,25 @@ describe('HoverTooltip', () => {
             });
         });
     });
+
+    it('renders the tooltip through document.body so transformed parents do not shift viewport positioning', () => {
+        render(
+            <div data-testid="transformed-parent" style={{ transform: 'translate3d(0, 0, 0)' }}>
+                <HoverTooltip label="Header view" position="bottom">
+                    <button type="button">Header trigger</button>
+                </HoverTooltip>
+            </div>,
+        );
+
+        const trigger = screen.getByRole('button', { name: 'Header trigger' });
+        vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+            createRect({ x: 240, y: 16, width: 36, height: 36 }),
+        );
+
+        fireEvent.mouseEnter(trigger);
+
+        const tooltip = screen.getByRole('tooltip');
+        expect(tooltip.parentElement).toBe(document.body);
+        expect(screen.getByTestId('transformed-parent')).not.toContainElement(tooltip);
+    });
 });

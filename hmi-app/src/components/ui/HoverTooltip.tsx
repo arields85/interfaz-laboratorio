@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 const TOOLTIP_OFFSET_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
@@ -260,6 +261,17 @@ export default function HoverTooltip({
         updatePosition();
     }, [isVisible, updatePosition]);
 
+    const tooltip = isVisible && coordinates ? (
+        <span
+            ref={tooltipRef}
+            role="tooltip"
+            className="pointer-events-none fixed z-50 whitespace-nowrap rounded border border-white bg-industrial-surface/90 px-2 py-1 text-white"
+            style={coordinates}
+        >
+            {label}
+        </span>
+    ) : null;
+
     return (
         <div
             ref={triggerRef}
@@ -283,16 +295,7 @@ export default function HoverTooltip({
             {...rest}
         >
             {children}
-            {isVisible && coordinates ? (
-                <span
-                    ref={tooltipRef}
-                    role="tooltip"
-                    className="pointer-events-none fixed z-50 whitespace-nowrap rounded border border-white bg-industrial-surface/90 px-2 py-1 text-white"
-                    style={coordinates}
-                >
-                    {label}
-                </span>
-            ) : null}
+            {tooltip && typeof document !== 'undefined' ? createPortal(tooltip, document.body) : tooltip}
         </div>
     );
 }

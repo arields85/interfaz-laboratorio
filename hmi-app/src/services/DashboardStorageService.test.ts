@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Dashboard } from '../domain/admin.types';
 import { dashboardStorage } from './DashboardStorageService';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 import { makeDashboard, makeLayout, makeTemplate, makeWidget } from '../test/fixtures/dashboard.fixture';
 import { TemplateAspectMismatchError, buildTemplateAspectMismatchMessage } from '../utils/templateAspectMismatch';
+import { createDefaultDashboardView } from '../utils/dashboardViews';
 
 describe('DashboardStorageService', () => {
     const readStoredDashboards = () => JSON.parse(localStorage.getItem(DASHBOARDS_STORAGE_KEY) ?? '[]');
@@ -54,6 +56,10 @@ describe('DashboardStorageService', () => {
         expect(dashboard.aspect).toBe('16:9');
         expect(dashboard.cols).toBe(40);
         expect(dashboard.rows).toBe(24);
+        expect(dashboard.views).toEqual([
+            expect.objectContaining({ id: 'view-default', name: 'Default view', order: 0, widgets: [], layout: [] }),
+        ]);
+        expect(dashboard.activeViewId).toBe('view-default');
 
         const persistedDashboards = JSON.parse(localStorage.getItem(DASHBOARDS_STORAGE_KEY) ?? '[]');
         expect(persistedDashboards).toEqual(
@@ -63,9 +69,39 @@ describe('DashboardStorageService', () => {
                     aspect: '16:9',
                     cols: 40,
                     rows: 24,
+                    activeViewId: 'view-default',
+                    views: [expect.objectContaining({ id: 'view-default', name: 'Default view' })],
                 }),
             ]),
         );
+    });
+
+    it('normalizes legacy dashboards into a default internal view during storage reads', async () => {
+        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify([
+            makeDashboard({
+                id: 'dashboard-legacy-views',
+                widgets: [makeWidget({ id: 'widget-legacy', title: 'Legacy widget' })],
+                layout: [makeLayout({ widgetId: 'widget-legacy', x: 2, y: 1, w: 5, h: 4 })],
+            }),
+        ]));
+
+        const dashboardPromise = dashboardStorage.getDashboard('dashboard-legacy-views');
+
+        await vi.advanceTimersByTimeAsync(200);
+        const dashboard = await dashboardPromise;
+
+        expect(dashboard?.views).toEqual([
+            expect.objectContaining({
+                id: 'view-default',
+                name: 'Default view',
+                widgets: [expect.objectContaining({ id: 'widget-legacy', title: 'Legacy widget' })],
+                layout: [expect.objectContaining({ widgetId: 'widget-legacy', x: 2, y: 1, w: 5, h: 4 })],
+            }),
+        ]);
+        expect(readStoredDashboards()[0]).toEqual(expect.objectContaining({
+            activeViewId: 'view-default',
+            views: [expect.objectContaining({ id: 'view-default', name: 'Default view' })],
+        }));
     });
 
     it('creates dashboards from templates preserving aspect, cols, and rows', async () => {
@@ -367,6 +403,166 @@ describe('DashboardStorageService', () => {
         }));
     });
 
+    it('scopes persisted widget display options by dashboard, view, and widget identity', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-view-options',
+            status: 'published',
+            ownerNodeId: 'node-1',
+            widgets: [makeWidget({ id: 'widget-shared', title: 'Production root' })],
+            layout: [makeLayout({ widgetId: 'widget-shared' })],
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({ id: 'widget-shared', title: 'Production root' })],
+                    layout: [makeLayout({ widgetId: 'widget-shared' })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-shared', title: 'Technical root' })],
+                    layout: [makeLayout({ widgetId: 'widget-shared', x: 4 })],
+                }),
+            ],
+            activeViewId: 'view-production',
+            publishedSnapshot: {
+                aspect: '16:9',
+                cols: 40,
+                rows: 24,
+                widgets: [makeWidget({ id: 'widget-shared', title: 'Production root' })],
+                layout: [makeLayout({ widgetId: 'widget-shared' })],
+                views: [
+                    createDefaultDashboardView({
+                        id: 'view-production',
+                        name: 'Production',
+                        widgets: [makeWidget({ id: 'widget-shared', title: 'Production root' })],
+                        layout: [makeLayout({ widgetId: 'widget-shared' })],
+                    }),
+                    createDefaultDashboardView({
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [makeWidget({ id: 'widget-shared', title: 'Technical root' })],
+                        layout: [makeLayout({ widgetId: 'widget-shared', x: 4 })],
+                    }),
+                ],
+                activeViewId: 'view-production',
+                publishedAt: '2026-04-16T15:00:00.000Z',
+            },
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(dashboard);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const persistPromise = dashboardStorage.persistPublishedWidgetDisplayOptions(
+            dashboard.id,
+            'view-technical',
+            'widget-shared',
+            { subtitle: 'Technical subtitle' },
+        );
+        await vi.advanceTimersByTimeAsync(600);
+        const updated = await persistPromise;
+
+        expect(updated?.views?.[0]?.widgets[0]).not.toEqual(expect.objectContaining({
+            displayOptions: expect.objectContaining({ subtitle: 'Technical subtitle' }),
+        }));
+        expect(updated?.views?.[1]?.widgets[0]).toEqual(expect.objectContaining({
+            displayOptions: expect.objectContaining({ subtitle: 'Technical subtitle' }),
+        }));
+        expect(updated?.publishedSnapshot?.views?.[0]?.widgets[0]).not.toEqual(expect.objectContaining({
+            displayOptions: expect.objectContaining({ subtitle: 'Technical subtitle' }),
+        }));
+        expect(updated?.publishedSnapshot?.views?.[1]?.widgets[0]).toEqual(expect.objectContaining({
+            displayOptions: expect.objectContaining({ subtitle: 'Technical subtitle' }),
+        }));
+    });
+
+    it('materializes legacy root widget fields from the selected published view when persisting viewer display options', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-view-root-materialization',
+            status: 'published',
+            ownerNodeId: 'node-1',
+            widgets: [makeWidget({ id: 'widget-shared', title: 'Production root', displayOptions: { range: '7d' } })],
+            layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({ id: 'widget-shared', title: 'Production root', displayOptions: { range: '7d' } })],
+                    layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-shared', title: 'Technical root', displayOptions: { range: '24h' } })],
+                    layout: [makeLayout({ widgetId: 'widget-shared', x: 4 })],
+                }),
+            ],
+            activeViewId: 'view-technical',
+            publishedSnapshot: {
+                aspect: '16:9',
+                cols: 40,
+                rows: 24,
+                widgets: [makeWidget({ id: 'widget-shared', title: 'Production root', displayOptions: { range: '7d' } })],
+                layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+                views: [
+                    createDefaultDashboardView({
+                        id: 'view-production',
+                        name: 'Production',
+                        widgets: [makeWidget({ id: 'widget-shared', title: 'Production root', displayOptions: { range: '7d' } })],
+                        layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+                    }),
+                    createDefaultDashboardView({
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [makeWidget({ id: 'widget-shared', title: 'Technical root', displayOptions: { range: '24h' } })],
+                        layout: [makeLayout({ widgetId: 'widget-shared', x: 4 })],
+                    }),
+                ],
+                activeViewId: 'view-technical',
+                publishedAt: '2026-04-16T15:00:00.000Z',
+            },
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(dashboard);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const persistPromise = dashboardStorage.persistPublishedWidgetDisplayOptions(
+            dashboard.id,
+            'view-technical',
+            'widget-shared',
+            { range: '30d' },
+        );
+        await vi.advanceTimersByTimeAsync(600);
+        const updated = await persistPromise;
+
+        expect(updated?.widgets[0]).toEqual(expect.objectContaining({
+            title: 'Technical root',
+            displayOptions: expect.objectContaining({ range: '30d' }),
+        }));
+        expect(updated?.layout[0]).toEqual(expect.objectContaining({ widgetId: 'widget-shared', x: 4 }));
+        expect(updated?.publishedSnapshot?.widgets[0]).toEqual(expect.objectContaining({
+            title: 'Technical root',
+            displayOptions: expect.objectContaining({ range: '30d' }),
+        }));
+        expect(updated?.publishedSnapshot?.layout[0]).toEqual(expect.objectContaining({ widgetId: 'widget-shared', x: 4 }));
+
+        const storedDashboard = readStoredDashboards().find((stored: Dashboard) => stored.id === dashboard.id);
+        expect(storedDashboard.widgets[0]).toEqual(expect.objectContaining({
+            title: 'Technical root',
+            displayOptions: expect.objectContaining({ range: '30d' }),
+        }));
+        expect(storedDashboard.publishedSnapshot.widgets[0]).toEqual(expect.objectContaining({
+            title: 'Technical root',
+            displayOptions: expect.objectContaining({ range: '30d' }),
+        }));
+    });
+
     it('applies matching templates preserving coordinates when rows already fit', () => {
         const dashboard = makeDashboard({
             id: 'dashboard-target',
@@ -548,6 +744,121 @@ describe('DashboardStorageService', () => {
         ]);
     });
 
+    it('duplicates every internal view with remapped ids and preserves the active view', async () => {
+        const original = makeDashboard({
+            id: 'dashboard-duplicate-views',
+            name: 'Original multi-view dashboard',
+            activeViewId: 'view-production',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({ id: 'widget-shared', title: 'Production widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-shared', title: 'Technical widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-shared', x: 4 })],
+                }),
+            ],
+            widgets: [makeWidget({ id: 'widget-shared', title: 'Production widget' })],
+            layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+            headerConfig: {
+                title: 'Original multi-view dashboard',
+                widgetSlots: [{ widgetId: 'widget-shared', column: 1 }],
+            },
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(original);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const duplicatePromise = dashboardStorage.duplicateDashboard(original.id, 'Duplicated multi-view dashboard');
+
+        await vi.advanceTimersByTimeAsync(600);
+        const duplicate = await duplicatePromise;
+
+        expect(duplicate?.views).toHaveLength(2);
+        expect(duplicate?.views?.map((view) => view.name)).toEqual(['Production', 'Technical']);
+        expect(duplicate?.views?.map((view) => view.order)).toEqual([0, 1]);
+        expect(duplicate?.views?.map((view) => view.id)).toEqual([
+            expect.stringMatching(/^view-production-dup-/),
+            expect.stringMatching(/^view-technical-dup-/),
+        ]);
+        expect(duplicate?.activeViewId).toBe(duplicate?.views?.[0]?.id);
+        expect(duplicate?.views?.[0]?.widgets[0]?.id).not.toBe('widget-shared');
+        expect(duplicate?.views?.[1]?.widgets[0]?.id).not.toBe('widget-shared');
+        expect(duplicate?.views?.[0]?.widgets[0]?.id).not.toBe(duplicate?.views?.[1]?.widgets[0]?.id);
+        expect(readStoredDashboards().find((dashboard: Dashboard) => dashboard.id === duplicate?.id)?.views).toHaveLength(2);
+    });
+
+    it('publishes and discards full internal view snapshots', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-publish-views',
+            name: 'Publish views dashboard',
+            ownerNodeId: 'node-1',
+            activeViewId: 'view-production',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-production', x: 0 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-technical', title: 'Technical widget' })],
+                    layout: [makeLayout({ widgetId: 'widget-technical', x: 4 })],
+                }),
+            ],
+            widgets: [makeWidget({ id: 'widget-production', title: 'Production widget' })],
+            layout: [makeLayout({ widgetId: 'widget-production', x: 0 })],
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(dashboard);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const publishPromise = dashboardStorage.publishDashboard(dashboard.id);
+        await vi.advanceTimersByTimeAsync(600);
+        const published = await publishPromise;
+
+        expect(published?.publishedSnapshot?.views).toEqual([
+            expect.objectContaining({ id: 'view-production', name: 'Production' }),
+            expect.objectContaining({ id: 'view-technical', name: 'Technical' }),
+        ]);
+        expect(published?.publishedSnapshot?.activeViewId).toBe('view-production');
+
+        const saveEditedPromise = dashboardStorage.saveDashboard({
+            ...published!,
+            activeViewId: 'view-technical',
+            views: [
+                published!.views![0],
+                {
+                    ...published!.views![1],
+                    name: 'Technical edited',
+                },
+            ],
+        });
+        await vi.advanceTimersByTimeAsync(400);
+        await saveEditedPromise;
+
+        const discardPromise = dashboardStorage.discardChanges(dashboard.id);
+        await vi.advanceTimersByTimeAsync(600);
+        const discarded = await discardPromise;
+
+        expect(discarded?.activeViewId).toBe('view-production');
+        expect(discarded?.views).toEqual([
+            expect.objectContaining({ id: 'view-production', name: 'Production' }),
+            expect.objectContaining({ id: 'view-technical', name: 'Technical' }),
+        ]);
+    });
+
     it('uses the fallback copy name when duplicating without an explicit name', async () => {
         const original = makeDashboard({
             id: 'dashboard-copy-name-source',
@@ -597,11 +908,12 @@ describe('DashboardStorageService', () => {
         expect(discarded).toEqual(expect.objectContaining({
             id: 'dashboard-null-snapshot',
             name: 'Null snapshot',
-            publishedSnapshot: null,
+            publishedSnapshot: undefined,
+            activeViewId: 'view-default',
         }));
         expect(readStoredDashboards()[0]).toEqual(expect.objectContaining({
             id: 'dashboard-null-snapshot',
-            publishedSnapshot: null,
+            activeViewId: 'view-default',
         }));
     });
 

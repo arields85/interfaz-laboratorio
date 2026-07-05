@@ -8,6 +8,7 @@ import { requestShieldReveal } from '../../hooks/useBootShield';
 import { useUIStore } from '../../store/ui.store';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { dashboardStorage } from '../../services/DashboardStorageService';
+import { TOPBAR_ICON_BUTTON_ACTIVE_CLS, TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
 
 const navLeftItems = [
     { icon: FolderTree, label: 'Explorador', path: '/explorer' },
@@ -100,8 +101,6 @@ export default function Topbar() {
     const navigate = useNavigate();
     const shouldShowAdminActions = isHydrated && hasAdminAccess;
 
-    const iconButtonClassName = 'relative rounded-lg p-2 text-industrial-muted transition-colors hover:bg-industrial-hover hover:text-industrial-text';
-
     const handleAdminNavigation = () => {
         requestShieldReveal({
             profileId: 'short',
@@ -147,17 +146,17 @@ export default function Topbar() {
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1">
-                    <button title="Notificaciones" className={iconButtonClassName}>
+                    <button title="Notificaciones" className={TOPBAR_ICON_BUTTON_CLS}>
                         <span className="led-glow-red absolute right-1 top-1 size-2 rounded-full bg-status-critical"></span>
                         <Bell size={20} />
                     </button>
                     {shouldShowAdminActions ? (
                         <button
                             title="Personalizar fondo"
-                            className={`p-2 rounded-lg transition-colors ${
+                            className={`${TOPBAR_ICON_BUTTON_CLS} ${
                                 shaderPanelOpen
-                                    ? 'bg-industrial-hover text-admin-accent'
-                                    : iconButtonClassName
+                                    ? TOPBAR_ICON_BUTTON_ACTIVE_CLS
+                                    : ''
                             }`}
                             onClick={() => setShaderPanelOpen((value) => !value)}
                         >
@@ -167,7 +166,7 @@ export default function Topbar() {
                     {shouldShowAdminActions ? (
                         <button
                             title="Administracion"
-                            className={iconButtonClassName}
+                            className={TOPBAR_ICON_BUTTON_CLS}
                             onClick={handleAdminNavigation}
                         >
                             <Settings size={20} />
@@ -176,7 +175,7 @@ export default function Topbar() {
                     <button
                         ref={userButtonRef}
                         title="Usuario"
-                        className={iconButtonClassName}
+                        className={TOPBAR_ICON_BUTTON_CLS}
                         onClick={() => setLoginOverlayOpen((value) => !value)}
                     >
                         <User size={20} />
