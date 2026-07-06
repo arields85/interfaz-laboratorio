@@ -286,25 +286,29 @@ export default function DashboardHeader({
     const title = getDashboardHeaderTitle(dashboard);
     const subtitle = getDashboardHeaderSubtitle(dashboard);
 
-    const widgetMap = new Map(dashboard.widgets.map(widget => [widget.id, widget]));
-    const headerWidgets = (headerConfig?.widgetSlots ?? [])
-        .map(slot => widgetMap.get(slot.widgetId))
-        .filter(Boolean) as typeof dashboard.widgets;
-
-    // Mapa widgetId → columna (0-indexed). Cuando el slot tiene `column` explícita
-    // se usa ese valor; si no, se usa la posición del slot en el array como fallback.
-    const widgetColumnMap = new Map<string, number>(
-        (headerConfig?.widgetSlots ?? []).map((slot, idx) => [
-            slot.widgetId,
-            slot.column ?? idx,
-        ])
-    );
-
     const isPreview = mode === 'preview';
     const isEditablePreview = isPreview && Boolean(onTitleChange) && Boolean(onSubtitleChange);
     const hasMultipleViews = (dashboard.views?.length ?? 0) > 1;
     const resolvedActiveViewId = activeViewId ?? dashboard.activeViewId ?? dashboard.views?.[0]?.id;
     const activeView = dashboard.views?.find((view) => view.id === resolvedActiveViewId) ?? dashboard.views?.[0];
+    const dashboardWidgetsForHeader = activeView ? activeView.widgets : dashboard.widgets;
+    const widgetMap = new Map(dashboardWidgetsForHeader.map(widget => [widget.id, widget]));
+    const activeHeaderSlots = (headerConfig?.widgetSlots ?? [])
+        .filter((slot) => widgetMap.has(slot.widgetId));
+    const headerWidgets = activeHeaderSlots.flatMap((slot) => {
+        const widget = widgetMap.get(slot.widgetId);
+        return widget ? [widget] : [];
+    });
+
+    // Mapa widgetId → columna (0-indexed). Cuando el slot tiene `column` explícita
+    // se usa ese valor; si no, se usa la posición del slot ya filtrado por vista activa.
+    const widgetColumnMap = new Map<string, number>(
+        activeHeaderSlots.map((slot, idx) => [
+            slot.widgetId,
+            slot.column ?? idx,
+        ])
+    );
+
     const hasInternalViewNavigation = hasMultipleViews && (!isPreview || Boolean(onSelectView));
     const activeViewName = activeView && hasMultipleViews ? activeView.name : undefined;
     const resolvedSubtitle = hasMultipleViews

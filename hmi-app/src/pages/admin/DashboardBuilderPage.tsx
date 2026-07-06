@@ -153,21 +153,6 @@ export default function DashboardBuilderPage() {
         [catalogVariables, stagedVariables],
     );
 
-    // 4a. IDs de widgets asignados al header — excluidos del grid del builder
-    // Calculado antes del guard para respetar las reglas de hooks.
-    const headerWidgetIds = useMemo(() => {
-        return new Set(
-            (draft?.headerConfig?.widgetSlots ?? []).map(s => s.widgetId)
-        );
-    }, [draft?.headerConfig?.widgetSlots]);
-
-    // 4b. Columnas del header actualmente ocupadas (para calcular el primer slot libre).
-    // El valor de `column` puede ser explícito o implícito (índice en el array).
-    const headerOccupiedColumns = useMemo(() => {
-        const slots = draft?.headerConfig?.widgetSlots ?? [];
-        return new Set(slots.map((s, i) => s.column ?? i));
-    }, [draft?.headerConfig?.widgetSlots]);
-
     // Dirty check — top-level para permitir useBlocker sin violar las reglas de hooks
     const isDirty = useMemo(() => {
         if (!draft || !originalConfig) return false;
@@ -312,6 +297,26 @@ export default function DashboardBuilderPage() {
     const currentActiveView = useMemo(() => (
         draft ? getActiveDashboardView(draft, selectedViewId) : null
     ), [draft, selectedViewId]);
+
+    // IDs de widgets asignados al header — excluidos del grid del builder.
+    // Los slots del header son globales, pero la capacidad/ocupación debe resolverse por vista activa.
+    const activeViewWidgetIds = useMemo(() => {
+        return new Set((currentActiveView?.widgets ?? []).map((widget) => widget.id));
+    }, [currentActiveView]);
+
+    const activeHeaderSlots = useMemo(() => {
+        return (draft?.headerConfig?.widgetSlots ?? []).filter((slot) => activeViewWidgetIds.has(slot.widgetId));
+    }, [activeViewWidgetIds, draft?.headerConfig?.widgetSlots]);
+
+    const headerWidgetIds = useMemo(() => {
+        return new Set(activeHeaderSlots.map((slot) => slot.widgetId));
+    }, [activeHeaderSlots]);
+
+    // Columnas del header ocupadas en la vista activa (para calcular el primer slot libre).
+    // El valor de `column` puede ser explícito o implícito (índice dentro de los slots de la vista activa).
+    const headerOccupiedColumns = useMemo(() => {
+        return new Set(activeHeaderSlots.map((slot, index) => slot.column ?? index));
+    }, [activeHeaderSlots]);
 
     const backButton = (
         <button
@@ -731,11 +736,11 @@ export default function DashboardBuilderPage() {
 
             const currentSlots = draft.headerConfig?.widgetSlots ?? [];
 
-            if (currentSlots.some(slot => slot.widgetId === widgetId) || currentSlots.length >= HEADER_WIDGET_SLOT_COUNT) {
+            if (currentSlots.some(slot => slot.widgetId === widgetId) || activeHeaderSlots.length >= HEADER_WIDGET_SLOT_COUNT) {
                 return;
             }
 
-            const targetColumn = getFirstFreeHeaderSlot(new Set(currentSlots.map((slot, index) => slot.column ?? index)));
+            const targetColumn = getFirstFreeHeaderSlot(new Set(activeHeaderSlots.map((slot, index) => slot.column ?? index)));
 
             if (targetColumn === null) {
                 return;
@@ -780,14 +785,16 @@ export default function DashboardBuilderPage() {
         const handleMoveHeaderWidget = (widgetId: string, targetColumn: number) => {
             const currentSlots = draft.headerConfig?.widgetSlots ?? [];
 
+            if (!activeViewWidgetIds.has(widgetId)) return;
+
             const movingSlot = currentSlots.find(slot => slot.widgetId === widgetId);
             if (!movingSlot) return;
 
-            const sourceColumn = movingSlot.column ?? currentSlots.indexOf(movingSlot);
+            const sourceColumn = movingSlot.column ?? activeHeaderSlots.indexOf(movingSlot);
             if (sourceColumn === targetColumn) return;
 
-            const occupyingSlot = currentSlots.find((slot) => (
-                (slot.column ?? currentSlots.indexOf(slot)) === targetColumn
+            const occupyingSlot = activeHeaderSlots.find((slot, index) => (
+                (slot.column ?? index) === targetColumn
             ));
 
             const newSlots = currentSlots.map((slot) => {
@@ -815,7 +822,7 @@ export default function DashboardBuilderPage() {
             if (
                 !payload
                 || !isHeaderCompatibleWidgetType(payload.widgetType)
-                || (draft.headerConfig?.widgetSlots?.length ?? 0) >= HEADER_WIDGET_SLOT_COUNT
+                || activeHeaderSlots.length >= HEADER_WIDGET_SLOT_COUNT
             ) {
                 return;
             }
@@ -834,7 +841,7 @@ export default function DashboardBuilderPage() {
             if (
                 !payload
                 || !isHeaderCompatibleWidgetType(payload.widgetType)
-                || (draft.headerConfig?.widgetSlots?.length ?? 0) >= HEADER_WIDGET_SLOT_COUNT
+                || activeHeaderSlots.length >= HEADER_WIDGET_SLOT_COUNT
             ) {
                 return;
             }
@@ -1056,9 +1063,8 @@ export default function DashboardBuilderPage() {
         const handleAddHeaderWidgetFromSlot = (type: WidgetType, slotIndex: number) => {
             if (type !== 'status' && type !== 'connection-status') return;
 
-            const currentSlots = draft.headerConfig?.widgetSlots ?? [];
-            if (currentSlots.length >= HEADER_WIDGET_SLOT_COUNT) return;
-            if (currentSlots.some(slot => (slot.column ?? currentSlots.indexOf(slot)) === slotIndex)) return;
+            if (activeHeaderSlots.length >= HEADER_WIDGET_SLOT_COUNT) return;
+            if (activeHeaderSlots.some((slot, index) => (slot.column ?? index) === slotIndex)) return;
 
             const newId = generateWidgetId(type);
             const newWidget: WidgetConfig = type === 'connection-status'
@@ -1123,12 +1129,12 @@ export default function DashboardBuilderPage() {
 
             const currentSlots = draft.headerConfig?.widgetSlots ?? [];
             const currentSlot = currentSlots.find(slot => slot.widgetId === widgetId);
-            const slotTakenByAnotherWidget = currentSlots.some((slot, index) => (
+            const slotTakenByAnotherWidget = activeHeaderSlots.some((slot, index) => (
                 (slot.column ?? index) === slotIndex && slot.widgetId !== widgetId
             ));
 
             if (slotTakenByAnotherWidget) return;
-            if (!currentSlot && currentSlots.length >= HEADER_WIDGET_SLOT_COUNT) return;
+            if (!currentSlot && activeHeaderSlots.length >= HEADER_WIDGET_SLOT_COUNT) return;
 
             setIsHeaderDropActive(false);
             setDraggedWidget(null);

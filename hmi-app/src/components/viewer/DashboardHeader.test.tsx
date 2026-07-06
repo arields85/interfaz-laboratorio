@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import DashboardHeader from './DashboardHeader';
-import { makeDashboard } from '../../test/fixtures/dashboard.fixture';
+import { makeDashboard, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import type { DashboardView } from '../../domain/admin.types';
 import { HEADER_VIEW_ICON_BUTTON_ACTIVE_CLS, HEADER_VIEW_ICON_BUTTON_CLS } from '../layout/topbarIconButtonStyles';
 
@@ -24,8 +24,23 @@ vi.mock('lucide-react', async () => {
 });
 
 vi.mock('./HeaderWidgetCanvas', () => ({
-    default: () => (
+    default: ({
+        widgets,
+        widgetColumnMap,
+    }: {
+        widgets: Array<{ id: string; title?: string }>;
+        widgetColumnMap?: Map<string, number>;
+    }) => (
         <div data-testid="header-widget-canvas">
+            {widgets.map((widget) => (
+                <div
+                    key={widget.id}
+                    data-testid={`header-widget-${widget.id}`}
+                    data-column={widgetColumnMap?.get(widget.id)}
+                >
+                    {widget.title ?? widget.id}
+                </div>
+            ))}
             <div data-testid="header-widget-slot-0" />
             <div data-testid="header-widget-slot-1" />
             <div data-testid="header-widget-slot-2" />
@@ -137,6 +152,19 @@ describe('DashboardHeader', () => {
                 subtitle: 'Main line overview',
                 widgetSlots: [{ widgetId: 'header-widget-1', column: 0 }],
             },
+            views: [
+                {
+                    ...makeView('view-production', 'Production'),
+                    widgets: [{
+                        id: 'header-widget-1',
+                        type: 'status',
+                        title: 'Header status',
+                        position: { x: 0, y: 0 },
+                        size: { w: 2, h: 1 },
+                    }],
+                },
+                makeView('view-technical', 'Technical'),
+            ],
             widgets: [{
                 id: 'header-widget-1',
                 type: 'status',
@@ -157,6 +185,103 @@ describe('DashboardHeader', () => {
         expect(actions).toContainElement(viewControls);
         expect(actions).toContainElement(widgetCanvas);
         expect(viewControls.compareDocumentPosition(widgetCanvas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('renders header widget slots from the active internal view only, even when global slots share a column', () => {
+        const productionHeaderWidget = makeWidget({ id: 'header-production', type: 'status', title: 'Production header status' });
+        const technicalHeaderWidget = makeWidget({ id: 'header-technical', type: 'status', title: 'Technical header status' });
+        const productionView: DashboardView = {
+            ...makeView('view-production', 'Production'),
+            widgets: [productionHeaderWidget],
+        };
+        const technicalView: DashboardView = {
+            ...makeView('view-technical', 'Technical'),
+            order: 1,
+            widgets: [technicalHeaderWidget],
+        };
+
+        const { rerender } = render(
+            <DashboardHeader
+                dashboard={makeDashboard({
+                    name: 'Line A Dashboard',
+                    activeViewId: 'view-production',
+                    widgets: [productionHeaderWidget],
+                    views: [productionView, technicalView],
+                    headerConfig: {
+                        widgetSlots: [
+                            { widgetId: 'header-production', column: 0 },
+                            { widgetId: 'header-technical', column: 0 },
+                        ],
+                    },
+                })}
+                activeViewId="view-technical"
+                equipmentMap={new Map()}
+            />,
+        );
+
+        expect(screen.queryByTestId('header-widget-header-production')).not.toBeInTheDocument();
+        expect(screen.getByTestId('header-widget-header-technical')).toHaveTextContent('Technical header status');
+        expect(screen.getByTestId('header-widget-header-technical')).toHaveAttribute('data-column', '0');
+
+        rerender(
+            <DashboardHeader
+                dashboard={makeDashboard({
+                    name: 'Line A Dashboard',
+                    activeViewId: 'view-production',
+                    widgets: [productionHeaderWidget],
+                    views: [productionView, technicalView],
+                    headerConfig: {
+                        widgetSlots: [
+                            { widgetId: 'header-production', column: 0 },
+                            { widgetId: 'header-technical', column: 0 },
+                        ],
+                    },
+                })}
+                activeViewId="view-production"
+                equipmentMap={new Map()}
+            />,
+        );
+
+        expect(screen.getByTestId('header-widget-header-production')).toHaveTextContent('Production header status');
+        expect(screen.getByTestId('header-widget-header-production')).toHaveAttribute('data-column', '0');
+        expect(screen.queryByTestId('header-widget-header-technical')).not.toBeInTheDocument();
+    });
+
+    it('uses the active-view filtered slot index as the fallback header widget column', () => {
+        const productionHeaderWidget = makeWidget({ id: 'header-production', type: 'status', title: 'Production header status' });
+        const technicalHeaderWidget = makeWidget({ id: 'header-technical', type: 'status', title: 'Technical header status' });
+
+        render(
+            <DashboardHeader
+                dashboard={makeDashboard({
+                    name: 'Line A Dashboard',
+                    activeViewId: 'view-production',
+                    widgets: [productionHeaderWidget],
+                    views: [
+                        {
+                            ...makeView('view-production', 'Production'),
+                            widgets: [productionHeaderWidget],
+                        },
+                        {
+                            ...makeView('view-technical', 'Technical'),
+                            order: 1,
+                            widgets: [technicalHeaderWidget],
+                        },
+                    ],
+                    headerConfig: {
+                        widgetSlots: [
+                            { widgetId: 'header-production' },
+                            { widgetId: 'header-technical' },
+                        ],
+                    },
+                })}
+                activeViewId="view-technical"
+                equipmentMap={new Map()}
+            />,
+        );
+
+        expect(screen.queryByTestId('header-widget-header-production')).not.toBeInTheDocument();
+        expect(screen.getByTestId('header-widget-header-technical')).toHaveAttribute('data-column', '0');
     });
 
     it('falls back to the active view name when no builder subtitle exists', () => {

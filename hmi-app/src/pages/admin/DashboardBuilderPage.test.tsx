@@ -909,6 +909,80 @@ describe('DashboardBuilderPage', () => {
         });
     });
 
+    it('allows the active view to place a header widget in a column occupied by another view', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            widgets: [makeWidget({ id: 'widget-status-a', type: 'status', title: 'Estado A' })],
+            layout: [],
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-a',
+                    name: 'Producción',
+                    order: 0,
+                    widgets: [makeWidget({ id: 'widget-status-a', type: 'status', title: 'Estado A' })],
+                    layout: [],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-b',
+                    name: 'Técnica',
+                    order: 1,
+                    widgets: [makeWidget({ id: 'widget-status-b', type: 'status', title: 'Estado B' })],
+                    layout: [makeLayout({ widgetId: 'widget-status-b', x: 0, y: 0, w: 1, h: 1 })],
+                }),
+            ],
+            activeViewId: 'view-a',
+            headerConfig: {
+                title: 'Demo',
+                widgetSlots: [{ widgetId: 'widget-status-a', column: 0 }],
+            },
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Técnica' }));
+
+        await waitFor(() => {
+            expect(dashboardHeaderMock.mock.calls.at(-1)?.[0]).toMatchObject({ activeViewId: 'view-b' });
+        });
+
+        const latestHeaderProps = dashboardHeaderMock.mock.calls.at(-1)?.[0] as {
+            onDropWidgetAtSlot?: (widgetId: string, slotIndex: number) => void;
+        };
+
+        await act(async () => {
+            latestHeaderProps.onDropWidgetAtSlot?.('widget-status-b', 0);
+        });
+
+        await waitFor(() => {
+            const rerenderedHeaderProps = dashboardHeaderMock.mock.calls.at(-1)?.[0] as {
+                dashboard: { headerConfig?: { widgetSlots?: Array<{ widgetId: string; column?: number }> } };
+            };
+
+            expect(rerenderedHeaderProps.dashboard.headerConfig?.widgetSlots).toEqual([
+                { widgetId: 'widget-status-a', column: 0 },
+                { widgetId: 'widget-status-b', column: 0 },
+            ]);
+        });
+
+        const headerPropsAfterPlacement = dashboardHeaderMock.mock.calls.at(-1)?.[0] as {
+            onMoveHeaderWidget?: (widgetId: string, targetColumn: number) => void;
+        };
+
+        await act(async () => {
+            headerPropsAfterPlacement.onMoveHeaderWidget?.('widget-status-b', 1);
+        });
+
+        await waitFor(() => {
+            const rerenderedHeaderProps = dashboardHeaderMock.mock.calls.at(-1)?.[0] as {
+                dashboard: { headerConfig?: { widgetSlots?: Array<{ widgetId: string; column?: number }> } };
+            };
+
+            expect(rerenderedHeaderProps.dashboard.headerConfig?.widgetSlots).toEqual([
+                { widgetId: 'widget-status-a', column: 0 },
+                { widgetId: 'widget-status-b', column: 1 },
+            ]);
+        });
+    });
+
     it('swaps header widget columns when the header canvas requests an arrow move', async () => {
         await renderBuilderPage(makeDashboard({
             id: 'dashboard-1',
