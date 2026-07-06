@@ -5,7 +5,10 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import type { MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import MachineActivityWidget, { resolveActivityVisualAnimationDuration } from './MachineActivityWidget';
-import { KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX } from '../../utils/kpiTopCapEffects';
+import {
+    KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+    resolveKpiFixedTopCapBlinkProfile,
+} from '../../utils/kpiTopCapEffects';
 
 const equipmentMap = new Map<string, EquipmentSummary>();
 
@@ -1272,6 +1275,8 @@ describe('MachineActivityWidget', () => {
     it('triggers the machine-activity fixed blink burst only after the traveling top cap completes its route', () => {
         vi.useFakeTimers();
         const animationFrames = createAnimationFrameController();
+        const expectedProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX, 72, 44, 0);
+        const expectedBurstOpacities = expectedProfile.values.split(';');
 
         render(
             <MachineActivityWidget
@@ -1326,7 +1331,65 @@ describe('MachineActivityWidget', () => {
         expect(triggeredBlinkStack).toHaveAttribute('data-blink-trigger-key', '1');
         expect(triggeredBlinkStack).toHaveAttribute('data-burst-active', 'true');
         expect(triggeredBlinkStack).toHaveAttribute('data-burst-key', '1');
+        expect(triggeredBlinkStack).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
         expect(triggeredBlinkStack.querySelector('animate')).toBeNull();
+    });
+
+    it('keeps the machine-activity travel-completion blink inactive when pulse stability resolves to zero duration', () => {
+        vi.useFakeTimers();
+        const animationFrames = createAnimationFrameController();
+        const inactiveProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX, 72, 44, 0);
+        const inactiveOpacity = inactiveProfile.values.split(';')[0] ?? '1';
+
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.3,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateSubtitle: true,
+                        showPowerSubtext: true,
+                        showDynamicColor: true,
+                        showStateAnimation: true,
+                        fixedTopCapEffects: {
+                            pulseSpeed: 72,
+                            pulseIrregularity: 44,
+                            pulseStability: 0,
+                        },
+                        travelingTopCapMinSpeed: 200,
+                        travelingTopCapMaxSpeed: 200,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.3)}
+            />,
+        );
+
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        const travelDurationMs = Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0') * 1000;
+
+        animationFrames.runNextFrame(1_000);
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(travelDurationMs) + 1);
+        });
+
+        const blinkStack = within(screen.getByTestId('gauge-circular-static-top-cap'))
+            .getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
+        expect(blinkStack).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(blinkStack).toHaveAttribute('data-blink-duration', '0');
+        expect(blinkStack).toHaveAttribute('data-burst-active', 'false');
+        expect(blinkStack).toHaveAttribute('data-burst-opacity', inactiveOpacity);
+        expect(blinkStack.querySelector('animate')).toBeNull();
     });
 
     it('keeps the fixed top-cap shape configurable while forcing machine-activity blink mode/intensity and traveling pill shape', () => {

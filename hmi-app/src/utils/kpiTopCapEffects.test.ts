@@ -10,6 +10,7 @@ import {
     resolveMachineActivityPulseStabilityRuntimeValue,
     resolveMachineActivityPulseStabilityVisualValue,
     resolveMachineActivityFixedTopCapEffects,
+    resolveMachineActivityTravelCompletionBlinkDurationSeconds,
     resolveKpiFixedTopCapBlinkDurationSeconds,
     resolveKpiFixedTopCapBlinkProfile,
     resolveKpiTravelingTopCapMaximumLength,
@@ -81,6 +82,16 @@ describe('kpiTopCapEffects', () => {
         expect(resolveMachineActivityFixedTopCapEffects({
             pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
         }).pulseStability).toBe(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);
+    });
+
+    it('maps machine-activity travel-completion blink duration linearly from 0 to 5 seconds', () => {
+        expect(resolveMachineActivityTravelCompletionBlinkDurationSeconds(0)).toBe(0);
+        expect(resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX / 2,
+        )).toBe(2.5);
+        expect(resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        )).toBe(5);
     });
 
     it('resolves traveling effects separately from fixed effect defaults', () => {

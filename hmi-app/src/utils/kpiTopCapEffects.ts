@@ -206,6 +206,23 @@ export function resolveKpiFixedTopCapBlinkDurationSeconds(
     ).toFixed(2));
 }
 
+export function resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+    pulseStability: number = DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.pulseStability,
+    pulseStabilityMax: number = MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+) {
+    if (!Number.isFinite(pulseStabilityMax) || pulseStabilityMax <= 0) {
+        return 0;
+    }
+
+    const normalizedStability = clampPulseEffectValue(
+        pulseStability,
+        DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.pulseStability,
+        pulseStabilityMax,
+    ) / pulseStabilityMax;
+
+    return Number((normalizedStability * 5).toFixed(2));
+}
+
 function clampUnit(value: number, minimum = 0, maximum = 1) {
     return Math.min(maximum, Math.max(minimum, Number(value.toFixed(3))));
 }

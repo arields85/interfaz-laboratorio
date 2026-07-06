@@ -249,6 +249,39 @@ const KPI_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
         step: KPI_TOP_CAP_EFFECT_STEP,
     },
 ];
+const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
+    key: 'pulseSpeed' | 'pulseIrregularity' | 'pulseStability';
+    label: string;
+    ariaLabel: string;
+    min: number;
+    max: number;
+    step: number;
+}> = [
+    {
+        key: 'pulseSpeed',
+        label: 'Velocidad',
+        ariaLabel: 'Velocidad top cap fijo',
+        min: KPI_TOP_CAP_EFFECT_MIN,
+        max: KPI_FIXED_TOP_CAP_PULSE_SPEED_MAX,
+        step: KPI_TOP_CAP_EFFECT_STEP,
+    },
+    {
+        key: 'pulseIrregularity',
+        label: 'Irregularidad',
+        ariaLabel: 'Irregularidad top cap fijo',
+        min: KPI_TOP_CAP_EFFECT_MIN,
+        max: KPI_FIXED_TOP_CAP_PULSE_IRREGULARITY_MAX,
+        step: KPI_TOP_CAP_EFFECT_STEP,
+    },
+    {
+        key: 'pulseStability',
+        label: 'Duración del parpadeo',
+        ariaLabel: 'Duración del parpadeo top cap fijo',
+        min: KPI_TOP_CAP_EFFECT_MIN,
+        max: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX,
+        step: KPI_TOP_CAP_EFFECT_STEP,
+    },
+];
 const CIRCULAR_GAUGE_VISUAL_SLIDERS = [
     {
         key: 'circularArcGlowIntensity' as const,
@@ -2813,7 +2846,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     checked={kpiFixedTopCapShape.pill}
                                     onChange={(checked) => handleKpiFixedTopCapShapeChange('pill', checked)}
                                 />
-                                {KPI_FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
+                                {MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
                                     <DockSliderField
                                         key={key}
                                         label={label}

@@ -4,6 +4,7 @@ import {
     DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
     KPI_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
     KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+    resolveMachineActivityTravelCompletionBlinkDurationSeconds,
     resolveKpiFixedTopCapBlinkDurationSeconds,
     resolveKpiFixedTopCapBlinkProfile,
     resolveKpiFixedTopCapShape,
@@ -201,12 +202,18 @@ export default function GaugeDisplay({
     const staticTopCapPulseIntensity = clamp(staticTopCapEffects.pulseIntensity / KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX, 0, 1);
     const staticTopCapPulseEnabled = topCapEnabled && !prefersReducedMotion && staticTopCapPulseIntensity > 0;
     const staticTopCapBlinkTrigger = circularTopCap?.staticBlinkTrigger ?? 'autonomous';
-    const staticTopCapBlinkDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(
-        staticTopCapEffects.pulseSpeed,
-        staticTopCapEffects.pulseIrregularity,
-        staticTopCapEffects.pulseStability,
-        staticTopCapPulseStabilityMax,
-    );
+    const usesTravelCompletionBlink = staticTopCapBlinkTrigger === 'travel-completion';
+    const staticTopCapBlinkDurationSeconds = usesTravelCompletionBlink
+        ? resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            staticTopCapEffects.pulseStability,
+            staticTopCapPulseStabilityMax,
+        )
+        : resolveKpiFixedTopCapBlinkDurationSeconds(
+            staticTopCapEffects.pulseSpeed,
+            staticTopCapEffects.pulseIrregularity,
+            staticTopCapEffects.pulseStability,
+            staticTopCapPulseStabilityMax,
+        );
     const staticTopCapLegacyPulseDurationSeconds = resolveKpiFixedTopCapPulseDurationSeconds(staticTopCapEffects.pulseSpeed);
     const staticTopCapBlinkProfile = resolveKpiFixedTopCapBlinkProfile(
         staticTopCapEffects.mode,
@@ -214,6 +221,26 @@ export default function GaugeDisplay({
         staticTopCapEffects.pulseSpeed,
         staticTopCapEffects.pulseIrregularity,
         staticTopCapEffects.pulseStability,
+        staticTopCapPulseStabilityMax,
+    );
+    const travelCompletionBlinkProfile = useMemo(() => resolveKpiFixedTopCapBlinkProfile(
+        staticTopCapEffects.mode,
+        staticTopCapEffects.pulseIntensity,
+        staticTopCapEffects.pulseSpeed,
+        staticTopCapEffects.pulseIrregularity,
+        0,
+        staticTopCapPulseStabilityMax,
+    ), [
+        staticTopCapEffects.mode,
+        staticTopCapEffects.pulseIntensity,
+        staticTopCapEffects.pulseIrregularity,
+        staticTopCapEffects.pulseSpeed,
+        staticTopCapPulseStabilityMax,
+    ]);
+    const travelCompletionBlinkSequenceDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(
+        staticTopCapEffects.pulseSpeed,
+        staticTopCapEffects.pulseIrregularity,
+        0,
         staticTopCapPulseStabilityMax,
     );
     const triggeredStaticBlinkInactiveOpacity = useMemo(() => {
@@ -343,11 +370,17 @@ export default function GaugeDisplay({
         durationSeconds: travelingTopCapDurationSeconds,
     });
     const triggeredStaticBlinkBurst = useTriggeredBlinkBurst({
-        enabled: staticTopCapBlinkTrigger === 'travel-completion' && staticTopCapPulseEnabled,
+        enabled: usesTravelCompletionBlink && staticTopCapPulseEnabled,
         triggerKey: travelingTopCapCompletionKey,
-        profile: staticTopCapBlinkProfile,
+        profile: usesTravelCompletionBlink
+            ? travelCompletionBlinkProfile
+            : staticTopCapBlinkProfile,
         inactiveOpacity: triggeredStaticBlinkInactiveOpacity,
         durationSeconds: staticTopCapBlinkDurationSeconds,
+        profileDurationSeconds: usesTravelCompletionBlink
+            ? travelCompletionBlinkSequenceDurationSeconds
+            : staticTopCapBlinkDurationSeconds,
+        initialStepIndex: usesTravelCompletionBlink ? 1 : 0,
     });
     const movingTopCapModel = useMemo(() => resolveCircularTravelingTopCapPosition({
         key: endpointSegment?.key ?? CIRCULAR_SEGMENT_COUNT - 1,
@@ -573,7 +606,7 @@ export default function GaugeDisplay({
                         data-burst-opacity={String(triggeredStaticBlinkBurst.opacity)}
                         style={{
                             mixBlendMode: 'screen',
-                            opacity: staticTopCapBlinkTrigger === 'travel-completion'
+                            opacity: usesTravelCompletionBlink
                                 ? triggeredStaticBlinkBurst.opacity
                                 : undefined,
                         }}
@@ -781,14 +814,22 @@ function useTriggeredBlinkBurst({
     profile,
     inactiveOpacity,
     durationSeconds,
+    profileDurationSeconds,
+    initialStepIndex = 0,
 }: {
     enabled: boolean;
     triggerKey: number;
     profile: { values: string; keyTimes: string };
     inactiveOpacity: number;
     durationSeconds: number;
+    profileDurationSeconds?: number;
+    initialStepIndex?: number;
 }) {
     const timeoutIdsRef = useRef<number[]>([]);
+    const burstWindowTokenRef = useRef(0);
+    const burstWindowRef = useRef<{ triggerKey: number; deadlineMs: number } | null>(null);
+    const processedTriggerKeyRef = useRef(0);
+    const closedBurstRef = useRef<{ triggerKey: number; token: number } | null>(null);
     const parsedProfile = useMemo(() => ({
         values: profile.values.split(';').map((value) => Number.parseFloat(value)),
         keyTimes: profile.keyTimes.split(';').map((value) => Number.parseFloat(value)),
@@ -817,7 +858,27 @@ function useTriggeredBlinkBurst({
         timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
         timeoutIdsRef.current = [];
 
-        if (!enabled || triggerKey <= 0 || durationSeconds <= 0) {
+        const now = Date.now();
+        const isSameActiveTriggerKey = burstWindowRef.current?.triggerKey === triggerKey;
+
+        if (triggerKey > 0 && triggerKey !== processedTriggerKeyRef.current) {
+            processedTriggerKeyRef.current = triggerKey;
+            closedBurstRef.current = null;
+            burstWindowRef.current = null;
+        }
+
+        if (!enabled || triggerKey <= 0 || (durationSeconds <= 0 && !isSameActiveTriggerKey)) {
+            if (triggerKey > 0 && durationSeconds <= 0 && !isSameActiveTriggerKey) {
+                closedBurstRef.current = {
+                    triggerKey,
+                    token: (closedBurstRef.current?.token ?? 0) + 1,
+                };
+            }
+
+            if (!enabled || triggerKey <= 0) {
+                burstWindowRef.current = null;
+            }
+
             setBurstState((current) => ({
                 active: false,
                 key: enabled ? current.key : 0,
@@ -827,7 +888,21 @@ function useTriggeredBlinkBurst({
             return undefined;
         }
 
+        if (closedBurstRef.current?.triggerKey === triggerKey) {
+            setBurstState({
+                active: false,
+                key: triggerKey,
+                opacity: inactiveOpacity,
+            });
+
+            return undefined;
+        }
+
         if (parsedProfile.values.length === 0 || parsedProfile.values.length !== parsedProfile.keyTimes.length) {
+            closedBurstRef.current = {
+                triggerKey,
+                token: (closedBurstRef.current?.token ?? 0) + 1,
+            };
             setBurstState({
                 active: false,
                 key: triggerKey,
@@ -838,46 +913,128 @@ function useTriggeredBlinkBurst({
         }
 
         const durationMs = Math.max(0, Math.round(durationSeconds * 1000));
+        const resolvedProfileDurationSeconds = profileDurationSeconds ?? durationSeconds;
+        const profileDurationMs = Math.max(0, Math.round(resolvedProfileDurationSeconds * 1000));
+        const boundedInitialStepIndex = Math.min(
+            Math.max(initialStepIndex, 0),
+            Math.max(parsedProfile.values.length - 1, 0),
+        );
+        const initialKeyTime = parsedProfile.keyTimes[boundedInitialStepIndex] ?? 0;
+
+        if (durationMs <= 0) {
+            closedBurstRef.current = {
+                triggerKey,
+                token: (closedBurstRef.current?.token ?? 0) + 1,
+            };
+            setBurstState({
+                active: false,
+                key: triggerKey,
+                opacity: inactiveOpacity,
+            });
+
+            return undefined;
+        }
+
+        const deadlineMs = isSameActiveTriggerKey
+            ? (burstWindowRef.current?.deadlineMs ?? now)
+            : now + durationMs;
+        const remainingMs = deadlineMs - now;
+
+        if (remainingMs <= 0) {
+            burstWindowRef.current = null;
+            closedBurstRef.current = {
+                triggerKey,
+                token: (closedBurstRef.current?.token ?? 0) + 1,
+            };
+            setBurstState({
+                active: false,
+                key: triggerKey,
+                opacity: inactiveOpacity,
+            });
+
+            return undefined;
+        }
+
+        burstWindowTokenRef.current += 1;
+        const burstWindowToken = burstWindowTokenRef.current;
+        burstWindowRef.current = {
+            triggerKey,
+            deadlineMs,
+        };
 
         setBurstState({
             active: true,
             key: triggerKey,
-            opacity: parsedProfile.values[0] ?? inactiveOpacity,
+            opacity: parsedProfile.values[boundedInitialStepIndex] ?? inactiveOpacity,
         });
 
         parsedProfile.keyTimes.forEach((keyTime, index) => {
             const nextOpacity = parsedProfile.values[index];
 
-            if (!Number.isFinite(keyTime) || !Number.isFinite(nextOpacity) || index === 0) {
+            if (
+                !Number.isFinite(keyTime)
+                || !Number.isFinite(nextOpacity)
+                || index <= boundedInitialStepIndex
+            ) {
+                return;
+            }
+
+            const relativeKeyTime = Math.max(keyTime - initialKeyTime, 0);
+            const stepDelayMs = Math.round(relativeKeyTime * profileDurationMs);
+
+            if (stepDelayMs >= remainingMs) {
                 return;
             }
 
             timeoutIdsRef.current.push(window.setTimeout(() => {
-                setBurstState((current) => current.key === triggerKey
-                    ? {
-                        ...current,
-                        active: true,
-                        opacity: nextOpacity,
-                    }
-                    : current);
-            }, Math.round(keyTime * durationMs)));
+                setBurstState((current) => (
+                    current.key === triggerKey && burstWindowTokenRef.current === burstWindowToken
+                        ? {
+                            ...current,
+                            active: true,
+                            opacity: nextOpacity,
+                        }
+                        : current
+                ));
+            }, stepDelayMs));
         });
 
         timeoutIdsRef.current.push(window.setTimeout(() => {
-            setBurstState((current) => current.key === triggerKey
-                ? {
+            setBurstState((current) => {
+                if (current.key !== triggerKey || burstWindowTokenRef.current !== burstWindowToken) {
+                    return current;
+                }
+
+                burstWindowTokenRef.current += 1;
+                burstWindowRef.current = null;
+                closedBurstRef.current = {
+                    triggerKey,
+                    token: (closedBurstRef.current?.token ?? 0) + 1,
+                };
+
+                return {
                     active: false,
                     key: triggerKey,
                     opacity: inactiveOpacity,
-                }
-                : current);
-        }, durationMs));
+                };
+            });
+        }, remainingMs));
 
         return () => {
+            burstWindowTokenRef.current += 1;
             timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
             timeoutIdsRef.current = [];
         };
-    }, [durationSeconds, enabled, inactiveOpacity, parsedProfile.keyTimes, parsedProfile.values, triggerKey]);
+    }, [
+        durationSeconds,
+        enabled,
+        inactiveOpacity,
+        initialStepIndex,
+        parsedProfile.keyTimes,
+        parsedProfile.values,
+        profileDurationSeconds,
+        triggerKey,
+    ]);
 
     return burstState;
 }

@@ -849,8 +849,8 @@ describe('PropertyDock machine-activity', () => {
         const fixedShapeCheckbox = within(fixedSection).getByRole('checkbox', { name: 'Recto/Pill top cap fijo' });
         const fixedPulseSpeedSlider = within(fixedSection).getByRole('slider', { name: 'Velocidad top cap fijo' });
         const fixedPulseIrregularitySlider = within(fixedSection).getByRole('slider', { name: 'Irregularidad top cap fijo' });
-        const fixedPulseStabilitySlider = within(fixedSection).getByRole('slider', { name: 'Estabilidad top cap fijo' });
-        const fixedPulseStabilityInput = within(fixedSection).getByRole('textbox', { name: 'Estabilidad top cap fijo value' });
+        const fixedPulseStabilitySlider = within(fixedSection).getByRole('slider', { name: 'Duración del parpadeo top cap fijo' });
+        const fixedPulseStabilityInput = within(fixedSection).getByRole('textbox', { name: 'Duración del parpadeo top cap fijo value' });
         const fixedAuraSlider = within(fixedSection).getByRole('slider', { name: 'Aura top cap fijo' });
 
         expect(within(fixedSection).queryByText('Largo')).not.toBeInTheDocument();
@@ -861,6 +861,8 @@ describe('PropertyDock machine-activity', () => {
         expect(within(fixedSection).queryByRole('slider', { name: 'Alfa base top cap fijo' })).not.toBeInTheDocument();
         expect(within(fixedSection).queryByText('Modo')).not.toBeInTheDocument();
         expect(within(fixedSection).queryByRole('slider', { name: 'Intensidad top cap fijo' })).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByText('Estabilidad')).not.toBeInTheDocument();
+        expect(within(fixedSection).getByText('Duración del parpadeo')).toBeInTheDocument();
         expect(fixedShapeCheckbox).toBeChecked();
         expect(fixedPulseSpeedSlider).toHaveValue('35');
         expect(fixedPulseIrregularitySlider).toHaveValue('0');

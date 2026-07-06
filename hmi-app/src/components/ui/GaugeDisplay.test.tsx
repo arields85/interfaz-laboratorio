@@ -10,6 +10,7 @@ import {
 } from '../../utils/travelingTopCapSpeed';
 import {
     MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    resolveMachineActivityTravelCompletionBlinkDurationSeconds,
     resolveKpiFixedTopCapBlinkDurationSeconds,
     resolveKpiFixedTopCapBlinkProfile,
 } from '../../utils/kpiTopCapEffects';
@@ -484,10 +485,11 @@ describe('GaugeDisplay', () => {
     });
 
     it('keeps the fixed top cap stable until travel completion, then fires a single blink burst', () => {
-        const expectedProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', 28, 72, 44, 85);
-        const expectedDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(72, 44, 85);
+        const expectedProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', 28, 72, 44, 0);
+        const expectedProfileTimes = expectedProfile.keyTimes.split(';').map(Number);
+        const expectedSequenceDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(72, 44, 0);
+        const expectedDurationSeconds = resolveMachineActivityTravelCompletionBlinkDurationSeconds(85);
         const expectedBurstOpacities = expectedProfile.values.split(';');
-        const expectedBurstTimes = expectedProfile.keyTimes.split(';').map(Number);
 
         render(
             <GaugeDisplay
@@ -495,6 +497,7 @@ describe('GaugeDisplay', () => {
                 circularTopCap={{
                     enabled: true,
                     staticBlinkTrigger: 'travel-completion',
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
                     staticEffects: {
                         mode: 'on-with-failures',
                         pulseIntensity: 28,
@@ -518,7 +521,7 @@ describe('GaugeDisplay', () => {
         const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
         const staticBlinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
         const travelDurationMs = Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0') * 1000;
-        const firstBurstDipDelayMs = Math.ceil(expectedDurationSeconds * 1000 * expectedBurstTimes[1]) + 1;
+        const secondBurstStepDelayMs = Math.ceil((expectedProfileTimes[2] - expectedProfileTimes[1]) * expectedSequenceDurationSeconds * 1000) + 1;
 
         expect(staticBlinkStack).toHaveAttribute('data-blink-trigger', 'travel-completion');
         expect(staticBlinkStack).toHaveAttribute('data-blink-trigger-key', '0');
@@ -538,15 +541,15 @@ describe('GaugeDisplay', () => {
         expect(triggeredBlinkStack).toHaveAttribute('data-blink-trigger-key', '1');
         expect(triggeredBlinkStack).toHaveAttribute('data-burst-active', 'true');
         expect(triggeredBlinkStack).toHaveAttribute('data-burst-key', '1');
-        expect(triggeredBlinkStack).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[0] ?? '1');
+        expect(triggeredBlinkStack).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
         expect(triggeredBlinkStack.querySelector('animate')).toBeNull();
 
         act(() => {
-            vi.advanceTimersByTime(firstBurstDipDelayMs);
+            vi.advanceTimersByTime(secondBurstStepDelayMs);
         });
 
         expect(within(screen.getByTestId('gauge-circular-static-top-cap'))
-            .getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
+            .getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[2] ?? '1');
 
         act(() => {
             vi.advanceTimersByTime(Math.ceil(expectedDurationSeconds * 1000));
@@ -558,7 +561,7 @@ describe('GaugeDisplay', () => {
 
     it('restarts the fixed blink burst on a second traveling top-cap completion', () => {
         const travelingTopCapPauseMinMs = 8_000;
-        const expectedProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', 28, 72, 44, 85);
+        const expectedProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', 28, 72, 44, 0);
         const expectedBurstOpacities = expectedProfile.values.split(';');
 
         render(
@@ -567,6 +570,7 @@ describe('GaugeDisplay', () => {
                 circularTopCap={{
                     enabled: true,
                     staticBlinkTrigger: 'travel-completion',
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
                     staticEffects: {
                         mode: 'on-with-failures',
                         pulseIntensity: 28,
@@ -604,7 +608,7 @@ describe('GaugeDisplay', () => {
         expect(firstCompletionBlinkStack).toHaveAttribute('data-blink-trigger-key', '1');
         expect(firstCompletionBlinkStack).toHaveAttribute('data-burst-active', 'true');
         expect(firstCompletionBlinkStack).toHaveAttribute('data-burst-key', '1');
-        expect(firstCompletionBlinkStack).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[0] ?? '1');
+        expect(firstCompletionBlinkStack).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
         expect(firstCompletionBlinkStack.querySelector('animate')).toBeNull();
         expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
 
@@ -626,12 +630,12 @@ describe('GaugeDisplay', () => {
         expect(secondCompletionBlinkStack).toHaveAttribute('data-blink-trigger-key', '2');
         expect(secondCompletionBlinkStack).toHaveAttribute('data-burst-active', 'true');
         expect(secondCompletionBlinkStack).toHaveAttribute('data-burst-key', '2');
-        expect(secondCompletionBlinkStack).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[0] ?? '1');
+        expect(secondCompletionBlinkStack).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
         expect(secondCompletionBlinkStack.querySelector('animate')).toBeNull();
         expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
     });
 
-    it('keeps the triggered burst active longer at maximum stability than at minimum stability', () => {
+    it('maps travel-completion burst duration to a 0..5 second active window', () => {
         const renderGauge = (pulseStability: number) => render(
             <GaugeDisplay
                 normalizedValue={0.75}
@@ -657,18 +661,30 @@ describe('GaugeDisplay', () => {
                 }}
             />,
         );
-        const lowDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(
+        const expectedBurstOpacities = resolveKpiFixedTopCapBlinkProfile(
+            'on-with-failures',
+            28,
             72,
             44,
             0,
             MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        ).values.split(';');
+        const zeroDurationSeconds = resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            0,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
         );
-        const highDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(
-            72,
-            44,
+        const midDurationSeconds = resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX / 2,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        );
+        const highDurationSeconds = resolveMachineActivityTravelCompletionBlinkDurationSeconds(
             MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
             MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
         );
+
+        expect(zeroDurationSeconds).toBe(0);
+        expect(midDurationSeconds).toBe(2.5);
+        expect(highDurationSeconds).toBe(5);
 
         const lowStabilityView = renderGauge(0);
         const lowTravelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
@@ -677,11 +693,9 @@ describe('GaugeDisplay', () => {
             vi.advanceTimersByTime(Math.ceil(lowTravelDurationMs) + 1);
         });
 
-        act(() => {
-            vi.advanceTimersByTime(Math.ceil(lowDurationSeconds * 1000) + 1);
-        });
-
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-duration', '0');
         expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[0] ?? '1');
 
         lowStabilityView.unmount();
 
@@ -692,17 +706,420 @@ describe('GaugeDisplay', () => {
             vi.advanceTimersByTime(Math.ceil(highTravelDurationMs) + 1);
         });
 
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-duration', '5');
+
         act(() => {
-            vi.advanceTimersByTime(Math.ceil(lowDurationSeconds * 1000) + 1);
+            vi.advanceTimersByTime(4_999);
         });
 
         expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
 
         act(() => {
-            vi.advanceTimersByTime(Math.ceil((highDurationSeconds - lowDurationSeconds) * 1000) + 1);
+            vi.advanceTimersByTime(2);
         });
 
         expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+    });
+
+    it('prevents late travel-completion profile steps from reviving the same burst after the duration window closes', () => {
+        const pulseStability = 10;
+        const expectedProfile = resolveKpiFixedTopCapBlinkProfile(
+            'on-with-failures',
+            28,
+            72,
+            44,
+            0,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        );
+        const inactiveOpacity = expectedProfile.values.split(';')[0] ?? '1';
+        const durationMs = Math.round(
+            resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+                pulseStability,
+                MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            ) * 1000,
+        );
+        const profileDurationMs = Math.round(
+            resolveKpiFixedTopCapBlinkDurationSeconds(
+                72,
+                44,
+                0,
+                MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            ) * 1000,
+        );
+
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticBlinkTrigger: 'travel-completion',
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                        pulseStability,
+                    },
+                    travelingSpeed: {
+                        min: 100,
+                        max: 100,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const travelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(travelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+        expect(durationMs).toBeGreaterThan(0);
+        expect(profileDurationMs).toBeGreaterThan(durationMs);
+
+        act(() => {
+            vi.advanceTimersByTime(durationMs + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', inactiveOpacity);
+
+        act(() => {
+            vi.advanceTimersByTime(profileDurationMs + 250);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', inactiveOpacity);
+    });
+
+    it('keeps same-trigger config rerenders inactive after the travel-completion window already closed', () => {
+        const renderGauge = (pulseSpeed: number, pulseIrregularity: number, pulseStability: number) => (
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticBlinkTrigger: 'travel-completion',
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed,
+                        pulseIrregularity,
+                        pulseStability,
+                    },
+                    travelingSpeed: {
+                        min: 100,
+                        max: 100,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />
+        );
+        const inactiveOpacity = resolveKpiFixedTopCapBlinkProfile(
+            'on-with-failures',
+            28,
+            72,
+            44,
+            0,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        ).values.split(';')[0] ?? '1';
+        const closedDurationMs = Math.round(
+            resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+                10,
+                MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            ) * 1000,
+        );
+        const { rerender } = render(renderGauge(72, 44, 10));
+        const travelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(travelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+
+        act(() => {
+            vi.advanceTimersByTime(closedDurationMs + 1);
+        });
+
+        const expectClosedSameKey = () => {
+            expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+            expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+            expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', inactiveOpacity);
+        };
+
+        expectClosedSameKey();
+
+        rerender(renderGauge(81, 44, 10));
+        expectClosedSameKey();
+
+        rerender(renderGauge(81, 63, 10));
+        expectClosedSameKey();
+
+        rerender(renderGauge(81, 63, 100));
+        expectClosedSameKey();
+    });
+
+    it('keeps same-trigger config rerenders inside the original travel-completion deadline window', () => {
+        const renderGauge = (pulseSpeed: number, pulseIrregularity: number, pulseStability: number) => (
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticBlinkTrigger: 'travel-completion',
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed,
+                        pulseIrregularity,
+                        pulseStability,
+                    },
+                    travelingSpeed: {
+                        min: 100,
+                        max: 100,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />
+        );
+        const originalDurationMs = Math.round(
+            resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+                10,
+                MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            ) * 1000,
+        );
+        const midWindowMs = Math.max(1, Math.floor(originalDurationMs / 2));
+        const remainingOriginalWindowMs = Math.max(1, originalDurationMs - midWindowMs);
+        const rerenderedInactiveOpacity = resolveKpiFixedTopCapBlinkProfile(
+            'on-with-failures',
+            28,
+            81,
+            63,
+            0,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        ).values.split(';')[0] ?? '1';
+        const rerenderedDurationMs = Math.round(
+            resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+                100,
+                MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            ) * 1000,
+        );
+        const rerenderedProfileDurationMs = Math.round(
+            resolveKpiFixedTopCapBlinkDurationSeconds(
+                81,
+                63,
+                0,
+                MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            ) * 1000,
+        );
+        const { rerender } = render(renderGauge(72, 44, 10));
+        const travelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(travelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+
+        act(() => {
+            vi.advanceTimersByTime(midWindowMs);
+        });
+
+        rerender(renderGauge(81, 63, 100));
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+
+        act(() => {
+            vi.advanceTimersByTime(remainingOriginalWindowMs + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', rerenderedInactiveOpacity);
+
+        act(() => {
+            vi.advanceTimersByTime(rerenderedDurationMs + rerenderedProfileDurationMs + 250);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', rerenderedInactiveOpacity);
+    });
+
+    it('keeps travel-completion first visible blink timing/profile shape independent from stability', () => {
+        const renderGauge = (pulseStability: number) => render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticBlinkTrigger: 'travel-completion',
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                        pulseStability,
+                    },
+                    travelingSpeed: {
+                        min: 100,
+                        max: 100,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const expectedProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', 28, 72, 44, 0, MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);
+        const expectedProfileTimes = expectedProfile.keyTimes.split(';').map(Number);
+        const expectedBurstOpacities = expectedProfile.values.split(';');
+        const profileDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(72, 44, 0, MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);
+        const lowDurationSeconds = resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX / 2,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        );
+        const highDurationSeconds = resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        );
+        const secondBurstStepDelayMs = Math.ceil((expectedProfileTimes[2] - expectedProfileTimes[1]) * profileDurationSeconds * 1000) + 1;
+
+        const lowView = renderGauge(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX / 2);
+        const lowTravelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(lowTravelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
+
+        act(() => {
+            vi.advanceTimersByTime(secondBurstStepDelayMs);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[2] ?? '1');
+
+        lowView.unmount();
+
+        renderGauge(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);
+        const highTravelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(highTravelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
+
+        act(() => {
+            vi.advanceTimersByTime(secondBurstStepDelayMs);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[2] ?? '1');
+        expect(highDurationSeconds).toBeGreaterThan(lowDurationSeconds);
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(lowDurationSeconds * 1000) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+    });
+
+    it('allows a new travel-completion trigger key to start a fresh burst after the prior window already closed', () => {
+        const travelingTopCapPauseMinMs = 8_000;
+        const pulseStability = 10;
+        const expectedBurstOpacities = resolveKpiFixedTopCapBlinkProfile(
+            'on-with-failures',
+            28,
+            72,
+            44,
+            0,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        ).values.split(';');
+        const durationMs = Math.round(
+            resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+                pulseStability,
+                MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            ) * 1000,
+        );
+
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticBlinkTrigger: 'travel-completion',
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                        pulseStability,
+                    },
+                    travelingSpeed: {
+                        min: 100,
+                        max: 100,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const firstTravelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(firstTravelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+
+        act(() => {
+            vi.advanceTimersByTime(durationMs + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'false');
+
+        act(() => {
+            vi.advanceTimersByTime(travelingTopCapPauseMinMs);
+        });
+
+        expect(screen.getByTestId('gauge-circular-top-cap')).toBeInTheDocument();
+
+        const secondTravelDurationMs = Number.parseFloat(screen.getByTestId('gauge-circular-top-cap').getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(secondTravelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-trigger-key', '2');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-opacity', expectedBurstOpacities[1] ?? '1');
     });
 
     it('renders off-with-flashes blink keyframes for the fixed top cap', () => {
