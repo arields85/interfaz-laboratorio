@@ -21,8 +21,15 @@ import {
     DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
     DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
     DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+    KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+    MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
 } from '../../utils/kpiTopCapEffects';
 import { ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS } from './adminSidebarStyles';
+import {
+    DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE,
+    DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE,
+    resolveStoredTravelingTopCapSpeedScale,
+} from '../../utils/travelingTopCapSpeed';
 import PropertyDock from './PropertyDock';
 import type { HierarchyAggregationTrace } from '../../widgets/resolvers/hierarchyResolver';
 
@@ -748,6 +755,15 @@ describe('PropertyDock machine-activity', () => {
             kpiMode: 'bar',
         });
 
+        const visualSection = getSection('Visualización');
+        const arcGlowSlider = within(visualSection).getByRole('slider', { name: 'Glow arco circular' });
+
+        fireEvent.change(arcGlowSlider, { target: { value: '0' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            circularArcGlowIntensity: 0,
+        });
+
         const productiveStatesSection = getSection('Estados Productivos');
         const confirmationInput = within(productiveStatesSection).getByDisplayValue('2000');
         await user.clear(confirmationInput);
@@ -803,6 +819,245 @@ describe('PropertyDock machine-activity', () => {
         });
     });
 
+    it('renders the machine-activity arc glow slider in Visualización with the default current appearance baseline', () => {
+        renderPropertyDock({
+            type: 'machine-activity',
+            title: 'Actividad de Máquina',
+        });
+
+        const visualSection = getSection('Visualización');
+        const arcGlowSlider = within(visualSection).getByRole('slider', { name: 'Glow arco circular' });
+        const arcGlowInput = within(visualSection).getByRole('textbox', { name: 'Glow arco circular value' });
+
+        expect(within(visualSection).getByText('Glow arco')).toBeInTheDocument();
+        expect(arcGlowSlider).toHaveValue('100');
+        expect(arcGlowInput).toHaveValue('100');
+    });
+
+    it('renders simplified fixed top-cap controls for circular machine-activity widgets and persists only the supported final fields', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'machine-activity',
+            title: 'Actividad de Máquina',
+        });
+
+        const fixedSection = getSection('Top cap fijo');
+
+        expect(within(fixedSection).queryByRole('slider', { name: 'Aura top cap fijo' })).not.toBeInTheDocument();
+
+        await user.click(within(fixedSection).getByRole('button', { name: 'Top cap fijo' }));
+
+        const fixedShapeCheckbox = within(fixedSection).getByRole('checkbox', { name: 'Recto/Pill top cap fijo' });
+        const fixedPulseSpeedSlider = within(fixedSection).getByRole('slider', { name: 'Velocidad top cap fijo' });
+        const fixedPulseIrregularitySlider = within(fixedSection).getByRole('slider', { name: 'Irregularidad top cap fijo' });
+        const fixedPulseStabilitySlider = within(fixedSection).getByRole('slider', { name: 'Estabilidad top cap fijo' });
+        const fixedPulseStabilityInput = within(fixedSection).getByRole('textbox', { name: 'Estabilidad top cap fijo value' });
+        const fixedAuraSlider = within(fixedSection).getByRole('slider', { name: 'Aura top cap fijo' });
+
+        expect(within(fixedSection).queryByText('Largo')).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByText('Base grosor')).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByText('Alfa')).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByRole('slider', { name: 'Largo base top cap fijo' })).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByRole('slider', { name: 'Grosor base top cap fijo' })).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByRole('slider', { name: 'Alfa base top cap fijo' })).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByText('Modo')).not.toBeInTheDocument();
+        expect(within(fixedSection).queryByRole('slider', { name: 'Intensidad top cap fijo' })).not.toBeInTheDocument();
+        expect(fixedShapeCheckbox).toBeChecked();
+        expect(fixedPulseSpeedSlider).toHaveValue('35');
+        expect(fixedPulseIrregularitySlider).toHaveValue('0');
+        expect(fixedPulseStabilitySlider).toHaveValue('0');
+        expect(fixedPulseStabilityInput).toHaveValue('0');
+        expect(fixedPulseStabilitySlider).toHaveAttribute('max', '100');
+
+        await user.click(fixedShapeCheckbox);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapShape: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                pill: false,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+
+        fireEvent.change(fixedPulseSpeedSlider, { target: { value: '61' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+            },
+        });
+
+        fireEvent.change(fixedPulseIrregularitySlider, { target: { value: '47' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+            },
+        });
+
+        fireEvent.change(fixedPulseStabilitySlider, { target: { value: '100' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+                pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            },
+        });
+
+        fireEvent.change(fixedAuraSlider, { target: { value: '42' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapShape: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                pill: false,
+            },
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+                pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                auraIntensity: 42,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+
+        const travelingSection = getSection('Top cap viajero');
+
+        expect(within(travelingSection).queryByRole('slider', { name: 'Aura top cap viajero' })).not.toBeInTheDocument();
+
+        await user.click(within(travelingSection).getByRole('button', { name: 'Top cap viajero' }));
+
+        const travelingAuraSlider = within(travelingSection).getByRole('slider', { name: 'Aura top cap viajero' });
+
+        expect(within(travelingSection).queryByText('Recto/Pill')).not.toBeInTheDocument();
+        expect(within(travelingSection).queryByRole('checkbox', { name: 'Recto/Pill top cap viajero' })).not.toBeInTheDocument();
+        expect(within(travelingSection).queryByText('Modo')).not.toBeInTheDocument();
+        expect(within(travelingSection).queryByRole('slider', { name: 'Intensidad top cap fijo' })).not.toBeInTheDocument();
+        expect(within(travelingSection).queryByRole('slider', { name: 'Velocidad top cap fijo' })).not.toBeInTheDocument();
+
+        fireEvent.change(travelingAuraSlider, { target: { value: '37' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapShape: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                pill: false,
+            },
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+                pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                auraIntensity: 42,
+            },
+            travelingTopCapEffects: {
+                ...DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+                auraIntensity: 37,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('travelingTopCapShape');
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+    });
+
+    it('renders the 1..10 top-cap speed scale and persists scale values for machine-activity traveling caps', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'machine-activity',
+            title: 'Actividad de Máquina',
+        });
+
+        const travelingSection = getSection('Top cap viajero');
+
+        await user.click(within(travelingSection).getByRole('button', { name: 'Top cap viajero' }));
+
+        const minInput = within(travelingSection).getByRole('textbox', { name: 'Vel. Min top cap viajero' });
+        const maxInput = within(travelingSection).getByRole('textbox', { name: 'Vel. Max top cap viajero' });
+
+        expect(within(travelingSection).getByText('Vel. Min')).toBeInTheDocument();
+        expect(within(travelingSection).getByText('Vel. Max')).toBeInTheDocument();
+        expect(DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE).toBe(3);
+        expect(DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE).toBe(9);
+        expect(minInput).toHaveValue('3');
+        expect(maxInput).toHaveValue('9');
+        expect(minInput).not.toHaveValue('3.5');
+        expect(maxInput).not.toHaveValue('6.7');
+        expect(minInput.parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
+        expect(maxInput.parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
+
+        await user.clear(minInput);
+        await user.type(minInput, '1');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            travelingTopCapMinSpeed: 1,
+        });
+
+        await user.clear(maxInput);
+        await user.type(maxInput, '10');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            travelingTopCapMinSpeed: 1,
+            travelingTopCapMaxSpeed: 10,
+        });
+    });
+
+    it('shows legacy raw top-cap speed configs on the new 1..10 scale before persisting updated scale values', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'machine-activity',
+            title: 'Actividad de Máquina',
+            displayOptions: {
+                travelingTopCapMinSpeed: 50,
+                travelingTopCapMaxSpeed: 400,
+            },
+        });
+
+        const travelingSection = getSection('Top cap viajero');
+
+        await user.click(within(travelingSection).getByRole('button', { name: 'Top cap viajero' }));
+
+        const minInput = within(travelingSection).getByRole('textbox', { name: 'Vel. Min top cap viajero' });
+        const maxInput = within(travelingSection).getByRole('textbox', { name: 'Vel. Max top cap viajero' });
+
+        expect(resolveStoredTravelingTopCapSpeedScale(50)).toBe(1);
+        expect(resolveStoredTravelingTopCapSpeedScale(400)).toBe(10);
+        expect(minInput).toHaveValue('1');
+        expect(maxInput).toHaveValue('10');
+
+        await user.clear(minInput);
+        await user.type(minInput, '4');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            travelingTopCapMinSpeed: 4,
+            travelingTopCapMaxSpeed: 400,
+        });
+    });
+
+    it('hides machine-activity top-cap sections when the widget is in bar mode', () => {
+        renderPropertyDock({
+            type: 'machine-activity',
+            displayOptions: {
+                kpiMode: 'bar',
+            },
+        });
+
+        expect(screen.queryByRole('button', { name: 'Top cap fijo' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Top cap viajero' })).not.toBeInTheDocument();
+    });
+
     it('shows the custom unit toggle for real machine-activity bindings and enables editing only when active', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'machine-activity',
@@ -855,6 +1110,23 @@ describe('PropertyDock machine-activity', () => {
         expect(screen.queryByLabelText('Unidad custom')).not.toBeInTheDocument();
         expect(getFieldButtonInSection('Datos', 'Unidad')).toHaveTextContent('%');
         expect(getFieldButtonInSection('Datos', 'Unidad')).not.toBeDisabled();
+    });
+
+    it('orders machine-activity top-cap sections after texts and before navigation-only trailing sections', () => {
+        renderPropertyDock({
+            type: 'machine-activity',
+            title: 'Actividad de Máquina',
+        });
+
+        const sectionTitles = Array.from(document.querySelectorAll('section')).map((section) =>
+            section.querySelector('button')?.textContent?.trim() ?? '',
+        );
+
+        expect(sectionTitles.indexOf('Textos')).toBeGreaterThan(-1);
+        expect(sectionTitles.indexOf('Top cap fijo')).toBeGreaterThan(sectionTitles.indexOf('Textos'));
+        expect(sectionTitles.indexOf('Top cap viajero')).toBeGreaterThan(sectionTitles.indexOf('Top cap fijo'));
+        expect(sectionTitles.indexOf('Top cap fijo')).toBe(sectionTitles.indexOf('Textos') + 1);
+        expect(sectionTitles.indexOf('Top cap viajero')).toBe(sectionTitles.indexOf('Top cap fijo') + 1);
     });
 
     it('updates the simulated machine-activity unit atomically without reverting to the previous value', async () => {

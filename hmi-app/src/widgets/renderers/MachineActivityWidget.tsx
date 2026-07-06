@@ -14,6 +14,14 @@ import {
     DEFAULT_GAUGE_VALUE_FONT_SIZE,
     resolveActivityAnalyticsDonutCenterValueFontSize,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import {
+    MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    resolveMachineActivityFixedTopCapEffects,
+    resolveKpiFixedTopCapShape,
+    resolveKpiTravelingTopCapEffects,
+    resolveKpiTravelingTopCapShape,
+} from '../../utils/kpiTopCapEffects';
+import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     Gauge,
@@ -71,7 +79,24 @@ const DEFAULT_CIRCULAR_TEXT_SIZING: { value: number; unit: number } = {
     unit: 0,
 };
 
+const ACTIVITY_VISUAL_ANIMATION_MIN_MS = 300;
+const ACTIVITY_VISUAL_ANIMATION_MAX_MS = 1200;
+const ACTIVITY_VISUAL_ANIMATION_BASE_MS = 120;
+const ACTIVITY_VISUAL_ANIMATION_MS_PER_POINT = 12;
+
 const CALIBRATING_VISUALS = getStateVisuals('calibrating');
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(Math.max(value, min), max);
+}
+
+export function resolveActivityVisualAnimationDuration(deltaPoints: number) {
+    return clamp(
+        ACTIVITY_VISUAL_ANIMATION_BASE_MS + (Math.abs(deltaPoints) * ACTIVITY_VISUAL_ANIMATION_MS_PER_POINT),
+        ACTIVITY_VISUAL_ANIMATION_MIN_MS,
+        ACTIVITY_VISUAL_ANIMATION_MAX_MS,
+    );
+}
 
 function resolveCappedSvgFontSize(desiredPixels: number, renderedSize: number) {
     if (!(desiredPixels > 0)) {
@@ -88,6 +113,43 @@ function readCssPixelValue(element: Element, propertyName: string) {
     const parsedValue = Number.parseFloat(rawValue);
 
     return Number.isFinite(parsedValue) ? parsedValue : 0;
+}
+
+function usePrefersReducedMotion() {
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return false;
+        }
+
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    });
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return undefined;
+        }
+
+        const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const handleChange = (event: MediaQueryListEvent) => {
+            setPrefersReducedMotion(event.matches);
+        };
+
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', handleChange);
+
+            return () => {
+                mediaQuery.removeEventListener('change', handleChange);
+            };
+        }
+
+        mediaQuery.addListener(handleChange);
+
+        return () => {
+            mediaQuery.removeListener(handleChange);
+        };
+    }, []);
+
+    return prefersReducedMotion;
 }
 
 function renderCircularGaugeText(
@@ -177,9 +239,21 @@ export default function MachineActivityWidget({
     const realUnit = isSimulatedBinding
         ? (simulatedUnit || 'kW')
         : (liveUnit || 'kW');
+    const fixedTopCapEffects = resolveMachineActivityFixedTopCapEffects(opts.fixedTopCapEffects);
+    const fixedTopCapShape = resolveKpiFixedTopCapShape(opts.fixedTopCapShape);
+    const travelingTopCapEffects = resolveKpiTravelingTopCapEffects(opts.travelingTopCapEffects);
+    const travelingTopCapShape = resolveKpiTravelingTopCapShape(opts.travelingTopCapShape);
+    const travelingTopCapSpeed = resolveStoredTravelingTopCapActualSpeedRange({
+        min: opts.travelingTopCapMinSpeed,
+        max: opts.travelingTopCapMaxSpeed,
+    });
     const Icon = resolveIcon(widget.displayOptions);
+    const prefersReducedMotion = usePrefersReducedMotion();
     const usesDynamicColor = opts.showDynamicColor !== false;
     const showsAnimation = opts.showStateAnimation !== false;
+    const activitySourceKey = isSimulatedBinding
+        ? 'simulated'
+        : `${widget.binding?.bindingVersion ?? 'legacy'}:${widget.binding?.assetId ?? ''}:${widget.binding?.machineId ?? ''}:${widget.binding?.variableKey ?? ''}`;
     const {
         activityIndex,
         productiveState,
@@ -189,34 +263,43 @@ export default function MachineActivityWidget({
         isValid,
     } = useMachineActivity(resolved.value, opts, {
         simulated: isSimulatedBinding,
-        sourceKey: isSimulatedBinding
-            ? 'simulated'
-            : `${widget.binding?.bindingVersion ?? 'legacy'}:${widget.binding?.assetId ?? ''}:${widget.binding?.machineId ?? ''}:${widget.binding?.variableKey ?? ''}`,
+        sourceKey: activitySourceKey,
     });
     const prevProductiveStateRef = useRef(productiveState);
     const justEnteredSetupRef = useRef(false);
     const lastSetupNormalizedRef = useRef(0);
-    const [retractingFromSetup, setRetractingFromSetup] = useState(false);
+    const retractStartNormalizedRef = useRef(0);
+    const retractGradientColorsRef = useRef(CALIBRATING_VISUALS.gradientColors);
+    const [retractingToStopped, setRetractingToStopped] = useState(false);
     const [expandAnim, setExpandAnim] = useState<{ value: number; opacity: number } | null>(null);
     const [retractAnim, setRetractAnim] = useState<{ value: number; opacity: number } | null>(null);
+    const [displayedActivityIndex, setDisplayedActivityIndex] = useState(activityIndex);
+    const displayedActivityIndexRef = useRef(activityIndex);
+    const activityAnimationFrameRef = useRef<number | null>(null);
+    const activityAnimationSnapshotRef = useRef({
+        sourceKey: activitySourceKey,
+        productiveState,
+        activityIndex,
+    });
     const shouldTrackAnimationState = !isLoadingData && resolved.value !== null;
+    const shouldAnimateCircularStoppedTransitions = shouldTrackAnimationState && mode === 'circular';
 
     /* eslint-disable react-hooks/refs -- animation refs intentionally track previous frame state without rerendering. */
-    if (shouldTrackAnimationState && productiveState === 'calibrating') {
+    if (shouldAnimateCircularStoppedTransitions && productiveState === 'calibrating') {
         lastSetupNormalizedRef.current = activityIndex / 100;
     }
-    const isRetractingFromSetup = (retractingFromSetup && productiveState === 'stopped')
-        || (prevProductiveStateRef.current === 'calibrating' && productiveState === 'stopped');
+    const isRetractingToStopped = (retractingToStopped && productiveState === 'stopped')
+        || ((prevProductiveStateRef.current === 'calibrating' || prevProductiveStateRef.current === 'producing') && productiveState === 'stopped');
     const gaugePrimaryColor = usesDynamicColor
         ? stateVisuals.primary
         : 'color-mix(in srgb, var(--color-accent-purple) 40%, transparent)';
     const gaugeColor = {
         primary: gaugePrimaryColor,
         gradient: usesDynamicColor
-            ? (isRetractingFromSetup ? CALIBRATING_VISUALS.gradientColors : stateVisuals.gradientColors)
+            ? (isRetractingToStopped ? retractGradientColorsRef.current : stateVisuals.gradientColors)
             : ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'] as [string, string],
     };
-    const effectiveAnimationIntensity = (isRetractingFromSetup
+    const effectiveAnimationIntensity = (isRetractingToStopped
         ? 'subtle'
         : productiveState === 'producing'
             ? 'active'
@@ -234,29 +317,48 @@ export default function MachineActivityWidget({
             intensity: 'none',
             durationMs: 0,
         } as const;
-    if (shouldTrackAnimationState && productiveState === 'calibrating' && prevProductiveStateRef.current === 'stopped' && expandAnim === null) {
+    if (shouldAnimateCircularStoppedTransitions && productiveState !== 'stopped' && prevProductiveStateRef.current === 'stopped' && expandAnim === null) {
         justEnteredSetupRef.current = true;
     }
 
-    if (shouldTrackAnimationState && expandAnim !== null) {
+    if (shouldAnimateCircularStoppedTransitions && expandAnim !== null) {
         justEnteredSetupRef.current = false;
     }
 
+    const productiveStateChangedSinceLastVisualSnapshot = activityAnimationSnapshotRef.current.productiveState !== productiveState;
+    const isStoppedVisualStateTransition = productiveStateChangedSinceLastVisualSnapshot
+        && (activityAnimationSnapshotRef.current.productiveState === 'stopped' || productiveState === 'stopped');
     const arcOpacity = expandAnim !== null
         ? expandAnim.opacity
         : (retractAnim !== null
             ? retractAnim.opacity
             : (justEnteredSetupRef.current ? 0 : 1));
+    const usesSpecialActivityAnimation = expandAnim !== null || retractAnim !== null;
+    const hasImmediateVisualOverride = usesSpecialActivityAnimation
+        || activityAnimationSnapshotRef.current.sourceKey !== activitySourceKey
+        || isStoppedVisualStateTransition
+        || !shouldTrackAnimationState
+        || !isValid
+        || prefersReducedMotion;
+    const visualActivityIndex = expandAnim !== null
+        ? expandAnim.value * 100
+        : (retractAnim !== null
+        ? retractAnim.value * 100
+        : (hasImmediateVisualOverride ? activityIndex : displayedActivityIndex));
     const gaugeNormalized = expandAnim !== null
         ? expandAnim.value
         : (retractAnim !== null
             ? retractAnim.value
-            : (justEnteredSetupRef.current ? 0 : (isRetractingFromSetup ? lastSetupNormalizedRef.current : activityIndex / 100)));
-    const gaugeGradientNormalized = (isRetractingFromSetup || retractAnim !== null)
-        ? lastSetupNormalizedRef.current
+            : (justEnteredSetupRef.current ? 0 : (isRetractingToStopped ? retractStartNormalizedRef.current : visualActivityIndex / 100)));
+    const gaugeGradientNormalized = (isRetractingToStopped || retractAnim !== null)
+        ? retractStartNormalizedRef.current
         : undefined;
     /* eslint-enable react-hooks/refs */
-    const activityIndexLabel = isValid ? String(Math.round(activityIndex)) : '--';
+    const activityIndexLabel = isValid ? String(Math.round(visualActivityIndex)) : '--';
+
+    useEffect(() => {
+        displayedActivityIndexRef.current = displayedActivityIndex;
+    }, [displayedActivityIndex]);
 
     useEffect(() => {
         if (mode !== 'circular') {
@@ -309,16 +411,16 @@ export default function MachineActivityWidget({
     }, [mode, valueFontSizeOverride]);
 
     useEffect(() => {
-        if (!shouldTrackAnimationState) {
+        if (!shouldAnimateCircularStoppedTransitions) {
             return undefined;
         }
 
-        if (!isRetractingFromSetup) {
+        if (!isRetractingToStopped) {
             setRetractAnim(null);
             return undefined;
         }
 
-        const startValue = lastSetupNormalizedRef.current;
+        const startValue = retractStartNormalizedRef.current;
         if (startValue <= 0) {
             setRetractAnim(null);
             return undefined;
@@ -347,14 +449,14 @@ export default function MachineActivityWidget({
         frameId = requestAnimationFrame(animate);
 
         return () => cancelAnimationFrame(frameId);
-    }, [isRetractingFromSetup, shouldTrackAnimationState, stateVisuals.animationDuration]);
+    }, [isRetractingToStopped, shouldAnimateCircularStoppedTransitions, stateVisuals.animationDuration]);
 
     useEffect(() => {
-        if (!shouldTrackAnimationState) {
+        if (!shouldAnimateCircularStoppedTransitions) {
             return undefined;
         }
 
-        const enteringSetup = productiveState === 'calibrating' && prevProductiveStateRef.current === 'stopped';
+        const enteringSetup = productiveState !== 'stopped' && prevProductiveStateRef.current === 'stopped';
 
         if (!enteringSetup) {
             return undefined;
@@ -366,7 +468,7 @@ export default function MachineActivityWidget({
         }
 
         setRetractAnim(null);
-        setRetractingFromSetup(false);
+        setRetractingToStopped(false);
 
         const startTime = performance.now();
         const duration = stateVisuals.animationDuration || 550;
@@ -384,6 +486,7 @@ export default function MachineActivityWidget({
             if (progress < 1) {
                 frameId = requestAnimationFrame(animate);
             } else {
+                setDisplayedActivityIndex(activityIndex);
                 setExpandAnim(null);
             }
         };
@@ -391,28 +494,121 @@ export default function MachineActivityWidget({
         frameId = requestAnimationFrame(animate);
 
         return () => cancelAnimationFrame(frameId);
-    }, [productiveState, activityIndex, shouldTrackAnimationState, stateVisuals.animationDuration]);
+    }, [productiveState, activityIndex, shouldAnimateCircularStoppedTransitions, stateVisuals.animationDuration]);
 
     useEffect(() => {
-        if (!shouldTrackAnimationState) {
+        if (!shouldAnimateCircularStoppedTransitions) {
             return undefined;
         }
 
         const prevState = prevProductiveStateRef.current;
 
-        if (prevState === 'calibrating' && productiveState === 'stopped') {
-            setRetractingFromSetup(true);
-            const timer = setTimeout(() => setRetractingFromSetup(false), (stateVisuals.animationDuration || 900) + 50);
+        if ((prevState === 'calibrating' || prevState === 'producing') && productiveState === 'stopped') {
+            retractStartNormalizedRef.current = prevState === 'calibrating'
+                ? lastSetupNormalizedRef.current
+                : clamp(displayedActivityIndexRef.current / 100, 0, 1);
+            retractGradientColorsRef.current = getStateVisuals(prevState).gradientColors;
+            setRetractingToStopped(true);
+            const timer = setTimeout(() => setRetractingToStopped(false), (stateVisuals.animationDuration || 900) + 50);
             prevProductiveStateRef.current = productiveState;
             return () => clearTimeout(timer);
         }
 
         if (productiveState !== 'stopped') {
-            setRetractingFromSetup(false);
+            setRetractingToStopped(false);
         }
 
         prevProductiveStateRef.current = productiveState;
-    }, [productiveState, shouldTrackAnimationState, stateVisuals.animationDuration]);
+    }, [productiveState, shouldAnimateCircularStoppedTransitions, stateVisuals.animationDuration]);
+
+    useEffect(() => {
+        const cancelActivityAnimation = () => {
+            if (activityAnimationFrameRef.current !== null) {
+                cancelAnimationFrame(activityAnimationFrameRef.current);
+                activityAnimationFrameRef.current = null;
+            }
+        };
+
+        const previousSnapshot = activityAnimationSnapshotRef.current;
+        const sourceChanged = previousSnapshot.sourceKey !== activitySourceKey;
+        const productiveStateChanged = previousSnapshot.productiveState !== productiveState;
+        const isStoppedStateTransition = productiveStateChanged
+            && (previousSnapshot.productiveState === 'stopped' || productiveState === 'stopped');
+        const activityChanged = previousSnapshot.activityIndex !== activityIndex;
+        const shouldAnimateVisualValue = shouldTrackAnimationState
+            && isValid
+            && !prefersReducedMotion
+            && !usesSpecialActivityAnimation
+            && !isStoppedStateTransition
+            && !sourceChanged
+            && activityChanged;
+
+        if (!shouldAnimateVisualValue) {
+            cancelActivityAnimation();
+            setDisplayedActivityIndex(activityIndex);
+            displayedActivityIndexRef.current = activityIndex;
+            activityAnimationSnapshotRef.current = {
+                sourceKey: activitySourceKey,
+                productiveState,
+                activityIndex,
+            };
+            return undefined;
+        }
+
+        const startValue = displayedActivityIndexRef.current;
+        const targetValue = activityIndex;
+        const delta = targetValue - startValue;
+
+        if (delta === 0) {
+            activityAnimationSnapshotRef.current = {
+                sourceKey: activitySourceKey,
+                productiveState,
+                activityIndex,
+            };
+            return undefined;
+        }
+
+        cancelActivityAnimation();
+
+        const startTime = performance.now();
+        const duration = resolveActivityVisualAnimationDuration(delta);
+
+        const animate = (now: number) => {
+            const elapsed = now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const easedProgress = 1 - Math.pow(1 - progress, 2);
+            const nextValue = startValue + (delta * easedProgress);
+
+            displayedActivityIndexRef.current = nextValue;
+            setDisplayedActivityIndex(nextValue);
+
+            if (progress < 1) {
+                activityAnimationFrameRef.current = requestAnimationFrame(animate);
+                return;
+            }
+
+            displayedActivityIndexRef.current = targetValue;
+            setDisplayedActivityIndex(targetValue);
+            activityAnimationFrameRef.current = null;
+        };
+
+        activityAnimationFrameRef.current = requestAnimationFrame(animate);
+        activityAnimationSnapshotRef.current = {
+            sourceKey: activitySourceKey,
+            productiveState,
+            activityIndex,
+        };
+
+        return cancelActivityAnimation;
+    }, [
+        activitySourceKey,
+        activityIndex,
+        isValid,
+        prefersReducedMotion,
+        productiveState,
+        shouldTrackAnimationState,
+        usesSpecialActivityAnimation,
+    ]);
 
     if (isLoadingData) {
         return (
@@ -446,8 +642,19 @@ export default function MachineActivityWidget({
                                 gradientNormalized={gaugeGradientNormalized}
                                 color={gaugeColor}
                                 mode="circular"
+                                circularBaseSegmentLinecap="butt"
                                 animation={gaugeAnimation}
                                 arcOpacity={arcOpacity}
+                                circularArcGlowIntensity={opts.circularArcGlowIntensity ?? 100}
+                                circularTopCap={{
+                                    enabled: true,
+                                    staticShape: fixedTopCapShape,
+                                    staticEffects: fixedTopCapEffects,
+                                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                                    travelingShape: travelingTopCapShape,
+                                    travelingEffects: travelingTopCapEffects,
+                                    travelingSpeed: travelingTopCapSpeed,
+                                }}
                                 circularContent={renderCircularGaugeText(activityIndexLabel, displayUnit, isValid, circularTextSizing)}
                             />
                         </div>

@@ -310,13 +310,20 @@ export interface KpiFixedTopCapBase {
     alpha?: number;
 }
 
+export type KpiFixedTopCapBlinkMode = 'on-with-failures' | 'off-with-flashes';
+
 export interface KpiFixedTopCapEffects {
+    mode?: KpiFixedTopCapBlinkMode;
     auraIntensity?: number;
     haloIntensity?: number;
     highlightIntensity?: number;
     blur?: number;
     extension?: number;
     thickness?: number;
+    pulseIntensity?: number;
+    pulseSpeed?: number;
+    pulseIrregularity?: number;
+    pulseStability?: number;
 }
 
 export interface KpiTravelingTopCapEffects {
@@ -422,6 +429,7 @@ export interface MachineActivityDisplayOptions {
     icon?: string | null;
     kpiMode?: 'circular' | 'bar';
     valueFontSize?: number;
+    circularArcGlowIntensity?: number;
     unit?: string;
     unitOverride?: boolean;
     thresholdStopped?: number;
@@ -435,6 +443,12 @@ export interface MachineActivityDisplayOptions {
     showPowerSubtext?: boolean;
     showDynamicColor?: boolean;
     showStateAnimation?: boolean;
+    fixedTopCapShape?: KpiTopCapShape;
+    fixedTopCapEffects?: KpiFixedTopCapEffects;
+    travelingTopCapShape?: KpiTopCapShape;
+    travelingTopCapEffects?: KpiTravelingTopCapEffects;
+    travelingTopCapMinSpeed?: number;
+    travelingTopCapMaxSpeed?: number;
     labelStopped?: string;
     labelCalibrating?: string;
     labelProducing?: string;

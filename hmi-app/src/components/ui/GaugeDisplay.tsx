@@ -2,13 +2,22 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type R
 import type { KpiFixedTopCapBase, KpiFixedTopCapEffects, KpiTopCapShape, KpiTravelingTopCapEffects } from '../../domain/admin.types';
 import {
     DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+    KPI_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+    resolveKpiFixedTopCapBlinkDurationSeconds,
+    resolveKpiFixedTopCapBlinkProfile,
     resolveKpiFixedTopCapShape,
     resolveKpiFixedTopCapEffects,
+    resolveKpiFixedTopCapPulseDurationSeconds,
     resolveKpiTravelingTopCapMaximumLength,
     resolveKpiTravelingTopCapMinimumThickness,
     resolveKpiTravelingTopCapShape,
     resolveKpiTravelingTopCapEffects,
 } from '../../utils/kpiTopCapEffects';
+import {
+    resolveTravelingTopCapSpeed,
+    type TravelingTopCapSpeedConfig,
+} from '../../utils/travelingTopCapSpeed';
 
 export type GaugeMode = 'circular' | 'bar';
 
@@ -28,6 +37,7 @@ export interface GaugeDisplayProps {
     animation?: GaugeDisplayAnimation;
     size?: 'sm' | 'md' | 'lg' | number;
     arcOpacity?: number;
+    circularArcGlowIntensity?: number;
     gradientNormalized?: number;
     className?: string;
     circularBaseSegmentLinecap?: 'default' | 'butt';
@@ -36,8 +46,10 @@ export interface GaugeDisplayProps {
         staticBase?: KpiFixedTopCapBase;
         staticShape?: KpiTopCapShape;
         staticEffects?: KpiFixedTopCapEffects;
+        staticPulseStabilityMax?: number;
         travelingShape?: KpiTopCapShape;
         travelingEffects?: KpiTravelingTopCapEffects;
+        travelingSpeed?: TravelingTopCapSpeedConfig;
     };
     circularContent?: (layout: {
         center: number;
@@ -115,8 +127,6 @@ const TOP_CAP_VISUAL_TUNING = {
         coreRadius: [2.7, 3.85, 3.65, 2.95, 2.7],
     },
 } as const;
-const TRAVELING_TOP_CAP_SPEED_PX_PER_SECOND = 323;
-const TRAVELING_TOP_CAP_DURATION_MIN_SECONDS = 0.9;
 const TRAVELING_TOP_CAP_DURATION_MAX_SECONDS = 3.2;
 const TRAVELING_TOP_CAP_PAUSE_MIN_MS = 8_000;
 const TRAVELING_TOP_CAP_PAUSE_MAX_MS = 20_000;
@@ -143,6 +153,7 @@ export default function GaugeDisplay({
     animation,
     size,
     arcOpacity,
+    circularArcGlowIntensity = 100,
     gradientNormalized,
     className,
     circularBaseSegmentLinecap = 'default',
@@ -161,11 +172,17 @@ export default function GaugeDisplay({
         ? (animation?.durationMs ?? ANIMATION_DURATION_PRESETS[animationIntensity])
         : 0;
     const showGlow = animationEnabled && animationIntensity !== 'none';
+    const resolvedCircularArcGlowIntensity = clamp(circularArcGlowIntensity, 0, 100);
+    const circularArcGlowOpacity = Number((resolvedCircularArcGlowIntensity / 100).toFixed(2));
+    const showCircularArcGlow = showGlow && resolvedCircularArcGlowIntensity > 0;
+    const preserveLegacyArcGlowFilter = showCircularArcGlow && resolvedCircularArcGlowIntensity === 100;
     const gradientColors = color.gradient;
     const primaryColor = color.primary;
     const topCapEnabled = mode === 'circular' && circularTopCap?.enabled === true;
-    const staticTopCapEffects = resolveKpiFixedTopCapEffects(circularTopCap?.staticEffects);
+    const staticTopCapPulseStabilityMax = circularTopCap?.staticPulseStabilityMax ?? KPI_FIXED_TOP_CAP_PULSE_STABILITY_MAX;
+    const staticTopCapEffects = resolveKpiFixedTopCapEffects(circularTopCap?.staticEffects, staticTopCapPulseStabilityMax);
     const travelingTopCapEffects = resolveKpiTravelingTopCapEffects(circularTopCap?.travelingEffects);
+    const prefersReducedMotion = usePrefersReducedMotion();
     const staticTopCapShape = useMemo(
         () => resolveKpiFixedTopCapShape(circularTopCap?.staticShape),
         [circularTopCap?.staticShape],
@@ -180,6 +197,23 @@ export default function GaugeDisplay({
     const travelingTopCapGlowFilterId = `${instanceId}-traveling-top-cap-glow`;
     const staticTopCapCornerRadiusMultiplier = staticTopCapShape.pill ? CIRCULAR_TOP_CAP_ROUNDED_CORNER_MULTIPLIER : 0;
     const travelingTopCapCornerRadiusMultiplier = travelingTopCapShape.pill ? CIRCULAR_TOP_CAP_ROUNDED_CORNER_MULTIPLIER : 0;
+    const staticTopCapPulseIntensity = clamp(staticTopCapEffects.pulseIntensity / KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX, 0, 1);
+    const staticTopCapPulseEnabled = topCapEnabled && !prefersReducedMotion && staticTopCapPulseIntensity > 0;
+    const staticTopCapBlinkDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(
+        staticTopCapEffects.pulseSpeed,
+        staticTopCapEffects.pulseIrregularity,
+        staticTopCapEffects.pulseStability,
+        staticTopCapPulseStabilityMax,
+    );
+    const staticTopCapLegacyPulseDurationSeconds = resolveKpiFixedTopCapPulseDurationSeconds(staticTopCapEffects.pulseSpeed);
+    const staticTopCapBlinkProfile = resolveKpiFixedTopCapBlinkProfile(
+        staticTopCapEffects.mode,
+        staticTopCapEffects.pulseIntensity,
+        staticTopCapEffects.pulseSpeed,
+        staticTopCapEffects.pulseIrregularity,
+        staticTopCapEffects.pulseStability,
+        staticTopCapPulseStabilityMax,
+    );
 
     useEffect(() => {
         if (mode !== 'circular') {
@@ -283,15 +317,19 @@ export default function GaugeDisplay({
             radius,
         });
     }, [center, circumference, endpointSegment, radius, strokeWidth, topCapEnabled, visibleArcLength]);
+    const travelingTopCapSpeed = useMemo(
+        () => resolveTravelingTopCapSpeed(normalized, circularTopCap?.travelingSpeed),
+        [circularTopCap?.travelingSpeed, normalized],
+    );
     const travelingTopCapDurationSeconds = useMemo(
-        () => resolveTravelingTopCapDurationSeconds(visibleArcLength),
-        [visibleArcLength],
+        () => resolveTravelingTopCapDurationSeconds(visibleArcLength, travelingTopCapSpeed),
+        [travelingTopCapSpeed, visibleArcLength],
     );
     const {
-        prefersReducedMotion,
         cycleKey: travelingTopCapCycleKey,
         progress: travelingTopCapProgress,
         isPaused: isTravelingTopCapPaused,
+        activeDurationSeconds: activeTravelingTopCapDurationSeconds,
     } = useTravelingEffectCycle({
         enabled: topCapEnabled && visibleArcLength > 0,
         durationSeconds: travelingTopCapDurationSeconds,
@@ -433,7 +471,7 @@ export default function GaugeDisplay({
                             strokeDashoffset={segment.strokeDashoffset}
                             strokeLinecap={segmentLinecap}
                             data-testid="gauge-circular-arc-segment"
-                            filter={showGlow ? `url(#${glowFilterId})` : undefined}
+                            filter={preserveLegacyArcGlowFilter ? `url(#${glowFilterId})` : undefined}
                             style={{
                                 opacity: arcOpacity,
                                 transition: `opacity ${animationDuration}ms ease-out`,
@@ -442,6 +480,36 @@ export default function GaugeDisplay({
                     );
                 })}
             </g>
+            {!preserveLegacyArcGlowFilter && showCircularArcGlow ? (
+                <g
+                    data-testid="gauge-circular-arc-glow"
+                    pointerEvents="none"
+                    aria-hidden="true"
+                >
+                    {circularSegments.map((segment) => (
+                        <circle
+                            key={`glow-${segment.key}`}
+                            cx={center}
+                            cy={center}
+                            r={radius}
+                            stroke={segment.stroke}
+                            strokeWidth={strokeWidth}
+                            fill="none"
+                            strokeDasharray={segment.strokeDasharray}
+                            strokeDashoffset={segment.strokeDashoffset}
+                            strokeLinecap="butt"
+                            data-testid="gauge-circular-arc-glow-segment"
+                            filter={`url(#${glowFilterId})`}
+                            style={{
+                                opacity: arcOpacity == null
+                                    ? circularArcGlowOpacity
+                                    : Number((arcOpacity * circularArcGlowOpacity).toFixed(2)),
+                                transition: `opacity ${animationDuration}ms ease-out`,
+                            }}
+                        />
+                    ))}
+                </g>
+            ) : null}
             {staticTopCapModel ? (
                 <g
                     pointerEvents="none"
@@ -461,11 +529,38 @@ export default function GaugeDisplay({
                     data-effect-blur={String(staticTopCapEffects.blur)}
                     data-effect-extension={String(staticTopCapEffects.extension)}
                     data-effect-thickness={String(staticTopCapEffects.thickness)}
+                    data-effect-pulse-intensity={String(staticTopCapEffects.pulseIntensity)}
+                    data-effect-pulse-speed={String(staticTopCapEffects.pulseSpeed)}
+                    data-effect-pulse-irregularity={String(staticTopCapEffects.pulseIrregularity)}
+                    data-effect-pulse-stability={String(staticTopCapEffects.pulseStability)}
+                    data-effect-pulse-duration={String(staticTopCapLegacyPulseDurationSeconds)}
+                    data-effect-blink-mode={staticTopCapEffects.mode}
+                    data-effect-blink-duration={String(staticTopCapBlinkDurationSeconds)}
                     data-effect-base-length={String(staticTopCapModel.effectBaseLength)}
                     data-effect-base-thickness={String(staticTopCapModel.effectBaseThickness)}
                     data-shape-pill={String(staticTopCapShape.pill)}
                 >
-                    <g style={{ mixBlendMode: 'screen' }}>
+                    <g
+                        data-testid="gauge-circular-static-top-cap-blink-stack"
+                        data-blink-enabled={String(staticTopCapPulseEnabled)}
+                        data-blink-mode={staticTopCapEffects.mode}
+                        data-blink-intensity={String(staticTopCapEffects.pulseIntensity)}
+                        data-blink-speed={String(staticTopCapEffects.pulseSpeed)}
+                        data-blink-irregularity={String(staticTopCapEffects.pulseIrregularity)}
+                        data-blink-stability={String(staticTopCapEffects.pulseStability)}
+                        data-blink-duration={String(staticTopCapBlinkDurationSeconds)}
+                        style={{ mixBlendMode: 'screen' }}
+                    >
+                        {staticTopCapPulseEnabled ? (
+                            <animate
+                                attributeName="opacity"
+                                calcMode="discrete"
+                                values={staticTopCapBlinkProfile.values}
+                                keyTimes={staticTopCapBlinkProfile.keyTimes}
+                                dur={`${staticTopCapBlinkDurationSeconds}s`}
+                                repeatCount="indefinite"
+                            />
+                        ) : null}
                         {renderCircularTopCapGlowStack({
                             filterId: staticTopCapGlowFilterId,
                             cap: {
@@ -492,7 +587,8 @@ export default function GaugeDisplay({
                     data-testid="gauge-circular-top-cap"
                     data-segment-key={String(movingTopCapModel.key)}
                     data-cycle-key={String(travelingTopCapCycleKey)}
-                    data-duration={`${travelingTopCapDurationSeconds}s`}
+                    data-speed={travelingTopCapSpeed.toFixed(2)}
+                    data-duration={`${activeTravelingTopCapDurationSeconds}s`}
                     data-progress={movingTopCapModel.progress.toFixed(4)}
                     data-cap-angle={movingTopCapModel.angleDegrees.toFixed(2)}
                     data-cap-x={movingTopCapModel.x.toFixed(2)}
@@ -503,6 +599,8 @@ export default function GaugeDisplay({
                     data-effect-blur={String(travelingTopCapEffects.blur)}
                     data-effect-extension={String(travelingTopCapEffects.extension)}
                     data-effect-thickness={String(travelingTopCapEffects.thickness)}
+                    data-effect-pulse-intensity="0"
+                    data-effect-pulse-speed="0"
                     data-shape-pill={String(travelingTopCapShape.pill)}
                     style={{ mixBlendMode: 'screen' }}
                 >
@@ -570,19 +668,26 @@ function useTravelingEffectCycle({
 }) {
     const prefersReducedMotion = usePrefersReducedMotion();
     const [cycleKey, setCycleKey] = useState(0);
-    const cycleSignature = `${enabled}:${prefersReducedMotion}:${cycleKey}:${durationSeconds}`;
+    const cycleSignature = `${enabled}:${prefersReducedMotion}:${cycleKey}`;
+    const pendingDurationRef = useRef(durationSeconds);
     const [cycleState, setCycleState] = useState(() => ({
         cycleSignature,
         progress: 0,
         isPaused: false,
+        activeDurationSeconds: durationSeconds,
     }));
+
+    useEffect(() => {
+        pendingDurationRef.current = durationSeconds;
+    }, [durationSeconds]);
 
     useEffect(() => {
         if (!enabled || prefersReducedMotion) {
             return undefined;
         }
 
-        const travelDurationMs = durationSeconds * 1000;
+        const activeDurationSeconds = pendingDurationRef.current;
+        const travelDurationMs = activeDurationSeconds * 1000;
         const randomPauseMs = resolveTravelingTopCapPauseMs();
         let travelStartTime: number | null = null;
         let animationFrameId = 0;
@@ -598,6 +703,7 @@ function useTravelingEffectCycle({
                 cycleSignature,
                 progress: nextProgress,
                 isPaused: false,
+                activeDurationSeconds,
             });
 
             if (nextProgress < 1) {
@@ -612,6 +718,7 @@ function useTravelingEffectCycle({
                 cycleSignature,
                 progress: 1,
                 isPaused: true,
+                activeDurationSeconds,
             });
         }, travelDurationMs);
         const restartTimerId = window.setTimeout(() => {
@@ -623,7 +730,7 @@ function useTravelingEffectCycle({
             window.clearTimeout(hideTimerId);
             window.clearTimeout(restartTimerId);
         };
-    }, [cycleKey, cycleSignature, durationSeconds, enabled, prefersReducedMotion]);
+    }, [cycleKey, cycleSignature, enabled, prefersReducedMotion]);
 
     const isCurrentCycleState = cycleState.cycleSignature === cycleSignature;
 
@@ -632,19 +739,18 @@ function useTravelingEffectCycle({
         cycleKey,
         progress: !enabled || prefersReducedMotion || !isCurrentCycleState ? 0 : cycleState.progress,
         isPaused: !enabled || prefersReducedMotion || !isCurrentCycleState ? false : cycleState.isPaused,
+        activeDurationSeconds: !enabled || prefersReducedMotion || !isCurrentCycleState
+            ? durationSeconds
+            : cycleState.activeDurationSeconds,
     };
 }
 
-function resolveTravelingTopCapDurationSeconds(pathLength: number) {
+function resolveTravelingTopCapDurationSeconds(pathLength: number, speedPxPerSecond: number) {
     if (!Number.isFinite(pathLength) || pathLength <= 0) {
-        return TRAVELING_TOP_CAP_DURATION_MIN_SECONDS;
+        return 0;
     }
 
-    return clamp(
-        pathLength / TRAVELING_TOP_CAP_SPEED_PX_PER_SECOND,
-        TRAVELING_TOP_CAP_DURATION_MIN_SECONDS,
-        TRAVELING_TOP_CAP_DURATION_MAX_SECONDS,
-    );
+    return Math.min(pathLength / speedPxPerSecond, TRAVELING_TOP_CAP_DURATION_MAX_SECONDS);
 }
 
 function resolveTravelingTopCapPauseMs(randomValue = Math.random()) {
@@ -1049,4 +1155,10 @@ function resolveStaticTopCapGlowFrame() {
     return resolveTravelingTopCapGlowFrame(STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS);
 }
 
-export { BAR_HEIGHT, CIRCULAR_DIAMETER, CIRCULAR_RADIUS, CIRCULAR_VIEWBOX_SIZE, STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS };
+export {
+    BAR_HEIGHT,
+    CIRCULAR_DIAMETER,
+    CIRCULAR_RADIUS,
+    CIRCULAR_VIEWBOX_SIZE,
+    STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS,
+};

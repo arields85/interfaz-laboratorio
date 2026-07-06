@@ -1,10 +1,11 @@
 import '@testing-library/jest-dom/vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
-import MachineActivityWidget from './MachineActivityWidget';
+import MachineActivityWidget, { resolveActivityVisualAnimationDuration } from './MachineActivityWidget';
+import { KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX } from '../../utils/kpiTopCapEffects';
 
 const equipmentMap = new Map<string, EquipmentSummary>();
 
@@ -104,8 +105,52 @@ describe('MachineActivityWidget', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+        vi.restoreAllMocks();
         vi.unstubAllGlobals();
     });
+
+    function createAnimationFrameController() {
+        let animationFrameId = 0;
+        const animationFrameCallbacks = new Map<number, FrameRequestCallback>();
+
+        vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+            animationFrameId += 1;
+            animationFrameCallbacks.set(animationFrameId, callback);
+            return animationFrameId;
+        }));
+        vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => {
+            animationFrameCallbacks.delete(id);
+        }));
+
+        return {
+            runNextFrame(now: number) {
+                const nextFrame = Array.from(animationFrameCallbacks.entries()).at(-1);
+
+                expect(nextFrame).toBeDefined();
+
+                const [frameId, callback] = nextFrame!;
+                animationFrameCallbacks.delete(frameId);
+
+                act(() => {
+                    callback(now);
+                });
+            },
+        };
+    }
+
+    function expectCircularArcToMatchPercent(percent: number) {
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const expectedAngle = percent * 3.6;
+
+        expect(Number.parseFloat(staticTopCap.getAttribute('data-cap-angle') ?? '0')).toBeCloseTo(expectedAngle, 1);
+    }
+
+    function expectCircularArcToApproximateDisplayedPercent(percent: number) {
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const actualPercent = Number.parseFloat(staticTopCap.getAttribute('data-cap-angle') ?? '0') / 3.6;
+
+        expect(actualPercent).toBeCloseTo(percent, 0);
+    }
 
     it('renders with valid power data', () => {
         render(
@@ -135,6 +180,7 @@ describe('MachineActivityWidget', () => {
         expect(gauge).toHaveClass('w-full', 'h-full');
         expect(gauge.style.width).toBe('');
         expect(gauge.style.height).toBe('');
+        expect(screen.getAllByTestId('gauge-circular-arc-segment')[0]).toHaveAttribute('stroke-linecap', 'butt');
         expect(screen.queryByTestId('gauge-circular-static-top-cap')).not.toBeInTheDocument();
         expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
     });
@@ -551,11 +597,424 @@ describe('MachineActivityWidget', () => {
         );
 
         expect(screen.getByText('En marcha')).toBeInTheDocument();
-        expect(screen.getByText('30')).toBeInTheDocument();
         expect(screen.getByText('Actividad de Máquina').closest('[data-state]')).toHaveAttribute('data-state', 'producing');
     });
 
-    it('resets machine activity processing when switching from a real binding to a simulated value', () => {
+    it('keeps the displayed value and bar gauge fill synchronized during in-state activity animation', () => {
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+
+        const { rerender } = render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.4,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'bar',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        expect(screen.getByText('40')).toBeInTheDocument();
+        expect(screen.getByTestId('gauge-bar-fill')).toHaveStyle({ width: '40%' });
+
+        rerender(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.6,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'bar',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        animationFrames.runNextFrame(1_180);
+
+        expect(screen.getByText('55')).toBeInTheDocument();
+        expect(Number.parseFloat(screen.getByTestId('gauge-bar-fill').style.width)).toBeCloseTo(55, 5);
+
+        animationFrames.runNextFrame(1_360);
+
+        expect(screen.getByText('60')).toBeInTheDocument();
+        expect(Number.parseFloat(screen.getByTestId('gauge-bar-fill').style.width)).toBeCloseTo(60, 5);
+    });
+
+    it('keeps the displayed value and circular arc synchronized during in-state activity animation', () => {
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+
+        const { rerender } = render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.4,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        expect(screen.getByText('40')).toBeInTheDocument();
+        expectCircularArcToMatchPercent(40);
+
+        rerender(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.6,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        animationFrames.runNextFrame(1_180);
+
+        expect(screen.getByText('55')).toBeInTheDocument();
+        expectCircularArcToMatchPercent(55);
+
+        animationFrames.runNextFrame(1_360);
+
+        expect(screen.getByText('60')).toBeInTheDocument();
+    });
+
+    it('animates the circular value and arc together when crossing from producing into setup', () => {
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+
+        const { rerender } = render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.6,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        expect(screen.getByText('60')).toBeInTheDocument();
+
+        rerender(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.2,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        animationFrames.runNextFrame(1_240);
+
+        expect(screen.getByText('34')).toBeInTheDocument();
+        expectCircularArcToApproximateDisplayedPercent(34);
+
+        animationFrames.runNextFrame(1_640);
+
+        expect(screen.getByText('20')).toBeInTheDocument();
+        expectCircularArcToMatchPercent(20);
+    });
+
+    it('animates the circular value and arc together when crossing from setup into producing', () => {
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+
+        const { rerender } = render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.2,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        expect(screen.getByText('20')).toBeInTheDocument();
+        expectCircularArcToMatchPercent(20);
+
+        rerender(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.6,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        animationFrames.runNextFrame(1_240);
+
+        expect(screen.getByText('46')).toBeInTheDocument();
+        expectCircularArcToApproximateDisplayedPercent(46);
+
+        animationFrames.runNextFrame(1_640);
+
+        expect(screen.getByText('60')).toBeInTheDocument();
+    });
+
+    it('retracts the circular value and arc together when crossing from producing into stopped', () => {
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+
+        const { rerender } = render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.6,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        expect(screen.getByText('60')).toBeInTheDocument();
+
+        rerender(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.1,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        animationFrames.runNextFrame(1_240);
+        animationFrames.runNextFrame(1_240);
+
+        expect(screen.queryByText('10')).not.toBeInTheDocument();
+        expect(screen.queryByText('60')).not.toBeInTheDocument();
+
+        animationFrames.runNextFrame(1_640);
+
+        expect(screen.getByText('0')).toBeInTheDocument();
+    });
+
+    it('expands the circular value and arc together when crossing from stopped into producing', () => {
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+
+        const { rerender } = render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.1,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        expect(screen.getByText('0')).toBeInTheDocument();
+
+        rerender(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.6,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+            />,
+        );
+
+        animationFrames.runNextFrame(1_120);
+
+        const displayedValue = within(screen.getByTestId('gauge-circular-center-content')).getByText(
+            (_, element) => element?.tagName.toLowerCase() === 'text' && /^\d+$/.test(element.textContent ?? ''),
+        );
+        const displayedPercent = Number.parseInt(displayedValue.textContent ?? '0', 10);
+        const arcOpacity = Number.parseFloat(screen.getAllByTestId('gauge-circular-arc-segment')[0]?.style.opacity ?? '0');
+
+        expect(displayedPercent).toBeGreaterThan(0);
+        expect(displayedPercent).toBeLessThan(60);
+        expectCircularArcToApproximateDisplayedPercent(displayedPercent);
+        expect(arcOpacity).toBeGreaterThan(0);
+        expect(arcOpacity).toBeLessThan(1);
+
+    });
+
+    it('caps the visual activity animation duration while keeping larger deltas slower than smaller ones', () => {
+        expect(resolveActivityVisualAnimationDuration(5)).toBe(300);
+        expect(resolveActivityVisualAnimationDuration(20)).toBe(360);
+        expect(resolveActivityVisualAnimationDuration(100)).toBe(1200);
+    });
+
+    it('resets machine activity processing when switching from a real binding to a simulated value', async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-04-24T12:30:00.000Z'));
 
@@ -644,6 +1103,10 @@ describe('MachineActivityWidget', () => {
                 machines={makeMachines(1)}
             />,
         );
+
+        act(() => {
+            vi.advanceTimersByTime(2_000);
+        });
 
         expect(screen.getByText('75')).toBeInTheDocument();
         expect(screen.getByText('30.00 °F')).toBeInTheDocument();
@@ -740,5 +1203,209 @@ describe('MachineActivityWidget', () => {
 
         expect(screen.getByTestId('gauge-circular')).toBeInTheDocument();
         expect(screen.getByText('Detenida')).toBeInTheDocument();
+    });
+
+    it('defaults machine-activity fixed blink to on-with-failures at max intensity', () => {
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.3,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.3)}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const blinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-blink-mode', 'on-with-failures');
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', String(KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX));
+        expect(blinkStack).toHaveAttribute('data-blink-enabled', 'true');
+    });
+
+    it('keeps the fixed top-cap shape configurable while forcing machine-activity blink mode/intensity and traveling pill shape', () => {
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.3,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateSubtitle: true,
+                        showPowerSubtext: true,
+                        showDynamicColor: true,
+                        showStateAnimation: true,
+                        fixedTopCapShape: {
+                            pill: false,
+                        },
+                        fixedTopCapEffects: {
+                            mode: 'off-with-flashes',
+                            auraIntensity: 35,
+                            haloIntensity: 45,
+                            highlightIntensity: 55,
+                            blur: 65,
+                            extension: 75,
+                            thickness: 85,
+                            pulseIntensity: 28,
+                            pulseSpeed: 72,
+                            pulseStability: 64,
+                        },
+                        travelingTopCapShape: {
+                            pill: false,
+                        },
+                        travelingTopCapEffects: {
+                            auraIntensity: 10,
+                            haloIntensity: 20,
+                            highlightIntensity: 30,
+                            blur: 40,
+                            extension: 50,
+                            thickness: 60,
+                        },
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.3)}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(staticTopCap).toHaveAttribute('data-shape-pill', 'false');
+        expect(staticTopCap).toHaveAttribute('data-effect-aura', '35');
+        expect(staticTopCap).toHaveAttribute('data-effect-extension', '75');
+        expect(staticTopCap).toHaveAttribute('data-effect-blink-mode', 'on-with-failures');
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', String(KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX));
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-speed', '72');
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-stability', '64');
+        expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-enabled', 'true');
+        expect(movingTopCap).toHaveAttribute('data-shape-pill', 'true');
+        expect(movingTopCap).toHaveAttribute('data-effect-aura', '10');
+        expect(movingTopCap).toHaveAttribute('data-effect-halo', '20');
+        expect(movingTopCap).toHaveAttribute('data-effect-highlight', '30');
+        expect(movingTopCap).toHaveAttribute('data-effect-blur', '40');
+        expect(movingTopCap).toHaveAttribute('data-effect-extension', '50');
+        expect(movingTopCap).toHaveAttribute('data-effect-thickness', '60');
+        expect(movingTopCap).toHaveAttribute('data-effect-pulse-intensity', '0');
+        expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-core')).toHaveAttribute('rx', '0');
+        expect(Number(within(movingTopCap).getByTestId('gauge-circular-top-cap-core').getAttribute('rx'))).toBeGreaterThan(0);
+        expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-static-top-cap-glow\)$/);
+        expect(within(movingTopCap).getByTestId('gauge-circular-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-traveling-top-cap-glow\)$/);
+    });
+
+    it('passes configured equal traveling top-cap speeds down to the gauge runtime without reintroducing the old duration floor', () => {
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.15,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        travelingTopCapMinSpeed: 200,
+                        travelingTopCapMaxSpeed: 200,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.15)}
+            />,
+        );
+
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(movingTopCap).toHaveAttribute('data-speed', '200.00');
+        expect(Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0')).toBeCloseTo(0.28, 2);
+        expect(Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0')).toBeLessThan(0.9);
+    });
+
+    it('passes the machine-activity arc glow intensity through to the circular gauge runtime', () => {
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.3,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        circularArcGlowIntensity: 0,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.3)}
+            />,
+        );
+
+        expect(screen.getAllByTestId('gauge-circular-arc-segment').every((segment) => !segment.hasAttribute('filter'))).toBe(true);
+        expect(screen.queryByTestId('gauge-circular-arc-glow')).not.toBeInTheDocument();
+    });
+
+    it('converts the stored 1..10 top-cap speed scale into actual gauge runtime speeds', () => {
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 1,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateAnimation: true,
+                        travelingTopCapMinSpeed: 1,
+                        travelingTopCapMaxSpeed: 10,
+                        thresholdStopped: 0.15,
+                        thresholdProducing: 0.25,
+                        powerMin: 0,
+                        powerMax: 1,
+                        confirmationTime: 99999,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1)}
+            />,
+        );
+
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(movingTopCap).toHaveAttribute('data-speed', '400.00');
     });
 });

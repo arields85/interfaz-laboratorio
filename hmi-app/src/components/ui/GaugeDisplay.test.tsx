@@ -1,12 +1,31 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import GaugeDisplay, { STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS } from './GaugeDisplay';
+import {
+    DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_PX_PER_SECOND,
+    DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_PX_PER_SECOND,
+    resolveActualSpeedFromScale,
+    resolveScaleFromActualSpeed,
+    resolveTravelingTopCapSpeed,
+} from '../../utils/travelingTopCapSpeed';
+import {
+    MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    resolveKpiFixedTopCapBlinkDurationSeconds,
+    resolveKpiFixedTopCapBlinkProfile,
+} from '../../utils/kpiTopCapEffects';
 
 const CIRCULAR_RADIUS = 60;
 const CIRCUMFERENCE = 2 * Math.PI * CIRCULAR_RADIUS;
 const LG_CIRCUMFERENCE = 2 * Math.PI * ((160 - 8) / 2);
 const SEGMENT_COUNT = 90;
 const SEGMENT_OVERLAP = 0.75;
+
+function resolveExpectedTravelDuration(normalizedValue: number, minSpeed: number, maxSpeed: number) {
+    const speed = resolveTravelingTopCapSpeed(normalizedValue, { min: minSpeed, max: maxSpeed });
+    const rawDuration = (CIRCUMFERENCE * normalizedValue) / speed;
+
+    return Math.min(rawDuration, 3.2);
+}
 
 describe('GaugeDisplay', () => {
     let mediaQueryMatches = false;
@@ -147,7 +166,47 @@ describe('GaugeDisplay', () => {
         expect(segments.at(-1)).toHaveAttribute('stroke-linecap', 'round');
         expect(segments[1]).toHaveAttribute('stroke-linecap', 'butt');
         expect(segments[0].style.transition).toBe('opacity 750ms ease-out');
+        expect(segments[0].getAttribute('filter')).toMatch(/^url\(#.+-glow\)$/);
         expect(svg.style.filter).toBe('');
+    });
+
+    it('disables only the base circular arc glow at zero while keeping top-cap filters intact', () => {
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularArcGlowIntensity={0}
+                circularTopCap={{ enabled: true }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(screen.getAllByTestId('gauge-circular-arc-segment').every((segment) => !segment.hasAttribute('filter'))).toBe(true);
+        expect(screen.queryByTestId('gauge-circular-arc-glow')).not.toBeInTheDocument();
+        expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-static-top-cap-glow\)$/);
+        expect(within(movingTopCap).getByTestId('gauge-circular-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-traveling-top-cap-glow\)$/);
+    });
+
+    it('keeps the current circular arc glow filter behavior at the 100 baseline', () => {
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularArcGlowIntensity={100}
+                circularTopCap={{ enabled: true }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        expect(screen.getAllByTestId('gauge-circular-arc-segment').every((segment) => /^url\(#.+-glow\)$/.test(segment.getAttribute('filter') ?? ''))).toBe(true);
+        expect(screen.queryByTestId('gauge-circular-arc-glow')).not.toBeInTheDocument();
     });
 
     it('renders bar mode and disables animated glow when animation is disabled', () => {
@@ -381,6 +440,234 @@ describe('GaugeDisplay', () => {
         expect(Number(staticCoreStroke.getAttribute('width'))).toBe(0);
         expect(Number(staticCoreStroke.getAttribute('height'))).toBe(0);
         expect(movingAura.getAttribute('filter')).toMatch(/^url\(#.+-traveling-top-cap-glow\)$/);
+    });
+
+    it('applies discrete blink animation only to the fixed top cap when intensity is configured', () => {
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const staticBlinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        const blinkAnimate = staticBlinkStack.querySelector('animate');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', '28');
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-speed', '72');
+        expect(staticTopCap).toHaveAttribute('data-effect-blink-mode', 'on-with-failures');
+        expect(staticTopCap).toHaveAttribute('data-effect-blink-duration', String(resolveKpiFixedTopCapBlinkDurationSeconds(72, 44)));
+        expect(staticBlinkStack).toHaveAttribute('data-blink-enabled', 'true');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-mode', 'on-with-failures');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-duration', String(resolveKpiFixedTopCapBlinkDurationSeconds(72, 44)));
+        expect(blinkAnimate).toHaveAttribute('attributeName', 'opacity');
+        expect(blinkAnimate).toHaveAttribute('calcMode', 'discrete');
+        expect(blinkAnimate?.getAttribute('values')).toContain('1;');
+        expect(blinkAnimate).toHaveAttribute('dur', `${resolveKpiFixedTopCapBlinkDurationSeconds(72, 44)}s`);
+        expect(within(movingTopCap).queryByTestId('gauge-circular-static-top-cap-blink-stack')).not.toBeInTheDocument();
+        expect(movingTopCap.querySelector('animate')).toBeNull();
+        expect(movingTopCap).toHaveAttribute('data-effect-pulse-intensity', '0');
+    });
+
+    it('renders off-with-flashes blink keyframes for the fixed top cap', () => {
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticEffects: {
+                        mode: 'off-with-flashes',
+                        pulseIntensity: 60,
+                        pulseSpeed: 80,
+                        pulseIrregularity: 50,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const blinkAnimate = within(staticTopCap)
+            .getByTestId('gauge-circular-static-top-cap-blink-stack')
+            .querySelector('animate');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-blink-mode', 'off-with-flashes');
+        expect(blinkAnimate?.getAttribute('values')?.startsWith('0.')).toBe(true);
+        expect(blinkAnimate).toHaveAttribute('calcMode', 'discrete');
+    });
+
+    it('reflects fixed top-cap stability in the runtime blink profile and duration', () => {
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                        pulseStability: 85,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const staticBlinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+        const blinkAnimate = staticBlinkStack.querySelector('animate');
+        const expectedProfile = resolveKpiFixedTopCapBlinkProfile('on-with-failures', 28, 72, 44, 85);
+        const expectedDuration = resolveKpiFixedTopCapBlinkDurationSeconds(72, 44, 85);
+
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-stability', '85');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-stability', '85');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-duration', String(expectedDuration));
+        expect(blinkAnimate).toHaveAttribute('keyTimes', expectedProfile.keyTimes);
+        expect(blinkAnimate).toHaveAttribute('dur', `${expectedDuration}s`);
+    });
+
+    it('supports the machine-activity expanded stability range in runtime blink attrs', () => {
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                        pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const staticBlinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+        const expectedDuration = resolveKpiFixedTopCapBlinkDurationSeconds(
+            72,
+            44,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        );
+
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-stability', String(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX));
+        expect(staticBlinkStack).toHaveAttribute('data-blink-stability', String(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX));
+        expect(staticBlinkStack).toHaveAttribute('data-blink-duration', String(expectedDuration));
+    });
+
+    it('disables fixed top-cap blink animation when reduced motion is requested', () => {
+        mediaQueryMatches = true;
+
+        render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 28,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const staticBlinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', '28');
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-speed', '72');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-enabled', 'false');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-duration', String(resolveKpiFixedTopCapBlinkDurationSeconds(72, 44)));
+        expect(staticBlinkStack.querySelector('animate')).toBeNull();
+        expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
+        expect(requestAnimationFrame).not.toHaveBeenCalled();
+    });
+
+    it('does not render fixed top-cap blink animation when pulse intensity is zero or omitted', () => {
+        const { rerender } = render(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseIntensity: 0,
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        let staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        let staticBlinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', '0');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-enabled', 'false');
+        expect(staticBlinkStack.querySelector('animate')).toBeNull();
+
+        rerender(
+            <GaugeDisplay
+                normalizedValue={0.75}
+                circularTopCap={{
+                    enabled: true,
+                    staticEffects: {
+                        mode: 'on-with-failures',
+                        pulseSpeed: 72,
+                        pulseIrregularity: 44,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        staticBlinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', '0');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-enabled', 'false');
+        expect(staticBlinkStack.querySelector('animate')).toBeNull();
     });
 
     it('keeps the fixed top-cap full effect geometry at the current 100 baseline', () => {
@@ -1012,13 +1299,14 @@ describe('GaugeDisplay', () => {
         const initialCapX = Number(movingTopCap.getAttribute('data-cap-x'));
         const initialCapY = Number(movingTopCap.getAttribute('data-cap-y'));
         const initialProgress = Number(movingTopCap.getAttribute('data-progress'));
+        const initialDurationMs = Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0') * 1000;
 
         expect(initialProgress).toBe(0);
         expect(getShapeCenter(initialCore).x).toBeCloseTo(initialCapX, 2);
         expect(getShapeCenter(initialCore).y).toBeCloseTo(initialCapY, 2);
 
         runNextAnimationFrame(1_000);
-        runNextAnimationFrame(1_450);
+        runNextAnimationFrame(1_000 + (initialDurationMs / 2));
 
         const movingTopCapMidRoute = screen.getByTestId('gauge-circular-top-cap');
         const midRouteProgress = Number(movingTopCapMidRoute.getAttribute('data-progress'));
@@ -1026,7 +1314,7 @@ describe('GaugeDisplay', () => {
         expect(midRouteProgress).toBeCloseTo(0.5, 2);
 
         act(() => {
-            vi.advanceTimersByTime(900);
+            vi.advanceTimersByTime(Math.ceil(initialDurationMs) + 1);
         });
 
         expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
@@ -1042,5 +1330,199 @@ describe('GaugeDisplay', () => {
 
         expect(segments[0]).toHaveAttribute('stroke-linecap', 'butt');
         expect(segments.at(-1)).toHaveAttribute('stroke-linecap', 'butt');
+    });
+
+    it('interpolates traveling top-cap speed from 0% to 100% and clamps outside that range', () => {
+        expect(resolveTravelingTopCapSpeed(0, { min: 100, max: 200 })).toBe(100);
+        expect(resolveTravelingTopCapSpeed(0.5, { min: 100, max: 200 })).toBe(150);
+        expect(resolveTravelingTopCapSpeed(1, { min: 100, max: 200 })).toBe(200);
+        expect(resolveTravelingTopCapSpeed(-1, { min: 100, max: 200 })).toBe(100);
+        expect(resolveTravelingTopCapSpeed(2, { min: 100, max: 200 })).toBe(200);
+        expect(resolveTravelingTopCapSpeed(0, { min: 240, max: 120 })).toBe(240);
+        expect(resolveTravelingTopCapSpeed(0.5, { min: 240, max: 120 })).toBe(180);
+        expect(resolveTravelingTopCapSpeed(1, { min: 240, max: 120 })).toBe(120);
+
+        const renderTopCap = (normalizedValue: number, min: number, max: number) => render(
+            <GaugeDisplay
+                normalizedValue={normalizedValue}
+                circularTopCap={{
+                    enabled: true,
+                    travelingSpeed: { min, max },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const firstView = renderTopCap(0, 100, 200);
+
+        expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
+
+        firstView.unmount();
+
+        const secondView = renderTopCap(0.5, 100, 200);
+
+        let movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(movingTopCap).toHaveAttribute('data-speed', '150.00');
+        expect(Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0')).toBeCloseTo(
+            resolveExpectedTravelDuration(0.5, 100, 200),
+            2,
+        );
+
+        secondView.unmount();
+
+        const thirdView = renderTopCap(1, 100, 200);
+
+        movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        expect(movingTopCap).toHaveAttribute('data-speed', '200.00');
+        expect(Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0')).toBeCloseTo(
+            resolveExpectedTravelDuration(1, 100, 200),
+            2,
+        );
+
+        thirdView.unmount();
+
+        const fourthView = renderTopCap(0.5, 240, 120);
+
+        movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        expect(movingTopCap).toHaveAttribute('data-speed', '180.00');
+
+        fourthView.unmount();
+
+        renderTopCap(1, 240, 120);
+
+        movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        expect(movingTopCap).toHaveAttribute('data-speed', '120.00');
+    });
+
+    it('maps the simplified 1..10 speed scale to the capped 50..400 actual speed range', () => {
+        expect(resolveActualSpeedFromScale(1)).toBeCloseTo(50, 5);
+        expect(resolveActualSpeedFromScale(10)).toBeCloseTo(400, 5);
+        expect(resolveScaleFromActualSpeed(50)).toBeCloseTo(1, 5);
+        expect(resolveScaleFromActualSpeed(400)).toBeCloseTo(10, 5);
+        expect(resolveScaleFromActualSpeed(DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_PX_PER_SECOND)).toBe(3);
+        expect(resolveScaleFromActualSpeed(DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_PX_PER_SECOND)).toBe(9);
+    });
+
+    it('keeps equal traveling speeds constant and preserves the configured low-value duration', () => {
+        const firstView = render(
+            <GaugeDisplay
+                normalizedValue={0.15}
+                circularTopCap={{
+                    enabled: true,
+                    travelingSpeed: {
+                        min: 200,
+                        max: 200,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        let movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(movingTopCap).toHaveAttribute('data-speed', '200.00');
+        expect(Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0')).toBeCloseTo(
+            resolveExpectedTravelDuration(0.15, 200, 200),
+            2,
+        );
+        expect(Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0')).toBeLessThan(0.9);
+
+        firstView.unmount();
+
+        render(
+            <GaugeDisplay
+                normalizedValue={0.15}
+                circularTopCap={{
+                    enabled: true,
+                    travelingSpeed: {
+                        min: 500,
+                        max: 500,
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(movingTopCap).toHaveAttribute('data-speed', '400.00');
+        expect(Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0')).toBeCloseTo(
+            resolveExpectedTravelDuration(0.15, 400, 400),
+            2,
+        );
+    });
+
+    it('keeps the traveling top-cap hidden during pause when value and duration change, then applies the new duration on the next cycle', () => {
+        const { rerender } = render(
+            <GaugeDisplay
+                normalizedValue={0.35}
+                circularTopCap={{
+                    enabled: true,
+                    travelingSpeed: {
+                        min: resolveActualSpeedFromScale(1),
+                        max: resolveActualSpeedFromScale(10),
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        const initialMovingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        expect(Number.parseFloat(initialMovingTopCap.getAttribute('data-duration') ?? '0')).toBeCloseTo(
+            resolveExpectedTravelDuration(0.35, 50, 400),
+            2,
+        );
+
+        act(() => {
+            vi.advanceTimersByTime(2640);
+        });
+
+        expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
+
+        rerender(
+            <GaugeDisplay
+                normalizedValue={0.65}
+                circularTopCap={{
+                    enabled: true,
+                    travelingSpeed: {
+                        min: resolveActualSpeedFromScale(1),
+                        max: resolveActualSpeedFromScale(10),
+                    },
+                }}
+                color={{
+                    primary: 'var(--color-accent-cyan)',
+                    gradient: ['var(--color-widget-gradient-from)', 'var(--color-widget-gradient-to)'],
+                }}
+            />,
+        );
+
+        expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
+
+        act(() => {
+            vi.advanceTimersByTime(8_000);
+        });
+
+        const restartedTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(restartedTopCap).toHaveAttribute('data-cycle-key', '1');
+        expect(restartedTopCap).toHaveAttribute('data-speed', '277.50');
+        expect(Number.parseFloat(restartedTopCap.getAttribute('data-duration') ?? '0')).toBeCloseTo(
+            resolveExpectedTravelDuration(0.65, 50, 400),
+            2,
+        );
+        expect(Number.parseFloat(restartedTopCap.getAttribute('data-progress') ?? '1')).toBe(0);
     });
 });
