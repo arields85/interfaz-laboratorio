@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { KpiWidgetConfig, ThresholdRule } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
@@ -12,11 +12,13 @@ import {
     resolveActivityAnalyticsDonutCenterValueFontSize,
 } from '../../utils/activityAnalyticsWidgetDefaults';
 import {
-    resolveKpiFixedTopCapEffects,
+    MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    resolveMachineActivityFixedTopCapEffects,
     resolveKpiFixedTopCapShape,
     resolveKpiTravelingTopCapEffects,
     resolveKpiTravelingTopCapShape,
 } from '../../utils/kpiTopCapEffects';
+import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     'Gauge': Gauge,
@@ -48,6 +50,42 @@ const WIDGET_UNIT_TEXT_STYLE = {
     fontSize: 'var(--font-size-widget-unit-gauge)',
     letterSpacing: 'var(--tracking-widget-value-gauge)',
 } as const;
+
+function usePrefersReducedMotion() {
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return false;
+        }
+
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    });
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return undefined;
+        }
+
+        const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const handleChange = () => setPrefersReducedMotion(mediaQuery.matches);
+
+        handleChange();
+        mediaQuery.addEventListener?.('change', handleChange);
+        mediaQuery.addListener?.(handleChange);
+
+        return () => {
+            mediaQuery.removeEventListener?.('change', handleChange);
+            mediaQuery.removeListener?.(handleChange);
+        };
+    }, []);
+
+    return prefersReducedMotion;
+}
+
+function resolveKpiVisualAnimationDuration(delta: number) {
+    const normalizedDelta = Math.min(Math.abs(delta), 100);
+
+    return Math.round(280 + (normalizedDelta * 7.2));
+}
 
 interface KpiWidgetProps {
     widget: KpiWidgetConfig;
@@ -90,10 +128,15 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
     };
     const min = opts?.min ?? 0;
     const max = opts?.max ?? 100;
-    const fixedTopCapEffects = resolveKpiFixedTopCapEffects(opts?.fixedTopCapEffects);
+    const fixedTopCapEffects = resolveMachineActivityFixedTopCapEffects(opts?.fixedTopCapEffects);
     const fixedTopCapShape = resolveKpiFixedTopCapShape(opts?.fixedTopCapShape);
     const travelingTopCapEffects = resolveKpiTravelingTopCapEffects(opts?.travelingTopCapEffects);
     const travelingTopCapShape = resolveKpiTravelingTopCapShape(opts?.travelingTopCapShape);
+    const travelingTopCapSpeed = resolveStoredTravelingTopCapActualSpeedRange({
+        min: opts?.travelingTopCapMinSpeed,
+        max: opts?.travelingTopCapMaxSpeed,
+    });
+    const prefersReducedMotion = usePrefersReducedMotion();
     const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
     const bindingUnit = widget.binding?.unit?.trim() ?? '';
     const resolvedUnit = resolved.unit?.trim() ?? '';
@@ -132,6 +175,69 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
         : dynamicMode
           ? dynamicMode.textColor
           : 'var(--color-widget-icon)';
+    const [displayedValue, setDisplayedValue] = useState(numericValue);
+    const displayedValueRef = useRef(numericValue);
+    const animationFrameRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        displayedValueRef.current = displayedValue;
+    }, [displayedValue]);
+
+    useEffect(() => {
+        if (mode !== 'circular' || numericValue === null || prefersReducedMotion) {
+            if (animationFrameRef.current !== null) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+            }
+
+            setDisplayedValue(numericValue);
+            displayedValueRef.current = numericValue;
+            return undefined;
+        }
+
+        const startValue = displayedValueRef.current;
+
+        if (startValue === null || startValue === numericValue) {
+            setDisplayedValue(numericValue);
+            displayedValueRef.current = numericValue;
+            return undefined;
+        }
+
+        const delta = numericValue - startValue;
+        const startTime = performance.now();
+        const duration = resolveKpiVisualAnimationDuration(delta);
+
+        const animate = (now: number) => {
+            const progress = Math.min((now - startTime) / duration, 1);
+            const easedProgress = 1 - Math.pow(1 - progress, 2);
+            const nextValue = startValue + (delta * easedProgress);
+
+            displayedValueRef.current = nextValue;
+            setDisplayedValue(nextValue);
+
+            if (progress < 1) {
+                animationFrameRef.current = requestAnimationFrame(animate);
+                return;
+            }
+
+            displayedValueRef.current = numericValue;
+            setDisplayedValue(numericValue);
+            animationFrameRef.current = null;
+        };
+
+        if (animationFrameRef.current !== null) {
+            cancelAnimationFrame(animationFrameRef.current);
+        }
+
+        animationFrameRef.current = requestAnimationFrame(animate);
+
+        return () => {
+            if (animationFrameRef.current !== null) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+            }
+        };
+    }, [mode, numericValue, prefersReducedMotion]);
 
     return (
         <div className={`p-5 glass-panel group relative w-full h-full ${className ?? ''}`}>
@@ -151,7 +257,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
             >
                 <div className="w-full h-full min-h-0">
                     {mode === 'circular' ? (
-                        <CircularKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} fixedTopCapEffects={fixedTopCapEffects} fixedTopCapShape={fixedTopCapShape} travelingTopCapEffects={travelingTopCapEffects} travelingTopCapShape={travelingTopCapShape} />
+                        <CircularKpi value={displayedValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} fixedTopCapEffects={fixedTopCapEffects} fixedTopCapShape={fixedTopCapShape} travelingTopCapEffects={travelingTopCapEffects} travelingTopCapShape={travelingTopCapShape} circularArcGlowIntensity={opts?.circularArcGlowIntensity ?? 100} travelingTopCapSpeed={travelingTopCapSpeed} staticPulseStabilityMax={MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX} />
                     ) : (
                         <BarKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
                     )}
@@ -237,7 +343,7 @@ function getGaugeVisuals(value: number | null, dynamicColor?: boolean, threshold
     };
 }
 
-function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle, fixedTopCapEffects, fixedTopCapShape, travelingTopCapEffects, travelingTopCapShape }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties, fixedTopCapEffects: ReturnType<typeof resolveKpiFixedTopCapEffects>, fixedTopCapShape: ReturnType<typeof resolveKpiFixedTopCapShape>, travelingTopCapEffects: ReturnType<typeof resolveKpiTravelingTopCapEffects>, travelingTopCapShape: ReturnType<typeof resolveKpiTravelingTopCapShape> }) {
+function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle, fixedTopCapEffects, fixedTopCapShape, travelingTopCapEffects, travelingTopCapShape, circularArcGlowIntensity, travelingTopCapSpeed, staticPulseStabilityMax }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties, fixedTopCapEffects: ReturnType<typeof resolveMachineActivityFixedTopCapEffects>, fixedTopCapShape: ReturnType<typeof resolveKpiFixedTopCapShape>, travelingTopCapEffects: ReturnType<typeof resolveKpiTravelingTopCapEffects>, travelingTopCapShape: ReturnType<typeof resolveKpiTravelingTopCapShape>, circularArcGlowIntensity: number, travelingTopCapSpeed: ReturnType<typeof resolveStoredTravelingTopCapActualSpeedRange>, staticPulseStabilityMax: number }) {
     const safeValue = value ?? min;
     const clamp = Math.min(Math.max(safeValue, min), max);
     const range = max - min;
@@ -252,7 +358,8 @@ function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTex
                 color={gaugeVisuals.color}
                 mode="circular"
                 circularBaseSegmentLinecap="butt"
-                circularTopCap={{ enabled: true, staticShape: fixedTopCapShape, staticEffects: fixedTopCapEffects, travelingShape: travelingTopCapShape, travelingEffects: travelingTopCapEffects }}
+                circularArcGlowIntensity={circularArcGlowIntensity}
+                circularTopCap={{ enabled: true, staticShape: fixedTopCapShape, staticEffects: fixedTopCapEffects, staticPulseStabilityMax, travelingShape: travelingTopCapShape, travelingEffects: travelingTopCapEffects, travelingSpeed: travelingTopCapSpeed }}
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-white leading-none mb-1" style={valueTextStyle}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>

@@ -135,6 +135,31 @@ describe('MachineActivityWidget', () => {
                     callback(now);
                 });
             },
+            runAllFrames(now: number, maxFrames = 10) {
+                let framesRun = 0;
+
+                while (animationFrameCallbacks.size > 0 && framesRun < maxFrames) {
+                    framesRun += 1;
+                    this.runNextFrame(now);
+                }
+            },
+            runFrameBatch(now: number, iterations = 5) {
+                for (let iteration = 0; iteration < iterations; iteration += 1) {
+                    const pendingFrames = Array.from(animationFrameCallbacks.entries());
+
+                    if (pendingFrames.length === 0) {
+                        return;
+                    }
+
+                    for (const [frameId, callback] of pendingFrames) {
+                        animationFrameCallbacks.delete(frameId);
+
+                        act(() => {
+                            callback(now);
+                        });
+                    }
+                }
+            },
         };
     }
 
@@ -454,6 +479,9 @@ describe('MachineActivityWidget', () => {
     });
 
     it('resolves live data from the equipment map in bar mode and hides optional text rows when disabled', async () => {
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+
         render(
             <MachineActivityWidget
                 widget={makeWidget({
@@ -487,10 +515,13 @@ describe('MachineActivityWidget', () => {
         expect(screen.queryByText('0.62 MW')).not.toBeInTheDocument();
 
         await waitFor(() => {
-            expect(screen.getByText('62')).toBeInTheDocument();
-            expect(screen.getByTestId('gauge-bar-fill')).toHaveStyle({ width: '62%' });
             expect(screen.getByText('Actividad de Máquina').closest('[data-state]')).toHaveAttribute('data-state', 'producing');
         });
+
+        animationFrames.runFrameBatch(2_100);
+
+        expect(screen.getByText('62')).toBeInTheDocument();
+        expect(Number.parseFloat(screen.getByTestId('gauge-bar-fill').style.width)).toBeCloseTo(62, 0);
 
         expect(screen.getByText('MW')).toBeInTheDocument();
     });
@@ -869,7 +900,7 @@ describe('MachineActivityWidget', () => {
         expect(screen.getByText('60')).toBeInTheDocument();
     });
 
-    it('retracts the circular value and arc together when crossing from producing into stopped', () => {
+    it('animates the circular value and arc together when crossing from producing into stopped', () => {
         const animationFrames = createAnimationFrameController();
         vi.spyOn(performance, 'now').mockReturnValue(1_000);
 
@@ -899,6 +930,7 @@ describe('MachineActivityWidget', () => {
         );
 
         expect(screen.getByText('60')).toBeInTheDocument();
+        expectCircularArcToMatchPercent(60);
 
         rerender(
             <MachineActivityWidget
@@ -925,18 +957,19 @@ describe('MachineActivityWidget', () => {
             />,
         );
 
-        animationFrames.runNextFrame(1_240);
-        animationFrames.runNextFrame(1_240);
+        animationFrames.runNextFrame(1_210);
 
-        expect(screen.queryByText('10')).not.toBeInTheDocument();
-        expect(screen.queryByText('60')).not.toBeInTheDocument();
+        expect(screen.getByText('34')).toBeInTheDocument();
+        expectCircularArcToApproximateDisplayedPercent(34);
+        expect(screen.getByTestId('gauge-circular-static-top-cap')).toBeInTheDocument();
 
-        animationFrames.runNextFrame(1_640);
+        animationFrames.runNextFrame(1_840);
 
         expect(screen.getByText('0')).toBeInTheDocument();
+        expect(screen.queryByTestId('gauge-circular-static-top-cap')).not.toBeInTheDocument();
     });
 
-    it('expands the circular value and arc together when crossing from stopped into producing', () => {
+    it('animates the circular value and arc together when crossing from stopped into producing', () => {
         const animationFrames = createAnimationFrameController();
         vi.spyOn(performance, 'now').mockReturnValue(1_000);
 
@@ -966,6 +999,7 @@ describe('MachineActivityWidget', () => {
         );
 
         expect(screen.getByText('0')).toBeInTheDocument();
+        expect(screen.queryByTestId('gauge-circular-static-top-cap')).not.toBeInTheDocument();
 
         rerender(
             <MachineActivityWidget
@@ -992,20 +1026,16 @@ describe('MachineActivityWidget', () => {
             />,
         );
 
-        animationFrames.runNextFrame(1_120);
+        animationFrames.runNextFrame(1_210);
 
-        const displayedValue = within(screen.getByTestId('gauge-circular-center-content')).getByText(
-            (_, element) => element?.tagName.toLowerCase() === 'text' && /^\d+$/.test(element.textContent ?? ''),
-        );
-        const displayedPercent = Number.parseInt(displayedValue.textContent ?? '0', 10);
-        const arcOpacity = Number.parseFloat(screen.getAllByTestId('gauge-circular-arc-segment')[0]?.style.opacity ?? '0');
+        expect(screen.getByText('26')).toBeInTheDocument();
+        expectCircularArcToApproximateDisplayedPercent(26);
+        expect(screen.getByTestId('gauge-circular-static-top-cap')).toBeInTheDocument();
 
-        expect(displayedPercent).toBeGreaterThan(0);
-        expect(displayedPercent).toBeLessThan(60);
-        expectCircularArcToApproximateDisplayedPercent(displayedPercent);
-        expect(arcOpacity).toBeGreaterThan(0);
-        expect(arcOpacity).toBeLessThan(1);
+        animationFrames.runFrameBatch(2_100);
 
+        expect(screen.getByText('60')).toBeInTheDocument();
+        expectCircularArcToApproximateDisplayedPercent(60);
     });
 
     it('caps the visual activity animation duration while keeping larger deltas slower than smaller ones', () => {
@@ -1017,6 +1047,8 @@ describe('MachineActivityWidget', () => {
     it('resets machine activity processing when switching from a real binding to a simulated value', async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-04-24T12:30:00.000Z'));
+        const animationFrames = createAnimationFrameController();
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
 
         const { rerender } = render(
             <MachineActivityWidget
@@ -1076,6 +1108,8 @@ describe('MachineActivityWidget', () => {
             />,
         );
 
+        animationFrames.runNextFrame(1_300);
+
         expect(screen.getByText('3')).toBeInTheDocument();
 
         rerender(
@@ -1107,6 +1141,8 @@ describe('MachineActivityWidget', () => {
         act(() => {
             vi.advanceTimersByTime(2_000);
         });
+
+        animationFrames.runFrameBatch(2_100);
 
         expect(screen.getByText('75')).toBeInTheDocument();
         expect(screen.getByText('30.00 °F')).toBeInTheDocument();
@@ -1229,6 +1265,68 @@ describe('MachineActivityWidget', () => {
         expect(staticTopCap).toHaveAttribute('data-effect-blink-mode', 'on-with-failures');
         expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', String(KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX));
         expect(blinkStack).toHaveAttribute('data-blink-enabled', 'true');
+        expect(blinkStack).toHaveAttribute('data-blink-trigger', 'travel-completion');
+        expect(blinkStack.querySelector('animate')).toBeNull();
+    });
+
+    it('triggers the machine-activity fixed blink burst only after the traveling top cap completes its route', () => {
+        vi.useFakeTimers();
+        const animationFrames = createAnimationFrameController();
+
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'simulated_value',
+                        simulatedValue: 0.3,
+                        unit: 'kW',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                        bindingVersion: 'node-red-v1',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        showStateSubtitle: true,
+                        showPowerSubtext: true,
+                        showDynamicColor: true,
+                        showStateAnimation: true,
+                        fixedTopCapEffects: {
+                            pulseSpeed: 72,
+                            pulseIrregularity: 44,
+                            pulseStability: 64,
+                        },
+                        travelingTopCapMinSpeed: 200,
+                        travelingTopCapMaxSpeed: 200,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0.3)}
+            />,
+        );
+
+        const initialBlinkStack = within(screen.getByTestId('gauge-circular-static-top-cap'))
+            .getByTestId('gauge-circular-static-top-cap-blink-stack');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        const travelDurationMs = Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0') * 1000;
+
+        expect(initialBlinkStack).toHaveAttribute('data-blink-trigger-key', '0');
+        expect(initialBlinkStack).toHaveAttribute('data-burst-active', 'false');
+        expect(initialBlinkStack.querySelector('animate')).toBeNull();
+
+        animationFrames.runNextFrame(1_000);
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(travelDurationMs) + 1);
+        });
+
+        const triggeredBlinkStack = within(screen.getByTestId('gauge-circular-static-top-cap'))
+            .getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
+        expect(triggeredBlinkStack).toHaveAttribute('data-blink-trigger-key', '1');
+        expect(triggeredBlinkStack).toHaveAttribute('data-burst-active', 'true');
+        expect(triggeredBlinkStack).toHaveAttribute('data-burst-key', '1');
+        expect(triggeredBlinkStack.querySelector('animate')).toBeNull();
     });
 
     it('keeps the fixed top-cap shape configurable while forcing machine-activity blink mode/intensity and traveling pill shape', () => {
@@ -1293,6 +1391,7 @@ describe('MachineActivityWidget', () => {
         expect(staticTopCap).toHaveAttribute('data-effect-pulse-speed', '72');
         expect(staticTopCap).toHaveAttribute('data-effect-pulse-stability', '64');
         expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-blink-enabled', 'true');
+        expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack').querySelector('animate')).toBeNull();
         expect(movingTopCap).toHaveAttribute('data-shape-pill', 'true');
         expect(movingTopCap).toHaveAttribute('data-effect-aura', '10');
         expect(movingTopCap).toHaveAttribute('data-effect-halo', '20');

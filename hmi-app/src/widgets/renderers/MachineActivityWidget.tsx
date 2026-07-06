@@ -98,6 +98,11 @@ export function resolveActivityVisualAnimationDuration(deltaPoints: number) {
     );
 }
 
+function usesNormalStoppedVisualTween(previousState: string, nextState: string) {
+    return (previousState === 'producing' && nextState === 'stopped')
+        || (previousState === 'stopped' && nextState === 'producing');
+}
+
 function resolveCappedSvgFontSize(desiredPixels: number, renderedSize: number) {
     if (!(desiredPixels > 0)) {
         return 0;
@@ -289,7 +294,7 @@ export default function MachineActivityWidget({
         lastSetupNormalizedRef.current = activityIndex / 100;
     }
     const isRetractingToStopped = (retractingToStopped && productiveState === 'stopped')
-        || ((prevProductiveStateRef.current === 'calibrating' || prevProductiveStateRef.current === 'producing') && productiveState === 'stopped');
+        || (prevProductiveStateRef.current === 'calibrating' && productiveState === 'stopped');
     const gaugePrimaryColor = usesDynamicColor
         ? stateVisuals.primary
         : 'color-mix(in srgb, var(--color-accent-purple) 40%, transparent)';
@@ -317,7 +322,10 @@ export default function MachineActivityWidget({
             intensity: 'none',
             durationMs: 0,
         } as const;
-    if (shouldAnimateCircularStoppedTransitions && productiveState !== 'stopped' && prevProductiveStateRef.current === 'stopped' && expandAnim === null) {
+    if (shouldAnimateCircularStoppedTransitions
+        && productiveState === 'calibrating'
+        && prevProductiveStateRef.current === 'stopped'
+        && expandAnim === null) {
         justEnteredSetupRef.current = true;
     }
 
@@ -328,6 +336,10 @@ export default function MachineActivityWidget({
     const productiveStateChangedSinceLastVisualSnapshot = activityAnimationSnapshotRef.current.productiveState !== productiveState;
     const isStoppedVisualStateTransition = productiveStateChangedSinceLastVisualSnapshot
         && (activityAnimationSnapshotRef.current.productiveState === 'stopped' || productiveState === 'stopped');
+    const usesNormalStoppedTween = usesNormalStoppedVisualTween(
+        activityAnimationSnapshotRef.current.productiveState,
+        productiveState,
+    );
     const arcOpacity = expandAnim !== null
         ? expandAnim.opacity
         : (retractAnim !== null
@@ -336,7 +348,7 @@ export default function MachineActivityWidget({
     const usesSpecialActivityAnimation = expandAnim !== null || retractAnim !== null;
     const hasImmediateVisualOverride = usesSpecialActivityAnimation
         || activityAnimationSnapshotRef.current.sourceKey !== activitySourceKey
-        || isStoppedVisualStateTransition
+        || (isStoppedVisualStateTransition && !usesNormalStoppedTween)
         || !shouldTrackAnimationState
         || !isValid
         || prefersReducedMotion;
@@ -456,7 +468,7 @@ export default function MachineActivityWidget({
             return undefined;
         }
 
-        const enteringSetup = productiveState !== 'stopped' && prevProductiveStateRef.current === 'stopped';
+        const enteringSetup = productiveState === 'calibrating' && prevProductiveStateRef.current === 'stopped';
 
         if (!enteringSetup) {
             return undefined;
@@ -503,10 +515,8 @@ export default function MachineActivityWidget({
 
         const prevState = prevProductiveStateRef.current;
 
-        if ((prevState === 'calibrating' || prevState === 'producing') && productiveState === 'stopped') {
-            retractStartNormalizedRef.current = prevState === 'calibrating'
-                ? lastSetupNormalizedRef.current
-                : clamp(displayedActivityIndexRef.current / 100, 0, 1);
+        if (prevState === 'calibrating' && productiveState === 'stopped') {
+            retractStartNormalizedRef.current = lastSetupNormalizedRef.current;
             retractGradientColorsRef.current = getStateVisuals(prevState).gradientColors;
             setRetractingToStopped(true);
             const timer = setTimeout(() => setRetractingToStopped(false), (stateVisuals.animationDuration || 900) + 50);
@@ -534,12 +544,16 @@ export default function MachineActivityWidget({
         const productiveStateChanged = previousSnapshot.productiveState !== productiveState;
         const isStoppedStateTransition = productiveStateChanged
             && (previousSnapshot.productiveState === 'stopped' || productiveState === 'stopped');
+        const usesNormalStoppedTween = usesNormalStoppedVisualTween(
+            previousSnapshot.productiveState,
+            productiveState,
+        );
         const activityChanged = previousSnapshot.activityIndex !== activityIndex;
         const shouldAnimateVisualValue = shouldTrackAnimationState
             && isValid
             && !prefersReducedMotion
             && !usesSpecialActivityAnimation
-            && !isStoppedStateTransition
+            && (!isStoppedStateTransition || usesNormalStoppedTween)
             && !sourceChanged
             && activityChanged;
 
@@ -651,6 +665,7 @@ export default function MachineActivityWidget({
                                     staticShape: fixedTopCapShape,
                                     staticEffects: fixedTopCapEffects,
                                     staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                                    staticBlinkTrigger: 'travel-completion',
                                     travelingShape: travelingTopCapShape,
                                     travelingEffects: travelingTopCapEffects,
                                     travelingSpeed: travelingTopCapSpeed,

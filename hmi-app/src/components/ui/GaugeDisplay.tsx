@@ -47,6 +47,7 @@ export interface GaugeDisplayProps {
         staticShape?: KpiTopCapShape;
         staticEffects?: KpiFixedTopCapEffects;
         staticPulseStabilityMax?: number;
+        staticBlinkTrigger?: 'autonomous' | 'travel-completion';
         travelingShape?: KpiTopCapShape;
         travelingEffects?: KpiTravelingTopCapEffects;
         travelingSpeed?: TravelingTopCapSpeedConfig;
@@ -199,6 +200,7 @@ export default function GaugeDisplay({
     const travelingTopCapCornerRadiusMultiplier = travelingTopCapShape.pill ? CIRCULAR_TOP_CAP_ROUNDED_CORNER_MULTIPLIER : 0;
     const staticTopCapPulseIntensity = clamp(staticTopCapEffects.pulseIntensity / KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX, 0, 1);
     const staticTopCapPulseEnabled = topCapEnabled && !prefersReducedMotion && staticTopCapPulseIntensity > 0;
+    const staticTopCapBlinkTrigger = circularTopCap?.staticBlinkTrigger ?? 'autonomous';
     const staticTopCapBlinkDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(
         staticTopCapEffects.pulseSpeed,
         staticTopCapEffects.pulseIrregularity,
@@ -214,6 +216,11 @@ export default function GaugeDisplay({
         staticTopCapEffects.pulseStability,
         staticTopCapPulseStabilityMax,
     );
+    const triggeredStaticBlinkInactiveOpacity = useMemo(() => {
+        const baseOpacity = Number.parseFloat(staticTopCapBlinkProfile.values.split(';')[0] ?? '1');
+
+        return Number.isFinite(baseOpacity) ? baseOpacity : 1;
+    }, [staticTopCapBlinkProfile.values]);
 
     useEffect(() => {
         if (mode !== 'circular') {
@@ -327,12 +334,20 @@ export default function GaugeDisplay({
     );
     const {
         cycleKey: travelingTopCapCycleKey,
+        completionKey: travelingTopCapCompletionKey,
         progress: travelingTopCapProgress,
         isPaused: isTravelingTopCapPaused,
         activeDurationSeconds: activeTravelingTopCapDurationSeconds,
     } = useTravelingEffectCycle({
         enabled: topCapEnabled && visibleArcLength > 0,
         durationSeconds: travelingTopCapDurationSeconds,
+    });
+    const triggeredStaticBlinkBurst = useTriggeredBlinkBurst({
+        enabled: staticTopCapBlinkTrigger === 'travel-completion' && staticTopCapPulseEnabled,
+        triggerKey: travelingTopCapCompletionKey,
+        profile: staticTopCapBlinkProfile,
+        inactiveOpacity: triggeredStaticBlinkInactiveOpacity,
+        durationSeconds: staticTopCapBlinkDurationSeconds,
     });
     const movingTopCapModel = useMemo(() => resolveCircularTravelingTopCapPosition({
         key: endpointSegment?.key ?? CIRCULAR_SEGMENT_COUNT - 1,
@@ -345,6 +360,8 @@ export default function GaugeDisplay({
         radius,
     }), [center, circumference, endpointSegment, gradientColors, radius, strokeWidth, travelingTopCapProgress, visibleArcLength]);
     const isTravelingTopCapActive = travelingTopCapProgress < 1 && !isTravelingTopCapPaused;
+    const shouldRenderAutonomousStaticBlink = staticTopCapBlinkTrigger === 'autonomous' && staticTopCapPulseEnabled;
+    const shouldRenderStaticBlinkAnimate = shouldRenderAutonomousStaticBlink;
     const showTravelingTopCap = topCapEnabled
         && !prefersReducedMotion
         && isTravelingTopCapActive
@@ -549,9 +566,19 @@ export default function GaugeDisplay({
                         data-blink-irregularity={String(staticTopCapEffects.pulseIrregularity)}
                         data-blink-stability={String(staticTopCapEffects.pulseStability)}
                         data-blink-duration={String(staticTopCapBlinkDurationSeconds)}
-                        style={{ mixBlendMode: 'screen' }}
+                        data-blink-trigger={staticTopCapBlinkTrigger}
+                        data-blink-trigger-key={String(travelingTopCapCompletionKey)}
+                        data-burst-active={String(triggeredStaticBlinkBurst.active)}
+                        data-burst-key={String(triggeredStaticBlinkBurst.key)}
+                        data-burst-opacity={String(triggeredStaticBlinkBurst.opacity)}
+                        style={{
+                            mixBlendMode: 'screen',
+                            opacity: staticTopCapBlinkTrigger === 'travel-completion'
+                                ? triggeredStaticBlinkBurst.opacity
+                                : undefined,
+                        }}
                     >
-                        {staticTopCapPulseEnabled ? (
+                        {shouldRenderStaticBlinkAnimate ? (
                             <animate
                                 attributeName="opacity"
                                 calcMode="discrete"
@@ -668,6 +695,7 @@ function useTravelingEffectCycle({
 }) {
     const prefersReducedMotion = usePrefersReducedMotion();
     const [cycleKey, setCycleKey] = useState(0);
+    const [completionKey, setCompletionKey] = useState(0);
     const cycleSignature = `${enabled}:${prefersReducedMotion}:${cycleKey}`;
     const pendingDurationRef = useRef(durationSeconds);
     const [cycleState, setCycleState] = useState(() => ({
@@ -720,6 +748,7 @@ function useTravelingEffectCycle({
                 isPaused: true,
                 activeDurationSeconds,
             });
+            setCompletionKey((current) => current + 1);
         }, travelDurationMs);
         const restartTimerId = window.setTimeout(() => {
             setCycleKey((current) => current + 1);
@@ -737,12 +766,120 @@ function useTravelingEffectCycle({
     return {
         prefersReducedMotion,
         cycleKey,
+        completionKey,
         progress: !enabled || prefersReducedMotion || !isCurrentCycleState ? 0 : cycleState.progress,
         isPaused: !enabled || prefersReducedMotion || !isCurrentCycleState ? false : cycleState.isPaused,
         activeDurationSeconds: !enabled || prefersReducedMotion || !isCurrentCycleState
             ? durationSeconds
             : cycleState.activeDurationSeconds,
     };
+}
+
+function useTriggeredBlinkBurst({
+    enabled,
+    triggerKey,
+    profile,
+    inactiveOpacity,
+    durationSeconds,
+}: {
+    enabled: boolean;
+    triggerKey: number;
+    profile: { values: string; keyTimes: string };
+    inactiveOpacity: number;
+    durationSeconds: number;
+}) {
+    const timeoutIdsRef = useRef<number[]>([]);
+    const parsedProfile = useMemo(() => ({
+        values: profile.values.split(';').map((value) => Number.parseFloat(value)),
+        keyTimes: profile.keyTimes.split(';').map((value) => Number.parseFloat(value)),
+    }), [profile.keyTimes, profile.values]);
+    const [burstState, setBurstState] = useState(() => ({
+        active: false,
+        key: 0,
+        opacity: inactiveOpacity,
+    }));
+
+    useEffect(() => {
+        setBurstState((current) => {
+            if (current.active || current.opacity !== inactiveOpacity) {
+                return {
+                    active: false,
+                    key: current.key,
+                    opacity: inactiveOpacity,
+                };
+            }
+
+            return current;
+        });
+    }, [inactiveOpacity]);
+
+    useEffect(() => {
+        timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+        timeoutIdsRef.current = [];
+
+        if (!enabled || triggerKey <= 0 || durationSeconds <= 0) {
+            setBurstState((current) => ({
+                active: false,
+                key: enabled ? current.key : 0,
+                opacity: inactiveOpacity,
+            }));
+
+            return undefined;
+        }
+
+        if (parsedProfile.values.length === 0 || parsedProfile.values.length !== parsedProfile.keyTimes.length) {
+            setBurstState({
+                active: false,
+                key: triggerKey,
+                opacity: inactiveOpacity,
+            });
+
+            return undefined;
+        }
+
+        const durationMs = Math.max(0, Math.round(durationSeconds * 1000));
+
+        setBurstState({
+            active: true,
+            key: triggerKey,
+            opacity: parsedProfile.values[0] ?? inactiveOpacity,
+        });
+
+        parsedProfile.keyTimes.forEach((keyTime, index) => {
+            const nextOpacity = parsedProfile.values[index];
+
+            if (!Number.isFinite(keyTime) || !Number.isFinite(nextOpacity) || index === 0) {
+                return;
+            }
+
+            timeoutIdsRef.current.push(window.setTimeout(() => {
+                setBurstState((current) => current.key === triggerKey
+                    ? {
+                        ...current,
+                        active: true,
+                        opacity: nextOpacity,
+                    }
+                    : current);
+            }, Math.round(keyTime * durationMs)));
+        });
+
+        timeoutIdsRef.current.push(window.setTimeout(() => {
+            setBurstState((current) => current.key === triggerKey
+                ? {
+                    active: false,
+                    key: triggerKey,
+                    opacity: inactiveOpacity,
+                }
+                : current);
+        }, durationMs));
+
+        return () => {
+            timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+            timeoutIdsRef.current = [];
+        };
+    }, [durationSeconds, enabled, inactiveOpacity, parsedProfile.keyTimes, parsedProfile.values, triggerKey]);
+
+    return burstState;
 }
 
 function resolveTravelingTopCapDurationSeconds(pathLength: number, speedPxPerSecond: number) {

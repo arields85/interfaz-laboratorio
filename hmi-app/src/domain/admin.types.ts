@@ -288,6 +288,7 @@ export interface KpiDisplayOptions {
     icon?: string | null;
     kpiMode?: 'circular' | 'bar';
     valueFontSize?: number;
+    circularArcGlowIntensity?: number;
     min?: number;
     max?: number;
     dynamicColor?: boolean;
@@ -298,6 +299,8 @@ export interface KpiDisplayOptions {
     fixedTopCapEffects?: KpiFixedTopCapEffects;
     travelingTopCapShape?: KpiTopCapShape;
     travelingTopCapEffects?: KpiTravelingTopCapEffects;
+    travelingTopCapMinSpeed?: number;
+    travelingTopCapMaxSpeed?: number;
 }
 
 export interface KpiTopCapShape {

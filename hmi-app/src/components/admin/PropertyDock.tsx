@@ -77,7 +77,6 @@ import {
     resolveMachineActivityPulseStabilityRuntimeValue,
     resolveMachineActivityPulseStabilityVisualValue,
     resolveMachineActivityFixedTopCapEffects,
-    resolveKpiFixedTopCapEffects,
     resolveKpiFixedTopCapShape,
     resolveKpiTravelingTopCapEffects,
 } from '../../utils/kpiTopCapEffects';
@@ -217,7 +216,7 @@ const KPI_FIXED_TOP_CAP_SLIDERS: Array<{
     { key: 'extension', label: 'Extensión', ariaLabel: 'Extensión top cap fijo' },
     { key: 'thickness', label: 'Grosor', ariaLabel: 'Grosor top cap fijo' },
 ];
-const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
+const KPI_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
     key: 'pulseSpeed' | 'pulseIrregularity' | 'pulseStability';
     label: string;
     ariaLabel: string;
@@ -250,7 +249,7 @@ const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
         step: KPI_TOP_CAP_EFFECT_STEP,
     },
 ];
-const MACHINE_ACTIVITY_VISUAL_SLIDERS = [
+const CIRCULAR_GAUGE_VISUAL_SLIDERS = [
     {
         key: 'circularArcGlowIntensity' as const,
         label: 'Glow arco',
@@ -387,10 +386,8 @@ export default function PropertyDock(props: PropertyDockProps) {
         const currentDisplayOptions = ((selectedWidget.type === 'kpi'
             ? selectedWidget.displayOptions as KpiDisplayOptions | undefined
             : selectedWidget.displayOptions as MachineActivityDisplayOptions | undefined) ?? {});
-        const currentEffects = selectedWidget.type === 'machine-activity'
-            ? resolveMachineActivityFixedTopCapEffects(currentDisplayOptions.fixedTopCapEffects)
-            : resolveKpiFixedTopCapEffects(currentDisplayOptions.fixedTopCapEffects);
-        const resolvedValue = selectedWidget.type === 'machine-activity' && key === 'pulseStability'
+        const currentEffects = resolveMachineActivityFixedTopCapEffects(currentDisplayOptions.fixedTopCapEffects);
+        const resolvedValue = key === 'pulseStability'
             ? resolveMachineActivityPulseStabilityRuntimeValue(value)
             : value;
 
@@ -428,15 +425,17 @@ export default function PropertyDock(props: PropertyDockProps) {
         });
     };
 
-    const handleMachineActivityTravelingTopCapSpeedChange = (
+    const handleGaugeTravelingTopCapSpeedChange = (
         key: 'travelingTopCapMinSpeed' | 'travelingTopCapMaxSpeed',
         value: string,
     ) => {
-        if (!selectedWidget || selectedWidget.type !== 'machine-activity') {
+        if (!selectedWidget || (selectedWidget.type !== 'machine-activity' && selectedWidget.type !== 'kpi')) {
             return;
         }
 
-        const currentDisplayOptions = (selectedWidget.displayOptions as MachineActivityDisplayOptions | undefined) ?? {};
+        const currentDisplayOptions = ((selectedWidget.type === 'machine-activity'
+            ? selectedWidget.displayOptions as MachineActivityDisplayOptions | undefined
+            : selectedWidget.displayOptions as KpiDisplayOptions | undefined) ?? {});
         const nextRawValue = Number(value);
         const fallback = key === 'travelingTopCapMinSpeed'
             ? DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_PX_PER_SECOND
@@ -1451,10 +1450,8 @@ export default function PropertyDock(props: PropertyDockProps) {
     const topCapDisplayOptions = isMachineActivity
         ? machineActivityOptions
         : kpiDisplayOptions;
-    const kpiFixedTopCapEffects = isMachineActivity
+    const kpiFixedTopCapEffects = isMachineActivity || isKpi
         ? resolveMachineActivityFixedTopCapEffects(topCapDisplayOptions?.fixedTopCapEffects)
-        : isKpi
-            ? resolveKpiFixedTopCapEffects(topCapDisplayOptions?.fixedTopCapEffects)
         : DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS;
     const kpiFixedTopCapShape = (isKpi || isMachineActivity)
         ? resolveKpiFixedTopCapShape(topCapDisplayOptions?.fixedTopCapShape)
@@ -2700,13 +2697,13 @@ export default function PropertyDock(props: PropertyDockProps) {
                             </>
                         )}
 
-                        {isMachineActivity && (
+                        {(isMachineActivity || isKpi) && isCircularGaugeWidget && (
                             <DockSection icon={<Settings size={11} />} title="Visualización">
-                                {MACHINE_ACTIVITY_VISUAL_SLIDERS.map(({ key, label, ariaLabel, min, max, step, defaultValue }) => (
+                                {CIRCULAR_GAUGE_VISUAL_SLIDERS.map(({ key, label, ariaLabel, min, max, step, defaultValue }) => (
                                     <DockSliderField
                                         key={key}
                                         label={label}
-                                        value={machineActivityOptions?.[key] ?? defaultValue}
+                                        value={(isMachineActivity ? machineActivityOptions?.[key] : kpiDisplayOptions?.[key]) ?? defaultValue}
                                         min={min}
                                         max={max}
                                         step={step}
@@ -2816,7 +2813,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     checked={kpiFixedTopCapShape.pill}
                                     onChange={(checked) => handleKpiFixedTopCapShapeChange('pill', checked)}
                                 />
-                                {MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
+                                {KPI_FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
                                     <DockSliderField
                                         key={key}
                                         label={label}
@@ -2857,7 +2854,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     max={TRAVELING_TOP_CAP_SPEED_SCALE_MAX}
                                     step={TRAVELING_TOP_CAP_SPEED_SCALE_STEP}
                                     ariaLabel="Vel. Min top cap viajero"
-                                    onChange={(value) => handleMachineActivityTravelingTopCapSpeedChange('travelingTopCapMinSpeed', value)}
+                                    onChange={(value) => handleGaugeTravelingTopCapSpeedChange('travelingTopCapMinSpeed', value)}
                                 />
                                 <DockCompactNumberField
                                     label="Vel. Max"
@@ -2869,7 +2866,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     max={TRAVELING_TOP_CAP_SPEED_SCALE_MAX}
                                     step={TRAVELING_TOP_CAP_SPEED_SCALE_STEP}
                                     ariaLabel="Vel. Max top cap viajero"
-                                    onChange={(value) => handleMachineActivityTravelingTopCapSpeedChange('travelingTopCapMaxSpeed', value)}
+                                    onChange={(value) => handleGaugeTravelingTopCapSpeedChange('travelingTopCapMaxSpeed', value)}
                                 />
                                 {KPI_TRAVELING_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
                                     <DockSliderField
@@ -3023,6 +3020,20 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     checked={kpiFixedTopCapShape.pill}
                                     onChange={(checked) => handleKpiFixedTopCapShapeChange('pill', checked)}
                                 />
+                                {KPI_FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
+                                    <DockSliderField
+                                        key={key}
+                                        label={label}
+                                        ariaLabel={ariaLabel}
+                                        value={key === 'pulseStability'
+                                            ? resolveMachineActivityPulseStabilityVisualValue(kpiFixedTopCapEffects.pulseStability)
+                                            : (kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key])}
+                                        min={min}
+                                        max={max}
+                                        step={step}
+                                        onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
+                                    />
+                                ))}
                                 {KPI_FIXED_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
                                     <DockSliderField
                                         key={key}
@@ -3040,6 +3051,30 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                         {isKpi && isCircularGaugeWidget && (
                             <DockSection icon={<Sliders size={11} />} title="Top cap viajero" defaultOpen={false}>
+                                <DockCompactNumberField
+                                    label="Vel. Min"
+                                    value={resolveStoredTravelingTopCapSpeedScale(
+                                        kpiDisplayOptions?.travelingTopCapMinSpeed,
+                                        DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_PX_PER_SECOND,
+                                    )}
+                                    min={TRAVELING_TOP_CAP_SPEED_SCALE_MIN}
+                                    max={TRAVELING_TOP_CAP_SPEED_SCALE_MAX}
+                                    step={TRAVELING_TOP_CAP_SPEED_SCALE_STEP}
+                                    ariaLabel="Vel. Min top cap viajero"
+                                    onChange={(value) => handleGaugeTravelingTopCapSpeedChange('travelingTopCapMinSpeed', value)}
+                                />
+                                <DockCompactNumberField
+                                    label="Vel. Max"
+                                    value={resolveStoredTravelingTopCapSpeedScale(
+                                        kpiDisplayOptions?.travelingTopCapMaxSpeed,
+                                        DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_PX_PER_SECOND,
+                                    )}
+                                    min={TRAVELING_TOP_CAP_SPEED_SCALE_MIN}
+                                    max={TRAVELING_TOP_CAP_SPEED_SCALE_MAX}
+                                    step={TRAVELING_TOP_CAP_SPEED_SCALE_STEP}
+                                    ariaLabel="Vel. Max top cap viajero"
+                                    onChange={(value) => handleGaugeTravelingTopCapSpeedChange('travelingTopCapMaxSpeed', value)}
+                                />
                                 {KPI_TRAVELING_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
                                     <DockSliderField
                                         key={key}

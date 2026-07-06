@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { KpiWidgetConfig } from '../../domain/admin.types';
 import { STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS } from '../../components/ui/GaugeDisplay';
@@ -10,7 +10,9 @@ import {
     DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
     DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
     DEFAULT_KPI_TRAVELING_TOP_CAP_SHAPE,
+    KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
 } from '../../utils/kpiTopCapEffects';
+import { resolveTravelingTopCapSpeed } from '../../utils/travelingTopCapSpeed';
 import KpiWidget from './KpiWidget';
 
 const equipmentMap = new Map();
@@ -87,7 +89,130 @@ function getShapeCenter(element: Element) {
     };
 }
 
+function resolveKpiVisualAnimationDuration(delta: number) {
+    const normalizedDelta = Math.min(Math.abs(delta), 100);
+
+    return Math.round(280 + (normalizedDelta * 7.2));
+}
+
+function formatDisplayedKpiValue(value: number) {
+    return value % 1 !== 0 ? value.toFixed(1) : String(value);
+}
+
 describe('KpiWidget', () => {
+    let mediaQueryMatches = false;
+    let animationFrameId = 0;
+    let animationFrameCallbacks = new Map<number, FrameRequestCallback>();
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        mediaQueryMatches = false;
+        animationFrameId = 0;
+        animationFrameCallbacks = new Map<number, FrameRequestCallback>();
+
+        vi.spyOn(performance, 'now').mockReturnValue(1_000);
+        vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+            animationFrameId += 1;
+            animationFrameCallbacks.set(animationFrameId, callback);
+            return animationFrameId;
+        }));
+        vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => {
+            animationFrameCallbacks.delete(id);
+        }));
+        vi.stubGlobal('matchMedia', vi.fn(() => ({
+            matches: mediaQueryMatches,
+            media: '(prefers-reduced-motion: reduce)',
+            onchange: null,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+        })));
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    function runNextAnimationFrame(now: number) {
+        const nextFrame = Array.from(animationFrameCallbacks.entries()).at(-1);
+
+        expect(nextFrame).toBeDefined();
+
+        const [frameId, callback] = nextFrame!;
+        animationFrameCallbacks.delete(frameId);
+
+        act(() => {
+            callback(now);
+        });
+    }
+
+    function runPendingAnimationFrames(now: number) {
+        const pendingFrames = Array.from(animationFrameCallbacks.entries());
+
+        expect(pendingFrames.length).toBeGreaterThan(0);
+
+        animationFrameCallbacks.clear();
+
+        act(() => {
+            pendingFrames.forEach(([, callback]) => {
+                callback(now);
+            });
+        });
+    }
+
+    function expectCircularTweenSync(startValue: number, targetValue: number) {
+        const delta = targetValue - startValue;
+        const duration = resolveKpiVisualAnimationDuration(delta);
+        const halfProgressValue = startValue + (delta * (1 - Math.pow(1 - 0.5, 2)));
+        const expectedNormalized = halfProgressValue / 100;
+        const expectedAngle = expectedNormalized * 360;
+
+        const { rerender } = render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 100,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(startValue)}
+            />,
+        );
+
+        expect(screen.getByText(String(startValue))).toBeInTheDocument();
+        vi.mocked(requestAnimationFrame).mockClear();
+        animationFrameCallbacks.clear();
+
+        rerender(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 100,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(targetValue)}
+            />,
+        );
+
+        expect(requestAnimationFrame).toHaveBeenCalled();
+
+        runPendingAnimationFrames(1_000 + (duration / 2));
+
+        expect(screen.getByText(formatDisplayedKpiValue(halfProgressValue))).toBeInTheDocument();
+        expect(screen.queryByText(String(startValue))).not.toBeInTheDocument();
+        expect(Number(screen.getByTestId('gauge-circular-static-top-cap').getAttribute('data-cap-angle'))).toBeCloseTo(expectedAngle, 2);
+        expect(Number(screen.getByTestId('gauge-circular-static-top-cap').getAttribute('data-cap-angle')) / 360).toBeCloseTo(expectedNormalized, 2);
+    }
+
     it('renders a loading skeleton without gauge or resolved value output', () => {
         const { container } = render(
             <KpiWidget
@@ -156,6 +281,61 @@ describe('KpiWidget', () => {
             'stroke-dasharray',
             `${expectedFullCircleSegmentLength} ${CIRCUMFERENCE - expectedFullCircleSegmentLength}`,
         );
+    });
+
+    it('animates 20 to 80 with synced circular number and arc', () => {
+        expectCircularTweenSync(20, 80);
+    });
+
+    it('animates 80 to 20 with synced circular number and arc', () => {
+        expectCircularTweenSync(80, 20);
+    });
+
+    it('animates 60 to 0 as a normal circular tween', () => {
+        expectCircularTweenSync(60, 0);
+    });
+
+    it('animates 0 to 60 as a normal circular tween', () => {
+        expectCircularTweenSync(0, 60);
+    });
+
+    it('skips circular KPI tweening under reduced motion and jumps straight to the target value', () => {
+        mediaQueryMatches = true;
+
+        const { rerender } = render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 100,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(0)}
+            />,
+        );
+
+        expect(screen.getByText('0')).toBeInTheDocument();
+
+        rerender(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 100,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(60)}
+            />,
+        );
+
+        expect(requestAnimationFrame).not.toHaveBeenCalled();
+        expect(screen.getByText('60')).toBeInTheDocument();
+        expect(screen.queryByText('0')).not.toBeInTheDocument();
+        expect(screen.getByTestId('gauge-circular-static-top-cap')).toHaveAttribute('data-cap-angle', '216.00');
     });
 
     it('uses the custom unit when unitOverride is enabled', () => {
@@ -272,6 +452,78 @@ describe('KpiWidget', () => {
         expect(movingTopCap).toHaveAttribute('data-effect-thickness', '60');
         expect(within(staticTopCap).getByTestId('gauge-circular-static-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-static-top-cap-glow\)$/);
         expect(within(movingTopCap).getByTestId('gauge-circular-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-traveling-top-cap-glow\)$/);
+    });
+
+    it('forces legacy KPI fixed blink mode/intensity to the simplified runtime contract while preserving speed/irregularity/stability', () => {
+        render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 10,
+                        circularArcGlowIntensity: 0,
+                        travelingTopCapMinSpeed: 1,
+                        travelingTopCapMaxSpeed: 10,
+                        fixedTopCapEffects: {
+                            ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                            mode: 'off-with-flashes',
+                            pulseIntensity: 0,
+                            pulseSpeed: 61,
+                            pulseIrregularity: 47,
+                            pulseStability: 700,
+                        },
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        const staticBlinkStack = screen.getByTestId('gauge-circular-static-top-cap-blink-stack');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+
+        expect(screen.getAllByTestId('gauge-circular-arc-segment').every((segment) => !segment.hasAttribute('filter'))).toBe(true);
+        expect(staticBlinkStack).toHaveAttribute('data-blink-mode', 'on-with-failures');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-intensity', String(KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX));
+        expect(staticBlinkStack).toHaveAttribute('data-blink-speed', '61');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-irregularity', '47');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-stability', '700');
+        expect(movingTopCap).toHaveAttribute(
+            'data-speed',
+            resolveTravelingTopCapSpeed(0.11, { min: 50, max: 400 }).toFixed(2),
+        );
+    });
+
+    it('enables simplified fixed blink defaults for KPI circular widgets when legacy configs omit mode and intensity', () => {
+        render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 10,
+                        fixedTopCapEffects: {
+                            pulseSpeed: 72,
+                            pulseIrregularity: 44,
+                        },
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        const staticBlinkStack = screen.getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(staticBlinkStack).toHaveAttribute('data-blink-mode', 'on-with-failures');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-intensity', String(KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX));
+        expect(staticBlinkStack).toHaveAttribute('data-blink-speed', '72');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-irregularity', '44');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-enabled', 'true');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-trigger', 'autonomous');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-trigger-key', '0');
+        expect(staticBlinkStack.querySelector('animate')).not.toBeNull();
     });
 
     it('keeps the fixed top-cap shape configurable while forcing the traveling top cap to pill', () => {

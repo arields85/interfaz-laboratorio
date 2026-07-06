@@ -748,13 +748,6 @@ describe('PropertyDock machine-activity', () => {
             },
         });
 
-        await user.click(getFieldButtonInSection('General', 'Estilo'));
-        await user.click(screen.getByRole('button', { name: 'Barra' }));
-
-        expect(updates.at(-1)?.displayOptions).toMatchObject({
-            kpiMode: 'bar',
-        });
-
         const visualSection = getSection('Visualización');
         const arcGlowSlider = within(visualSection).getByRole('slider', { name: 'Glow arco circular' });
 
@@ -787,6 +780,13 @@ describe('PropertyDock machine-activity', () => {
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             labelProducing: 'Produciendo avanzada',
+        });
+
+        await user.click(getFieldButtonInSection('General', 'Estilo'));
+        await user.click(screen.getByRole('button', { name: 'Barra' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            kpiMode: 'bar',
         });
     });
 
@@ -2849,7 +2849,7 @@ describe('PropertyDock KPI thresholds', () => {
         });
     });
 
-    it('renders only fixed top-cap shape/effect controls for circular KPIs and persists them without base geometry writes', async () => {
+    it('renders simplified fixed top-cap controls for circular KPIs and persists the final supported fields', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'kpi',
             title: 'KPI local',
@@ -2862,6 +2862,10 @@ describe('PropertyDock KPI thresholds', () => {
         await user.click(within(topCapSection).getByRole('button', { name: 'Top cap fijo' }));
 
         const shapeCheckbox = within(topCapSection).getByRole('checkbox', { name: 'Recto/Pill top cap fijo' });
+        const pulseSpeedSlider = within(topCapSection).getByRole('slider', { name: 'Velocidad top cap fijo' });
+        const pulseIrregularitySlider = within(topCapSection).getByRole('slider', { name: 'Irregularidad top cap fijo' });
+        const pulseStabilitySlider = within(topCapSection).getByRole('slider', { name: 'Estabilidad top cap fijo' });
+        const pulseStabilityInput = within(topCapSection).getByRole('textbox', { name: 'Estabilidad top cap fijo value' });
         const auraSlider = within(topCapSection).getByRole('slider', { name: 'Aura top cap fijo' });
         const auraValueInput = within(topCapSection).getByRole('textbox', { name: 'Aura top cap fijo value' });
 
@@ -2876,10 +2880,18 @@ describe('PropertyDock KPI thresholds', () => {
         expect(within(topCapSection).getByText('Halo')).toBeInTheDocument();
         expect(within(topCapSection).queryByText('Brillo')).not.toBeInTheDocument();
         expect(within(topCapSection).queryByRole('slider', { name: 'Brillo top cap fijo' })).not.toBeInTheDocument();
+        expect(within(topCapSection).getByText('Velocidad')).toBeInTheDocument();
+        expect(within(topCapSection).getByText('Irregularidad')).toBeInTheDocument();
+        expect(within(topCapSection).getByText('Estabilidad')).toBeInTheDocument();
         expect(within(topCapSection).getByText('Blur')).toBeInTheDocument();
         expect(within(topCapSection).getByText('Extensión')).toBeInTheDocument();
         expect(within(topCapSection).getByText('Grosor')).toBeInTheDocument();
         expect(shapeCheckbox).toBeChecked();
+        expect(pulseSpeedSlider).toHaveValue('35');
+        expect(pulseIrregularitySlider).toHaveValue('0');
+        expect(pulseStabilitySlider).toHaveValue('0');
+        expect(pulseStabilityInput).toHaveValue('0');
+        expect(pulseStabilitySlider).toHaveAttribute('max', '100');
         expect(auraSlider).toHaveAttribute('min', '0');
         expect(auraSlider).toHaveAttribute('max', '100');
         expect(auraValueInput).toHaveValue(String(DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.auraIntensity));
@@ -2894,6 +2906,47 @@ describe('PropertyDock KPI thresholds', () => {
         });
         expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
 
+        fireEvent.change(pulseSpeedSlider, { target: { value: '61' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapShape: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
+                pill: false,
+            },
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+            },
+        });
+        expect(updates.at(-1)?.displayOptions).not.toHaveProperty('fixedTopCapBase');
+
+        fireEvent.change(pulseIrregularitySlider, { target: { value: '47' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+            },
+        });
+
+        fireEvent.change(pulseStabilitySlider, { target: { value: '100' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fixedTopCapEffects: {
+                ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+                pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+            },
+        });
+
         fireEvent.change(auraSlider, { target: { value: '42' } });
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
@@ -2903,6 +2956,11 @@ describe('PropertyDock KPI thresholds', () => {
             },
             fixedTopCapEffects: {
                 ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+                pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
                 auraIntensity: 42,
             },
         });
@@ -2919,6 +2977,11 @@ describe('PropertyDock KPI thresholds', () => {
             },
             fixedTopCapEffects: {
                 ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                mode: 'on-with-failures',
+                pulseIntensity: KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+                pulseSpeed: 61,
+                pulseIrregularity: 47,
+                pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
                 auraIntensity: 100,
             },
         });
@@ -2937,12 +3000,16 @@ describe('PropertyDock KPI thresholds', () => {
 
         await user.click(within(travelingSection).getByRole('button', { name: 'Top cap viajero' }));
 
+        const minInput = within(travelingSection).getByRole('textbox', { name: 'Vel. Min top cap viajero' });
+        const maxInput = within(travelingSection).getByRole('textbox', { name: 'Vel. Max top cap viajero' });
         const auraSlider = within(travelingSection).getByRole('slider', { name: 'Aura top cap viajero' });
         const auraValueInput = within(travelingSection).getByRole('textbox', { name: 'Aura top cap viajero value' });
         const extensionSlider = within(travelingSection).getByRole('slider', { name: 'Extensión top cap viajero' });
 
         expect(within(travelingSection).queryByText('Recto/Pill')).not.toBeInTheDocument();
         expect(within(travelingSection).queryByRole('checkbox', { name: 'Recto/Pill top cap viajero' })).not.toBeInTheDocument();
+        expect(within(travelingSection).getByText('Vel. Min')).toBeInTheDocument();
+        expect(within(travelingSection).getByText('Vel. Max')).toBeInTheDocument();
         expect(within(travelingSection).getByText('Aura')).toBeInTheDocument();
         expect(within(travelingSection).getByText('Halo')).toBeInTheDocument();
         expect(within(travelingSection).queryByText('Brillo')).not.toBeInTheDocument();
@@ -2950,10 +3017,29 @@ describe('PropertyDock KPI thresholds', () => {
         expect(within(travelingSection).getByText('Blur')).toBeInTheDocument();
         expect(within(travelingSection).getByText('Extensión')).toBeInTheDocument();
         expect(within(travelingSection).getByText('Grosor')).toBeInTheDocument();
+        expect(minInput).toHaveValue('3');
+        expect(maxInput).toHaveValue('9');
         expect(auraSlider).toHaveAttribute('min', '0');
         expect(auraSlider).toHaveAttribute('max', '100');
         expect(extensionSlider).toHaveAttribute('step', '1');
         expect(auraValueInput).toHaveValue(String(DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS.auraIntensity));
+
+        await user.clear(minInput);
+        await user.type(minInput, '1');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            travelingTopCapMinSpeed: 1,
+        });
+
+        await user.clear(maxInput);
+        await user.type(maxInput, '10');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            travelingTopCapMinSpeed: 1,
+            travelingTopCapMaxSpeed: 10,
+        });
 
         fireEvent.change(auraSlider, { target: { value: '37' } });
 
@@ -2979,6 +3065,35 @@ describe('PropertyDock KPI thresholds', () => {
             },
         });
         expect(updates.at(-1)?.displayOptions).not.toHaveProperty('travelingTopCapShape');
+    });
+
+    it('renders the KPI arc glow slider in Visualización and persists the circular glow baseline override', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'kpi',
+            title: 'KPI local',
+        });
+
+        const visualSection = getSection('Visualización');
+        const arcGlowSlider = within(visualSection).getByRole('slider', { name: 'Glow arco circular' });
+        const arcGlowInput = within(visualSection).getByRole('textbox', { name: 'Glow arco circular value' });
+
+        expect(within(visualSection).getByText('Glow arco')).toBeInTheDocument();
+        expect(arcGlowSlider).toHaveValue('100');
+        expect(arcGlowInput).toHaveValue('100');
+
+        fireEvent.change(arcGlowSlider, { target: { value: '0' } });
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            circularArcGlowIntensity: 0,
+        });
+
+        await user.clear(arcGlowInput);
+        await user.type(arcGlowInput, '35');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            circularArcGlowIntensity: 35,
+        });
     });
 
     it('hides fixed top-cap slider controls when the KPI is in bar mode', () => {
