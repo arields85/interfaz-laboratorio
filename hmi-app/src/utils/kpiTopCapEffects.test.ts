@@ -25,16 +25,16 @@ describe('kpiTopCapEffects', () => {
     it('uses the screenshot defaults for top-cap effects and shapes', () => {
         expect(DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS).toEqual({
             mode: 'on-with-failures',
-            auraIntensity: 90,
-            haloIntensity: 0,
+            auraIntensity: 100,
+            haloIntensity: 100,
             highlightIntensity: 68,
-            blur: 37,
-            extension: 11,
-            thickness: 61,
+            blur: 35,
+            extension: 13,
+            thickness: 67,
             pulseIntensity: 0,
-            pulseSpeed: 35,
-            pulseIrregularity: 0,
-            pulseStability: 0,
+            pulseSpeed: 60,
+            pulseIrregularity: 15,
+            pulseStability: 112,
         });
         expect(DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS).toEqual({
             auraIntensity: 45,
@@ -79,6 +79,7 @@ describe('kpiTopCapEffects', () => {
     it('maps the machine-activity stability UI scale to the expanded runtime range', () => {
         expect(resolveMachineActivityPulseStabilityRuntimeValue(100)).toBe(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);
         expect(resolveMachineActivityPulseStabilityVisualValue(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX)).toBe(100);
+        expect(resolveMachineActivityPulseStabilityVisualValue(DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.pulseStability)).toBe(16);
         expect(resolveMachineActivityFixedTopCapEffects({
             pulseStability: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
         }).pulseStability).toBe(MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);

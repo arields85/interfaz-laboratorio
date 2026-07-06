@@ -68,14 +68,15 @@ import {
     DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
     DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
     DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
-    MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX,
+    DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
+    FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_VISUAL_MAX,
     KPI_FIXED_TOP_CAP_PULSE_IRREGULARITY_MAX,
     KPI_FIXED_TOP_CAP_PULSE_SPEED_MAX,
     KPI_TOP_CAP_EFFECT_MAX,
     KPI_TOP_CAP_EFFECT_MIN,
     KPI_TOP_CAP_EFFECT_STEP,
-    resolveMachineActivityPulseStabilityRuntimeValue,
-    resolveMachineActivityPulseStabilityVisualValue,
+    resolveTravelCompletionPulseStabilityRuntimeValue,
+    resolveTravelCompletionPulseStabilityVisualValue,
     resolveMachineActivityFixedTopCapEffects,
     resolveKpiFixedTopCapShape,
     resolveKpiTravelingTopCapEffects,
@@ -205,6 +206,15 @@ const ACTIVITY_ANALYTICS_SURFACE_EFFECT_CARDS = [
     { key: 'donut' as const, label: 'Donut' },
 ];
 type KpiFixedTopCapVisualSliderKey = 'auraIntensity' | 'haloIntensity' | 'blur' | 'extension' | 'thickness';
+type FixedTopCapPulseSliderKey = 'pulseSpeed' | 'pulseIrregularity' | 'pulseStability';
+type FixedTopCapPulseSlider = {
+    key: FixedTopCapPulseSliderKey;
+    label: string;
+    ariaLabel: string;
+    min: number;
+    max: number;
+    step: number;
+};
 const KPI_FIXED_TOP_CAP_SLIDERS: Array<{
     key: KpiFixedTopCapVisualSliderKey;
     label: string;
@@ -216,47 +226,7 @@ const KPI_FIXED_TOP_CAP_SLIDERS: Array<{
     { key: 'extension', label: 'Extensión', ariaLabel: 'Extensión top cap fijo' },
     { key: 'thickness', label: 'Grosor', ariaLabel: 'Grosor top cap fijo' },
 ];
-const KPI_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
-    key: 'pulseSpeed' | 'pulseIrregularity' | 'pulseStability';
-    label: string;
-    ariaLabel: string;
-    min: number;
-    max: number;
-    step: number;
-}> = [
-    {
-        key: 'pulseSpeed',
-        label: 'Velocidad',
-        ariaLabel: 'Velocidad top cap fijo',
-        min: KPI_TOP_CAP_EFFECT_MIN,
-        max: KPI_FIXED_TOP_CAP_PULSE_SPEED_MAX,
-        step: KPI_TOP_CAP_EFFECT_STEP,
-    },
-    {
-        key: 'pulseIrregularity',
-        label: 'Irregularidad',
-        ariaLabel: 'Irregularidad top cap fijo',
-        min: KPI_TOP_CAP_EFFECT_MIN,
-        max: KPI_FIXED_TOP_CAP_PULSE_IRREGULARITY_MAX,
-        step: KPI_TOP_CAP_EFFECT_STEP,
-    },
-    {
-        key: 'pulseStability',
-        label: 'Estabilidad',
-        ariaLabel: 'Estabilidad top cap fijo',
-        min: KPI_TOP_CAP_EFFECT_MIN,
-        max: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX,
-        step: KPI_TOP_CAP_EFFECT_STEP,
-    },
-];
-const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
-    key: 'pulseSpeed' | 'pulseIrregularity' | 'pulseStability';
-    label: string;
-    ariaLabel: string;
-    min: number;
-    max: number;
-    step: number;
-}> = [
+const FIXED_TOP_CAP_PULSE_SLIDERS: FixedTopCapPulseSlider[] = [
     {
         key: 'pulseSpeed',
         label: 'Velocidad',
@@ -278,7 +248,7 @@ const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS: Array<{
         label: 'Duración del parpadeo',
         ariaLabel: 'Duración del parpadeo top cap fijo',
         min: KPI_TOP_CAP_EFFECT_MIN,
-        max: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX,
+        max: FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_VISUAL_MAX,
         step: KPI_TOP_CAP_EFFECT_STEP,
     },
 ];
@@ -290,7 +260,7 @@ const CIRCULAR_GAUGE_VISUAL_SLIDERS = [
         min: 0,
         max: 100,
         step: 1,
-        defaultValue: 100,
+        defaultValue: DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
     },
 ];
 const KPI_TRAVELING_TOP_CAP_SLIDERS: Array<{
@@ -421,7 +391,7 @@ export default function PropertyDock(props: PropertyDockProps) {
             : selectedWidget.displayOptions as MachineActivityDisplayOptions | undefined) ?? {});
         const currentEffects = resolveMachineActivityFixedTopCapEffects(currentDisplayOptions.fixedTopCapEffects);
         const resolvedValue = key === 'pulseStability'
-            ? resolveMachineActivityPulseStabilityRuntimeValue(value)
+            ? resolveTravelCompletionPulseStabilityRuntimeValue(value)
             : value;
 
         onUpdateWidget({
@@ -1611,6 +1581,43 @@ export default function PropertyDock(props: PropertyDockProps) {
             );
         })()
         : null;
+
+    const renderGaugeFixedTopCapSection = () => (
+        <DockSection icon={<Sliders size={11} />} title="Top cap fijo" defaultOpen={false}>
+            <DockCheckboxField
+                label="Recto/Pill"
+                ariaLabel="Recto/Pill top cap fijo"
+                checked={kpiFixedTopCapShape.pill}
+                onChange={(checked) => handleKpiFixedTopCapShapeChange('pill', checked)}
+            />
+            {FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
+                <DockSliderField
+                    key={key}
+                    label={label}
+                    value={key === 'pulseStability'
+                        ? resolveTravelCompletionPulseStabilityVisualValue(kpiFixedTopCapEffects.pulseStability)
+                        : (kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key])}
+                    min={min}
+                    max={max}
+                    step={step}
+                    ariaLabel={ariaLabel}
+                    onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
+                />
+            ))}
+            {KPI_FIXED_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
+                <DockSliderField
+                    key={key}
+                    label={label}
+                    value={kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key]}
+                    min={KPI_TOP_CAP_EFFECT_MIN}
+                    max={KPI_TOP_CAP_EFFECT_MAX}
+                    step={KPI_TOP_CAP_EFFECT_STEP}
+                    ariaLabel={ariaLabel}
+                    onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
+                />
+            ))}
+        </DockSection>
+    );
 
     if (!selectedWidget) {
         return (
@@ -2839,40 +2846,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                         )}
 
                         {isMachineActivity && isCircularGaugeWidget && (
-                            <DockSection icon={<Sliders size={11} />} title="Top cap fijo" defaultOpen={false}>
-                                <DockCheckboxField
-                                    label="Recto/Pill"
-                                    ariaLabel="Recto/Pill top cap fijo"
-                                    checked={kpiFixedTopCapShape.pill}
-                                    onChange={(checked) => handleKpiFixedTopCapShapeChange('pill', checked)}
-                                />
-                                {MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
-                                    <DockSliderField
-                                        key={key}
-                                        label={label}
-                                        value={key === 'pulseStability'
-                                            ? resolveMachineActivityPulseStabilityVisualValue(kpiFixedTopCapEffects.pulseStability)
-                                            : (kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key])}
-                                        min={min}
-                                        max={max}
-                                        step={step}
-                                        ariaLabel={ariaLabel}
-                                        onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
-                                    />
-                                ))}
-                                {KPI_FIXED_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
-                                    <DockSliderField
-                                        key={key}
-                                        label={label}
-                                        value={kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key]}
-                                        min={KPI_TOP_CAP_EFFECT_MIN}
-                                        max={KPI_TOP_CAP_EFFECT_MAX}
-                                        step={KPI_TOP_CAP_EFFECT_STEP}
-                                        ariaLabel={ariaLabel}
-                                        onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
-                                    />
-                                ))}
-                            </DockSection>
+                            renderGaugeFixedTopCapSection()
                         )}
 
                         {isMachineActivity && isCircularGaugeWidget && (
@@ -3046,40 +3020,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                         )}
 
                         {isKpi && isCircularGaugeWidget && (
-                            <DockSection icon={<Sliders size={11} />} title="Top cap fijo" defaultOpen={false}>
-                                <DockCheckboxField
-                                    label="Recto/Pill"
-                                    ariaLabel="Recto/Pill top cap fijo"
-                                    checked={kpiFixedTopCapShape.pill}
-                                    onChange={(checked) => handleKpiFixedTopCapShapeChange('pill', checked)}
-                                />
-                                {KPI_FIXED_TOP_CAP_PULSE_SLIDERS.map(({ key, label, ariaLabel, min, max, step }) => (
-                                    <DockSliderField
-                                        key={key}
-                                        label={label}
-                                        ariaLabel={ariaLabel}
-                                        value={key === 'pulseStability'
-                                            ? resolveMachineActivityPulseStabilityVisualValue(kpiFixedTopCapEffects.pulseStability)
-                                            : (kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key])}
-                                        min={min}
-                                        max={max}
-                                        step={step}
-                                        onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
-                                    />
-                                ))}
-                                {KPI_FIXED_TOP_CAP_SLIDERS.map(({ key, label, ariaLabel }) => (
-                                    <DockSliderField
-                                        key={key}
-                                        label={label}
-                                        value={kpiFixedTopCapEffects[key] ?? DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS[key]}
-                                        min={KPI_TOP_CAP_EFFECT_MIN}
-                                        max={KPI_TOP_CAP_EFFECT_MAX}
-                                        step={KPI_TOP_CAP_EFFECT_STEP}
-                                        ariaLabel={ariaLabel}
-                                        onChange={(value) => handleKpiFixedTopCapEffectChange(key, value)}
-                                    />
-                                ))}
-                            </DockSection>
+                            renderGaugeFixedTopCapSection()
                         )}
 
                         {isKpi && isCircularGaugeWidget && (

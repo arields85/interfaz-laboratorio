@@ -819,7 +819,7 @@ describe('PropertyDock machine-activity', () => {
         });
     });
 
-    it('renders the machine-activity arc glow slider in Visualización with the default current appearance baseline', () => {
+    it('renders the machine-activity arc glow slider in Visualización with the requested default baseline', () => {
         renderPropertyDock({
             type: 'machine-activity',
             title: 'Actividad de Máquina',
@@ -830,8 +830,8 @@ describe('PropertyDock machine-activity', () => {
         const arcGlowInput = within(visualSection).getByRole('textbox', { name: 'Glow arco circular value' });
 
         expect(within(visualSection).getByText('Glow arco')).toBeInTheDocument();
-        expect(arcGlowSlider).toHaveValue('100');
-        expect(arcGlowInput).toHaveValue('100');
+        expect(arcGlowSlider).toHaveValue('50');
+        expect(arcGlowInput).toHaveValue('50');
     });
 
     it('renders simplified fixed top-cap controls for circular machine-activity widgets and persists only the supported final fields', async () => {
@@ -864,10 +864,10 @@ describe('PropertyDock machine-activity', () => {
         expect(within(fixedSection).queryByText('Estabilidad')).not.toBeInTheDocument();
         expect(within(fixedSection).getByText('Duración del parpadeo')).toBeInTheDocument();
         expect(fixedShapeCheckbox).toBeChecked();
-        expect(fixedPulseSpeedSlider).toHaveValue('35');
-        expect(fixedPulseIrregularitySlider).toHaveValue('0');
-        expect(fixedPulseStabilitySlider).toHaveValue('0');
-        expect(fixedPulseStabilityInput).toHaveValue('0');
+        expect(fixedPulseSpeedSlider).toHaveValue('60');
+        expect(fixedPulseIrregularitySlider).toHaveValue('15');
+        expect(fixedPulseStabilitySlider).toHaveValue('16');
+        expect(fixedPulseStabilityInput).toHaveValue('16');
         expect(fixedPulseStabilitySlider).toHaveAttribute('max', '100');
 
         await user.click(fixedShapeCheckbox);
@@ -989,12 +989,8 @@ describe('PropertyDock machine-activity', () => {
 
         expect(within(travelingSection).getByText('Vel. Min')).toBeInTheDocument();
         expect(within(travelingSection).getByText('Vel. Max')).toBeInTheDocument();
-        expect(DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE).toBe(3);
-        expect(DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE).toBe(9);
-        expect(minInput).toHaveValue('3');
-        expect(maxInput).toHaveValue('9');
-        expect(minInput).not.toHaveValue('3.5');
-        expect(maxInput).not.toHaveValue('6.7');
+        expect(minInput).toHaveValue(String(DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE));
+        expect(maxInput).toHaveValue(String(DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE));
         expect(minInput.parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
         expect(maxInput.parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
 
@@ -2866,8 +2862,8 @@ describe('PropertyDock KPI thresholds', () => {
         const shapeCheckbox = within(topCapSection).getByRole('checkbox', { name: 'Recto/Pill top cap fijo' });
         const pulseSpeedSlider = within(topCapSection).getByRole('slider', { name: 'Velocidad top cap fijo' });
         const pulseIrregularitySlider = within(topCapSection).getByRole('slider', { name: 'Irregularidad top cap fijo' });
-        const pulseStabilitySlider = within(topCapSection).getByRole('slider', { name: 'Estabilidad top cap fijo' });
-        const pulseStabilityInput = within(topCapSection).getByRole('textbox', { name: 'Estabilidad top cap fijo value' });
+        const pulseStabilitySlider = within(topCapSection).getByRole('slider', { name: 'Duración del parpadeo top cap fijo' });
+        const pulseStabilityInput = within(topCapSection).getByRole('textbox', { name: 'Duración del parpadeo top cap fijo value' });
         const auraSlider = within(topCapSection).getByRole('slider', { name: 'Aura top cap fijo' });
         const auraValueInput = within(topCapSection).getByRole('textbox', { name: 'Aura top cap fijo value' });
 
@@ -2884,15 +2880,16 @@ describe('PropertyDock KPI thresholds', () => {
         expect(within(topCapSection).queryByRole('slider', { name: 'Brillo top cap fijo' })).not.toBeInTheDocument();
         expect(within(topCapSection).getByText('Velocidad')).toBeInTheDocument();
         expect(within(topCapSection).getByText('Irregularidad')).toBeInTheDocument();
-        expect(within(topCapSection).getByText('Estabilidad')).toBeInTheDocument();
+        expect(within(topCapSection).queryByText('Estabilidad')).not.toBeInTheDocument();
+        expect(within(topCapSection).getByText('Duración del parpadeo')).toBeInTheDocument();
         expect(within(topCapSection).getByText('Blur')).toBeInTheDocument();
         expect(within(topCapSection).getByText('Extensión')).toBeInTheDocument();
         expect(within(topCapSection).getByText('Grosor')).toBeInTheDocument();
         expect(shapeCheckbox).toBeChecked();
-        expect(pulseSpeedSlider).toHaveValue('35');
-        expect(pulseIrregularitySlider).toHaveValue('0');
-        expect(pulseStabilitySlider).toHaveValue('0');
-        expect(pulseStabilityInput).toHaveValue('0');
+        expect(pulseSpeedSlider).toHaveValue('60');
+        expect(pulseIrregularitySlider).toHaveValue('15');
+        expect(pulseStabilitySlider).toHaveValue('16');
+        expect(pulseStabilityInput).toHaveValue('16');
         expect(pulseStabilitySlider).toHaveAttribute('max', '100');
         expect(auraSlider).toHaveAttribute('min', '0');
         expect(auraSlider).toHaveAttribute('max', '100');
@@ -3019,8 +3016,8 @@ describe('PropertyDock KPI thresholds', () => {
         expect(within(travelingSection).getByText('Blur')).toBeInTheDocument();
         expect(within(travelingSection).getByText('Extensión')).toBeInTheDocument();
         expect(within(travelingSection).getByText('Grosor')).toBeInTheDocument();
-        expect(minInput).toHaveValue('3');
-        expect(maxInput).toHaveValue('9');
+        expect(minInput).toHaveValue(String(DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE));
+        expect(maxInput).toHaveValue(String(DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE));
         expect(auraSlider).toHaveAttribute('min', '0');
         expect(auraSlider).toHaveAttribute('max', '100');
         expect(extensionSlider).toHaveAttribute('step', '1');
@@ -3080,8 +3077,8 @@ describe('PropertyDock KPI thresholds', () => {
         const arcGlowInput = within(visualSection).getByRole('textbox', { name: 'Glow arco circular value' });
 
         expect(within(visualSection).getByText('Glow arco')).toBeInTheDocument();
-        expect(arcGlowSlider).toHaveValue('100');
-        expect(arcGlowInput).toHaveValue('100');
+        expect(arcGlowSlider).toHaveValue('50');
+        expect(arcGlowInput).toHaveValue('50');
 
         fireEvent.change(arcGlowSlider, { target: { value: '0' } });
 

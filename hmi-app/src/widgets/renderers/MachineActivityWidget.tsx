@@ -15,7 +15,8 @@ import {
     resolveActivityAnalyticsDonutCenterValueFontSize,
 } from '../../utils/activityAnalyticsWidgetDefaults';
 import {
-    MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
+    FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
     resolveMachineActivityFixedTopCapEffects,
     resolveKpiFixedTopCapShape,
     resolveKpiTravelingTopCapEffects,
@@ -659,12 +660,12 @@ export default function MachineActivityWidget({
                                 circularBaseSegmentLinecap="butt"
                                 animation={gaugeAnimation}
                                 arcOpacity={arcOpacity}
-                                circularArcGlowIntensity={opts.circularArcGlowIntensity ?? 100}
+                                circularArcGlowIntensity={opts.circularArcGlowIntensity ?? DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY}
                                 circularTopCap={{
                                     enabled: true,
                                     staticShape: fixedTopCapShape,
                                     staticEffects: fixedTopCapEffects,
-                                    staticPulseStabilityMax: MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+                                    staticPulseStabilityMax: FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
                                     staticBlinkTrigger: 'travel-completion',
                                     travelingShape: travelingTopCapShape,
                                     travelingEffects: travelingTopCapEffects,

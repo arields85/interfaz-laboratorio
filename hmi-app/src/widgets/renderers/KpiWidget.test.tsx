@@ -6,11 +6,15 @@ import type { KpiWidgetConfig } from '../../domain/admin.types';
 import { STATIC_TOP_CAP_FULL_INTENSITY_PROGRESS } from '../../components/ui/GaugeDisplay';
 import { DEFAULT_GAUGE_VALUE_FONT_SIZE } from '../../utils/activityAnalyticsWidgetDefaults';
 import {
+    DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
     DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
     DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
     DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
     DEFAULT_KPI_TRAVELING_TOP_CAP_SHAPE,
+    FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
     KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
+    resolveFixedTopCapTravelCompletionBlinkDurationSeconds,
+    resolveKpiFixedTopCapEffects,
 } from '../../utils/kpiTopCapEffects';
 import { resolveTravelingTopCapSpeed } from '../../utils/travelingTopCapSpeed';
 import KpiWidget from './KpiWidget';
@@ -454,7 +458,7 @@ describe('KpiWidget', () => {
         expect(within(movingTopCap).getByTestId('gauge-circular-top-cap-aura').getAttribute('filter')).toMatch(/^url\(#.+-traveling-top-cap-glow\)$/);
     });
 
-    it('forces legacy KPI fixed blink mode/intensity to the simplified runtime contract while preserving speed/irregularity/stability', () => {
+    it('forces legacy KPI fixed blink mode/intensity to the simplified travel-completion runtime contract while preserving speed/irregularity/stability as duration', () => {
         render(
             <KpiWidget
                 widget={makeWidget({
@@ -489,10 +493,58 @@ describe('KpiWidget', () => {
         expect(staticBlinkStack).toHaveAttribute('data-blink-speed', '61');
         expect(staticBlinkStack).toHaveAttribute('data-blink-irregularity', '47');
         expect(staticBlinkStack).toHaveAttribute('data-blink-stability', '700');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-trigger', 'travel-completion');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-duration', String(resolveFixedTopCapTravelCompletionBlinkDurationSeconds(
+            FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
+            FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
+        )));
+        expect(staticBlinkStack).toHaveAttribute('data-burst-active', 'false');
+        expect(staticBlinkStack.querySelector('animate')).toBeNull();
         expect(movingTopCap).toHaveAttribute(
             'data-speed',
             resolveTravelingTopCapSpeed(0.11, { min: 50, max: 400 }).toFixed(2),
         );
+
+        const travelDurationMs = Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(travelDurationMs) + 1);
+        });
+
+        expect(screen.getByTestId('gauge-circular-static-top-cap-blink-stack')).toHaveAttribute('data-burst-active', 'true');
+    });
+
+    it('keeps KPI fixed top-cap duration at zero with legacy zero stability so traveling completion does not create a visible burst', () => {
+        render(
+            <KpiWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        min: 0,
+                        max: 10,
+                        fixedTopCapEffects: {
+                            ...DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
+                            pulseStability: 0,
+                        },
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        const travelDurationMs = Number.parseFloat(movingTopCap.getAttribute('data-duration') ?? '0') * 1000;
+
+        act(() => {
+            vi.advanceTimersByTime(Math.ceil(travelDurationMs) + 1);
+        });
+
+        const staticBlinkStack = screen.getByTestId('gauge-circular-static-top-cap-blink-stack');
+
+        expect(staticBlinkStack).toHaveAttribute('data-blink-trigger', 'travel-completion');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-duration', '0');
+        expect(staticBlinkStack).toHaveAttribute('data-burst-active', 'false');
     });
 
     it('enables simplified fixed blink defaults for KPI circular widgets when legacy configs omit mode and intensity', () => {
@@ -521,9 +573,51 @@ describe('KpiWidget', () => {
         expect(staticBlinkStack).toHaveAttribute('data-blink-speed', '72');
         expect(staticBlinkStack).toHaveAttribute('data-blink-irregularity', '44');
         expect(staticBlinkStack).toHaveAttribute('data-blink-enabled', 'true');
-        expect(staticBlinkStack).toHaveAttribute('data-blink-trigger', 'autonomous');
+        expect(staticBlinkStack).toHaveAttribute('data-blink-trigger', 'travel-completion');
         expect(staticBlinkStack).toHaveAttribute('data-blink-trigger-key', '0');
-        expect(staticBlinkStack.querySelector('animate')).not.toBeNull();
+        expect(staticBlinkStack).toHaveAttribute('data-blink-duration', String(resolveFixedTopCapTravelCompletionBlinkDurationSeconds(
+            DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.pulseStability,
+            FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
+        )));
+        expect(staticBlinkStack).toHaveAttribute('data-burst-active', 'false');
+        expect(staticBlinkStack.querySelector('animate')).toBeNull();
+    });
+
+    it('uses requested circular defaults when KPI display options omit top-cap and arc glow values', () => {
+        const expectedFixedTopCapEffects = resolveKpiFixedTopCapEffects();
+        const expectedArcGlowOpacity = String(Number((DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY / 100).toFixed(2)));
+
+        render(
+            <KpiWidget
+                widget={makeWidget()}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(1.1)}
+            />,
+        );
+
+        const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
+        const blinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
+        const arcGlowSegment = screen.getAllByTestId('gauge-circular-arc-glow-segment')[0];
+
+        expect(staticTopCap).toHaveAttribute('data-shape-pill', 'true');
+        expect(staticTopCap).toHaveAttribute('data-effect-aura', String(expectedFixedTopCapEffects.auraIntensity));
+        expect(staticTopCap).toHaveAttribute('data-effect-halo', String(expectedFixedTopCapEffects.haloIntensity));
+        expect(staticTopCap).toHaveAttribute('data-effect-blur', String(expectedFixedTopCapEffects.blur));
+        expect(staticTopCap).toHaveAttribute('data-effect-extension', String(expectedFixedTopCapEffects.extension));
+        expect(staticTopCap).toHaveAttribute('data-effect-thickness', String(expectedFixedTopCapEffects.thickness));
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-speed', String(expectedFixedTopCapEffects.pulseSpeed));
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-irregularity', String(expectedFixedTopCapEffects.pulseIrregularity));
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-stability', String(expectedFixedTopCapEffects.pulseStability));
+        expect(blinkStack).toHaveAttribute('data-blink-duration', String(resolveFixedTopCapTravelCompletionBlinkDurationSeconds(
+            expectedFixedTopCapEffects.pulseStability,
+            FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
+        )));
+        expect(movingTopCap).toHaveAttribute(
+            'data-speed',
+            resolveTravelingTopCapSpeed(0.11).toFixed(2),
+        );
+        expect(arcGlowSegment).toHaveStyle({ opacity: expectedArcGlowOpacity });
     });
 
     it('keeps the fixed top-cap shape configurable while forcing the traveling top cap to pill', () => {

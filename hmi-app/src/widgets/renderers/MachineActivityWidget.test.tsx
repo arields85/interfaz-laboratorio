@@ -6,9 +6,14 @@ import type { MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import MachineActivityWidget, { resolveActivityVisualAnimationDuration } from './MachineActivityWidget';
 import {
+    DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
+    FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
     KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX,
     resolveKpiFixedTopCapBlinkProfile,
+    resolveMachineActivityFixedTopCapEffects,
+    resolveMachineActivityTravelCompletionBlinkDurationSeconds,
 } from '../../utils/kpiTopCapEffects';
+import { resolveTravelingTopCapSpeed } from '../../utils/travelingTopCapSpeed';
 
 const equipmentMap = new Map<string, EquipmentSummary>();
 
@@ -1245,6 +1250,9 @@ describe('MachineActivityWidget', () => {
     });
 
     it('defaults machine-activity fixed blink to on-with-failures at max intensity', () => {
+        const expectedFixedTopCapEffects = resolveMachineActivityFixedTopCapEffects();
+        const expectedArcGlowOpacity = String(Number((DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY / 100).toFixed(2)));
+
         render(
             <MachineActivityWidget
                 widget={makeWidget({
@@ -1263,13 +1271,33 @@ describe('MachineActivityWidget', () => {
         );
 
         const staticTopCap = screen.getByTestId('gauge-circular-static-top-cap');
+        const movingTopCap = screen.getByTestId('gauge-circular-top-cap');
         const blinkStack = within(staticTopCap).getByTestId('gauge-circular-static-top-cap-blink-stack');
 
         expect(staticTopCap).toHaveAttribute('data-effect-blink-mode', 'on-with-failures');
         expect(staticTopCap).toHaveAttribute('data-effect-pulse-intensity', String(KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX));
+        expect(staticTopCap).toHaveAttribute('data-effect-aura', String(expectedFixedTopCapEffects.auraIntensity));
+        expect(staticTopCap).toHaveAttribute('data-effect-halo', String(expectedFixedTopCapEffects.haloIntensity));
+        expect(staticTopCap).toHaveAttribute('data-effect-blur', String(expectedFixedTopCapEffects.blur));
+        expect(staticTopCap).toHaveAttribute('data-effect-extension', String(expectedFixedTopCapEffects.extension));
+        expect(staticTopCap).toHaveAttribute('data-effect-thickness', String(expectedFixedTopCapEffects.thickness));
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-speed', String(expectedFixedTopCapEffects.pulseSpeed));
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-irregularity', String(expectedFixedTopCapEffects.pulseIrregularity));
+        expect(staticTopCap).toHaveAttribute('data-effect-pulse-stability', String(expectedFixedTopCapEffects.pulseStability));
         expect(blinkStack).toHaveAttribute('data-blink-enabled', 'true');
         expect(blinkStack).toHaveAttribute('data-blink-trigger', 'travel-completion');
+        expect(blinkStack).toHaveAttribute('data-blink-duration', String(resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+            expectedFixedTopCapEffects.pulseStability,
+            FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
+        )));
+        expect(movingTopCap).toHaveAttribute(
+            'data-speed',
+            resolveTravelingTopCapSpeed(0.3).toFixed(2),
+        );
         expect(blinkStack.querySelector('animate')).toBeNull();
+
+        const arcGlowSegment = screen.getAllByTestId('gauge-circular-arc-glow-segment')[0];
+        expect(arcGlowSegment).toHaveStyle({ opacity: expectedArcGlowOpacity });
     });
 
     it('triggers the machine-activity fixed blink burst only after the traveling top cap completes its route', () => {

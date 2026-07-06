@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type ComponentProps, type CSSProperties } from 'react';
 import type { KpiWidgetConfig, ThresholdRule } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
@@ -12,7 +12,8 @@ import {
     resolveActivityAnalyticsDonutCenterValueFontSize,
 } from '../../utils/activityAnalyticsWidgetDefaults';
 import {
-    MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
+    FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
     resolveMachineActivityFixedTopCapEffects,
     resolveKpiFixedTopCapShape,
     resolveKpiTravelingTopCapEffects,
@@ -93,6 +94,52 @@ interface KpiWidgetProps {
     machines?: ContractMachine[];
     isLoadingData?: boolean;
     className?: string;
+}
+
+type CircularTopCapConfig = NonNullable<ComponentProps<typeof GaugeDisplay>['circularTopCap']>;
+
+type CircularKpiProps = {
+    value: number | null;
+    min: number;
+    max: number;
+    unit?: string;
+    dynamicColor?: boolean;
+    thresholds?: ThresholdRule[];
+    valueTextStyle: CSSProperties;
+    fixedTopCapEffects: ReturnType<typeof resolveMachineActivityFixedTopCapEffects>;
+    fixedTopCapShape: ReturnType<typeof resolveKpiFixedTopCapShape>;
+    travelingTopCapEffects: ReturnType<typeof resolveKpiTravelingTopCapEffects>;
+    travelingTopCapShape: ReturnType<typeof resolveKpiTravelingTopCapShape>;
+    circularArcGlowIntensity: number;
+    travelingTopCapSpeed: ReturnType<typeof resolveStoredTravelingTopCapActualSpeedRange>;
+    staticPulseStabilityMax: number;
+};
+
+function createCircularTopCapConfig({
+    fixedTopCapEffects,
+    fixedTopCapShape,
+    travelingTopCapEffects,
+    travelingTopCapShape,
+    travelingTopCapSpeed,
+    staticPulseStabilityMax,
+}: Pick<CircularKpiProps,
+    | 'fixedTopCapEffects'
+    | 'fixedTopCapShape'
+    | 'travelingTopCapEffects'
+    | 'travelingTopCapShape'
+    | 'travelingTopCapSpeed'
+    | 'staticPulseStabilityMax'
+>): CircularTopCapConfig {
+    return {
+        enabled: true,
+        staticShape: fixedTopCapShape,
+        staticEffects: fixedTopCapEffects,
+        staticPulseStabilityMax,
+        staticBlinkTrigger: 'travel-completion',
+        travelingShape: travelingTopCapShape,
+        travelingEffects: travelingTopCapEffects,
+        travelingSpeed: travelingTopCapSpeed,
+    };
 }
 
 export default function KpiWidget({ widget, equipmentMap, machines, isLoadingData, className }: KpiWidgetProps) {
@@ -257,7 +304,22 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
             >
                 <div className="w-full h-full min-h-0">
                     {mode === 'circular' ? (
-                        <CircularKpi value={displayedValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} fixedTopCapEffects={fixedTopCapEffects} fixedTopCapShape={fixedTopCapShape} travelingTopCapEffects={travelingTopCapEffects} travelingTopCapShape={travelingTopCapShape} circularArcGlowIntensity={opts?.circularArcGlowIntensity ?? 100} travelingTopCapSpeed={travelingTopCapSpeed} staticPulseStabilityMax={MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX} />
+                        <CircularKpi
+                            value={displayedValue}
+                            min={min}
+                            max={max}
+                            unit={unit}
+                            dynamicColor={!!opts?.dynamicColor}
+                            thresholds={widget.thresholds}
+                            valueTextStyle={valueTextStyle}
+                            fixedTopCapEffects={fixedTopCapEffects}
+                            fixedTopCapShape={fixedTopCapShape}
+                            travelingTopCapEffects={travelingTopCapEffects}
+                            travelingTopCapShape={travelingTopCapShape}
+                            circularArcGlowIntensity={opts?.circularArcGlowIntensity ?? DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY}
+                            travelingTopCapSpeed={travelingTopCapSpeed}
+                            staticPulseStabilityMax={FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX}
+                        />
                     ) : (
                         <BarKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
                     )}
@@ -343,12 +405,23 @@ function getGaugeVisuals(value: number | null, dynamicColor?: boolean, threshold
     };
 }
 
-function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle, fixedTopCapEffects, fixedTopCapShape, travelingTopCapEffects, travelingTopCapShape, circularArcGlowIntensity, travelingTopCapSpeed, staticPulseStabilityMax }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties, fixedTopCapEffects: ReturnType<typeof resolveMachineActivityFixedTopCapEffects>, fixedTopCapShape: ReturnType<typeof resolveKpiFixedTopCapShape>, travelingTopCapEffects: ReturnType<typeof resolveKpiTravelingTopCapEffects>, travelingTopCapShape: ReturnType<typeof resolveKpiTravelingTopCapShape>, circularArcGlowIntensity: number, travelingTopCapSpeed: ReturnType<typeof resolveStoredTravelingTopCapActualSpeedRange>, staticPulseStabilityMax: number }) {
+function CircularKpi(props: CircularKpiProps) {
+    const {
+        value,
+        min,
+        max,
+        unit,
+        dynamicColor,
+        thresholds,
+        valueTextStyle,
+        circularArcGlowIntensity,
+    } = props;
     const safeValue = value ?? min;
     const clamp = Math.min(Math.max(safeValue, min), max);
     const range = max - min;
     const normalizedValue = range === 0 ? 0 : (clamp - min) / range;
     const gaugeVisuals = getGaugeVisuals(value, dynamicColor, thresholds);
+    const circularTopCapConfig = createCircularTopCapConfig(props);
 
     return (
         <div className="relative flex items-center justify-center w-full h-full min-h-[140px]">
@@ -359,7 +432,7 @@ function CircularKpi({ value, min, max, unit, dynamicColor, thresholds, valueTex
                 mode="circular"
                 circularBaseSegmentLinecap="butt"
                 circularArcGlowIntensity={circularArcGlowIntensity}
-                circularTopCap={{ enabled: true, staticShape: fixedTopCapShape, staticEffects: fixedTopCapEffects, staticPulseStabilityMax, travelingShape: travelingTopCapShape, travelingEffects: travelingTopCapEffects, travelingSpeed: travelingTopCapSpeed }}
+                circularTopCap={circularTopCapConfig}
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-white leading-none mb-1" style={valueTextStyle}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>

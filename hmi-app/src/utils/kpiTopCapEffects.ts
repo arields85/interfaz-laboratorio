@@ -7,21 +7,24 @@ export const KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX = 200;
 export const KPI_FIXED_TOP_CAP_PULSE_SPEED_MAX = 200;
 export const KPI_FIXED_TOP_CAP_PULSE_IRREGULARITY_MAX = 100;
 export const KPI_FIXED_TOP_CAP_PULSE_STABILITY_MAX = 300;
-export const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX = 700;
-export const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX = 100;
+export const FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX = 700;
+export const FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_VISUAL_MAX = 100;
+export const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX = FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX;
+export const MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX = FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_VISUAL_MAX;
+export const DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY = 50;
 
 export const DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS: Required<KpiFixedTopCapEffects> = {
     mode: 'on-with-failures',
-    auraIntensity: 90,
-    haloIntensity: 0,
+    auraIntensity: 100,
+    haloIntensity: 100,
     highlightIntensity: 68,
-    blur: 37,
-    extension: 11,
-    thickness: 61,
+    blur: 35,
+    extension: 13,
+    thickness: 67,
     pulseIntensity: 0,
-    pulseSpeed: 35,
-    pulseIrregularity: 0,
-    pulseStability: 0,
+    pulseSpeed: 60,
+    pulseIrregularity: 15,
+    pulseStability: 112,
 };
 
 export const DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS: Required<KpiTravelingTopCapEffects> = {
@@ -74,25 +77,28 @@ function clampPulseEffectValue(value: number | undefined, fallback: number, maxi
     return Math.min(maximum, Math.max(KPI_TOP_CAP_EFFECT_MIN, Math.round(resolvedValue)));
 }
 
-export function resolveMachineActivityPulseStabilityVisualValue(value: number | undefined) {
+export function resolveTravelCompletionPulseStabilityVisualValue(value: number | undefined) {
     const resolvedValue = clampPulseEffectValue(
         value,
         DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.pulseStability,
-        MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+        FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
     );
 
-    return Math.round((resolvedValue / MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX) * MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX);
+    return Math.round((resolvedValue / FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX) * FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_VISUAL_MAX);
 }
 
-export function resolveMachineActivityPulseStabilityRuntimeValue(value: number | undefined) {
+export function resolveTravelCompletionPulseStabilityRuntimeValue(value: number | undefined) {
     const visualValue = clampPulseEffectValue(
         value,
         DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.pulseStability,
-        MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX,
+        FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_VISUAL_MAX,
     );
 
-    return Math.round((visualValue / MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_VISUAL_MAX) * MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);
+    return Math.round((visualValue / FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_VISUAL_MAX) * FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX);
 }
+
+export const resolveMachineActivityPulseStabilityVisualValue = resolveTravelCompletionPulseStabilityVisualValue;
+export const resolveMachineActivityPulseStabilityRuntimeValue = resolveTravelCompletionPulseStabilityRuntimeValue;
 
 function resolveFixedTopCapBlinkMode(mode: KpiFixedTopCapBlinkMode | undefined): KpiFixedTopCapBlinkMode {
     return mode === 'off-with-flashes' ? mode : DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.mode;
@@ -157,7 +163,7 @@ export function resolveKpiFixedTopCapEffects(
 export function resolveMachineActivityFixedTopCapEffects(
     effects?: KpiFixedTopCapEffects,
 ): Required<KpiFixedTopCapEffects> {
-    const resolvedEffects = resolveKpiFixedTopCapEffects(effects, MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX);
+    const resolvedEffects = resolveKpiFixedTopCapEffects(effects, FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX);
 
     return {
         ...resolvedEffects,
@@ -206,9 +212,9 @@ export function resolveKpiFixedTopCapBlinkDurationSeconds(
     ).toFixed(2));
 }
 
-export function resolveMachineActivityTravelCompletionBlinkDurationSeconds(
+export function resolveFixedTopCapTravelCompletionBlinkDurationSeconds(
     pulseStability: number = DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS.pulseStability,
-    pulseStabilityMax: number = MACHINE_ACTIVITY_FIXED_TOP_CAP_PULSE_STABILITY_MAX,
+    pulseStabilityMax: number = FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
 ) {
     if (!Number.isFinite(pulseStabilityMax) || pulseStabilityMax <= 0) {
         return 0;
@@ -222,6 +228,8 @@ export function resolveMachineActivityTravelCompletionBlinkDurationSeconds(
 
     return Number((normalizedStability * 5).toFixed(2));
 }
+
+export const resolveMachineActivityTravelCompletionBlinkDurationSeconds = resolveFixedTopCapTravelCompletionBlinkDurationSeconds;
 
 function clampUnit(value: number, minimum = 0, maximum = 1) {
     return Math.min(maximum, Math.max(minimum, Number(value.toFixed(3))));

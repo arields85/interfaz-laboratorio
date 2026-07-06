@@ -66,6 +66,14 @@ import {
     normalizeDashboardViews,
 } from '../../utils/dashboardViews';
 import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
+import {
+    DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
+    DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
+} from '../../utils/kpiTopCapEffects';
+import {
+    DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE,
+    DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE,
+} from '../../utils/travelingTopCapSpeed';
 
 const DASHBOARD_BUILDER_WARNING_SLOT_CLS = 'flex w-52 justify-end';
 const DASHBOARD_BUILDER_DIRTY_SAVE_BUTTON_CLS = [
@@ -914,6 +922,10 @@ export default function DashboardBuilderPage() {
                         displayOptions: {
                             icon: defaultIcon,
                             unitOverride: false,
+                            circularArcGlowIntensity: DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
+                            travelingTopCapMinSpeed: DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE,
+                            travelingTopCapMaxSpeed: DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE,
+                            travelingTopCapEffects: DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
                         },
                     }
                 : type === 'metric-card'
@@ -967,6 +979,10 @@ export default function DashboardBuilderPage() {
                                 showPowerSubtext: true,
                                 showDynamicColor: true,
                                 showStateAnimation: true,
+                                circularArcGlowIntensity: DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
+                                travelingTopCapMinSpeed: DEFAULT_TRAVELING_TOP_CAP_MIN_SPEED_SCALE,
+                                travelingTopCapMaxSpeed: DEFAULT_TRAVELING_TOP_CAP_MAX_SPEED_SCALE,
+                                travelingTopCapEffects: DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
                                 labelStopped: 'Detenida',
                                 labelCalibrating: 'Setup',
                                 labelProducing: 'Produciendo',
