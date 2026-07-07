@@ -86,6 +86,23 @@ function makeMachines(value: number | null): ContractMachine[] {
     }];
 }
 
+function makeMachinesWithUnit(value: number | null, unit?: string): ContractMachine[] {
+    return [{
+        unitId: 101,
+        name: 'Extrusora 101',
+        status: 'online',
+        lastSuccess: '2026-04-23T22:00:00.000Z',
+        ageMs: 0,
+        values: {
+            activePower: {
+                value,
+                unit,
+                timestamp: '2026-04-23T22:00:00.000Z',
+            },
+        },
+    }];
+}
+
 function makeEquipmentMap(): Map<string, EquipmentSummary> {
     return new Map<string, EquipmentSummary>([[
         'asset-1',
@@ -373,6 +390,31 @@ describe('MachineActivityWidget', () => {
         expect(screen.getByText('%')).toBeInTheDocument();
         expect(screen.getByText('0.10 kW')).toBeInTheDocument();
         expect(screen.queryByText('0.10 %')).not.toBeInTheDocument();
+    });
+
+    it('keeps the real power fallback unit visible when the live binding provides no unit metadata', () => {
+        render(
+            <MachineActivityWidget
+                widget={makeWidget({
+                    binding: {
+                        mode: 'real_variable',
+                        bindingVersion: 'node-red-v1',
+                        machineId: 101,
+                        variableKey: 'activePower',
+                    },
+                    displayOptions: {
+                        kpiMode: 'circular',
+                        unitOverride: false,
+                    },
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachinesWithUnit(0.1)}
+            />,
+        );
+
+        expect(screen.getByText('kW')).toBeInTheDocument();
+        expect(screen.getByText('0.10 kW')).toBeInTheDocument();
+        expect(screen.queryByText('%')).not.toBeInTheDocument();
     });
 
     it('refreshes the live unit when the bound variable changes and unitOverride is disabled', () => {

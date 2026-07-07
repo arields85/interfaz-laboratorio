@@ -5,6 +5,7 @@ import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { AlertHistoryEntry } from '../../domain/alertHistory.types';
 import { alertHistoryStorage } from '../../services/AlertHistoryStorageService';
+import { formatAlertHistoryAge, formatAlertHistoryValue } from '../../utils/alertHistoryFormatting';
 import { evaluateDashboardWidgets } from '../resolvers/alertHistoryEvaluator';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 
@@ -321,10 +322,7 @@ function AlertEntryRow({ entry }, ref) {
                         className="font-mono"
                         style={{ color: 'var(--color-industrial-muted)' }}
                     >
-                        Valor: {typeof entry.value === 'number' && entry.value % 1 !== 0
-                            ? entry.value.toFixed(2)
-                            : entry.value}
-                        {entry.unit ? ` ${entry.unit}` : ''}
+                        Valor: {formatAlertHistoryValue(entry.value, entry.unit)}
                     </span>
                 </div>
             )}
@@ -360,7 +358,7 @@ function RelativeTime({ iso }: { iso: string }) {
     const [refreshTick, setRefreshTick] = useState(0);
     const label = useMemo(() => {
         void refreshTick;
-        return formatRelative(iso);
+        return formatAlertHistoryAge(iso);
     }, [iso, refreshTick]);
 
     useEffect(() => {
@@ -369,21 +367,4 @@ function RelativeTime({ iso }: { iso: string }) {
     }, [iso]);
 
     return <>{label}</>;
-}
-
-function formatRelative(iso: string): string {
-    const diffMs = Date.now() - new Date(iso).getTime();
-    const diffSec = Math.floor(diffMs / 1000);
-
-    if (diffSec < 60) return 'hace un momento';
-    if (diffSec < 3600) {
-        const mins = Math.floor(diffSec / 60);
-        return `hace ${mins} min`;
-    }
-    if (diffSec < 86400) {
-        const hours = Math.floor(diffSec / 3600);
-        return `hace ${hours}h`;
-    }
-    const days = Math.floor(diffSec / 86400);
-    return `hace ${days}d`;
 }

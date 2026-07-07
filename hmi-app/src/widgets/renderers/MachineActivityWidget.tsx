@@ -23,6 +23,7 @@ import {
     resolveKpiTravelingTopCapShape,
 } from '../../utils/kpiTopCapEffects';
 import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
+import { resolveMachineActivityUnits } from '../utils/machineActivityRuntime';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     Gauge,
@@ -232,19 +233,13 @@ export default function MachineActivityWidget({
         fontSize: `${valueFontSizeOverride}px`,
     };
     const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
-    const resolvedUnit = resolved.unit?.trim() ?? '';
-    const bindingUnit = widget.binding?.unit?.trim() ?? '';
-    const customUnit = opts.unit?.trim() ?? '';
-    const simulatedUnit = bindingUnit || customUnit;
-    const liveUnit = isSimulatedBinding
-        ? simulatedUnit
-        : (resolvedUnit || bindingUnit);
-    const displayUnit = opts.unitOverride
-        ? (isSimulatedBinding ? (simulatedUnit || '%') : (customUnit || '%'))
-        : (liveUnit || 'kW');
-    const realUnit = isSimulatedBinding
-        ? (simulatedUnit || 'kW')
-        : (liveUnit || 'kW');
+    const { displayUnit, realUnit } = resolveMachineActivityUnits({
+        isSimulatedBinding,
+        resolvedUnit: resolved.unit,
+        bindingUnit: widget.binding?.unit,
+        customUnit: opts.unit,
+        unitOverride: opts.unitOverride,
+    });
     const fixedTopCapEffects = resolveMachineActivityFixedTopCapEffects(opts.fixedTopCapEffects);
     const fixedTopCapShape = resolveKpiFixedTopCapShape(opts.fixedTopCapShape);
     const travelingTopCapEffects = resolveKpiTravelingTopCapEffects(opts.travelingTopCapEffects);

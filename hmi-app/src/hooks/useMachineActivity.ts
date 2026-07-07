@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { MachineActivityDisplayOptions, ProductiveState } from '../domain/admin.types';
+import { calculateActivityIndex, determineProductiveState, getStateVisuals, smoothValue, type StateVisuals } from '../widgets/utils/machineActivity';
 import {
-    calculateActivityIndex,
-    determineProductiveState,
-    getStateVisuals,
-    smoothValue,
-    type StateVisuals,
-} from '../widgets/utils/machineActivity';
+    coerceMachineActivityRawValue,
+    initializeMachineActivityState,
+    MACHINE_ACTIVITY_DEFAULTS,
+    resolveMachineActivityStateLabel,
+} from '../widgets/utils/machineActivityRuntime';
 
 export interface MachineActivityResult {
     activityIndex: number;
@@ -30,44 +30,6 @@ interface MachineActivityInitialization {
     pendingSince: number | null;
     lastProcessedRawPower: number | null;
     result: MachineActivityResult;
-}
-
-const DEFAULTS = {
-    thresholdStopped: 0.15,
-    thresholdProducing: 0.25,
-    hysteresis: 0.05,
-    confirmationTime: 2000,
-    smoothingWindow: 5,
-    powerMin: 0,
-    powerMax: 1,
-    labelStopped: 'Detenida',
-    labelCalibrating: 'Setup',
-    labelProducing: 'Produciendo',
-} as const;
-
-function coerceRawValue(rawValue: number | string | null | undefined): number | null {
-    if (rawValue == null) {
-        return null;
-    }
-
-    if (typeof rawValue === 'number') {
-        return Number.isNaN(rawValue) ? null : rawValue;
-    }
-
-    const parsed = parseFloat(rawValue);
-    return Number.isNaN(parsed) ? null : parsed;
-}
-
-function resolveStateLabel(state: ProductiveState, displayOptions: MachineActivityDisplayOptions): string {
-    if (state === 'stopped') {
-        return displayOptions.labelStopped ?? DEFAULTS.labelStopped;
-    }
-
-    if (state === 'calibrating') {
-        return displayOptions.labelCalibrating ?? DEFAULTS.labelCalibrating;
-    }
-
-    return displayOptions.labelProducing ?? DEFAULTS.labelProducing;
 }
 
 function areResultsEqual(previous: MachineActivityResult, next: MachineActivityResult): boolean {
@@ -94,7 +56,7 @@ function buildResult(
     pendingSinceRef: MutableRefObject<number | null>,
     lastProcessedRawPowerRef: MutableRefObject<number | null>,
 ): MachineActivityResult {
-    const rawPower = coerceRawValue(rawValue);
+    const rawPower = coerceMachineActivityRawValue(rawValue);
     const isSimulated = options.simulated === true;
 
     if (rawPower === null) {
@@ -117,7 +79,7 @@ function buildResult(
 
     const smoothingWindow = isSimulated
         ? 1
-        : Math.max(1, displayOptions.smoothingWindow ?? DEFAULTS.smoothingWindow);
+        : Math.max(1, displayOptions.smoothingWindow ?? MACHINE_ACTIVITY_DEFAULTS.smoothingWindow);
 
     if (lastProcessedRawPowerRef.current !== rawPower) {
         valueBufferRef.current = [...(valueBufferRef.current ?? []), rawPower].slice(-smoothingWindow);
@@ -130,14 +92,14 @@ function buildResult(
     const candidateState = determineProductiveState(
         smoothedPower,
         {
-            stopped: displayOptions.thresholdStopped ?? DEFAULTS.thresholdStopped,
-            producing: displayOptions.thresholdProducing ?? DEFAULTS.thresholdProducing,
+            stopped: displayOptions.thresholdStopped ?? MACHINE_ACTIVITY_DEFAULTS.thresholdStopped,
+            producing: displayOptions.thresholdProducing ?? MACHINE_ACTIVITY_DEFAULTS.thresholdProducing,
         },
-        displayOptions.hysteresis ?? DEFAULTS.hysteresis,
+        displayOptions.hysteresis ?? MACHINE_ACTIVITY_DEFAULTS.hysteresis,
         confirmedStateRef.current ?? 'stopped',
     );
 
-    const confirmationTime = isSimulated ? 0 : (displayOptions.confirmationTime ?? DEFAULTS.confirmationTime);
+    const confirmationTime = isSimulated ? 0 : (displayOptions.confirmationTime ?? MACHINE_ACTIVITY_DEFAULTS.confirmationTime);
     const now = Date.now();
 
     if (isSimulated) {
@@ -159,15 +121,15 @@ function buildResult(
     const productiveState = confirmedStateRef.current;
     const activityIndex = calculateActivityIndex(
         smoothedPower,
-        displayOptions.powerMin ?? DEFAULTS.powerMin,
-        displayOptions.powerMax ?? DEFAULTS.powerMax,
+        displayOptions.powerMin ?? MACHINE_ACTIVITY_DEFAULTS.powerMin,
+        displayOptions.powerMax ?? MACHINE_ACTIVITY_DEFAULTS.powerMax,
     );
     const finalActivityIndex = productiveState === 'stopped' ? 0 : activityIndex;
 
     return {
         activityIndex: finalActivityIndex,
         productiveState,
-        stateLabel: resolveStateLabel(productiveState, displayOptions),
+        stateLabel: resolveMachineActivityStateLabel(productiveState, displayOptions),
         stateVisuals: getStateVisuals(productiveState),
         smoothedPower,
         rawPower,
@@ -180,79 +142,7 @@ function initializeMachineActivity(
     displayOptions: MachineActivityDisplayOptions,
     options: UseMachineActivityOptions,
 ): MachineActivityInitialization {
-    const rawPower = coerceRawValue(rawValue);
-    const isSimulated = options.simulated === true;
-
-    if (rawPower === null) {
-        return {
-            valueBuffer: [],
-            confirmedState: 'stopped',
-            pendingState: null,
-            pendingSince: null,
-            lastProcessedRawPower: null,
-            result: {
-                activityIndex: 0,
-                productiveState: 'stopped',
-                stateLabel: 'Sin datos',
-                stateVisuals: getStateVisuals('stopped'),
-                smoothedPower: 0,
-                rawPower: null,
-                isValid: false,
-            },
-        };
-    }
-
-    const smoothingWindow = isSimulated
-        ? 1
-        : Math.max(1, displayOptions.smoothingWindow ?? DEFAULTS.smoothingWindow);
-    const valueBuffer = [rawPower].slice(-smoothingWindow);
-    const smoothedPower = isSimulated
-        ? rawPower
-        : smoothValue(valueBuffer, smoothingWindow);
-    let confirmedState: ProductiveState = 'stopped';
-    let pendingState: ProductiveState | null = null;
-    let pendingSince: number | null = null;
-
-    const candidateState = determineProductiveState(
-        smoothedPower,
-        {
-            stopped: displayOptions.thresholdStopped ?? DEFAULTS.thresholdStopped,
-            producing: displayOptions.thresholdProducing ?? DEFAULTS.thresholdProducing,
-        },
-        displayOptions.hysteresis ?? DEFAULTS.hysteresis,
-        confirmedState,
-    );
-
-    if (isSimulated) {
-        confirmedState = candidateState;
-    } else if (candidateState !== confirmedState) {
-        pendingState = candidateState;
-        pendingSince = Date.now();
-    }
-
-    const activityIndex = calculateActivityIndex(
-        smoothedPower,
-        displayOptions.powerMin ?? DEFAULTS.powerMin,
-        displayOptions.powerMax ?? DEFAULTS.powerMax,
-    );
-    const productiveState = confirmedState;
-
-    return {
-        valueBuffer,
-        confirmedState,
-        pendingState,
-        pendingSince,
-        lastProcessedRawPower: rawPower,
-        result: {
-            activityIndex: productiveState === 'stopped' ? 0 : activityIndex,
-            productiveState,
-            stateLabel: resolveStateLabel(productiveState, displayOptions),
-            stateVisuals: getStateVisuals(productiveState),
-            smoothedPower,
-            rawPower,
-            isValid: true,
-        },
-    };
+    return initializeMachineActivityState(rawValue, displayOptions, options);
 }
 
 export function useMachineActivity(
@@ -320,7 +210,7 @@ export function useMachineActivity(
 
         const confirmationTime = simulated === true
             ? 0
-            : (displayOptions.confirmationTime ?? DEFAULTS.confirmationTime);
+            : (displayOptions.confirmationTime ?? MACHINE_ACTIVITY_DEFAULTS.confirmationTime);
         const elapsed = Date.now() - pendingSinceRef.current;
         const remaining = Math.max(confirmationTime - elapsed, 0);
         const timeoutId = window.setTimeout(() => {
