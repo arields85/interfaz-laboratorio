@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -57,6 +57,8 @@ vi.mock('../../services/HierarchyStorageService', () => ({
 }));
 
 vi.mock('../../services/dashboardPortabilityService', () => ({
+    buildPortableDashboardFileName: (dashboardName: string) => `portable-${dashboardName.toLocaleLowerCase()}.json`,
+    sanitizePortableDashboardFileName: (fileName: string) => `${fileName.trim().replace(/[^a-z0-9.-]+/gi, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '') || 'dashboard'}.json`.replace(/\.json\.json$/i, '.json'),
     dashboardPortabilityService: dashboardPortabilityServiceMock,
 }));
 
@@ -88,6 +90,7 @@ vi.mock('../../components/admin/AdminWorkspaceLayout', () => ({
 
 describe('DashboardManagerPage', () => {
     beforeEach(() => {
+        vi.restoreAllMocks();
         mockNavigate.mockReset();
         dashboardStorageMock.getDashboards.mockReset();
         dashboardStorageMock.createEmptyDashboard.mockReset();
@@ -188,9 +191,13 @@ describe('DashboardManagerPage', () => {
 
     it('exports one dashboard from the row action and triggers the file download', async () => {
         const user = userEvent.setup();
+        const importInputClickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => undefined);
         const createObjectURLMock = vi.fn(() => 'blob:portable-dashboard');
         const revokeObjectURLMock = vi.fn();
-        const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+        const clickedDownloads: string[] = [];
+        const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click() {
+            clickedDownloads.push(this.download);
+        });
 
         Object.assign(URL, {
             createObjectURL: createObjectURLMock,
@@ -206,8 +213,26 @@ describe('DashboardManagerPage', () => {
 
         render(<DashboardManagerPage />);
 
+        const importButton = await screen.findByRole('button', { name: 'Importar Dashboard' });
         const exportButton = await screen.findByRole('button', { name: 'Exportar Principal' });
+
+        expect(importButton.querySelector('svg')).toHaveClass('lucide-download');
+        expect(exportButton.querySelector('svg')).toHaveClass('lucide-upload');
+
+        await user.click(importButton);
+        expect(importInputClickSpy).toHaveBeenCalledTimes(1);
+
         await user.click(exportButton);
+
+        const exportDialog = await screen.findByRole('dialog', { name: 'Exportar dashboard' });
+        const fileNameInput = within(exportDialog).getByLabelText('Nombre del archivo');
+
+        expect(fileNameInput).toHaveValue('portable-principal.json');
+        expect(dashboardPortabilityServiceMock.exportDashboard).not.toHaveBeenCalled();
+
+        await user.clear(fileNameInput);
+        await user.type(fileNameInput, '  principal/editado  ');
+        await user.click(within(exportDialog).getByRole('button', { name: 'Confirmar exportación' }));
 
         await waitFor(() => {
             expect(dashboardPortabilityServiceMock.exportDashboard).toHaveBeenCalledWith(
@@ -217,7 +242,34 @@ describe('DashboardManagerPage', () => {
 
         expect(createObjectURLMock).toHaveBeenCalledWith(expect.any(Blob));
         expect(anchorClickSpy).toHaveBeenCalledTimes(1);
+        expect(clickedDownloads).toEqual(['principal-editado.json']);
         expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:portable-dashboard');
+    });
+
+    it('cancels export from the filename dialog without calling the portability service or starting a download', async () => {
+        const user = userEvent.setup();
+        const createObjectURLMock = vi.fn(() => 'blob:portable-dashboard');
+        const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+        Object.assign(URL, {
+            createObjectURL: createObjectURLMock,
+        });
+
+        render(<DashboardManagerPage />);
+
+        const exportButton = await screen.findByRole('button', { name: 'Exportar Principal' });
+        await user.click(exportButton);
+
+        const exportDialog = await screen.findByRole('dialog', { name: 'Exportar dashboard' });
+        await user.click(within(exportDialog).getByRole('button', { name: 'Cancelar exportación' }));
+
+        await waitFor(() => {
+            expect(screen.queryByRole('dialog', { name: 'Exportar dashboard' })).not.toBeInTheDocument();
+        });
+
+        expect(dashboardPortabilityServiceMock.exportDashboard).not.toHaveBeenCalled();
+        expect(createObjectURLMock).not.toHaveBeenCalled();
+        expect(anchorClickSpy).not.toHaveBeenCalled();
     });
 
     it('imports a portable dashboard, refreshes the list, and shows a success summary', async () => {

@@ -10,7 +10,11 @@ import type {
     DashboardImportResult,
     DashboardPortabilityIssue,
 } from '../../services/dashboardPortabilityService';
-import { dashboardPortabilityService } from '../../services/dashboardPortabilityService';
+import {
+    buildPortableDashboardFileName,
+    dashboardPortabilityService,
+    sanitizePortableDashboardFileName,
+} from '../../services/dashboardPortabilityService';
 import { templateStorage } from '../../services/TemplateStorageService';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import type { Dashboard, HierarchyNode, Template } from '../../domain/admin.types';
@@ -153,14 +157,14 @@ function createImportSuccessFeedback(result: DashboardImportResult): DashboardPo
     };
 }
 
-async function triggerDashboardDownload(dashboard: Dashboard) {
+async function triggerDashboardDownload(dashboard: Dashboard, fileNameOverride?: string) {
     const exportResult = await dashboardPortabilityService.exportDashboard(dashboard);
     const downloadUrl = URL.createObjectURL(new Blob([exportResult.json], { type: 'application/json' }));
 
     try {
         const link = document.createElement('a');
         link.href = downloadUrl;
-        link.download = exportResult.fileName;
+        link.download = sanitizePortableDashboardFileName(fileNameOverride ?? exportResult.fileName);
         link.click();
     } finally {
         URL.revokeObjectURL(downloadUrl);
@@ -194,6 +198,8 @@ export default function DashboardManagerPage() {
     const [dashboardSearch, setDashboardSearch] = useState('');
     const [isImporting, setIsImporting] = useState(false);
     const [exportingDashboardId, setExportingDashboardId] = useState<string | null>(null);
+    const [exportDialogDashboardId, setExportDialogDashboardId] = useState<string | null>(null);
+    const [exportFileName, setExportFileName] = useState('');
     const [portabilityFeedback, setPortabilityFeedback] = useState<DashboardPortabilityFeedback | null>(null);
     const [, setNodeTypeLabelsVersion] = useState(0);
     const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -238,11 +244,11 @@ export default function DashboardManagerPage() {
         }
     };
 
-    const handleExportDashboard = async (dashboard: Dashboard) => {
+    const handleExportDashboard = async (dashboard: Dashboard, fileNameOverride?: string) => {
         setExportingDashboardId(dashboard.id);
 
         try {
-            await triggerDashboardDownload(dashboard);
+            await triggerDashboardDownload(dashboard, fileNameOverride);
         } catch (error) {
             console.error('Error exportando dashboard:', error);
             setPortabilityFeedback({
@@ -255,6 +261,33 @@ export default function DashboardManagerPage() {
         } finally {
             setExportingDashboardId(null);
         }
+    };
+
+    const handleOpenExportDialog = (dashboard: Dashboard) => {
+        setExportDialogDashboardId(dashboard.id);
+        setExportFileName(buildPortableDashboardFileName(getDashboardHeaderTitle(dashboard)));
+    };
+
+    const handleCloseExportDialog = () => {
+        setExportDialogDashboardId(null);
+        setExportFileName('');
+    };
+
+    const handleConfirmExportDashboard = async () => {
+        if (!exportDialogDashboardId || !exportFileName.trim()) {
+            return;
+        }
+
+        const dashboard = dashboards.find((item) => item.id === exportDialogDashboardId);
+
+        if (!dashboard) {
+            handleCloseExportDialog();
+            return;
+        }
+
+        const nextFileName = exportFileName.trim();
+        handleCloseExportDialog();
+        await handleExportDashboard(dashboard, nextFileName);
     };
 
     const handleOpenImportPicker = () => {
@@ -526,7 +559,7 @@ export default function DashboardManagerPage() {
                             variant="secondary"
                             disabled={isImporting}
                         >
-                            {isImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                            {isImporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                             Importar Dashboard
                         </AdminActionButton>
 
@@ -550,7 +583,7 @@ export default function DashboardManagerPage() {
                             disabled={isImporting}
                             className="h-9 w-9 inline-flex items-center justify-center rounded-md text-industrial-muted transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                            {isImporting ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                            {isImporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
                         </button>
                     </HoverTooltip>
                     <HoverTooltip label="Nuevo dashboard" position="right" className="flex">
@@ -824,12 +857,12 @@ export default function DashboardManagerPage() {
                                         type="button"
                                         aria-label={`Exportar ${headerTitle}`}
                                         className="p-2 hover:bg-white/10 hover:text-white rounded transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                                        onClick={() => void handleExportDashboard(dash)}
+                                        onClick={() => handleOpenExportDialog(dash)}
                                         disabled={exportingDashboardId === dash.id}
                                     >
                                         {exportingDashboardId === dash.id
                                             ? <Loader2 size={16} className="animate-spin" />
-                                            : <Download size={16} />}
+                                            : <Upload size={16} />}
                                     </button>
                                 </HoverTooltip>
                                 <HoverTooltip label="Eliminar" position="right" className="flex">
@@ -950,6 +983,42 @@ export default function DashboardManagerPage() {
                     </div>
                 </AdminDialog>
             )}
+
+            <AdminDialog
+                open={Boolean(exportDialogDashboardId)}
+                title="Exportar dashboard"
+                onClose={handleCloseExportDialog}
+                actions={(
+                    <>
+                        <AdminActionButton variant="secondary" onClick={handleCloseExportDialog}>
+                            Cancelar exportación
+                        </AdminActionButton>
+                        <AdminActionButton
+                            onClick={() => void handleConfirmExportDashboard()}
+                            disabled={!exportFileName.trim()}
+                            variant="primary"
+                        >
+                            Confirmar exportación
+                        </AdminActionButton>
+                    </>
+                )}
+            >
+                <div>
+                    <label className="mb-1.5 block w-auto uppercase text-industrial-muted" htmlFor="dashboard-export-file-name">
+                        Nombre del archivo
+                    </label>
+                    <input
+                        id="dashboard-export-file-name"
+                        aria-label="Nombre del archivo"
+                        type="text"
+                        value={exportFileName}
+                        onChange={(event) => setExportFileName(event.target.value)}
+                        placeholder="Nombre del archivo"
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
+                        autoFocus
+                    />
+                </div>
+            </AdminDialog>
 
             {(() => {
                 const targetDash = dashboards.find(d => d.id === deleteDashboardId);

@@ -91,7 +91,7 @@ export class DashboardPortabilityValidationError extends Error {
 class DashboardPortabilityService {
     async exportDashboard(dashboard: Dashboard): Promise<DashboardExportResult> {
         const exportedAt = new Date().toISOString();
-        const normalizedDashboard = normalizeDashboardViews(dashboard);
+        const normalizedDashboard = materializeDashboardView(dashboard, dashboard.activeViewId);
         const { referencedCatalogVariables, issues } = await this.collectReferencedCatalogVariables(normalizedDashboard);
 
         const portableFile: PortableDashboardFileV2 = {
@@ -203,7 +203,12 @@ class DashboardPortabilityService {
             layout: [],
         }, activeViewId);
 
-        await dashboardStorage.saveDashboard(dashboard);
+        try {
+            await dashboardStorage.saveDashboard(dashboard);
+        } catch (error) {
+            await this.rollbackCreatedCatalogVariables(createdCatalogVariables);
+            throw error;
+        }
 
         return {
             dashboard,
@@ -344,6 +349,39 @@ class DashboardPortabilityService {
 
         const referencedVariablesById = new Map(portableFile.referencedCatalogVariables.map((variable) => [variable.id, variable]));
         const normalizedDashboard = normalizePortableDashboard(portableFile);
+        const sourceViews = portableFile.schemaVersion === 2 ? portableFile.dashboard.views ?? [] : normalizedDashboard.views;
+
+        if (portableFile.schemaVersion === 2) {
+            const viewIds = new Set<string>();
+
+            for (const view of sourceViews) {
+                if (viewIds.has(view.id)) {
+                    issues.push({
+                        code: 'duplicate_view_id',
+                        path: `dashboard.views[${view.id}]`,
+                        message: `View id "${view.id}" is duplicated in the portable dashboard file.`,
+                        severity: 'error',
+                    });
+                    continue;
+                }
+
+                viewIds.add(view.id);
+            }
+
+            if (portableFile.dashboard.activeViewId && !viewIds.has(portableFile.dashboard.activeViewId)) {
+                issues.push({
+                    code: 'invalid_active_view_reference',
+                    path: 'dashboard.activeViewId',
+                    message: `Active view "${portableFile.dashboard.activeViewId}" does not exist in dashboard.views.`,
+                    severity: 'error',
+                });
+            }
+        }
+
+        if (hasErrors(issues)) {
+            return issues;
+        }
+
         const activeView = normalizedDashboard.views.find((view) => view.id === normalizedDashboard.activeViewId) ?? normalizedDashboard.views[0];
         const activeWidgetById = new Map<string, WidgetConfig>();
 
@@ -471,37 +509,48 @@ class DashboardPortabilityService {
         const catalogVariableIdMap = new Map<string, string>();
         const createdCatalogVariables: CatalogVariable[] = [];
 
-        for (const sourceCatalogVariableId of usedCatalogVariableIds) {
-            const referencedVariable = referencedVariablesById.get(sourceCatalogVariableId);
+        try {
+            for (const sourceCatalogVariableId of usedCatalogVariableIds) {
+                const referencedVariable = referencedVariablesById.get(sourceCatalogVariableId);
 
-            if (!referencedVariable) {
-                continue;
+                if (!referencedVariable) {
+                    continue;
+                }
+
+                const existingVariable = await variableCatalogStorage.findByNameAndUnit(
+                    referencedVariable.name,
+                    referencedVariable.unit,
+                );
+
+                if (existingVariable) {
+                    catalogVariableIdMap.set(sourceCatalogVariableId, existingVariable.id);
+                    continue;
+                }
+
+                const createdVariable = {
+                    ...clone(referencedVariable),
+                    id: buildUniqueCatalogVariableId(referencedVariable, [
+                        ...createdCatalogVariables,
+                        ...await variableCatalogStorage.getAll(),
+                    ]),
+                };
+
+                await variableCatalogStorage.create(createdVariable);
+                createdCatalogVariables.push(createdVariable);
+                catalogVariableIdMap.set(sourceCatalogVariableId, createdVariable.id);
             }
-
-            const existingVariable = await variableCatalogStorage.findByNameAndUnit(
-                referencedVariable.name,
-                referencedVariable.unit,
-            );
-
-            if (existingVariable) {
-                catalogVariableIdMap.set(sourceCatalogVariableId, existingVariable.id);
-                continue;
-            }
-
-            const createdVariable = {
-                ...clone(referencedVariable),
-                id: buildUniqueCatalogVariableId(referencedVariable, [
-                    ...createdCatalogVariables,
-                    ...await variableCatalogStorage.getAll(),
-                ]),
-            };
-
-            await variableCatalogStorage.create(createdVariable);
-            createdCatalogVariables.push(createdVariable);
-            catalogVariableIdMap.set(sourceCatalogVariableId, createdVariable.id);
+        } catch (error) {
+            await this.rollbackCreatedCatalogVariables(createdCatalogVariables);
+            throw error;
         }
 
         return { catalogVariableIdMap, createdCatalogVariables };
+    }
+
+    private async rollbackCreatedCatalogVariables(createdCatalogVariables: CatalogVariable[]): Promise<void> {
+        await Promise.allSettled(
+            createdCatalogVariables.map((variable) => variableCatalogStorage.delete(variable.id)),
+        );
     }
 }
 
@@ -570,10 +619,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
-function buildPortableDashboardFileName(dashboardName: string, exportedAt: string): string {
-    const exportedDate = new Date(exportedAt);
+export function buildPortableDashboardFileName(
+    dashboardName: string,
+    exportedAt: string | Date = new Date(),
+): string {
+    const exportedDate = exportedAt instanceof Date ? exportedAt : new Date(exportedAt);
 
     return `interfaz-laboratorio-dashboard-${slugifyFileSegment(dashboardName)}-${formatPortableTimestamp(exportedDate)}.json`;
+}
+
+export function sanitizePortableDashboardFileName(fileName: string): string {
+    const normalizedBaseName = fileName
+        .trim()
+        .replace(/\.json$/i, '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[<>:"/\\|?*\x00-\x1f]+/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[.-]+|[.-]+$/g, '');
+
+    return `${normalizedBaseName || 'dashboard'}.json`;
 }
 
 function formatPortableTimestamp(value: Date): string {
