@@ -6,6 +6,7 @@ import type { ContractMachine, DataHistoryResponseV2 } from '../domain/dataContr
 import type {
     ActivityAnalyticsWidgetConfig,
     AlertHistoryWidgetConfig,
+    InfoCardWidgetConfig,
     MachineActivityWidgetConfig,
     MetricCardWidgetConfig,
     ProdTrendWidgetConfig,
@@ -758,5 +759,29 @@ describe('WidgetRenderer', () => {
 
         expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
         expect(onPersistWidgetDisplayOptions).not.toHaveBeenCalled();
+    });
+
+    it('routes info-card widgets to the static renderer without unsupported or control UI', () => {
+        const infoCardWidget: InfoCardWidgetConfig = {
+            id: 'info-card-renderer-1',
+            type: 'info-card',
+            title: 'Static Lab Context',
+            position: { x: 0, y: 0 },
+            size: { w: 6, h: 5 },
+            displayOptions: {
+                fields: [
+                    { id: 'sample', label: 'Sample', value: 'QA-17' },
+                ],
+            },
+        };
+
+        render(<WidgetRenderer widget={infoCardWidget} equipmentMap={equipmentMap} />);
+
+        expect(screen.getByText('Static Lab Context')).toBeInTheDocument();
+        expect(screen.getByText('Sample')).toBeInTheDocument();
+        expect(screen.getByText('QA-17')).toBeInTheDocument();
+        expect(screen.queryByText('Widget no soportado')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button')).not.toBeInTheDocument();
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
     });
 });

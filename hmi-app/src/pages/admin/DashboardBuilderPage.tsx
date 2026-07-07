@@ -44,6 +44,7 @@ import { createDefaultProdTrendDisplayOptions } from '../../utils/prodTrendWidge
 import { ADMIN_SIDEBAR_INPUT_CLS } from '../../components/admin/adminSidebarStyles';
 import { getDashboardViewIconComponent } from '../../utils/dashboardViewIcons';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
+import { DEFAULT_INFO_CARD_VALUE_FONT_SIZE } from '../../utils/infoCardDisplayOptions';
 import { getAncestors } from '../../utils/hierarchyTree';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
 import { migrateLegacyBindings } from '../../utils/catalogMigration';
@@ -1046,6 +1047,24 @@ export default function DashboardBuilderPage() {
                                     binding: { mode: 'simulated_value', simulatedValue: 0 },
                                     displayOptions: {
                                         fontSize: DEFAULT_TEXT_TITLE_FONT_SIZE,
+                                    },
+                                }
+                            : type === 'info-card'
+                                ? {
+                                    id: newId,
+                                    type,
+                                    title: 'INFO-CARD',
+                                    position: { x: 0, y: 0 },
+                                    size: { w: defaultWidth, h: defaultHeight },
+                                    binding: { mode: 'simulated_value', simulatedValue: 0 },
+                                    displayOptions: {
+                                        subtitle: 'Static summary',
+                                        helpText: 'Static admin-authored information only.',
+                                        icon: defaultIcon,
+                                        valueFontSize: DEFAULT_INFO_CARD_VALUE_FONT_SIZE,
+                                        fields: [
+                                            { id: 'field-1', label: 'Label', value: 'Value' },
+                                        ],
                                     },
                                 }
                             : {

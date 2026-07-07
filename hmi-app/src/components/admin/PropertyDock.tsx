@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart } from 'lucide-react';
-import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape } from '../../domain/admin.types';
+import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart, Info } from 'lucide-react';
+import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape, InfoCardDisplayOptions, InfoCardField } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -52,6 +52,7 @@ import {
 } from './adminSidebarStyles';
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
+import { DEFAULT_INFO_CARD_VALUE_FONT_SIZE, resolveInfoCardFields } from '../../utils/infoCardDisplayOptions';
 import {
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
     DEFAULT_GAUGE_VALUE_FONT_SIZE,
@@ -1146,6 +1147,27 @@ export default function PropertyDock(props: PropertyDockProps) {
         onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, prodTrendBands: { ...selectedWidget.displayOptions?.prodTrendBands, blendMode: resolveActivityAnalyticsProdTrendBandBlendMode(blendMode) } } });
     };
 
+    const handleInfoCardFieldChange = (index: number, key: keyof Pick<InfoCardField, 'label' | 'value'>, value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'info-card') {
+            return;
+        }
+
+        const currentOptions = (selectedWidget.displayOptions ?? {}) as InfoCardDisplayOptions;
+        const resolvedFields = resolveInfoCardFields(currentOptions);
+        const currentFields = resolvedFields.length ? resolvedFields : [{ id: 'field-1', label: '', value: '' }];
+        const nextFields = currentFields.map((field, fieldIndex) => (
+            fieldIndex === index ? { ...field, [key]: value } : field
+        ));
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...currentOptions,
+                fields: nextFields,
+            },
+        });
+    };
+
     const handleUnitChange = (val: string) => {
         if (!selectedWidget) return;
         const binding = { ...selectedWidget.binding, mode: selectedWidget.binding?.mode || 'simulated_value' as const, unit: val || undefined };
@@ -1376,6 +1398,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     const isActivityAnalytics = selectedWidget?.type === 'activity-analytics';
     const isProdTrend = selectedWidget?.type === 'prod-trend';
     const isDashboardTitle = selectedWidget?.type === 'text-title';
+    const isInfoCard = selectedWidget?.type === 'info-card';
     const navigationDashboardOptions = availableDashboards
         .filter((dashboard) => dashboard.id !== currentDashboardId)
         .map((dashboard) => ({
@@ -1427,6 +1450,13 @@ export default function PropertyDock(props: PropertyDockProps) {
     const prodTrendOptions = isProdTrend
         ? resolveProdTrendDisplayOptions(selectedWidget.displayOptions as ProdTrendDisplayOptions | undefined, prodTrendThemeDefaultLineColors)
         : null;
+    const infoCardOptions = isInfoCard
+        ? (selectedWidget.displayOptions as InfoCardDisplayOptions | undefined)
+        : undefined;
+    const resolvedInfoCardFields = isInfoCard ? resolveInfoCardFields(infoCardOptions) : [];
+    const infoCardFields = isInfoCard
+        ? (resolvedInfoCardFields.length ? resolvedInfoCardFields : [{ id: 'field-1', label: '', value: '' }])
+        : [];
     const activityAnalyticsDisplayRules = activityAnalyticsOptions
         ? resolveActivityAnalyticsDisplayRules({
             range: activityAnalyticsOptions.range,
@@ -1518,9 +1548,9 @@ export default function PropertyDock(props: PropertyDockProps) {
         && selectedWidget.type !== 'connection-status'
         && selectedWidget.type !== 'text-title'
         && selectedWidget.type !== 'status'
-        && selectedWidget.type !== 'trend-chart'
-        && selectedWidget.type !== 'activity-analytics'
-        && selectedWidget.type !== 'prod-trend';
+                && selectedWidget.type !== 'trend-chart'
+                && selectedWidget.type !== 'activity-analytics'
+                && selectedWidget.type !== 'prod-trend';
     const genericDataUnitField = selectedWidget
         && selectedWidget.type !== 'alert-history'
         && selectedWidget.type !== 'prod-history'
@@ -1717,7 +1747,11 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             { value: '__pending__', label: '(Ícono pendiente)', icon: <HelpCircle size={12} /> },
                                             { value: '__none__', label: 'Sin ícono' },
                                             ...(selectedWidget.type === 'alert-history'
-                                                ? [{ value: 'History', label: 'Historial', icon: <History size={12} /> }]
+                                ? [{ value: 'History', label: 'Historial', icon: <History size={12} /> }]
+                                : []
+                                            ),
+                                            ...(selectedWidget.type === 'info-card'
+                                                ? [{ value: 'Info', label: 'Info', icon: <Info size={12} /> }]
                                                 : []
                                             ),
                                             { value: 'Gauge', label: 'Medidor', icon: <Gauge size={12} /> },
@@ -1942,8 +1976,67 @@ export default function PropertyDock(props: PropertyDockProps) {
                             })()}
                         </DockSection>
 
+                        {isInfoCard && (
+                            <DockSection icon={<Info size={11} />} title="INFO-CARD">
+                                <DockInfoBox
+                                    variant="normal"
+                                    text="Static admin-authored fields only. No telemetry binding or plant control is available."
+                                />
+                                <DockFieldRow label="Subtítulo">
+                                    <input
+                                        type="text"
+                                        className={INPUT_CLS}
+                                        value={infoCardOptions?.subtitle || ''}
+                                        onChange={e => handleDisplayOptionChange('subtitle', e.target.value)}
+                                        placeholder="Short context"
+                                    />
+                                </DockFieldRow>
+                                <DockFieldRow label="Ayuda">
+                                    <input
+                                        type="text"
+                                        className={INPUT_CLS}
+                                        value={infoCardOptions?.helpText || ''}
+                                        onChange={e => handleDisplayOptionChange('helpText', e.target.value)}
+                                        placeholder="Read-only note"
+                                    />
+                                </DockFieldRow>
+                                <DockFieldRow label="Tamaño">
+                                    <AdminNumberInput
+                                        value={infoCardOptions?.valueFontSize ?? DEFAULT_INFO_CARD_VALUE_FONT_SIZE}
+                                        min={12}
+                                        max={200}
+                                        step={1}
+                                        commitOnBlur
+                                        onChange={val => handleNumericDisplayOptionChange('valueFontSize', val)}
+                                    />
+                                </DockFieldRow>
+                                {infoCardFields.map((field, index) => (
+                                    <div key={field.id} className="flex flex-col gap-2">
+                                        <DockFieldRow label={`Etiqueta ${index + 1}`}>
+                                            <input
+                                                type="text"
+                                                className={INPUT_CLS}
+                                                value={field.label}
+                                                onChange={e => handleInfoCardFieldChange(index, 'label', e.target.value)}
+                                                placeholder="Field label"
+                                            />
+                                        </DockFieldRow>
+                                        <DockFieldRow label={`Valor ${index + 1}`}>
+                                            <input
+                                                type="text"
+                                                className={INPUT_CLS}
+                                                value={field.value || ''}
+                                                onChange={e => handleInfoCardFieldChange(index, 'value', e.target.value)}
+                                                placeholder="Static value"
+                                            />
+                                        </DockFieldRow>
+                                    </div>
+                                ))}
+                            </DockSection>
+                        )}
+
                         {/* ─── DATOS — no aplica para alert-history ni prod-history (datos mock propios) ─── */}
-                        {selectedWidget.type !== 'alert-history' && selectedWidget.type !== 'prod-history' && selectedWidget.type !== 'text-title' && (
+                        {selectedWidget.type !== 'alert-history' && selectedWidget.type !== 'prod-history' && selectedWidget.type !== 'text-title' && selectedWidget.type !== 'info-card' && (
                             <DockSection icon={<Database size={11} />} title="Datos">
                                 {hasHierarchySupport && (
                                     <DockFieldRow label="Fuente">

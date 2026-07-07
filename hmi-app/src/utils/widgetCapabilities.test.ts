@@ -10,6 +10,21 @@ import {
 } from './widgetCapabilities';
 
 describe('widgetCapabilities', () => {
+    it('marks info-card as a static read-only widget without bindings', () => {
+        const widgetType: WidgetType = 'info-card';
+
+        expect(getWidgetCapabilities(widgetType)).toEqual({
+            catalogVariable: false,
+            hierarchy: false,
+            nestedInteractiveNavigation: false,
+            defaultSize: { w: 6, h: 5 },
+            defaultIcon: 'Info',
+        });
+        expect(hasNestedInteractiveNavigation(widgetType)).toBe(false);
+        expect(supportsCatalogVariable(widgetType)).toBe(false);
+        expect(supportsHierarchy(widgetType)).toBe(false);
+    });
+
     it('marks text-title as non-catalog and non-hierarchical', () => {
         const widgetType: WidgetType = 'text-title';
 
@@ -83,6 +98,7 @@ describe('widgetCapabilities', () => {
         expect(getDefaultSize('connection-status')).toEqual({ w: 5, h: 5 });
         expect(getDefaultSize('alert-history')).toEqual({ w: 8, h: 8 });
         expect(getDefaultSize('text-title')).toEqual({ w: 5, h: 2 });
+        expect(getDefaultSize('info-card')).toEqual({ w: 6, h: 5 });
     });
 
     it('falls back to 4×3 for unknown widget types', () => {
@@ -102,6 +118,7 @@ describe('widgetCapabilities', () => {
         expect(getDefaultIcon('status')).toBeNull();
         expect(getDefaultIcon('connection-status')).toBeNull();
         expect(getDefaultIcon('text-title')).toBeNull();
+        expect(getDefaultIcon('info-card')).toBe('Info');
     });
 
     it('returns null as the default icon for unknown widget types', () => {

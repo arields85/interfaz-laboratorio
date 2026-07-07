@@ -544,6 +544,118 @@ describe('PropertyDock text-title', () => {
     });
 });
 
+describe('PropertyDock info-card', () => {
+    it('renders static info-card editing controls without catalog-variable binding controls', () => {
+        renderPropertyDock({
+            type: 'info-card',
+            title: 'Line summary',
+            binding: { mode: 'simulated_value', simulatedValue: 0 },
+            displayOptions: {
+                subtitle: 'Shift overview',
+                helpText: 'Reviewed by QA',
+                icon: 'Info',
+                valueFontSize: 42,
+                fields: [
+                    { id: 'field-1', label: 'Batch', value: 'B-204' },
+                    { id: 'field-2', label: 'Operator', value: 'Ada' },
+                ],
+            },
+        });
+
+        expect(screen.getByRole('button', { name: /general/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /info-card/i })).toBeInTheDocument();
+        expect(getInputInSection('General', 'Título')).toHaveValue('Line summary');
+        expect(getInputInSection('INFO-CARD', 'Subtítulo')).toHaveValue('Shift overview');
+        expect(getInputInSection('INFO-CARD', 'Ayuda')).toHaveValue('Reviewed by QA');
+        expect(getInputInSection('INFO-CARD', 'Tamaño')).toHaveValue('42');
+        expect(getInputInSection('INFO-CARD', 'Etiqueta 1')).toHaveValue('Batch');
+        expect(getInputInSection('INFO-CARD', 'Valor 1')).toHaveValue('B-204');
+        expect(getInputInSection('INFO-CARD', 'Etiqueta 2')).toHaveValue('Operator');
+        expect(getInputInSection('INFO-CARD', 'Valor 2')).toHaveValue('Ada');
+        expect(screen.getByText('Static admin-authored fields only. No telemetry binding or plant control is available.')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /datos/i })).not.toBeInTheDocument();
+        expect(screen.queryByText('Variable')).not.toBeInTheDocument();
+        expect(screen.queryByText('Origen')).not.toBeInTheDocument();
+    });
+
+    it('persists subtitle, help text, value size, and field label/value edits in displayOptions.fields', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'info-card',
+            title: 'Line summary',
+            binding: { mode: 'simulated_value', simulatedValue: 0 },
+            displayOptions: {
+                subtitle: 'Shift overview',
+                helpText: 'Reviewed by QA',
+                icon: 'Info',
+                fields: [
+                    { id: 'field-1', label: 'Batch', value: 'B-204' },
+                ],
+            },
+        });
+
+        const subtitleInput = getInputInSection('INFO-CARD', 'Subtítulo');
+        await user.clear(subtitleInput);
+        await user.type(subtitleInput, 'Current shift');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            subtitle: 'Current shift',
+            fields: [{ id: 'field-1', label: 'Batch', value: 'B-204' }],
+        });
+
+        const valueSizeInput = getInputInSection('INFO-CARD', 'Tamaño');
+        await user.clear(valueSizeInput);
+        await user.type(valueSizeInput, '52');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            subtitle: 'Current shift',
+            valueFontSize: 52,
+            fields: [{ id: 'field-1', label: 'Batch', value: 'B-204' }],
+        });
+
+        const labelInput = getInputInSection('INFO-CARD', 'Etiqueta 1');
+        await user.clear(labelInput);
+        await user.type(labelInput, 'Lot');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            subtitle: 'Current shift',
+            fields: [{ id: 'field-1', label: 'Lot', value: 'B-204' }],
+        });
+
+        const valueInput = getInputInSection('INFO-CARD', 'Valor 1');
+        await user.clear(valueInput);
+        await user.type(valueInput, 'L-18');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            fields: [{ id: 'field-1', label: 'Lot', value: 'L-18' }],
+        });
+        expect(updates.at(-1)?.binding).toEqual({ mode: 'simulated_value', simulatedValue: 0 });
+    });
+
+    it('normalizes malformed persisted fields before editing the fallback field', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'info-card',
+            title: 'Line summary',
+            binding: { mode: 'simulated_value', simulatedValue: 0 },
+            displayOptions: {
+                subtitle: 'Shift overview',
+                fields: 'legacy-bad-shape',
+            } as unknown as WidgetConfig['displayOptions'],
+        });
+
+        const labelInput = getInputInSection('INFO-CARD', 'Etiqueta 1');
+
+        expect(labelInput).toHaveValue('');
+
+        await user.type(labelInput, 'Batch');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            subtitle: 'Shift overview',
+            fields: [{ id: 'field-1', label: 'Batch', value: '' }],
+        });
+    });
+});
+
 describe('PropertyDock hierarchy aggregation preview', () => {
     const hierarchyTrace: HierarchyAggregationTrace = {
         resolved: { value: 30, unit: '°C', status: 'normal', source: 'real' },

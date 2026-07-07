@@ -267,7 +267,7 @@ vi.mock('../../components/admin/AdminWorkspaceLayout', () => ({
 }));
 
 vi.mock('../../components/admin/WidgetCatalogRail', () => ({
-    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart' | 'trend-chart-v2' | 'activity-analytics' | 'prod-trend') => void }) => (
+    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart' | 'trend-chart-v2' | 'activity-analytics' | 'prod-trend' | 'info-card') => void }) => (
         <div data-testid="widget-catalog-rail">
             <button type="button" onClick={() => onAddWidget('kpi')}>
                 Agregar KPI
@@ -289,6 +289,9 @@ vi.mock('../../components/admin/WidgetCatalogRail', () => ({
             </button>
             <button type="button" onClick={() => onAddWidget('prod-trend')}>
                 Agregar PROD-TREND
+            </button>
+            <button type="button" onClick={() => onAddWidget('info-card')}>
+                Agregar INFO-CARD
             </button>
         </div>
     ),
@@ -662,6 +665,48 @@ describe('DashboardBuilderPage', () => {
                     },
                 },
             });
+        });
+    });
+
+    it('adds info-card widgets with safe static display defaults only', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [],
+            layout: [],
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Agregar INFO-CARD' }));
+
+        await waitFor(() => {
+            const snapshot = getBuilderCanvasSnapshot();
+            expect(snapshot.layout).toHaveLength(1);
+            expect(snapshot.layout[0]).toMatchObject({ x: 0, y: 0, w: 6, h: 5 });
+        });
+
+        await waitFor(() => {
+            expect(propertyDockMock).toHaveBeenCalled();
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: {
+                    type: 'info-card',
+                    title: 'INFO-CARD',
+                    size: { w: 6, h: 5 },
+                    binding: { mode: 'simulated_value', simulatedValue: 0 },
+                    displayOptions: {
+                        subtitle: 'Static summary',
+                        helpText: 'Static admin-authored information only.',
+                        icon: 'Info',
+                        valueFontSize: 35,
+                        fields: [
+                            { id: 'field-1', label: 'Label', value: 'Value' },
+                        ],
+                    },
+                },
+            });
+            expect(propertyDockMock.mock.calls.at(-1)?.[0].selectedWidget.binding).not.toHaveProperty('catalogVariableId');
         });
     });
 

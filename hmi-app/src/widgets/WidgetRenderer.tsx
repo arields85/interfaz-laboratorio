@@ -15,6 +15,7 @@ import ProdTrendWidget from './renderers/ProdTrendWidget';
 import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
+import InfoCardWidget from './renderers/InfoCardWidget';
 import { hasNestedInteractiveNavigationForConfig } from '../utils/widgetCapabilities';
 import WidgetRuntimeState from '../components/ui/WidgetRuntimeState';
 
@@ -240,6 +241,10 @@ export default function WidgetRenderer({
 
         case 'text-title':
             renderedWidget = <TextTitleWidget widget={widget} className={className} />;
+            break;
+
+        case 'info-card':
+            renderedWidget = <InfoCardWidget widget={widget} className={className} />;
             break;
 
         // -----------------------------------------------------------------------

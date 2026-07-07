@@ -1,10 +1,12 @@
 import type {
     Dashboard,
+    InfoCardWidgetConfig,
     MetricCardWidgetConfig,
     Template,
     WidgetConfig,
     WidgetLayout,
 } from '../../domain/admin.types';
+import { DEFAULT_INFO_CARD_VALUE_FONT_SIZE } from '../../utils/infoCardDisplayOptions';
 
 export function makeLayout(overrides: Partial<WidgetLayout> = {}): WidgetLayout {
     return {
@@ -28,6 +30,29 @@ export function makeWidget(overrides: Partial<MetricCardWidgetConfig> = {}): Wid
     };
 
     return widget;
+}
+
+export function makeInfoCardWidget(overrides: Partial<InfoCardWidgetConfig> = {}): InfoCardWidgetConfig {
+    return {
+        id: 'info-card-1',
+        type: 'info-card',
+        title: 'INFO-CARD',
+        position: { x: 0, y: 0 },
+        size: { w: 6, h: 5 },
+        binding: { mode: 'simulated_value', simulatedValue: 0 },
+        displayOptions: {
+            subtitle: 'Static summary',
+            helpText: 'Static admin-authored information only.',
+            icon: 'Info',
+            valueFontSize: DEFAULT_INFO_CARD_VALUE_FONT_SIZE,
+            fields: [
+                { id: 'field-1', label: 'Batch', value: 'B-204' },
+                { id: 'field-2', label: 'Operator', value: 'Ada' },
+            ],
+            ...overrides.displayOptions,
+        },
+        ...overrides,
+    };
 }
 
 export function makeDashboard(overrides: Partial<Dashboard> = {}): Dashboard {

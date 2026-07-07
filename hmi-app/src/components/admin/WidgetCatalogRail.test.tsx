@@ -65,4 +65,18 @@ describe('WidgetCatalogRail', () => {
 
         expect(onAddWidget).toHaveBeenCalledWith('prod-trend');
     });
+
+    it('shows INFO-CARD in the catalog and dispatches the widget type on click', async () => {
+        const user = userEvent.setup();
+        const onAddWidget = vi.fn();
+
+        render(<WidgetCatalogRail onAddWidget={onAddWidget} />);
+
+        const button = screen.getByRole('button', { name: 'INFO-CARD' });
+        expect(button).toBeInTheDocument();
+
+        await user.click(button);
+
+        expect(onAddWidget).toHaveBeenCalledWith('info-card');
+    });
 });

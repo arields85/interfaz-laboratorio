@@ -33,6 +33,7 @@ export const mockDashboards: Dashboard[] = [
             { widgetId: 'w-oee', x: 0, y: 0, w: 1, h: 1 },
             { widgetId: 'w-prod', x: 1, y: 0, w: 1, h: 1 },
             { widgetId: 'w-alarms', x: 2, y: 0, w: 1, h: 1 },
+            { widgetId: 'w-line-summary', x: 3, y: 0, w: 6, h: 5 },
         ],
         widgets: [
             {
@@ -58,6 +59,24 @@ export const mockDashboards: Dashboard[] = [
                 position: { x: 2, y: 0 },
                 size: { w: 1, h: 1 },
                 binding: { mode: 'simulated_value', simulatedValue: 3 }
+            },
+            {
+                id: 'w-line-summary',
+                type: 'info-card',
+                title: 'LINE SUMMARY',
+                position: { x: 3, y: 0 },
+                size: { w: 6, h: 5 },
+                binding: { mode: 'simulated_value', simulatedValue: 0 },
+                displayOptions: {
+                    subtitle: 'Static summary',
+                    helpText: 'Static admin-authored information only.',
+                    icon: 'Info',
+                    valueFontSize: 35,
+                    fields: [
+                        { id: 'field-1', label: 'Batch', value: 'B-204' },
+                        { id: 'field-2', label: 'Operator', value: 'Ada' },
+                    ],
+                },
             }
         ]
     },

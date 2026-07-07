@@ -206,6 +206,7 @@ export type WidgetType =
     | 'ai-summary'
     | 'section-title'
     | 'text-title'
+    | 'info-card'
     | 'machine-activity'
     | 'activity-analytics'
     | 'prod-trend';
@@ -618,6 +619,20 @@ export interface TextTitleDisplayOptions {
     textColor?: TextTitleColor;
 }
 
+export interface InfoCardField {
+    id: string;
+    label: string;
+    value?: string;
+}
+
+export interface InfoCardDisplayOptions {
+    subtitle?: string;
+    helpText?: string;
+    icon?: string | null;
+    valueFontSize?: number;
+    fields: InfoCardField[];
+}
+
 // =============================================================================
 // WIDGET CONFIG — Unión discriminada por tipo
 //
@@ -733,9 +748,14 @@ export interface TextTitleWidgetConfig extends WidgetConfigBase {
     displayOptions?: TextTitleDisplayOptions;
 }
 
+export interface InfoCardWidgetConfig extends WidgetConfigBase {
+    type: 'info-card';
+    displayOptions?: InfoCardDisplayOptions;
+}
+
 /** Variante genérica para todos los tipos de widget sin displayOptions específicos. */
 export interface GenericWidgetConfig extends WidgetConfigBase {
-    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'activity-analytics' | 'prod-trend' | 'text-title'>;
+    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'activity-analytics' | 'prod-trend' | 'text-title' | 'info-card'>;
     displayOptions?: BaseDisplayOptions;
 }
 
@@ -756,6 +776,7 @@ export type WidgetConfig =
     | ActivityAnalyticsWidgetConfig
     | ProdTrendWidgetConfig
     | TextTitleWidgetConfig
+    | InfoCardWidgetConfig
     | GenericWidgetConfig;
 
 // =============================================================================
@@ -788,6 +809,10 @@ export function isActivityAnalyticsWidget(w: WidgetConfig): w is ActivityAnalyti
 
 export function isProdTrendWidget(w: WidgetConfig): w is ProdTrendWidgetConfig {
     return w.type === 'prod-trend';
+}
+
+export function isInfoCardWidget(w: WidgetConfig): w is InfoCardWidgetConfig {
+    return w.type === 'info-card';
 }
 
 // --- TEMPLATE ---

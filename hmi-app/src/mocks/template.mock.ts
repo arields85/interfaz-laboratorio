@@ -50,12 +50,29 @@ export const mockTemplates: Template[] = [
                 size: { w: 2, h: 1 },
                 binding: { mode: 'simulated_value', simulatedValue: 1500, unit: 'RPM' },
             },
+            {
+                type: 'info-card',
+                title: 'LOT INFORMATION',
+                size: { w: 6, h: 5 },
+                binding: { mode: 'simulated_value', simulatedValue: 0 },
+                displayOptions: {
+                    subtitle: 'Static summary',
+                    helpText: 'Static admin-authored information only.',
+                    icon: 'Info',
+                    valueFontSize: 35,
+                    fields: [
+                        { id: 'field-1', label: 'Line', value: 'Compression A' },
+                        { id: 'field-2', label: 'Recipe', value: 'Standard' },
+                    ],
+                },
+            },
         ],
         layoutPreset: [
             { widgetId: 'preset-0', x: 0, y: 0, w: 1, h: 1 },
             { widgetId: 'preset-1', x: 1, y: 0, w: 1, h: 1 },
             { widgetId: 'preset-2', x: 2, y: 0, w: 1, h: 1 },
             { widgetId: 'preset-3', x: 0, y: 1, w: 2, h: 1 },
+            { widgetId: 'preset-4', x: 2, y: 1, w: 6, h: 5 },
         ],
     },
 ];
