@@ -884,6 +884,35 @@ describe('PropertyDock metric-card', () => {
             icon: 'Thermometer',
         });
     });
+
+    it('keeps generic unit presets and custom-unit affordances available for metric-card widgets', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'metric-card',
+            title: 'Tarjeta de Métrica',
+            binding: {
+                mode: 'simulated_value',
+                simulatedValue: 42,
+                unit: '°C',
+            },
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Unidad'));
+
+        expect(screen.getByRole('button', { name: 'Hs' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Personalizado' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Personalizado' }));
+
+        const customUnitInput = screen.getByPlaceholderText('Unidad personalizada');
+        expect(getFieldButtonInSection('Datos', 'Unidad')).toHaveTextContent('Personalizado');
+
+        await user.clear(customUnitInput);
+        await user.type(customUnitInput, 'BTU/h');
+
+        expect(updates.at(-1)?.binding).toMatchObject({
+            unit: 'BTU/h',
+        });
+    });
 });
 
 describe('PropertyDock machine-activity', () => {
@@ -1291,6 +1320,7 @@ describe('PropertyDock machine-activity', () => {
         expect(toggle).not.toBeChecked();
         expect(unitSelect).toHaveTextContent('°C');
         expect(unitSelect).toBeDisabled();
+        expect(screen.queryByPlaceholderText('Unidad personalizada')).not.toBeInTheDocument();
 
         await user.click(toggle);
 
@@ -1547,6 +1577,89 @@ describe('PropertyDock machine-activity', () => {
 
         expect(within(getSection('Escala Visual')).getByText('bar mín')).toBeInTheDocument();
         expect(within(getSection('Escala Visual')).getByText('bar máx')).toBeInTheDocument();
+    });
+
+    it('adds custom-unit creation to simulated KPI unit selectors', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'kpi',
+            title: 'KPI local',
+            binding: {
+                mode: 'simulated_value',
+                simulatedValue: 12,
+                unit: 'RPM',
+            },
+            displayOptions: {
+                unit: 'RPM',
+                unitOverride: true,
+            },
+        });
+
+        await user.click(getFieldButtonInSection('Datos', 'Unidad'));
+        await user.click(screen.getByRole('button', { name: 'Personalizado' }));
+
+        const customUnitInput = screen.getByPlaceholderText('Unidad personalizada');
+        expect(getFieldButtonInSection('Datos', 'Unidad')).toHaveTextContent('Personalizado');
+
+        await user.clear(customUnitInput);
+        await user.type(customUnitInput, 'BTU/h');
+
+        expect(updates.at(-1)).toMatchObject({
+            binding: {
+                mode: 'simulated_value',
+                unit: 'BTU/h',
+            },
+            displayOptions: {
+                unit: 'BTU/h',
+                unitOverride: true,
+            },
+        });
+    });
+
+    it('adds custom-unit creation to real KPI unit override selectors without mutating binding.unit', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'kpi',
+            title: 'KPI real',
+            binding: {
+                mode: 'real_variable',
+                machineId: 101,
+                variableKey: 'temp',
+                bindingVersion: 'node-red-v1',
+                unit: 'kW',
+            },
+            displayOptions: {
+                unitOverride: false,
+            },
+        });
+
+        const toggle = screen.getByLabelText('Unidad custom');
+
+        expect(toggle).not.toBeChecked();
+        expect(getFieldButtonInSection('Datos', 'Unidad')).toBeDisabled();
+        expect(screen.queryByPlaceholderText('Unidad personalizada')).not.toBeInTheDocument();
+
+        await user.click(toggle);
+        await user.click(getFieldButtonInSection('Datos', 'Unidad'));
+        await user.click(screen.getByRole('button', { name: 'Personalizado' }));
+
+        const customUnitInput = screen.getByPlaceholderText('Unidad personalizada');
+        expect(getFieldButtonInSection('Datos', 'Unidad')).toHaveTextContent('Personalizado');
+
+        await user.clear(customUnitInput);
+        await user.type(customUnitInput, 'BTU/h');
+
+        expect(updates.at(-1)).toMatchObject({
+            binding: {
+                mode: 'real_variable',
+                machineId: 101,
+                variableKey: 'temp',
+                bindingVersion: 'node-red-v1',
+                unit: 'kW',
+            },
+            displayOptions: {
+                unitOverride: true,
+                unit: 'BTU/h',
+            },
+        });
     });
 
     it('falls back to the current simulated display unit for KPI scale labels when binding.unit is empty', () => {

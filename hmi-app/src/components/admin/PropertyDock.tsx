@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart, Info } from 'lucide-react';
+import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart, Info, Pencil } from 'lucide-react';
 import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape, InfoCardDisplayOptions, InfoCardField, TextAlign } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
@@ -163,7 +163,13 @@ const PROD_HISTORY_OEE_DEFAULT_LINE_STROKE_WIDTH = 2.5;
 const PROD_HISTORY_OEE_DEFAULT_LINE_GLOW_BLUR = 3;
 const PROD_HISTORY_PRODUCTION_DEFAULT_LINE_STROKE_WIDTH = 2.5;
 const PROD_HISTORY_PRODUCTION_DEFAULT_LINE_GLOW_BLUR = 3;
-const PRESET_UNITS = ['°C', '°F', 'RPM', '%', 'bar', 'psi', 'kW', 'A', 'V', 'Hz', 'mm', 'kg', 'L/min', 'm³/h', 'N', 'kN'] as const;
+const PRESET_UNITS = ['°C', '°F', 'RPM', '%', 'bar', 'psi', 'kW', 'A', 'V', 'Hz', 'Hs', 'mm', 'kg', 'L/min', 'm³/h', 'N', 'kN'] as const;
+const CUSTOM_UNIT_OPTION_VALUE = '__custom__';
+const CUSTOM_UNIT_OPTION = {
+    value: CUSTOM_UNIT_OPTION_VALUE,
+    label: 'Personalizado',
+    icon: <Pencil size={11} />,
+};
 type PresetUnit = (typeof PRESET_UNITS)[number];
 type ConnectionStatusTextFieldKey = 'onlineText' | 'degradadoText' | 'offlineText' | 'unknownText';
 type InfoCardFieldStorageKey = keyof Pick<InfoCardField, 'helpText' | 'label' | 'value'>;
@@ -365,6 +371,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     void selectedLayout;
 
     useEffect(() => {
+        setIsCustomUnit(false);
         setActivityAnalyticsThresholdWarning(null);
     }, [selectedWidget?.id]);
 
@@ -1262,15 +1269,16 @@ export default function PropertyDock(props: PropertyDockProps) {
         } as WidgetConfig);
     };
 
-    const getUnitSelectOptions = (value?: string | null) => {
+    const getUnitSelectOptions = (value?: string | null, includeCustomOption = false) => {
         const normalizedValue = value?.trim() ?? '';
         const baseOptions = PRESET_UNITS.map(unitOption => ({ value: unitOption, label: unitOption }));
+        const customOptions = includeCustomOption ? [CUSTOM_UNIT_OPTION] : [];
 
         if (!normalizedValue || isPresetUnit(normalizedValue)) {
-            return baseOptions;
+            return [...baseOptions, ...customOptions];
         }
 
-        return [{ value: normalizedValue, label: normalizedValue }, ...baseOptions];
+        return [{ value: normalizedValue, label: normalizedValue }, ...baseOptions, ...customOptions];
     };
 
     // --- Binding handlers ---
@@ -1563,10 +1571,15 @@ export default function PropertyDock(props: PropertyDockProps) {
     const kpiScaleMinLabel = resolvedKpiScaleUnit ? `${resolvedKpiScaleUnit} mín` : 'Valor mín';
     const kpiScaleMaxLabel = resolvedKpiScaleUnit ? `${resolvedKpiScaleUnit} máx` : 'Valor máx';
     const isSimulatedBinding = binding.mode === 'simulated_value';
+    const isWidgetUnitEditable = isSimulatedBinding || isUnitOverrideEnabled;
     const simulatedWidgetUnit = (binding.unit?.trim() || widgetUnitDisplayOptions?.unit?.trim() || '');
     const customUnitInputValue = isSimulatedBinding
         ? (simulatedWidgetUnit || (isMachineActivity ? '%' : ''))
         : (widgetUnitDisplayOptions?.unit ?? (isMachineActivity ? '%' : (binding.unit ?? '')));
+    const normalizedCustomUnitInputValue = customUnitInputValue.trim();
+    const showWidgetCustomUnitInput = isWidgetUnitEditable
+        && (isCustomUnit || (!!normalizedCustomUnitInputValue && !isPresetUnit(normalizedCustomUnitInputValue)));
+    const widgetUnitSelectValue = showWidgetCustomUnitInput ? CUSTOM_UNIT_OPTION_VALUE : customUnitInputValue;
     const resolvedUnitPreviewValue = resolvedVariableUnit ?? '—';
     const prodHistoryBarWidth = (() => {
         const rawValue = prodHistoryOptions?.productionBarWidth ?? 1;
@@ -1607,7 +1620,7 @@ export default function PropertyDock(props: PropertyDockProps) {
             const currentUnit = selectedWidget?.binding?.unit || '';
             const isPreset = isPresetUnit(currentUnit);
             const showCustom = isCustomUnit || (!isPreset && currentUnit !== '');
-            const selectValue = showCustom ? '__custom__' : currentUnit;
+            const selectValue = showCustom ? CUSTOM_UNIT_OPTION_VALUE : currentUnit;
 
             return (
                 <>
@@ -1624,7 +1637,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                 value={selectValue}
                                 placeholder="Seleccionar"
                                 onChange={val => {
-                                    if (val === '__custom__') {
+                                    if (val === CUSTOM_UNIT_OPTION_VALUE) {
                                         setIsCustomUnit(true);
                                     } else {
                                         setIsCustomUnit(false);
@@ -1634,7 +1647,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                 options={[
                                     { value: '', label: 'Sin unidad' },
                                     ...PRESET_UNITS.map(u => ({ value: u, label: u })),
-                                    { value: '__custom__', label: '✏️ Personalizado' },
+                                    CUSTOM_UNIT_OPTION,
                                 ]}
                             />
                         )}
@@ -2376,15 +2389,37 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         )}
 
                                         {binding.mode === 'simulated_value' && (isKpi || isMachineActivity) && (
-                                            <DockFieldRow label="Unidad">
-                                                <AdminSelect
-                                                    value={customUnitInputValue}
-                                                    onChange={handleWidgetSimulatedUnitChange}
-                                                    placeholder="Seleccionar"
-                                                    disabled={isBindingSourceDisabled}
-                                                    options={getUnitSelectOptions(customUnitInputValue)}
-                                                />
-                                            </DockFieldRow>
+                                            <>
+                                                <DockFieldRow label="Unidad">
+                                                    <AdminSelect
+                                                        value={widgetUnitSelectValue}
+                                                        onChange={val => {
+                                                            if (val === CUSTOM_UNIT_OPTION_VALUE) {
+                                                                setIsCustomUnit(true);
+                                                                return;
+                                                            }
+
+                                                            setIsCustomUnit(false);
+                                                            handleWidgetSimulatedUnitChange(val);
+                                                        }}
+                                                        placeholder="Seleccionar"
+                                                        disabled={isBindingSourceDisabled}
+                                                        options={getUnitSelectOptions(customUnitInputValue, true)}
+                                                    />
+                                                </DockFieldRow>
+                                                {showWidgetCustomUnitInput && !isBindingSourceDisabled && (
+                                                    <DockFieldRow label="">
+                                                        <input
+                                                            type="text"
+                                                            className={INPUT_CLS}
+                                                            value={customUnitInputValue}
+                                                            onChange={e => handleWidgetSimulatedUnitChange(e.target.value)}
+                                                            placeholder="Unidad personalizada"
+                                                            autoFocus
+                                                        />
+                                                    </DockFieldRow>
+                                                )}
+                                            </>
                                         )}
 
                                         {binding.mode === 'real_variable' && (
@@ -2502,13 +2537,33 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                                                         <DockFieldRow label="Unidad">
                                                             <AdminSelect
-                                                                value={isUnitOverrideEnabled ? customUnitInputValue : resolvedUnitPreviewValue}
-                                                                onChange={handleWidgetDisplayUnitChange}
+                                                                value={isUnitOverrideEnabled ? widgetUnitSelectValue : resolvedUnitPreviewValue}
+                                                                onChange={val => {
+                                                                    if (val === CUSTOM_UNIT_OPTION_VALUE) {
+                                                                        setIsCustomUnit(true);
+                                                                        return;
+                                                                    }
+
+                                                                    setIsCustomUnit(false);
+                                                                    handleWidgetDisplayUnitChange(val);
+                                                                }}
                                                                 placeholder="Seleccionar"
                                                                 disabled={!isUnitOverrideEnabled}
-                                                                options={getUnitSelectOptions(isUnitOverrideEnabled ? customUnitInputValue : resolvedUnitPreviewValue)}
+                                                                options={getUnitSelectOptions(isUnitOverrideEnabled ? customUnitInputValue : resolvedUnitPreviewValue, isUnitOverrideEnabled)}
                                                             />
                                                         </DockFieldRow>
+                                                        {showWidgetCustomUnitInput && isUnitOverrideEnabled && (
+                                                            <DockFieldRow label="">
+                                                                <input
+                                                                    type="text"
+                                                                    className={INPUT_CLS}
+                                                                    value={customUnitInputValue}
+                                                                    onChange={e => handleWidgetDisplayUnitChange(e.target.value)}
+                                                                    placeholder="Unidad personalizada"
+                                                                    autoFocus
+                                                                />
+                                                            </DockFieldRow>
+                                                        )}
                                                         </>
                                                 )}
                                             </>
