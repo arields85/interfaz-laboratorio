@@ -353,6 +353,7 @@ export interface MetricCardDisplayOptions {
     subtitle?: string;
     subtext?: string;
     icon?: string | null;
+    valueFontSize?: number;
 }
 
 /**
@@ -611,11 +612,13 @@ export interface ProdHistoryDisplayOptions {
  */
 export type BaseDisplayOptions = Record<never, never>;
 
+export type TextAlign = 'left' | 'center' | 'right';
+
 export type TextTitleColor = 'white' | 'soft' | 'muted';
 
 export interface TextTitleDisplayOptions {
     fontSize?: number;
-    textAlign?: 'left' | 'center' | 'right';
+    textAlign?: TextAlign;
     textColor?: TextTitleColor;
 }
 
@@ -623,6 +626,7 @@ export interface InfoCardField {
     id: string;
     label: string;
     value?: string;
+    helpText?: string;
 }
 
 export interface InfoCardDisplayOptions {
@@ -630,6 +634,7 @@ export interface InfoCardDisplayOptions {
     helpText?: string;
     icon?: string | null;
     valueFontSize?: number;
+    textAlign?: TextAlign;
     fields: InfoCardField[];
 }
 

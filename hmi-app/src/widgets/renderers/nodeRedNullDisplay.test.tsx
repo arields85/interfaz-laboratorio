@@ -152,6 +152,23 @@ describe('Node-RED null renderer fallbacks', () => {
         expect(screen.queryByText('—')).not.toBeInTheDocument();
     });
 
+    it('applies the metric-card valueFontSize override only to the runtime metric value', () => {
+        render(
+            <MetricWidget
+                widget={{
+                    ...makeMetricWidget(),
+                    displayOptions: {
+                        valueFontSize: 72,
+                    },
+                }}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(42)}
+            />,
+        );
+
+        expect(screen.getByTestId('metric-card-value-row')).toHaveStyle({ fontSize: '72px' });
+    });
+
     it('renders Sin datos in TrendChartWidget when the resolved contract value is null', () => {
         render(
             <TrendChartWidget

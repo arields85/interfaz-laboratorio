@@ -6,6 +6,7 @@ import ConnectionBadge from '../../components/ui/ConnectionBadge';
 import { resolveBinding } from '../resolvers/bindingResolver';
 import { buildHierarchyAggregationTrace, type HierarchyContext } from '../resolvers/hierarchyResolver';
 import { toCardStatus } from '../resolvers/thresholdEvaluator';
+import { resolveActivityAnalyticsDonutCenterValueFontSize } from '../../utils/activityAnalyticsWidgetDefaults';
 import { Gauge, Activity, Thermometer, Zap, Droplet, Wind, Settings, Fan, FoldVertical, HelpCircle, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -107,12 +108,14 @@ export default function MetricWidget({
     const showConnectionBadge =
         resolved.connectionState !== undefined &&
         resolved.connectionState !== 'online';
+    const valueFontSize = resolveActivityAnalyticsDonutCenterValueFontSize(widget.displayOptions?.valueFontSize);
 
     return (
         <div className={`flex flex-col gap-1.5 w-full h-full min-h-0 ${className ?? ''}`}>
             <MetricCard
                 label={widget.title ?? '—'}
                 value={resolved.value}
+                valueFontSize={valueFontSize}
                 unit={resolved.unit}
                 status={cardStatus}
                 icon={Icon}

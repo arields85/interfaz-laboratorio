@@ -1059,11 +1059,10 @@ export default function DashboardBuilderPage() {
                                     binding: { mode: 'simulated_value', simulatedValue: 0 },
                                     displayOptions: {
                                         subtitle: 'Static summary',
-                                        helpText: 'Static admin-authored information only.',
                                         icon: defaultIcon,
                                         valueFontSize: DEFAULT_INFO_CARD_VALUE_FONT_SIZE,
                                         fields: [
-                                            { id: 'field-1', label: 'Label', value: 'Value' },
+                                            { id: 'field-1', label: 'Label', value: 'Value', helpText: 'Static admin-authored information only.' },
                                         ],
                                     },
                                 }

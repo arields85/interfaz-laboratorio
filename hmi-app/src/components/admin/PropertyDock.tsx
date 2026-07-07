@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart, Info } from 'lucide-react';
-import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape, InfoCardDisplayOptions, InfoCardField } from '../../domain/admin.types';
+import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape, InfoCardDisplayOptions, InfoCardField, TextAlign } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -52,7 +52,13 @@ import {
 } from './adminSidebarStyles';
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
-import { DEFAULT_INFO_CARD_VALUE_FONT_SIZE, resolveInfoCardFields } from '../../utils/infoCardDisplayOptions';
+import {
+    DEFAULT_INFO_CARD_VALUE_FONT_SIZE,
+    DEFAULT_WIDGET_VALUE_FONT_SIZE,
+    resolveInfoCardFieldContent,
+    resolveInfoCardFields,
+    resolveInfoCardTextAlign,
+} from '../../utils/infoCardDisplayOptions';
 import {
     DEFAULT_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
     DEFAULT_GAUGE_VALUE_FONT_SIZE,
@@ -160,6 +166,23 @@ const PROD_HISTORY_PRODUCTION_DEFAULT_LINE_GLOW_BLUR = 3;
 const PRESET_UNITS = ['°C', '°F', 'RPM', '%', 'bar', 'psi', 'kW', 'A', 'V', 'Hz', 'mm', 'kg', 'L/min', 'm³/h', 'N', 'kN'] as const;
 type PresetUnit = (typeof PRESET_UNITS)[number];
 type ConnectionStatusTextFieldKey = 'onlineText' | 'degradadoText' | 'offlineText' | 'unknownText';
+type InfoCardFieldStorageKey = keyof Pick<InfoCardField, 'helpText' | 'label' | 'value'>;
+
+const INFO_CARD_FIELD_EDITOR_ROWS: Array<{
+    storageKey: InfoCardFieldStorageKey;
+    semanticLabel: 'Texto' | 'Subtexto' | 'Etiqueta';
+    placeholder: string;
+}> = [
+    { storageKey: 'value', semanticLabel: 'Texto', placeholder: 'Primary text' },
+    { storageKey: 'label', semanticLabel: 'Subtexto', placeholder: 'Secondary text' },
+    { storageKey: 'helpText', semanticLabel: 'Etiqueta', placeholder: 'Optional label' },
+];
+
+const TEXT_ALIGN_BUTTON_OPTIONS: Array<{ value: TextAlign; label: string; Icon: typeof AlignLeft }> = [
+    { value: 'left', label: 'Alinear a la izquierda', Icon: AlignLeft },
+    { value: 'center', label: 'Alinear al centro', Icon: AlignCenter },
+    { value: 'right', label: 'Alinear a la derecha', Icon: AlignRight },
+];
 
 const isPresetUnit = (value: string): value is PresetUnit => PRESET_UNITS.some(unit => unit === value);
 const ACTIVITY_ANALYTICS_RANGE_OPTIONS: Array<{ value: ActivityAnalyticsSupportedRange; label: string }> = [
@@ -611,6 +634,22 @@ export default function PropertyDock(props: PropertyDockProps) {
                 ),
             },
         } as WidgetConfig);
+    };
+
+    const handleMetricCardValueFontSizeChange = (value: string) => {
+        if (!selectedWidget || selectedWidget.type !== 'metric-card') {
+            return;
+        }
+
+        onUpdateWidget({
+            ...selectedWidget,
+            displayOptions: {
+                ...(selectedWidget.displayOptions ?? {}),
+                valueFontSize: resolveActivityAnalyticsDonutCenterValueFontSize(
+                    value === '' ? undefined : Number(value),
+                ),
+            },
+        });
     };
 
     const handleActivityAnalyticsStateGradientChange = (
@@ -1147,16 +1186,18 @@ export default function PropertyDock(props: PropertyDockProps) {
         onUpdateWidget({ ...selectedWidget, displayOptions: { ...selectedWidget.displayOptions, prodTrendBands: { ...selectedWidget.displayOptions?.prodTrendBands, blendMode: resolveActivityAnalyticsProdTrendBandBlendMode(blendMode) } } });
     };
 
-    const handleInfoCardFieldChange = (index: number, key: keyof Pick<InfoCardField, 'label' | 'value'>, value: string) => {
+    // Product semantics are Texto/Subtexto/Etiqueta, but persisted keys stay
+    // `value/label/helpText` to avoid destructive schema changes.
+    const handleInfoCardFieldChange = (index: number, storageKey: InfoCardFieldStorageKey, value: string) => {
         if (!selectedWidget || selectedWidget.type !== 'info-card') {
             return;
         }
 
         const currentOptions = (selectedWidget.displayOptions ?? {}) as InfoCardDisplayOptions;
         const resolvedFields = resolveInfoCardFields(currentOptions);
-        const currentFields = resolvedFields.length ? resolvedFields : [{ id: 'field-1', label: '', value: '' }];
+        const currentFields = resolvedFields.length ? resolvedFields : [{ id: 'field-1', label: '', value: '', helpText: '' }];
         const nextFields = currentFields.map((field, fieldIndex) => (
-            fieldIndex === index ? { ...field, [key]: value } : field
+            fieldIndex === index ? { ...field, [storageKey]: value } : field
         ));
 
         onUpdateWidget({
@@ -1453,9 +1494,12 @@ export default function PropertyDock(props: PropertyDockProps) {
     const infoCardOptions = isInfoCard
         ? (selectedWidget.displayOptions as InfoCardDisplayOptions | undefined)
         : undefined;
+    const metricCardDisplayOptions = selectedWidget?.type === 'metric-card'
+        ? (selectedWidget.displayOptions as MetricCardDisplayOptions | undefined)
+        : undefined;
     const resolvedInfoCardFields = isInfoCard ? resolveInfoCardFields(infoCardOptions) : [];
     const infoCardFields = isInfoCard
-        ? (resolvedInfoCardFields.length ? resolvedInfoCardFields : [{ id: 'field-1', label: '', value: '' }])
+        ? (resolvedInfoCardFields.length ? resolvedInfoCardFields : [{ id: 'field-1', label: '', value: '', helpText: '' }])
         : [];
     const activityAnalyticsDisplayRules = activityAnalyticsOptions
         ? resolveActivityAnalyticsDisplayRules({
@@ -1692,14 +1736,27 @@ export default function PropertyDock(props: PropertyDockProps) {
                                 />
                             </DockFieldRow>
                             {/* Subtítulo: header del widget (debajo del título). KPI y MetricCard. */}
-                            {(selectedWidget.type === 'kpi' || selectedWidget.type === 'metric-card') && (
-                                <DockFieldRow label="Subtítulo">
-                                    <input
-                                        type="text"
-                                        className={INPUT_CLS}
+                             {(selectedWidget.type === 'kpi' || selectedWidget.type === 'metric-card') && (
+                                 <DockFieldRow label="Subtítulo">
+                                     <input
+                                         type="text"
+                                         className={INPUT_CLS}
                                         value={(selectedWidget.displayOptions as KpiDisplayOptions | MetricCardDisplayOptions | undefined)?.subtitle || ''}
                                         onChange={e => handleDisplayOptionChange('subtitle', e.target.value)}
-                                        placeholder="ej. Estado: OK"
+                                         placeholder="ej. Estado: OK"
+                                     />
+                                 </DockFieldRow>
+                             )}
+                            {selectedWidget.type === 'metric-card' && (
+                                <DockFieldRow label="Tam. Valor">
+                                    <AdminNumberInput
+                                        value={metricCardDisplayOptions?.valueFontSize ?? DEFAULT_WIDGET_VALUE_FONT_SIZE}
+                                        min={MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE}
+                                        max={MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE}
+                                        step={1}
+                                        commitOnBlur
+                                        ariaLabel="Tarjeta de métrica tamaño de valor"
+                                        onChange={handleMetricCardValueFontSizeChange}
                                     />
                                 </DockFieldRow>
                             )}
@@ -1938,15 +1995,13 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         </DockFieldRow>
                                         <DockFieldRow label="Alinear">
                                             <div className="flex gap-1">
-                                                {([
-                                                    { value: 'left' as const, Icon: AlignLeft },
-                                                    { value: 'center' as const, Icon: AlignCenter },
-                                                    { value: 'right' as const, Icon: AlignRight },
-                                                ]).map(({ value, Icon }) => (
+                                                {TEXT_ALIGN_BUTTON_OPTIONS.map(({ value, label, Icon }) => (
                                                     <button
                                                         key={value}
                                                         type="button"
                                                         onClick={() => handleDisplayOptionChange('textAlign', value)}
+                                                        aria-label={label}
+                                                        title={label}
                                                         className={`p-1.5 rounded transition-colors ${currentAlign === value ? 'bg-white/10 text-white' : 'text-industrial-muted hover:text-white hover:bg-white/5'}`}
                                                     >
                                                         <Icon size={14} />
@@ -1991,15 +2046,6 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         placeholder="Short context"
                                     />
                                 </DockFieldRow>
-                                <DockFieldRow label="Ayuda">
-                                    <input
-                                        type="text"
-                                        className={INPUT_CLS}
-                                        value={infoCardOptions?.helpText || ''}
-                                        onChange={e => handleDisplayOptionChange('helpText', e.target.value)}
-                                        placeholder="Read-only note"
-                                    />
-                                </DockFieldRow>
                                 <DockFieldRow label="Tamaño">
                                     <AdminNumberInput
                                         value={infoCardOptions?.valueFontSize ?? DEFAULT_INFO_CARD_VALUE_FONT_SIZE}
@@ -2010,28 +2056,50 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         onChange={val => handleNumericDisplayOptionChange('valueFontSize', val)}
                                     />
                                 </DockFieldRow>
-                                {infoCardFields.map((field, index) => (
-                                    <div key={field.id} className="flex flex-col gap-2">
-                                        <DockFieldRow label={`Etiqueta ${index + 1}`}>
-                                            <input
-                                                type="text"
-                                                className={INPUT_CLS}
-                                                value={field.label}
-                                                onChange={e => handleInfoCardFieldChange(index, 'label', e.target.value)}
-                                                placeholder="Field label"
-                                            />
-                                        </DockFieldRow>
-                                        <DockFieldRow label={`Valor ${index + 1}`}>
-                                            <input
-                                                type="text"
-                                                className={INPUT_CLS}
-                                                value={field.value || ''}
-                                                onChange={e => handleInfoCardFieldChange(index, 'value', e.target.value)}
-                                                placeholder="Static value"
-                                            />
-                                        </DockFieldRow>
+                                <DockFieldRow label="Alinear">
+                                    <div className="flex gap-1">
+                                        {TEXT_ALIGN_BUTTON_OPTIONS.map(({ value, label, Icon }) => {
+                                            const currentAlign = resolveInfoCardTextAlign(infoCardOptions);
+
+                                            return (
+                                                <button
+                                                    key={value}
+                                                    type="button"
+                                                    onClick={() => handleDisplayOptionChange('textAlign', value)}
+                                                    aria-label={label}
+                                                    title={label}
+                                                    className={`p-1.5 rounded transition-colors ${currentAlign === value ? 'bg-white/10 text-white' : 'text-industrial-muted hover:text-white hover:bg-white/5'}`}
+                                                >
+                                                    <Icon size={14} />
+                                                </button>
+                                            );
+                                        })}
                                     </div>
-                                ))}
+                                </DockFieldRow>
+                                {infoCardFields.map((field, index) => {
+                                    const fieldContent = resolveInfoCardFieldContent(field);
+                                    const valueByStorageKey: Record<InfoCardFieldStorageKey, string> = {
+                                        value: fieldContent.text ?? '',
+                                        label: fieldContent.subtext,
+                                        helpText: fieldContent.tag ?? '',
+                                    };
+
+                                    return (
+                                        <div key={field.id} className="flex flex-col gap-2">
+                                            {INFO_CARD_FIELD_EDITOR_ROWS.map(({ storageKey, semanticLabel, placeholder }) => (
+                                                <DockFieldRow key={`${field.id}-${storageKey}`} label={`${semanticLabel} ${index + 1}`}>
+                                                    <input
+                                                        type="text"
+                                                        className={INPUT_CLS}
+                                                        value={valueByStorageKey[storageKey]}
+                                                        onChange={e => handleInfoCardFieldChange(index, storageKey, e.target.value)}
+                                                        placeholder={placeholder}
+                                                    />
+                                                </DockFieldRow>
+                                            ))}
+                                        </div>
+                                    );
+                                })}
                             </DockSection>
                         )}
 

@@ -42,11 +42,10 @@ export function makeInfoCardWidget(overrides: Partial<InfoCardWidgetConfig> = {}
         binding: { mode: 'simulated_value', simulatedValue: 0 },
         displayOptions: {
             subtitle: 'Static summary',
-            helpText: 'Static admin-authored information only.',
             icon: 'Info',
             valueFontSize: DEFAULT_INFO_CARD_VALUE_FONT_SIZE,
             fields: [
-                { id: 'field-1', label: 'Batch', value: 'B-204' },
+                { id: 'field-1', label: 'Batch', value: 'B-204', helpText: 'Static admin-authored information only.' },
                 { id: 'field-2', label: 'Operator', value: 'Ada' },
             ],
             ...overrides.displayOptions,

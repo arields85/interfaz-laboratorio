@@ -17,6 +17,7 @@ import {
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENT_ALPHAS,
     DEFAULT_ACTIVITY_ANALYTICS_STATE_GRADIENTS,
 } from '../../utils/activityAnalyticsWidgetDefaults';
+import { DEFAULT_WIDGET_VALUE_FONT_SIZE } from '../../utils/infoCardDisplayOptions';
 import {
     DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
     DEFAULT_KPI_FIXED_TOP_CAP_SHAPE,
@@ -201,6 +202,21 @@ function getInputInSection(sectionTitle: string, label: string) {
     }
 
     return input;
+}
+
+function getButtonsInSectionRow(sectionTitle: string, label: string) {
+    const section = getSection(sectionTitle);
+    const row = within(section).getByText(label).closest('div');
+
+    if (!row) {
+        throw new Error(`No se encontró la fila ${label} en ${sectionTitle}`);
+    }
+
+    return within(row).getAllByRole('button');
+}
+
+function getButtonNamesInSectionRow(sectionTitle: string, label: string) {
+    return getButtonsInSectionRow(sectionTitle, label).map((button) => button.getAttribute('aria-label'));
 }
 
 describe('PropertyDock Node-RED binding', () => {
@@ -566,19 +582,26 @@ describe('PropertyDock info-card', () => {
         expect(screen.getByRole('button', { name: /info-card/i })).toBeInTheDocument();
         expect(getInputInSection('General', 'Título')).toHaveValue('Line summary');
         expect(getInputInSection('INFO-CARD', 'Subtítulo')).toHaveValue('Shift overview');
-        expect(getInputInSection('INFO-CARD', 'Ayuda')).toHaveValue('Reviewed by QA');
         expect(getInputInSection('INFO-CARD', 'Tamaño')).toHaveValue('42');
-        expect(getInputInSection('INFO-CARD', 'Etiqueta 1')).toHaveValue('Batch');
-        expect(getInputInSection('INFO-CARD', 'Valor 1')).toHaveValue('B-204');
-        expect(getInputInSection('INFO-CARD', 'Etiqueta 2')).toHaveValue('Operator');
-        expect(getInputInSection('INFO-CARD', 'Valor 2')).toHaveValue('Ada');
+        expect(getButtonsInSectionRow('INFO-CARD', 'Alinear')).toHaveLength(3);
+        expect(getButtonNamesInSectionRow('INFO-CARD', 'Alinear')).toEqual([
+            'Alinear a la izquierda',
+            'Alinear al centro',
+            'Alinear a la derecha',
+        ]);
+        expect(getInputInSection('INFO-CARD', 'Texto 1')).toHaveValue('B-204');
+        expect(getInputInSection('INFO-CARD', 'Subtexto 1')).toHaveValue('Batch');
+        expect(getInputInSection('INFO-CARD', 'Etiqueta 1')).toHaveValue('Reviewed by QA');
+        expect(getInputInSection('INFO-CARD', 'Texto 2')).toHaveValue('Ada');
+        expect(getInputInSection('INFO-CARD', 'Subtexto 2')).toHaveValue('Operator');
+        expect(getInputInSection('INFO-CARD', 'Etiqueta 2')).toHaveValue('');
         expect(screen.getByText('Static admin-authored fields only. No telemetry binding or plant control is available.')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /datos/i })).not.toBeInTheDocument();
         expect(screen.queryByText('Variable')).not.toBeInTheDocument();
         expect(screen.queryByText('Origen')).not.toBeInTheDocument();
     });
 
-    it('persists subtitle, help text, value size, and field label/value edits in displayOptions.fields', async () => {
+    it('persists subtitle, value size, and grouped text/subtext/label edits in displayOptions.fields without dropping legacy display options', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'info-card',
             title: 'Line summary',
@@ -599,6 +622,7 @@ describe('PropertyDock info-card', () => {
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             subtitle: 'Current shift',
+            helpText: 'Reviewed by QA',
             fields: [{ id: 'field-1', label: 'Batch', value: 'B-204' }],
         });
 
@@ -609,25 +633,47 @@ describe('PropertyDock info-card', () => {
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             subtitle: 'Current shift',
+            helpText: 'Reviewed by QA',
             valueFontSize: 52,
             fields: [{ id: 'field-1', label: 'Batch', value: 'B-204' }],
         });
 
-        const labelInput = getInputInSection('INFO-CARD', 'Etiqueta 1');
-        await user.clear(labelInput);
-        await user.type(labelInput, 'Lot');
+        await user.click(screen.getByRole('button', { name: 'Alinear a la izquierda' }));
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             subtitle: 'Current shift',
+            helpText: 'Reviewed by QA',
+            valueFontSize: 52,
+            textAlign: 'left',
+            fields: [{ id: 'field-1', label: 'Batch', value: 'B-204' }],
+        });
+
+        const subtextInput = getInputInSection('INFO-CARD', 'Subtexto 1');
+        await user.clear(subtextInput);
+        await user.type(subtextInput, 'Lot');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            subtitle: 'Current shift',
+            helpText: 'Reviewed by QA',
             fields: [{ id: 'field-1', label: 'Lot', value: 'B-204' }],
         });
 
-        const valueInput = getInputInSection('INFO-CARD', 'Valor 1');
-        await user.clear(valueInput);
-        await user.type(valueInput, 'L-18');
+        const textInput = getInputInSection('INFO-CARD', 'Texto 1');
+        await user.clear(textInput);
+        await user.type(textInput, 'L-18');
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
+            helpText: 'Reviewed by QA',
             fields: [{ id: 'field-1', label: 'Lot', value: 'L-18' }],
+        });
+
+        const fieldLabelInput = getInputInSection('INFO-CARD', 'Etiqueta 1');
+        await user.clear(fieldLabelInput);
+        await user.type(fieldLabelInput, 'Read-only legend');
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            helpText: 'Reviewed by QA',
+            fields: [{ id: 'field-1', label: 'Lot', value: 'L-18', helpText: 'Read-only legend' }],
         });
         expect(updates.at(-1)?.binding).toEqual({ mode: 'simulated_value', simulatedValue: 0 });
     });
@@ -643,7 +689,7 @@ describe('PropertyDock info-card', () => {
             } as unknown as WidgetConfig['displayOptions'],
         });
 
-        const labelInput = getInputInSection('INFO-CARD', 'Etiqueta 1');
+        const labelInput = getInputInSection('INFO-CARD', 'Subtexto 1');
 
         expect(labelInput).toHaveValue('');
 
@@ -783,6 +829,60 @@ describe('PropertyDock hierarchy aggregation preview', () => {
         expect(screen.getByText('No se encontró ningún contributor numérico para la variable seleccionada.')).toBeInTheDocument();
         expect(screen.queryByText('Incluidos')).not.toBeInTheDocument();
         expect(screen.queryByText('Excluidos')).not.toBeInTheDocument();
+    });
+});
+
+describe('PropertyDock metric-card', () => {
+    it('renders the metric-card Tam. Valor control in General between Subtítulo and Subtexto and persists a clamped value font size override', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'metric-card',
+            title: 'Tarjeta de Métrica',
+            binding: {
+                mode: 'simulated_value',
+                simulatedValue: 42,
+                unit: '°C',
+            },
+            displayOptions: {
+                subtitle: 'Tanque principal',
+                subtext: 'Límite alto',
+                icon: 'Thermometer',
+            },
+        });
+
+        const generalSection = getSection('General');
+        const dataSection = getSection('Datos');
+        const subtitleInput = within(generalSection).getByDisplayValue('Tanque principal');
+        const fontSizeInput = within(generalSection).getByRole('textbox', { name: 'Tarjeta de métrica tamaño de valor' });
+        const subtextInput = within(generalSection).getByDisplayValue('Límite alto');
+
+        expect(within(dataSection).getByText('Valor')).toBeInTheDocument();
+        expect(within(dataSection).queryByText('Tam. Valor')).not.toBeInTheDocument();
+        expect(within(generalSection).getByText('Tam. Valor')).toBeInTheDocument();
+        expect(subtitleInput.compareDocumentPosition(fontSizeInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(fontSizeInput.compareDocumentPosition(subtextInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(fontSizeInput).toHaveValue(String(DEFAULT_WIDGET_VALUE_FONT_SIZE));
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '240');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            valueFontSize: MAX_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+            subtitle: 'Tanque principal',
+            subtext: 'Límite alto',
+            icon: 'Thermometer',
+        });
+
+        await user.clear(fontSizeInput);
+        await user.type(fontSizeInput, '8');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            valueFontSize: MIN_ACTIVITY_ANALYTICS_DONUT_CENTER_VALUE_FONT_SIZE,
+            subtitle: 'Tanque principal',
+            subtext: 'Límite alto',
+            icon: 'Thermometer',
+        });
     });
 });
 
