@@ -16,11 +16,16 @@ export const DATA_DEFAULT_STALE_TIME = 4_000;
 export const DATA_DEFAULT_ENDPOINT = '/api/hmi-data';
 export const DATA_DEFAULT_HISTORY_ENDPOINT = '/api/hmi-data/history';
 export const DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT = '/api/hmi-data/activity-series';
+export const DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS = 5_000;
+export const DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS = 1_000;
 
 const LS_KEY_BASE_URL = 'hmi:node-red-base-url';
 const LS_KEY_ENDPOINT = 'hmi:node-red-endpoint';
 const LS_KEY_HISTORY_ENDPOINT = 'hmi:data-history-endpoint';
 const LS_KEY_ACTIVITY_SERIES_ENDPOINT = 'hmi:activity-series-endpoint';
+const LS_KEY_SNAPSHOT_EXPORT_ENDPOINT = 'hmi:snapshot-export-endpoint';
+const LS_KEY_SNAPSHOT_EXPORT_ENABLED = 'hmi:snapshot-export-enabled';
+const LS_KEY_SNAPSHOT_EXPORT_INTERVAL_MS = 'hmi:snapshot-export-interval-ms';
 
 function stripTrailingSlashes(raw: string): string {
     return raw.replace(/\/+$/, '');
@@ -33,6 +38,14 @@ function stripLeadingSlashes(raw: string): string {
 function normalizeUrl(raw: string | null | undefined): string | null {
     if (!raw || raw.trim() === '') return null;
     return stripTrailingSlashes(raw.trim());
+}
+
+function normalizeSnapshotExportIntervalMs(intervalMs: number): number {
+    if (!Number.isFinite(intervalMs)) {
+        return DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS;
+    }
+
+    return Math.max(DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS, Math.trunc(intervalMs));
 }
 
 // --- Base URL ---
@@ -201,4 +214,91 @@ export function getDataActivitySeriesUrl(): string | null {
     const activitySeriesEndpoint = getDataActivitySeriesEndpoint();
     if (!activitySeriesEndpoint) return null;
     return `${base}/${stripLeadingSlashes(activitySeriesEndpoint)}`;
+}
+
+export function getDataSnapshotExportEndpoint(): string | null {
+    try {
+        const stored = localStorage.getItem(LS_KEY_SNAPSHOT_EXPORT_ENDPOINT);
+
+        if (stored !== null) {
+            const trimmed = stored.trim();
+            return trimmed === '' ? null : '/' + stripLeadingSlashes(trimmed);
+        }
+    } catch {
+        // localStorage unavailable
+    }
+
+    return null;
+}
+
+export function saveDataSnapshotExportEndpoint(endpoint: string): void {
+    localStorage.setItem(LS_KEY_SNAPSHOT_EXPORT_ENDPOINT, endpoint.trim());
+}
+
+export function clearDataSnapshotExportEndpoint(): void {
+    localStorage.removeItem(LS_KEY_SNAPSHOT_EXPORT_ENDPOINT);
+}
+
+export function getSavedDataSnapshotExportEndpoint(): string | null {
+    try {
+        return localStorage.getItem(LS_KEY_SNAPSHOT_EXPORT_ENDPOINT);
+    } catch {
+        return null;
+    }
+}
+
+export function getDataSnapshotExportEnabledSetting(): boolean {
+    try {
+        return localStorage.getItem(LS_KEY_SNAPSHOT_EXPORT_ENABLED) === 'true';
+    } catch {
+        return false;
+    }
+}
+
+export function saveDataSnapshotExportEnabledSetting(enabled: boolean): void {
+    localStorage.setItem(LS_KEY_SNAPSHOT_EXPORT_ENABLED, String(enabled));
+}
+
+export function clearDataSnapshotExportEnabledSetting(): void {
+    localStorage.removeItem(LS_KEY_SNAPSHOT_EXPORT_ENABLED);
+}
+
+export function getDataSnapshotExportIntervalMs(): number {
+    try {
+        const stored = localStorage.getItem(LS_KEY_SNAPSHOT_EXPORT_INTERVAL_MS);
+
+        if (stored !== null) {
+            const parsed = Number.parseInt(stored, 10);
+
+            if (Number.isFinite(parsed) && parsed > 0) {
+                return normalizeSnapshotExportIntervalMs(parsed);
+            }
+        }
+    } catch {
+        // localStorage unavailable
+    }
+
+    return DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS;
+}
+
+export function saveDataSnapshotExportIntervalMs(intervalMs: number): void {
+    localStorage.setItem(LS_KEY_SNAPSHOT_EXPORT_INTERVAL_MS, String(normalizeSnapshotExportIntervalMs(intervalMs)));
+}
+
+export function clearDataSnapshotExportIntervalMs(): void {
+    localStorage.removeItem(LS_KEY_SNAPSHOT_EXPORT_INTERVAL_MS);
+}
+
+export function isDataSnapshotExportEnabled(): boolean {
+    return getDataBaseUrl() !== null
+        && getDataSnapshotExportEndpoint() !== null
+        && getDataSnapshotExportEnabledSetting();
+}
+
+export function getDataSnapshotExportUrl(): string | null {
+    const base = getDataBaseUrl();
+    if (!base) return null;
+    const endpoint = getDataSnapshotExportEndpoint();
+    if (!endpoint) return null;
+    return `${base}/${stripLeadingSlashes(endpoint)}`;
 }

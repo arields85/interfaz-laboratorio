@@ -10,7 +10,17 @@ import { useUIStore } from '../store/ui.store';
 
 const CONTENT_READY_ATTRIBUTE = 'data-hmi-content-ready';
 
-const { dashboardStorageMock, hierarchyStorageMock, dashboardViewerMock, dashboardHeaderMock, useDataOverviewMock } = vi.hoisted(() => ({
+const {
+    dashboardStorageMock,
+    hierarchyStorageMock,
+    dashboardViewerMock,
+    dashboardHeaderMock,
+    useDataOverviewMock,
+    buildDashboardSnapshotMock,
+    exportDashboardSnapshotMock,
+    getDataSnapshotExportIntervalMsMock,
+    isDataSnapshotExportEnabledMock,
+} = vi.hoisted(() => ({
     dashboardStorageMock: {
         getDashboards: vi.fn(),
     },
@@ -20,6 +30,10 @@ const { dashboardStorageMock, hierarchyStorageMock, dashboardViewerMock, dashboa
     dashboardViewerMock: vi.fn(),
     dashboardHeaderMock: vi.fn(),
     useDataOverviewMock: vi.fn(),
+    buildDashboardSnapshotMock: vi.fn(),
+    exportDashboardSnapshotMock: vi.fn(),
+    getDataSnapshotExportIntervalMsMock: vi.fn(),
+    isDataSnapshotExportEnabledMock: vi.fn(),
 }));
 
 vi.mock('../services/DashboardStorageService', () => ({
@@ -69,6 +83,24 @@ vi.mock('../queries/useDataOverview', () => ({
     useDataOverview: useDataOverviewMock,
 }));
 
+vi.mock('../services/dashboardSnapshotBuilder', () => ({
+    buildDashboardSnapshot: buildDashboardSnapshotMock,
+}));
+
+vi.mock('../services/dashboardSnapshotExport.service', () => ({
+    exportDashboardSnapshot: exportDashboardSnapshotMock,
+}));
+
+vi.mock('../config/dataConnection.config', async () => {
+    const actual = await vi.importActual('../config/dataConnection.config') as Record<string, unknown>;
+
+    return {
+        ...actual,
+        getDataSnapshotExportIntervalMs: getDataSnapshotExportIntervalMsMock,
+        isDataSnapshotExportEnabled: isDataSnapshotExportEnabledMock,
+    };
+});
+
 function renderDashboard(initialEntry = '/', options?: Parameters<typeof render>[1]) {
     return render(
         <MemoryRouter initialEntries={[initialEntry]}>
@@ -107,6 +139,10 @@ describe('Dashboard page layout', () => {
         const dashboard = makeDashboard({ status: 'published', publishedSnapshot: undefined });
         dashboardStorageMock.getDashboards.mockResolvedValue([dashboard]);
         hierarchyStorageMock.getNodes.mockResolvedValue([]);
+        buildDashboardSnapshotMock.mockReturnValue({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
+        exportDashboardSnapshotMock.mockResolvedValue(true);
+        getDataSnapshotExportIntervalMsMock.mockReturnValue(5_000);
+        isDataSnapshotExportEnabledMock.mockReturnValue(true);
         useUIStore.setState({
             selectedPlantId: null,
             selectedAreaId: null,
@@ -124,6 +160,7 @@ describe('Dashboard page layout', () => {
     });
 
     afterEach(() => {
+        vi.useRealTimers();
         vi.clearAllMocks();
     });
 
@@ -565,5 +602,164 @@ describe('Dashboard page layout', () => {
                 dashboard: expect.objectContaining({ id: 'dashboard-a', ownerNodeId: 'plant-a' }),
             }),
         );
+    });
+
+    it('exports the visible dashboard snapshot only after the configured interval without breaking the viewer shell', async () => {
+        vi.useFakeTimers();
+        renderDashboard();
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        expect(buildDashboardSnapshotMock).not.toHaveBeenCalled();
+        expect(exportDashboardSnapshotMock).not.toHaveBeenCalled();
+
+        await act(async () => {
+            vi.advanceTimersByTime(5_000);
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                dashboard: expect.objectContaining({ id: 'dashboard-1' }),
+            }),
+        );
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+        expect(exportDashboardSnapshotMock).toHaveBeenCalledWith({
+            timestamp: '2026-07-07T10:00:00.000Z',
+            widgets: [],
+        });
+        expect(exportDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not start a new snapshot export tick while the previous export is still in flight', async () => {
+        vi.useFakeTimers();
+
+        let resolveExport: ((value: boolean) => void) | null = null;
+        exportDashboardSnapshotMock.mockImplementation(() => new Promise((resolve) => {
+            resolveExport = resolve;
+        }));
+
+        renderDashboard();
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).not.toHaveBeenCalled();
+        expect(exportDashboardSnapshotMock).not.toHaveBeenCalled();
+
+        await act(async () => {
+            vi.advanceTimersByTime(5_000);
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+        expect(exportDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(15_000);
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+        expect(exportDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            resolveExport?.(true);
+            await Promise.resolve();
+        });
+
+        await act(async () => {
+            vi.advanceTimersByTime(5_000);
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledTimes(2);
+        expect(exportDashboardSnapshotMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not send immediately again on data-refresh rerenders and uses the latest overview values on the next tick', async () => {
+        vi.useFakeTimers();
+
+        const initialConnection: ConnectionHealth = { globalStatus: 'unknown', lastSuccess: null, ageMs: null };
+        const nextConnection: ConnectionHealth = { globalStatus: 'online', lastSuccess: '2026-07-07T10:05:00.000Z', ageMs: 150 };
+        const initialMachines: ContractMachine[] = [];
+        const nextMachines: ContractMachine[] = [{
+            unitId: 7,
+            name: 'Compresora 7',
+            status: 'online',
+            values: {},
+            lastSuccess: '2026-07-07T10:05:00.000Z',
+            ageMs: 150,
+        }];
+
+        let currentOverview = {
+            connection: initialConnection,
+            machines: initialMachines,
+            isLoading: false,
+            isError: false,
+            error: null,
+            dataUpdatedAt: 0,
+            isEnabled: true,
+        };
+
+        useDataOverviewMock.mockImplementation(() => currentOverview);
+
+        const view = renderDashboard();
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        await act(async () => {
+            vi.advanceTimersByTime(5_000);
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+        expect(buildDashboardSnapshotMock).toHaveBeenLastCalledWith(expect.objectContaining({
+            connection: initialConnection,
+            machines: initialMachines,
+        }));
+
+        currentOverview = {
+            connection: nextConnection,
+            machines: nextMachines,
+            isLoading: false,
+            isError: false,
+            error: null,
+            dataUpdatedAt: 5_000,
+            isEnabled: true,
+        };
+
+        view.rerender(
+            <MemoryRouter initialEntries={['/']}>
+                <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                </Routes>
+            </MemoryRouter>,
+        );
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+        expect(exportDashboardSnapshotMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(5_000);
+            await Promise.resolve();
+        });
+
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledTimes(2);
+        expect(buildDashboardSnapshotMock).toHaveBeenLastCalledWith(expect.objectContaining({
+            connection: nextConnection,
+            machines: nextMachines,
+        }));
+        expect(exportDashboardSnapshotMock).toHaveBeenCalledTimes(2);
     });
 });

@@ -28,7 +28,7 @@ La HMI se desacopla del origen real de datos. Hoy la cadena es `Edge -> Node-RED
 
 | Campo | Ejemplo |
 |-------|---------|
-| `baseUrl` | `https://192.168.50.250:51880` |
+| `baseUrl` | `https://node-red.example.local` |
 | `endpoint` | `/api/hmi-data` |
 | **URL final** | `baseUrl + endpoint` (construida internamente) |
 
@@ -195,3 +195,33 @@ machines.find(m => m.unitId === 10)?.values["Total kW"]
 - Romper estructura `machines[].values`
 
 Version actual: `"contractVersion": "1.0"`
+
+---
+
+## 10. Dashboard snapshot export sink
+
+La HMI puede **emitir** un POST del dashboard visible hacia un endpoint externo configurable. Ese flujo es solo un **telemetry snapshot sink** y NO cambia el límite de solo lectura del producto.
+
+### Reglas
+
+- Está **deshabilitado por default**. Un admin debe habilitarlo explícitamente.
+- El endpoint es **configurable** y usa la misma `baseUrl` de integración. No hardcodear IPs de producción.
+- Este POST es **solo observación**: no envía comandos de planta, no escribe setpoints y no controla actuadores.
+- Si falta `baseUrl`, el endpoint está vacío o el toggle sigue deshabilitado, la HMI no envía nada.
+- El receptor externo debe tratar el payload como un contrato versionado y tolerar datos faltantes.
+
+### Payload esperado
+
+| Campo | Regla |
+|------|-------|
+| `timestamp` | ISO 8601 del snapshot emitido |
+| `screen` | Contexto de pantalla/dashboard visible |
+| `machine` | Puede ser `null` si no hay máquina resoluble |
+| `dashboard` | Metadatos del dashboard/render activo |
+| `widgets` | Lista serializada de widgets visibles |
+
+### Notas de compatibilidad
+
+- Los campos derivados de telemetría **pueden ser `null`** cuando la fuente no tiene dato disponible.
+- El sink externo debe aceptar payloads parciales sin asumir completitud total.
+- Este POST complementa el contrato de lectura principal; no reemplaza `contractVersion: "1.0"` del feed que consume la HMI.

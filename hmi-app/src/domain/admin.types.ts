@@ -648,6 +648,7 @@ export interface InfoCardDisplayOptions {
 /** Campos comunes a todas las variantes de WidgetConfig. */
 interface WidgetConfigBase {
     id: string;
+    exportId?: string;
     title?: string;
     navigationTargetDashboardId?: string;
     /**

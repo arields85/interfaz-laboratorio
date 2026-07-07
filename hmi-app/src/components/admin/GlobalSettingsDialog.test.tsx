@@ -206,6 +206,17 @@ describe('GlobalSettingsDialog', () => {
         expect(screen.getByLabelText('Temporal draft')).toHaveValue('Temporal unsaved');
     });
 
+    it('keeps the tab content in a scrollable panel', () => {
+        render(<Harness />);
+
+        const dialog = screen.getByRole('dialog', { name: 'CONFIGURACION GENERAL' });
+        const scrollPanel = dialog.querySelector('.hmi-scrollbar');
+
+        expect(scrollPanel).toBeInTheDocument();
+        expect(scrollPanel).toHaveClass('overflow-y-auto');
+        expect(scrollPanel).toHaveClass('min-h-0');
+    });
+
     it('discards mounted drafts on close without save and restores persisted values on reopen', async () => {
         const user = userEvent.setup();
 

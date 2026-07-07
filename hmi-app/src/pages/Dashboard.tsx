@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { dashboardStorage } from '../services/DashboardStorageService';
 import { hierarchyStorage } from '../services/HierarchyStorageService';
 import type { Dashboard, HierarchyNode, ViewerPersistedWidgetDisplayPatch } from '../domain/admin.types';
+import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.types';
 import DashboardViewer from '../components/viewer/DashboardViewer';
 import DashboardHeader from '../components/viewer/DashboardHeader';
 import { mockEquipmentList } from '../mocks/equipment.mock';
@@ -13,6 +14,9 @@ import type { HierarchyContext } from '../widgets/resolvers/hierarchyResolver';
 import { resetShieldContentReady, signalShieldContentReady } from '../shield/shieldContentReadiness';
 import { useUIStore } from '../store/ui.store';
 import { getDefaultDashboardView, materializeDashboardView, normalizeDashboardViews } from '../utils/dashboardViews';
+import { getDataSnapshotExportIntervalMs, isDataSnapshotExportEnabled } from '../config/dataConnection.config';
+import { buildDashboardSnapshot } from '../services/dashboardSnapshotBuilder';
+import { exportDashboardSnapshot } from '../services/dashboardSnapshotExport.service';
 
 // =============================================================================
 // Dashboard Público (Visor)
@@ -226,6 +230,38 @@ export default function Dashboard() {
         currentNodeId: activeDashboard?.ownerNodeId,
     }), [allNodes, allDashboards, activeDashboard?.ownerNodeId]);
 
+    interface SnapshotExportRuntimeValues {
+        activeDashboard?: Dashboard;
+        allNodes: HierarchyNode[];
+        connection?: ConnectionHealth;
+        dashboardViewState: typeof dashboardViewState;
+        equipmentMap: Map<string, EquipmentSummary>;
+        machines?: ContractMachine[];
+    }
+
+    const snapshotExportEnabled = isDataSnapshotExportEnabled();
+    const snapshotExportIntervalMs = getDataSnapshotExportIntervalMs();
+    const latestSnapshotExportValuesRef = useRef<SnapshotExportRuntimeValues>({
+        activeDashboard: undefined,
+        allNodes: [],
+        connection: undefined,
+        dashboardViewState: 'loading',
+        equipmentMap,
+        machines: undefined,
+    });
+    const snapshotExportInFlightRef = useRef(false);
+
+    useEffect(() => {
+        latestSnapshotExportValuesRef.current = {
+            activeDashboard,
+            allNodes,
+            connection,
+            dashboardViewState,
+            equipmentMap,
+            machines,
+        };
+    }, [activeDashboard, allNodes, connection, dashboardViewState, equipmentMap, machines]);
+
     useEffect(() => {
         if (!activeDashboard?.ownerNodeId) {
             setSelectedPlant(null);
@@ -246,6 +282,58 @@ export default function Dashboard() {
 
         setSelectedPlant(null);
     }, [activeDashboard?.ownerNodeId, allNodes, setSelectedPlant]);
+
+    useEffect(() => {
+        if (!snapshotExportEnabled) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const exportVisibleSnapshot = async () => {
+            if (cancelled || snapshotExportInFlightRef.current || document.visibilityState === 'hidden') {
+                return;
+            }
+
+            const {
+                activeDashboard: latestDashboard,
+                allNodes: latestAllNodes,
+                connection: latestConnection,
+                dashboardViewState: latestDashboardViewState,
+                equipmentMap: latestEquipmentMap,
+                machines: latestMachines,
+            } = latestSnapshotExportValuesRef.current;
+
+            if (!latestDashboard || latestDashboardViewState !== 'viewer') {
+                return;
+            }
+
+            snapshotExportInFlightRef.current = true;
+
+            try {
+                const snapshot = buildDashboardSnapshot({
+                    dashboard: latestDashboard,
+                    connection: latestConnection,
+                    machines: latestMachines,
+                    equipmentMap: latestEquipmentMap,
+                    hierarchyNodes: latestAllNodes,
+                });
+
+                await exportDashboardSnapshot(snapshot);
+            } finally {
+                snapshotExportInFlightRef.current = false;
+            }
+        };
+
+        const intervalId = window.setInterval(() => {
+            void exportVisibleSnapshot();
+        }, snapshotExportIntervalMs);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(intervalId);
+        };
+    }, [snapshotExportEnabled, snapshotExportIntervalMs]);
 
     const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => {
         if (!activeDashboard) {

@@ -78,7 +78,15 @@ async function waitForResizeObserver(target: Element) {
     });
 }
 
-const { hierarchyStorageMock, useDataOverviewMock, useActivitySeriesMock, useTemporalSettingsMock, isDataActivitySeriesEnabledMock } = vi.hoisted(() => ({
+const {
+    hierarchyStorageMock,
+    useDataOverviewMock,
+    useActivitySeriesMock,
+    useTemporalSettingsMock,
+    isDataActivitySeriesEnabledMock,
+    isDataSnapshotExportEnabledMock,
+    getDataSnapshotExportIntervalMsMock,
+} = vi.hoisted(() => ({
     hierarchyStorageMock: {
         getNodes: vi.fn(),
     },
@@ -86,6 +94,8 @@ const { hierarchyStorageMock, useDataOverviewMock, useActivitySeriesMock, useTem
     useActivitySeriesMock: vi.fn(),
     useTemporalSettingsMock: vi.fn(),
     isDataActivitySeriesEnabledMock: vi.fn(),
+    isDataSnapshotExportEnabledMock: vi.fn(),
+    getDataSnapshotExportIntervalMsMock: vi.fn(),
 }));
 
 vi.mock('../services/HierarchyStorageService', () => ({
@@ -110,6 +120,8 @@ vi.mock('../hooks/useTemporalSettings', () => ({
 
 vi.mock('../config/dataConnection.config', () => ({
     isDataActivitySeriesEnabled: isDataActivitySeriesEnabledMock,
+    isDataSnapshotExportEnabled: isDataSnapshotExportEnabledMock,
+    getDataSnapshotExportIntervalMs: getDataSnapshotExportIntervalMsMock,
 }));
 
 vi.mock('../components/ui/ChartHoverLayer', () => ({
@@ -147,6 +159,8 @@ describe('Dashboard activity-analytics viewer persistence', () => {
             resolvedTimezone: 'UTC',
         });
         isDataActivitySeriesEnabledMock.mockReturnValue(true);
+        isDataSnapshotExportEnabledMock.mockReturnValue(false);
+        getDataSnapshotExportIntervalMsMock.mockReturnValue(5_000);
         useActivitySeriesMock.mockImplementation(({ range, start, end }: { range: string; start?: string; end?: string }) => ({
             data: {
                 contractVersion: '1.0.0',

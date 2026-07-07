@@ -90,62 +90,64 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                 </div>
             )}
         >
-            <div className="border-b border-white/10">
-                <div className="flex flex-row gap-1">
-                    {TABS.map(({ id, label, icon: Icon }) => {
-                        const isActive = activeTab === id;
+            <div className="flex max-h-[calc(100vh-12rem)] min-h-[520px] flex-col">
+                <div className="shrink-0 border-b border-white/10">
+                    <div className="flex flex-row gap-1">
+                        {TABS.map(({ id, label, icon: Icon }) => {
+                            const isActive = activeTab === id;
 
-                        return (
-                            <button
-                                key={id}
-                                type="button"
-                                onClick={() => {
-                                setActiveTab(id);
-                                localStorage.setItem('hmi-global-settings-tab', id);
-                            }}
-                                className={[
-                                    'flex items-center gap-2 px-4 py-2 uppercase transition-colors',
-                                    isActive
-                                        ? 'border-b-2 border-admin-accent text-white'
-                                        : 'text-industrial-muted hover:text-white',
-                                ].join(' ')}
-                            >
-                                <Icon size={14} />
-                                <span>{label}</span>
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
-
-            <div className="min-h-[520px]">
-                <div hidden={activeTab !== 'connection'}>
-                    <ConnectionSettingsTab
-                        onDirtyChange={setConnectionDirty}
-                        saveRef={connectionSaveRef}
-                    />
+                            return (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    onClick={() => {
+                                    setActiveTab(id);
+                                    localStorage.setItem('hmi-global-settings-tab', id);
+                                }}
+                                    className={[
+                                        'flex items-center gap-2 px-4 py-2 uppercase transition-colors',
+                                        isActive
+                                            ? 'border-b-2 border-admin-accent text-white'
+                                            : 'text-industrial-muted hover:text-white',
+                                    ].join(' ')}
+                                >
+                                    <Icon size={14} />
+                                    <span>{label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
 
-                <div hidden={activeTab !== 'design'}>
-                    <DesignSettingsTab
-                        onDirtyChange={setDesignDirty}
-                        saveRef={designSaveRef}
-                        revertRef={designRevertRef}
-                    />
-                </div>
+                <div className="hmi-scrollbar min-h-0 flex-1 overflow-y-auto pr-2 pt-4">
+                    <div hidden={activeTab !== 'connection'}>
+                        <ConnectionSettingsTab
+                            onDirtyChange={setConnectionDirty}
+                            saveRef={connectionSaveRef}
+                        />
+                    </div>
 
-                <div hidden={activeTab !== 'options'}>
-                    <LoaderOptionsSettingsTab
-                        onDirtyChange={setOptionsDirty}
-                        saveRef={optionsSaveRef}
-                    />
-                </div>
+                    <div hidden={activeTab !== 'design'}>
+                        <DesignSettingsTab
+                            onDirtyChange={setDesignDirty}
+                            saveRef={designSaveRef}
+                            revertRef={designRevertRef}
+                        />
+                    </div>
 
-                <div hidden={activeTab !== 'temporal'}>
-                    <TemporalSettingsTab
-                        onDirtyChange={setTemporalDirty}
-                        saveRef={temporalSaveRef}
-                    />
+                    <div hidden={activeTab !== 'options'}>
+                        <LoaderOptionsSettingsTab
+                            onDirtyChange={setOptionsDirty}
+                            saveRef={optionsSaveRef}
+                        />
+                    </div>
+
+                    <div hidden={activeTab !== 'temporal'}>
+                        <TemporalSettingsTab
+                            onDirtyChange={setTemporalDirty}
+                            saveRef={temporalSaveRef}
+                        />
+                    </div>
                 </div>
             </div>
         </AdminDialog>
