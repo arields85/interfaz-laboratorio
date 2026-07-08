@@ -142,6 +142,37 @@ describe('dataHistory.service', () => {
         );
     });
 
+    it('forwards an optional external AbortSignal while preserving the GET-only request shape', async () => {
+        vi.spyOn(dataConnectionConfig, 'getDataHistoryUrl').mockReturnValue(
+            'https://api.local/api/hmi/history'
+        );
+
+        const externalAbortController = new AbortController();
+        const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+        }));
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        const request = fetchDataHistory({ machineId: 7, variableKey: 'flow rate', range: '24h' }, externalAbortController.signal);
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            'https://api.local/api/hmi/history?machineId=7&variableKey=flow+rate&range=24h',
+            expect.objectContaining({
+                method: 'GET',
+                headers: { Accept: 'application/json' },
+                signal: expect.any(AbortSignal),
+            })
+        );
+        const passedSignal = fetchMock.mock.calls[0]?.[1]?.signal as AbortSignal;
+        expect(passedSignal.aborted).toBe(false);
+
+        externalAbortController.abort();
+
+        expect(passedSignal.aborted).toBe(true);
+        await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
     it('rejects invalid machine ids before a backend request is sent', async () => {
         vi.spyOn(dataConnectionConfig, 'getDataHistoryUrl').mockReturnValue(
             'https://api.local/api/hmi/history'

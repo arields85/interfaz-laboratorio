@@ -43,7 +43,7 @@ export function isDataHistoryConnectionError(error: unknown): error is DataHisto
  * Devuelve el JSON tal cual viene — sin transformar ni validar.
  * El adapter downstream es responsable de mapear al dominio.
  */
-export async function fetchDataHistory(params: HistoryQueryParamsAny): Promise<unknown> {
+export async function fetchDataHistory(params: HistoryQueryParamsAny, externalSignal?: AbortSignal): Promise<unknown> {
     const validation = validateAndNormalizeHistoryQueryParams(params);
 
     if (!validation.ok) {
@@ -77,6 +77,7 @@ export async function fetchDataHistory(params: HistoryQueryParamsAny): Promise<u
 
     let response: Response;
     const abortController = new AbortController();
+    const removeExternalAbortListener = bindExternalAbortSignal(externalSignal, abortController);
     let didTimeout = false;
     const timeoutId = setTimeout(() => {
         didTimeout = true;
@@ -96,9 +97,16 @@ export async function fetchDataHistory(params: HistoryQueryParamsAny): Promise<u
             throw new DataHistoryServiceError(DATA_HISTORY_TIMEOUT_ERROR_MESSAGE, 'timeout');
         }
 
+        if (externalSignal?.aborted) {
+            throw externalSignal.reason instanceof Error
+                ? externalSignal.reason
+                : createAbortError();
+        }
+
         throw new DataHistoryServiceError(DATA_HISTORY_NETWORK_ERROR_MESSAGE, 'network');
     } finally {
         clearTimeout(timeoutId);
+        removeExternalAbortListener();
     }
 
     if (!response.ok) {
@@ -110,6 +118,38 @@ export async function fetchDataHistory(params: HistoryQueryParamsAny): Promise<u
     }
 
     return response.json();
+}
+
+function bindExternalAbortSignal(externalSignal: AbortSignal | undefined, abortController: AbortController): () => void {
+    if (!externalSignal) {
+        return () => {};
+    }
+
+    if (externalSignal.aborted) {
+        abortController.abort(externalSignal.reason);
+
+        return () => {};
+    }
+
+    const handleAbort = () => {
+        abortController.abort(externalSignal.reason);
+    };
+
+    externalSignal.addEventListener('abort', handleAbort, { once: true });
+
+    return () => {
+        externalSignal.removeEventListener('abort', handleAbort);
+    };
+}
+
+function createAbortError(): Error {
+    if (typeof DOMException === 'function') {
+        return new DOMException('The operation was aborted.', 'AbortError');
+    }
+
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    return error;
 }
 
 function getSanitizedDataHistoryHttpMessage(statusCode: number): string {

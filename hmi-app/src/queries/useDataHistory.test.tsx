@@ -1,17 +1,24 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { adaptDataHistory } from '../adapters/dataHistory.adapter';
 import { isDataHistoryEnabled } from '../config/dataConnection.config';
 import { fetchDataHistory } from '../services/dataHistory.service';
 import {
     DATA_HISTORY_QUERY_KEY_PREFIX,
+    createDataHistoryQueryKey,
+    createDataHistoryQueryOptions,
     useDataHistory,
 } from './useDataHistory';
 
-vi.mock('@tanstack/react-query', () => ({
-    useQuery: vi.fn(),
-}));
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+
+    return {
+        ...actual,
+        useQuery: vi.fn(),
+    };
+});
 
 vi.mock('../config/dataConnection.config', () => ({
     isDataHistoryEnabled: vi.fn(),
@@ -60,6 +67,9 @@ describe('useDataHistory', () => {
             isError: false,
             error: null,
             isEnabled: false,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
         });
     });
 
@@ -102,7 +112,7 @@ describe('useDataHistory', () => {
         );
 
         await expect(queryOptions?.queryFn?.()).resolves.toEqual(adapted);
-        expect(fetchDataHistory).toHaveBeenCalledWith(params);
+        expect(fetchDataHistory).toHaveBeenCalledWith(params, undefined);
         expect(adaptDataHistory).toHaveBeenCalledWith(raw);
         expect(result).toEqual({
             data: { machineId: 7, variableKey: 'pressure' },
@@ -110,6 +120,85 @@ describe('useDataHistory', () => {
             isError: false,
             error: null,
             isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+    });
+
+    it('reuses exported query helpers and exposes previous-data refresh metadata', () => {
+        vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: { machineId: 7, variableKey: 'pressure', range: '24h' },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isFetching: true,
+            isPlaceholderData: true,
+        } as never);
+
+        const params = { machineId: 7, variableKey: 'pressure', range: '24h' as const, maxPoints: 750 };
+        const queryKey = createDataHistoryQueryKey(params);
+        const queryOptions = createDataHistoryQueryOptions(params);
+        const result = useDataHistory(params);
+
+        expect(queryKey).toEqual(['data', 'history', 7, 'pressure', '24h', null, null, 750]);
+        expect(queryOptions).toEqual(expect.objectContaining({
+            queryKey,
+            enabled: true,
+            placeholderData: keepPreviousData,
+        }));
+        expect(vi.mocked(useQuery).mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+            queryKey,
+            enabled: true,
+            placeholderData: keepPreviousData,
+        }));
+        expect(result).toMatchObject({
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        });
+    });
+
+    it('passes react-query abort signals through exported query helpers and does not label finalized data as refreshing', async () => {
+        vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: { machineId: 11, variableKey: 'temperature', range: '24h' },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isFetching: true,
+            isPlaceholderData: false,
+        } as never);
+
+        const params = { machineId: 11, variableKey: 'temperature', range: '24h' as const };
+        const raw = { ok: true };
+        const adapted = {
+            contractVersion: '1.1.0',
+            machineId: 11,
+            variableKey: 'temperature',
+            range: '24h' as const,
+            unit: '°C',
+            series: [],
+            summary: { last: null, min: null, max: null, avg: null },
+        };
+        const directFetch = vi.fn();
+        const signal = new AbortController().signal;
+
+        vi.stubGlobal('fetch', directFetch);
+        vi.mocked(fetchDataHistory).mockResolvedValue(raw);
+        vi.mocked(adaptDataHistory).mockReturnValue(adapted);
+
+        const queryOptions = createDataHistoryQueryOptions(params);
+        const result = useDataHistory(params);
+
+        await expect(queryOptions.queryFn?.({ queryKey: queryOptions.queryKey, signal, meta: undefined, client: undefined as never, pageParam: undefined, direction: 'forward' })).resolves.toEqual(adapted);
+        expect(fetchDataHistory).toHaveBeenCalledWith(params, signal);
+        expect(directFetch).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            isFetching: true,
+            isPlaceholderData: false,
+            isRefreshing: false,
         });
     });
 
@@ -172,7 +261,7 @@ describe('useDataHistory', () => {
         );
 
         await expect(queryOptions?.queryFn?.()).resolves.toEqual(adapted);
-        expect(fetchDataHistory).toHaveBeenCalledWith(params);
+        expect(fetchDataHistory).toHaveBeenCalledWith(params, undefined);
         expect(adaptDataHistory).toHaveBeenCalledWith(raw);
     });
 
@@ -205,7 +294,7 @@ describe('useDataHistory', () => {
         expect(fetchDataHistory).toHaveBeenCalledWith({
             ...params,
             maxPoints: 2000,
-        });
+        }, undefined);
     });
 
     it('disables invalid custom V2 windows before the service boundary', () => {

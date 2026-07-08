@@ -12,7 +12,7 @@
 // Contrato oficial: docs/DATA_CONTRACT.md
 // =============================================================================
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { adaptDataHistory } from '../adapters/dataHistory.adapter';
 import { isDataHistoryEnabled } from '../config/dataConnection.config';
 import type {
@@ -27,6 +27,10 @@ import { fetchDataHistory } from '../services/dataHistory.service';
 import { validateAndNormalizeHistoryQueryParams } from '../utils/historyQueryValidation';
 
 export const DATA_HISTORY_QUERY_KEY_PREFIX = ['data', 'history'] as const;
+type DataHistoryQueryKey = ReturnType<typeof createDataHistoryQueryKey>;
+type DataHistoryQueryOptions = Pick<UseQueryOptions<DataHistoryResponseAny, Error, DataHistoryResponseAny, DataHistoryQueryKey>, 'queryKey' | 'queryFn' | 'placeholderData' | 'staleTime' | 'retry' | 'refetchOnWindowFocus'> & {
+    enabled: boolean;
+};
 
 export interface UseDataHistoryResult<TData extends DataHistoryResponseAny = DataHistoryResponseAny> {
     data: TData | null;
@@ -34,45 +38,58 @@ export interface UseDataHistoryResult<TData extends DataHistoryResponseAny = Dat
     isError: boolean;
     error: Error | null;
     isEnabled: boolean;
+    isFetching: boolean;
+    isPlaceholderData: boolean;
+    isRefreshing: boolean;
 }
 
 export function useDataHistory(params: HistoryQueryParams | null): UseDataHistoryResult<DataHistoryResponse>;
 export function useDataHistory(params: HistoryQueryParamsV2 | null): UseDataHistoryResult<DataHistoryResponseV2>;
 export function useDataHistory(params: HistoryQueryParamsAny | null): UseDataHistoryResult<DataHistoryResponseAny>;
 export function useDataHistory(params: HistoryQueryParamsAny | null): UseDataHistoryResult<DataHistoryResponseAny> {
+    const queryOptions = createDataHistoryQueryOptions(params);
+    const query = useQuery<DataHistoryResponseAny, Error, DataHistoryResponseAny, DataHistoryQueryKey>(queryOptions);
+    const isFetching = queryOptions.enabled ? query.isFetching === true : false;
+    const isPlaceholderData = queryOptions.enabled ? query.isPlaceholderData === true : false;
+
+    return {
+        data: query.data ?? null,
+        isLoading: queryOptions.enabled ? query.isLoading : false,
+        isError: queryOptions.enabled ? query.isError : false,
+        error: queryOptions.enabled ? query.error ?? null : null,
+        isEnabled: queryOptions.enabled,
+        isFetching,
+        isPlaceholderData,
+        isRefreshing: isFetching && isPlaceholderData,
+    };
+}
+
+export function createDataHistoryQueryKey(params: HistoryQueryParamsAny | null) {
+    const normalizedParams = normalizeHistoryQueryParams(params);
+
+    return buildDataHistoryQueryKey(normalizedParams);
+}
+
+export function createDataHistoryQueryOptions(params: HistoryQueryParamsAny | null): DataHistoryQueryOptions {
     const normalizedParams = normalizeHistoryQueryParams(params);
     const enabled = normalizedParams !== null && isDataHistoryEnabled();
 
-    const query = useQuery<DataHistoryResponseAny>({
-        queryKey: [
-            ...DATA_HISTORY_QUERY_KEY_PREFIX,
-            normalizedParams?.machineId ?? null,
-            normalizedParams?.variableKey ?? null,
-            normalizedParams?.range ?? null,
-            normalizedParams && 'start' in normalizedParams ? normalizedParams.start : null,
-            normalizedParams && 'end' in normalizedParams ? normalizedParams.end : null,
-            normalizedParams && 'maxPoints' in normalizedParams ? normalizedParams.maxPoints ?? null : null,
-        ],
-        queryFn: async () => {
+    return {
+        queryKey: buildDataHistoryQueryKey(normalizedParams),
+        queryFn: async (context) => {
             if (!normalizedParams) {
                 throw new Error('History query params are required');
             }
 
-            const raw = await fetchDataHistory(normalizedParams);
+            const signal = context?.signal;
+            const raw = await fetchDataHistory(normalizedParams, signal);
             return adaptDataHistory(raw);
         },
         enabled,
+        placeholderData: keepPreviousData,
         staleTime: 30_000,
         retry: 2,
         refetchOnWindowFocus: true,
-    });
-
-    return {
-        data: query.data ?? null,
-        isLoading: query.isLoading,
-        isError: query.isError,
-        error: query.error ?? null,
-        isEnabled: enabled,
     };
 }
 
@@ -84,4 +101,16 @@ function normalizeHistoryQueryParams(params: HistoryQueryParamsAny | null): Hist
     }
 
     return validation.params;
+}
+
+function buildDataHistoryQueryKey(normalizedParams: ReturnType<typeof normalizeHistoryQueryParams>) {
+    return [
+        ...DATA_HISTORY_QUERY_KEY_PREFIX,
+        normalizedParams?.machineId ?? null,
+        normalizedParams?.variableKey ?? null,
+        normalizedParams?.range ?? null,
+        normalizedParams && 'start' in normalizedParams ? normalizedParams.start : null,
+        normalizedParams && 'end' in normalizedParams ? normalizedParams.end : null,
+        normalizedParams && 'maxPoints' in normalizedParams ? normalizedParams.maxPoints ?? null : null,
+    ] as const;
 }
