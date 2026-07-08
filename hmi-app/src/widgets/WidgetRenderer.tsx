@@ -150,6 +150,7 @@ export default function WidgetRenderer({
                     hasOverviewError={hasOverviewError}
                     isLoadingData={isLoadingData}
                     className={className}
+                    siblingWidgets={siblingWidgets}
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
                 />
             );

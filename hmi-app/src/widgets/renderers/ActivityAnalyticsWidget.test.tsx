@@ -1,14 +1,16 @@
 import '@testing-library/jest-dom/vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClientContext } from '@tanstack/react-query';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
-import type { ActivityAnalyticsWidgetConfig } from '../../domain/admin.types';
+import type { ActivityAnalyticsWidgetConfig, WidgetConfig } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { useActivitySeries } from '../../queries/useActivitySeries';
+import { useActivitySeries, type UseActivitySeriesResult } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
+import { subscribeActivityAnalyticsPerformanceDiagnostics } from '../../utils/activityAnalyticsPerformanceDiagnostics';
 import type { ActivityAnalyticsInterval } from '../../utils/activityAnalytics';
 import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComputation';
 import { groupActivityAnalyticsIntervals } from '../../utils/activityAnalyticsGrouping';
@@ -124,9 +126,14 @@ vi.mock('../../hooks/useTemporalSettings', () => ({
     useTemporalSettings: vi.fn(),
 }));
 
-vi.mock('../../queries/useActivitySeries', () => ({
-    useActivitySeries: vi.fn(),
-}));
+vi.mock('../../queries/useActivitySeries', async () => {
+    const actual = await vi.importActual<typeof import('../../queries/useActivitySeries')>('../../queries/useActivitySeries');
+
+    return {
+        ...actual,
+        useActivitySeries: vi.fn(),
+    };
+});
 
 vi.mock('../../components/ui/ChartHoverLayer', () => ({
     default: ({ dataLength, x0, marginLeft, plotWidth, highlights, onHoverChange }: {
@@ -489,32 +496,179 @@ function createMatchMediaMock(matches: boolean): typeof window.matchMedia {
     }));
 }
 
+class MockIntersectionObserver implements IntersectionObserver {
+    private static instances: MockIntersectionObserver[] = [];
+
+    private observedTargets: Element[] = [];
+
+    public readonly root = null;
+
+    public readonly rootMargin = '0px';
+
+    public readonly thresholds = [0];
+
+    public constructor(private readonly callback: IntersectionObserverCallback) {
+        MockIntersectionObserver.instances.push(this);
+    }
+
+    public observe(target: Element): void {
+        this.observedTargets.push(target);
+    }
+
+    public unobserve(): void {}
+
+    public disconnect(): void {}
+
+    public takeRecords(): IntersectionObserverEntry[] {
+        return [];
+    }
+
+    public emit(isIntersecting: boolean, target: Element | null = this.observedTargets[0] ?? null): void {
+        if (!target) {
+            return;
+        }
+
+        this.callback([
+            {
+                target,
+                isIntersecting,
+                intersectionRatio: isIntersecting ? 1 : 0,
+                boundingClientRect: target.getBoundingClientRect(),
+                intersectionRect: isIntersecting ? target.getBoundingClientRect() : new DOMRectReadOnly(),
+                rootBounds: null,
+                time: 0,
+            } as IntersectionObserverEntry,
+        ], this);
+    }
+
+    public static latest(): MockIntersectionObserver {
+        const instance = MockIntersectionObserver.instances.at(-1);
+
+        if (!instance) {
+            throw new Error('No IntersectionObserver instance was created');
+        }
+
+        return instance;
+    }
+
+    public static reset(): void {
+        MockIntersectionObserver.instances = [];
+    }
+}
+
+const prefetchQuery = vi.fn<(...args: unknown[]) => Promise<void>>();
+const getQueryState = vi.fn();
+
+function renderWithQueryClient(element: Parameters<typeof render>[0]) {
+    return render(
+        <QueryClientContext.Provider
+            value={{
+                prefetchQuery,
+                getQueryState,
+            } as never}
+        >
+            {element}
+        </QueryClientContext.Provider>,
+    );
+}
+
+function createActivitySeriesResult(overrides?: Partial<UseActivitySeriesResult>): UseActivitySeriesResult {
+    return {
+        data: null,
+        isLoading: false,
+        isError: false,
+        error: null,
+        isEnabled: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isRefreshing: false,
+        ...overrides,
+    };
+}
+
+function setDocumentVisibilityState(state: DocumentVisibilityState) {
+    Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: state,
+    });
+    Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        value: state === 'hidden',
+    });
+}
+
+function installVisibleIntersectionObserver() {
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+}
+
+function installImmediateIdleCallback() {
+    vi.stubGlobal('requestIdleCallback', ((callback: IdleRequestCallback) => {
+        callback({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
+        return 1;
+    }) as typeof requestIdleCallback);
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+}
+
+function collectPerformanceDiagnostics() {
+    const events: Array<{ widgetId: string; event: string; reason?: string; durationMs?: number }> = [];
+    const unsubscribe = subscribeActivityAnalyticsPerformanceDiagnostics((event) => {
+        events.push(event);
+    });
+
+    return { events, unsubscribe };
+}
+
+function buildComputedSnapshot(label: string) {
+    return {
+        analytics: {
+            durationsMs: {
+                prod: 4 * 60 * 60 * 1000,
+                setup: 2 * 60 * 60 * 1000,
+                stopped: 1 * 60 * 60 * 1000,
+                noData: 0,
+            },
+            stopCount: 1,
+            estimatedKwh: 18.4,
+            utilizationRatio: 4 / 7,
+            coverageRatio: 1,
+            intervals: [],
+        },
+        grouped: [buildGroupedBucket({ bucketKey: label, label, productivityLabel: label })],
+        comparison: {
+            best: { label, bucketKey: `${label}-best` },
+            worst: { label, bucketKey: `${label}-worst` },
+        },
+        summaryRows: [{ label, productivityLabel: label, bucketKey: `${label}-row` }],
+        timezone: 'UTC',
+    } as never;
+}
+
 describe('ActivityAnalyticsWidget', () => {
     afterEach(() => {
         vi.restoreAllMocks();
         vi.unstubAllGlobals();
         MockResizeObserver.reset();
+        MockIntersectionObserver.reset();
     });
 
     beforeEach(() => {
         vi.stubGlobal('ResizeObserver', MockResizeObserver);
+        setDocumentVisibilityState('visible');
         vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
             font: '',
             measureText: (text: string) => ({ width: text.length * 8 }),
         } as unknown as CanvasRenderingContext2D);
         vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
+        prefetchQuery.mockReset();
+        getQueryState.mockReset();
+        prefetchQuery.mockResolvedValue(undefined);
+        getQueryState.mockReturnValue(undefined);
         vi.mocked(useTemporalSettings).mockReturnValue({
             config: { plantTimezone: null, shifts: [] },
             shifts: [],
             resolvedTimezone: 'UTC',
         });
-        vi.mocked(useActivitySeries).mockReturnValue({
-            data: null,
-            isLoading: false,
-            isError: false,
-            error: null,
-            isEnabled: true,
-        });
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult());
     });
 
     it('shows a missing-machine state before querying when the widget has no machine binding', () => {
@@ -691,13 +845,9 @@ describe('ActivityAnalyticsWidget', () => {
     });
 
     it('shows a loading state while the activity-series query is pending', () => {
-        vi.mocked(useActivitySeries).mockReturnValue({
-            data: null,
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
             isLoading: true,
-            isError: false,
-            error: null,
-            isEnabled: true,
-        });
+        }));
 
         render(
             <ActivityAnalyticsWidget
@@ -708,6 +858,480 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getByTestId('activity-analytics-widget-runtime-state')).toHaveTextContent('Cargando_');
         expect(screen.getByTestId('activity-analytics-widget-runtime-state').querySelector('svg')).toBeNull();
+    });
+
+    it('keeps the initial loading state when there is no confirmed analytics snapshot yet', () => {
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            isLoading: true,
+        }));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getByTestId('activity-analytics-widget-runtime-state')).toHaveTextContent('Cargando_');
+        expect(screen.queryByText('Mostrando la última vista confirmada')).not.toBeInTheDocument();
+        expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('keeps the last confirmed analytics visible and marks them as refreshing while a new range is pending', () => {
+        const activitySeriesState = {
+            current: createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+            }),
+        };
+
+        vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+            range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
+        ));
+
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'shift' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
+
+        activitySeriesState.current = createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        });
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'shift' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
+        expect(screen.queryByText('Requested snapshot 30d')).not.toBeInTheDocument();
+        expect(screen.getByRole('status')).toHaveTextContent('Actualizando');
+        expect(screen.getByText('Mostrando la última vista confirmada')).toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-widget-runtime-state')).not.toBeInTheDocument();
+    });
+
+    it('closes an in-flight transition measurement when the widget identity resets mid-refresh', async () => {
+        const diagnostics = collectPerformanceDiagnostics();
+        const activitySeriesState = {
+            current: createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+            }),
+        };
+
+        vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+            range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
+        ));
+
+        try {
+            const { rerender } = render(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ id: 'activity-analytics-1', displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'shift' } })}
+                    machines={MACHINES}
+                />,
+            );
+
+            activitySeriesState.current = createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+                isFetching: true,
+                isPlaceholderData: true,
+                isRefreshing: true,
+            });
+
+            rerender(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ id: 'activity-analytics-1', displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'shift' } })}
+                    machines={MACHINES}
+                />,
+            );
+
+            rerender(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ id: 'activity-analytics-2', displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'shift' } })}
+                    machines={MACHINES}
+                />,
+            );
+
+            await waitFor(() => expect(diagnostics.events.some((event) => event.event === 'transition_measured' && event.reason === 'widget_reset')).toBe(true));
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it('keeps the last confirmed analytics visible and shows a refresh-failed alert when the new range fails', () => {
+        const activitySeriesState = {
+            current: createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+            }),
+        };
+
+        vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+            range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
+        ));
+
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'shift' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
+
+        activitySeriesState.current = createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+            isError: true,
+            error: new DataServiceError('Activity-series data is temporarily unavailable', 503),
+        });
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'shift' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
+        expect(screen.queryByText('Requested snapshot 30d')).not.toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent('No se pudo actualizar');
+        expect(screen.getByText('Se mantiene la última vista confirmada')).toBeInTheDocument();
+        expect(screen.queryByRole('status')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-widget-runtime-state')).not.toBeInTheDocument();
+    });
+
+    it('prefetches at most two preset ranges when the widget is visible and healthy', async () => {
+        installVisibleIntersectionObserver();
+        installImmediateIdleCallback();
+
+        const diagnostics = collectPerformanceDiagnostics();
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+        }));
+
+        try {
+            renderWithQueryClient(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'shift' } })}
+                    machines={MACHINES}
+                />,
+            );
+
+            act(() => {
+                MockIntersectionObserver.latest().emit(true);
+            });
+
+            await waitFor(() => expect(prefetchQuery).toHaveBeenCalledTimes(2));
+
+            expect(prefetchQuery.mock.calls.map(([options]) => (options as { queryKey: readonly unknown[] }).queryKey[3])).toEqual(['30d', '12m']);
+            expect(diagnostics.events.filter((event) => event.event === 'prefetch_started')).toHaveLength(2);
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it('keeps temporal interactions on read-only runtime paths while bounding demanded requests to the active selection', async () => {
+        const user = userEvent.setup();
+        const onPersistDisplayOptions = vi.fn();
+        const directFetch = vi.fn();
+        const requestedSelections: string[] = [];
+
+        vi.stubGlobal('fetch', directFetch);
+        vi.mocked(useActivitySeries).mockImplementation((params) => {
+            requestedSelections.push(JSON.stringify(params));
+
+            return createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+            });
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+                onPersistDisplayOptions={onPersistDisplayOptions}
+            />,
+        );
+
+        await user.click(within(screen.getByTestId('activity-analytics-runtime-range-selector')).getByRole('button', { name: '30d' }));
+        await user.click(within(screen.getByTestId('activity-analytics-runtime-group-selector')).getByRole('button', { name: 'SEMANA' }));
+
+        expect(onPersistDisplayOptions).toHaveBeenCalledTimes(1);
+        expect(onPersistDisplayOptions).toHaveBeenCalledWith({
+            range: '30d',
+            start: undefined,
+            end: undefined,
+        });
+        expect(Array.from(new Set(requestedSelections))).toEqual([
+            JSON.stringify({ machineId: 101, range: '7d' }),
+            JSON.stringify({ machineId: 101, range: '30d' }),
+        ]);
+        expect(directFetch).not.toHaveBeenCalled();
+    });
+
+    it('keeps idle prefetch on the read-only query path with a max-two request cap', async () => {
+        installVisibleIntersectionObserver();
+        installImmediateIdleCallback();
+
+        const directFetch = vi.fn();
+
+        vi.stubGlobal('fetch', directFetch);
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+        }));
+
+        renderWithQueryClient(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'shift' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            MockIntersectionObserver.latest().emit(true);
+        });
+
+        await waitFor(() => expect(prefetchQuery).toHaveBeenCalledTimes(2));
+
+        expect(prefetchQuery.mock.calls.map(([options]) => (options as { queryKey: readonly unknown[] }).queryKey)).toEqual([
+            ['data', 'activity-series', 101, '30d', null, null],
+            ['data', 'activity-series', 101, '12m', null, null],
+        ]);
+        expect(directFetch).not.toHaveBeenCalled();
+    });
+
+    it('never prefetches custom windows even when the widget is visible and healthy', async () => {
+        installVisibleIntersectionObserver();
+        installImmediateIdleCallback();
+
+        const diagnostics = collectPerformanceDiagnostics();
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+        }));
+
+        try {
+            render(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({
+                        displayOptions: {
+                            range: 'custom',
+                            start: '2026-06-18T10:00:00.000Z',
+                            end: '2026-06-18T12:00:00.000Z',
+                            groupBy: 'shift',
+                            setupThresholdKw: 0.15,
+                            prodThresholdKw: 0.25,
+                            displayMode: 'kpis-and-bars',
+                        },
+                    })}
+                    machines={MACHINES}
+                />,
+            );
+
+            act(() => {
+                MockIntersectionObserver.latest().emit(true);
+            });
+
+            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'custom_range')).toBe(true));
+            expect(prefetchQuery).not.toHaveBeenCalled();
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it('fails closed when visibility observation is unavailable', async () => {
+        const diagnostics = collectPerformanceDiagnostics();
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+        }));
+
+        try {
+            render(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget()}
+                    machines={MACHINES}
+                />,
+            );
+
+            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'visibility_unavailable')).toBe(true));
+            expect(prefetchQuery).not.toHaveBeenCalled();
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it.each([
+        {
+            name: 'hidden widgets',
+            arrange: () => {
+                installVisibleIntersectionObserver();
+                installImmediateIdleCallback();
+            },
+            emitVisibility: false,
+            activitySeries: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
+            expectedReason: 'hidden',
+        },
+        {
+            name: 'hidden documents',
+            arrange: () => {
+                installVisibleIntersectionObserver();
+                installImmediateIdleCallback();
+                setDocumentVisibilityState('hidden');
+            },
+            emitVisibility: true,
+            activitySeries: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
+            expectedReason: 'document_hidden',
+        },
+        {
+            name: 'unhealthy connections',
+            arrange: () => {
+                installVisibleIntersectionObserver();
+                installImmediateIdleCallback();
+            },
+            emitVisibility: true,
+            activitySeries: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
+            connection: { globalStatus: 'degradado' as const, lastSuccess: '2026-04-21T13:00:00.000Z', ageMs: 0 },
+            expectedReason: 'unhealthy',
+        },
+        {
+            name: 'offline connections',
+            arrange: () => {
+                installVisibleIntersectionObserver();
+                installImmediateIdleCallback();
+            },
+            emitVisibility: true,
+            activitySeries: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
+            connection: { globalStatus: 'offline' as const, lastSuccess: null, ageMs: null },
+            expectedReason: 'offline',
+        },
+        {
+            name: 'loading queries',
+            arrange: () => {
+                installVisibleIntersectionObserver();
+                installImmediateIdleCallback();
+            },
+            emitVisibility: null,
+            activitySeries: createActivitySeriesResult({ isLoading: true }),
+            expectedReason: null,
+        },
+        {
+            name: 'errored queries',
+            arrange: () => {
+                installVisibleIntersectionObserver();
+                installImmediateIdleCallback();
+            },
+            emitVisibility: true,
+            activitySeries: createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+                isError: true,
+                error: new DataServiceError('Activity-series data is temporarily unavailable', 503),
+            }),
+            expectedReason: 'error',
+        },
+    ])('suppresses bounded idle prefetch for $name', async ({ arrange, emitVisibility, activitySeries, connection, expectedReason }) => {
+        arrange();
+        const diagnostics = collectPerformanceDiagnostics();
+        vi.mocked(useActivitySeries).mockReturnValue(activitySeries);
+
+        try {
+            render(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget()}
+                    machines={MACHINES}
+                    connection={connection}
+                />,
+            );
+
+            if (typeof emitVisibility === 'boolean') {
+                act(() => {
+                    MockIntersectionObserver.latest().emit(emitVisibility);
+                });
+            }
+
+            if (expectedReason) {
+                await waitFor(() => expect(diagnostics.events.some((event) => event.reason === expectedReason)).toBe(true));
+            }
+            expect(prefetchQuery).not.toHaveBeenCalled();
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it('suppresses bounded idle prefetch when activity-analytics sibling pressure is high', async () => {
+        installVisibleIntersectionObserver();
+        installImmediateIdleCallback();
+
+        const diagnostics = collectPerformanceDiagnostics();
+        const siblingWidgets: WidgetConfig[] = [
+            makeWidget({ id: 'activity-analytics-1' }),
+            makeWidget({ id: 'activity-analytics-2' }),
+            makeWidget({ id: 'activity-analytics-3' }),
+        ];
+
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+        }));
+
+        try {
+            render(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget()}
+                    machines={MACHINES}
+                    siblingWidgets={siblingWidgets}
+                />,
+            );
+
+            act(() => {
+                MockIntersectionObserver.latest().emit(true);
+            });
+
+            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'dashboard_pressure')).toBe(true));
+            expect(prefetchQuery).not.toHaveBeenCalled();
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it('counts the current widget when sibling pressure input only contains peer widgets', async () => {
+        installVisibleIntersectionObserver();
+        installImmediateIdleCallback();
+
+        const diagnostics = collectPerformanceDiagnostics();
+        const siblingWidgets: WidgetConfig[] = [
+            makeWidget({ id: 'activity-analytics-peer-1' }),
+            makeWidget({ id: 'activity-analytics-peer-2' }),
+        ];
+
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            data: POPULATED_ACTIVITY_SERIES,
+        }));
+
+        try {
+            renderWithQueryClient(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ id: 'activity-analytics-self' })}
+                    machines={MACHINES}
+                    siblingWidgets={siblingWidgets}
+                />,
+            );
+
+            act(() => {
+                MockIntersectionObserver.latest().emit(true);
+            });
+
+            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'dashboard_pressure')).toBe(true));
+            expect(prefetchQuery).not.toHaveBeenCalled();
+        } finally {
+            diagnostics.unsubscribe();
+        }
     });
 
     it('shows a clear invalid-threshold state for legacy invalid configs', () => {
@@ -7359,6 +7983,71 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(computeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('records one completed refresh transition while keeping request pressure bounded to the new demanded range', async () => {
+        const diagnostics = collectPerformanceDiagnostics();
+        const requestedSelections: string[] = [];
+        const activitySeriesState = {
+            current: createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+            }),
+        };
+
+        vi.mocked(useActivitySeries).mockImplementation((params) => {
+            requestedSelections.push(JSON.stringify(params));
+
+            return activitySeriesState.current;
+        });
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+            range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
+        ));
+
+        try {
+            const { rerender } = render(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'shift' } })}
+                    machines={MACHINES}
+                />,
+            );
+
+            activitySeriesState.current = createActivitySeriesResult({
+                data: POPULATED_ACTIVITY_SERIES,
+                isFetching: true,
+                isPlaceholderData: true,
+                isRefreshing: true,
+            });
+
+            rerender(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'shift' } })}
+                    machines={MACHINES}
+                />,
+            );
+
+            activitySeriesState.current = createActivitySeriesResult({
+                data: {
+                    ...POPULATED_ACTIVITY_SERIES,
+                    range: '30d',
+                },
+            });
+
+            rerender(
+                <ActivityAnalyticsWidget
+                    widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'shift' } })}
+                    machines={MACHINES}
+                />,
+            );
+
+            await waitFor(() => expect(diagnostics.events.filter((event) => event.event === 'transition_measured')).toHaveLength(1));
+
+            expect(Array.from(new Set(requestedSelections))).toEqual([
+                JSON.stringify({ machineId: 101, range: '7d' }),
+                JSON.stringify({ machineId: 101, range: '30d' }),
+            ]);
+        } finally {
+            diagnostics.unsubscribe();
+        }
     });
 
     it('keeps reduced shell bottom padding scoped to the widget shell instead of the visual panels stack', () => {

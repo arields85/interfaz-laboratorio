@@ -1,7 +1,8 @@
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
 import { BarChart2 } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
-import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
+import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition, WidgetConfig } from '../../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
@@ -12,8 +13,12 @@ import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { useActivitySeries } from '../../queries/useActivitySeries';
+import { createActivitySeriesQueryKey, createActivitySeriesQueryOptions, useActivitySeries } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
+import {
+    recordActivityAnalyticsPerformanceDiagnostic,
+    startActivityAnalyticsPerformanceTransition,
+} from '../../utils/activityAnalyticsPerformanceDiagnostics';
 import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
 import {
     computeActivityAnalytics,
@@ -58,6 +63,7 @@ interface ActivityAnalyticsWidgetProps {
     hasOverviewError?: boolean;
     isLoadingData?: boolean;
     className?: string;
+    siblingWidgets?: WidgetConfig[];
     onPersistDisplayOptions?: (displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
 }
 
@@ -89,6 +95,22 @@ interface ActivityAnalyticsGroupsChartLayout {
     productivityLabelClearanceTop: number;
 }
 
+interface ActivityAnalyticsRenderSnapshot {
+    snapshotKey: string;
+    analytics: ReturnType<typeof computeActivityAnalytics>['analytics'];
+    comparison: ReturnType<typeof computeActivityAnalytics>['comparison'];
+    grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
+    visualPalette: ActivityAnalyticsVisualPalette;
+    donutCenterValueFontSize?: number;
+    prodTrendBands: ResolvedActivityAnalyticsDisplayOptions['prodTrendBands'];
+    visualEffects: ResolvedActivityAnalyticsVisualEffects;
+    barWidthFactor: number;
+    title: string;
+    showTurnoModeControl: boolean;
+    turnoMode: 'summary' | 'detail';
+    emptyMessage: string | null;
+}
+
 const RANGE_OPTIONS: Array<{ value: ResolvedActivityAnalyticsDisplayOptions['range']; label: string }> = [
     { value: '7d', label: '7d' },
     { value: '30d', label: '30d' },
@@ -101,6 +123,7 @@ const GROUP_BY_OPTIONS: Array<{ value: ResolvedActivityAnalyticsDisplayOptions['
     { value: 'week', label: 'SEMANA' },
     { value: 'month', label: 'MES' },
 ];
+const PREFETCHABLE_ACTIVITY_ANALYTICS_RANGES: Array<Exclude<ResolvedActivityAnalyticsDisplayOptions['range'], 'custom'>> = ['7d', '30d', '12m'];
 
 const GENERAL_TYPOGRAPHY_STYLE: CSSProperties = {
     fontFamily: 'var(--font-system)',
@@ -399,12 +422,26 @@ export default function ActivityAnalyticsWidget({
     hasOverviewError = false,
     isLoadingData = false,
     className,
+    siblingWidgets,
     onPersistDisplayOptions,
 }: ActivityAnalyticsWidgetProps) {
+    const queryClient = useContext(QueryClientContext);
     const displayOptions = resolveActivityAnalyticsDisplayOptions(widget.displayOptions);
     const [runtimeViewState, setRuntimeViewState] = useState<ActivityAnalyticsRuntimeViewState>(() => createRuntimeViewState(displayOptions));
     const [analyticsBodySize, setAnalyticsBodySize] = useState<{ width: number; height: number } | null>(null);
+    const [lastSuccessfulSnapshotState, setLastSuccessfulSnapshotState] = useState<{
+        ownerKey: string;
+        snapshot: ActivityAnalyticsRenderSnapshot;
+    } | null>(null);
+    const [widgetVisibilityState, setWidgetVisibilityState] = useState<{
+        ownerKey: string;
+        value: boolean | null;
+    } | null>(null);
     const analyticsBodyRef = useRef<HTMLDivElement | null>(null);
+    const widgetRootRef = useRef<HTMLDivElement | null>(null);
+    const transitionStopRef = useRef<((reason?: string) => number) | null>(null);
+    const lastRefreshFailureKeyRef = useRef<string | null>(null);
+    const lastPrefetchDecisionKeyRef = useRef<string | null>(null);
     const displayKey = createDisplayOptionsSyncKey(displayOptions);
 
     if (runtimeViewState.sourceDisplayKey !== displayKey || runtimeViewState.sourceGroupBy !== displayOptions.groupBy) {
@@ -458,6 +495,13 @@ export default function ActivityAnalyticsWidget({
         }));
     }
     const machineBinding = resolveActivityAnalyticsMachineBinding(widget.binding?.machineId, machines);
+    const runtimeScopeKey = `${widget.id}|${machineBinding.machineId ?? 'none'}`;
+    const lastSuccessfulSnapshot = lastSuccessfulSnapshotState?.ownerKey === runtimeScopeKey
+        ? lastSuccessfulSnapshotState.snapshot
+        : null;
+    const isWidgetVisible = widgetVisibilityState?.ownerKey === runtimeScopeKey
+        ? widgetVisibilityState.value
+        : null;
     const isOverviewUnavailable = isActivityOverviewUnavailable({
         connection,
         hasOverviewError,
@@ -547,6 +591,271 @@ export default function ActivityAnalyticsWidget({
             : computedAnalytics.comparison;
     }, [activeGroupBy, computedAnalytics, displayGrouped]);
     const groupedCount = displayGrouped.length;
+    const requestedSelectionKey = `${machineBinding.machineId ?? 'none'}|${activeDisplayOptions.range}|${activeGroupBy}|${activeTurnoMode}|${activeDisplayOptions.start ?? ''}|${activeDisplayOptions.end ?? ''}`;
+    const validatedProcessingErrorState = (() => {
+        if (!activityData || !computedAnalytics) {
+            return null;
+        }
+
+        try {
+            validateComputedAnalytics(computedAnalytics);
+            return null;
+        } catch (error) {
+            return resolveProcessingErrorState(error);
+        }
+    })();
+    const currentRenderSnapshot = activityData && computedAnalytics && validatedProcessingErrorState === null && computedAnalytics.grouped.length > 0
+        ? {
+            snapshotKey: `${requestedSelectionKey}|${activityData.window.start}|${activityData.window.end}|${activityData.series.length}`,
+            analytics: computedAnalytics.analytics,
+            comparison: displayComparison,
+            grouped: displayGrouped,
+            visualPalette,
+            donutCenterValueFontSize: displayOptions.donutCenterValueFontSize,
+            prodTrendBands: selectedDisplayOptions.prodTrendBands,
+            visualEffects: selectedDisplayOptions.visualEffects as ResolvedActivityAnalyticsVisualEffects,
+            barWidthFactor: activeGroupBarWidth,
+            title: groupsTitle,
+            showTurnoModeControl,
+            turnoMode: activeTurnoMode,
+            emptyMessage: hasHiddenOnlyTurnoGroups
+                ? 'Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.'
+                : null,
+        } satisfies ActivityAnalyticsRenderSnapshot
+        : null;
+    const isShowingRefreshingSnapshot = activitySeries.isRefreshing && lastSuccessfulSnapshot !== null;
+    const isShowingRefreshFailedSnapshot = activitySeries.isError && lastSuccessfulSnapshot !== null;
+    const visibleSnapshot = isShowingRefreshingSnapshot || isShowingRefreshFailedSnapshot
+        ? lastSuccessfulSnapshot
+        : currentRenderSnapshot;
+
+    useEffect(() => {
+        transitionStopRef.current?.('widget_reset');
+        transitionStopRef.current = null;
+        lastRefreshFailureKeyRef.current = null;
+        lastPrefetchDecisionKeyRef.current = null;
+    }, [widget.id, machineBinding.machineId]);
+
+    useEffect(() => {
+        if (!currentRenderSnapshot || activitySeries.isRefreshing || activitySeries.isError) {
+            return;
+        }
+
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- continuity snapshot must update after the finalized render snapshot is known.
+        setLastSuccessfulSnapshotState((current) => {
+            if (current?.ownerKey === runtimeScopeKey && current.snapshot.snapshotKey === currentRenderSnapshot.snapshotKey) {
+                return current;
+            }
+
+            return {
+                ownerKey: runtimeScopeKey,
+                snapshot: currentRenderSnapshot,
+            };
+        });
+        lastRefreshFailureKeyRef.current = null;
+    }, [activitySeries.isError, activitySeries.isRefreshing, currentRenderSnapshot, runtimeScopeKey]);
+
+    useEffect(() => {
+        if (!lastSuccessfulSnapshot) {
+            return;
+        }
+
+        if (activitySeries.isRefreshing) {
+            if (!transitionStopRef.current) {
+                transitionStopRef.current = startActivityAnalyticsPerformanceTransition(widget.id);
+            }
+
+            return;
+        }
+
+        if (transitionStopRef.current && currentRenderSnapshot) {
+            transitionStopRef.current();
+            transitionStopRef.current = null;
+        }
+    }, [activitySeries.isRefreshing, currentRenderSnapshot, lastSuccessfulSnapshot, widget.id]);
+
+    useEffect(() => {
+        if (!lastSuccessfulSnapshot || !activitySeries.isError) {
+            return;
+        }
+
+        if (lastRefreshFailureKeyRef.current === requestedSelectionKey) {
+            return;
+        }
+
+        transitionStopRef.current?.();
+        transitionStopRef.current = null;
+        lastRefreshFailureKeyRef.current = requestedSelectionKey;
+        recordActivityAnalyticsPerformanceDiagnostic({
+            widgetId: widget.id,
+            event: 'refresh_failed',
+            reason: requestedSelectionKey,
+        });
+    }, [activitySeries.isError, lastSuccessfulSnapshot, requestedSelectionKey, widget.id]);
+
+    useEffect(() => {
+        if (!widgetRootRef.current) {
+            return;
+        }
+
+        if (typeof IntersectionObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new IntersectionObserver((entries) => {
+            const entry = entries[0];
+            const nextVisibility = entry?.isIntersecting ?? false;
+
+            setWidgetVisibilityState((current) => {
+                if (current?.ownerKey === runtimeScopeKey && current.value === nextVisibility) {
+                    return current;
+                }
+
+                return {
+                    ownerKey: runtimeScopeKey,
+                    value: nextVisibility,
+                };
+            });
+        });
+
+        observer.observe(widgetRootRef.current);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [runtimeScopeKey, widget.id]);
+
+    useEffect(() => {
+        const widgetId = widget.id;
+        const recordPrefetchDecision = (decisionKey: string, event: 'prefetch_started' | 'prefetch_suppressed' | 'prefetch_failed', reason?: string) => {
+            if (lastPrefetchDecisionKeyRef.current === decisionKey) {
+                return;
+            }
+
+            lastPrefetchDecisionKeyRef.current = decisionKey;
+            recordActivityAnalyticsPerformanceDiagnostic({
+                widgetId,
+                event,
+                reason,
+            });
+        };
+
+        const suppress = (reason: string) => {
+            recordPrefetchDecision(`${requestedSelectionKey}:suppressed:${reason}`, 'prefetch_suppressed', reason);
+            return undefined;
+        };
+
+        if (activeDisplayOptions.range === 'custom') {
+            return suppress('custom_range');
+        }
+
+        if (typeof IntersectionObserver === 'undefined' || isWidgetVisible === null) {
+            return suppress('visibility_unavailable');
+        }
+
+        if (isWidgetVisible === false) {
+            return suppress('hidden');
+        }
+
+        if (document.hidden || document.visibilityState === 'hidden') {
+            return suppress('document_hidden');
+        }
+
+        const activityAnalyticsWidgetIds = new Set<string>([widget.id]);
+
+        siblingWidgets?.forEach((candidate) => {
+            if (candidate.type === 'activity-analytics') {
+                activityAnalyticsWidgetIds.add(candidate.id);
+            }
+        });
+
+        if (activityAnalyticsWidgetIds.size > 2) {
+            return suppress('dashboard_pressure');
+        }
+
+        if (connection?.globalStatus === 'offline') {
+            return suppress('offline');
+        }
+
+        if (connection && connection.globalStatus !== 'online') {
+            return suppress('unhealthy');
+        }
+
+        if (isLoadingData || activitySeries.isLoading || activitySeries.isFetching || activitySeries.isRefreshing || currentRenderSnapshot === null) {
+            return suppress('loading');
+        }
+
+        if (activitySeries.isError) {
+            return suppress('error');
+        }
+
+        if (machineBinding.machineId == null) {
+            return suppress('invalid_machine');
+        }
+
+        if (!queryClient) {
+            return suppress('query_client_unavailable');
+        }
+
+        const rangesToPrefetch = PREFETCHABLE_ACTIVITY_ANALYTICS_RANGES
+            .filter((range) => range !== activeDisplayOptions.range)
+            .slice(0, 2)
+            .filter((range) => {
+                const queryKey = createActivitySeriesQueryKey({
+                    machineId: machineBinding.machineId,
+                    range,
+                });
+                const queryState = queryClient.getQueryState(queryKey);
+
+                return !(queryState && (queryState.status === 'success' || queryState.fetchStatus === 'fetching'));
+            });
+
+        if (rangesToPrefetch.length === 0) {
+            return suppress('already_cached');
+        }
+
+        const scheduleIdle = typeof requestIdleCallback === 'function'
+            ? requestIdleCallback
+            : ((callback: IdleRequestCallback) => window.setTimeout(() => callback({
+                didTimeout: false,
+                timeRemaining: () => 0,
+            } as IdleDeadline), 0));
+        const cancelIdle = typeof cancelIdleCallback === 'function'
+            ? cancelIdleCallback
+            : window.clearTimeout;
+        const handle = scheduleIdle(() => {
+            void Promise.all(rangesToPrefetch.map(async (range) => {
+                try {
+                    await queryClient.prefetchQuery(createActivitySeriesQueryOptions({
+                        machineId: machineBinding.machineId!,
+                        range,
+                    }));
+                    recordPrefetchDecision(`${requestedSelectionKey}:started:${range}`, 'prefetch_started', range);
+                } catch {
+                    recordPrefetchDecision(`${requestedSelectionKey}:failed:${range}`, 'prefetch_failed', range);
+                }
+            }));
+        });
+
+        return () => {
+            cancelIdle(handle as never);
+        };
+    }, [
+        activeDisplayOptions.range,
+        activitySeries.isError,
+        activitySeries.isFetching,
+        activitySeries.isLoading,
+        activitySeries.isRefreshing,
+        connection,
+        currentRenderSnapshot,
+        isLoadingData,
+        isWidgetVisible,
+        machineBinding.machineId,
+        queryClient,
+        requestedSelectionKey,
+        siblingWidgets,
+        widget.id,
+    ]);
 
     useEffect(() => {
         if (typeof ResizeObserver === 'undefined' || !analyticsBodyRef.current) {
@@ -742,7 +1051,7 @@ export default function ActivityAnalyticsWidget({
         });
     }
 
-    if (isLoadingData || activitySeries.isLoading) {
+    if ((isLoadingData || activitySeries.isLoading) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
@@ -750,7 +1059,7 @@ export default function ActivityAnalyticsWidget({
         });
     }
 
-    if (activitySeries.isError) {
+    if (activitySeries.isError && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
@@ -758,7 +1067,7 @@ export default function ActivityAnalyticsWidget({
         });
     }
 
-    if (!activityData || activityData.series.length === 0) {
+    if ((!activityData || activityData.series.length === 0) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
@@ -767,17 +1076,15 @@ export default function ActivityAnalyticsWidget({
         });
     }
 
-    try {
-        validateComputedAnalytics(computedAnalytics);
-    } catch (error) {
+    if (validatedProcessingErrorState !== null && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
-            ...resolveProcessingErrorState(error),
+            ...validatedProcessingErrorState,
         });
     }
 
-    if (computedAnalytics.grouped.length === 0) {
+    if ((computedAnalytics?.grouped.length ?? 0) === 0 && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
@@ -787,18 +1094,32 @@ export default function ActivityAnalyticsWidget({
     }
 
     return (
-        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
+        <div ref={widgetRootRef} className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
             {header}
+
+            {isShowingRefreshingSnapshot ? (
+                <div role="status" className="mt-2 rounded-xl border border-industrial-border bg-industrial-bg/40 px-3 py-2 text-industrial-muted">
+                    <span className="uppercase">Actualizando</span>
+                    <span className="ml-2">Mostrando la última vista confirmada</span>
+                </div>
+            ) : null}
+
+            {isShowingRefreshFailedSnapshot ? (
+                <div role="alert" className="mt-2 rounded-xl border border-status-critical/30 bg-status-critical/10 px-3 py-2 text-industrial-text">
+                    <span className="uppercase">No se pudo actualizar</span>
+                    <span className="ml-2">Se mantiene la última vista confirmada</span>
+                </div>
+            ) : null}
 
             <div ref={analyticsBodyRef} className="mt-1 flex min-h-0 flex-1 flex-col gap-3">
                 <AnalyticsVisualPanels
-                    analytics={computedAnalytics.analytics}
-                    comparison={displayComparison}
-                    grouped={displayGrouped}
-                    visualPalette={visualPalette}
-                    donutCenterValueFontSize={displayOptions.donutCenterValueFontSize}
-                    prodTrendBands={selectedDisplayOptions.prodTrendBands}
-                    visualEffects={selectedDisplayOptions.visualEffects as ResolvedActivityAnalyticsVisualEffects}
+                    analytics={visibleSnapshot!.analytics}
+                    comparison={visibleSnapshot!.comparison}
+                    grouped={visibleSnapshot!.grouped}
+                    visualPalette={visibleSnapshot!.visualPalette}
+                    donutCenterValueFontSize={visibleSnapshot!.donutCenterValueFontSize}
+                    prodTrendBands={visibleSnapshot!.prodTrendBands}
+                    visualEffects={visibleSnapshot!.visualEffects}
                     visualLayout={visualLayout}
                     groupsChartLayout={groupsChartLayout}
                     chartWidth={analyticsBodyWidth}
@@ -806,14 +1127,12 @@ export default function ActivityAnalyticsWidget({
                     topRegionSharedHeight={topRegionSharedHeight}
                     prodTrendPanelHeight={prodTrendPanelHeight}
                     groupsHeightBudget={groupsHeightBudget}
-                    barWidthFactor={activeGroupBarWidth}
-                    title={groupsTitle}
-                    showTurnoModeControl={showTurnoModeControl}
-                    turnoMode={activeTurnoMode}
+                    barWidthFactor={visibleSnapshot!.barWidthFactor}
+                    title={visibleSnapshot!.title}
+                    showTurnoModeControl={visibleSnapshot!.showTurnoModeControl}
+                    turnoMode={visibleSnapshot!.turnoMode}
                     onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
-                    emptyMessage={hasHiddenOnlyTurnoGroups
-                        ? 'Todos los grupos de esta ventana corresponden a sin turno y se ocultan en esta vista.'
-                        : null}
+                    emptyMessage={visibleSnapshot!.emptyMessage}
                 />
             </div>
         </div>

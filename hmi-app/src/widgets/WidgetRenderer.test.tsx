@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClientContext } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContractMachine, DataHistoryResponseV2 } from '../domain/dataContract.types';
@@ -18,6 +19,7 @@ import { isDataHistoryEnabled } from '../config/dataConnection.config';
 import { useTemporalSettings } from '../hooks/useTemporalSettings';
 import { useActivitySeries } from '../queries/useActivitySeries';
 import { useDataHistory } from '../queries/useDataHistory';
+import { subscribeActivityAnalyticsPerformanceDiagnostics } from '../utils/activityAnalyticsPerformanceDiagnostics';
 import WidgetRenderer from './WidgetRenderer';
 
 class MockResizeObserver implements ResizeObserver {
@@ -56,15 +58,33 @@ vi.mock('../queries/useDataHistory', () => ({
     useDataHistory: vi.fn(),
 }));
 
-vi.mock('../queries/useActivitySeries', () => ({
-    useActivitySeries: vi.fn(),
-}));
+vi.mock('../queries/useActivitySeries', async () => {
+    const actual = await vi.importActual<typeof import('../queries/useActivitySeries')>('../queries/useActivitySeries');
+
+    return {
+        ...actual,
+        useActivitySeries: vi.fn(),
+    };
+});
 
 vi.mock('../hooks/useTemporalSettings', () => ({
     useTemporalSettings: vi.fn(),
 }));
 
 const equipmentMap = new Map();
+
+function renderWithQueryClient(element: Parameters<typeof render>[0], overrides?: { getQueryState?: ReturnType<typeof vi.fn>; prefetchQuery?: ReturnType<typeof vi.fn> }) {
+    return render(
+        <QueryClientContext.Provider
+            value={{
+                getQueryState: overrides?.getQueryState ?? vi.fn(),
+                prefetchQuery: overrides?.prefetchQuery ?? vi.fn().mockResolvedValue(undefined),
+            } as never}
+        >
+            {element}
+        </QueryClientContext.Provider>,
+    );
+}
 
 const widget: MachineActivityWidgetConfig = {
     id: 'machine-activity-1',
@@ -759,6 +779,120 @@ describe('WidgetRenderer', () => {
 
         expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
         expect(onPersistWidgetDisplayOptions).not.toHaveBeenCalled();
+    });
+
+    it('forwards sibling widgets through the real activity-analytics render path so dashboard pressure suppresses prefetch', async () => {
+        class VisibleIntersectionObserver implements IntersectionObserver {
+            public readonly root = null;
+            public readonly rootMargin = '0px';
+            public readonly thresholds = [0];
+
+            public constructor(private readonly callback: IntersectionObserverCallback) {}
+
+            public observe(target: Element): void {
+                this.callback([
+                    {
+                        target,
+                        isIntersecting: true,
+                        intersectionRatio: 1,
+                        boundingClientRect: target.getBoundingClientRect(),
+                        intersectionRect: target.getBoundingClientRect(),
+                        rootBounds: null,
+                        time: 0,
+                    } as IntersectionObserverEntry,
+                ], this);
+            }
+
+            public unobserve(): void {}
+            public disconnect(): void {}
+            public takeRecords(): IntersectionObserverEntry[] { return []; }
+        }
+
+        const activityAnalyticsWidget: ActivityAnalyticsWidgetConfig = {
+            id: 'activity-analytics-1',
+            type: 'activity-analytics',
+            title: 'ACT-ANALYTICS',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+            },
+            displayOptions: {
+                range: '7d',
+                groupBy: 'shift',
+                setupThresholdKw: 0.15,
+                prodThresholdKw: 0.25,
+                displayMode: 'kpis-and-bars',
+            },
+        };
+        const siblingWidgets = [
+            activityAnalyticsWidget,
+            { ...activityAnalyticsWidget, id: 'activity-analytics-2' },
+            { ...activityAnalyticsWidget, id: 'activity-analytics-3' },
+        ];
+        const prefetchQuery = vi.fn().mockResolvedValue(undefined);
+        const diagnostics: Array<{ widgetId: string; event: string; reason?: string }> = [];
+        const unsubscribe = subscribeActivityAnalyticsPerformanceDiagnostics((event) => {
+            diagnostics.push(event);
+        });
+
+        vi.stubGlobal('IntersectionObserver', VisibleIntersectionObserver);
+        vi.stubGlobal('requestIdleCallback', ((callback: IdleRequestCallback) => {
+            callback({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
+            return 1;
+        }) as typeof requestIdleCallback);
+        vi.stubGlobal('cancelIdleCallback', vi.fn());
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+        Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'Total kW',
+                range: '7d',
+                unit: 'kW',
+                purpose: 'activity-analytics',
+                window: {
+                    start: '2026-06-18T12:00:00.000Z',
+                    end: '2026-06-18T14:00:00.000Z',
+                    timezone: 'UTC',
+                    bucket: '5m',
+                    bucketMs: 300000,
+                },
+                series: [
+                    { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 0.3 },
+                ],
+                summary: { hidden: true },
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+
+        try {
+            renderWithQueryClient(
+                <WidgetRenderer
+                    widget={activityAnalyticsWidget}
+                    equipmentMap={equipmentMap}
+                    machines={machines}
+                    siblingWidgets={siblingWidgets}
+                />,
+                { prefetchQuery },
+            );
+
+            await waitFor(() => expect(diagnostics.some((event) => event.reason === 'dashboard_pressure')).toBe(true));
+
+            expect(prefetchQuery).not.toHaveBeenCalled();
+        } finally {
+            unsubscribe();
+        }
     });
 
     it('routes info-card widgets to the static renderer without unsupported or control UI', () => {

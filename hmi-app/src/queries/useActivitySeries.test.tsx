@@ -1,15 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ActivitySeriesAdapterError, adaptActivitySeries } from '../adapters/activitySeries.adapter';
 import { isDataActivitySeriesEnabled } from '../config/dataConnection.config';
 import { DataServiceError } from '../services/dataOverview.service';
 import { fetchActivitySeries } from '../services/activitySeries.service';
-import { ACTIVITY_SERIES_QUERY_KEY_PREFIX, useActivitySeries } from './useActivitySeries';
+import {
+    ACTIVITY_SERIES_QUERY_KEY_PREFIX,
+    createActivitySeriesQueryKey,
+    createActivitySeriesQueryOptions,
+    useActivitySeries,
+} from './useActivitySeries';
 
-vi.mock('@tanstack/react-query', () => ({
-    useQuery: vi.fn(),
-}));
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+
+    return {
+        ...actual,
+        useQuery: vi.fn(),
+    };
+});
 
 vi.mock('../config/dataConnection.config', () => ({
     isDataActivitySeriesEnabled: vi.fn(),
@@ -31,6 +41,7 @@ vi.mock('../adapters/activitySeries.adapter', async (importOriginal) => {
 describe('useActivitySeries', () => {
     afterEach(() => {
         vi.clearAllMocks();
+        vi.unstubAllGlobals();
     });
 
     it('disables the query when machineId is missing or the endpoint is disabled', () => {
@@ -106,6 +117,78 @@ describe('useActivitySeries', () => {
         expect(fetchActivitySeries).toHaveBeenCalledWith(params);
         expect(adaptActivitySeries).toHaveBeenCalledWith(raw);
         expect(result.isEnabled).toBe(true);
+    });
+
+    it('reuses exported query helpers and exposes previous-data refresh metadata', () => {
+        vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: { purpose: 'activity-analytics' },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isFetching: true,
+            isPlaceholderData: true,
+        } as never);
+
+        const params = { machineId: 7, range: '30d' as const };
+        const queryKey = createActivitySeriesQueryKey(params);
+        const queryOptions = createActivitySeriesQueryOptions(params);
+        const result = useActivitySeries(params);
+
+        expect(queryKey).toEqual(['data', 'activity-series', 7, '30d', null, null]);
+        expect(queryOptions).toEqual(expect.objectContaining({
+            queryKey,
+            enabled: true,
+            placeholderData: keepPreviousData,
+        }));
+        expect(vi.mocked(useQuery).mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+            queryKey,
+            enabled: true,
+            placeholderData: keepPreviousData,
+        }));
+        expect(result).toMatchObject({
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        });
+    });
+
+    it('keeps GET-only query execution inside the service boundary and does not label finalized data as refreshing', async () => {
+        vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: { purpose: 'activity-analytics' },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isFetching: true,
+            isPlaceholderData: false,
+        } as never);
+
+        const params = { machineId: 11, range: '24h' as const };
+        const raw = { ok: true };
+        const adapted = { purpose: 'activity-analytics', window: { bucketMs: 300000 }, series: [] };
+        const directFetch = vi.fn();
+
+        vi.stubGlobal('fetch', directFetch);
+        vi.mocked(fetchActivitySeries).mockResolvedValue(raw);
+        vi.mocked(adaptActivitySeries).mockReturnValue(adapted as never);
+
+        const queryOptions = createActivitySeriesQueryOptions(params);
+        const result = useActivitySeries(params);
+
+        await expect(queryOptions.queryFn?.()).resolves.toEqual(adapted);
+        expect(fetchActivitySeries).toHaveBeenCalledWith(params);
+        expect(directFetch).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            isFetching: true,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+    });
+
+    it('restores the global fetch between tests so service-boundary assertions do not leak state', () => {
+        expect(globalThis.fetch).toBeTypeOf('function');
+        expect('mock' in globalThis.fetch).toBe(false);
     });
 
     it('separates custom activity-series queries in the cache key and forwards explicit bounds to the service', async () => {

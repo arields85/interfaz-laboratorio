@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { adaptActivitySeries } from '../adapters/activitySeries.adapter';
 import { ActivitySeriesAdapterError } from '../adapters/activitySeries.adapter';
 import { isDataActivitySeriesEnabled } from '../config/dataConnection.config';
@@ -8,6 +8,10 @@ import { fetchActivitySeries } from '../services/activitySeries.service';
 import { validateAndNormalizeActivitySeriesQueryParams } from '../utils/activitySeriesQueryValidation';
 
 export const ACTIVITY_SERIES_QUERY_KEY_PREFIX = ['data', 'activity-series'] as const;
+type ActivitySeriesQueryKey = ReturnType<typeof createActivitySeriesQueryKey>;
+type ActivitySeriesQueryOptions = Pick<UseQueryOptions<ActivityAnalyticsResponse, Error, ActivityAnalyticsResponse, ActivitySeriesQueryKey>, 'queryKey' | 'queryFn' | 'placeholderData' | 'staleTime' | 'retry' | 'refetchOnWindowFocus'> & {
+    enabled: boolean;
+};
 
 export interface UseActivitySeriesResult {
     data: ActivityAnalyticsResponse | null;
@@ -15,20 +19,41 @@ export interface UseActivitySeriesResult {
     isError: boolean;
     error: Error | null;
     isEnabled: boolean;
+    isFetching: boolean;
+    isPlaceholderData: boolean;
+    isRefreshing: boolean;
 }
 
 export function useActivitySeries(params: ActivityAnalyticsQueryDraft): UseActivitySeriesResult {
+    const queryOptions = createActivitySeriesQueryOptions(params);
+    const query = useQuery<ActivityAnalyticsResponse, Error, ActivityAnalyticsResponse, ActivitySeriesQueryKey>(queryOptions);
+    const isFetching = queryOptions.enabled ? query.isFetching : false;
+    const isPlaceholderData = queryOptions.enabled ? query.isPlaceholderData : false;
+
+    return {
+        data: query.data ?? null,
+        isLoading: queryOptions.enabled ? query.isLoading : false,
+        isError: queryOptions.enabled ? query.isError : false,
+        error: queryOptions.enabled ? toActivitySeriesUiError(query.error) : null,
+        isEnabled: queryOptions.enabled,
+        isFetching,
+        isPlaceholderData,
+        isRefreshing: isFetching && isPlaceholderData,
+    };
+}
+
+export function createActivitySeriesQueryKey(params: ActivityAnalyticsQueryDraft) {
+    const normalizedParams = normalizeActivitySeriesQueryParams(params);
+
+    return buildActivitySeriesQueryKey(normalizedParams);
+}
+
+export function createActivitySeriesQueryOptions(params: ActivityAnalyticsQueryDraft): ActivitySeriesQueryOptions {
     const normalizedParams = normalizeActivitySeriesQueryParams(params);
     const enabled = normalizedParams !== null && isDataActivitySeriesEnabled();
 
-    const query = useQuery<ActivityAnalyticsResponse>({
-        queryKey: [
-            ...ACTIVITY_SERIES_QUERY_KEY_PREFIX,
-            normalizedParams?.machineId ?? null,
-            normalizedParams?.range ?? null,
-            normalizedParams?.range === 'custom' ? normalizedParams.start : null,
-            normalizedParams?.range === 'custom' ? normalizedParams.end : null,
-        ],
+    return {
+        queryKey: buildActivitySeriesQueryKey(normalizedParams),
         queryFn: async () => {
             if (!normalizedParams) {
                 throw new Error('Activity-series query params are required');
@@ -38,18 +63,21 @@ export function useActivitySeries(params: ActivityAnalyticsQueryDraft): UseActiv
             return adaptActivitySeries(raw);
         },
         enabled,
+        placeholderData: keepPreviousData,
         staleTime: 30_000,
         retry: (failureCount, error) => shouldRetryActivitySeriesQuery(failureCount, error),
         refetchOnWindowFocus: true,
-    });
-
-    return {
-        data: query.data ?? null,
-        isLoading: enabled ? query.isLoading : false,
-        isError: enabled ? query.isError : false,
-        error: enabled ? toActivitySeriesUiError(query.error) : null,
-        isEnabled: enabled,
     };
+}
+
+function buildActivitySeriesQueryKey(normalizedParams: ReturnType<typeof normalizeActivitySeriesQueryParams>) {
+    return [
+        ...ACTIVITY_SERIES_QUERY_KEY_PREFIX,
+        normalizedParams?.machineId ?? null,
+        normalizedParams?.range ?? null,
+        normalizedParams?.range === 'custom' ? normalizedParams.start : null,
+        normalizedParams?.range === 'custom' ? normalizedParams.end : null,
+    ] as const;
 }
 
 function normalizeActivitySeriesQueryParams(params: ActivityAnalyticsQueryDraft) {
