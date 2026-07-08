@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import AdminActionButton from './AdminActionButton';
 import AdminNumberInput from './AdminNumberInput';
 import AdminSelect from './AdminSelect';
@@ -61,6 +61,8 @@ import {
 
 const FONT_STORAGE_KEY = 'hmi-theme-fonts';
 const COLOR_STORAGE_KEY = 'hmi-theme-colors';
+const COLOR_PALETTE_FILE_TYPE = 'hmi-color-palette';
+const COLOR_PALETTE_FILE_VERSION = 1;
 
 const FONT_SIZE_TOKEN_KEYS = [
     '--font-size-system',
@@ -88,6 +90,18 @@ type FontSizeTokenKey = (typeof FONT_SIZE_TOKEN_KEYS)[number];
 type TrackingTokenKey = (typeof TRACKING_TOKEN_KEYS)[number];
 type FontTokenKey = '--font-system' | '--font-mono' | '--font-chart' | '--font-dashboard-title' | '--font-widget-value' | '--font-widget-value-gauge' | '--font-widget-value-activity-analytics-prod-trend';
 type InlineFontSizeTokenKey = Extract<FontSizeTokenKey, '--font-size-system' | '--font-size-mono' | '--font-size-chart' | '--font-size-dashboard-title' | '--font-size-widget-value' | '--font-size-widget-value-activity-analytics-prod-trend'>;
+type ColorPaletteFile = {
+    type: typeof COLOR_PALETTE_FILE_TYPE;
+    version: typeof COLOR_PALETTE_FILE_VERSION;
+    colors: Record<string, string>;
+};
+type ThemeState = {
+    fontValues: Record<FontTokenKey, FontName>;
+    weightValues: Record<string, string>;
+    fontSizeValues: Record<FontSizeTokenKey, string>;
+    trackingValues: Record<TrackingTokenKey, string>;
+    colorValues: Record<ColorTokenKey, string>;
+};
 type FontToken = {
     key: FontTokenKey;
     label: string;
@@ -319,6 +333,9 @@ const DEFAULT_COLOR_VALUES: Record<ColorTokenKey, string> = COLOR_GROUPS.reduce(
     return accumulator;
 }, {} as Record<ColorTokenKey, string>);
 
+const COLOR_TOKEN_KEYS = COLOR_GROUPS.flatMap((group) => group.colors.map((color) => color.key)) as ColorTokenKey[];
+const COLOR_TOKEN_KEY_SET = new Set<string>(COLOR_TOKEN_KEYS);
+
 const FONT_SELECT_WIDTH_CH = Math.max(...AVAILABLE_FONTS.map((fontName) => fontName.length)) + 4;
 const TYPOGRAPHY_SECTION_ROW_CLS = 'flex flex-wrap min-w-0 items-center gap-x-3 gap-y-2 overflow-hidden pb-1';
 const TYPOGRAPHY_CONTROL_LABEL_CLS = 'text-industrial-muted';
@@ -382,6 +399,82 @@ function readStoredOverrides(storageKey: string): Record<string, string> {
     } catch {
         return {};
     }
+}
+
+function isColorTokenKey(value: string): value is ColorTokenKey {
+    return COLOR_TOKEN_KEY_SET.has(value);
+}
+
+function isColorPaletteFile(value: unknown): value is ColorPaletteFile {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+
+    const candidate = value as Partial<ColorPaletteFile>;
+    return candidate.type === COLOR_PALETTE_FILE_TYPE
+        && candidate.version === COLOR_PALETTE_FILE_VERSION
+        && isRecord(candidate.colors);
+}
+
+function getImportedColorValues(paletteFile: ColorPaletteFile): Partial<Record<ColorTokenKey, string>> {
+    return Object.entries(paletteFile.colors).reduce((accumulator, [key, value]) => {
+        if (isColorTokenKey(key)) {
+            accumulator[key] = value;
+        }
+
+        return accumulator;
+    }, {} as Partial<Record<ColorTokenKey, string>>);
+}
+
+function isValidColorValue(value: string): boolean {
+    const trimmedValue = value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(trimmedValue) || /^#[0-9a-f]{8}$/i.test(trimmedValue)) {
+        return true;
+    }
+
+    const rgbMatch = trimmedValue.match(/^rgba?\(([^)]+)\)$/i);
+    if (rgbMatch) {
+        const channels = rgbMatch[1].split(',').map((part) => part.trim());
+        const expectedLength = trimmedValue.toLowerCase().startsWith('rgba(') ? 4 : 3;
+        if (channels.length !== expectedLength) {
+            return false;
+        }
+
+        const rgbChannels = channels.slice(0, 3).every((channel) => {
+            const parsedChannel = Number(channel);
+            return Number.isFinite(parsedChannel) && parsedChannel >= 0 && parsedChannel <= 255;
+        });
+        if (!rgbChannels) {
+            return false;
+        }
+
+        if (channels.length === 4) {
+            const alphaChannel = Number(channels[3]);
+            return Number.isFinite(alphaChannel) && alphaChannel >= 0 && alphaChannel <= 1;
+        }
+
+        return true;
+    }
+
+    if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function') {
+        return CSS.supports('color', trimmedValue);
+    }
+
+    return false;
+}
+
+function getValidatedImportedColorValues(paletteFile: ColorPaletteFile): Partial<Record<ColorTokenKey, string>> | null {
+    const importedColorValues = getImportedColorValues(paletteFile);
+
+    for (const [key, value] of Object.entries(importedColorValues)) {
+        if (!isColorTokenKey(key) || !isValidColorValue(value)) {
+            return null;
+        }
+
+        importedColorValues[key] = value.trim();
+    }
+
+    return importedColorValues;
 }
 
 function writeStoredOverrides(storageKey: string, overrides: Record<string, string>): void {
@@ -462,6 +555,67 @@ function buildFontStorageOverrides(
     }
 
     return overrides;
+}
+
+function applyFontStateToDocument(
+    fontValues: Record<FontTokenKey, FontName>,
+    weightValues: Record<string, string>,
+    fontSizeValues: Record<FontSizeTokenKey, string>,
+    trackingValues: Record<TrackingTokenKey, string>,
+): void {
+    for (const fontToken of FONT_TOKENS) {
+        document.documentElement.style.removeProperty(fontToken.key);
+        if (fontToken.weightKey) {
+            document.documentElement.style.removeProperty(fontToken.weightKey);
+        }
+    }
+
+    for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
+        document.documentElement.style.removeProperty(sizeKey);
+    }
+
+    for (const trackingKey of TRACKING_TOKEN_KEYS) {
+        document.documentElement.style.removeProperty(trackingKey);
+    }
+
+    const normalizedOverrides = buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues);
+    for (const [key, value] of Object.entries(normalizedOverrides)) {
+        if ((FONT_TOKENS as readonly { key: FontTokenKey }[]).some((fontToken) => fontToken.key === key)) {
+            document.documentElement.style.setProperty(key, resolveFontCssVariableValue(key as FontFamilyTokenKey, value));
+            continue;
+        }
+
+        if (isFontSizeTokenKey(key)) {
+            document.documentElement.style.setProperty(key, FONT_SIZE_FIELD_CONFIG[key].normalize(value));
+            continue;
+        }
+
+        if (isTrackingTokenKey(key)) {
+            document.documentElement.style.setProperty(key, TRACKING_FIELD_CONFIG[key].normalize(value));
+            continue;
+        }
+
+        document.documentElement.style.setProperty(key, value);
+    }
+}
+
+function applyColorStateToDocument(colorValues: Record<ColorTokenKey, string>): void {
+    for (const colorKey of COLOR_TOKEN_KEYS) {
+        document.documentElement.style.removeProperty(colorKey);
+        if (normalizeColorForInput(colorValues[colorKey]) !== normalizeColorForInput(DEFAULT_COLOR_VALUES[colorKey])) {
+            document.documentElement.style.setProperty(colorKey, colorValues[colorKey]);
+        }
+    }
+}
+
+function applyThemeStateToDocument(themeState: ThemeState): void {
+    applyFontStateToDocument(
+        themeState.fontValues,
+        themeState.weightValues,
+        themeState.fontSizeValues,
+        themeState.trackingValues,
+    );
+    applyColorStateToDocument(themeState.colorValues);
 }
 
 // eslint-disable-next-line react-refresh/only-export-components -- App bootstrap imports this initializer.
@@ -600,14 +754,9 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
     const [fontSizeValues, setFontSizeValues] = useState<Record<FontSizeTokenKey, string>>(initialThemeState.fontSizeValues);
     const [trackingValues, setTrackingValues] = useState<Record<TrackingTokenKey, string>>(initialThemeState.trackingValues);
     const [colorValues, setColorValues] = useState<Record<ColorTokenKey, string>>(initialThemeState.colorValues);
+    const paletteImportInputRef = useRef<HTMLInputElement | null>(null);
 
-    const snapshotRef = useRef<{
-        fontValues: Record<FontTokenKey, FontName>;
-        weightValues: Record<string, string>;
-        fontSizeValues: Record<FontSizeTokenKey, string>;
-        trackingValues: Record<TrackingTokenKey, string>;
-        colorValues: Record<ColorTokenKey, string>;
-    } | null>({
+    const snapshotRef = useRef<ThemeState | null>({
         ...initialThemeState,
     });
 
@@ -718,6 +867,58 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
         }
 
         onDirtyChange?.(true);
+    };
+
+    const handleExportPalette = () => {
+        const paletteFile: ColorPaletteFile = {
+            type: COLOR_PALETTE_FILE_TYPE,
+            version: COLOR_PALETTE_FILE_VERSION,
+            colors: colorValues,
+        };
+        const paletteBlob = new Blob([JSON.stringify(paletteFile, null, 2)], { type: 'application/json' });
+        const objectUrl = URL.createObjectURL(paletteBlob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = 'hmi-color-palette.v1.json';
+        link.click();
+        URL.revokeObjectURL(objectUrl);
+    };
+
+    const handleImportPalette = async (event: ChangeEvent<HTMLInputElement>) => {
+        const input = event.target;
+        const [file] = Array.from(input.files ?? []);
+
+        if (!file) {
+            return;
+        }
+
+        try {
+            const fileContent = await file.text();
+            const parsedFile: unknown = JSON.parse(fileContent);
+
+            if (!isColorPaletteFile(parsedFile)) {
+                return;
+            }
+
+            const importedColorValues = getValidatedImportedColorValues(parsedFile);
+            if (!importedColorValues || Object.keys(importedColorValues).length === 0) {
+                return;
+            }
+
+            const nextColorValues = {
+                ...colorValues,
+                ...importedColorValues,
+            } satisfies Record<ColorTokenKey, string>;
+
+            setColorValues(nextColorValues);
+            applyColorStateToDocument(nextColorValues);
+
+            onDirtyChange?.(true);
+        } catch {
+            // Invalid or malformed files must not mutate the current palette.
+        } finally {
+            input.value = '';
+        }
     };
 
     const handleWeightChange = (weightKey: string, nextWeight: string) => {
@@ -918,7 +1119,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             setFontSizeValues(snap.fontSizeValues);
             setTrackingValues(snap.trackingValues);
             setColorValues(snap.colorValues);
-            applyThemeOverrides();
+            applyThemeStateToDocument(snap);
             onDirtyChange?.(false);
         };
 
@@ -1215,6 +1416,23 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
                             </div>
                         </div>
                     ))}
+                </div>
+
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <input
+                        ref={paletteImportInputRef}
+                        type="file"
+                        accept="application/json,.json"
+                        className="hidden"
+                        onChange={handleImportPalette}
+                        aria-label="Importar archivo de paleta"
+                    />
+                    <AdminActionButton variant="secondary" onClick={handleExportPalette}>
+                        Exportar paleta
+                    </AdminActionButton>
+                    <AdminActionButton variant="secondary" onClick={() => paletteImportInputRef.current?.click()}>
+                        Importar paleta
+                    </AdminActionButton>
                 </div>
             </section>
 
