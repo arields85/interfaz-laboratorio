@@ -64,6 +64,10 @@ import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTempor
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
 import type { TrendChartV2RenderContext } from './trendChartV2RenderContext';
+import {
+    recordTrendChartV2PerformanceDiagnostic,
+    startTrendChartV2PerformanceTransition,
+} from '../../utils/trendChartV2PerformanceDiagnostics';
 
 const SYSTEM_TEXT_STYLE = {
     fontSize: 'var(--font-size-system)',
@@ -111,6 +115,12 @@ const MIN_LINE_STROKE_WIDTH = 0.5;
 const MAX_LINE_STROKE_WIDTH = 6;
 const MIN_LINE_GLOW_BLUR = 0;
 const MAX_LINE_GLOW_BLUR = 8;
+const RESIZE_SETTLE_DELAY_MS = 120;
+
+interface ChartDimensions {
+    width: number;
+    height: number;
+}
 
 function clampLineStrokeWidth(value: number | undefined): number {
     if (!Number.isFinite(value)) {
@@ -130,6 +140,24 @@ function clampLineGlowBlur(value: number | undefined): number {
 
 function formatTrendChartV2SummaryValue(value: number, unit: string | undefined): string {
     return `${formatTick(value)}${unit ? unit.toLowerCase() : ''}`;
+}
+
+function normalizeChartDimensions(width: number, height: number): ChartDimensions {
+    return {
+        width: Math.round(width),
+        height: Math.round(height),
+    };
+}
+
+function hasValidChartDimensions(dimensions: ChartDimensions): boolean {
+    return Number.isFinite(dimensions.width)
+        && Number.isFinite(dimensions.height)
+        && dimensions.width > 0
+        && dimensions.height > 0;
+}
+
+function areEquivalentChartDimensions(left: ChartDimensions, right: ChartDimensions): boolean {
+    return left.width === right.width && left.height === right.height;
 }
 
 const HEADER_ICON_MAP: Record<string, LucideIcon> = {
@@ -200,13 +228,22 @@ export default function TrendChartV2Widget({
     className,
     renderContext,
 }: TrendChartV2WidgetProps) {
-    void renderContext;
     const [range, setRange] = useState<Exclude<HistoryRangeV2, 'custom'>>('24h');
     const [customWindow, setCustomWindow] = useState<{ start: string; end: string } | null>(null);
     const [hoveredTimestampMs, setHoveredTimestampMs] = useState<number | null>(null);
     const [zoomMessage, setZoomMessage] = useState<string | null>(null);
-    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+    const [measuredDimensions, setMeasuredDimensions] = useState<ChartDimensions>({ width: 0, height: 0 });
+    const [renderDimensions, setRenderDimensions] = useState<ChartDimensions>({ width: 0, height: 0 });
     const containerRef = useRef<HTMLDivElement>(null);
+    const isMountedRef = useRef(true);
+    const measuredDimensionsRef = useRef<ChartDimensions>({ width: 0, height: 0 });
+    const renderDimensionsRef = useRef<ChartDimensions>({ width: 0, height: 0 });
+    const lastValidMeasurementRef = useRef<ChartDimensions | null>(null);
+    const resizeSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const resizeCommitFrameRef = useRef<number | null>(null);
+    const resizeGenerationRef = useRef(0);
+    const resizeTransitionStopRef = useRef<((reason?: string) => number) | null>(null);
+    const transientResizeActiveRef = useRef(false);
     const { resolvedTimezone, shifts } = useTemporalSettings();
     const historyEnabled = isDataHistoryEnabled();
     const resolved = resolveBinding(widget, equipmentMap, machines);
@@ -221,6 +258,145 @@ export default function TrendChartV2Widget({
     const bindingVariableKey = widget.binding?.variableKey;
     const isRealBinding = widget.binding?.mode === 'real_variable';
     const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
+    const isBuilderTransientResizeActive = renderContext?.surface === 'builder' && renderContext.isTransientResizeActive === true;
+
+    const stopResizeTransition = useCallback((reason: string) => {
+        resizeTransitionStopRef.current?.(reason);
+        resizeTransitionStopRef.current = null;
+    }, []);
+
+    const clearPendingResizeWork = useCallback((options?: {
+        incrementGeneration?: boolean;
+        stopTransitionReason?: string;
+    }) => {
+        if (resizeSettleTimerRef.current !== null) {
+            clearTimeout(resizeSettleTimerRef.current);
+            resizeSettleTimerRef.current = null;
+        }
+
+        if (resizeCommitFrameRef.current !== null) {
+            cancelAnimationFrame(resizeCommitFrameRef.current);
+            resizeCommitFrameRef.current = null;
+        }
+
+        if (options?.incrementGeneration) {
+            resizeGenerationRef.current += 1;
+        }
+
+        if (options?.stopTransitionReason) {
+            stopResizeTransition(options.stopTransitionReason);
+        }
+    }, [stopResizeTransition]);
+
+    const scheduleResizeCommit = useCallback((nextDimensions: ChartDimensions, reason: string) => {
+        clearPendingResizeWork();
+
+        const generation = resizeGenerationRef.current;
+
+        resizeSettleTimerRef.current = setTimeout(() => {
+            resizeSettleTimerRef.current = null;
+            resizeCommitFrameRef.current = requestAnimationFrame(() => {
+                resizeCommitFrameRef.current = null;
+
+                if (!isMountedRef.current || generation !== resizeGenerationRef.current) {
+                    return;
+                }
+
+                const normalizedDimensions = normalizeChartDimensions(nextDimensions.width, nextDimensions.height);
+
+                if (!hasValidChartDimensions(normalizedDimensions)) {
+                    return;
+                }
+
+                if (areEquivalentChartDimensions(renderDimensionsRef.current, normalizedDimensions)) {
+                    recordTrendChartV2PerformanceDiagnostic({
+                        widgetId: widget.id,
+                        event: 'resize_noop_suppressed',
+                        reason,
+                    });
+                    stopResizeTransition(reason);
+                    return;
+                }
+
+                renderDimensionsRef.current = normalizedDimensions;
+                setRenderDimensions(normalizedDimensions);
+                recordTrendChartV2PerformanceDiagnostic({
+                    widgetId: widget.id,
+                    event: 'resize_settled_committed',
+                    reason,
+                });
+                stopResizeTransition(reason);
+            });
+        }, RESIZE_SETTLE_DELAY_MS);
+    }, [clearPendingResizeWork, stopResizeTransition, widget.id]);
+
+    const applyMeasuredDimensions = useCallback((width: number, height: number) => {
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+            if (lastValidMeasurementRef.current !== null) {
+                recordTrendChartV2PerformanceDiagnostic({
+                    widgetId: widget.id,
+                    event: 'invalid_measurement_preserved',
+                });
+            }
+
+            return;
+        }
+
+        const nextDimensions = normalizeChartDimensions(width, height);
+
+        if (areEquivalentChartDimensions(measuredDimensionsRef.current, nextDimensions)) {
+            recordTrendChartV2PerformanceDiagnostic({
+                widgetId: widget.id,
+                event: 'resize_noop_suppressed',
+            });
+            return;
+        }
+
+        lastValidMeasurementRef.current = nextDimensions;
+        measuredDimensionsRef.current = nextDimensions;
+        setMeasuredDimensions(nextDimensions);
+
+        if (!hasValidChartDimensions(renderDimensionsRef.current)) {
+            renderDimensionsRef.current = nextDimensions;
+            setRenderDimensions(nextDimensions);
+            return;
+        }
+
+        if (transientResizeActiveRef.current) {
+            if (!resizeTransitionStopRef.current) {
+                resizeTransitionStopRef.current = startTrendChartV2PerformanceTransition(widget.id);
+            }
+
+            return;
+        }
+
+        scheduleResizeCommit(nextDimensions, 'resize_observer_settle');
+    }, [scheduleResizeCommit, widget.id]);
+
+    useEffect(() => {
+        transientResizeActiveRef.current = isBuilderTransientResizeActive;
+    }, [isBuilderTransientResizeActive]);
+
+    useEffect(() => {
+        if (!isBuilderTransientResizeActive && lastValidMeasurementRef.current && !areEquivalentChartDimensions(renderDimensionsRef.current, lastValidMeasurementRef.current)) {
+            clearPendingResizeWork();
+            renderDimensionsRef.current = lastValidMeasurementRef.current;
+            setRenderDimensions(lastValidMeasurementRef.current);
+            recordTrendChartV2PerformanceDiagnostic({
+                widgetId: widget.id,
+                event: 'resize_settled_committed',
+                reason: 'builder_resize_end',
+            });
+            stopResizeTransition('builder_resize_end');
+        }
+    }, [clearPendingResizeWork, isBuilderTransientResizeActive, stopResizeTransition, widget.id]);
+
+    useEffect(() => {
+        clearPendingResizeWork({
+            incrementGeneration: true,
+            stopTransitionReason: 'generation_reset',
+        });
+    }, [bindingMachineId, bindingVariableKey, clearPendingResizeWork, customWindow?.end, customWindow?.start, range, widget.id]);
 
     useEffect(() => {
         const element = containerRef.current;
@@ -228,24 +404,26 @@ export default function TrendChartV2Widget({
             return;
         }
 
-        const applyDimensions = (width: number, height: number) => {
-            if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-                return;
-            }
-
-            setDimensions({ width, height });
-        };
-
         const initialRect = element.getBoundingClientRect();
-        applyDimensions(initialRect.width, initialRect.height);
+        applyMeasuredDimensions(initialRect.width, initialRect.height);
 
         const observer = new ResizeObserver(([entry]) => {
-            applyDimensions(entry.contentRect.width, entry.contentRect.height);
+            applyMeasuredDimensions(entry.contentRect.width, entry.contentRect.height);
         });
 
         observer.observe(element);
         return () => observer.disconnect();
-    }, []);
+    }, [applyMeasuredDimensions]);
+
+    useEffect(() => {
+        return () => {
+            isMountedRef.current = false;
+            clearPendingResizeWork({
+                incrementGeneration: true,
+                stopTransitionReason: 'unmount',
+            });
+        };
+    }, [clearPendingResizeWork]);
 
     const historyParams = isRealBinding && bindingMachineId !== undefined && bindingVariableKey && historyEnabled
         ? customWindow
@@ -384,8 +562,8 @@ export default function TrendChartV2Widget({
         valueDomain.max - (((valueDomain.max - valueDomain.min) * index) / 4)
     )), [valueDomain.max, valueDomain.min]);
     const chartLayout = useMemo(() => resolveWidgetChartLayoutMetrics({
-        width: dimensions.width,
-        height: dimensions.height,
+        width: renderDimensions.width,
+        height: renderDimensions.height,
         hasTopAdornments: hasTopChartAdornments,
         firstXAxisLabel,
         lastXAxisLabel,
@@ -393,7 +571,7 @@ export default function TrendChartV2Widget({
         idPrefix: widget.id,
         font: chartFont,
         letterSpacing: chartLetterSpacing,
-    }), [chartFont, chartLetterSpacing, dimensions.height, dimensions.width, firstXAxisLabel, hasTopChartAdornments, lastXAxisLabel, valueTickValues, widget.id]);
+    }), [chartFont, chartLetterSpacing, firstXAxisLabel, hasTopChartAdornments, lastXAxisLabel, renderDimensions.height, renderDimensions.width, valueTickValues, widget.id]);
     const chartModel = useMemo(() => {
         const plotWidth = chartLayout.plotArea.width;
         const plotHeight = chartLayout.plotArea.height;
@@ -456,10 +634,10 @@ export default function TrendChartV2Widget({
         range: customWindow ? 'custom' : range,
         timezone,
         minLabelX: 0,
-        maxLabelX: dimensions.width,
+        maxLabelX: renderDimensions.width,
         font: chartFont,
         letterSpacing: chartLetterSpacing,
-    }), [chartFont, chartLetterSpacing, chartLayout.xAxisLabels.left, chartLayout.xAxisLabels.plotWidth, customWindow, dimensions.width, numericPoints, range, timezone, visibleWindow.endMs, visibleWindow.startMs]);
+    }), [chartFont, chartLetterSpacing, chartLayout.xAxisLabels.left, chartLayout.xAxisLabels.plotWidth, customWindow, numericPoints, range, renderDimensions.width, timezone, visibleWindow.endMs, visibleWindow.startMs]);
     const lastRenderablePoint = chartModel.interactionPoints.at(-1) ?? null;
     const leadingEdgeAnchor = useMemo(() => resolveLeadingEdgeAnchor({
         range: activeRange,
@@ -494,8 +672,8 @@ export default function TrendChartV2Widget({
 
     const hasData = chartModel.interactionPoints.length > 0;
     const showLoading = isLoadingData || (historyParams !== null && isLoading);
-    const hasRenderableDimensions = dimensions.width >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.width
-        && dimensions.height >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.height;
+    const hasRenderableDimensions = renderDimensions.width >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.width
+        && renderDimensions.height >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.height;
     const shouldShowState = showLoading || isError || !hasData || !hasRenderableDimensions;
     const runtimeState = showLoading
         ? 'loading'
@@ -504,9 +682,31 @@ export default function TrendChartV2Widget({
             : hasData && !hasRenderableDimensions
                 ? 'chart-not-ready'
                 : 'empty';
+    const shouldScaleTransientSnapshot = isBuilderTransientResizeActive
+        && hasValidChartDimensions(measuredDimensions)
+        && hasValidChartDimensions(renderDimensions)
+        && !areEquivalentChartDimensions(measuredDimensions, renderDimensions);
+    const transientSnapshotStyle = hasValidChartDimensions(renderDimensions)
+        ? {
+            width: `${renderDimensions.width}px`,
+            height: `${renderDimensions.height}px`,
+            transform: shouldScaleTransientSnapshot
+                ? `scale(${measuredDimensions.width / Math.max(renderDimensions.width, 1)}, ${measuredDimensions.height / Math.max(renderDimensions.height, 1)})`
+                : undefined,
+            transformOrigin: shouldScaleTransientSnapshot ? 'top left' : undefined,
+          }
+        : undefined;
 
     return (
-        <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
+        <div
+            className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}
+            data-resize-surface={renderContext?.surface ?? 'viewer'}
+            data-transient-resize-active={isBuilderTransientResizeActive ? 'true' : 'false'}
+            data-measured-width={String(measuredDimensions.width)}
+            data-measured-height={String(measuredDimensions.height)}
+            data-render-width={String(renderDimensions.width)}
+            data-render-height={String(renderDimensions.height)}
+        >
             <WidgetHeader
                 title={widget.title || 'Trend Chart V2'}
                 icon={HeaderIcon ?? undefined}
@@ -559,7 +759,7 @@ export default function TrendChartV2Widget({
                 </div>
             )}
 
-            <div ref={containerRef} className={WIDGET_CHART_CONTAINER_CLASS}>
+            <div ref={containerRef} className={WIDGET_CHART_CONTAINER_CLASS} style={transientSnapshotStyle}>
                 {showLoading ? (
                     <WidgetRuntimeState state={runtimeState} testId="trend-chart-v2-state" />
                 ) : shouldShowState ? (
@@ -860,7 +1060,7 @@ export default function TrendChartV2Widget({
                                     timezone,
                                 })}
                                 x={hoveredPoint.x}
-                                containerWidth={dimensions.width}
+                                containerWidth={renderDimensions.width}
                                 series={[{
                                     name: widget.title ?? 'Trend Chart V2',
                                     value: `${hoveredPoint.value}${resolvedUnit ? ` ${resolvedUnit}` : ''}`,

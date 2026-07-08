@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrendChartV2WidgetConfig } from '../../domain/admin.types';
 import type { DataHistoryResponseV2 } from '../../domain/dataContract.types';
@@ -10,7 +10,27 @@ import { useDataHistory } from '../../queries/useDataHistory';
 import { DataHistoryServiceError } from '../../services/dataHistory.service';
 import { isDataHistoryResponseV2 } from '../../utils/dataHistoryResponseV2';
 import { getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx } from '../../utils/chartHelpers';
+import {
+    clearTrendChartV2PerformanceDiagnosticsSnapshot,
+    getTrendChartV2PerformanceDiagnosticsSnapshot,
+} from '../../utils/trendChartV2PerformanceDiagnostics';
 import TrendChartV2Widget from './TrendChartV2Widget';
+
+const RESIZE_SETTLE_DELAY_MS = 120;
+
+let rafIdSequence = 0;
+let pendingAnimationFrameCallbacks = new Map<number, FrameRequestCallback>();
+let cancelAnimationFrameSpy: ReturnType<typeof vi.fn>;
+let nextObservedMeasurements: Array<{ width: number; height: number }> = [];
+
+function flushAnimationFrame(callbackTime = 16) {
+    const callbacks = [...pendingAnimationFrameCallbacks.entries()];
+    pendingAnimationFrameCallbacks = new Map();
+
+    for (const [, callback] of callbacks) {
+        callback(callbackTime);
+    }
+}
 
 vi.mock('../../config/dataConnection.config', () => ({
     isDataHistoryEnabled: vi.fn(),
@@ -35,7 +55,8 @@ class MockResizeObserver implements ResizeObserver {
 
     public observe(target: Element): void {
         this.observedTarget = target;
-        this.emit(320, 180, target);
+        const nextMeasurement = nextObservedMeasurements.shift() ?? { width: 320, height: 180 };
+        this.emit(nextMeasurement.width, nextMeasurement.height, target);
     }
 
     public unobserve(): void {}
@@ -150,8 +171,21 @@ function makeLegacyHistoryResponse() {
 
 describe('TrendChartV2Widget', () => {
     beforeEach(() => {
+        pendingAnimationFrameCallbacks = new Map();
+        rafIdSequence = 0;
+        nextObservedMeasurements = [];
         vi.stubGlobal('ResizeObserver', MockResizeObserver);
+        vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
+            rafIdSequence += 1;
+            pendingAnimationFrameCallbacks.set(rafIdSequence, callback);
+            return rafIdSequence;
+        }) as typeof requestAnimationFrame);
+        cancelAnimationFrameSpy = vi.fn((id: number) => {
+            pendingAnimationFrameCallbacks.delete(id);
+        });
+        vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrameSpy as typeof cancelAnimationFrame);
         vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
+        clearTrendChartV2PerformanceDiagnosticsSnapshot();
         vi.mocked(useTemporalSettings).mockReturnValue({
             config: { plantTimezone: 'UTC', shifts: [] },
             shifts: [],
@@ -176,6 +210,223 @@ describe('TrendChartV2Widget', () => {
         vi.unstubAllGlobals();
         vi.clearAllMocks();
         MockResizeObserver.reset();
+    });
+
+    it('keeps measured and render sizes separate during builder transient resize and commits the final size once the interaction ends', () => {
+        vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+
+        const { rerender } = render(
+            <TrendChartV2Widget
+                widget={makeWidget()}
+                equipmentMap={new Map()}
+                machines={[]}
+                renderContext={{ surface: 'builder', isTransientResizeActive: false }}
+            />,
+        );
+
+        const observer = MockResizeObserver.latest();
+        const initialRoot = screen.getByText('Trend Chart V2').closest('[data-resize-surface]');
+
+        if (!initialRoot) {
+            throw new Error('TrendChartV2 root was not rendered.');
+        }
+
+        expect(screen.getByTestId('trend-chart-v2-svg')).toHaveAttribute('width', '320');
+        expect(initialRoot).toHaveAttribute('data-measured-width', '320');
+        expect(initialRoot).toHaveAttribute('data-render-width', '320');
+
+        rerender(
+            <TrendChartV2Widget
+                widget={makeWidget()}
+                equipmentMap={new Map()}
+                machines={[]}
+                renderContext={{ surface: 'builder', isTransientResizeActive: true }}
+            />,
+        );
+
+        act(() => {
+            observer.emit(640, 300);
+        });
+
+        const transientRoot = screen.getByText('Trend Chart V2').closest('[data-resize-surface]');
+
+        if (!transientRoot) {
+            throw new Error('Transient TrendChartV2 root was not rendered.');
+        }
+
+        expect(screen.getByTestId('trend-chart-v2-svg')).toHaveAttribute('width', '320');
+        expect(transientRoot).toHaveAttribute('data-measured-width', '640');
+        expect(transientRoot).toHaveAttribute('data-render-width', '320');
+
+        act(() => {
+            rerender(
+                <TrendChartV2Widget
+                    widget={makeWidget()}
+                    equipmentMap={new Map()}
+                    machines={[]}
+                    renderContext={{ surface: 'builder', isTransientResizeActive: false }}
+                />,
+            );
+            vi.advanceTimersByTime(RESIZE_SETTLE_DELAY_MS);
+            flushAnimationFrame();
+        });
+
+        const committedRoot = screen.getByText('Trend Chart V2').closest('[data-resize-surface]');
+
+        if (!committedRoot) {
+            throw new Error('Committed TrendChartV2 root was not rendered.');
+        }
+
+        expect(screen.getByTestId('trend-chart-v2-svg')).toHaveAttribute('width', '640');
+        expect(committedRoot).toHaveAttribute('data-render-width', '640');
+        expect(getTrendChartV2PerformanceDiagnosticsSnapshot().some((event) => event.event === 'resize_settled_committed')).toBe(true);
+    });
+
+    it('suppresses equivalent resize measurements and records a no-op diagnostic instead of recomputing', () => {
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const observer = MockResizeObserver.latest();
+
+        observer.emit(320, 180);
+
+        expect(getTrendChartV2PerformanceDiagnosticsSnapshot()).toContainEqual(expect.objectContaining({
+            widgetId: 'trend-v2-1',
+            event: 'resize_noop_suppressed',
+        }));
+        expect(screen.getByTestId('trend-chart-v2-svg')).toHaveAttribute('width', '320');
+    });
+
+    it('preserves the last valid render size and records diagnostics when a transient invalid measurement arrives', () => {
+        render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        const observer = MockResizeObserver.latest();
+        const root = screen.getByText('Trend Chart V2').closest('[data-resize-surface]');
+
+        if (!root) {
+            throw new Error('TrendChartV2 root was not rendered.');
+        }
+
+        observer.emit(Number.NaN, 0);
+
+        expect(screen.getByTestId('trend-chart-v2-svg')).toHaveAttribute('width', '320');
+        expect(root).toHaveAttribute('data-render-width', '320');
+        expect(getTrendChartV2PerformanceDiagnosticsSnapshot()).toContainEqual(expect.objectContaining({
+            widgetId: 'trend-v2-1',
+            event: 'invalid_measurement_preserved',
+        }));
+    });
+
+    it('cancels stale resize work without dropping the fresh post-generation measurement commit', () => {
+        vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+        nextObservedMeasurements = [
+            { width: 320, height: 180 },
+            { width: 640, height: 300 },
+        ];
+
+        const { rerender } = render(
+            <TrendChartV2Widget
+                widget={makeWidget()}
+                equipmentMap={new Map()}
+                machines={[]}
+                renderContext={{ surface: 'builder', isTransientResizeActive: false }}
+            />,
+        );
+
+        const observer = MockResizeObserver.latest();
+
+        act(() => {
+            observer.emit(640, 300);
+            vi.advanceTimersByTime(RESIZE_SETTLE_DELAY_MS);
+        });
+
+        const pendingFrameIds = [...pendingAnimationFrameCallbacks.keys()];
+
+        expect(pendingFrameIds).toHaveLength(1);
+
+        const [pendingFrameId] = pendingFrameIds;
+
+        rerender(
+            <TrendChartV2Widget
+                widget={{ ...makeWidget(), id: 'trend-v2-2', title: 'Trend Chart V2 B' }}
+                equipmentMap={new Map()}
+                machines={[]}
+                renderContext={{ surface: 'builder', isTransientResizeActive: false }}
+            />,
+        );
+
+        expect(cancelAnimationFrameSpy).toHaveBeenCalledWith(pendingFrameId);
+        expect(pendingAnimationFrameCallbacks.size).toBe(0);
+
+        act(() => {
+            vi.runOnlyPendingTimers();
+            flushAnimationFrame();
+        });
+
+        expect(screen.getByTestId('trend-chart-v2-svg')).toHaveAttribute('width', '640');
+        expect(getTrendChartV2PerformanceDiagnosticsSnapshot().some((event) => (
+            event.widgetId === 'trend-v2-1' && event.event === 'resize_settled_committed'
+        ))).toBe(false);
+    });
+
+    it('preserves gap segmentation, visible-window bounds, density maxPoints, and final interaction geometry across resize commit', () => {
+        vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+
+        const { rerender } = render(
+            <TrendChartV2Widget
+                widget={makeWidget({ historicalDensity: 'high' })}
+                equipmentMap={new Map()}
+                machines={[]}
+                renderContext={{ surface: 'builder', isTransientResizeActive: false }}
+            />,
+        );
+
+        const observer = MockResizeObserver.latest();
+        const beforeSegments = screen.getAllByTestId('trend-chart-v2-segment').length;
+        const beforeOverlayWidth = Number(screen.getByTestId('trend-chart-v2-interaction-overlay').getAttribute('width'));
+        const beforeFinalPoint = screen.getByTestId('trend-chart-v2-final-point-core');
+        const beforeFinalPointCx = Number(beforeFinalPoint.getAttribute('cx'));
+        const beforeFinalPointCy = Number(beforeFinalPoint.getAttribute('cy'));
+
+        expect(screen.getByText('12:00')).toBeInTheDocument();
+        expect(screen.getByText('14:00')).toBeInTheDocument();
+        expect(useDataHistory).toHaveBeenLastCalledWith(expect.objectContaining({ maxPoints: 1500 }));
+
+        rerender(
+            <TrendChartV2Widget
+                widget={makeWidget({ historicalDensity: 'high' })}
+                equipmentMap={new Map()}
+                machines={[]}
+                renderContext={{ surface: 'builder', isTransientResizeActive: true }}
+            />,
+        );
+
+        act(() => {
+            observer.emit(640, 300);
+        });
+
+        rerender(
+            <TrendChartV2Widget
+                widget={makeWidget({ historicalDensity: 'high' })}
+                equipmentMap={new Map()}
+                machines={[]}
+                renderContext={{ surface: 'builder', isTransientResizeActive: false }}
+            />,
+        );
+
+        act(() => {
+            vi.advanceTimersByTime(RESIZE_SETTLE_DELAY_MS);
+            flushAnimationFrame();
+        });
+
+        const afterFinalPoint = screen.getByTestId('trend-chart-v2-final-point-core');
+
+        expect(screen.getAllByTestId('trend-chart-v2-segment')).toHaveLength(beforeSegments);
+        expect(screen.getByText('12:00')).toBeInTheDocument();
+        expect(screen.getByText('14:00')).toBeInTheDocument();
+        expect(useDataHistory).toHaveBeenLastCalledWith(expect.objectContaining({ maxPoints: 1500 }));
+        expect(Number(screen.getByTestId('trend-chart-v2-interaction-overlay').getAttribute('width'))).toBeGreaterThan(beforeOverlayWidth);
+        expect(Number(afterFinalPoint.getAttribute('cx'))).toBeGreaterThan(beforeFinalPointCx);
+        expect(Number(afterFinalPoint.getAttribute('cy'))).not.toBe(beforeFinalPointCy);
     });
 
     it('shows the canonical loading legend while chart layout is still not renderable', () => {
@@ -1071,7 +1322,7 @@ describe('TrendChartV2Widget', () => {
     });
 
     it('keeps rendering legacy-compatible preset payloads whose timestamps are far from the current client time', () => {
-        vi.useFakeTimers();
+        vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
         vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
         vi.mocked(useDataHistory).mockReturnValue({
             data: makeLegacyHistoryResponse(),
