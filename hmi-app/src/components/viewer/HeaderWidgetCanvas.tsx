@@ -248,7 +248,15 @@ export default function HeaderWidgetCanvas({
         return rawPayload ? parseHeaderWidgetDragPayload(rawPayload) : null;
     };
 
-    const resolveDisplayTitle = (widget: WidgetConfig) => widget.title || widget.type;
+    const resolveDisplayTitle = (widget: WidgetConfig) => {
+        const title = widget.title?.trim() ?? '';
+
+        if (widget.type === 'status' || widget.type === 'connection-status') {
+            return title;
+        }
+
+        return title || widget.type;
+    };
     const resolveNavigationTarget = (widget: WidgetConfig) => widget.navigationTargetDashboardId?.trim() ?? '';
 
     const handleSelectByKeyboard = (
@@ -287,7 +295,8 @@ export default function HeaderWidgetCanvas({
     };
 
     const renderWidgetSurface = (widget: WidgetConfig) => {
-        const hasDisplayTitle = !(widget.type === 'connection-status' && !widget.title?.trim());
+        const displayTitle = resolveDisplayTitle(widget);
+        const hasDisplayTitle = displayTitle.length > 0;
         const navigationTargetDashboardId = resolveNavigationTarget(widget);
         const isNavigable = !isPreview && navigationTargetDashboardId !== '' && Boolean(onNavigateDashboard);
         const isSelectable = isPreview && Boolean(onWidgetSelect);
@@ -298,7 +307,7 @@ export default function HeaderWidgetCanvas({
                 data-header-widget-surface="true"
                 role={isInteractive ? 'button' : undefined}
                 tabIndex={isInteractive ? 0 : undefined}
-                aria-label={isInteractive ? resolveDisplayTitle(widget) : undefined}
+                aria-label={isInteractive ? (displayTitle || widget.type) : undefined}
                 draggable={false}
                 onClick={() => {
                     if (isPreview) {
@@ -324,7 +333,7 @@ export default function HeaderWidgetCanvas({
                         {hasDisplayTitle ? (
                             <div className="min-w-0 flex-1">
                                 <p className="truncate uppercase text-industrial-muted">
-                                    {resolveDisplayTitle(widget)}
+                                    {displayTitle}
                                 </p>
                             </div>
                         ) : null}

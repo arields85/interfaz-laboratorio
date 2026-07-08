@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import HeaderWidgetCanvas from './HeaderWidgetCanvas';
@@ -7,9 +7,13 @@ import { makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { HEADER_WIDGET_DRAG_MIME } from '../../utils/headerWidgets';
 
 vi.mock('./HeaderWidgetRenderer', () => ({
-    default: ({ widget }: { widget: { id: string; title?: string } }) => (
-        <div data-testid={`header-widget-renderer-${widget.id}`}>{widget.title ?? widget.id}</div>
-    ),
+    default: ({ widget }: { widget: { id: string; title?: string; type?: string } }) => {
+        const content = widget.type === 'status'
+            ? 'Advertencia'
+            : (widget.title ?? widget.id);
+
+        return <div data-testid={`header-widget-renderer-${widget.id}`}>{content}</div>;
+    },
 }));
 
 vi.mock('../ui/HeaderSelectionFrame', () => ({
@@ -74,6 +78,30 @@ describe('HeaderWidgetCanvas', () => {
         expect(onWidgetSelect).toHaveBeenNthCalledWith(1, 'header-status');
         expect(onWidgetSelect).toHaveBeenNthCalledWith(2, 'header-status');
         expect(onWidgetSelect).toHaveBeenNthCalledWith(3, 'header-status');
+    });
+
+    it('does not render a STATUS fallback title for header status widgets with an empty title', () => {
+        renderPreviewCanvas({
+            widgets: [makeWidget({ id: 'header-status', type: 'status', title: '' })],
+            widgetColumnMap: new Map([['header-status', 0]]),
+        });
+
+        const widgetSlot = screen.getByTestId('header-widget-slot-header-status');
+        const widgetSurface = widgetSlot.querySelector('[data-header-widget-surface="true"]');
+
+        expect(widgetSurface).not.toBeNull();
+        expect(within(widgetSurface as HTMLElement).queryByText(/^status$/i)).not.toBeInTheDocument();
+        expect(screen.getByText('Advertencia')).toBeInTheDocument();
+    });
+
+    it('renders the explicit title for header status widgets and keeps the status label visible', () => {
+        renderPreviewCanvas({
+            widgets: [makeWidget({ id: 'header-status', type: 'status', title: 'Main line status' })],
+            widgetColumnMap: new Map([['header-status', 0]]),
+        });
+
+        expect(screen.getByText('Main line status')).toBeInTheDocument();
+        expect(screen.getByText('Advertencia')).toBeInTheDocument();
     });
 
     it('exposes preview hover actions for move, return, and delete', async () => {

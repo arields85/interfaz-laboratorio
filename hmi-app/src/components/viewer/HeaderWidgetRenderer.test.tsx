@@ -65,6 +65,23 @@ describe('HeaderWidgetRenderer', () => {
         expect(screen.getByText('Desconocido')).toBeInTheDocument();
     });
 
+    it('keeps rendering the status label text even when the widget title is empty', () => {
+        render(
+            <HeaderWidgetRenderer
+                widget={makeWidget({
+                    id: 'status-empty-title',
+                    type: 'status',
+                    title: '',
+                    binding: { mode: 'simulated_value', simulatedValue: 'warning' },
+                })}
+                equipmentMap={new Map()}
+                align="start"
+            />,
+        );
+
+        expect(screen.getByText('Advertencia')).toBeInTheDocument();
+    });
+
     it('renders a global connection widget with relative freshness', () => {
         const connection: ConnectionHealth = {
             globalStatus: 'degradado',
