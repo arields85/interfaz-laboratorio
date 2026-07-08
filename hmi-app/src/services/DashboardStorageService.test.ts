@@ -795,6 +795,78 @@ describe('DashboardStorageService', () => {
         expect(readStoredDashboards().find((dashboard: Dashboard) => dashboard.id === duplicate?.id)?.views).toHaveLength(2);
     });
 
+    it('remaps header slot widget ids across every duplicated view', async () => {
+        const productionWidget = makeWidget({ id: 'widget-shared', title: 'Production widget' });
+        const technicalWidget = makeWidget({ id: 'widget-shared', title: 'Technical widget' });
+        const maintenanceWidget = makeWidget({ id: 'widget-maintenance', title: 'Maintenance widget' });
+        const original = makeDashboard({
+            id: 'dashboard-duplicate-header-slots',
+            name: 'Original dashboard with header slots',
+            activeViewId: 'view-production',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [productionWidget],
+                    layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [technicalWidget],
+                    layout: [makeLayout({ widgetId: 'widget-shared', x: 4 })],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-maintenance',
+                    name: 'Maintenance',
+                    order: 2,
+                    widgets: [maintenanceWidget],
+                    layout: [makeLayout({ widgetId: 'widget-maintenance', x: 8 })],
+                }),
+            ],
+            widgets: [productionWidget],
+            layout: [makeLayout({ widgetId: 'widget-shared', x: 0 })],
+            headerConfig: {
+                title: 'Original dashboard with header slots',
+                widgetSlots: [
+                    { widgetId: 'widget-shared', column: 1 },
+                    { widgetId: 'widget-maintenance', column: 2 },
+                ],
+            },
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(original);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const duplicatePromise = dashboardStorage.duplicateDashboard(original.id, 'Duplicated dashboard with header slots');
+
+        await vi.advanceTimersByTimeAsync(600);
+        const duplicate = await duplicatePromise;
+
+        const duplicatedProductionView = duplicate?.views?.find((view) => view.name === 'Production');
+        const duplicatedTechnicalView = duplicate?.views?.find((view) => view.name === 'Technical');
+        const duplicatedMaintenanceView = duplicate?.views?.find((view) => view.name === 'Maintenance');
+        const duplicatedHeaderSlotIds = duplicate?.headerConfig?.widgetSlots?.map((slot) => slot.widgetId) ?? [];
+
+        expect(duplicatedProductionView?.widgets[0]?.id).toMatch(/^widget-shared-dup-/);
+        expect(duplicatedTechnicalView?.widgets[0]?.id).toMatch(/^widget-shared-dup-/);
+        expect(duplicatedMaintenanceView?.widgets[0]?.id).toMatch(/^widget-maintenance-dup-/);
+        expect(duplicatedHeaderSlotIds).toEqual([
+            duplicatedProductionView?.widgets[0]?.id,
+            duplicatedMaintenanceView?.widgets[0]?.id,
+        ]);
+        expect(duplicatedHeaderSlotIds).not.toContain('widget-shared');
+        expect(duplicatedHeaderSlotIds).not.toContain('widget-maintenance');
+
+        const storedDuplicate = readStoredDashboards().find((dashboard: Dashboard) => dashboard.id === duplicate?.id);
+        expect(storedDuplicate?.headerConfig?.widgetSlots).toEqual([
+            { widgetId: duplicatedProductionView?.widgets[0]?.id, column: 1 },
+            { widgetId: duplicatedMaintenanceView?.widgets[0]?.id, column: 2 },
+        ]);
+    });
+
     it('publishes and discards full internal view snapshots', async () => {
         const dashboard = makeDashboard({
             id: 'dashboard-publish-views',

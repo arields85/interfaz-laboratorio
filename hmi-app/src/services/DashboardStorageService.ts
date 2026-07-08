@@ -7,7 +7,7 @@ import {
     cloneDashboardViewsWithRemappedIds,
     materializeDashboardView,
     normalizeDashboardViews,
-    remapDashboardHeaderConfigForView,
+    remapDashboardHeaderConfigAcrossViews,
 } from '../utils/dashboardViews';
 
 const DEFAULT_DASHBOARD_ASPECT = '16:9' as const;
@@ -324,8 +324,6 @@ class DashboardStorageService {
         const duplicatedActiveViewId = normalizedOriginal.activeViewId
             ? viewIdMap.get(normalizedOriginal.activeViewId) ?? views[0]?.id
             : views[0]?.id;
-        const activeViewSourceId = normalizedOriginal.activeViewId ?? normalizedOriginal.views?.[0]?.id ?? '';
-        const activeWidgetIdMap = widgetIdMapByView.get(activeViewSourceId) ?? new Map<string, string>();
 
         const duplicate: Dashboard = {
             ...normalizedOriginal,
@@ -338,7 +336,11 @@ class DashboardStorageService {
             views,
             activeViewId: duplicatedActiveViewId,
             headerConfig: {
-                ...(remapDashboardHeaderConfigForView(normalizedOriginal.headerConfig, activeWidgetIdMap) ?? {}),
+                ...(remapDashboardHeaderConfigAcrossViews(
+                    normalizedOriginal.headerConfig,
+                    normalizedOriginal.views ?? [],
+                    widgetIdMapByView,
+                ) ?? {}),
                 title: resolvedName,
             },
             lastUpdateAt: new Date().toISOString(),

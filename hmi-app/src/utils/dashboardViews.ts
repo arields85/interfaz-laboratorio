@@ -309,6 +309,33 @@ export function remapDashboardHeaderConfigForView(
     };
 }
 
+export function remapDashboardHeaderConfigAcrossViews(
+    headerConfig: DashboardHeaderConfig | undefined,
+    sourceViews: ReadonlyArray<DashboardView>,
+    widgetIdMapByView: ReadonlyMap<string, ReadonlyMap<string, string>>,
+): DashboardHeaderConfig | undefined {
+    if (!headerConfig) {
+        return undefined;
+    }
+
+    const sourceViewWidgetIds = sourceViews.map((view) => ({
+        widgetIds: new Set(view.widgets.map((widget) => widget.id)),
+        widgetIdMap: widgetIdMapByView.get(view.id) ?? new Map<string, string>(),
+    }));
+
+    return {
+        ...clone(headerConfig),
+        widgetSlots: (headerConfig.widgetSlots ?? []).map((slot) => {
+            const matchingView = sourceViewWidgetIds.find(({ widgetIds }) => widgetIds.has(slot.widgetId));
+
+            return {
+                ...slot,
+                widgetId: matchingView?.widgetIdMap.get(slot.widgetId) ?? slot.widgetId,
+            };
+        }),
+    };
+}
+
 function normalizeViewCollection(
     views: DashboardView[] | undefined,
     legacyWidgets: WidgetConfig[] | undefined,

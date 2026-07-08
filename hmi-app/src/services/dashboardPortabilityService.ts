@@ -13,7 +13,7 @@ import {
     cloneDashboardViewsWithRemappedIds,
     materializeDashboardView,
     normalizeDashboardViews,
-    remapDashboardHeaderConfigForView,
+    remapDashboardHeaderConfigAcrossViews,
 } from '../utils/dashboardViews';
 import { supportsCatalogVariable } from '../utils/widgetCapabilities';
 import { dashboardStorage } from './DashboardStorageService';
@@ -93,6 +93,11 @@ class DashboardPortabilityService {
         const exportedAt = new Date().toISOString();
         const normalizedDashboard = materializeDashboardView(dashboard, dashboard.activeViewId);
         const { referencedCatalogVariables, issues } = await this.collectReferencedCatalogVariables(normalizedDashboard);
+        const {
+            headerConfig: exportedHeaderConfig,
+            issues: headerConfigIssues,
+        } = sanitizeExportHeaderConfig(normalizedDashboard);
+        const exportIssues = [...issues, ...headerConfigIssues];
 
         const portableFile: PortableDashboardFileV2 = {
             schemaVersion: 2,
@@ -112,7 +117,7 @@ class DashboardPortabilityService {
                 rows: normalizedDashboard.rows,
                 activeViewId: normalizedDashboard.activeViewId,
                 views: clone(normalizedDashboard.views),
-                headerConfig: clone(normalizedDashboard.headerConfig),
+                headerConfig: exportedHeaderConfig,
             },
             referencedCatalogVariables,
         };
@@ -121,7 +126,7 @@ class DashboardPortabilityService {
             fileName: buildPortableDashboardFileName(normalizedDashboard.name, exportedAt),
             json: JSON.stringify(portableFile, null, 2),
             portableFile,
-            issues,
+            issues: exportIssues,
         };
     }
 
@@ -177,9 +182,11 @@ class DashboardPortabilityService {
         const activeViewId = sourceDashboard.activeViewId
             ? clonedViewResult.viewIdMap.get(sourceDashboard.activeViewId) ?? clonedViews[0]?.id
             : clonedViews[0]?.id;
-        const activeSourceViewId = sourceDashboard.activeViewId ?? sourceViews[0]?.id ?? DEFAULT_DASHBOARD_VIEW_ID;
-        const activeWidgetIdMap = clonedViewResult.widgetIdMapByView.get(activeSourceViewId) ?? new Map<string, string>();
-        const headerConfig = remapDashboardHeaderConfigForView(sourceDashboard.headerConfig, activeWidgetIdMap);
+        const headerConfig = remapDashboardHeaderConfigAcrossViews(
+            sourceDashboard.headerConfig,
+            sourceViews,
+            clonedViewResult.widgetIdMapByView,
+        );
 
         const dashboard = materializeDashboardView({
             id: importedDashboardId,
@@ -382,8 +389,7 @@ class DashboardPortabilityService {
             return issues;
         }
 
-        const activeView = normalizedDashboard.views.find((view) => view.id === normalizedDashboard.activeViewId) ?? normalizedDashboard.views[0];
-        const activeWidgetById = new Map<string, WidgetConfig>();
+        const widgetByIdByView = new Map<string, Map<string, WidgetConfig>>();
 
         normalizedDashboard.views.forEach((view) => {
             const widgetById = new Map<string, WidgetConfig>();
@@ -400,10 +406,6 @@ class DashboardPortabilityService {
                 }
 
                 widgetById.set(widget.id, widget);
-
-                if (view.id === activeView?.id) {
-                    activeWidgetById.set(widget.id, widget);
-                }
 
                 if (widget.binding?.catalogVariableId) {
                     if (!supportsCatalogVariable(widget.type)) {
@@ -436,25 +438,20 @@ class DashboardPortabilityService {
                     });
                 }
             }
+
+            widgetByIdByView.set(view.id, widgetById);
         });
 
         const slots = normalizedDashboard.headerConfig?.widgetSlots ?? [];
 
-        if (slots.length > HEADER_WIDGET_SLOT_COUNT) {
-            issues.push({
-                code: 'header_slot_limit_exceeded',
-                path: 'dashboard.headerConfig.widgetSlots',
-                message: `Header supports up to ${HEADER_WIDGET_SLOT_COUNT} widgets.`,
-                severity: 'error',
-            });
-        }
-
-        const occupiedColumns = new Set<number>();
-
         for (const slot of slots) {
-            const widget = activeWidgetById.get(slot.widgetId);
+            const slotViews = normalizedDashboard.views.flatMap((view) => {
+                const widget = widgetByIdByView.get(view.id)?.get(slot.widgetId);
 
-            if (!widget) {
+                return widget ? [{ view, widget }] : [];
+            });
+
+            if (slotViews.length === 0) {
                 issues.push({
                     code: 'invalid_header_widget_reference',
                     path: `dashboard.headerConfig.widgetSlots[${slot.widgetId}]`,
@@ -464,35 +461,68 @@ class DashboardPortabilityService {
                 continue;
             }
 
-            if (!isHeaderCompatibleWidget(widget)) {
+            if (slotViews.length > 1) {
                 issues.push({
-                    code: 'invalid_header_widget_type',
+                    code: 'ambiguous_header_widget_reference',
                     path: `dashboard.headerConfig.widgetSlots[${slot.widgetId}]`,
-                    message: `Widget "${slot.widgetId}" of type "${widget.type}" cannot be placed in the header.`,
+                    message: `Header slot widget "${slot.widgetId}" exists in multiple views and cannot be imported unambiguously.`,
+                    severity: 'error',
+                });
+                continue;
+            }
+
+            slotViews.forEach(({ widget }) => {
+                if (!isHeaderCompatibleWidget(widget)) {
+                    issues.push({
+                        code: 'invalid_header_widget_type',
+                        path: `dashboard.headerConfig.widgetSlots[${slot.widgetId}]`,
+                        message: `Widget "${slot.widgetId}" of type "${widget.type}" cannot be placed in the header.`,
+                        severity: 'error',
+                    });
+                }
+            });
+        }
+
+        normalizedDashboard.views.forEach((view) => {
+            const viewSlots = slots.filter((slot) => widgetByIdByView.get(view.id)?.has(slot.widgetId));
+
+            if (viewSlots.length > HEADER_WIDGET_SLOT_COUNT) {
+                issues.push({
+                    code: 'header_slot_limit_exceeded',
+                    path: 'dashboard.headerConfig.widgetSlots',
+                    message: `Header supports up to ${HEADER_WIDGET_SLOT_COUNT} widgets per view.`,
                     severity: 'error',
                 });
             }
 
-            if (slot.column !== undefined) {
-                if (!Number.isInteger(slot.column) || slot.column < 0 || slot.column >= HEADER_WIDGET_SLOT_COUNT) {
+            const occupiedColumns = new Set<number>();
+
+            viewSlots.forEach((slot, index) => {
+                const resolvedColumn = slot.column ?? index;
+
+                if (!Number.isInteger(resolvedColumn) || resolvedColumn < 0 || resolvedColumn >= HEADER_WIDGET_SLOT_COUNT) {
                     issues.push({
                         code: 'invalid_header_widget_column',
                         path: `dashboard.headerConfig.widgetSlots[${slot.widgetId}].column`,
                         message: `Header widget column "${String(slot.column)}" is outside the supported range.`,
                         severity: 'error',
                     });
-                } else if (occupiedColumns.has(slot.column)) {
+                    return;
+                }
+
+                if (occupiedColumns.has(resolvedColumn)) {
                     issues.push({
                         code: 'duplicate_header_widget_column',
                         path: `dashboard.headerConfig.widgetSlots[${slot.widgetId}].column`,
-                        message: `Header column "${slot.column}" is assigned more than once.`,
+                        message: `Header column "${resolvedColumn}" is assigned more than once.`,
                         severity: 'error',
                     });
+                    return;
                 }
 
-                occupiedColumns.add(slot.column);
-            }
-        }
+                occupiedColumns.add(resolvedColumn);
+            });
+        });
 
         return issues;
     }
@@ -552,6 +582,45 @@ class DashboardPortabilityService {
             createdCatalogVariables.map((variable) => variableCatalogStorage.delete(variable.id)),
         );
     }
+}
+
+function sanitizeExportHeaderConfig(dashboard: Dashboard): {
+    headerConfig: Dashboard['headerConfig'];
+    issues: DashboardPortabilityIssue[];
+} {
+    const headerConfig = clone(dashboard.headerConfig);
+
+    if (!headerConfig?.widgetSlots) {
+        return {
+            headerConfig,
+            issues: [],
+        };
+    }
+
+    const availableWidgetIds = new Set(
+        normalizeDashboardViews(dashboard).views.flatMap((view) => view.widgets.map((widget) => widget.id)),
+    );
+    const issues: DashboardPortabilityIssue[] = [];
+
+    headerConfig.widgetSlots = headerConfig.widgetSlots.filter((slot) => {
+        if (availableWidgetIds.has(slot.widgetId)) {
+            return true;
+        }
+
+        issues.push({
+            code: 'orphaned_header_widget_slot_omitted',
+            path: `dashboard.headerConfig.widgetSlots[${slot.widgetId}]`,
+            message: `Header slot references stale widget "${slot.widgetId}" and was omitted from the exported portable dashboard.`,
+            severity: 'warning',
+        });
+
+        return false;
+    });
+
+    return {
+        headerConfig,
+        issues,
+    };
 }
 
 function normalizePortableDashboard(portableFile: PortableDashboardFile): NormalizedPortableDashboard {

@@ -280,6 +280,104 @@ describe('dashboardPortabilityService.exportDashboard', () => {
         expect(snapshotLocalStorage()).toEqual(beforeExport);
     });
 
+    it('omits orphaned header slots during export and reports a warning', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-orphan-header-slot-export',
+            name: 'Orphan header slot export',
+            activeViewId: 'view-production',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    widgets: [
+                        { ...makeWidget({ id: 'widget-header-status', title: 'Header status' }), type: 'status' as const },
+                    ],
+                    layout: [],
+                }),
+            ],
+            headerConfig: {
+                title: 'Header with stale slot',
+                widgetSlots: [
+                    { widgetId: 'widget-header-status', column: 0 },
+                    { widgetId: 'widget-stale-slot', column: 2 },
+                ],
+            },
+        });
+
+        const exportPromise = dashboardPortabilityService.exportDashboard(dashboard);
+
+        await vi.advanceTimersByTimeAsync(200);
+        const exportResult = await exportPromise;
+        const portableFile = JSON.parse(exportResult.json) as PortableDashboardFileV2;
+
+        expect(portableFile.dashboard.headerConfig).toEqual({
+            title: 'Header with stale slot',
+            widgetSlots: [{ widgetId: 'widget-header-status', column: 0 }],
+        });
+        expect(exportResult.issues).toEqual([
+            {
+                code: 'orphaned_header_widget_slot_omitted',
+                path: 'dashboard.headerConfig.widgetSlots[widget-stale-slot]',
+                message: 'Header slot references stale widget "widget-stale-slot" and was omitted from the exported portable dashboard.',
+                severity: 'warning',
+            },
+        ]);
+        expect(dashboard.headerConfig?.widgetSlots).toEqual([
+            { widgetId: 'widget-header-status', column: 0 },
+            { widgetId: 'widget-stale-slot', column: 2 },
+        ]);
+    });
+
+    it('preserves valid header slots across views during export', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-multi-view-header-export',
+            name: 'Multi view header export',
+            activeViewId: 'view-production',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-production',
+                    name: 'Production',
+                    order: 0,
+                    widgets: [
+                        { ...makeWidget({ id: 'widget-header-prod-status', title: 'Production status' }), type: 'status' as const },
+                    ],
+                    layout: [],
+                }),
+                createDefaultDashboardView({
+                    id: 'view-technical',
+                    name: 'Technical',
+                    order: 1,
+                    widgets: [
+                        { ...makeWidget({ id: 'widget-header-tech-connection', title: 'Technical connection' }), type: 'connection-status' as const },
+                    ],
+                    layout: [],
+                }),
+            ],
+            headerConfig: {
+                title: 'Distributed header slots',
+                widgetSlots: [
+                    { widgetId: 'widget-header-prod-status', column: 0 },
+                    { widgetId: 'widget-header-tech-connection', column: 1 },
+                ],
+            },
+        });
+
+        const exportPromise = dashboardPortabilityService.exportDashboard(dashboard);
+
+        await vi.advanceTimersByTimeAsync(200);
+        const exportResult = await exportPromise;
+        const portableFile = JSON.parse(exportResult.json) as PortableDashboardFileV2;
+
+        expect(exportResult.issues).toEqual([]);
+        expect(portableFile.dashboard.headerConfig).toEqual({
+            title: 'Distributed header slots',
+            widgetSlots: [
+                { widgetId: 'widget-header-prod-status', column: 0 },
+                { widgetId: 'widget-header-tech-connection', column: 1 },
+            ],
+        });
+    });
+
     it('round-trips every internal view while preserving a non-first active view and deep widget data', async () => {
         const dashboard = makeDashboard({
             id: 'dashboard-portable-roundtrip',
@@ -537,7 +635,6 @@ describe('dashboardPortabilityService.importDashboard', () => {
         const rejection = expect(importPromise).rejects.toMatchObject({
             issues: expect.arrayContaining([
                 expect.objectContaining({ code: 'invalid_layout_widget_reference' }),
-                expect.objectContaining({ code: 'header_slot_limit_exceeded' }),
                 expect.objectContaining({ code: 'invalid_header_widget_reference' }),
                 expect.objectContaining({ code: 'invalid_header_widget_type' }),
                 expect.objectContaining({ code: 'invalid_header_widget_column' }),
@@ -787,6 +884,149 @@ describe('dashboardPortabilityService.importDashboard', () => {
             expect.objectContaining({ id: 'local-pressure-kpa', name: 'Line pressure', unit: 'kPa' }),
             expect.objectContaining({ id: createdPressureVariableId, name: 'Line pressure', unit: 'bar' }),
         ]));
+    });
+
+    it('imports schema v2 dashboards with header slots distributed across multiple views', async () => {
+        const importPromise = dashboardPortabilityService.importDashboard(JSON.stringify({
+            schemaVersion: 2,
+            exportedAt: '2026-07-01T10:00:00.000Z',
+            origin: {
+                app: 'interfaz-laboratorio',
+                dashboardId: 'portable-dashboard-multi-view-header',
+                dashboardName: 'Portable dashboard multi-view header',
+            },
+            dashboard: {
+                id: 'portable-dashboard-multi-view-header',
+                name: 'Portable dashboard multi-view header',
+                description: 'Header widgets scoped by active view',
+                dashboardType: 'line',
+                aspect: '21:9',
+                cols: 24,
+                rows: 12,
+                activeViewId: 'view-production',
+                views: [
+                    {
+                        id: 'view-production',
+                        name: 'Production',
+                        order: 0,
+                        widgets: [
+                            { ...makeWidget({ id: 'widget-header-prod-status', title: 'Production header status' }), type: 'status' as const },
+                            { ...makeWidget({ id: 'widget-header-prod-connection', title: 'Production header connection' }), type: 'connection-status' as const },
+                        ],
+                        layout: [],
+                    },
+                    {
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [
+                            { ...makeWidget({ id: 'widget-header-tech-status', title: 'Technical header status' }), type: 'status' as const },
+                            { ...makeWidget({ id: 'widget-header-tech-connection', title: 'Technical header connection' }), type: 'connection-status' as const },
+                        ],
+                        layout: [],
+                    },
+                ],
+                headerConfig: {
+                    title: 'Portable dashboard multi-view header',
+                    widgetSlots: [
+                        { widgetId: 'widget-header-prod-status', column: 0 },
+                        { widgetId: 'widget-header-prod-connection', column: 1 },
+                        { widgetId: 'widget-header-tech-status', column: 0 },
+                        { widgetId: 'widget-header-tech-connection', column: 1 },
+                    ],
+                },
+            },
+            referencedCatalogVariables: [],
+        }));
+
+        await vi.advanceTimersByTimeAsync(1000);
+        const result = await importPromise;
+
+        const productionView = result.dashboard.views?.find((view) => view.name === 'Production');
+        const technicalView = result.dashboard.views?.find((view) => view.name === 'Technical');
+        const productionStatusWidget = productionView?.widgets.find((widget) => widget.title === 'Production header status');
+        const productionConnectionWidget = productionView?.widgets.find((widget) => widget.title === 'Production header connection');
+        const technicalStatusWidget = technicalView?.widgets.find((widget) => widget.title === 'Technical header status');
+        const technicalConnectionWidget = technicalView?.widgets.find((widget) => widget.title === 'Technical header connection');
+
+        expect(result.dashboard.headerConfig?.widgetSlots).toEqual([
+            { widgetId: productionStatusWidget?.id, column: 0 },
+            { widgetId: productionConnectionWidget?.id, column: 1 },
+            { widgetId: technicalStatusWidget?.id, column: 0 },
+            { widgetId: technicalConnectionWidget?.id, column: 1 },
+        ]);
+        expect(result.dashboard.activeViewId).toBe(productionView?.id);
+        expect(result.dashboard.widgets).toEqual(productionView?.widgets);
+        expect(result.dashboard.layout).toEqual(productionView?.layout);
+    });
+
+    it('rejects schema v2 header slots that reference duplicate widget ids across views', async () => {
+        const existingDashboards = [makeDashboard({ id: 'existing-dashboard', name: 'Existing dashboard' })];
+        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(existingDashboards));
+
+        const importPromise = dashboardPortabilityService.importDashboard(JSON.stringify({
+            schemaVersion: 2,
+            exportedAt: '2026-07-01T10:00:00.000Z',
+            origin: {
+                app: 'interfaz-laboratorio',
+                dashboardId: 'portable-dashboard-ambiguous-header',
+                dashboardName: 'Portable dashboard ambiguous header',
+            },
+            dashboard: {
+                id: 'portable-dashboard-ambiguous-header',
+                name: 'Portable dashboard ambiguous header',
+                description: 'Duplicate widget ids across views remain allowed unless a header slot references them.',
+                dashboardType: 'line',
+                aspect: '21:9',
+                cols: 24,
+                rows: 12,
+                activeViewId: 'view-production',
+                views: [
+                    {
+                        id: 'view-production',
+                        name: 'Production',
+                        order: 0,
+                        widgets: [
+                            { ...makeWidget({ id: 'widget-header-shared', title: 'Production header status' }), type: 'status' as const },
+                        ],
+                        layout: [],
+                    },
+                    {
+                        id: 'view-technical',
+                        name: 'Technical',
+                        order: 1,
+                        widgets: [
+                            { ...makeWidget({ id: 'widget-header-shared', title: 'Technical header status' }), type: 'status' as const },
+                        ],
+                        layout: [],
+                    },
+                ],
+                headerConfig: {
+                    title: 'Portable dashboard ambiguous header',
+                    widgetSlots: [{ widgetId: 'widget-header-shared', column: 0 }],
+                },
+            },
+            referencedCatalogVariables: [],
+        })).then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+        );
+
+        await vi.advanceTimersByTimeAsync(1000);
+
+        const result = await importPromise;
+        const rejection = 'error' in result ? result.error : undefined;
+
+        expect(rejection).toBeInstanceOf(DashboardPortabilityValidationError);
+        expect(rejection).toMatchObject({
+            issues: expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'ambiguous_header_widget_reference',
+                    path: 'dashboard.headerConfig.widgetSlots[widget-header-shared]',
+                }),
+            ]),
+        });
+        expect(JSON.parse(localStorage.getItem(DASHBOARDS_STORAGE_KEY) ?? '[]')).toEqual(existingDashboards);
     });
 
     it('keeps import inside local HMI configuration by mutating only dashboard and catalog storage', async () => {
