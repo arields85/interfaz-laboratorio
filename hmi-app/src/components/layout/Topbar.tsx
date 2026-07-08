@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Bell, Search, User, Home, FolderTree, Activity, AlertTriangle, Box, Settings, LayoutDashboard, Stethoscope, ScrollText, Palette } from 'lucide-react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import LoginOverlay from '../auth/LoginOverlay';
 import ShaderSettingsPanel from './ShaderSettingsPanel';
 import { useAuthStore } from '../../store/auth.store';
@@ -25,20 +25,16 @@ const navRightItems = [
 
 function NavIconLink({ icon: Icon, label, path }: { icon: typeof Home; label: string; path: string }) {
     return (
-        <NavLink
-            to={path}
+        <button
+            type="button"
+            disabled
             title={label}
-            end={path === '/'}
-            className={({ isActive }) =>
-                `p-2 rounded-lg transition-colors ${
-                    isActive
-                        ? 'text-admin-accent hover:bg-industrial-hover'
-                        : 'text-industrial-muted hover:bg-industrial-hover hover:text-industrial-text'
-                }`
-            }
+            aria-label={label}
+            className="cursor-default rounded-lg p-2 text-industrial-muted/50 transition-colors"
+            data-disabled-route={path}
         >
             <Icon size={20} />
-        </NavLink>
+        </button>
     );
 }
 
@@ -146,8 +142,13 @@ export default function Topbar() {
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1">
-                    <button title="Notificaciones" className={TOPBAR_ICON_BUTTON_CLS}>
-                        <span className="led-glow-red absolute right-1 top-1 size-2 rounded-full bg-status-critical"></span>
+                    <button
+                        type="button"
+                        disabled
+                        title="Notificaciones"
+                        aria-label="Notificaciones"
+                        className="cursor-default rounded-lg p-2 text-industrial-muted/50 transition-colors"
+                    >
                         <Bell size={20} />
                     </button>
                     {shouldShowAdminActions ? (

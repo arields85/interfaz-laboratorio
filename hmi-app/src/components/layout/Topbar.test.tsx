@@ -160,6 +160,50 @@ describe('Topbar', () => {
         });
     });
 
+    it('renders central non-Home navigation buttons as disabled muted controls while Home remains clickable', async () => {
+        const user = userEvent.setup();
+
+        renderTopbar('/explorer');
+
+        const disabledNavLabels = [
+            'Explorador',
+            'Tendencias',
+            'Alarmas',
+            'Trazabilidad',
+            'Overview',
+            'Diagnostics',
+            'Logs',
+        ];
+
+        for (const label of disabledNavLabels) {
+            const button = screen.getByRole('button', { name: label });
+            expect(button).toBeDisabled();
+            expect(button).toHaveClass('cursor-default');
+            expect(button).toHaveClass('text-industrial-muted/50');
+        }
+
+        const homeButton = screen.getByRole('button', { name: 'Visión General' });
+        expect(homeButton).toBeEnabled();
+        expect(homeButton).not.toHaveClass('cursor-default');
+        expect(homeButton).not.toHaveClass('text-industrial-muted/50');
+
+        await user.click(homeButton);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('current-path')).toHaveTextContent('/');
+        });
+    });
+
+    it('renders notifications as a disabled muted control without the red status dot', () => {
+        const { container } = renderTopbar('/explorer');
+
+        const notificationsButton = screen.getByRole('button', { name: 'Notificaciones' });
+        expect(notificationsButton).toBeDisabled();
+        expect(notificationsButton).toHaveClass('cursor-default');
+        expect(notificationsButton).toHaveClass('text-industrial-muted/50');
+        expect(container.querySelector('.led-glow-red')).not.toBeInTheDocument();
+    });
+
     it('keeps the current Home fallback when no plant main dashboard can be resolved', async () => {
         const user = userEvent.setup();
 
