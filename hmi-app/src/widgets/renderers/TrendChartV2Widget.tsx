@@ -63,6 +63,7 @@ import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
+import type { TrendChartV2RenderContext } from './trendChartV2RenderContext';
 
 const SYSTEM_TEXT_STYLE = {
     fontSize: 'var(--font-size-system)',
@@ -77,6 +78,7 @@ interface TrendChartV2WidgetProps {
     machines?: ContractMachine[];
     isLoadingData?: boolean;
     className?: string;
+    renderContext?: TrendChartV2RenderContext;
 }
 
 interface LeadingEdgeAnchor {
@@ -196,7 +198,9 @@ export default function TrendChartV2Widget({
     machines,
     isLoadingData = false,
     className,
+    renderContext,
 }: TrendChartV2WidgetProps) {
+    void renderContext;
     const [range, setRange] = useState<Exclude<HistoryRangeV2, 'custom'>>('24h');
     const [customWindow, setCustomWindow] = useState<{ start: string; end: string } | null>(null);
     const [hoveredTimestampMs, setHoveredTimestampMs] = useState<number | null>(null);

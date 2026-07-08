@@ -22,6 +22,27 @@ import { useDataHistory } from '../queries/useDataHistory';
 import { subscribeActivityAnalyticsPerformanceDiagnostics } from '../utils/activityAnalyticsPerformanceDiagnostics';
 import WidgetRenderer from './WidgetRenderer';
 
+const trendChartV2RendererSpy = vi.fn();
+
+vi.mock('./renderers/TrendChartV2Widget', () => ({
+    default: (props: {
+        widget: { id: string; title?: string };
+        renderContext?: { surface?: string; isTransientResizeActive?: boolean };
+    }) => {
+        trendChartV2RendererSpy(props);
+
+        return (
+            <div
+                data-testid="trend-chart-v2-renderer-spy"
+                data-render-surface={props.renderContext?.surface ?? 'none'}
+                data-resize-active={props.renderContext?.isTransientResizeActive === true ? 'true' : 'false'}
+            >
+                {props.widget.title ?? props.widget.id}
+            </div>
+        );
+    },
+}));
+
 class MockResizeObserver implements ResizeObserver {
     public constructor(private readonly callback: ResizeObserverCallback) {}
 
@@ -214,6 +235,7 @@ function makeTrendChartV2Response(): DataHistoryResponseV2 {
 
 describe('WidgetRenderer', () => {
     beforeEach(() => {
+        trendChartV2RendererSpy.mockReset();
         vi.stubGlobal('ResizeObserver', MockResizeObserver);
         vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
         vi.mocked(useTemporalSettings).mockReturnValue({
@@ -514,8 +536,53 @@ describe('WidgetRenderer', () => {
             />,
         );
 
-        expect(screen.getByText('Trend Chart V2')).toBeInTheDocument();
-        expect(screen.getByText('12:00')).toBeInTheDocument();
+        expect(screen.getByTestId('trend-chart-v2-renderer-spy')).toHaveTextContent('Trend Chart V2');
+        expect(trendChartV2RendererSpy).toHaveBeenCalledWith(expect.objectContaining({
+            widget: expect.objectContaining({ id: 'trend-v2-1' }),
+        }));
+    });
+
+    it('forwards render context only to trend-chart-v2 widgets', () => {
+        const renderContext = { surface: 'builder' as const, isTransientResizeActive: true };
+        const trendChartV2Widget: TrendChartV2WidgetConfig = {
+            id: 'trend-v2-1',
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+                variableKey: 'temperature',
+            },
+            displayOptions: { historicalDensity: 'normal' },
+        };
+
+        const { rerender } = render(
+            <WidgetRenderer
+                widget={trendChartV2Widget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                renderContext={renderContext}
+            />,
+        );
+
+        expect(screen.getByTestId('trend-chart-v2-renderer-spy')).toHaveAttribute('data-render-surface', 'builder');
+        expect(screen.getByTestId('trend-chart-v2-renderer-spy')).toHaveAttribute('data-resize-active', 'true');
+        expect(trendChartV2RendererSpy).toHaveBeenLastCalledWith(expect.objectContaining({ renderContext }));
+
+        rerender(
+            <WidgetRenderer
+                widget={widget}
+                equipmentMap={equipmentMap}
+                machines={machines}
+                renderContext={renderContext}
+            />,
+        );
+
+        expect(screen.queryByTestId('trend-chart-v2-renderer-spy')).not.toBeInTheDocument();
+        expect(trendChartV2RendererSpy).toHaveBeenCalledTimes(1);
     });
 
     it('dispatches activity-analytics widgets to the dedicated runtime renderer and preserves the editable widget title in the header', () => {

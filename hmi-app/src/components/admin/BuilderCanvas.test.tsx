@@ -105,6 +105,7 @@ async function renderInteractiveCanvas(overrides?: {
     cols?: number;
     rows?: number;
     layout?: ReturnType<typeof makeLayout>[];
+    widgets?: WidgetConfig[];
     selectedWidgetId?: string;
     onWidgetSelect?: (widgetId: string) => void;
     onLayoutCommit?: (layout: { widgetId: string; x: number; y: number; w: number; h: number }) => void;
@@ -114,7 +115,7 @@ async function renderInteractiveCanvas(overrides?: {
     const dashboard = makeDashboard({
         cols: overrides?.cols ?? 20,
         rows: overrides?.rows ?? 12,
-        widgets: [makeWidget({ id: 'widget-1', title: 'Widget 1' })],
+        widgets: overrides?.widgets ?? [makeWidget({ id: 'widget-1', title: 'Widget 1' })],
         layout: overrides?.layout ?? [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
     });
 
@@ -187,10 +188,24 @@ function renderBuilderCanvasWithoutMeasurement(overrides?: {
 }
 
 vi.mock('../../widgets', () => ({
-    WidgetRenderer: ({ widget }: { widget: { id: string; title?: string } }) => (
+    WidgetRenderer: ({
+        widget,
+        renderContext,
+    }: {
+        widget: { id: string; title?: string };
+        renderContext?: { surface?: string; isTransientResizeActive?: boolean };
+    }) => (
         widget.title === 'Editable Input'
             ? <input data-testid={`widget-renderer-input-${widget.id}`} defaultValue="editable" />
-            : <div data-testid={`widget-renderer-${widget.id}`}>{widget.title ?? widget.id}</div>
+            : (
+                <div
+                    data-testid={`widget-renderer-${widget.id}`}
+                    data-render-surface={renderContext?.surface ?? 'none'}
+                    data-resize-active={renderContext?.isTransientResizeActive === true ? 'true' : 'false'}
+                >
+                    {widget.title ?? widget.id}
+                </div>
+            )
     ),
 }));
 
@@ -214,6 +229,23 @@ describe('BuilderCanvas', () => {
         useUIStore.setState(useUIStore.getInitialState());
         vi.unstubAllGlobals();
     });
+
+    function makeTrendChartV2BuilderWidget(): WidgetConfig {
+        return {
+            id: 'widget-1',
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            position: { x: 0, y: 0 },
+            size: { w: 3, h: 2 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+                variableKey: 'temperature',
+            },
+            displayOptions: { historicalDensity: 'normal' },
+        };
+    }
 
     it('keeps the builder root as a neutral shell until the first valid canvas measurement arrives', () => {
         const { builderRoot } = renderBuilderCanvasWithoutMeasurement();
@@ -542,6 +574,7 @@ describe('BuilderCanvas', () => {
         const user = userEvent.setup();
 
         await renderInteractiveCanvas({
+            widgets: [makeTrendChartV2BuilderWidget()],
             selectedWidgetId: 'widget-1',
             layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
             cols: 16,
@@ -580,6 +613,86 @@ describe('BuilderCanvas', () => {
         unmount();
 
         expect(document.body.style.cursor).toBe('');
+    });
+
+    it('forwards active builder resize context only while the selected widget is being resized', async () => {
+        const user = userEvent.setup();
+
+        await renderInteractiveCanvas({
+            widgets: [makeTrendChartV2BuilderWidget()],
+            selectedWidgetId: 'widget-1',
+            layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+            cols: 16,
+            resizeWidth: 1200,
+            resizeHeight: 900,
+        });
+
+        const renderer = screen.getByTestId('widget-renderer-widget-1');
+        const handle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
+
+        expect(renderer).toHaveAttribute('data-render-surface', 'none');
+        expect(renderer).toHaveAttribute('data-resize-active', 'false');
+
+        await pressPointer(user, handle, { clientX: 300, clientY: 150 });
+
+        expect(renderer).toHaveAttribute('data-render-surface', 'builder');
+        expect(renderer).toHaveAttribute('data-resize-active', 'true');
+
+        await releasePointer(user, document.body, { clientX: 300, clientY: 150 });
+
+        expect(renderer).toHaveAttribute('data-render-surface', 'none');
+        expect(renderer).toHaveAttribute('data-resize-active', 'false');
+    });
+
+    it('clears builder resize context when the resize interaction is cancelled', async () => {
+        const user = userEvent.setup();
+
+        await renderInteractiveCanvas({
+            widgets: [makeTrendChartV2BuilderWidget()],
+            selectedWidgetId: 'widget-1',
+            layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+            cols: 16,
+            resizeWidth: 1200,
+            resizeHeight: 900,
+        });
+
+        const renderer = screen.getByTestId('widget-renderer-widget-1');
+        const handle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
+
+        await pressPointer(user, handle, { clientX: 300, clientY: 150 });
+
+        expect(renderer).toHaveAttribute('data-render-surface', 'builder');
+        expect(renderer).toHaveAttribute('data-resize-active', 'true');
+
+        fireEvent.pointerCancel(window, { pointerId: 1 });
+
+        expect(renderer).toHaveAttribute('data-render-surface', 'none');
+        expect(renderer).toHaveAttribute('data-resize-active', 'false');
+    });
+
+    it('clears builder resize context when the canvas unmounts mid-resize', async () => {
+        const user = userEvent.setup();
+
+        const { unmount } = await renderInteractiveCanvas({
+            widgets: [makeTrendChartV2BuilderWidget()],
+            selectedWidgetId: 'widget-1',
+            layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+            cols: 16,
+            resizeWidth: 1200,
+            resizeHeight: 900,
+        });
+
+        const renderer = screen.getByTestId('widget-renderer-widget-1');
+        const handle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
+
+        await pressPointer(user, handle, { clientX: 300, clientY: 150 });
+
+        expect(renderer).toHaveAttribute('data-render-surface', 'builder');
+        expect(renderer).toHaveAttribute('data-resize-active', 'true');
+
+        unmount();
+
+        expect(screen.queryByTestId('widget-renderer-widget-1')).not.toBeInTheDocument();
     });
 
     it('clamps drag-to-move commits on release and allows visual overflow while dragging', async () => {

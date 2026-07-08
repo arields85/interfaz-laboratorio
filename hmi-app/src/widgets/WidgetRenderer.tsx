@@ -16,6 +16,7 @@ import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
 import InfoCardWidget from './renderers/InfoCardWidget';
+import type { TrendChartV2RenderContext } from './renderers/trendChartV2RenderContext';
 import { hasNestedInteractiveNavigationForConfig } from '../utils/widgetCapabilities';
 import WidgetRuntimeState from '../components/ui/WidgetRuntimeState';
 
@@ -63,6 +64,7 @@ interface WidgetRendererProps {
     hierarchyContext?: HierarchyContext;
     onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
+    renderContext?: TrendChartV2RenderContext;
 }
 
 const NAVIGATION_INTERACTIVE_SELECTOR = [
@@ -99,6 +101,7 @@ export default function WidgetRenderer({
     hierarchyContext,
     onPersistWidgetDisplayOptions,
     onNavigateDashboard,
+    renderContext,
 }: WidgetRendererProps) {
     let renderedWidget: ReactNode;
 
@@ -212,6 +215,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    renderContext={renderContext}
                 />
             );
             break;

@@ -28,6 +28,7 @@ import {
     type WidgetInteractionType,
     type WidgetPixelBounds,
 } from '../../utils/widgetInteraction';
+import type { TrendChartV2RenderContext } from '../../widgets/renderers/trendChartV2RenderContext';
 
 interface BuilderCanvasProps {
     widgets: WidgetConfig[];
@@ -320,16 +321,25 @@ export default function BuilderCanvas({
             clearInteraction();
         };
 
+        const handlePointerCancel = () => {
+            clearInteraction();
+        };
+
         window.addEventListener('pointermove', handlePointerMove);
         window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerCancel);
         interactionCleanupRef.current = () => {
             window.removeEventListener('pointermove', handlePointerMove);
             window.removeEventListener('pointerup', handlePointerUp);
+            window.removeEventListener('pointercancel', handlePointerCancel);
         };
     };
 
     const resizeTooltipLayout = interaction && isResizeInteraction(interaction.type) && interaction.hasExceededThreshold
         ? resolveCommittedLayout({ interaction, metrics, cols, rows })
+        : null;
+    const activeResizeWidgetId = interaction && isResizeInteraction(interaction.type)
+        ? interaction.widgetId
         : null;
 
     const visibleLayout = layout.filter((item) => !headerWidgetIds?.has(item.widgetId));
@@ -506,6 +516,12 @@ export default function BuilderCanvas({
                                 gridRowStart: item.y + 1,
                                 gridRowEnd: `span ${item.h}`,
                               };
+                        const renderContext: TrendChartV2RenderContext | undefined = widget.type === 'trend-chart-v2' && activeResizeWidgetId === widget.id
+                            ? {
+                                surface: 'builder',
+                                isTransientResizeActive: true,
+                            }
+                            : undefined;
 
                         return (
                             <div
@@ -567,6 +583,7 @@ export default function BuilderCanvas({
                                         isLoadingData={false}
                                         siblingWidgets={widgets}
                                         hierarchyContext={hierarchyContext}
+                                        renderContext={renderContext}
                                         className="h-full w-full"
                                     />
                                 </div>
