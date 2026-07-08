@@ -202,6 +202,29 @@ describe('useDataHistory', () => {
         });
     });
 
+    it('preserves stale data metadata on refresh failure without labeling it as a successful refresh', () => {
+        vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
+        vi.mocked(useQuery).mockReturnValue({
+            data: { machineId: 11, variableKey: 'temperature', range: '24h' },
+            isLoading: false,
+            isError: true,
+            error: new Error('refresh failed'),
+            isFetching: false,
+            isPlaceholderData: false,
+        } as never);
+
+        const result = useDataHistory({ machineId: 11, variableKey: 'temperature', range: '24h' });
+
+        expect(result).toMatchObject({
+            data: { machineId: 11, variableKey: 'temperature', range: '24h' },
+            isError: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+        expect(result.error).toEqual(new Error('refresh failed'));
+    });
+
     it('separates custom V2 history queries in the cache key and forwards start/end/maxPoints to the service', async () => {
         vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
         vi.mocked(useQuery).mockReturnValue({

@@ -173,6 +173,28 @@ describe('dataHistory.service', () => {
         await expect(request).rejects.toMatchObject({ name: 'AbortError' });
     });
 
+    it('keeps every history transport path strictly read-only with no request body', async () => {
+        vi.spyOn(dataConnectionConfig, 'getDataHistoryUrl').mockReturnValue(
+            'https://api.local/api/hmi/history'
+        );
+
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: vi.fn().mockResolvedValue({ contractVersion: '1.1.0', machineId: 7, variableKey: 'flow rate', range: '24h', unit: 'L/min', series: [], summary: { last: null, min: null, max: null, avg: null } }),
+        });
+
+        vi.stubGlobal('fetch', fetchMock);
+
+        await fetchDataHistory({ machineId: 7, variableKey: 'flow rate', range: '24h', maxPoints: 250 });
+
+        const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+
+        expect(init.method).toBe('GET');
+        expect(init.body).toBeUndefined();
+        expect(init.headers).toEqual({ Accept: 'application/json' });
+        expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
     it('rejects invalid machine ids before a backend request is sent', async () => {
         vi.spyOn(dataConnectionConfig, 'getDataHistoryUrl').mockReturnValue(
             'https://api.local/api/hmi/history'

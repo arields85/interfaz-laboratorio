@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { QueryClientContext } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrendChartV2WidgetConfig } from '../../domain/admin.types';
 import type { DataHistoryResponseV2 } from '../../domain/dataContract.types';
@@ -7,12 +8,14 @@ import { WIDGET_CHART_CONTAINER_CLASS, WIDGET_CHART_HEADER_CLASS } from '../../c
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useDataHistory } from '../../queries/useDataHistory';
+import * as dataHistoryService from '../../services/dataHistory.service';
 import { DataHistoryServiceError } from '../../services/dataHistory.service';
 import { isDataHistoryResponseV2 } from '../../utils/dataHistoryResponseV2';
 import { getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx } from '../../utils/chartHelpers';
 import {
     clearTrendChartV2PerformanceDiagnosticsSnapshot,
     getTrendChartV2PerformanceDiagnosticsSnapshot,
+    subscribeTrendChartV2PerformanceDiagnostics,
 } from '../../utils/trendChartV2PerformanceDiagnostics';
 import TrendChartV2Widget from './TrendChartV2Widget';
 
@@ -22,6 +25,127 @@ let rafIdSequence = 0;
 let pendingAnimationFrameCallbacks = new Map<number, FrameRequestCallback>();
 let cancelAnimationFrameSpy: ReturnType<typeof vi.fn>;
 let nextObservedMeasurements: Array<{ width: number; height: number }> = [];
+const prefetchQuery = vi.fn<(...args: unknown[]) => Promise<void>>();
+const getQueryState = vi.fn();
+const cancelQueries = vi.fn();
+const isFetching = vi.fn();
+
+class MockIntersectionObserver implements IntersectionObserver {
+    private static instances: MockIntersectionObserver[] = [];
+
+    private observedTarget: Element | null = null;
+
+    public readonly root = null;
+
+    public readonly rootMargin = '0px';
+
+    public readonly thresholds = [0];
+
+    public constructor(private readonly callback: IntersectionObserverCallback) {
+        MockIntersectionObserver.instances.push(this);
+    }
+
+    public observe(target: Element): void {
+        this.observedTarget = target;
+    }
+
+    public unobserve(): void {}
+
+    public disconnect(): void {}
+
+    public takeRecords(): IntersectionObserverEntry[] {
+        return [];
+    }
+
+    public emit(isIntersecting: boolean, target: Element | null = this.observedTarget): void {
+        if (!target) {
+            return;
+        }
+
+        this.callback([
+            {
+                target,
+                isIntersecting,
+                intersectionRatio: isIntersecting ? 1 : 0,
+                boundingClientRect: target.getBoundingClientRect(),
+                intersectionRect: isIntersecting ? target.getBoundingClientRect() : new DOMRectReadOnly(),
+                rootBounds: null,
+                time: 0,
+            } as IntersectionObserverEntry,
+        ], this);
+    }
+
+    public static latest(): MockIntersectionObserver {
+        const instance = MockIntersectionObserver.instances.at(-1);
+
+        if (!instance) {
+            throw new Error('No IntersectionObserver instance was created');
+        }
+
+        return instance;
+    }
+
+    public static reset(): void {
+        MockIntersectionObserver.instances = [];
+    }
+}
+
+function renderWithQueryClient(element: Parameters<typeof render>[0]) {
+    return render(
+        <QueryClientContext.Provider
+            value={{
+                prefetchQuery,
+                getQueryState,
+                cancelQueries,
+                isFetching,
+            } as never}
+        >
+            {element}
+        </QueryClientContext.Provider>,
+    );
+}
+
+function setDocumentVisibilityState(state: DocumentVisibilityState) {
+    Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: state,
+    });
+    Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        value: state === 'hidden',
+    });
+}
+
+function installImmediateIdleCallback() {
+    vi.stubGlobal('requestIdleCallback', ((callback: IdleRequestCallback) => {
+        callback({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
+        return 1;
+    }) as typeof requestIdleCallback);
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+}
+
+function collectPerformanceDiagnostics() {
+    const events: Array<{ widgetId: string; event: string; reason?: string; durationMs?: number }> = [];
+    const unsubscribe = subscribeTrendChartV2PerformanceDiagnostics((event) => {
+        events.push(event);
+    });
+
+    return { events, unsubscribe };
+}
+
+function createUseDataHistoryResult(overrides?: Partial<ReturnType<typeof useDataHistory>>): ReturnType<typeof useDataHistory> {
+    return {
+        data: makeHistoryResponse(),
+        isLoading: false,
+        isError: false,
+        error: null,
+        isEnabled: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isRefreshing: false,
+        ...overrides,
+    } as ReturnType<typeof useDataHistory>;
+}
 
 function flushAnimationFrame(callbackTime = 16) {
     const callbacks = [...pendingAnimationFrameCallbacks.entries()];
@@ -36,9 +160,14 @@ vi.mock('../../config/dataConnection.config', () => ({
     isDataHistoryEnabled: vi.fn(),
 }));
 
-vi.mock('../../queries/useDataHistory', () => ({
-    useDataHistory: vi.fn(),
-}));
+vi.mock('../../queries/useDataHistory', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../queries/useDataHistory')>();
+
+    return {
+        ...actual,
+        useDataHistory: vi.fn(),
+    };
+});
 
 vi.mock('../../hooks/useTemporalSettings', () => ({
     useTemporalSettings: vi.fn(),
@@ -169,6 +298,13 @@ function makeLegacyHistoryResponse() {
     };
 }
 
+function makeSiblingWidgets(count: number): TrendChartV2WidgetConfig[] {
+    return Array.from({ length: count }, (_, index) => makeWidget({
+        id: `trend-v2-${index + 1}`,
+        title: `Trend Chart V2 ${index + 1}`,
+    }));
+}
+
 describe('TrendChartV2Widget', () => {
     beforeEach(() => {
         pendingAnimationFrameCallbacks = new Map();
@@ -184,24 +320,29 @@ describe('TrendChartV2Widget', () => {
             pendingAnimationFrameCallbacks.delete(id);
         });
         vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrameSpy as typeof cancelAnimationFrame);
+        setDocumentVisibilityState('visible');
         vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
         clearTrendChartV2PerformanceDiagnosticsSnapshot();
+        prefetchQuery.mockReset();
+        getQueryState.mockReset();
+        cancelQueries.mockReset();
+        isFetching.mockReset();
+        prefetchQuery.mockResolvedValue(undefined);
+        getQueryState.mockReturnValue(undefined);
+        cancelQueries.mockResolvedValue(undefined);
+        isFetching.mockReturnValue(0);
         vi.mocked(useTemporalSettings).mockReturnValue({
             config: { plantTimezone: 'UTC', shifts: [] },
             shifts: [],
             resolvedTimezone: 'UTC',
         });
-        vi.mocked(useDataHistory).mockImplementation((params) => ({
+        vi.mocked(useDataHistory).mockImplementation((params) => createUseDataHistoryResult({
             data: params?.range === 'custom'
                 ? makeHistoryResponse({
                     range: 'custom',
                     window: undefined,
                 })
                 : makeHistoryResponse(),
-            isLoading: false,
-            isError: false,
-            error: null,
-            isEnabled: true,
         }));
     });
 
@@ -210,6 +351,170 @@ describe('TrendChartV2Widget', () => {
         vi.unstubAllGlobals();
         vi.clearAllMocks();
         MockResizeObserver.reset();
+        MockIntersectionObserver.reset();
+    });
+
+    it('shows a stale refresh banner while preserving the last confirmed chart and records transition evidence', () => {
+        const diagnostics = collectPerformanceDiagnostics();
+        vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+
+        vi.mocked(useDataHistory).mockReturnValue(createUseDataHistoryResult({
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        }));
+
+        try {
+            render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+            expect(screen.getByRole('status')).toHaveTextContent('Actualizando');
+            expect(screen.getByRole('status')).toHaveTextContent('Mostrando la última vista confirmada');
+            expect(screen.getByTestId('trend-chart-v2-svg')).toBeInTheDocument();
+            expect(diagnostics.events.some((event) => event.event === 'transition_measured')).toBe(false);
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it('keeps the last confirmed chart visible on refresh failure, records diagnostics, and never shows a refresh-success banner', () => {
+        const diagnostics = collectPerformanceDiagnostics();
+        const { rerender } = render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
+
+        vi.mocked(useDataHistory).mockReturnValue(createUseDataHistoryResult({
+            isError: true,
+            error: new DataHistoryServiceError('Data history request could not be completed', 'http', 422),
+        }));
+
+        try {
+            rerender(<TrendChartV2Widget widget={makeWidget({ historicalDensity: 'high' })} equipmentMap={new Map()} machines={[]} />);
+
+            expect(screen.getByRole('alert')).toHaveTextContent('No se pudo actualizar');
+            expect(screen.getByRole('alert')).toHaveTextContent('Se mantiene la última vista confirmada');
+            expect(screen.queryByRole('status')).not.toBeInTheDocument();
+            expect(screen.getByTestId('trend-chart-v2-svg')).toBeInTheDocument();
+            expect(diagnostics.events).toContainEqual(expect.objectContaining({
+                widgetId: 'trend-v2-1',
+                event: 'refresh_failed',
+            }));
+        } finally {
+            diagnostics.unsubscribe();
+        }
+    });
+
+    it('prefetches exactly one adjacent preset range through the read-only query path when the viewer widget is visible and safe', async () => {
+        installImmediateIdleCallback();
+        vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+        const fetchDataHistorySpy = vi.spyOn(dataHistoryService, 'fetchDataHistory').mockResolvedValue(makeHistoryResponse());
+        const siblingWidgets = makeSiblingWidgets(2);
+
+        renderWithQueryClient(
+            <TrendChartV2Widget widget={siblingWidgets[0]} siblingWidgets={siblingWidgets} equipmentMap={new Map()} machines={[]} />,
+        );
+
+        act(() => {
+            MockIntersectionObserver.latest().emit(true);
+        });
+
+        expect(prefetchQuery).toHaveBeenCalledTimes(1);
+        expect(prefetchQuery.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+            queryKey: ['data', 'history', 101, 'temperature', '7d', null, null, 800],
+        }));
+
+        const scheduledPrefetch = prefetchQuery.mock.calls[0]?.[0] as { queryFn?: (context?: { signal?: AbortSignal }) => Promise<unknown> };
+        const signal = new AbortController().signal;
+
+        await expect(scheduledPrefetch.queryFn?.({ signal })).resolves.toEqual(expect.objectContaining({
+            machineId: 101,
+            variableKey: 'temperature',
+        }));
+        expect(fetchDataHistorySpy).toHaveBeenCalledWith({
+            machineId: 101,
+            variableKey: 'temperature',
+            range: '7d',
+            maxPoints: 800,
+        }, signal);
+    });
+
+    it('fails closed for custom windows and dashboard pressure, recording denial diagnostics and canceling pending prefetch work', () => {
+        const diagnostics = collectPerformanceDiagnostics();
+        const cancelIdleCallback = vi.fn();
+        vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+        vi.stubGlobal('requestIdleCallback', vi.fn(() => 7) as typeof requestIdleCallback);
+        vi.stubGlobal('cancelIdleCallback', cancelIdleCallback as typeof cancelIdleCallback);
+
+        try {
+            const scheduled = renderWithQueryClient(
+                <TrendChartV2Widget
+                    widget={makeWidget()}
+                    siblingWidgets={makeSiblingWidgets(2)}
+                    equipmentMap={new Map()}
+                    machines={[]}
+                />,
+            );
+
+            act(() => {
+                MockIntersectionObserver.latest().emit(true);
+            });
+
+            scheduled.unmount();
+
+            expect(cancelIdleCallback).toHaveBeenCalled();
+            expect(cancelQueries).toHaveBeenCalled();
+
+            const pressured = renderWithQueryClient(
+                <div>
+                    <TrendChartV2Widget
+                        widget={makeWidget()}
+                        siblingWidgets={makeSiblingWidgets(13)}
+                        equipmentMap={new Map()}
+                        machines={[]}
+                    />
+                </div>,
+            );
+
+            act(() => {
+                MockIntersectionObserver.latest().emit(true);
+            });
+
+            expect(prefetchQuery).not.toHaveBeenCalled();
+            expect(diagnostics.events).toContainEqual(expect.objectContaining({
+                widgetId: 'trend-v2-1',
+                event: 'prefetch_denied',
+                reason: 'dashboard_pressure',
+            }));
+
+            const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
+            const overlayX = Number(overlay.getAttribute('x'));
+            const overlayWidth = Number(overlay.getAttribute('width'));
+            Object.defineProperty(overlay, 'getBoundingClientRect', {
+                configurable: true,
+                value: () => ({
+                    x: overlayX,
+                    y: 0,
+                    width: overlayWidth,
+                    height: 180,
+                    top: 0,
+                    left: overlayX,
+                    right: overlayX + overlayWidth,
+                    bottom: 180,
+                    toJSON: () => ({}),
+                }),
+            });
+
+            fireEvent.mouseDown(overlay, { clientX: 92, clientY: 60 });
+            fireEvent.mouseMove(overlay, { clientX: 227, clientY: 60 });
+            fireEvent.mouseUp(overlay, { clientX: 227, clientY: 60 });
+
+            expect(diagnostics.events).toContainEqual(expect.objectContaining({
+                widgetId: 'trend-v2-1',
+                event: 'prefetch_denied',
+                reason: 'custom_range',
+            }));
+
+            pressured.unmount();
+        } finally {
+            diagnostics.unsubscribe();
+        }
     });
 
     it('keeps measured and render sizes separate during builder transient resize and commits the final size once the interaction ends', () => {

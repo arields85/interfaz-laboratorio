@@ -28,6 +28,7 @@ vi.mock('./renderers/TrendChartV2Widget', () => ({
     default: (props: {
         widget: { id: string; title?: string };
         renderContext?: { surface?: string; isTransientResizeActive?: boolean };
+        siblingWidgets?: Array<{ id: string }>;
     }) => {
         trendChartV2RendererSpy(props);
 
@@ -540,6 +541,35 @@ describe('WidgetRenderer', () => {
         expect(trendChartV2RendererSpy).toHaveBeenCalledWith(expect.objectContaining({
             widget: expect.objectContaining({ id: 'trend-v2-1' }),
         }));
+    });
+
+    it('forwards sibling widget context to trend-chart-v2 so viewer pressure guards can use dashboard data instead of DOM guesses', () => {
+        const trendChartV2Widget: TrendChartV2WidgetConfig = {
+            id: 'trend-v2-1',
+            type: 'trend-chart-v2',
+            title: 'Trend Chart V2',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            binding: {
+                mode: 'real_variable',
+                bindingVersion: 'node-red-v1',
+                machineId: 101,
+                variableKey: 'temperature',
+            },
+            displayOptions: { historicalDensity: 'normal' },
+        };
+        const siblingWidgets = [trendChartV2Widget, makeMetricCardWidget({ id: 'metric-card-2' })];
+
+        render(
+            <WidgetRenderer
+                widget={trendChartV2Widget}
+                siblingWidgets={siblingWidgets}
+                equipmentMap={equipmentMap}
+                machines={machines}
+            />,
+        );
+
+        expect(trendChartV2RendererSpy).toHaveBeenLastCalledWith(expect.objectContaining({ siblingWidgets }));
     });
 
     it('forwards render context only to trend-chart-v2 widgets', () => {

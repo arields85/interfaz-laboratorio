@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
 import {
     Activity,
     BarChart2,
@@ -17,12 +18,12 @@ import {
     Zap,
     type LucideIcon,
 } from 'lucide-react';
-import type { TrendChartV2WidgetConfig } from '../../domain/admin.types';
-import type { ContractMachine, HistoryDataPointV2, HistoryRangeV2 } from '../../domain/dataContract.types';
+import type { TrendChartV2WidgetConfig, WidgetConfig } from '../../domain/admin.types';
+import type { ContractMachine, HistoryDataPointV2, HistoryQueryParamsAny, HistoryRangeV2 } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { useDataHistory } from '../../queries/useDataHistory';
+import { createDataHistoryQueryOptions, useDataHistory } from '../../queries/useDataHistory';
 import { resolveBinding } from '../resolvers/bindingResolver';
 import { coerceDataHistoryResponseForTrendChartV2 } from '../../utils/dataHistoryResponseV2';
 import { mapHistoricalDensityToMaxPoints, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -83,6 +84,7 @@ interface TrendChartV2WidgetProps {
     isLoadingData?: boolean;
     className?: string;
     renderContext?: TrendChartV2RenderContext;
+    siblingWidgets?: WidgetConfig[];
 }
 
 interface LeadingEdgeAnchor {
@@ -116,6 +118,10 @@ const MAX_LINE_STROKE_WIDTH = 6;
 const MIN_LINE_GLOW_BLUR = 0;
 const MAX_LINE_GLOW_BLUR = 8;
 const RESIZE_SETTLE_DELAY_MS = 120;
+const PREFETCH_DASHBOARD_MAX_WIDGETS = 12;
+const PREFETCH_DASHBOARD_MAX_HISTORY_WIDGETS = 3;
+
+type PresetHistoryRange = Exclude<HistoryRangeV2, 'custom'>;
 
 interface ChartDimensions {
     width: number;
@@ -158,6 +164,32 @@ function hasValidChartDimensions(dimensions: ChartDimensions): boolean {
 
 function areEquivalentChartDimensions(left: ChartDimensions, right: ChartDimensions): boolean {
     return left.width === right.width && left.height === right.height;
+}
+
+function resolveAdjacentPresetRange(range: PresetHistoryRange): PresetHistoryRange | null {
+    const currentIndex = RANGE_OPTIONS.findIndex((option) => option.value === range);
+
+    if (currentIndex === -1) {
+        return null;
+    }
+
+    return RANGE_OPTIONS[currentIndex + 1]?.value ?? RANGE_OPTIONS[currentIndex - 1]?.value ?? null;
+}
+
+function isPrefetchPressureCountedHistoryWidget(widget: WidgetConfig): boolean {
+    return widget.type === 'trend-chart-v2';
+}
+
+function resolveHistorySelectionDiagnosticKey(params: HistoryQueryParamsAny | null, range: PresetHistoryRange, customWindow: { start: string; end: string } | null, maxPoints: number): string {
+    if (!params) {
+        return 'history-disabled';
+    }
+
+    if (customWindow) {
+        return `custom:maxPoints=${maxPoints}`;
+    }
+
+    return `preset:${range}:maxPoints=${maxPoints}`;
 }
 
 const HEADER_ICON_MAP: Record<string, LucideIcon> = {
@@ -227,9 +259,11 @@ export default function TrendChartV2Widget({
     isLoadingData = false,
     className,
     renderContext,
+    siblingWidgets,
 }: TrendChartV2WidgetProps) {
-    const [range, setRange] = useState<Exclude<HistoryRangeV2, 'custom'>>('24h');
+    const [range, setRange] = useState<PresetHistoryRange>('24h');
     const [customWindow, setCustomWindow] = useState<{ start: string; end: string } | null>(null);
+    const [isWidgetVisible, setIsWidgetVisible] = useState<boolean | null>(null);
     const [hoveredTimestampMs, setHoveredTimestampMs] = useState<number | null>(null);
     const [zoomMessage, setZoomMessage] = useState<string | null>(null);
     const [measuredDimensions, setMeasuredDimensions] = useState<ChartDimensions>({ width: 0, height: 0 });
@@ -244,6 +278,11 @@ export default function TrendChartV2Widget({
     const resizeGenerationRef = useRef(0);
     const resizeTransitionStopRef = useRef<((reason?: string) => number) | null>(null);
     const transientResizeActiveRef = useRef(false);
+    const refreshTransitionStopRef = useRef<((reason?: string) => number) | null>(null);
+    const lastRefreshFailureKeyRef = useRef<string | null>(null);
+    const lastPrefetchDecisionKeyRef = useRef<string | null>(null);
+    const widgetRootRef = useRef<HTMLDivElement>(null);
+    const queryClient = useContext(QueryClientContext);
     const { resolvedTimezone, shifts } = useTemporalSettings();
     const historyEnabled = isDataHistoryEnabled();
     const resolved = resolveBinding(widget, equipmentMap, machines);
@@ -448,7 +487,11 @@ export default function TrendChartV2Widget({
         isLoading,
         isError,
         error,
+        isFetching,
+        isPlaceholderData,
+        isRefreshing,
     } = useDataHistory(historyParams);
+    const requestedSelectionKey = resolveHistorySelectionDiagnosticKey(historyParams, range, customWindow, maxPoints);
 
     const baseValue = resolved.value == null
         ? null
@@ -671,10 +714,12 @@ export default function TrendChartV2Widget({
     }, []);
 
     const hasData = chartModel.interactionPoints.length > 0;
+    const isShowingRefreshingSnapshot = isRefreshing && hasData;
+    const isShowingRefreshFailedSnapshot = isError && hasData;
     const showLoading = isLoadingData || (historyParams !== null && isLoading);
     const hasRenderableDimensions = renderDimensions.width >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.width
         && renderDimensions.height >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.height;
-    const shouldShowState = showLoading || isError || !hasData || !hasRenderableDimensions;
+    const shouldShowState = showLoading || (!isShowingRefreshFailedSnapshot && isError) || !hasData || !hasRenderableDimensions;
     const runtimeState = showLoading
         ? 'loading'
         : isError
@@ -697,9 +742,215 @@ export default function TrendChartV2Widget({
           }
         : undefined;
 
+    useEffect(() => {
+        if (!widgetRootRef.current || typeof IntersectionObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new IntersectionObserver((entries) => {
+            setIsWidgetVisible(entries[0]?.isIntersecting ?? false);
+        });
+
+        observer.observe(widgetRootRef.current);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [widget.id]);
+
+    useEffect(() => {
+        if (!hasData || !historyParams) {
+            return;
+        }
+
+        if (isRefreshing) {
+            if (!refreshTransitionStopRef.current) {
+                refreshTransitionStopRef.current = startTrendChartV2PerformanceTransition(widget.id);
+            }
+
+            return;
+        }
+
+        if (refreshTransitionStopRef.current && !isError) {
+            refreshTransitionStopRef.current(requestedSelectionKey);
+            refreshTransitionStopRef.current = null;
+        }
+    }, [hasData, historyParams, isError, isRefreshing, requestedSelectionKey, widget.id]);
+
+    useEffect(() => {
+        if (!hasData || !historyParams || !isError) {
+            return;
+        }
+
+        if (lastRefreshFailureKeyRef.current === requestedSelectionKey) {
+            return;
+        }
+
+        refreshTransitionStopRef.current?.(requestedSelectionKey);
+        refreshTransitionStopRef.current = null;
+        lastRefreshFailureKeyRef.current = requestedSelectionKey;
+        recordTrendChartV2PerformanceDiagnostic({
+            widgetId: widget.id,
+            event: 'refresh_failed',
+            reason: requestedSelectionKey,
+        });
+    }, [hasData, historyParams, isError, requestedSelectionKey, widget.id]);
+
+    useEffect(() => {
+        const recordPrefetchDenied = (reason: string) => {
+            const decisionKey = `${requestedSelectionKey}:${reason}`;
+
+            if (lastPrefetchDecisionKeyRef.current === decisionKey) {
+                return;
+            }
+
+            lastPrefetchDecisionKeyRef.current = decisionKey;
+            recordTrendChartV2PerformanceDiagnostic({
+                widgetId: widget.id,
+                event: 'prefetch_denied',
+                reason,
+            });
+        };
+
+        if (customWindow) {
+            recordPrefetchDenied('custom_range');
+            return;
+        }
+
+        const targetRange = resolveAdjacentPresetRange(range);
+
+        if (!targetRange) {
+            recordPrefetchDenied('no_adjacent_range');
+            return;
+        }
+
+        if (!historyEnabled || !isRealBinding || bindingMachineId === undefined || !bindingVariableKey) {
+            recordPrefetchDenied('invalid_binding');
+            return;
+        }
+
+        if (!queryClient || typeof queryClient.prefetchQuery !== 'function' || typeof queryClient.getQueryState !== 'function') {
+            recordPrefetchDenied('query_client_unavailable');
+            return;
+        }
+
+        if (typeof IntersectionObserver === 'undefined' || isWidgetVisible === null) {
+            recordPrefetchDenied('visibility_unavailable');
+            return;
+        }
+
+        if (isWidgetVisible === false) {
+            recordPrefetchDenied('hidden');
+            return;
+        }
+
+        if (typeof document !== 'undefined' && (document.hidden || document.visibilityState === 'hidden')) {
+            recordPrefetchDenied('document_hidden');
+            return;
+        }
+
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            recordPrefetchDenied('offline');
+            return;
+        }
+
+        if (isLoadingData || isLoading || isFetching || isRefreshing || isPlaceholderData || isError || !historyData) {
+            recordPrefetchDenied(isError ? 'error' : 'loading');
+            return;
+        }
+
+        const totalWidgetCount = siblingWidgets?.length ?? 0;
+        const heavyHistoryWidgetCount = siblingWidgets?.filter(isPrefetchPressureCountedHistoryWidget).length ?? 0;
+
+        if (totalWidgetCount === 0 || heavyHistoryWidgetCount === 0) {
+            recordPrefetchDenied('widget_count_unknown');
+            return;
+        }
+
+        if (totalWidgetCount > PREFETCH_DASHBOARD_MAX_WIDGETS || heavyHistoryWidgetCount > PREFETCH_DASHBOARD_MAX_HISTORY_WIDGETS) {
+            recordPrefetchDenied('dashboard_pressure');
+            return;
+        }
+
+        if (typeof queryClient.isFetching === 'function' && queryClient.isFetching() > 0) {
+            recordPrefetchDenied('history_fetch_active');
+            return;
+        }
+
+        const prefetchParams = {
+            machineId: bindingMachineId,
+            variableKey: bindingVariableKey,
+            range: targetRange,
+            maxPoints,
+        };
+        const prefetchOptions = createDataHistoryQueryOptions(prefetchParams);
+        const targetQueryState = queryClient.getQueryState(prefetchOptions.queryKey);
+
+        if (targetQueryState && (targetQueryState.status === 'success' || targetQueryState.fetchStatus === 'fetching')) {
+            recordPrefetchDenied('already_cached');
+            return;
+        }
+
+        const scheduleIdle = typeof requestIdleCallback === 'function'
+            ? requestIdleCallback
+            : ((callback: IdleRequestCallback) => window.setTimeout(() => callback({
+                didTimeout: false,
+                timeRemaining: () => 0,
+            } as IdleDeadline), 0));
+        const cancelIdle = typeof cancelIdleCallback === 'function'
+            ? cancelIdleCallback
+            : window.clearTimeout;
+        const handle = scheduleIdle(() => {
+            void queryClient.prefetchQuery(prefetchOptions).catch((prefetchError: unknown) => {
+                if (prefetchError instanceof DOMException && prefetchError.name === 'AbortError') {
+                    return;
+                }
+
+                recordPrefetchDenied('prefetch_failed');
+            });
+        });
+
+        return () => {
+            cancelIdle(handle as never);
+
+            if (typeof queryClient.cancelQueries === 'function') {
+                void queryClient.cancelQueries({ queryKey: prefetchOptions.queryKey });
+            }
+        };
+    }, [
+        bindingMachineId,
+        bindingVariableKey,
+        customWindow,
+        historyData,
+        historyEnabled,
+        isError,
+        isFetching,
+        isLoading,
+        isLoadingData,
+        isPlaceholderData,
+        isRealBinding,
+        isRefreshing,
+        isWidgetVisible,
+        maxPoints,
+        queryClient,
+        range,
+        requestedSelectionKey,
+        siblingWidgets,
+        widget.id,
+    ]);
+
+    useEffect(() => {
+        return () => {
+            refreshTransitionStopRef.current?.('unmount');
+            refreshTransitionStopRef.current = null;
+        };
+    }, []);
+
     return (
         <div
+            ref={widgetRootRef}
             className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}
+            data-prefetch-history-widget="true"
             data-resize-surface={renderContext?.surface ?? 'viewer'}
             data-transient-resize-active={isBuilderTransientResizeActive ? 'true' : 'false'}
             data-measured-width={String(measuredDimensions.width)}
@@ -758,6 +1009,20 @@ export default function TrendChartV2Widget({
                     <span className="text-admin-accent">{zoomMessage}</span>
                 </div>
             )}
+
+            {isShowingRefreshingSnapshot ? (
+                <div role="status" className="mt-2 rounded-xl border border-industrial-border bg-industrial-bg/40 px-3 py-2 text-industrial-muted">
+                    <span className="uppercase">Actualizando</span>
+                    <span className="ml-2">Mostrando la última vista confirmada</span>
+                </div>
+            ) : null}
+
+            {isShowingRefreshFailedSnapshot ? (
+                <div role="alert" className="mt-2 rounded-xl border border-status-critical/30 bg-status-critical/10 px-3 py-2 text-industrial-text">
+                    <span className="uppercase">No se pudo actualizar</span>
+                    <span className="ml-2">Se mantiene la última vista confirmada</span>
+                </div>
+            ) : null}
 
             <div ref={containerRef} className={WIDGET_CHART_CONTAINER_CLASS} style={transientSnapshotStyle}>
                 {showLoading ? (

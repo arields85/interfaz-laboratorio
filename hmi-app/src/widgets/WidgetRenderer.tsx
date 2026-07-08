@@ -216,6 +216,7 @@ export default function WidgetRenderer({
                     isLoadingData={isLoadingData}
                     className={className}
                     renderContext={renderContext}
+                    siblingWidgets={siblingWidgets}
                 />
             );
             break;
