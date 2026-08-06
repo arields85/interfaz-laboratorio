@@ -403,6 +403,29 @@ describe('DashboardStorageService', () => {
         }));
     });
 
+    it('persists and reloads PROD-TREND data mode configuration', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-prod-trend-mode',
+            widgets: [makeWidget({
+                id: 'prod-trend-mode-widget',
+                type: 'prod-trend',
+                displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' },
+            } as never)],
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(dashboard);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const reloadPromise = dashboardStorage.getDashboard(dashboard.id);
+        await vi.advanceTimersByTimeAsync(200);
+        const reloaded = await reloadPromise;
+
+        expect(reloaded?.widgets.find((widget) => widget.id === 'prod-trend-mode-widget')?.displayOptions).toEqual(
+            expect.objectContaining({ dataMode: 'automatic' }),
+        );
+    });
+
     it('scopes persisted widget display options by dashboard, view, and widget identity', async () => {
         const dashboard = makeDashboard({
             id: 'dashboard-view-options',

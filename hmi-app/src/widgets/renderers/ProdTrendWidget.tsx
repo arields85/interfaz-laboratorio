@@ -16,8 +16,9 @@ import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import type { ProdTrendWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
+import { PROD_TREND_HISTORY_VARIABLE_KEY } from '../../domain/prodTrendDataMode.types';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { useActivitySeries } from '../../queries/useActivitySeries';
+import { useProdTrendDataSource, type UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
 import { DataServiceError } from '../../services/dataOverview.service';
 import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
 import { computeActivityAnalytics, resolveActivityAnalyticsComparableProductivityRatio } from '../../utils/activityAnalyticsComputation';
@@ -25,6 +26,7 @@ import { resolveActivityAnalyticsDisplayRules } from '../../utils/activityAnalyt
 import { resolveActivityAnalyticsTimezone } from '../../utils/activityAnalyticsGrouping';
 import { buildAreaPath, clamp, computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx, measureSmoothPathLength, resolveAnimationDurationSecondsFromPathLength, smoothPath } from '../../utils/chartHelpers';
 import { createDefaultProdTrendDisplayOptions, resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
+import { buildTrendChartV2SimulatedHistory } from '../../utils/trendChartV2Simulation';
 
 interface ProdTrendWidgetProps {
     widget: ProdTrendWidgetConfig;
@@ -96,6 +98,7 @@ const TRAVELING_GLOW_DURATION_MIN_SECONDS = 0.9;
 const TRAVELING_GLOW_DURATION_MAX_SECONDS = 3.2;
 const TRAVELING_GLOW_PAUSE_MIN_MS = 8_000;
 const TRAVELING_GLOW_PAUSE_MAX_MS = 20_000;
+const LINE_GLOW_FILTER_SAFETY_MARGIN_PX = 1;
 const DEFAULT_LINE_STROKE_WIDTH = 2.5;
 const DEFAULT_LINE_GLOW_BLUR = 3;
 const MIN_LINE_STROKE_WIDTH = 0.5;
@@ -136,6 +139,7 @@ export default function ProdTrendWidget({
     const [runtimeViewState, setRuntimeViewState] = useState<ProdTrendRuntimeViewState>(() => createRuntimeViewState(displayOptions));
     const bodyRef = useRef<HTMLDivElement | null>(null);
     const [bodySize, setBodySize] = useState<{ width: number; height: number } | null>(null);
+    const [simulatedNowMs] = useState(() => Date.now());
     const displayKey = createDisplayOptionsSyncKey(displayOptions);
 
     if (runtimeViewState.sourceDisplayKey !== displayKey || runtimeViewState.sourceGroupBy !== displayOptions.groupBy) {
@@ -180,16 +184,70 @@ export default function ProdTrendWidget({
         connection,
         hasOverviewError,
     });
+    const sourceMachineId = machineBinding.status === 'valid'
+        || (displayOptions.dataMode !== 'real' && machineBinding.reason === 'machine_lookup_pending_or_missing')
+        ? machineBinding.machineId
+        : null;
+    const simulatedMetricKey = widget.binding?.variableKey ?? PROD_TREND_HISTORY_VARIABLE_KEY;
+    const simulatedMetric = machines
+        ?.find((machine) => machine.unitId === machineBinding.machineId)
+        ?.values[simulatedMetricKey];
     const { config, shifts } = useTemporalSettings();
-    const activitySeries = useActivitySeries(machineBinding.machineId != null
+    const activitySeriesParams = sourceMachineId != null
         ? {
-            machineId: machineBinding.machineId,
+            machineId: sourceMachineId,
             ...(activeDisplayOptions.range === 'custom'
                 ? { range: 'custom' as const, start: activeDisplayOptions.start ?? '', end: activeDisplayOptions.end ?? '' }
                 : { range: activeDisplayOptions.range }),
         }
-        : null);
-    const activityData = activitySeries.data;
+        : null;
+    const activitySeriesIdentity = activeDisplayOptions.range === 'custom'
+        ? {
+            machineId: sourceMachineId ?? 0,
+            range: 'custom' as const,
+            start: activeDisplayOptions.start ?? '',
+            end: activeDisplayOptions.end ?? '',
+        }
+        : {
+            machineId: sourceMachineId ?? 0,
+            range: activeDisplayOptions.range,
+        };
+    const dataSource = useProdTrendDataSource({
+        configuredMode: displayOptions.dataMode,
+        params: activitySeriesParams,
+        identity: activitySeriesIdentity,
+    });
+    const simulatedActivityData = useMemo(() => {
+        if (displayOptions.dataMode !== 'simulated') {
+            return null;
+        }
+
+        const simulatedHistory = buildTrendChartV2SimulatedHistory({
+            widgetId: widget.id,
+            machineId: sourceMachineId ?? undefined,
+            variableKey: simulatedMetricKey,
+            range: activeDisplayOptions.range,
+            customWindow: activeDisplayOptions.range === 'custom'
+                ? { start: activeDisplayOptions.start ?? '', end: activeDisplayOptions.end ?? '' }
+                : undefined,
+            baseValue: (activeDisplayOptions.setupThresholdKw + activeDisplayOptions.prodThresholdKw) / 2,
+            nowMs: simulatedNowMs,
+        });
+
+        return {
+            ...simulatedHistory,
+            unit: simulatedMetric?.unit ?? widget.binding?.unit ?? 'kW',
+            purpose: 'activity-analytics' as const,
+            window: {
+                ...simulatedHistory.window,
+                timezone: undefined,
+                bucket: 'synthetic',
+            },
+        };
+    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, displayOptions.dataMode, simulatedMetric?.unit, simulatedMetricKey, simulatedNowMs, sourceMachineId, widget.binding?.unit, widget.id]);
+    const activityData = displayOptions.dataMode === 'simulated'
+        ? simulatedActivityData
+        : dataSource.response;
     const timezone = useMemo(() => resolveActivityAnalyticsTimezone({
         temporalSettings: { plantTimezone: config.plantTimezone },
         windowTimezone: activityData?.window.timezone,
@@ -210,8 +268,9 @@ export default function ProdTrendWidget({
             shifts,
             timezone,
             window: activityData.window,
+            nowMs: displayOptions.dataMode === 'simulated' ? simulatedNowMs : undefined,
         });
-    }, [activeDisplayOptions.prodThresholdKw, activeDisplayOptions.setupThresholdKw, activeGroupBy, activityData, displayRules.range, shifts, timezone]);
+    }, [activeDisplayOptions.prodThresholdKw, activeDisplayOptions.setupThresholdKw, activeGroupBy, activityData, displayOptions.dataMode, displayRules.range, shifts, simulatedNowMs, timezone]);
 
     const grouped = useMemo(() => {
         if (!computedAnalytics) {
@@ -249,6 +308,7 @@ export default function ProdTrendWidget({
         return () => observer.disconnect();
     }, [grouped.length]);
 
+    const dataModeIndicator = renderProdTrendDataModeIndicator(dataSource);
     const header = (
         <WidgetHeader
             title={widget.title ?? 'PROD-TREND'}
@@ -257,46 +317,49 @@ export default function ProdTrendWidget({
             iconTestId="prod-trend-widget-header-icon"
             className={WIDGET_CHART_HEADER_CLASS}
             trailing={(
-                <WidgetHeaderTemporalControls
-                    variant="pill"
-                    testId="prod-trend-widget-runtime-controls"
-                    indicatorTestId="prod-trend-widget-runtime-control-indicator"
-                    groups={[
-                        {
-                            testId: 'prod-trend-widget-runtime-range-selector',
-                            options: RANGE_OPTIONS,
-                            selectedValue: activeDisplayOptions.range,
-                            onSelect: (value) => {
-                                const nextRange = value as ResolvedProdTrendDisplayOptions['range'];
-                                const nextDisplayOptions = {
-                                    ...widget.displayOptions,
-                                    ...activeDisplayOptions,
-                                    range: nextRange,
-                                    start: undefined,
-                                    end: undefined,
-                                } satisfies ResolvedProdTrendDisplayOptions;
+                <>
+                    {dataModeIndicator}
+                    <WidgetHeaderTemporalControls
+                        variant="pill"
+                        testId="prod-trend-widget-runtime-controls"
+                        indicatorTestId="prod-trend-widget-runtime-control-indicator"
+                        groups={[
+                            {
+                                testId: 'prod-trend-widget-runtime-range-selector',
+                                options: RANGE_OPTIONS,
+                                selectedValue: activeDisplayOptions.range,
+                                onSelect: (value) => {
+                                    const nextRange = value as ResolvedProdTrendDisplayOptions['range'];
+                                    const nextDisplayOptions = {
+                                        ...widget.displayOptions,
+                                        ...activeDisplayOptions,
+                                        range: nextRange,
+                                        start: undefined,
+                                        end: undefined,
+                                    } satisfies ResolvedProdTrendDisplayOptions;
 
-                                setRuntimeViewState((current) => ({
-                                    ...current,
-                                    selectionOverride: nextDisplayOptions,
-                                }));
+                                    setRuntimeViewState((current) => ({
+                                        ...current,
+                                        selectionOverride: nextDisplayOptions,
+                                    }));
+                                },
                             },
-                        },
-                        {
-                            testId: 'prod-trend-widget-runtime-group-selector',
-                            options: groupBySelectOptions,
-                            selectedValue: activeGroupBy,
-                            onSelect: (value) => {
-                                const nextGroupBy = value as RuntimeProdTrendGroupBy;
+                            {
+                                testId: 'prod-trend-widget-runtime-group-selector',
+                                options: groupBySelectOptions,
+                                selectedValue: activeGroupBy,
+                                onSelect: (value) => {
+                                    const nextGroupBy = value as RuntimeProdTrendGroupBy;
 
-                                setRuntimeViewState((current) => ({
-                                    ...current,
-                                    runtimeGroupBy: nextGroupBy,
-                                }));
+                                    setRuntimeViewState((current) => ({
+                                        ...current,
+                                        runtimeGroupBy: nextGroupBy,
+                                    }));
+                                },
                             },
-                        },
-                    ]}
-                />
+                        ]}
+                    />
+                </>
             )}
         />
     );
@@ -311,7 +374,9 @@ export default function ProdTrendWidget({
     }
 
     if (machineBinding.status === 'invalid') {
-        if (isLoadingOverview && machineBinding.reason === 'machine_lookup_pending_or_missing') {
+        if (displayOptions.dataMode !== 'simulated'
+            && isLoadingOverview
+            && machineBinding.reason === 'machine_lookup_pending_or_missing') {
             return renderRuntimeState({
                 className,
                 header,
@@ -319,7 +384,7 @@ export default function ProdTrendWidget({
             });
         }
 
-        if (isOverviewUnavailable) {
+        if (isOverviewUnavailable && displayOptions.dataMode === 'real') {
             return renderRuntimeState({
                 className,
                 header,
@@ -327,15 +392,17 @@ export default function ProdTrendWidget({
             });
         }
 
-        return renderRuntimeState({
-            className,
-            header,
-            label: 'Seleccione una máquina válida',
-            state: 'invalid-config',
-        });
+        if (displayOptions.dataMode === 'real' || machineBinding.reason !== 'machine_lookup_pending_or_missing') {
+            return renderRuntimeState({
+                className,
+                header,
+                label: 'Seleccione una máquina válida',
+                state: 'invalid-config',
+            });
+        }
     }
 
-    if (!isDataActivitySeriesEnabled()) {
+    if (displayOptions.dataMode !== 'simulated' && !isDataActivitySeriesEnabled()) {
         return renderRuntimeState({
             className,
             header,
@@ -358,7 +425,7 @@ export default function ProdTrendWidget({
         });
     }
 
-    if (isLoadingData || activitySeries.isLoading) {
+    if (displayOptions.dataMode !== 'simulated' && (isLoadingData || dataSource.isLoading)) {
         return renderRuntimeState({
             className,
             header,
@@ -366,8 +433,14 @@ export default function ProdTrendWidget({
         });
     }
 
-    if (activitySeries.isError) {
-        return renderRuntimeState({ className, header, ...resolveErrorState(activitySeries.error) });
+    if (displayOptions.dataMode !== 'simulated' && dataSource.error) {
+        return renderRuntimeState({
+            className,
+            header,
+            ...(isTrustedBackupUnavailable(dataSource)
+                ? { label: 'Respaldo histórico confiable no disponible', state: 'error' as const }
+                : resolveErrorState(dataSource.error)),
+        });
     }
 
     if (!activityData || activityData.series.length === 0) {
@@ -429,6 +502,7 @@ export default function ProdTrendWidget({
                             data-testid="prod-trend-widget-content"
                         >
                             <ProdTrendChart
+                                key={`${activeDisplayOptions.range}:${activeGroupBy}`}
                                 widgetId={widget.id}
                                 grouped={grouped}
                                 width={xAxisModel.chartWidth}
@@ -510,6 +584,15 @@ const ProdTrendChart = memo(function ProdTrendChart({
     const plotWidth = chartLayout.plotArea.width;
     const plotHeight = chartLayout.plotArea.height;
     const baselineY = chartLayout.plotArea.bottom;
+    const lineGlowFilterPadding = Math.ceil(
+        (3 * lineGlowBlur) + (lineStrokeWidth / 2) + LINE_GLOW_FILTER_SAFETY_MARGIN_PX,
+    );
+    const lineGlowFilterRegion = {
+        x: chartLayout.plotArea.left - lineGlowFilterPadding,
+        y: chartLayout.plotArea.top - lineGlowFilterPadding,
+        width: plotWidth + (2 * lineGlowFilterPadding),
+        height: plotHeight + (2 * lineGlowFilterPadding),
+    };
     const positions = grouped.length > 1
         ? grouped.map((_, index) => chartLayout.xAxisLabels.left + ((chartLayout.xAxisLabels.plotWidth * index) / (grouped.length - 1)))
         : grouped.map(() => chartLayout.xAxisLabels.left + (chartLayout.xAxisLabels.plotWidth / 2));
@@ -658,7 +741,14 @@ const ProdTrendChart = memo(function ProdTrendChart({
                         <rect x="0" y="0" width="1" height="1" fill={`url(#${fadeGradientId})`} />
                     </mask>
 
-                    <filter id={glowId} x="-20%" y="-50%" width="140%" height="200%">
+                    <filter
+                        id={glowId}
+                        filterUnits="userSpaceOnUse"
+                        x={lineGlowFilterRegion.x}
+                        y={lineGlowFilterRegion.y}
+                        width={lineGlowFilterRegion.width}
+                        height={lineGlowFilterRegion.height}
+                    >
                         <feGaussianBlur stdDeviation={lineGlowBlur} result="blur" />
                         <feMerge>
                             <feMergeNode in="blur" />
@@ -746,7 +836,10 @@ const ProdTrendChart = memo(function ProdTrendChart({
                         </text>
 
                         {lineSegments.map((segment, index) => {
-                    const linePath = segment.length >= 2 ? smoothPath(segment) : '';
+                    const singlePoint = segment.length === 1 ? segment[0] : null;
+                    const linePath = singlePoint
+                        ? `M ${singlePoint.x} ${singlePoint.y} L ${singlePoint.x} ${singlePoint.y}`
+                        : smoothPath(segment);
                     const areaPath = segment.length >= 2 ? buildAreaPath(linePath, segment, baselineY) : '';
 
                     return (
@@ -766,6 +859,8 @@ const ProdTrendChart = memo(function ProdTrendChart({
                                     fill="none"
                                     stroke={`url(#${lineGradientId})`}
                                     strokeWidth={lineStrokeWidth}
+                                    strokeLinecap="round"
+                                    vectorEffect="non-scaling-stroke"
                                     filter={`url(#${glowId})`}
                                     data-testid="prod-trend-widget-line"
                                 />
@@ -903,6 +998,8 @@ const ProdTrendChart = memo(function ProdTrendChart({
                             fill="transparent"
                             cursor="crosshair"
                             data-testid="prod-trend-widget-hit-area"
+                            data-productivity-ratio={resolveGroupedTrendProductivityRatio(bucket) ?? ''}
+                            data-chart-y={renderablePoints[index]?.y ?? ''}
                             onMouseEnter={() => setHoverInfo({ index, x: centerX })}
                             onMouseLeave={() => setHoverInfo(null)}
                         />
@@ -1524,7 +1621,7 @@ function resolveMachineBinding(rawMachineId: unknown, machines?: ContractMachine
     const selectedMachine = machines?.find((machine) => machine.unitId === machineId);
 
     if (machines && !selectedMachine) {
-        return { status: 'invalid' as const, machineId: null, reason: 'machine_lookup_pending_or_missing' as const };
+        return { status: 'invalid' as const, machineId, reason: 'machine_lookup_pending_or_missing' as const };
     }
 
     return { status: 'valid' as const, machineId };
@@ -1581,6 +1678,79 @@ function resolveProcessingErrorState(error: unknown) {
     }
 
     return resolveErrorState(error instanceof Error ? error : null);
+}
+
+const PROD_TREND_DATA_MODE_LABELS: Record<UseProdTrendDataSourceResult['effectiveMode'], string> = {
+    real: 'REAL',
+    simulated: 'SIMULADO',
+    fallback: 'FALLBACK',
+};
+
+const PROD_TREND_DATA_MODE_TEXT_CLASSES: Record<UseProdTrendDataSourceResult['effectiveMode'], string> = {
+    real: 'text-status-normal',
+    simulated: 'text-admin-accent',
+    fallback: 'text-status-warning',
+};
+
+function renderProdTrendDataModeIndicator(dataSource: UseProdTrendDataSourceResult) {
+    const mode = dataSource.effectiveMode;
+    const detail = resolveProdTrendFallbackDetail(dataSource);
+
+    return (
+        <span
+            data-testid="prod-trend-widget-data-mode"
+            role="status"
+            aria-live="polite"
+            aria-describedby={detail ? 'prod-trend-widget-data-mode-detail' : undefined}
+            className={`inline-flex items-center gap-1.5 uppercase ${PROD_TREND_DATA_MODE_TEXT_CLASSES[mode]}`}
+        >
+            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+            <span>{PROD_TREND_DATA_MODE_LABELS[mode]}</span>
+            {detail && (
+                <span id="prod-trend-widget-data-mode-detail" data-testid="prod-trend-widget-data-mode-detail" className="sr-only">
+                    {detail}
+                </span>
+            )}
+        </span>
+    );
+}
+
+function resolveProdTrendFallbackDetail(dataSource: UseProdTrendDataSourceResult): string | null {
+    if (dataSource.effectiveMode !== 'fallback') {
+        return null;
+    }
+
+    const lastRealSuccess = formatProdTrendLastRealSuccess(dataSource.lastRealSuccessAt);
+
+    if (dataSource.source === 'last-known-good') {
+        return `El historial real no está disponible temporalmente. Se muestra un respaldo histórico confiable del último éxito real. ${lastRealSuccess} Razón de respaldo: ${dataSource.state.fallbackReason ?? 'invalid-contract'}. Fuente: último dato real válido (last-known-good).`;
+    }
+
+    if (dataSource.source === 'packaged-capture') {
+        return `El historial real no está disponible temporalmente. Se muestra una plantilla histórica confiable. ${lastRealSuccess} Razón de respaldo: ${dataSource.state.fallbackReason ?? 'invalid-contract'}. Fuente: plantilla histórica (historical-template).`;
+    }
+
+    return `El historial real no está disponible temporalmente y no hay un respaldo histórico confiable disponible. ${lastRealSuccess} Razón de respaldo: ${dataSource.state.fallbackReason ?? 'invalid-contract'}. Fuente: ninguna.`;
+}
+
+function isTrustedBackupUnavailable(dataSource: UseProdTrendDataSourceResult): boolean {
+    return dataSource.effectiveMode !== 'real' && dataSource.response === null && dataSource.error !== null;
+}
+
+function formatProdTrendLastRealSuccess(timestampMs: number | null | undefined): string {
+    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs) || timestampMs <= 0) {
+        return 'Último éxito real: no disponible.';
+    }
+
+    const timestamp = new Date(timestampMs);
+    if (Number.isNaN(timestamp.getTime())) {
+        return 'Último éxito real: no disponible.';
+    }
+
+    return `Último éxito real: ${new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'short',
+        timeStyle: 'medium',
+    }).format(timestamp)}.`;
 }
 
 function renderRuntimeState({

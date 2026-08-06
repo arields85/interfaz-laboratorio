@@ -3,6 +3,7 @@ import type {
     ActivityAnalyticsStateGradient,
     ProdTrendDisplayOptions,
 } from '../domain/admin.types';
+import type { ProdTrendConfiguredMode } from '../domain/prodTrendDataMode.types';
 import {
     DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
@@ -28,6 +29,7 @@ const PROD_TREND_THEME_DEFAULT_LINE_COLOR_KEYS = [
 ] as const;
 
 export const DEFAULT_PROD_TREND_GROUP_BY = 'shift' as const;
+export const DEFAULT_PROD_TREND_DATA_MODE: ProdTrendConfiguredMode = 'real';
 export const DEFAULT_PROD_TREND_LINE_COLORS: ActivityAnalyticsStateGradient = [
     '#3b82f6',
     '#a855f7',
@@ -38,7 +40,7 @@ export const DEFAULT_PROD_TREND_LINE_COLOR_ALPHAS: ActivityAnalyticsAlphaPair = 
 
 export type ResolvedProdTrendDisplayOptions = Required<Pick<
     ProdTrendDisplayOptions,
-    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'groupBarWidth' | 'groupBarWidths' | 'trendLineColors' | 'trendLineColorAlphas' | 'lineStrokeWidth' | 'lineGlowBlur'
+    'dataMode' | 'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'groupBarWidth' | 'groupBarWidths' | 'trendLineColors' | 'trendLineColorAlphas' | 'lineStrokeWidth' | 'lineGlowBlur'
 >> & Pick<ProdTrendDisplayOptions, 'start' | 'end'> & {
     prodTrendBands: ReturnType<typeof resolveActivityAnalyticsProdTrendBands>;
 };
@@ -81,6 +83,7 @@ export function resolveProdTrendThemeDefaultLineColors(): ActivityAnalyticsState
 
 export function createDefaultProdTrendDisplayOptions(): ProdTrendDisplayOptions {
     return {
+        dataMode: DEFAULT_PROD_TREND_DATA_MODE,
         range: DEFAULT_ACTIVITY_ANALYTICS_RANGE,
         groupBy: DEFAULT_PROD_TREND_GROUP_BY,
         setupThresholdKw: DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW,
@@ -93,6 +96,12 @@ export function createDefaultProdTrendDisplayOptions(): ProdTrendDisplayOptions 
             blendMode: DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_BLEND_MODE,
         },
     };
+}
+
+function resolveProdTrendDataMode(value: unknown): ProdTrendConfiguredMode {
+    return value === 'simulated' || value === 'automatic' || value === 'real'
+        ? value
+        : DEFAULT_PROD_TREND_DATA_MODE;
 }
 
 export function resolveProdTrendDisplayOptions(
@@ -121,6 +130,7 @@ export function resolveProdTrendDisplayOptions(
     });
 
     return {
+        dataMode: resolveProdTrendDataMode(displayOptions?.dataMode),
         range: resolvedActivityAnalytics.range,
         start: resolvedActivityAnalytics.start,
         end: resolvedActivityAnalytics.end,

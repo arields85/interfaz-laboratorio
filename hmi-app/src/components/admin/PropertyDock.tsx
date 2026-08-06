@@ -196,6 +196,11 @@ const ACTIVITY_ANALYTICS_RANGE_OPTIONS: Array<{ value: ActivityAnalyticsSupporte
     { value: '30d', label: '30 días' },
     { value: '12m', label: '12 meses' },
 ];
+const PROD_TREND_DATA_MODE_OPTIONS = [
+    { value: 'real', label: 'Real' },
+    { value: 'simulated', label: 'Simulado' },
+    { value: 'automatic', label: 'Automático' },
+];
 const ACTIVITY_ANALYTICS_GROUP_OPTIONS = [
     { value: 'shift', label: 'Turno' },
     { value: 'day', label: 'Día' },
@@ -2176,6 +2181,16 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 />
                                             )}
                                         </DockFieldRow>
+
+                                        {isProdTrend && (
+                                            <DockFieldRow label="Modo">
+                                                <AdminSelect
+                                                    value={prodTrendOptions?.dataMode ?? 'real'}
+                                                    onChange={(value) => handleDisplayOptionChange('dataMode', value)}
+                                                    options={PROD_TREND_DATA_MODE_OPTIONS}
+                                                />
+                                            </DockFieldRow>
+                                        )}
 
                                         <DockFieldRow label="Rango">
                                             <AdminSelect

@@ -727,7 +727,7 @@ describe('WidgetRenderer', () => {
             isEnabled: true,
         });
 
-        render(
+        renderWithQueryClient(
             <WidgetRenderer
                 widget={prodTrendWidget}
                 equipmentMap={equipmentMap}

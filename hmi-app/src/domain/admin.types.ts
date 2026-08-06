@@ -3,6 +3,7 @@ import type {
     ActivityAnalyticsGroupBy,
     ActivityAnalyticsRange,
 } from './activityAnalytics.types';
+import type { ProdTrendConfiguredMode } from './prodTrendDataMode.types';
 
 // =============================================================================
 // DOMAIN: Admin (Modo Administrador)
@@ -513,6 +514,7 @@ export interface ActivityAnalyticsDisplayOptions {
 }
 
 export interface ProdTrendDisplayOptions {
+    dataMode?: ProdTrendConfiguredMode;
     range?: ActivityAnalyticsRange;
     start?: string;
     end?: string;

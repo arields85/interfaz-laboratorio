@@ -8,6 +8,7 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
+import { useProdTrendDataSource, type UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
 import {
     resolveWidgetChartLayoutMetrics,
     WIDGET_CHART_CONTAINER_CLASS,
@@ -38,6 +39,7 @@ class MockResizeObserver implements ResizeObserver {
 vi.mock('../../config/dataConnection.config', () => ({ isDataActivitySeriesEnabled: vi.fn() }));
 vi.mock('../../hooks/useTemporalSettings', () => ({ useTemporalSettings: vi.fn() }));
 vi.mock('../../queries/useActivitySeries', () => ({ useActivitySeries: vi.fn() }));
+vi.mock('../../queries/useProdTrendDataSource', () => ({ useProdTrendDataSource: vi.fn() }));
 vi.mock('../../components/ui/ChartTooltip', () => ({ default: () => null }));
 vi.mock('../../components/ui/AnchoredOverlay', () => ({
     default: ({ isOpen, children }: { isOpen: boolean; children: ReactNode }) => (isOpen ? <div>{children}</div> : null),
@@ -100,6 +102,43 @@ function buildDenseActivitySeries(startIso: string, points: number, bucketMs: nu
 const MACHINES: ContractMachine[] = [{ unitId: 101, name: 'Extrusora 101', status: 'online', lastSuccess: '2026-06-18T12:00:00.000Z', ageMs: 0, values: {} }];
 const DENSE_ACTIVITY_SERIES = buildDenseActivitySeries('2026-06-18T00:00:00.000Z', 864, 300000, 0.4);
 
+function makeDataSourceResult(overrides: Partial<UseProdTrendDataSourceResult> = {}): UseProdTrendDataSourceResult {
+    return {
+        state: {
+            configuredMode: 'real',
+            effectiveMode: 'real',
+            phase: 'active',
+            emptyStreak: 0,
+            successStreak: 0,
+            committedSource: 'real',
+            fallbackReason: null,
+        },
+        effectiveMode: 'real',
+        source: 'real',
+        response: {
+            contractVersion: '1.0.0',
+            machineId: 101,
+            variableKey: 'Total kW',
+            range: '7d',
+            unit: 'kW',
+            purpose: 'activity-analytics',
+            window: { start: '2026-06-18T00:00:00.000Z', end: '2026-06-20T23:55:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
+            series: DENSE_ACTIVITY_SERIES,
+            summary: null,
+        },
+        analytics: null,
+        error: null,
+        retryRequested: false,
+        saveLastKnownGood: false,
+        lastRealSuccessAt: null,
+        isLoading: false,
+        isFetching: false,
+        isRefreshing: false,
+        isEnabled: true,
+        ...overrides,
+    };
+}
+
 describe('ProdTrendWidget', () => {
     afterEach(() => {
         vi.restoreAllMocks();
@@ -114,6 +153,41 @@ describe('ProdTrendWidget', () => {
         } as unknown as CanvasRenderingContext2D);
         vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(true);
         vi.mocked(useTemporalSettings).mockReturnValue({ config: { plantTimezone: 'UTC' }, shifts: [] } as never);
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: null,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+        vi.mocked(useProdTrendDataSource).mockImplementation(({ configuredMode, params }) => {
+            const query = vi.mocked(useActivitySeries)(params);
+            const response = query.data;
+            const effectiveMode = configuredMode === 'automatic' ? 'real' : configuredMode;
+
+            return makeDataSourceResult({
+                state: {
+                    configuredMode: effectiveMode,
+                    effectiveMode,
+                    phase: 'active',
+                    emptyStreak: 0,
+                    successStreak: 0,
+                    committedSource: response ? 'real' : null,
+                    fallbackReason: null,
+                },
+                effectiveMode,
+                source: response ? 'real' : null,
+                response,
+                error: query.error,
+                isLoading: query.isLoading,
+                isFetching: query.isFetching,
+                isRefreshing: query.isRefreshing,
+                isEnabled: query.isEnabled,
+            });
+        });
     });
 
     it('renders the standalone trend with the standard header, scales, and no extra inner panel', () => {
@@ -140,6 +214,7 @@ describe('ProdTrendWidget', () => {
         const chart = screen.getByTestId('prod-trend-widget-chart');
 
         expect(screen.getByText('PROD-TREND')).toBeInTheDocument();
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('REAL');
         expect(screen.getByTestId('prod-trend-widget-header-icon')).toBeInTheDocument();
         expect(screen.getByTestId('prod-trend-widget-runtime-controls')).toHaveClass('flex', 'items-center', 'gap-2.5');
         expect(screen.getByTestId('prod-trend-widget-runtime-range-selector')).toBeInTheDocument();
@@ -199,6 +274,304 @@ describe('ProdTrendWidget', () => {
         expect(screen.getByTestId('prod-trend-widget-chart-shell')).not.toHaveClass('mt-2');
         expect(screen.getByTestId('prod-trend-widget-viewport')).toHaveClass('overflow-hidden');
         expect(screen.getByTestId('prod-trend-widget-viewport')).not.toHaveClass('hmi-scrollbar', 'overflow-x-auto');
+    });
+
+    it('announces fallback state and source-specific accessible detail without mixing sources', () => {
+        const fallbackResponse = {
+            contractVersion: '1.0.0',
+            machineId: 101,
+            variableKey: undefined,
+            range: '7d' as const,
+            unit: 'kW',
+            purpose: 'activity-analytics' as const,
+            window: { start: '2026-06-18T00:00:00.000Z', end: '2026-06-20T23:55:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
+            series: DENSE_ACTIVITY_SERIES.map((point) => ({ ...point, value: 0.8 })),
+            summary: null,
+        };
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            effectiveMode: 'fallback',
+            source: 'last-known-good',
+            response: fallbackResponse,
+            state: {
+                configuredMode: 'automatic',
+                effectiveMode: 'fallback',
+                phase: 'fallback',
+                emptyStreak: 0,
+                successStreak: 0,
+                committedSource: 'last-known-good',
+                fallbackReason: 'network-error',
+            },
+        }));
+
+        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        const indicator = screen.getByTestId('prod-trend-widget-data-mode');
+        const detail = screen.getByTestId('prod-trend-widget-data-mode-detail');
+        expect(indicator).toHaveTextContent('FALLBACK');
+        expect(indicator).toHaveAttribute('role', 'status');
+        expect(indicator).toHaveAttribute('aria-describedby', detail.id);
+        expect(detail).toHaveTextContent('historial real no está disponible temporalmente');
+        expect(detail).toHaveTextContent('respaldo histórico confiable');
+        expect(detail).toHaveTextContent('último éxito real');
+        expect(detail).toHaveTextContent('último dato real válido');
+        expect(detail).toHaveTextContent('Razón de respaldo: network-error');
+        expect(screen.getByTestId('prod-trend-widget-line')).toBeInTheDocument();
+    });
+
+    it('renders simulated data without querying real history or claiming fallback provenance', async () => {
+        const user = userEvent.setup();
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            effectiveMode: 'simulated',
+            source: null,
+            response: null,
+            state: {
+                configuredMode: 'simulated',
+                effectiveMode: 'simulated',
+                phase: 'active',
+                emptyStreak: 0,
+                successStreak: 0,
+                committedSource: null,
+                fallbackReason: null,
+            },
+        }));
+        vi.mocked(useActivitySeries).mockClear();
+        vi.mocked(isDataActivitySeriesEnabled).mockClear();
+
+        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('SIMULADO');
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-widget-data-mode-detail')).not.toBeInTheDocument();
+        expect(screen.queryByText(/plantilla histórica/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/respaldo histórico/i)).not.toBeInTheDocument();
+        expect(vi.mocked(useActivitySeries)).not.toHaveBeenCalled();
+        expect(vi.mocked(isDataActivitySeriesEnabled)).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole('button', { name: '30d' }));
+        await user.click(screen.getByRole('button', { name: '12m' }));
+
+        expect(screen.getByRole('button', { name: '12m' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+    });
+
+    it('matches Real 7D day temporal visualization while disconnected', () => {
+        vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-06-19T12:00:00.000Z'));
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            effectiveMode: 'simulated',
+            source: null,
+            response: null,
+            error: null,
+            isLoading: true,
+            state: {
+                configuredMode: 'simulated',
+                effectiveMode: 'simulated',
+                phase: 'active',
+                emptyStreak: 0,
+                successStreak: 0,
+                committedSource: null,
+                fallbackReason: null,
+            },
+        }));
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({ displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' } })}
+                machines={[]}
+                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
+                isLoadingOverview
+                hasOverviewError
+                isLoadingData
+            />,
+        );
+
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('SIMULADO');
+        expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
+        const displayPoints = screen.getAllByTestId('prod-trend-widget-hit-area');
+        const xAxisLabels = screen.getAllByTestId('prod-trend-widget-x-axis-label').map((label) => label.textContent);
+        const productivityValues = displayPoints.map((point) => Number(point.getAttribute('data-productivity-ratio')));
+        const chartYValues = displayPoints.map((point) => Number(point.getAttribute('data-chart-y')));
+        const linePath = screen.getByTestId('prod-trend-widget-line').getAttribute('d');
+        const areaPath = screen.getByTestId('prod-trend-widget-area').getAttribute('d');
+
+        expect(displayPoints).toHaveLength(7);
+        expect(screen.getAllByTestId('prod-trend-widget-band-group')).toHaveLength(3);
+        expect(xAxisLabels).toEqual(['13/06', '14/06', '15/06', '16/06', '17/06', '18/06', '19/06']);
+        expect(xAxisLabels.every((label) => !/^\d{2}:\d{2}$/.test(label ?? ''))).toBe(true);
+        expect(displayPoints.every((point) => point.getAttribute('data-productivity-ratio') !== '')).toBe(true);
+        expect(productivityValues.every(Number.isFinite)).toBe(true);
+        expect(new Set(productivityValues).size).toBeGreaterThanOrEqual(2);
+        expect(displayPoints.every((point) => point.getAttribute('data-chart-y') !== '')).toBe(true);
+        expect(chartYValues.every(Number.isFinite)).toBe(true);
+        expect(new Set(chartYValues).size).toBeGreaterThanOrEqual(2);
+        expect(linePath).toBeTruthy();
+        expect(areaPath).toBeTruthy();
+        expect(screen.queryByTestId('prod-trend-widget-empty')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-widget-runtime-state')).not.toBeInTheDocument();
+        expect(screen.queryByText('Respaldo histórico confiable no disponible')).not.toBeInTheDocument();
+        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-widget-data-mode-detail')).not.toBeInTheDocument();
+    });
+
+    it('keeps Real mode on the disconnected runtime state when overview connectivity is unavailable', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            source: null,
+            response: null,
+            error: null,
+        }));
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({ displayOptions: { dataMode: 'real', range: '7d', groupBy: 'day' } })}
+                machines={[]}
+                connection={{ globalStatus: 'offline', lastSuccess: null, ageMs: null }}
+                hasOverviewError
+            />,
+        );
+
+        expect(screen.getByText('Sin conexión')).toBeInTheDocument();
+        expect(screen.queryByText('Respaldo histórico confiable no disponible')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-widget-line')).not.toBeInTheDocument();
+    });
+
+    it('renders an available Automatic trusted fallback without mixing it with the disconnected overview state', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            effectiveMode: 'fallback',
+            source: 'packaged-capture',
+            state: {
+                configuredMode: 'automatic',
+                effectiveMode: 'fallback',
+                phase: 'fallback',
+                emptyStreak: 0,
+                successStreak: 0,
+                committedSource: 'packaged-capture',
+                fallbackReason: 'network-error',
+            },
+            response: {
+                ...makeDataSourceResult().response!,
+                variableKey: undefined,
+                series: DENSE_ACTIVITY_SERIES.map((point) => ({ ...point, value: 0.8 })),
+            } as never,
+        }));
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })}
+                machines={[]}
+                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
+                hasOverviewError
+            />,
+        );
+
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('FALLBACK');
+        expect(screen.getByTestId('prod-trend-widget-line')).toBeInTheDocument();
+        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
+        expect(screen.queryByText('Respaldo histórico confiable no disponible')).not.toBeInTheDocument();
+    });
+
+    it('states that Automatic has no trusted backup when the packaged manifest is empty', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            effectiveMode: 'fallback',
+            source: null,
+            response: null,
+            error: new Error('No matching PROD-TREND fallback source is available'),
+            state: {
+                configuredMode: 'automatic',
+                effectiveMode: 'fallback',
+                phase: 'fallback',
+                emptyStreak: 2,
+                successStreak: 0,
+                committedSource: null,
+                fallbackReason: 'repeated-empty-series',
+            },
+        }));
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })}
+                machines={[]}
+                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
+                hasOverviewError
+            />,
+        );
+
+        expect(screen.getByText('Respaldo histórico confiable no disponible')).toBeInTheDocument();
+        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Fuente: ninguna');
+        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-widget-line')).not.toBeInTheDocument();
+    });
+
+    it('explains packaged fallback as a historical template for assistive technology', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            effectiveMode: 'fallback',
+            source: 'packaged-capture',
+            state: {
+                configuredMode: 'automatic',
+                effectiveMode: 'fallback',
+                phase: 'fallback',
+                emptyStreak: 0,
+                successStreak: 0,
+                committedSource: 'packaged-capture',
+                fallbackReason: 'network-error',
+            },
+        }));
+
+        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('plantilla histórica');
+        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('historical-template');
+        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Último éxito real: no disponible');
+        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Razón de respaldo: network-error');
+    });
+
+    it('announces last real success availability when fallback has no local source', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue({
+            ...makeDataSourceResult({
+                effectiveMode: 'fallback',
+                source: null,
+                response: null,
+                state: {
+                    configuredMode: 'automatic',
+                    effectiveMode: 'fallback',
+                    phase: 'fallback',
+                    emptyStreak: 2,
+                    successStreak: 0,
+                    committedSource: null,
+                    fallbackReason: 'repeated-empty-series',
+                },
+            }),
+            lastRealSuccessAt: Date.parse('2026-06-18T12:34:56.000Z'),
+        });
+
+        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        const detail = screen.getByTestId('prod-trend-widget-data-mode-detail');
+        expect(detail).toHaveTextContent('Último éxito real:');
+        expect(detail).not.toHaveTextContent('no disponible');
+        expect(detail).toHaveTextContent('Razón de respaldo: repeated-empty-series');
+        expect(detail).toHaveTextContent('Fuente: ninguna');
+        expect(detail).toHaveTextContent('respaldo histórico confiable disponible');
+    });
+
+    it('states when last real success is unavailable in no-source fallback detail', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            effectiveMode: 'fallback',
+            source: null,
+            response: null,
+            state: {
+                configuredMode: 'automatic',
+                effectiveMode: 'fallback',
+                phase: 'fallback',
+                emptyStreak: 0,
+                successStreak: 0,
+                committedSource: null,
+                fallbackReason: 'network-error',
+            },
+        }));
+
+        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Último éxito real: no disponible');
     });
 
     it('applies the PROD-TREND temporal header selectors to range and grouping at runtime', async () => {
@@ -494,6 +867,123 @@ describe('ProdTrendWidget', () => {
         expect(clampLineStrokeWidth(Number.NaN)).toBe(2.5);
         expect(clampLineGlowBlur(-2)).toBe(0);
         expect(getBlur()).toHaveAttribute('stdDeviation', '0');
+    });
+
+    it('keeps the PROD-TREND glow filter unclipped across flat selector states', async () => {
+        const user = userEvent.setup();
+        const configuredLineStrokeWidth = 4.3;
+        const configuredLineGlowBlur = 5.4;
+        const allDays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+        const initialNowMs = Date.parse('2026-06-19T12:00:00.000Z');
+        let nowCallCount = 0;
+
+        vi.stubGlobal('matchMedia', createMatchMediaMock(true));
+        vi.spyOn(Date, 'now').mockImplementation(() => initialNowMs + (nowCallCount++ * 31 * 24 * 60 * 60 * 1000));
+        vi.mocked(useTemporalSettings).mockReturnValue({
+            config: { plantTimezone: 'UTC' },
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '00:00', end: '08:00', weekdays: allDays },
+                { id: 'shift-b', label: 'Turno B', start: '08:00', end: '16:00', weekdays: allDays },
+                { id: 'shift-c', label: 'Turno C', start: '16:00', end: '00:00', weekdays: allDays },
+            ],
+        } as never);
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        dataMode: 'simulated',
+                        range: '7d',
+                        groupBy: 'day',
+                        setupThresholdKw: 0.15,
+                        prodThresholdKw: 0.25,
+                        lineStrokeWidth: configuredLineStrokeWidth,
+                        lineGlowBlur: configuredLineGlowBlur,
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        const captureLineContract = () => {
+            const displayPoints = screen.getAllByTestId('prod-trend-widget-hit-area');
+            const linePaths = screen.getAllByTestId('prod-trend-widget-line');
+            const plotRect = linePaths[0]?.ownerSVGElement?.querySelector('clipPath rect');
+            const plotX = Number(plotRect?.getAttribute('x'));
+            const plotY = Number(plotRect?.getAttribute('y'));
+            const plotWidth = Number(plotRect?.getAttribute('width'));
+            const plotHeight = Number(plotRect?.getAttribute('height'));
+            const expectedPadding = Math.ceil((3 * configuredLineGlowBlur) + (configuredLineStrokeWidth / 2) + 1);
+
+            expect(displayPoints.length).toBeGreaterThan(0);
+            expect(linePaths.length).toBeGreaterThan(0);
+            expect(plotRect).not.toBeNull();
+            return linePaths.map((path) => {
+                const geometry = path.getAttribute('d') ?? '';
+                const filterReference = path.getAttribute('filter') ?? '';
+                const filterId = /^url\(#(.+)\)$/.exec(filterReference)?.[1] ?? '';
+                const filter = Array.from(path.ownerSVGElement?.querySelectorAll('filter') ?? [])
+                    .find((candidate) => candidate.id === filterId);
+                const filterX = Number(filter?.getAttribute('x'));
+                const filterY = Number(filter?.getAttribute('y'));
+                const filterWidth = Number(filter?.getAttribute('width'));
+                const filterHeight = Number(filter?.getAttribute('height'));
+
+                expect(geometry.length).toBeGreaterThan(0);
+                expect(path).toHaveAttribute('stroke-width', String(configuredLineStrokeWidth));
+                expect(path).toHaveAttribute('stroke-linecap', 'round');
+                expect(path).toHaveAttribute('vector-effect', 'non-scaling-stroke');
+                expect(filterReference).toMatch(/^url\(#.+\)$/);
+                expect(filter).toHaveAttribute('filterUnits', 'userSpaceOnUse');
+                expect(filter?.querySelector('feGaussianBlur')).toHaveAttribute('stdDeviation', String(configuredLineGlowBlur));
+                expect(filterX).toBeCloseTo(plotX - expectedPadding);
+                expect(filterY).toBeCloseTo(plotY - expectedPadding);
+                expect(filterWidth).toBeCloseTo(plotWidth + (2 * expectedPadding));
+                expect(filterHeight).toBeCloseTo(plotHeight + (2 * expectedPadding));
+                expect(filterWidth).toBeGreaterThan(0);
+                expect(filterHeight).toBeGreaterThan(0);
+                expect(filterX).toBeLessThan(plotX);
+                expect(filterY).toBeLessThan(plotY);
+                expect(filterX + filterWidth).toBeGreaterThan(plotX + plotWidth);
+                expect(filterY + filterHeight).toBeGreaterThan(plotY + plotHeight);
+
+                return {
+                    geometry,
+                    strokeWidth: path.getAttribute('stroke-width'),
+                    strokeLinecap: path.getAttribute('stroke-linecap'),
+                    vectorEffect: path.getAttribute('vector-effect'),
+                    filterBlur: filter?.querySelector('feGaussianBlur')?.getAttribute('stdDeviation') ?? null,
+                    filterUnits: filter?.getAttribute('filterUnits'),
+                    filterRegion: { x: filterX, y: filterY, width: filterWidth, height: filterHeight },
+                };
+            });
+        };
+
+        expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
+        captureLineContract();
+
+        await user.click(screen.getByRole('button', { name: '30d' }));
+        await user.click(screen.getByRole('button', { name: 'TURNO' }));
+        expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
+        const first30dShift = captureLineContract();
+
+        await user.click(screen.getByRole('button', { name: '12m' }));
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
+        const first12mShift = captureLineContract();
+
+        await user.click(screen.getByRole('button', { name: '7d' }));
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
+        captureLineContract();
+
+        await user.click(screen.getByRole('button', { name: 'DÍA' }));
+        await user.click(screen.getByRole('button', { name: '12m' }));
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
+        expect(captureLineContract()).toEqual(first12mShift);
+
+        await user.click(screen.getByRole('button', { name: '30d' }));
+        expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
+        expect(captureLineContract()).toEqual(first30dShift);
     });
 
     it('keeps the final sampled X-axis label visible and centered on the safe plot boundary', () => {

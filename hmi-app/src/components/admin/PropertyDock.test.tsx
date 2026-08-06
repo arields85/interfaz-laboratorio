@@ -2748,7 +2748,7 @@ describe('PropertyDock prod-trend', () => {
 
 describe('PropertyDock prod-history', () => {
     it('renders prod-history sections and updates general, data, series, scales and layout controls', async () => {
-        const { user, updates } = renderPropertyDock({
+        const { updates } = renderPropertyDock({
             type: 'prod-history',
             title: 'Histórico de producción',
             binding: {
@@ -2770,19 +2770,19 @@ describe('PropertyDock prod-history', () => {
         expect(getFieldButtonInSection('Datos', 'Unidad')).toHaveTextContent('unidades');
         expect(getFieldButtonInSection('Datos', 'Origen')).toHaveTextContent('Simulado');
 
-        await user.click(getFieldButtonInSection('General', 'Producción'));
-        await user.click(screen.getByRole('button', { name: 'Área' }));
+        fireEvent.click(getFieldButtonInSection('General', 'Producción'));
+        fireEvent.click(screen.getByRole('button', { name: 'Área' }));
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             productionChartMode: 'area',
         });
 
-        await user.click(screen.getByLabelText('Relleno bajo línea OEE'));
+        fireEvent.click(screen.getByLabelText('Relleno bajo línea OEE'));
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             oeeShowArea: true,
         });
 
-        await user.click(screen.getByLabelText('Puntos en OEE'));
+        fireEvent.click(screen.getByLabelText('Puntos en OEE'));
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             oeeShowPoints: true,
         });
@@ -2800,44 +2800,44 @@ describe('PropertyDock prod-history', () => {
             productionBarWidth: 1.4,
         });
 
-        await user.click(getFieldButtonInSection('Datos', 'Unidad'));
-        await user.click(screen.getByRole('button', { name: 'kg' }));
+        fireEvent.click(getFieldButtonInSection('Datos', 'Unidad'));
+        fireEvent.click(screen.getByRole('button', { name: 'kg' }));
 
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             productionUnit: 'kg',
         });
 
-        await user.click(getFieldButtonInSection('Datos', 'Origen'));
-        await user.click(screen.getByRole('button', { name: 'Real' }));
+        fireEvent.click(getFieldButtonInSection('Datos', 'Origen'));
+        fireEvent.click(screen.getByRole('button', { name: 'Real' }));
 
         expect(updates.at(-1)?.binding).toMatchObject({
             mode: 'real_variable',
         });
 
         const productionInput = screen.getByPlaceholderText('Clave variable producción');
-        await user.type(productionInput, 'prod_total');
+        fireEvent.change(productionInput, { target: { value: 'prod_total' } });
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             productionVariableKey: 'prod_total',
         });
 
         const oeeInput = screen.getByPlaceholderText('Clave variable OEE');
-        await user.type(oeeInput, 'oee_pct');
+        fireEvent.change(oeeInput, { target: { value: 'oee_pct' } });
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             oeeVariableKey: 'oee_pct',
         });
 
-        await user.click(screen.getByLabelText('Mostrar OEE'));
+        fireEvent.click(screen.getByLabelText('Mostrar OEE'));
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             defaultShowOee: false,
         });
 
-        await user.click(screen.getByLabelText('Usar eje secundario para OEE'));
+        fireEvent.click(screen.getByLabelText('Usar eje secundario para OEE'));
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             useSecondaryAxis: false,
         });
 
         const autoScaleToggle = screen.getByLabelText('Autoescala');
-        await user.click(autoScaleToggle);
+        fireEvent.click(autoScaleToggle);
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             autoScale: false,
         });
@@ -2845,27 +2845,23 @@ describe('PropertyDock prod-history', () => {
         const scalesSection = getSection('Escalas');
         const [prodMinInput, prodMaxInput, oeeMinInput, oeeMaxInput] = within(scalesSection).getAllByRole('textbox');
 
-        await user.clear(prodMinInput);
-        await user.type(prodMinInput, '10');
-        await user.tab();
+        fireEvent.change(prodMinInput, { target: { value: '10' } });
+        fireEvent.blur(prodMinInput);
         expect(updates.at(-1)?.displayOptions).toMatchObject({ productionAxisMin: 10 });
 
-        await user.clear(prodMaxInput);
-        await user.type(prodMaxInput, '320');
-        await user.tab();
+        fireEvent.change(prodMaxInput, { target: { value: '320' } });
+        fireEvent.blur(prodMaxInput);
         expect(updates.at(-1)?.displayOptions).toMatchObject({ productionAxisMax: 320 });
 
-        await user.clear(oeeMinInput);
-        await user.type(oeeMinInput, '15');
-        await user.tab();
+        fireEvent.change(oeeMinInput, { target: { value: '15' } });
+        fireEvent.blur(oeeMinInput);
         expect(updates.at(-1)?.displayOptions).toMatchObject({ oeeAxisMin: 15 });
 
-        await user.clear(oeeMaxInput);
-        await user.type(oeeMaxInput, '95');
-        await user.tab();
+        fireEvent.change(oeeMaxInput, { target: { value: '95' } });
+        fireEvent.blur(oeeMaxInput);
         expect(updates.at(-1)?.displayOptions).toMatchObject({ oeeAxisMax: 95 });
 
-        await user.click(screen.getByLabelText('Mostrar grilla'));
+        fireEvent.click(screen.getByLabelText('Mostrar grilla'));
         expect(updates.at(-1)?.displayOptions).toMatchObject({
             showGrid: false,
         });
@@ -3507,5 +3503,36 @@ describe('PropertyDock KPI thresholds', () => {
         expect(sectionTitles.indexOf('Top cap viajero')).toBeGreaterThan(sectionTitles.indexOf('Top cap fijo'));
         expect(sectionTitles.indexOf('Navegación')).toBeGreaterThan(sectionTitles.indexOf('Top cap viajero'));
         expect(sectionTitles.at(-1)).toBe('Navegación');
+    });
+
+    it('offers only the three selectable PROD-TREND data modes and excludes fallback', async () => {
+        const { user } = renderPropertyDock({
+            type: 'prod-trend',
+            displayOptions: { dataMode: 'real' },
+        });
+
+        const dataSection = getSection('Datos');
+        expect(within(dataSection).getByText('Modo')).toBeInTheDocument();
+        expect(within(dataSection).getByRole('button', { name: 'Real' })).toBeInTheDocument();
+
+        await user.click(within(dataSection).getByRole('button', { name: 'Real' }));
+
+        expect(screen.getAllByRole('button', { name: 'Real' })).toHaveLength(2);
+        expect(screen.getByRole('button', { name: 'Simulado' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Automático' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Fallback' })).not.toBeInTheDocument();
+    });
+
+    it('persists a selected PROD-TREND mode through the existing widget update path', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'prod-trend',
+            displayOptions: { dataMode: 'real' },
+        });
+
+        const dataSection = getSection('Datos');
+        await user.click(within(dataSection).getByRole('button', { name: 'Real' }));
+        await user.click(screen.getByRole('button', { name: 'Automático' }));
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ dataMode: 'automatic' });
     });
 });

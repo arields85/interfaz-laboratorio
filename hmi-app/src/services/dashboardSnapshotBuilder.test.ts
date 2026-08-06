@@ -140,6 +140,33 @@ describe('buildDashboardSnapshot', () => {
         ]);
     });
 
+    it('keeps PROD-TREND runtime data-mode fields out of the snapshot contract', () => {
+        const dashboard = makeDashboard({
+            widgets: [makeWidget({
+                id: 'widget-prod-trend',
+                type: 'prod-trend',
+                title: 'Producción',
+                displayOptions: { dataMode: 'automatic' },
+            })],
+            layout: [makeLayout({ widgetId: 'widget-prod-trend', x: 0, y: 0, w: 8, h: 4 })],
+        });
+
+        const snapshot = buildDashboardSnapshot({
+            dashboard,
+            connection,
+            machines: makeMachines(),
+            equipmentMap: makeEquipmentMap(),
+            hierarchyNodes: [],
+            timestamp: '2026-07-07T10:00:05.000Z',
+        });
+        const snapshotWidget = snapshot.widgets[0];
+
+        expect(snapshotWidget).toMatchObject({ type: 'prod-trend', value: null });
+        expect(snapshotWidget).not.toHaveProperty('dataMode');
+        expect(snapshotWidget).not.toHaveProperty('effectiveMode');
+        expect(snapshotWidget).not.toHaveProperty('fallbackReason');
+    });
+
     it('falls back to widget.id and preserves unsupported widgets with null value plus summary metadata', () => {
         const dashboard = makeDashboard({
             widgets: [
