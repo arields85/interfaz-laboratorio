@@ -598,7 +598,7 @@ function sanitizeExportHeaderConfig(dashboard: Dashboard): {
     }
 
     const availableWidgetIds = new Set(
-        normalizeDashboardViews(dashboard).views.flatMap((view) => view.widgets.map((widget) => widget.id)),
+        normalizeDashboardViews(dashboard).views?.flatMap((view) => view.widgets.map((widget) => widget.id)) ?? [],
     );
     const issues: DashboardPortabilityIssue[] = [];
 
