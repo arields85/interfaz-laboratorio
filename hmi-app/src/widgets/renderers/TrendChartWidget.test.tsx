@@ -324,6 +324,7 @@ describe('TrendChartWidget', () => {
 
     it('falls back to simulated data when binding mode is simulated_value', () => {
         vi.mocked(isDataHistoryEnabled).mockReturnValue(true);
+        const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
 
         render(
             <TrendChartWidget
@@ -340,6 +341,12 @@ describe('TrendChartWidget', () => {
         expect(screen.queryByTestId('trend-chart-widget-loading')).not.toBeInTheDocument();
         expect(screen.queryByText('--')).not.toBeInTheDocument();
         expect(screen.queryByText('Sin datos')).not.toBeInTheDocument();
+        expect(screen.getByTestId('trend-chart-svg')).toBeInTheDocument();
+        expect(random).toHaveBeenCalledTimes(24);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Día' }));
+
+        expect(random).toHaveBeenCalledTimes(24);
     });
 
     it('uses legacy displayOptions to configure line stroke width and glow blur while preserving defaults when absent', () => {

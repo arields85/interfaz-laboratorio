@@ -531,6 +531,11 @@ describe('MachineActivityWidget', () => {
     it('resolves live data from the equipment map in bar mode and hides optional text rows when disabled', async () => {
         const animationFrames = createAnimationFrameController();
         vi.spyOn(performance, 'now').mockReturnValue(1_000);
+        vi.stubGlobal('matchMedia', () => ({
+            matches: true,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+        }));
 
         render(
             <MachineActivityWidget
