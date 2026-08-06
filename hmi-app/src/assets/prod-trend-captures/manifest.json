@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "captures": [
+    {
+      "id": "capture-11-24h",
+      "available": true,
+      "machineId": 11,
+      "range": "24h",
+      "file": "capture-11-24h.json"
+    }
+  ],
+  "unavailable": [
+    { "reason": "no-genuine-capture" }
+  ]
+}
