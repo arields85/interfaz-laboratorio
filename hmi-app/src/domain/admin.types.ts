@@ -4,6 +4,7 @@ import type {
     ActivityAnalyticsRange,
 } from './activityAnalytics.types';
 import type { ProdTrendConfiguredMode } from './prodTrendDataMode.types';
+import type { AnalyticsDataMode } from './analyticsDataMode.types';
 
 // =============================================================================
 // DOMAIN: Admin (Modo Administrador)
@@ -491,6 +492,7 @@ export interface ActivityAnalyticsSurfaceEffects {
 export type ActivityAnalyticsGroupBarWidths = Partial<Record<ActivityAnalyticsGroupBy, number>>;
 
 export interface ActivityAnalyticsDisplayOptions {
+    dataMode?: AnalyticsDataMode;
     range?: ActivityAnalyticsRange;
     start?: string;
     end?: string;

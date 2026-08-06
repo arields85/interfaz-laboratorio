@@ -21,6 +21,39 @@ describe('DashboardStorageService', () => {
         vi.useRealTimers();
     });
 
+    it('supports analytics data mode: saved simulated round-trips while missing mode normalizes to real', async () => {
+        const simulatedWidget = {
+            ...makeWidget({ id: 'activity-simulated' }),
+            type: 'activity-analytics' as const,
+            displayOptions: { dataMode: 'simulated' as const, range: '7d' as const, groupBy: 'day' as const },
+        };
+        const legacyWidget = {
+            ...makeWidget({ id: 'activity-legacy' }),
+            type: 'activity-analytics' as const,
+            displayOptions: { range: '7d' as const, groupBy: 'day' as const },
+        };
+        const dashboard = makeDashboard({
+            id: 'dashboard-analytics-data-mode',
+            widgets: [simulatedWidget, legacyWidget],
+            layout: [
+                makeLayout({ widgetId: simulatedWidget.id }),
+                makeLayout({ widgetId: legacyWidget.id, x: 4 }),
+            ],
+        });
+
+        const savePromise = dashboardStorage.saveDashboard(dashboard);
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        const readPromise = dashboardStorage.getDashboard(dashboard.id);
+        await vi.advanceTimersByTimeAsync(200);
+        const roundTripped = await readPromise;
+        const byId = new Map(roundTripped?.widgets.map((widget) => [widget.id, widget]));
+
+        expect(byId.get(simulatedWidget.id)?.displayOptions).toMatchObject({ dataMode: 'simulated' });
+        expect(byId.get(legacyWidget.id)?.displayOptions).toMatchObject({ dataMode: 'real' });
+    });
+
     it('seeds and reads dashboards from DASHBOARDS_STORAGE_KEY', async () => {
         const dashboardsPromise = dashboardStorage.getDashboards();
 
@@ -403,7 +436,7 @@ describe('DashboardStorageService', () => {
         }));
     });
 
-    it('persists and reloads PROD-TREND data mode configuration', async () => {
+    it('migrates and reloads legacy PROD-TREND automatic mode as real', async () => {
         const dashboard = makeDashboard({
             id: 'dashboard-prod-trend-mode',
             widgets: [makeWidget({
@@ -422,7 +455,7 @@ describe('DashboardStorageService', () => {
         const reloaded = await reloadPromise;
 
         expect(reloaded?.widgets.find((widget) => widget.id === 'prod-trend-mode-widget')?.displayOptions).toEqual(
-            expect.objectContaining({ dataMode: 'automatic' }),
+            expect.objectContaining({ dataMode: 'real' }),
         );
     });
 

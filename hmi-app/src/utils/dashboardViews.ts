@@ -6,6 +6,8 @@ import type {
     WidgetConfig,
     WidgetLayout,
 } from '../domain/admin.types';
+import { resolveProdTrendConfiguredMode } from './prodTrendDataMode';
+import { resolveAnalyticsDataMode } from './analyticsDataMode';
 
 export const DEFAULT_DASHBOARD_VIEW_ID = 'view-default';
 export const DEFAULT_DASHBOARD_VIEW_NAME = 'Default view';
@@ -395,7 +397,31 @@ function normalizeDashboardView(view: DashboardView, fallbackOrder: number): Das
         id: view.id || (fallbackOrder === 0 ? DEFAULT_DASHBOARD_VIEW_ID : `view-${fallbackOrder + 1}`),
         name: view.name || (fallbackOrder === 0 ? DEFAULT_DASHBOARD_VIEW_NAME : `View ${fallbackOrder + 1}`),
         order: view.order ?? fallbackOrder,
-        widgets: clone(view.widgets ?? []),
+        widgets: (view.widgets ?? []).map(normalizeWidget),
         layout: clone(view.layout ?? []),
     };
+}
+
+function normalizeWidget(widget: WidgetConfig): WidgetConfig {
+    const normalized = clone(widget);
+
+    if (normalized.type === 'activity-analytics') {
+        return {
+            ...normalized,
+            displayOptions: {
+                ...normalized.displayOptions,
+                dataMode: resolveAnalyticsDataMode(normalized.displayOptions?.dataMode),
+            },
+        };
+    }
+
+    return normalized.type === 'prod-trend'
+        ? {
+            ...normalized,
+            displayOptions: {
+                ...normalized.displayOptions,
+                dataMode: resolveProdTrendConfiguredMode(normalized.displayOptions?.dataMode),
+            },
+        }
+        : normalized;
 }

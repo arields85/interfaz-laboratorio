@@ -16,6 +16,7 @@ import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComp
 import { groupActivityAnalyticsIntervals } from '../../utils/activityAnalyticsGrouping';
 import { buildActivityAnalyticsSummarySegments } from '../../utils/activityAnalyticsSummarySegments';
 import { DEFAULT_ACTIVITY_ANALYTICS_PROD_TREND_BAND_ALPHAS } from '../../utils/activityAnalyticsWidgetDefaults';
+import * as activityAnalyticsSimulation from '../../utils/activityAnalyticsSimulation';
 import ActivityAnalyticsWidget, { resolveProdTrendLatestValueLabelPlacement, resolveSummaryTravelingTopCapRoute } from './ActivityAnalyticsWidget';
 
 class MockResizeObserver implements ResizeObserver {
@@ -669,6 +670,194 @@ describe('ActivityAnalyticsWidget', () => {
             resolvedTimezone: 'UTC',
         });
         vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult());
+    });
+
+    it('supports analytics data mode: simulated renders immediately and bypasses real network states', () => {
+        vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-06-19T12:00:00.000Z'));
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({
+            isLoading: true,
+            isError: true,
+            error: new DataServiceError('offline'),
+            isFetching: true,
+            isRefreshing: true,
+        }));
+        vi.mocked(isDataActivitySeriesEnabled).mockReturnValue(false);
+        vi.mocked(useActivitySeries).mockClear();
+        vi.mocked(isDataActivitySeriesEnabled).mockClear();
+        installVisibleIntersectionObserver();
+        installImmediateIdleCallback();
+
+        renderWithQueryClient(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' },
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        dataMode: 'simulated',
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={[]}
+                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
+                isLoadingOverview
+                hasOverviewError
+                isLoadingData
+            />,
+        );
+
+        const icon = screen.getByTestId('activity-analytics-widget-header-icon');
+        const dot = screen.getByTestId('activity-analytics-widget-data-mode');
+        const title = screen.getByText('Análisis de Actividad');
+
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
+        expect(screen.queryByText('Seleccione una máquina')).not.toBeInTheDocument();
+        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
+        expect(screen.queryByText('Endpoint Activity-Series no configurado')).not.toBeInTheDocument();
+        expect(screen.queryByText('No se pudo actualizar')).not.toBeInTheDocument();
+        expect(vi.mocked(useActivitySeries)).toHaveBeenCalledWith(null);
+        expect(vi.mocked(isDataActivitySeriesEnabled)).not.toHaveBeenCalled();
+
+        act(() => MockIntersectionObserver.latest().emit(true));
+
+        expect(prefetchQuery).not.toHaveBeenCalled();
+        expect(icon.nextElementSibling).toBe(dot);
+        expect(dot.nextElementSibling).toBe(title);
+        expect(dot).toHaveClass('text-admin-accent');
+        expect(dot).toHaveAttribute('aria-hidden', 'true');
+        expect(dot).not.toHaveAttribute('role');
+        expect(dot).not.toHaveAttribute('aria-live');
+        expect(dot).not.toHaveAttribute('aria-label');
+        expect(dot).toHaveTextContent('');
+        expect(screen.queryByText(/^(REAL|SIMULADO)$/)).not.toBeInTheDocument();
+    });
+
+    it('supports analytics data mode: simulated routes shared history through analytics across selectors', async () => {
+        const user = userEvent.setup();
+        const nowMs = Date.parse('2026-06-19T12:00:00.000Z');
+        vi.spyOn(Date, 'now').mockReturnValue(nowMs);
+        const buildHistory = vi.spyOn(activityAnalyticsSimulation, 'buildActivityAnalyticsSimulatedHistory');
+        const computeAnalytics = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics');
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' },
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        dataMode: 'simulated',
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={[]}
+            />,
+        );
+
+        const sevenDayCallIndex = buildHistory.mock.calls.findIndex(([options]) => options.range === '7d');
+        const sevenDayHistory = buildHistory.mock.results[sevenDayCallIndex]?.value;
+
+        expect(sevenDayHistory).toBeDefined();
+        expect(buildHistory.mock.calls[sevenDayCallIndex]?.[0]).toMatchObject({
+            widgetId: 'activity-analytics-1',
+            machineId: undefined,
+            range: '7d',
+            nowMs,
+        });
+        expect(computeAnalytics.mock.calls.some(([options]) => (
+            options.range === '7d' && options.series === sevenDayHistory?.series
+        ))).toBe(true);
+
+        await user.click(screen.getByRole('button', { name: '30d' }));
+
+        const thirtyDayCallIndex = buildHistory.mock.calls.findIndex(([options]) => options.range === '30d');
+        const thirtyDayHistory = buildHistory.mock.results[thirtyDayCallIndex]?.value;
+
+        expect(thirtyDayHistory).toBeDefined();
+        expect(buildHistory.mock.calls[thirtyDayCallIndex]?.[0].nowMs).toBe(nowMs);
+        expect(computeAnalytics.mock.calls.some(([options]) => (
+            options.range === '30d' && options.series === thirtyDayHistory?.series
+        ))).toBe(true);
+        expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('supports analytics data mode: real preserves machine validation and the Activity-Series query path', () => {
+        const missingMachineView = render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' },
+                    displayOptions: { ...makeWidget().displayOptions, dataMode: 'real' },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getByText('Seleccione una máquina')).toBeInTheDocument();
+        expect(vi.mocked(useActivitySeries)).toHaveBeenLastCalledWith(null);
+        missingMachineView.unmount();
+
+        vi.mocked(useActivitySeries).mockClear();
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }));
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, dataMode: 'real' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        const icon = screen.getByTestId('activity-analytics-widget-header-icon');
+        const dot = screen.getByTestId('activity-analytics-widget-data-mode');
+        const title = screen.getByText('Análisis de Actividad');
+
+        expect(vi.mocked(useActivitySeries)).toHaveBeenCalledWith({ machineId: 101, range: '7d' });
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
+        expect(icon.nextElementSibling).toBe(dot);
+        expect(dot.nextElementSibling).toBe(title);
+        expect(dot).toHaveClass('text-status-normal');
+    });
+
+    it('supports analytics data mode: simulated cannot inherit a stale real refresh snapshot', () => {
+        const activitySeriesState = {
+            current: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
+        };
+        vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
+        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ series }) => (
+            buildComputedSnapshot(series.length > 1 ? 'Simulated snapshot' : 'Real snapshot')
+        ));
+
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, dataMode: 'real' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByText('Real snapshot').length).toBeGreaterThan(0);
+
+        activitySeriesState.current = createActivitySeriesResult({
+            data: null,
+            isError: true,
+            error: new DataServiceError('offline'),
+            isFetching: true,
+            isRefreshing: true,
+        });
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' },
+                    displayOptions: { ...makeWidget().displayOptions, dataMode: 'simulated' },
+                })}
+                machines={[]}
+                connection={{ globalStatus: 'offline', lastSuccess: null, ageMs: null }}
+                hasOverviewError
+                isLoadingData
+            />,
+        );
+
+        expect(screen.getAllByText('Simulated snapshot').length).toBeGreaterThan(0);
+        expect(screen.queryByText('Real snapshot')).not.toBeInTheDocument();
+        expect(screen.queryByText('No se pudo actualizar')).not.toBeInTheDocument();
     });
 
     it('shows a missing-machine state before querying when the widget has no machine binding', () => {

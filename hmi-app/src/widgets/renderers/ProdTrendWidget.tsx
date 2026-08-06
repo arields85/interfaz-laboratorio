@@ -13,12 +13,13 @@ import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
+import AnalyticsDataModeDot from '../../components/ui/AnalyticsDataModeDot';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import type { ProdTrendWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import { PROD_TREND_HISTORY_VARIABLE_KEY } from '../../domain/prodTrendDataMode.types';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { useProdTrendDataSource, type UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
+import { useProdTrendDataSource } from '../../queries/useProdTrendDataSource';
 import { DataServiceError } from '../../services/dataOverview.service';
 import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
 import { computeActivityAnalytics, resolveActivityAnalyticsComparableProductivityRatio } from '../../utils/activityAnalyticsComputation';
@@ -26,7 +27,7 @@ import { resolveActivityAnalyticsDisplayRules } from '../../utils/activityAnalyt
 import { resolveActivityAnalyticsTimezone } from '../../utils/activityAnalyticsGrouping';
 import { buildAreaPath, clamp, computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx, measureSmoothPathLength, resolveAnimationDurationSecondsFromPathLength, smoothPath } from '../../utils/chartHelpers';
 import { createDefaultProdTrendDisplayOptions, resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
-import { buildTrendChartV2SimulatedHistory } from '../../utils/trendChartV2Simulation';
+import { buildActivityAnalyticsSimulatedHistory } from '../../utils/activityAnalyticsSimulation';
 
 interface ProdTrendWidgetProps {
     widget: ProdTrendWidgetConfig;
@@ -184,13 +185,13 @@ export default function ProdTrendWidget({
         connection,
         hasOverviewError,
     });
-    const sourceMachineId = machineBinding.status === 'valid'
-        || (displayOptions.dataMode !== 'real' && machineBinding.reason === 'machine_lookup_pending_or_missing')
-        ? machineBinding.machineId
-        : null;
+    const sourceMachineId = machineBinding.status === 'valid' ? machineBinding.machineId : null;
+    const simulatedMachineId = typeof widget.binding?.machineId === 'number'
+        ? widget.binding.machineId
+        : undefined;
     const simulatedMetricKey = widget.binding?.variableKey ?? PROD_TREND_HISTORY_VARIABLE_KEY;
     const simulatedMetric = machines
-        ?.find((machine) => machine.unitId === machineBinding.machineId)
+        ?.find((machine) => machine.unitId === simulatedMachineId)
         ?.values[simulatedMetricKey];
     const { config, shifts } = useTemporalSettings();
     const activitySeriesParams = sourceMachineId != null
@@ -201,36 +202,35 @@ export default function ProdTrendWidget({
                 : { range: activeDisplayOptions.range }),
         }
         : null;
-    const activitySeriesIdentity = activeDisplayOptions.range === 'custom'
-        ? {
-            machineId: sourceMachineId ?? 0,
-            range: 'custom' as const,
-            start: activeDisplayOptions.start ?? '',
-            end: activeDisplayOptions.end ?? '',
-        }
-        : {
-            machineId: sourceMachineId ?? 0,
-            range: activeDisplayOptions.range,
-        };
     const dataSource = useProdTrendDataSource({
         configuredMode: displayOptions.dataMode,
         params: activitySeriesParams,
-        identity: activitySeriesIdentity,
     });
     const simulatedActivityData = useMemo(() => {
         if (displayOptions.dataMode !== 'simulated') {
             return null;
         }
 
-        const simulatedHistory = buildTrendChartV2SimulatedHistory({
+        const simulatedHistory = buildActivityAnalyticsSimulatedHistory({
             widgetId: widget.id,
-            machineId: sourceMachineId ?? undefined,
+            machineId: simulatedMachineId,
             variableKey: simulatedMetricKey,
             range: activeDisplayOptions.range,
             customWindow: activeDisplayOptions.range === 'custom'
                 ? { start: activeDisplayOptions.start ?? '', end: activeDisplayOptions.end ?? '' }
                 : undefined,
             baseValue: (activeDisplayOptions.setupThresholdKw + activeDisplayOptions.prodThresholdKw) / 2,
+            operatingLevels: {
+                stopped: Math.max(activeDisplayOptions.setupThresholdKw * 0.2, 0),
+                setup: activeDisplayOptions.setupThresholdKw
+                    + ((activeDisplayOptions.prodThresholdKw - activeDisplayOptions.setupThresholdKw) * 0.45),
+                production: activeDisplayOptions.prodThresholdKw
+                    + Math.max(
+                        (activeDisplayOptions.prodThresholdKw - activeDisplayOptions.setupThresholdKw) * 0.35,
+                        activeDisplayOptions.prodThresholdKw * 0.08,
+                        0.1,
+                    ),
+            },
             nowMs: simulatedNowMs,
         });
 
@@ -244,7 +244,7 @@ export default function ProdTrendWidget({
                 bucket: 'synthetic',
             },
         };
-    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, displayOptions.dataMode, simulatedMetric?.unit, simulatedMetricKey, simulatedNowMs, sourceMachineId, widget.binding?.unit, widget.id]);
+    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, displayOptions.dataMode, simulatedMachineId, simulatedMetric?.unit, simulatedMetricKey, simulatedNowMs, widget.binding?.unit, widget.id]);
     const activityData = displayOptions.dataMode === 'simulated'
         ? simulatedActivityData
         : dataSource.response;
@@ -308,63 +308,66 @@ export default function ProdTrendWidget({
         return () => observer.disconnect();
     }, [grouped.length]);
 
-    const dataModeIndicator = renderProdTrendDataModeIndicator(dataSource);
+    const dataModeDot = (
+        <AnalyticsDataModeDot
+            mode={dataSource.effectiveMode}
+            testId="prod-trend-widget-data-mode"
+        />
+    );
     const header = (
         <WidgetHeader
             title={widget.title ?? 'PROD-TREND'}
+            titleLeading={dataModeDot}
             icon={TrendingUp}
             iconPosition="left"
             iconTestId="prod-trend-widget-header-icon"
             className={WIDGET_CHART_HEADER_CLASS}
             trailing={(
-                <>
-                    {dataModeIndicator}
-                    <WidgetHeaderTemporalControls
-                        variant="pill"
-                        testId="prod-trend-widget-runtime-controls"
-                        indicatorTestId="prod-trend-widget-runtime-control-indicator"
-                        groups={[
-                            {
-                                testId: 'prod-trend-widget-runtime-range-selector',
-                                options: RANGE_OPTIONS,
-                                selectedValue: activeDisplayOptions.range,
-                                onSelect: (value) => {
-                                    const nextRange = value as ResolvedProdTrendDisplayOptions['range'];
-                                    const nextDisplayOptions = {
-                                        ...widget.displayOptions,
-                                        ...activeDisplayOptions,
-                                        range: nextRange,
-                                        start: undefined,
-                                        end: undefined,
-                                    } satisfies ResolvedProdTrendDisplayOptions;
+                <WidgetHeaderTemporalControls
+                    variant="pill"
+                    testId="prod-trend-widget-runtime-controls"
+                    indicatorTestId="prod-trend-widget-runtime-control-indicator"
+                    groups={[
+                        {
+                            testId: 'prod-trend-widget-runtime-range-selector',
+                            options: RANGE_OPTIONS,
+                            selectedValue: activeDisplayOptions.range,
+                            onSelect: (value) => {
+                                const nextRange = value as ResolvedProdTrendDisplayOptions['range'];
+                                const nextDisplayOptions = {
+                                    ...widget.displayOptions,
+                                    ...activeDisplayOptions,
+                                    range: nextRange,
+                                    start: undefined,
+                                    end: undefined,
+                                } satisfies ResolvedProdTrendDisplayOptions;
 
-                                    setRuntimeViewState((current) => ({
-                                        ...current,
-                                        selectionOverride: nextDisplayOptions,
-                                    }));
-                                },
+                                setRuntimeViewState((current) => ({
+                                    ...current,
+                                    selectionOverride: nextDisplayOptions,
+                                }));
                             },
-                            {
-                                testId: 'prod-trend-widget-runtime-group-selector',
-                                options: groupBySelectOptions,
-                                selectedValue: activeGroupBy,
-                                onSelect: (value) => {
-                                    const nextGroupBy = value as RuntimeProdTrendGroupBy;
+                        },
+                        {
+                            testId: 'prod-trend-widget-runtime-group-selector',
+                            options: groupBySelectOptions,
+                            selectedValue: activeGroupBy,
+                            onSelect: (value) => {
+                                const nextGroupBy = value as RuntimeProdTrendGroupBy;
 
-                                    setRuntimeViewState((current) => ({
-                                        ...current,
-                                        runtimeGroupBy: nextGroupBy,
-                                    }));
-                                },
+                                setRuntimeViewState((current) => ({
+                                    ...current,
+                                    runtimeGroupBy: nextGroupBy,
+                                }));
                             },
-                        ]}
-                    />
-                </>
+                        },
+                    ]}
+                />
             )}
         />
     );
 
-    if (machineBinding.status === 'missing') {
+    if (displayOptions.dataMode === 'real' && machineBinding.status === 'missing') {
         return renderRuntimeState({
             className,
             header,
@@ -373,9 +376,8 @@ export default function ProdTrendWidget({
         });
     }
 
-    if (machineBinding.status === 'invalid') {
-        if (displayOptions.dataMode !== 'simulated'
-            && isLoadingOverview
+    if (displayOptions.dataMode === 'real' && machineBinding.status === 'invalid') {
+        if (isLoadingOverview
             && machineBinding.reason === 'machine_lookup_pending_or_missing') {
             return renderRuntimeState({
                 className,
@@ -384,7 +386,7 @@ export default function ProdTrendWidget({
             });
         }
 
-        if (isOverviewUnavailable && displayOptions.dataMode === 'real') {
+        if (isOverviewUnavailable) {
             return renderRuntimeState({
                 className,
                 header,
@@ -392,14 +394,12 @@ export default function ProdTrendWidget({
             });
         }
 
-        if (displayOptions.dataMode === 'real' || machineBinding.reason !== 'machine_lookup_pending_or_missing') {
-            return renderRuntimeState({
-                className,
-                header,
-                label: 'Seleccione una máquina válida',
-                state: 'invalid-config',
-            });
-        }
+        return renderRuntimeState({
+            className,
+            header,
+            label: 'Seleccione una máquina válida',
+            state: 'invalid-config',
+        });
     }
 
     if (displayOptions.dataMode !== 'simulated' && !isDataActivitySeriesEnabled()) {
@@ -437,9 +437,7 @@ export default function ProdTrendWidget({
         return renderRuntimeState({
             className,
             header,
-            ...(isTrustedBackupUnavailable(dataSource)
-                ? { label: 'Respaldo histórico confiable no disponible', state: 'error' as const }
-                : resolveErrorState(dataSource.error)),
+            ...resolveErrorState(dataSource.error),
         });
     }
 
@@ -1678,79 +1676,6 @@ function resolveProcessingErrorState(error: unknown) {
     }
 
     return resolveErrorState(error instanceof Error ? error : null);
-}
-
-const PROD_TREND_DATA_MODE_LABELS: Record<UseProdTrendDataSourceResult['effectiveMode'], string> = {
-    real: 'REAL',
-    simulated: 'SIMULADO',
-    fallback: 'FALLBACK',
-};
-
-const PROD_TREND_DATA_MODE_TEXT_CLASSES: Record<UseProdTrendDataSourceResult['effectiveMode'], string> = {
-    real: 'text-status-normal',
-    simulated: 'text-admin-accent',
-    fallback: 'text-status-warning',
-};
-
-function renderProdTrendDataModeIndicator(dataSource: UseProdTrendDataSourceResult) {
-    const mode = dataSource.effectiveMode;
-    const detail = resolveProdTrendFallbackDetail(dataSource);
-
-    return (
-        <span
-            data-testid="prod-trend-widget-data-mode"
-            role="status"
-            aria-live="polite"
-            aria-describedby={detail ? 'prod-trend-widget-data-mode-detail' : undefined}
-            className={`inline-flex items-center gap-1.5 uppercase ${PROD_TREND_DATA_MODE_TEXT_CLASSES[mode]}`}
-        >
-            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-            <span>{PROD_TREND_DATA_MODE_LABELS[mode]}</span>
-            {detail && (
-                <span id="prod-trend-widget-data-mode-detail" data-testid="prod-trend-widget-data-mode-detail" className="sr-only">
-                    {detail}
-                </span>
-            )}
-        </span>
-    );
-}
-
-function resolveProdTrendFallbackDetail(dataSource: UseProdTrendDataSourceResult): string | null {
-    if (dataSource.effectiveMode !== 'fallback') {
-        return null;
-    }
-
-    const lastRealSuccess = formatProdTrendLastRealSuccess(dataSource.lastRealSuccessAt);
-
-    if (dataSource.source === 'last-known-good') {
-        return `El historial real no está disponible temporalmente. Se muestra un respaldo histórico confiable del último éxito real. ${lastRealSuccess} Razón de respaldo: ${dataSource.state.fallbackReason ?? 'invalid-contract'}. Fuente: último dato real válido (last-known-good).`;
-    }
-
-    if (dataSource.source === 'packaged-capture') {
-        return `El historial real no está disponible temporalmente. Se muestra una plantilla histórica confiable. ${lastRealSuccess} Razón de respaldo: ${dataSource.state.fallbackReason ?? 'invalid-contract'}. Fuente: plantilla histórica (historical-template).`;
-    }
-
-    return `El historial real no está disponible temporalmente y no hay un respaldo histórico confiable disponible. ${lastRealSuccess} Razón de respaldo: ${dataSource.state.fallbackReason ?? 'invalid-contract'}. Fuente: ninguna.`;
-}
-
-function isTrustedBackupUnavailable(dataSource: UseProdTrendDataSourceResult): boolean {
-    return dataSource.effectiveMode !== 'real' && dataSource.response === null && dataSource.error !== null;
-}
-
-function formatProdTrendLastRealSuccess(timestampMs: number | null | undefined): string {
-    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs) || timestampMs <= 0) {
-        return 'Último éxito real: no disponible.';
-    }
-
-    const timestamp = new Date(timestampMs);
-    if (Number.isNaN(timestamp.getTime())) {
-        return 'Último éxito real: no disponible.';
-    }
-
-    return `Último éxito real: ${new Intl.DateTimeFormat(undefined, {
-        dateStyle: 'short',
-        timeStyle: 'medium',
-    }).format(timestamp)}.`;
 }
 
 function renderRuntimeState({

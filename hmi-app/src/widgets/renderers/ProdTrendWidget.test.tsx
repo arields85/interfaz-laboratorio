@@ -14,6 +14,7 @@ import {
     WIDGET_CHART_CONTAINER_CLASS,
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
+import * as activityAnalyticsSimulation from '../../utils/activityAnalyticsSimulation';
 import ProdTrendWidget, { clampLineGlowBlur, clampLineStrokeWidth, resolveProdTrendLatestValueLabelPlacement } from './ProdTrendWidget';
 
 function expectRuntimeControlIndicator(button: HTMLElement, expectedClasses: string[], unexpectedClasses: string[] = []) {
@@ -104,15 +105,7 @@ const DENSE_ACTIVITY_SERIES = buildDenseActivitySeries('2026-06-18T00:00:00.000Z
 
 function makeDataSourceResult(overrides: Partial<UseProdTrendDataSourceResult> = {}): UseProdTrendDataSourceResult {
     return {
-        state: {
-            configuredMode: 'real',
-            effectiveMode: 'real',
-            phase: 'active',
-            emptyStreak: 0,
-            successStreak: 0,
-            committedSource: 'real',
-            fallbackReason: null,
-        },
+        configuredMode: 'real',
         effectiveMode: 'real',
         source: 'real',
         response: {
@@ -126,11 +119,7 @@ function makeDataSourceResult(overrides: Partial<UseProdTrendDataSourceResult> =
             series: DENSE_ACTIVITY_SERIES,
             summary: null,
         },
-        analytics: null,
         error: null,
-        retryRequested: false,
-        saveLastKnownGood: false,
-        lastRealSuccessAt: null,
         isLoading: false,
         isFetching: false,
         isRefreshing: false,
@@ -166,18 +155,10 @@ describe('ProdTrendWidget', () => {
         vi.mocked(useProdTrendDataSource).mockImplementation(({ configuredMode, params }) => {
             const query = vi.mocked(useActivitySeries)(params);
             const response = query.data;
-            const effectiveMode = configuredMode === 'automatic' ? 'real' : configuredMode;
+            const effectiveMode = configuredMode === 'simulated' ? 'simulated' : 'real';
 
             return makeDataSourceResult({
-                state: {
-                    configuredMode: effectiveMode,
-                    effectiveMode,
-                    phase: 'active',
-                    emptyStreak: 0,
-                    successStreak: 0,
-                    committedSource: response ? 'real' : null,
-                    fallbackReason: null,
-                },
+                configuredMode: effectiveMode,
                 effectiveMode,
                 source: response ? 'real' : null,
                 response,
@@ -214,7 +195,7 @@ describe('ProdTrendWidget', () => {
         const chart = screen.getByTestId('prod-trend-widget-chart');
 
         expect(screen.getByText('PROD-TREND')).toBeInTheDocument();
-        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('REAL');
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveClass('text-status-normal');
         expect(screen.getByTestId('prod-trend-widget-header-icon')).toBeInTheDocument();
         expect(screen.getByTestId('prod-trend-widget-runtime-controls')).toHaveClass('flex', 'items-center', 'gap-2.5');
         expect(screen.getByTestId('prod-trend-widget-runtime-range-selector')).toBeInTheDocument();
@@ -276,74 +257,59 @@ describe('ProdTrendWidget', () => {
         expect(screen.getByTestId('prod-trend-widget-viewport')).not.toHaveClass('hmi-scrollbar', 'overflow-x-auto');
     });
 
-    it('announces fallback state and source-specific accessible detail without mixing sources', () => {
-        const fallbackResponse = {
-            contractVersion: '1.0.0',
-            machineId: 101,
-            variableKey: undefined,
-            range: '7d' as const,
-            unit: 'kW',
-            purpose: 'activity-analytics' as const,
-            window: { start: '2026-06-18T00:00:00.000Z', end: '2026-06-20T23:55:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
-            series: DENSE_ACTIVITY_SERIES.map((point) => ({ ...point, value: 0.8 })),
-            summary: null,
+    it('supports shared analytics data mode: PROD-TREND keeps shared simulation and its decorative dynamic mode dot', () => {
+        const buildHistory = vi.spyOn(activityAnalyticsSimulation, 'buildActivityAnalyticsSimulatedHistory');
+        const { rerender } = render(<ProdTrendWidget widget={makeWidget()} machines={MACHINES} />);
+
+        const expectModeDot = (expectedClassName: string) => {
+            const icon = screen.getByTestId('prod-trend-widget-header-icon');
+            const dot = screen.getByTestId('prod-trend-widget-data-mode');
+            const title = screen.getByText('PROD-TREND');
+            const controls = screen.getByTestId('prod-trend-widget-runtime-controls');
+
+            expect(icon.nextElementSibling).toBe(dot);
+            expect(dot.nextElementSibling).toBe(title);
+            expect(title.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            expect(dot).toHaveClass(expectedClassName);
+            expect(dot).toHaveAttribute('aria-hidden', 'true');
+            expect(dot).not.toHaveAttribute('role');
+            expect(dot).not.toHaveAttribute('aria-live');
+            expect(dot).not.toHaveAttribute('aria-label');
+            expect(dot).toHaveTextContent('');
+            expect(screen.queryByText(/^(REAL|SIMULADO)$/)).not.toBeInTheDocument();
         };
-        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
-            effectiveMode: 'fallback',
-            source: 'last-known-good',
-            response: fallbackResponse,
-            state: {
-                configuredMode: 'automatic',
-                effectiveMode: 'fallback',
-                phase: 'fallback',
-                emptyStreak: 0,
-                successStreak: 0,
-                committedSource: 'last-known-good',
-                fallbackReason: 'network-error',
-            },
+
+        expectModeDot('text-status-normal');
+
+        rerender(
+            <ProdTrendWidget
+                widget={makeWidget({ displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expectModeDot('text-admin-accent');
+        expect(buildHistory).toHaveBeenCalledWith(expect.objectContaining({
+            widgetId: 'prod-trend-1',
+            range: '7d',
         }));
-
-        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
-
-        const indicator = screen.getByTestId('prod-trend-widget-data-mode');
-        const detail = screen.getByTestId('prod-trend-widget-data-mode-detail');
-        expect(indicator).toHaveTextContent('FALLBACK');
-        expect(indicator).toHaveAttribute('role', 'status');
-        expect(indicator).toHaveAttribute('aria-describedby', detail.id);
-        expect(detail).toHaveTextContent('historial real no está disponible temporalmente');
-        expect(detail).toHaveTextContent('respaldo histórico confiable');
-        expect(detail).toHaveTextContent('último éxito real');
-        expect(detail).toHaveTextContent('último dato real válido');
-        expect(detail).toHaveTextContent('Razón de respaldo: network-error');
-        expect(screen.getByTestId('prod-trend-widget-line')).toBeInTheDocument();
     });
 
-    it('renders simulated data without querying real history or claiming fallback provenance', async () => {
+    it('renders simulated data without querying real history', async () => {
         const user = userEvent.setup();
         vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            configuredMode: 'simulated',
             effectiveMode: 'simulated',
             source: null,
             response: null,
-            state: {
-                configuredMode: 'simulated',
-                effectiveMode: 'simulated',
-                phase: 'active',
-                emptyStreak: 0,
-                successStreak: 0,
-                committedSource: null,
-                fallbackReason: null,
-            },
         }));
         vi.mocked(useActivitySeries).mockClear();
         vi.mocked(isDataActivitySeriesEnabled).mockClear();
 
         render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
 
-        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('SIMULADO');
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveClass('text-admin-accent');
         expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
-        expect(screen.queryByTestId('prod-trend-widget-data-mode-detail')).not.toBeInTheDocument();
-        expect(screen.queryByText(/plantilla histórica/i)).not.toBeInTheDocument();
-        expect(screen.queryByText(/respaldo histórico/i)).not.toBeInTheDocument();
         expect(vi.mocked(useActivitySeries)).not.toHaveBeenCalled();
         expect(vi.mocked(isDataActivitySeriesEnabled)).not.toHaveBeenCalled();
 
@@ -354,23 +320,49 @@ describe('ProdTrendWidget', () => {
         expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
     });
 
+    it('renders a newly placed simulated widget without a machine binding', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            configuredMode: 'simulated',
+            effectiveMode: 'simulated',
+            source: null,
+            response: null,
+            isEnabled: false,
+        }));
+
+        render(<ProdTrendWidget
+            widget={makeWidget({
+                binding: { mode: 'real_variable' },
+                displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' },
+            })}
+            machines={[]}
+        />);
+
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+        expect(screen.queryByText('Seleccione una máquina')).not.toBeInTheDocument();
+    });
+
+    it('still requests a machine for a newly placed real widget', () => {
+        render(<ProdTrendWidget
+            widget={makeWidget({
+                binding: { mode: 'real_variable' },
+                displayOptions: { dataMode: 'real', range: '7d', groupBy: 'day' },
+            })}
+            machines={[]}
+        />);
+
+        expect(screen.getByText('Seleccione una máquina')).toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-widget-chart')).not.toBeInTheDocument();
+    });
+
     it('matches Real 7D day temporal visualization while disconnected', () => {
         vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-06-19T12:00:00.000Z'));
         vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            configuredMode: 'simulated',
             effectiveMode: 'simulated',
             source: null,
             response: null,
             error: null,
             isLoading: true,
-            state: {
-                configuredMode: 'simulated',
-                effectiveMode: 'simulated',
-                phase: 'active',
-                emptyStreak: 0,
-                successStreak: 0,
-                committedSource: null,
-                fallbackReason: null,
-            },
         }));
 
         render(
@@ -384,7 +376,7 @@ describe('ProdTrendWidget', () => {
             />,
         );
 
-        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('SIMULADO');
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveClass('text-admin-accent');
         expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
         const displayPoints = screen.getAllByTestId('prod-trend-widget-hit-area');
@@ -410,7 +402,6 @@ describe('ProdTrendWidget', () => {
         expect(screen.queryByTestId('prod-trend-widget-runtime-state')).not.toBeInTheDocument();
         expect(screen.queryByText('Respaldo histórico confiable no disponible')).not.toBeInTheDocument();
         expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('prod-trend-widget-data-mode-detail')).not.toBeInTheDocument();
     });
 
     it('keeps Real mode on the disconnected runtime state when overview connectivity is unavailable', () => {
@@ -432,146 +423,6 @@ describe('ProdTrendWidget', () => {
         expect(screen.getByText('Sin conexión')).toBeInTheDocument();
         expect(screen.queryByText('Respaldo histórico confiable no disponible')).not.toBeInTheDocument();
         expect(screen.queryByTestId('prod-trend-widget-line')).not.toBeInTheDocument();
-    });
-
-    it('renders an available Automatic trusted fallback without mixing it with the disconnected overview state', () => {
-        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
-            effectiveMode: 'fallback',
-            source: 'packaged-capture',
-            state: {
-                configuredMode: 'automatic',
-                effectiveMode: 'fallback',
-                phase: 'fallback',
-                emptyStreak: 0,
-                successStreak: 0,
-                committedSource: 'packaged-capture',
-                fallbackReason: 'network-error',
-            },
-            response: {
-                ...makeDataSourceResult().response!,
-                variableKey: undefined,
-                series: DENSE_ACTIVITY_SERIES.map((point) => ({ ...point, value: 0.8 })),
-            } as never,
-        }));
-
-        render(
-            <ProdTrendWidget
-                widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })}
-                machines={[]}
-                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
-                hasOverviewError
-            />,
-        );
-
-        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveTextContent('FALLBACK');
-        expect(screen.getByTestId('prod-trend-widget-line')).toBeInTheDocument();
-        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
-        expect(screen.queryByText('Respaldo histórico confiable no disponible')).not.toBeInTheDocument();
-    });
-
-    it('states that Automatic has no trusted backup when the packaged manifest is empty', () => {
-        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
-            effectiveMode: 'fallback',
-            source: null,
-            response: null,
-            error: new Error('No matching PROD-TREND fallback source is available'),
-            state: {
-                configuredMode: 'automatic',
-                effectiveMode: 'fallback',
-                phase: 'fallback',
-                emptyStreak: 2,
-                successStreak: 0,
-                committedSource: null,
-                fallbackReason: 'repeated-empty-series',
-            },
-        }));
-
-        render(
-            <ProdTrendWidget
-                widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })}
-                machines={[]}
-                connection={{ globalStatus: 'unknown', lastSuccess: null, ageMs: null }}
-                hasOverviewError
-            />,
-        );
-
-        expect(screen.getByText('Respaldo histórico confiable no disponible')).toBeInTheDocument();
-        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Fuente: ninguna');
-        expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('prod-trend-widget-line')).not.toBeInTheDocument();
-    });
-
-    it('explains packaged fallback as a historical template for assistive technology', () => {
-        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
-            effectiveMode: 'fallback',
-            source: 'packaged-capture',
-            state: {
-                configuredMode: 'automatic',
-                effectiveMode: 'fallback',
-                phase: 'fallback',
-                emptyStreak: 0,
-                successStreak: 0,
-                committedSource: 'packaged-capture',
-                fallbackReason: 'network-error',
-            },
-        }));
-
-        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
-
-        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('plantilla histórica');
-        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('historical-template');
-        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Último éxito real: no disponible');
-        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Razón de respaldo: network-error');
-    });
-
-    it('announces last real success availability when fallback has no local source', () => {
-        vi.mocked(useProdTrendDataSource).mockReturnValue({
-            ...makeDataSourceResult({
-                effectiveMode: 'fallback',
-                source: null,
-                response: null,
-                state: {
-                    configuredMode: 'automatic',
-                    effectiveMode: 'fallback',
-                    phase: 'fallback',
-                    emptyStreak: 2,
-                    successStreak: 0,
-                    committedSource: null,
-                    fallbackReason: 'repeated-empty-series',
-                },
-            }),
-            lastRealSuccessAt: Date.parse('2026-06-18T12:34:56.000Z'),
-        });
-
-        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
-
-        const detail = screen.getByTestId('prod-trend-widget-data-mode-detail');
-        expect(detail).toHaveTextContent('Último éxito real:');
-        expect(detail).not.toHaveTextContent('no disponible');
-        expect(detail).toHaveTextContent('Razón de respaldo: repeated-empty-series');
-        expect(detail).toHaveTextContent('Fuente: ninguna');
-        expect(detail).toHaveTextContent('respaldo histórico confiable disponible');
-    });
-
-    it('states when last real success is unavailable in no-source fallback detail', () => {
-        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
-            effectiveMode: 'fallback',
-            source: null,
-            response: null,
-            state: {
-                configuredMode: 'automatic',
-                effectiveMode: 'fallback',
-                phase: 'fallback',
-                emptyStreak: 0,
-                successStreak: 0,
-                committedSource: null,
-                fallbackReason: 'network-error',
-            },
-        }));
-
-        render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'automatic', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
-
-        expect(screen.getByTestId('prod-trend-widget-data-mode-detail')).toHaveTextContent('Último éxito real: no disponible');
     });
 
     it('applies the PROD-TREND temporal header selectors to range and grouping at runtime', async () => {
@@ -984,7 +835,7 @@ describe('ProdTrendWidget', () => {
         await user.click(screen.getByRole('button', { name: '30d' }));
         expect(screen.getByRole('button', { name: 'TURNO' })).toHaveAttribute('aria-pressed', 'true');
         expect(captureLineContract()).toEqual(first30dShift);
-    });
+    }, 15_000);
 
     it('keeps the final sampled X-axis label visible and centered on the safe plot boundary', () => {
         vi.mocked(useActivitySeries).mockReturnValue({

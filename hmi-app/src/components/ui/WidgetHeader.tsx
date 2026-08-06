@@ -36,6 +36,8 @@ import type { LucideIcon } from 'lucide-react';
 export interface WidgetHeaderProps {
     /** Texto principal del header (se renderiza en uppercase) */
     title: string;
+    /** Contenido visual opcional renderizado inmediatamente antes del título. */
+    titleLeading?: ReactNode;
     /** Ícono Lucide a mostrar en la esquina superior derecha */
     icon?: LucideIcon;
     /**
@@ -85,6 +87,7 @@ export interface WidgetHeaderProps {
 
 export default function WidgetHeader({
     title,
+    titleLeading,
     icon: Icon,
     iconPosition = 'right',
     iconColor = 'var(--color-widget-icon)',
@@ -122,7 +125,14 @@ export default function WidgetHeader({
 
         return (
             <div className={`flex flex-col items-center gap-2 ${className}`}>
-                {hasTitle ? titleNode : null}
+                {hasTitle ? (
+                    titleLeading ? (
+                        <div className="flex min-w-0 items-center gap-2">
+                            {titleLeading}
+                            {titleNode}
+                        </div>
+                    ) : titleNode
+                ) : null}
                 {iconNode}
             </div>
         );
@@ -136,6 +146,7 @@ export default function WidgetHeader({
                     <>
                         <div className="flex min-w-0 flex-1 items-center gap-2">
                             {iconNode}
+                            {titleLeading}
                             {titleNode}
                         </div>
                         {trailing && (
@@ -146,6 +157,7 @@ export default function WidgetHeader({
                     </>
                 ) : (
                     <>
+                        {titleLeading}
                         {titleNode}
 
                         {(iconNode || trailing) && (

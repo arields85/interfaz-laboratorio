@@ -31,6 +31,13 @@ import {
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 describe('activityAnalyticsWidgetDefaults', () => {
+    it('supports analytics data mode: missing defaults to real and simulated remains persisted', () => {
+        expect(createDefaultActivityAnalyticsDisplayOptions().dataMode).toBe('real');
+        expect(resolveActivityAnalyticsDisplayOptions().dataMode).toBe('real');
+        expect(resolveActivityAnalyticsDisplayOptions({ dataMode: 'simulated' }).dataMode).toBe('simulated');
+        expect(resolveActivityAnalyticsDisplayOptions({ dataMode: 'automatic' as never }).dataMode).toBe('real');
+    });
+
     it('exposes only first-release display modes', () => {
         expect(ACTIVITY_ANALYTICS_DISPLAY_MODE_OPTIONS).toEqual(['kpis-and-bars']);
     });

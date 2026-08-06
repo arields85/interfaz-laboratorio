@@ -17,6 +17,7 @@ import {
 import {
     resolveActivityAnalyticsDisplayRules,
 } from './activityAnalyticsDisplayRules';
+import { resolveAnalyticsDataMode } from './analyticsDataMode';
 
 export const DEFAULT_ACTIVITY_ANALYTICS_RANGE = '7d' as const;
 export const DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY = 'shift' as const;
@@ -122,7 +123,7 @@ export type ResolvedActivityAnalyticsProdTrendBands = {
 
 export type ResolvedActivityAnalyticsDisplayOptions = Required<Pick<
     ActivityAnalyticsDisplayOptions,
-    'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode' | 'groupBarWidth' | 'groupBarWidths' | 'coverageColor' | 'stateGradients' | 'stateGradientAlphas' | 'visualEffects'
+    'dataMode' | 'range' | 'groupBy' | 'setupThresholdKw' | 'prodThresholdKw' | 'displayMode' | 'groupBarWidth' | 'groupBarWidths' | 'coverageColor' | 'stateGradients' | 'stateGradientAlphas' | 'visualEffects'
 >> & Pick<ActivityAnalyticsDisplayOptions, 'start' | 'end' | 'donutCenterValueFontSize'>;
 export type ResolvedActivityAnalyticsDisplayOptionsWithTrendBands = ResolvedActivityAnalyticsDisplayOptions & {
     prodTrendBands: ResolvedActivityAnalyticsProdTrendBands;
@@ -381,6 +382,7 @@ export function createDefaultActivityAnalyticsDisplayOptions(): ActivityAnalytic
     const groupBarWidths = createDefaultActivityAnalyticsGroupBarWidths();
 
     return {
+        dataMode: resolveAnalyticsDataMode(undefined),
         range: DEFAULT_ACTIVITY_ANALYTICS_RANGE,
         groupBy: DEFAULT_ACTIVITY_ANALYTICS_GROUP_BY,
         setupThresholdKw: DEFAULT_ACTIVITY_ANALYTICS_SETUP_THRESHOLD_KW,
@@ -419,6 +421,7 @@ export function resolveActivityAnalyticsDisplayOptions(
     );
 
     return {
+        dataMode: resolveAnalyticsDataMode(displayOptions?.dataMode),
         range: displayRules.range,
         start: displayOptions?.start,
         end: displayOptions?.end,

@@ -946,7 +946,7 @@ describe('PropertyDock machine-activity', () => {
         expect(getFieldButtonInSection('General', 'Ícono')).toHaveTextContent('(Ícono pendiente)');
         expect(getFieldButtonInSection('General', 'Estilo')).toHaveTextContent('Radial');
 
-        expect(getFieldButtonInSection('Datos', 'Origen')).toHaveTextContent('Variable Real');
+        expect(getFieldButtonInSection('Datos', 'Modo')).toHaveTextContent('Real');
         expect(getFieldButtonInSection('Datos', 'Equipo')).toHaveTextContent('Seleccione...');
         expect(getFieldButtonInSection('Datos', 'Variable')).toHaveTextContent('Seleccione...');
         expect(screen.getByLabelText('Unidad custom')).toBeChecked();
@@ -1517,7 +1517,7 @@ describe('PropertyDock machine-activity', () => {
 
         expect(within(getSection('Escala Visual')).getByText('°C mín')).toBeInTheDocument();
 
-        await user.click(getFieldButtonInSection('Datos', 'Origen'));
+        await user.click(getFieldButtonInSection('Datos', 'Modo'));
         await user.click(screen.getByRole('button', { name: 'Simulado' }));
 
         expect(updates.at(-1)?.binding).toMatchObject({
@@ -1759,6 +1759,33 @@ describe('PropertyDock machine-activity', () => {
 });
 
 describe('PropertyDock activity-analytics', () => {
+    it('supports analytics data mode: orders Modo, conditional Equipo, and Rango with only Real or Simulado', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'activity-analytics',
+            binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' },
+            displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' },
+        });
+        const dataSection = getSection('Datos');
+        const simulatedText = dataSection.textContent ?? '';
+
+        expect(within(dataSection).getByRole('button', { name: 'Simulado' })).toBeInTheDocument();
+        expect(within(dataSection).queryByText('Equipo')).not.toBeInTheDocument();
+        expect(simulatedText.indexOf('Modo')).toBeLessThan(simulatedText.indexOf('Rango'));
+
+        await user.click(within(dataSection).getByRole('button', { name: 'Simulado' }));
+
+        expect(screen.getByRole('button', { name: 'Real' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Automático' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Real' }));
+
+        const realText = dataSection.textContent ?? '';
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ dataMode: 'real' });
+        expect(within(dataSection).getByText('Equipo')).toBeInTheDocument();
+        expect(realText.indexOf('Modo')).toBeLessThan(realText.indexOf('Equipo'));
+        expect(realText.indexOf('Equipo')).toBeLessThan(realText.indexOf('Rango'));
+    });
+
     it('shows the canonical activity analytics identity badge instead of the editable widget title', () => {
         renderPropertyDock({
             type: 'activity-analytics',
@@ -2768,7 +2795,7 @@ describe('PropertyDock prod-history', () => {
 
         expect(getFieldButtonInSection('General', 'Producción')).toHaveTextContent('Barras');
         expect(getFieldButtonInSection('Datos', 'Unidad')).toHaveTextContent('unidades');
-        expect(getFieldButtonInSection('Datos', 'Origen')).toHaveTextContent('Simulado');
+        expect(getFieldButtonInSection('Datos', 'Modo')).toHaveTextContent('Simulado');
 
         fireEvent.click(getFieldButtonInSection('General', 'Producción'));
         fireEvent.click(screen.getByRole('button', { name: 'Área' }));
@@ -2807,7 +2834,7 @@ describe('PropertyDock prod-history', () => {
             productionUnit: 'kg',
         });
 
-        fireEvent.click(getFieldButtonInSection('Datos', 'Origen'));
+        fireEvent.click(getFieldButtonInSection('Datos', 'Modo'));
         fireEvent.click(screen.getByRole('button', { name: 'Real' }));
 
         expect(updates.at(-1)?.binding).toMatchObject({
@@ -3505,34 +3532,52 @@ describe('PropertyDock KPI thresholds', () => {
         expect(sectionTitles.at(-1)).toBe('Navegación');
     });
 
-    it('offers only the three selectable PROD-TREND data modes and excludes fallback', async () => {
+    it('shows only Modo and Rango for simulated PROD-TREND and offers Simulado or Real', async () => {
         const { user } = renderPropertyDock({
             type: 'prod-trend',
-            displayOptions: { dataMode: 'real' },
+            displayOptions: { dataMode: 'simulated' },
         });
 
         const dataSection = getSection('Datos');
         expect(within(dataSection).getByText('Modo')).toBeInTheDocument();
-        expect(within(dataSection).getByRole('button', { name: 'Real' })).toBeInTheDocument();
+        expect(within(dataSection).getByRole('button', { name: 'Simulado' })).toBeInTheDocument();
+        expect(within(dataSection).queryByText('Equipo')).not.toBeInTheDocument();
+        expect(within(dataSection).getByText('Rango')).toBeInTheDocument();
 
-        await user.click(within(dataSection).getByRole('button', { name: 'Real' }));
+        await user.click(within(dataSection).getByRole('button', { name: 'Simulado' }));
 
-        expect(screen.getAllByRole('button', { name: 'Real' })).toHaveLength(2);
-        expect(screen.getByRole('button', { name: 'Simulado' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Automático' })).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Fallback' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Real' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Automático' })).not.toBeInTheDocument();
     });
 
-    it('persists a selected PROD-TREND mode through the existing widget update path', async () => {
-        const { user, updates } = renderPropertyDock({
+    it('orders PROD-TREND Modo before Equipo and Rango in real mode', () => {
+        renderPropertyDock({
             type: 'prod-trend',
             displayOptions: { dataMode: 'real' },
         });
 
         const dataSection = getSection('Datos');
-        await user.click(within(dataSection).getByRole('button', { name: 'Real' }));
-        await user.click(screen.getByRole('button', { name: 'Automático' }));
+        const text = dataSection.textContent ?? '';
 
-        expect(updates.at(-1)?.displayOptions).toMatchObject({ dataMode: 'automatic' });
+        expect(within(dataSection).getByText('Equipo')).toBeInTheDocument();
+        expect(text.indexOf('Modo')).toBeLessThan(text.indexOf('Equipo'));
+        expect(text.indexOf('Equipo')).toBeLessThan(text.indexOf('Rango'));
+    });
+
+    it('uses Modo with Simulado and Real for generic trend widgets', async () => {
+        const { user } = renderPropertyDock({
+            type: 'trend-chart',
+            binding: { mode: 'real_variable' },
+        });
+
+        const dataSection = getSection('Datos');
+        expect(within(dataSection).getByText('Modo')).toBeInTheDocument();
+        expect(within(dataSection).queryByText('Origen')).not.toBeInTheDocument();
+        expect(within(dataSection).getByRole('button', { name: 'Real' })).toBeInTheDocument();
+
+        await user.click(within(dataSection).getByRole('button', { name: 'Real' }));
+
+        expect(screen.getByRole('button', { name: 'Simulado' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Variable Real' })).not.toBeInTheDocument();
     });
 });

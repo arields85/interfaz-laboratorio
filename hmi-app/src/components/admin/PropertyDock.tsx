@@ -196,10 +196,9 @@ const ACTIVITY_ANALYTICS_RANGE_OPTIONS: Array<{ value: ActivityAnalyticsSupporte
     { value: '30d', label: '30 días' },
     { value: '12m', label: '12 meses' },
 ];
-const PROD_TREND_DATA_MODE_OPTIONS = [
+const ANALYTICS_DATA_MODE_OPTIONS = [
     { value: 'real', label: 'Real' },
     { value: 'simulated', label: 'Simulado' },
-    { value: 'automatic', label: 'Automático' },
 ];
 const ACTIVITY_ANALYTICS_GROUP_OPTIONS = [
     { value: 'shift', label: 'Turno' },
@@ -2147,48 +2146,53 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                                 {isActivityAnalytics || isProdTrend ? (
                                     <>
-                                        <DockFieldRow label="Equipo">
-                                            {dataLoading ? (
-                                                <div className={`${INPUT_CLS} flex items-center gap-2 text-industrial-muted`}>
-                                                    <Loader2 size={12} className="animate-spin" />
-                                                    <span>Cargando equipos...</span>
-                                                </div>
-                                            ) : dataError ? (
-                                                <div className={`${INPUT_CLS} flex items-center text-status-critical`}>
-                                                    Error cargando equipos
-                                                </div>
-                                            ) : !dataEnabled ? (
-                                                <div className={`${INPUT_CLS} flex items-center text-industrial-muted`}>
-                                                    No configurado
-                                                </div>
-                                            ) : machines.length === 0 ? (
-                                                <AdminSelect
-                                                    disabled
-                                                    value=""
-                                                    onChange={() => undefined}
-                                                    placeholder="Sin equipos"
-                                                    options={[]}
-                                                />
-                                            ) : (
-                                                <AdminSelect
-                                                    value={binding.machineId != null ? String(binding.machineId) : ''}
-                                                    onChange={handleMachineChange}
-                                                    placeholder="Seleccione..."
-                                                    options={machines.map(machine => ({
-                                                        value: String(machine.unitId),
-                                                        label: machine.name,
-                                                    }))}
-                                                />
-                                            )}
-                                        </DockFieldRow>
-
-                                        {isProdTrend && (
+                                        {(isActivityAnalytics || isProdTrend) && (
                                             <DockFieldRow label="Modo">
                                                 <AdminSelect
-                                                    value={prodTrendOptions?.dataMode ?? 'real'}
+                                                    value={isActivityAnalytics
+                                                        ? (activityAnalyticsOptions?.dataMode ?? 'real')
+                                                        : (prodTrendOptions?.dataMode ?? 'real')}
                                                     onChange={(value) => handleDisplayOptionChange('dataMode', value)}
-                                                    options={PROD_TREND_DATA_MODE_OPTIONS}
+                                                    options={ANALYTICS_DATA_MODE_OPTIONS}
                                                 />
+                                            </DockFieldRow>
+                                        )}
+
+                                        {((isActivityAnalytics && activityAnalyticsOptions?.dataMode === 'real')
+                                            || (isProdTrend && prodTrendOptions?.dataMode === 'real')) && (
+                                            <DockFieldRow label="Equipo">
+                                                {dataLoading ? (
+                                                    <div className={`${INPUT_CLS} flex items-center gap-2 text-industrial-muted`}>
+                                                        <Loader2 size={12} className="animate-spin" />
+                                                        <span>Cargando equipos...</span>
+                                                    </div>
+                                                ) : dataError ? (
+                                                    <div className={`${INPUT_CLS} flex items-center text-status-critical`}>
+                                                        Error cargando equipos
+                                                    </div>
+                                                ) : !dataEnabled ? (
+                                                    <div className={`${INPUT_CLS} flex items-center text-industrial-muted`}>
+                                                        No configurado
+                                                    </div>
+                                                ) : machines.length === 0 ? (
+                                                    <AdminSelect
+                                                        disabled
+                                                        value=""
+                                                        onChange={() => undefined}
+                                                        placeholder="Sin equipos"
+                                                        options={[]}
+                                                    />
+                                                ) : (
+                                                    <AdminSelect
+                                                        value={binding.machineId != null ? String(binding.machineId) : ''}
+                                                        onChange={handleMachineChange}
+                                                        placeholder="Seleccione..."
+                                                        options={machines.map(machine => ({
+                                                            value: String(machine.unitId),
+                                                            label: machine.name,
+                                                        }))}
+                                                    />
+                                                )}
                                             </DockFieldRow>
                                         )}
 
@@ -2204,7 +2208,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     <>
                                         {genericDataUnitField}
 
-                                        {hasCatalogSupport && (
+                                        {hasCatalogSupport && binding.mode === 'real_variable' && (
                                     <>
                                         <DockFieldRow label={<><span>Variable{isCatalogVariableRequired ? <span className="text-status-warning">*</span> : null}</span></>}>
                                             <CatalogVariableSelector
@@ -2313,7 +2317,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         )}
 
                                         <>
-                                        <DockFieldRow label="Origen">
+                                        <DockFieldRow label={isConnectionWidget ? 'Origen' : 'Modo'}>
                                             {isConnectionWidget ? (
                                                 <AdminSelect
                                                     value={connectionOrigin}
@@ -2332,7 +2336,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                     onChange={val => handleModeChange(val as WidgetBinding['mode'])}
                                                     options={[
                                                         { value: 'simulated_value', label: 'Simulado' },
-                                                        { value: 'real_variable', label: 'Variable Real' },
+                                                        { value: 'real_variable', label: 'Real' },
                                                     ]}
                                                 />
                                             )}
@@ -3297,8 +3301,7 @@ export default function PropertyDock(props: PropertyDockProps) {
 
                         {selectedWidget.type === 'prod-history' && (
                             <DockSection icon={<Database size={11} />} title="Datos">
-                                <div className="flex items-center gap-2">
-                                    <span className={LABEL_CLS}>Unidad</span>
+                                <DockFieldRow label="Unidad">
                                     <AdminSelect
                                         value={prodHistoryOptions?.productionUnit ?? 'unidades'}
                                         onChange={val => handleDisplayOptionChange('productionUnit', val)}
@@ -3309,10 +3312,9 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             { value: 'cuñetes', label: 'cuñetes' },
                                         ]}
                                     />
-                                </div>
+                                </DockFieldRow>
 
-                                <div className="flex items-center gap-2">
-                                    <span className={LABEL_CLS}>Origen</span>
+                                <DockFieldRow label="Modo">
                                     <AdminSelect
                                         value={binding.mode}
                                         onChange={val => handleModeChange(val as WidgetBinding['mode'])}
@@ -3321,12 +3323,11 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             { value: 'real_variable', label: 'Real' },
                                         ]}
                                     />
-                                </div>
+                                </DockFieldRow>
 
                                 {binding.mode === 'real_variable' && (
                                     <>
-                                        <div className="flex items-center gap-2">
-                                            <span className={LABEL_CLS}>Var. Prod.</span>
+                                        <DockFieldRow label="Var. Prod.">
                                             {selectedAsset ? (
                                                 <AdminSelect
                                                     value={prodHistoryOptions?.productionVariableKey || ''}
@@ -3346,10 +3347,9 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                     placeholder="Clave variable producción"
                                                 />
                                             )}
-                                        </div>
+                                        </DockFieldRow>
 
-                                        <div className="flex items-center gap-2">
-                                            <span className={LABEL_CLS}>Var. OEE</span>
+                                        <DockFieldRow label="Var. OEE">
                                             {selectedAsset ? (
                                                 <AdminSelect
                                                     value={prodHistoryOptions?.oeeVariableKey || ''}
@@ -3369,7 +3369,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                     placeholder="Clave variable OEE"
                                                 />
                                             )}
-                                        </div>
+                                        </DockFieldRow>
                                     </>
                                 )}
                             </DockSection>

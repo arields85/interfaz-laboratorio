@@ -4,6 +4,7 @@ import type {
     ProdTrendDisplayOptions,
 } from '../domain/admin.types';
 import type { ProdTrendConfiguredMode } from '../domain/prodTrendDataMode.types';
+import { resolveProdTrendConfiguredMode } from './prodTrendDataMode';
 import {
     DEFAULT_ACTIVITY_ANALYTICS_GROUP_BAR_WIDTH,
     DEFAULT_ACTIVITY_ANALYTICS_GROUPED_BAR_EFFECTS,
@@ -98,12 +99,6 @@ export function createDefaultProdTrendDisplayOptions(): ProdTrendDisplayOptions 
     };
 }
 
-function resolveProdTrendDataMode(value: unknown): ProdTrendConfiguredMode {
-    return value === 'simulated' || value === 'automatic' || value === 'real'
-        ? value
-        : DEFAULT_PROD_TREND_DATA_MODE;
-}
-
 export function resolveProdTrendDisplayOptions(
     displayOptions?: ProdTrendDisplayOptions,
     trendLineColorFallback: ActivityAnalyticsStateGradient = PROD_TREND_THEME_DEFAULT_LINE_COLOR_TOKENS,
@@ -130,7 +125,7 @@ export function resolveProdTrendDisplayOptions(
     });
 
     return {
-        dataMode: resolveProdTrendDataMode(displayOptions?.dataMode),
+        dataMode: resolveProdTrendConfiguredMode(displayOptions?.dataMode),
         range: resolvedActivityAnalytics.range,
         start: resolvedActivityAnalytics.start,
         end: resolvedActivityAnalytics.end,
