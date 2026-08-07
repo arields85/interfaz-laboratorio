@@ -5,6 +5,11 @@ import type { AlertHistoryEntry, WidgetStateSnapshot } from '../../domain/alertH
 import type { AlertHistoryWidgetConfig } from '../../domain/admin.types';
 import AlertHistoryWidget from './AlertHistoryWidget';
 
+interface CoordinatorState {
+    entries: AlertHistoryEntry[];
+    activeSeverity: 'normal' | 'warning' | 'critical';
+}
+
 const alertHistoryMock = vi.hoisted(() => {
     const state = {
         entries: [] as AlertHistoryEntry[],
@@ -12,8 +17,11 @@ const alertHistoryMock = vi.hoisted(() => {
         snapshots: {} as Record<string, WidgetStateSnapshot>,
     };
 
+    const listeners = new Set<(state: CoordinatorState) => void>();
+
     return {
         state,
+        listeners,
         getEntries: vi.fn((dashboardId: string) => {
             void dashboardId;
             return state.entries;
@@ -30,24 +38,25 @@ const alertHistoryMock = vi.hoisted(() => {
             void dashboardId;
             return state.snapshots[widgetId] ?? null;
         }),
+        subscribeAlertHistory: vi.fn((subscription: { onState: (state: CoordinatorState) => void }) => {
+            listeners.add(subscription.onState);
+            subscription.onState({ entries: state.entries, activeSeverity: state.severity });
+            return () => listeners.delete(subscription.onState);
+        }),
+        clearAlertHistoryEntries: vi.fn((dashboardId: string) => {
+            void dashboardId;
+            state.entries = [];
+            listeners.forEach((listener) => listener({
+                entries: state.entries,
+                activeSeverity: state.severity,
+            }));
+        }),
     };
 });
 
-const evaluatorMock = vi.hoisted(() => ({
-    evaluateDashboardWidgets: vi.fn(),
-}));
-
-vi.mock('../../services/AlertHistoryStorageService', () => ({
-    alertHistoryStorage: {
-        getEntries: alertHistoryMock.getEntries,
-        getActiveAlertSeverity: alertHistoryMock.getActiveAlertSeverity,
-        clearEntries: alertHistoryMock.clearEntries,
-        getWidgetSnapshot: alertHistoryMock.getWidgetSnapshot,
-    },
-}));
-
-vi.mock('../resolvers/alertHistoryEvaluator', () => ({
-    evaluateDashboardWidgets: evaluatorMock.evaluateDashboardWidgets,
+vi.mock('./alertHistoryCoordinator', () => ({
+    subscribeAlertHistory: alertHistoryMock.subscribeAlertHistory,
+    clearAlertHistoryEntries: alertHistoryMock.clearAlertHistoryEntries,
 }));
 
 const resizeObserverCallbacks = new Set<ResizeObserverCallback>();
@@ -89,8 +98,10 @@ describe('AlertHistoryWidget', () => {
         alertHistoryMock.state.entries = [];
         alertHistoryMock.state.severity = 'normal';
         alertHistoryMock.state.snapshots = {};
+        alertHistoryMock.listeners.clear();
         resizeObserverCallbacks.clear();
-        evaluatorMock.evaluateDashboardWidgets.mockReset();
+        alertHistoryMock.subscribeAlertHistory.mockClear();
+        alertHistoryMock.clearAlertHistoryEntries.mockClear();
     });
 
     afterEach(() => {
@@ -112,21 +123,30 @@ describe('AlertHistoryWidget', () => {
         expect(screen.getByRole('button', { name: 'Ver historial completo (funcionalidad pendiente)' })).toHaveAttribute('tabindex', '-1');
     });
 
-    it('runs the first dashboard evaluation immediately on mount', () => {
+    it('subscribes to the dashboard coordinator with fresh evaluation context', () => {
+        const siblingWidgets = [makeWidget({ id: 'peer-widget' })];
         render(
             <AlertHistoryWidget
                 widget={makeWidget()}
                 equipmentMap={equipmentMap}
-                siblingWidgets={[makeWidget({ id: 'peer-widget' })]}
+                siblingWidgets={siblingWidgets}
             />,
         );
 
-        expect(evaluatorMock.evaluateDashboardWidgets).toHaveBeenCalledWith(
-            'dashboard-a',
-            [expect.objectContaining({ id: 'peer-widget' })],
+        expect(alertHistoryMock.subscribeAlertHistory).toHaveBeenCalledWith(expect.objectContaining({
+            dashboardId: 'dashboard-a',
+            pollInterval: 10_000,
+            onState: expect.any(Function),
+            getContext: expect.any(Function),
+        }));
+        const subscription = alertHistoryMock.subscribeAlertHistory.mock.calls[0]?.[0] as {
+            getContext: () => { widgets: AlertHistoryWidgetConfig[]; equipmentMap: Map<unknown, unknown> };
+        };
+        expect(subscription.getContext()).toEqual({
+            widgets: siblingWidgets,
             equipmentMap,
-            undefined,
-        );
+            machines: undefined,
+        });
     });
 
     it('renders warning and critical entries with formatted timestamps and values', async () => {
@@ -212,7 +232,7 @@ describe('AlertHistoryWidget', () => {
             expect(screen.getByText('Sin alertas recientes')).toBeInTheDocument();
         });
 
-        expect(alertHistoryMock.clearEntries).toHaveBeenCalledWith('dashboard-a');
+        expect(alertHistoryMock.clearAlertHistoryEntries).toHaveBeenCalledWith('dashboard-a');
         expect(container.firstChild).toHaveClass('glass-panel-warning');
         expect(alertHistoryMock.getWidgetSnapshot('dashboard-a', 'widget-a')).toEqual({
             widgetId: 'widget-a',

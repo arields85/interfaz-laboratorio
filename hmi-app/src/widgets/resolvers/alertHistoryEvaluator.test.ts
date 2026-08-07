@@ -180,4 +180,46 @@ describe('evaluateDashboardWidgets', () => {
         expect(alertHistoryStorage.getWidgetSnapshot('dashboard-a', 'removed-widget')).toBeNull();
         expect(alertHistoryStorage.getWidgetSnapshot('dashboard-a', 'active-widget')).toBeNull();
     });
+
+    it.each([12, 50])('evaluates %i alerting widgets with one storage read and one write', (widgetCount) => {
+        const widgets = Array.from({ length: widgetCount }, (_, index) => makeWidget({
+            id: `sensor-${index}`,
+            title: `Sensor ${index}`,
+            simulatedValue: 100 + index,
+            thresholds: [{ value: 90, severity: 'warning' }],
+        }));
+        const getItemSpy = vi.spyOn(Storage.prototype, 'getItem');
+        const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+        const result = evaluateDashboardWidgets('dashboard-a', widgets, new Map());
+
+        expect(result.evaluatedCount).toBe(widgetCount);
+        expect(result.newEntries).toHaveLength(widgetCount);
+        expect(getItemSpy).toHaveBeenCalledTimes(1);
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+
+        const history = alertHistoryStorage.getHistory('dashboard-a');
+        expect(history.entries).toHaveLength(widgetCount);
+        expect(Object.keys(history.widgetSnapshots)).toHaveLength(widgetCount);
+        expect(history.entries.map(entry => entry.widgetId)).toEqual(
+            Array.from({ length: widgetCount }, (_, index) => `sensor-${widgetCount - index - 1}`),
+        );
+    });
+
+    it('uses one read and no writes when a 50-widget cycle has no state changes', () => {
+        const widgets = Array.from({ length: 50 }, (_, index) => makeWidget({
+            id: `sensor-${index}`,
+            simulatedValue: 100 + index,
+            thresholds: [{ value: 90, severity: 'warning' }],
+        }));
+        evaluateDashboardWidgets('dashboard-a', widgets, new Map());
+        const getItemSpy = vi.spyOn(Storage.prototype, 'getItem');
+        const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+        const result = evaluateDashboardWidgets('dashboard-a', widgets, new Map());
+
+        expect(result).toEqual({ evaluatedCount: 50, newEntries: [] });
+        expect(getItemSpy).toHaveBeenCalledTimes(1);
+        expect(setItemSpy).not.toHaveBeenCalled();
+    });
 });

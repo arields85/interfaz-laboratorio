@@ -35,22 +35,132 @@ function storageKey(dashboardId: string): string {
     return `${STORAGE_KEY_PREFIX}${dashboardId}`;
 }
 
+export interface AlertHistoryTransaction {
+    getEntries(): AlertHistoryEntry[];
+    getWidgetSnapshot(widgetId: string): WidgetStateSnapshot | null;
+    recordStateChange(
+        widgetId: string,
+        widgetTitle: string,
+        newStatus: MetricStatus,
+        value?: number | string | null,
+        unit?: string,
+    ): AlertHistoryEntry | null;
+    getActiveAlertSeverity(): 'normal' | 'warning' | 'critical';
+    clearEntries(): void;
+    removeWidgetSnapshot(widgetId: string): void;
+    removeOrphanedSnapshots(activeWidgetIds: Set<string>): void;
+}
+
+class MutableAlertHistoryTransaction implements AlertHistoryTransaction {
+    private changed = false;
+    private readonly history: DashboardAlertHistory;
+
+    constructor(history: DashboardAlertHistory) {
+        this.history = history;
+    }
+
+    get hasChanges(): boolean {
+        return this.changed;
+    }
+
+    get value(): DashboardAlertHistory {
+        return this.history;
+    }
+
+    getEntries(): AlertHistoryEntry[] {
+        return this.history.entries;
+    }
+
+    getWidgetSnapshot(widgetId: string): WidgetStateSnapshot | null {
+        return this.history.widgetSnapshots[widgetId] ?? null;
+    }
+
+    recordStateChange(
+        widgetId: string,
+        widgetTitle: string,
+        newStatus: MetricStatus,
+        value?: number | string | null,
+        unit?: string,
+    ): AlertHistoryEntry | null {
+        const prevSnapshot = this.history.widgetSnapshots[widgetId];
+        const prevStatus: MetricStatus = prevSnapshot?.lastStatus ?? 'normal';
+
+        if (prevStatus === newStatus) {
+            return null;
+        }
+
+        const now = new Date().toISOString();
+        this.history.widgetSnapshots[widgetId] = {
+            widgetId,
+            lastStatus: newStatus,
+            lastCheckedAt: now,
+        };
+
+        let newEntry: AlertHistoryEntry | null = null;
+        if (newStatus === 'warning' || newStatus === 'critical') {
+            newEntry = {
+                id: `ah-${widgetId}-${Date.now().toString(36)}`,
+                dashboardId: this.history.dashboardId,
+                widgetId,
+                widgetTitle,
+                toStatus: newStatus as HistorySeverity,
+                fromStatus: prevStatus,
+                value,
+                unit,
+                detectedAt: now,
+            };
+            this.history.entries = [newEntry, ...this.history.entries].slice(0, MAX_ENTRIES);
+        }
+
+        this.history.lastUpdatedAt = now;
+        this.changed = true;
+        return newEntry;
+    }
+
+    getActiveAlertSeverity(): 'normal' | 'warning' | 'critical' {
+        const snapshots = Object.values(this.history.widgetSnapshots);
+
+        if (snapshots.some((snapshot) => snapshot.lastStatus === 'warning')) return 'warning';
+        if (snapshots.some((snapshot) => snapshot.lastStatus === 'critical')) return 'critical';
+        return 'normal';
+    }
+
+    clearEntries(): void {
+        if (this.history.entries.length === 0) {
+            return;
+        }
+
+        this.history.entries = [];
+        this.history.lastUpdatedAt = new Date().toISOString();
+        this.changed = true;
+    }
+
+    removeWidgetSnapshot(widgetId: string): void {
+        if (!(widgetId in this.history.widgetSnapshots)) {
+            return;
+        }
+
+        delete this.history.widgetSnapshots[widgetId];
+        this.changed = true;
+    }
+
+    removeOrphanedSnapshots(activeWidgetIds: Set<string>): void {
+        for (const widgetId of Object.keys(this.history.widgetSnapshots)) {
+            if (!activeWidgetIds.has(widgetId)) {
+                delete this.history.widgetSnapshots[widgetId];
+                this.changed = true;
+            }
+        }
+    }
+}
+
 class AlertHistoryStorageService {
     /**
      * Lee el histórico completo de un dashboard desde localStorage.
      * Si no existe, devuelve una estructura vacía.
      */
     getHistory(dashboardId: string): DashboardAlertHistory {
-        const raw = localStorage.getItem(storageKey(dashboardId));
-        if (!raw) {
-            return this.emptyHistory(dashboardId);
-        }
-        try {
-            return JSON.parse(raw) as DashboardAlertHistory;
-        } catch {
-            // Dato corrupto → historia limpia
-            return this.emptyHistory(dashboardId);
-        }
+        return this.loadHistory(dashboardId).history;
     }
 
     /**
@@ -71,6 +181,21 @@ class AlertHistoryStorageService {
     ): WidgetStateSnapshot | null {
         const history = this.getHistory(dashboardId);
         return history.widgetSnapshots[widgetId] ?? null;
+    }
+
+    runTransaction<TResult>(
+        dashboardId: string,
+        operation: (transaction: AlertHistoryTransaction) => TResult,
+    ): TResult {
+        const loaded = this.loadHistory(dashboardId);
+        const transaction = new MutableAlertHistoryTransaction(loaded.history);
+        const result = operation(transaction);
+
+        if (transaction.hasChanges && loaded.canPersist) {
+            this.saveHistory(transaction.value);
+        }
+
+        return result;
     }
 
     /**
@@ -99,47 +224,13 @@ class AlertHistoryStorageService {
         value?: number | string | null,
         unit?: string,
     ): AlertHistoryEntry | null {
-        const history = this.getHistory(dashboardId);
-        const prevSnapshot = history.widgetSnapshots[widgetId];
-        const prevStatus: MetricStatus = prevSnapshot?.lastStatus ?? 'normal';
-
-        // Sin cambio de estado → nada que registrar
-        if (prevStatus === newStatus) {
-            return null;
-        }
-
-        // Actualizar snapshot siempre (incluye retorno a normal/stale/no-data)
-        const now = new Date().toISOString();
-        const updatedSnapshot: WidgetStateSnapshot = {
+        return this.runTransaction(dashboardId, (transaction) => transaction.recordStateChange(
             widgetId,
-            lastStatus: newStatus,
-            lastCheckedAt: now,
-        };
-        history.widgetSnapshots[widgetId] = updatedSnapshot;
-
-        // Solo crear entry visible para transiciones HACIA warning/critical
-        let newEntry: AlertHistoryEntry | null = null;
-        if (newStatus === 'warning' || newStatus === 'critical') {
-            newEntry = {
-                id: `ah-${widgetId}-${Date.now().toString(36)}`,
-                dashboardId,
-                widgetId,
-                widgetTitle,
-                toStatus: newStatus as HistorySeverity,
-                fromStatus: prevStatus,
-                value,
-                unit,
-                detectedAt: now,
-            };
-
-            // Insertar al frente (más reciente primero), con límite
-            history.entries = [newEntry, ...history.entries].slice(0, MAX_ENTRIES);
-        }
-
-        history.lastUpdatedAt = now;
-        this.saveHistory(history);
-
-        return newEntry;
+            widgetTitle,
+            newStatus,
+            value,
+            unit,
+        ));
     }
 
     /**
@@ -155,16 +246,7 @@ class AlertHistoryStorageService {
      * @returns La severidad activa más alta, o 'normal' si no hay alertas.
      */
     getActiveAlertSeverity(dashboardId: string): 'normal' | 'warning' | 'critical' {
-        const history = this.getHistory(dashboardId);
-        const snapshots = Object.values(history.widgetSnapshots);
-
-        const hasActiveWarning = snapshots.some((s) => s.lastStatus === 'warning');
-        if (hasActiveWarning) return 'warning';
-
-        const hasActiveCritical = snapshots.some((s) => s.lastStatus === 'critical');
-        if (hasActiveCritical) return 'critical';
-
-        return 'normal';
+        return this.runTransaction(dashboardId, (transaction) => transaction.getActiveAlertSeverity());
     }
 
     /**
@@ -172,7 +254,11 @@ class AlertHistoryStorageService {
      * Útil si el dashboard es eliminado o reseteado por el admin.
      */
     clearHistory(dashboardId: string): void {
-        localStorage.removeItem(storageKey(dashboardId));
+        try {
+            localStorage.removeItem(storageKey(dashboardId));
+        } catch {
+            // Storage unavailable: keep the read-only HMI operational.
+        }
     }
 
     /**
@@ -182,10 +268,7 @@ class AlertHistoryStorageService {
      * Útil para que el operador limpie la vista sin perder el estado activo.
      */
     clearEntries(dashboardId: string): void {
-        const history = this.getHistory(dashboardId);
-        history.entries = [];
-        history.lastUpdatedAt = new Date().toISOString();
-        this.saveHistory(history);
+        this.runTransaction(dashboardId, (transaction) => transaction.clearEntries());
     }
 
     /**
@@ -193,9 +276,7 @@ class AlertHistoryStorageService {
      * Los entries históricos se conservan por trazabilidad.
      */
     removeWidgetSnapshot(dashboardId: string, widgetId: string): void {
-        const history = this.getHistory(dashboardId);
-        delete history.widgetSnapshots[widgetId];
-        this.saveHistory(history);
+        this.runTransaction(dashboardId, (transaction) => transaction.removeWidgetSnapshot(widgetId));
     }
 
     /**
@@ -206,25 +287,37 @@ class AlertHistoryStorageService {
      * @param activeWidgetIds  IDs de los widgets que actualmente existen en el dashboard.
      */
     removeOrphanedSnapshots(dashboardId: string, activeWidgetIds: Set<string>): void {
-        const history = this.getHistory(dashboardId);
-        const snapshotIds = Object.keys(history.widgetSnapshots);
-        let changed = false;
-
-        for (const id of snapshotIds) {
-            if (!activeWidgetIds.has(id)) {
-                delete history.widgetSnapshots[id];
-                changed = true;
-            }
-        }
-
-        if (changed) {
-            this.saveHistory(history);
-        }
+        this.runTransaction(
+            dashboardId,
+            (transaction) => transaction.removeOrphanedSnapshots(activeWidgetIds),
+        );
     }
 
     // -------------------------------------------------------------------------
     // Helpers privados
     // -------------------------------------------------------------------------
+
+    private loadHistory(dashboardId: string): {
+        history: DashboardAlertHistory;
+        canPersist: boolean;
+    } {
+        let raw: string | null;
+        try {
+            raw = localStorage.getItem(storageKey(dashboardId));
+        } catch {
+            return { history: this.emptyHistory(dashboardId), canPersist: false };
+        }
+
+        if (!raw) {
+            return { history: this.emptyHistory(dashboardId), canPersist: true };
+        }
+
+        try {
+            return { history: JSON.parse(raw) as DashboardAlertHistory, canPersist: true };
+        } catch {
+            return { history: this.emptyHistory(dashboardId), canPersist: true };
+        }
+    }
 
     private saveHistory(history: DashboardAlertHistory): void {
         try {

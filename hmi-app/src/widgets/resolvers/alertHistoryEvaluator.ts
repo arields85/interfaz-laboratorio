@@ -4,7 +4,10 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import type { AlertHistoryEntry } from '../../domain/alertHistory.types';
 import type { MetricStatus } from '../../domain/widget.types';
 import { resolveBinding } from './bindingResolver';
-import { alertHistoryStorage } from '../../services/AlertHistoryStorageService';
+import {
+    alertHistoryStorage,
+    type AlertHistoryTransaction,
+} from '../../services/AlertHistoryStorageService';
 
 // =============================================================================
 // alertHistoryEvaluator
@@ -103,7 +106,21 @@ export function evaluateDashboardWidgets(
     widgets: WidgetConfig[],
     equipmentMap: Map<string, EquipmentSummary>,
     machines?: ContractMachine[],
+    transaction?: AlertHistoryTransaction,
 ): EvaluationResult {
+    if (!transaction) {
+        return alertHistoryStorage.runTransaction(
+            dashboardId,
+            (activeTransaction) => evaluateDashboardWidgets(
+                dashboardId,
+                widgets,
+                equipmentMap,
+                machines,
+                activeTransaction,
+            ),
+        );
+    }
+
     // Solo evaluamos widgets que tengan thresholds definidos y no sean
     // el propio widget de histórico (evitar auto-referencia)
     const evaluableWidgets = widgets.filter(
@@ -126,7 +143,7 @@ export function evaluateDashboardWidgets(
         }
 
         // Obtener estado anterior del snapshot para el cálculo de deadband
-        const prevSnapshot = alertHistoryStorage.getWidgetSnapshot(dashboardId, widget.id);
+        const prevSnapshot = transaction.getWidgetSnapshot(widget.id);
         const prevStatus: MetricStatus = prevSnapshot?.lastStatus ?? 'normal';
 
         // Aplicar histéresis: suprimir recuperaciones dentro de la banda muerta
@@ -139,8 +156,7 @@ export function evaluateDashboardWidgets(
             deadbandPercent,
         );
 
-        const entry = alertHistoryStorage.recordStateChange(
-            dashboardId,
+        const entry = transaction.recordStateChange(
             widget.id,
             widget.title ?? `Widget ${widget.id}`,
             effectiveStatus,
@@ -161,8 +177,7 @@ export function evaluateDashboardWidgets(
     );
 
     for (const widget of nonEvaluableWidgets) {
-        alertHistoryStorage.recordStateChange(
-            dashboardId,
+        transaction.recordStateChange(
             widget.id,
             widget.title ?? `Widget ${widget.id}`,
             'normal',
@@ -173,7 +188,7 @@ export function evaluateDashboardWidgets(
     const activeWidgetIds = new Set(
         widgets.filter((w) => w.type !== 'alert-history').map((w) => w.id),
     );
-    alertHistoryStorage.removeOrphanedSnapshots(dashboardId, activeWidgetIds);
+    transaction.removeOrphanedSnapshots(activeWidgetIds);
 
     return {
         evaluatedCount: evaluableWidgets.length,

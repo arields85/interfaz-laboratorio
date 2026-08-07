@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState, useMemo, useCallback, forwardRef } from 'react';
+import { useEffect, useEffectEvent, useRef, useState, useMemo, forwardRef } from 'react';
 import { AlertTriangle, AlertCircle, Clock, History, Gauge, Activity, Thermometer, Zap, Droplet, Wind, Settings, Fan, FoldVertical, HelpCircle, Trash2, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 import type { AlertHistoryWidgetConfig, WidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { AlertHistoryEntry } from '../../domain/alertHistory.types';
-import { alertHistoryStorage } from '../../services/AlertHistoryStorageService';
 import { formatAlertHistoryAge, formatAlertHistoryValue } from '../../utils/alertHistoryFormatting';
-import { evaluateDashboardWidgets } from '../resolvers/alertHistoryEvaluator';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import {
+    clearAlertHistoryEntries,
+    subscribeAlertHistory,
+} from './alertHistoryCoordinator';
 
 // =============================================================================
 // AlertHistoryWidget
@@ -108,43 +110,30 @@ export default function AlertHistoryWidget({
     const [entries, setEntries] = useState<AlertHistoryEntry[]>([]);
     const [activeSeverity, setActiveSeverity] = useState<'normal' | 'warning' | 'critical'>('normal');
     const [visibleCount, setVisibleCount] = useState(5);
-    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const entryRef = useRef<HTMLDivElement>(null);
+    const getEvaluationContext = useEffectEvent(() => ({
+        widgets: siblingWidgets,
+        equipmentMap,
+        machines,
+    }));
+    const applyCoordinatorState = useEffectEvent((state: {
+        entries: AlertHistoryEntry[];
+        activeSeverity: 'normal' | 'warning' | 'critical';
+    }) => {
+        setEntries(state.entries);
+        setActiveSeverity(state.activeSeverity);
+    });
 
-    // Leer entries del storage y severidad activa desde snapshots
-    const refreshState = useCallback(() => {
-        const stored = alertHistoryStorage.getEntries(dashboardId);
-        setEntries(stored);
-        // La severidad activa se computa desde los snapshots (estado presente),
-        // NO desde los entries del historial (estado pasado).
-        setActiveSeverity(alertHistoryStorage.getActiveAlertSeverity(dashboardId));
-    }, [dashboardId]);
-
-    // Evaluar widgets hermanos y detectar cambios de estado
-    const runEvaluation = useCallback(() => {
-        if (dashboardId === 'unknown' || siblingWidgets.length === 0) {
-            refreshState();
-            return;
-        }
-
-        evaluateDashboardWidgets(dashboardId, siblingWidgets, equipmentMap, machines);
-        refreshState();
-    }, [dashboardId, siblingWidgets, equipmentMap, machines, refreshState]);
-
-    // Evaluación inicial al montar + polling
+    // El coordinator mantiene una sola evaluación y un solo timer por dashboard.
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- the first alert evaluation must happen in the initial effect tick to avoid a visible delayed severity state.
-        runEvaluation();
-
-        intervalRef.current = setInterval(runEvaluation, pollInterval);
-
-        return () => {
-            if (intervalRef.current !== null) {
-                clearInterval(intervalRef.current);
-            }
-        };
-    }, [runEvaluation, pollInterval]);
+        return subscribeAlertHistory({
+            dashboardId,
+            pollInterval,
+            getContext: getEvaluationContext,
+            onState: applyCoordinatorState,
+        });
+    }, [dashboardId, pollInterval]);
 
     // ResizeObserver: calcula cuántas filas caben en el contenedor sin scroll
     useEffect(() => {
@@ -237,8 +226,7 @@ export default function AlertHistoryWidget({
                     disabled={entries.length === 0}
                     className={entries.length === 0 ? 'text-industrial-muted/30 cursor-not-allowed' : 'text-industrial-muted hover:text-white transition-colors cursor-pointer'}
                     onClick={() => {
-                        alertHistoryStorage.clearEntries(dashboardId);
-                        refreshState();
+                        clearAlertHistoryEntries(dashboardId);
                     }}
                 >
                     <Trash2 size={14} aria-hidden="true" />

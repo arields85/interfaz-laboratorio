@@ -121,6 +121,48 @@ describe('AlertHistoryStorageService', () => {
         expect(entries.find(entry => entry.widgetId === 'widget-0')).toBeUndefined();
     });
 
+    it('commits a 201-transition transaction with one read and one write', () => {
+        const getItemSpy = vi.spyOn(Storage.prototype, 'getItem');
+        const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+        alertHistoryStorage.runTransaction('dashboard-a', (transaction) => {
+            for (let index = 0; index < 201; index += 1) {
+                dateNowSpy.mockReturnValue(1_717_171_717_171 + index);
+                transaction.recordStateChange(
+                    `widget-${index}`,
+                    `Widget ${index}`,
+                    'critical',
+                    index,
+                );
+            }
+        });
+
+        expect(getItemSpy).toHaveBeenCalledTimes(1);
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+
+        const history = alertHistoryStorage.getHistory('dashboard-a');
+        expect(history.entries).toHaveLength(200);
+        expect(history.entries[0]).toEqual(expect.objectContaining({ widgetId: 'widget-200', value: 200 }));
+        expect(history.entries.at(-1)).toEqual(expect.objectContaining({ widgetId: 'widget-1', value: 1 }));
+        expect(history.widgetSnapshots).toHaveProperty('widget-0');
+    });
+
+    it('does not write a transaction when none of its operations mutate history', () => {
+        alertHistoryStorage.recordStateChange('dashboard-a', 'widget-a', 'Temperature', 'warning');
+        const getItemSpy = vi.spyOn(Storage.prototype, 'getItem');
+        const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+        const snapshot = alertHistoryStorage.runTransaction('dashboard-a', (transaction) => {
+            transaction.recordStateChange('widget-a', 'Temperature', 'warning');
+            transaction.removeOrphanedSnapshots(new Set(['widget-a']));
+            return transaction.getWidgetSnapshot('widget-a');
+        });
+
+        expect(snapshot?.lastStatus).toBe('warning');
+        expect(getItemSpy).toHaveBeenCalledTimes(1);
+        expect(setItemSpy).not.toHaveBeenCalled();
+    });
+
     it('prioritizes warning over critical when resolving active severity', () => {
         alertHistoryStorage.recordStateChange('dashboard-a', 'widget-warning', 'Warning widget', 'warning');
         alertHistoryStorage.recordStateChange('dashboard-a', 'widget-critical', 'Critical widget', 'critical');
@@ -188,6 +230,28 @@ describe('AlertHistoryStorageService', () => {
             fromStatus: 'normal',
         });
         expect(setItemSpy).toHaveBeenCalled();
+    });
+
+    it('degrades to empty history when storage reads fail', () => {
+        vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+            throw new Error('Storage unavailable');
+        });
+        const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+        expect(alertHistoryStorage.getHistory('dashboard-a')).toEqual({
+            dashboardId: 'dashboard-a',
+            entries: [],
+            widgetSnapshots: {},
+            lastUpdatedAt: '2026-06-17T12:00:00.000Z',
+        });
+
+        expect(alertHistoryStorage.recordStateChange(
+            'dashboard-a',
+            'widget-a',
+            'Temperature',
+            'warning',
+        )).toMatchObject({ widgetId: 'widget-a', toStatus: 'warning' });
+        expect(setItemSpy).not.toHaveBeenCalled();
     });
 
     it('clears dashboard history storage completely', () => {
