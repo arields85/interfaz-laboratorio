@@ -1,7 +1,7 @@
 import type { ActivityAnalyticsQueryDraft, ActivityAnalyticsResponse } from '../domain/activityAnalytics.types';
 import type { ProdTrendConfiguredMode, ProdTrendDataSource } from '../domain/prodTrendDataMode.types';
 import { resolveProdTrendConfiguredMode } from '../utils/prodTrendDataMode';
-import { useActivitySeries } from './useActivitySeries';
+import { isActivitySeriesResponseCompatible, useActivitySeries } from './useActivitySeries';
 
 export interface UseProdTrendDataSourceOptions {
     configuredMode: unknown;
@@ -30,9 +30,13 @@ export function useProdTrendDataSource(options: UseProdTrendDataSourceOptions): 
     const configuredMode = resolveProdTrendConfiguredMode(options.configuredMode);
     const realQuery = useActivitySeries(resolveProdTrendQueryParams(configuredMode, options.params));
     const isReal = configuredMode === 'real';
-    const hasMatchingResponse = realQuery.data === null || matchesParams(options.params, realQuery.data);
-    const response = isReal && hasMatchingResponse ? realQuery.data : null;
-    const identityError = isReal && !hasMatchingResponse
+    const hasCompatibleResponse = realQuery.data !== null
+        && isActivitySeriesResponseCompatible(options.params, realQuery.data);
+    const response = isReal && hasCompatibleResponse ? realQuery.data : null;
+    const identityError = isReal
+        && realQuery.data !== null
+        && !hasCompatibleResponse
+        && !realQuery.isPlaceholderData
         ? new Error('Activity-series response identity does not match the requested identity')
         : null;
 
@@ -47,13 +51,4 @@ export function useProdTrendDataSource(options: UseProdTrendDataSourceOptions): 
         isRefreshing: realQuery.isRefreshing,
         isEnabled: realQuery.isEnabled,
     };
-}
-
-function matchesParams(params: ActivityAnalyticsQueryDraft, response: ActivityAnalyticsResponse): boolean {
-    if (!params || params.machineId !== response.machineId || params.range !== response.range) {
-        return false;
-    }
-
-    return params.range !== 'custom'
-        || (params.start === response.window.start && params.end === response.window.end);
 }

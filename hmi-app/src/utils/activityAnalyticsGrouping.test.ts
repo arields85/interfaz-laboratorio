@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ShiftDefinition, TemporalSettingsConfig } from '../domain/admin.types';
 import type { ActivityAnalyticsInterval } from './activityAnalytics';
@@ -8,6 +8,7 @@ import {
 } from './activityAnalyticsGrouping';
 
 const UTC = 'UTC';
+const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 
 const SHIFTS: ShiftDefinition[] = [
     { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] },
@@ -33,6 +34,69 @@ function interval(start: string, durationMs: number, state: ActivityAnalyticsInt
 }
 
 describe('activityAnalyticsGrouping', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('constructs one timezone formatter for a calendar grouping invocation', () => {
+        const NativeDateTimeFormat = Intl.DateTimeFormat;
+        const formatToPartsSpy = vi.fn((formatter: Intl.DateTimeFormat, value?: Date | number) => (
+            formatter.formatToParts(value)
+        ));
+        function DateTimeFormatMock(locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
+            const formatter = new NativeDateTimeFormat(locales, options);
+
+            return {
+                formatToParts: (value?: Date | number) => formatToPartsSpy(formatter, value),
+            } as Intl.DateTimeFormat;
+        }
+        const formatterSpy = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(DateTimeFormatMock);
+        const startMs = Date.parse('2026-06-18T00:00:00.000Z');
+
+        groupActivityAnalyticsIntervals({
+            intervals: Array.from({ length: 48 }, (_, index) => (
+                interval(new Date(startMs + (index * 30 * 60 * 1000)).toISOString(), 30 * 60 * 1000, 'prod')
+            )),
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-06-20T00:00:00.000Z'),
+        });
+
+        expect(formatterSpy).toHaveBeenCalledTimes(1);
+        expect(formatToPartsSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it('constructs one shared timezone formatter for a top-level shift grouping invocation', () => {
+        const NativeDateTimeFormat = Intl.DateTimeFormat;
+        function DateTimeFormatMock(locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
+            return new NativeDateTimeFormat(locales, options);
+        }
+        const formatterSpy = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(DateTimeFormatMock);
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T22:30:00.000Z', 30 * 60 * 1000, 'prod'),
+                interval('2026-06-19T01:30:00.000Z', 30 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-06-20T00:00:00.000Z'),
+        });
+
+        expect(formatterSpy).toHaveBeenCalledTimes(1);
+        expect(grouped).toMatchObject([{
+            bucketKey: 'shift:shift-c:2026-06-18',
+            label: '18/06 · Turno C',
+            durationsMs: {
+                prod: 30 * 60 * 1000,
+                setup: 30 * 60 * 1000,
+                stopped: 0,
+                noData: 0,
+            },
+        }]);
+    });
+
     it('groups overnight shifts into one logical shift bucket across midnight', () => {
         const grouped = groupActivityAnalyticsIntervals({
             intervals: [
@@ -55,6 +119,105 @@ describe('activityAnalyticsGrouping', () => {
                 noData: 0,
             },
         });
+    });
+
+    it('sweeps one interval across multiple exact shift boundaries and assigns its stop once', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-06-18T13:00:00.000Z', 18 * 60 * 60 * 1000, 'stopped')],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ALL_DAYS },
+                { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00', weekdays: ALL_DAYS },
+                { id: 'shift-c', label: 'Turno C', start: '22:00', end: '06:00', weekdays: ALL_DAYS },
+            ],
+            nowMs: Date.parse('2026-06-20T00:00:00.000Z'),
+        });
+
+        expect(grouped.map((bucket) => ({
+            bucketKey: bucket.bucketKey,
+            stopped: bucket.durationsMs.stopped,
+            estimatedKwh: bucket.estimatedKwh,
+            stopCount: bucket.stopCount,
+        }))).toEqual([
+            { bucketKey: 'shift:shift-a:2026-06-18', stopped: 60 * 60 * 1000, estimatedKwh: 10, stopCount: 1 },
+            { bucketKey: 'shift:shift-b:2026-06-18', stopped: 8 * 60 * 60 * 1000, estimatedKwh: 80, stopCount: 0 },
+            { bucketKey: 'shift:shift-c:2026-06-18', stopped: 8 * 60 * 60 * 1000, estimatedKwh: 80, stopCount: 0 },
+            { bucketKey: 'shift:shift-a:2026-06-19', stopped: 60 * 60 * 1000, estimatedKwh: 10, stopCount: 0 },
+        ]);
+    });
+
+    it('preserves unordered overlapping interval contributions across a shift boundary', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-18T14:00:00.000Z', 30 * 60 * 1000, 'stopped'),
+                interval('2026-06-18T13:00:00.000Z', 2 * 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T13:30:00.000Z', 60 * 60 * 1000, 'setup'),
+            ],
+            groupBy: 'shift',
+            timezone: UTC,
+            shifts: [
+                { id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ALL_DAYS },
+                { id: 'shift-b', label: 'Turno B', start: '14:00', end: '22:00', weekdays: ALL_DAYS },
+            ],
+            nowMs: Date.parse('2026-06-20T00:00:00.000Z'),
+        });
+
+        expect(grouped).toMatchObject([
+            {
+                bucketKey: 'shift:shift-a:2026-06-18',
+                durationsMs: {
+                    prod: 60 * 60 * 1000,
+                    setup: 30 * 60 * 1000,
+                    stopped: 0,
+                    noData: 0,
+                },
+                estimatedKwh: 15,
+                stopCount: 0,
+            },
+            {
+                bucketKey: 'shift:shift-b:2026-06-18',
+                durationsMs: {
+                    prod: 60 * 60 * 1000,
+                    setup: 30 * 60 * 1000,
+                    stopped: 30 * 60 * 1000,
+                    noData: 0,
+                },
+                estimatedKwh: 20,
+                stopCount: 1,
+            },
+        ]);
+    });
+
+    it('preserves top-level shift durations across DST forward and backward', () => {
+        const shifts: ShiftDefinition[] = [
+            { id: 'shift-dst', label: 'Turno DST', start: '00:00', end: '04:00', weekdays: ['sun'] },
+        ];
+        const springForward = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-03-08T05:00:00.000Z', 3 * 60 * 60 * 1000, 'prod')],
+            groupBy: 'shift',
+            timezone: 'America/New_York',
+            shifts,
+            nowMs: Date.parse('2026-03-09T12:00:00.000Z'),
+        });
+        const fallBackward = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-11-01T04:00:00.000Z', 5 * 60 * 60 * 1000, 'setup')],
+            groupBy: 'shift',
+            timezone: 'America/New_York',
+            shifts,
+            nowMs: Date.parse('2026-11-02T12:00:00.000Z'),
+        });
+
+        expect(springForward).toMatchObject([{
+            bucketKey: 'shift:shift-dst:2026-03-08',
+            expectedDurationMs: 3 * 60 * 60 * 1000,
+            durationsMs: { prod: 3 * 60 * 60 * 1000 },
+        }]);
+        expect(fallBackward).toMatchObject([{
+            bucketKey: 'shift:shift-dst:2026-11-01',
+            expectedDurationMs: 5 * 60 * 60 * 1000,
+            durationsMs: { setup: 5 * 60 * 60 * 1000 },
+        }]);
     });
 
     it('keeps shift grouping clipped to the visible slice while preserving the semantic current-shift state', () => {
@@ -280,6 +443,42 @@ describe('activityAnalyticsGrouping', () => {
         ]);
     });
 
+    it('preserves 23-hour and 25-hour local days across DST transitions', () => {
+        const springForward = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-03-08T05:00:00.000Z', 23 * 60 * 60 * 1000, 'prod')],
+            groupBy: 'day',
+            timezone: 'America/New_York',
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-03-10T00:00:00.000Z'),
+        });
+        const fallBackward = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-11-01T04:00:00.000Z', 25 * 60 * 60 * 1000, 'prod')],
+            groupBy: 'day',
+            timezone: 'America/New_York',
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-11-03T00:00:00.000Z'),
+        });
+
+        expect(springForward).toMatchObject([{
+            bucketKey: 'day:2026-03-08',
+            startMs: Date.parse('2026-03-08T05:00:00.000Z'),
+            endMs: Date.parse('2026-03-09T04:00:00.000Z'),
+            expectedDurationMs: 23 * 60 * 60 * 1000,
+            durationsMs: { prod: 23 * 60 * 60 * 1000, setup: 0, stopped: 0, noData: 0 },
+            coverageRatio: 1,
+            productivityRatio: 1,
+        }]);
+        expect(fallBackward).toMatchObject([{
+            bucketKey: 'day:2026-11-01',
+            startMs: Date.parse('2026-11-01T04:00:00.000Z'),
+            endMs: Date.parse('2026-11-02T05:00:00.000Z'),
+            expectedDurationMs: 25 * 60 * 60 * 1000,
+            durationsMs: { prod: 25 * 60 * 60 * 1000, setup: 0, stopped: 0, noData: 0 },
+            coverageRatio: 1,
+            productivityRatio: 1,
+        }]);
+    });
+
     it('groups weeks and months with deterministic local calendar keys', () => {
         const intervals = [
             interval('2026-06-15T08:00:00.000Z', 30 * 60 * 1000, 'prod'),
@@ -307,6 +506,35 @@ describe('activityAnalyticsGrouping', () => {
         }).map((bucket) => bucket.bucketKey)).toEqual([
             'month:2026-06',
             'month:2026-07',
+        ]);
+    });
+
+    it('sorts calendar input and preserves duplicate contributions deterministically', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [
+                interval('2026-06-19T01:00:00.000Z', 60 * 60 * 1000, 'setup'),
+                interval('2026-06-18T01:00:00.000Z', 60 * 60 * 1000, 'prod'),
+                interval('2026-06-18T01:00:00.000Z', 60 * 60 * 1000, 'prod'),
+            ],
+            groupBy: 'day',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2026-06-21T00:00:00.000Z'),
+        });
+
+        expect(grouped).toMatchObject([
+            {
+                bucketKey: 'day:2026-06-18',
+                durationsMs: { prod: 2 * 60 * 60 * 1000, setup: 0, stopped: 0, noData: 22 * 60 * 60 * 1000 },
+                estimatedKwh: 20,
+                stopCount: 0,
+            },
+            {
+                bucketKey: 'day:2026-06-19',
+                durationsMs: { prod: 0, setup: 60 * 60 * 1000, stopped: 0, noData: 23 * 60 * 60 * 1000 },
+                estimatedKwh: 10,
+                stopCount: 0,
+            },
         ]);
     });
 
@@ -419,6 +647,33 @@ describe('activityAnalyticsGrouping', () => {
                     stopped: 60 * 60 * 1000,
                     noData: (31 * 24 * 60 * 60 * 1000) - (60 * 60 * 1000),
                 },
+                estimatedKwh: 10,
+                stopCount: 0,
+            },
+        ]);
+    });
+
+    it('splits a month bucket across the year boundary without changing labels or stop attribution', () => {
+        const grouped = groupActivityAnalyticsIntervals({
+            intervals: [interval('2026-12-31T23:30:00.000Z', 90 * 60 * 1000, 'stopped')],
+            groupBy: 'month',
+            timezone: UTC,
+            shifts: SHIFTS,
+            nowMs: Date.parse('2027-02-01T00:00:00.000Z'),
+        });
+
+        expect(grouped).toMatchObject([
+            {
+                bucketKey: 'month:2026-12',
+                label: 'dic 26',
+                durationsMs: { stopped: 30 * 60 * 1000 },
+                estimatedKwh: 5,
+                stopCount: 1,
+            },
+            {
+                bucketKey: 'month:2027-01',
+                label: 'ene 27',
+                durationsMs: { stopped: 60 * 60 * 1000 },
                 estimatedKwh: 10,
                 stopCount: 0,
             },

@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery, type UseQueryOptions } from '@tanstack/reac
 import { adaptActivitySeries } from '../adapters/activitySeries.adapter';
 import { ActivitySeriesAdapterError } from '../adapters/activitySeries.adapter';
 import { isDataActivitySeriesEnabled } from '../config/dataConnection.config';
-import type { ActivityAnalyticsQueryDraft, ActivityAnalyticsResponse } from '../domain/activityAnalytics.types';
+import type { ActivityAnalyticsQueryDraft, ActivityAnalyticsResponse, ActivityAnalyticsWindow } from '../domain/activityAnalytics.types';
 import { DataServiceError } from '../services/dataOverview.service';
 import { fetchActivitySeries } from '../services/activitySeries.service';
 import { validateAndNormalizeActivitySeriesQueryParams } from '../utils/activitySeriesQueryValidation';
@@ -48,6 +48,30 @@ export function createActivitySeriesQueryKey(params: ActivityAnalyticsQueryDraft
     return buildActivitySeriesQueryKey(normalizedParams);
 }
 
+export function isActivitySeriesResponseCompatible(
+    params: ActivityAnalyticsQueryDraft,
+    response: Pick<ActivityAnalyticsResponse, 'machineId' | 'range'> & {
+        window: Pick<ActivityAnalyticsWindow, 'start' | 'end'>;
+    },
+): boolean {
+    const normalizedParams = normalizeActivitySeriesQueryParams(params);
+
+    if (
+        normalizedParams === null
+        || response.machineId !== normalizedParams.machineId
+        || response.range !== normalizedParams.range
+    ) {
+        return false;
+    }
+
+    if (normalizedParams.range !== 'custom') {
+        return true;
+    }
+
+    return isSameInstant(normalizedParams.start, response.window.start)
+        && isSameInstant(normalizedParams.end, response.window.end);
+}
+
 export function createActivitySeriesQueryOptions(params: ActivityAnalyticsQueryDraft): ActivitySeriesQueryOptions {
     const normalizedParams = normalizeActivitySeriesQueryParams(params);
     const enabled = normalizedParams !== null && isDataActivitySeriesEnabled();
@@ -83,6 +107,13 @@ function buildActivitySeriesQueryKey(normalizedParams: ReturnType<typeof normali
 function normalizeActivitySeriesQueryParams(params: ActivityAnalyticsQueryDraft) {
     const validation = validateAndNormalizeActivitySeriesQueryParams(params);
     return validation.ok ? validation.params : null;
+}
+
+function isSameInstant(left: string, right: string): boolean {
+    const leftMs = Date.parse(left);
+    const rightMs = Date.parse(right);
+
+    return Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs === rightMs;
 }
 
 function toActivitySeriesUiError(error: Error | null): Error | null {

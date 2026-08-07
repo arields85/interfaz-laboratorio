@@ -13,6 +13,7 @@ import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
+import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
 import AnalyticsDataModeDot from '../../components/ui/AnalyticsDataModeDot';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import type { ProdTrendWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
@@ -21,8 +22,13 @@ import { PROD_TREND_HISTORY_VARIABLE_KEY } from '../../domain/prodTrendDataMode.
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useProdTrendDataSource } from '../../queries/useProdTrendDataSource';
 import { DataServiceError } from '../../services/dataOverview.service';
-import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
-import { computeActivityAnalytics, resolveActivityAnalyticsComparableProductivityRatio } from '../../utils/activityAnalyticsComputation';
+import { buildActivityAnalytics, validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
+import {
+    computeActivityAnalytics,
+    deriveComputedActivityAnalytics,
+    groupBuiltActivityAnalytics,
+    resolveActivityAnalyticsComparableProductivityRatio,
+} from '../../utils/activityAnalyticsComputation';
 import { resolveActivityAnalyticsDisplayRules } from '../../utils/activityAnalyticsDisplayRules';
 import { resolveActivityAnalyticsTimezone } from '../../utils/activityAnalyticsGrouping';
 import { buildAreaPath, clamp, computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx, measureSmoothPathLength, resolveAnimationDurationSecondsFromPathLength, smoothPath } from '../../utils/chartHelpers';
@@ -47,6 +53,14 @@ interface ProdTrendRuntimeViewState {
     sourceGroupBy: ResolvedProdTrendDisplayOptions['groupBy'];
     selectionOverride: ResolvedProdTrendDisplayOptions | null;
     runtimeGroupBy: RuntimeProdTrendGroupBy;
+}
+
+interface ProdTrendRenderSnapshot {
+    snapshotKey: string;
+    computedAnalytics: ReturnType<typeof computeActivityAnalytics>;
+    grouped: ReturnType<typeof computeActivityAnalytics>['grouped'];
+    range: ResolvedProdTrendDisplayOptions['range'];
+    groupBy: ResolvedProdTrendDisplayOptions['groupBy'];
 }
 
 const RANGE_OPTIONS: Array<{ value: ResolvedProdTrendDisplayOptions['range']; label: string }> = [
@@ -138,6 +152,10 @@ export default function ProdTrendWidget({
     const lineStrokeWidth = clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth);
     const lineGlowBlur = clampLineGlowBlur(widget.displayOptions?.lineGlowBlur);
     const [runtimeViewState, setRuntimeViewState] = useState<ProdTrendRuntimeViewState>(() => createRuntimeViewState(displayOptions));
+    const [lastSuccessfulSnapshotState, setLastSuccessfulSnapshotState] = useState<{
+        ownerKey: string;
+        snapshot: ProdTrendRenderSnapshot;
+    } | null>(null);
     const bodyRef = useRef<HTMLDivElement | null>(null);
     const [bodySize, setBodySize] = useState<{ width: number; height: number } | null>(null);
     const [simulatedNowMs] = useState(() => Date.now());
@@ -186,6 +204,10 @@ export default function ProdTrendWidget({
         hasOverviewError,
     });
     const sourceMachineId = machineBinding.status === 'valid' ? machineBinding.machineId : null;
+    const runtimeScopeKey = `${widget.id}|${displayOptions.dataMode}|${sourceMachineId ?? 'none'}`;
+    const lastSuccessfulSnapshot = lastSuccessfulSnapshotState?.ownerKey === runtimeScopeKey
+        ? lastSuccessfulSnapshotState.snapshot
+        : null;
     const simulatedMachineId = typeof widget.binding?.machineId === 'number'
         ? widget.binding.machineId
         : undefined;
@@ -252,25 +274,48 @@ export default function ProdTrendWidget({
         temporalSettings: { plantTimezone: config.plantTimezone },
         windowTimezone: activityData?.window.timezone,
     }), [activityData?.window.timezone, config.plantTimezone]);
-    const computedAnalytics = useMemo(() => {
-        if (!activityData) {
+    const analyticsSeries = activityData?.series;
+    const analyticsWindowStart = activityData?.window.start;
+    const analyticsWindowEnd = activityData?.window.end;
+    const analyticsBucketMs = activityData?.window.bucketMs;
+    const analyticsNowMs = displayOptions.dataMode === 'simulated' ? simulatedNowMs : undefined;
+    const baseAnalytics = useMemo(() => {
+        if (!analyticsSeries || analyticsBucketMs === undefined) {
             return null;
         }
 
-        return computeActivityAnalytics({
-            series: activityData.series,
+        return buildActivityAnalytics({
+            series: analyticsSeries,
+            bucketMs: analyticsBucketMs,
             thresholds: {
                 setupKw: activeDisplayOptions.setupThresholdKw,
                 prodKw: activeDisplayOptions.prodThresholdKw,
             },
+        });
+    }, [activeDisplayOptions.prodThresholdKw, activeDisplayOptions.setupThresholdKw, analyticsBucketMs, analyticsSeries]);
+    const groupedAnalytics = useMemo(() => {
+        if (!baseAnalytics || analyticsWindowStart === undefined || analyticsWindowEnd === undefined || analyticsBucketMs === undefined) {
+            return null;
+        }
+
+        return groupBuiltActivityAnalytics({
+            analytics: baseAnalytics,
             range: displayRules.range,
             groupBy: activeGroupBy,
             shifts,
             timezone,
-            window: activityData.window,
-            nowMs: displayOptions.dataMode === 'simulated' ? simulatedNowMs : undefined,
+            window: {
+                start: analyticsWindowStart,
+                end: analyticsWindowEnd,
+                bucketMs: analyticsBucketMs,
+            },
+            nowMs: analyticsNowMs,
         });
-    }, [activeDisplayOptions.prodThresholdKw, activeDisplayOptions.setupThresholdKw, activeGroupBy, activityData, displayOptions.dataMode, displayRules.range, shifts, simulatedNowMs, timezone]);
+    }, [activeGroupBy, analyticsBucketMs, analyticsNowMs, analyticsWindowEnd, analyticsWindowStart, baseAnalytics, displayRules.range, shifts, timezone]);
+    const computedAnalytics = useMemo(
+        () => groupedAnalytics ? deriveComputedActivityAnalytics(groupedAnalytics) : null,
+        [groupedAnalytics],
+    );
 
     const grouped = useMemo(() => {
         if (!computedAnalytics) {
@@ -284,6 +329,59 @@ export default function ProdTrendWidget({
         return buildTurnoSummaryBuckets(computedAnalytics.grouped, shifts)
             .filter((bucket) => !isTurnoVisualHiddenBucket(bucket));
     }, [activeGroupBy, computedAnalytics, shifts]);
+    const processingErrorState = (() => {
+        if (!computedAnalytics) {
+            return null;
+        }
+
+        try {
+            validateComputedAnalytics(computedAnalytics);
+            return null;
+        } catch (error) {
+            return resolveProcessingErrorState(error);
+        }
+    })();
+    const currentRenderSnapshot = activityData
+        && computedAnalytics
+        && processingErrorState === null
+        && computedAnalytics.grouped.length > 0
+        ? {
+            snapshotKey: `${displayOptions.dataMode}|${sourceMachineId ?? 'none'}|${activeDisplayOptions.range}|${activeGroupBy}|${activeDisplayOptions.start ?? ''}|${activeDisplayOptions.end ?? ''}|${activeDisplayOptions.setupThresholdKw}|${activeDisplayOptions.prodThresholdKw}|${activityData.window.start}|${activityData.window.end}|${activityData.series.length}`,
+            computedAnalytics,
+            grouped,
+            range: activeDisplayOptions.range,
+            groupBy: activeGroupBy,
+        } satisfies ProdTrendRenderSnapshot
+        : null;
+    const isReal = displayOptions.dataMode === 'real';
+    const isShowingRefreshingSnapshot = isReal && dataSource.isRefreshing && lastSuccessfulSnapshot !== null;
+    const isShowingRefreshFailedSnapshot = isReal && dataSource.error !== null && lastSuccessfulSnapshot !== null;
+    const visibleSnapshot = isShowingRefreshingSnapshot || isShowingRefreshFailedSnapshot
+        ? lastSuccessfulSnapshot
+        : currentRenderSnapshot;
+    const visibleGrouped = visibleSnapshot?.grouped ?? [];
+
+    useEffect(() => {
+        if (!isReal || !currentRenderSnapshot || dataSource.isRefreshing || dataSource.error) {
+            return;
+        }
+
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- continuity snapshot updates only after a complete validated chart result exists.
+        setLastSuccessfulSnapshotState((current) => {
+            if (
+                current?.ownerKey === runtimeScopeKey
+                && current.snapshot.snapshotKey === currentRenderSnapshot.snapshotKey
+                && current.snapshot.computedAnalytics === currentRenderSnapshot.computedAnalytics
+            ) {
+                return current;
+            }
+
+            return {
+                ownerKey: runtimeScopeKey,
+                snapshot: currentRenderSnapshot,
+            };
+        });
+    }, [currentRenderSnapshot, dataSource.error, dataSource.isRefreshing, isReal, runtimeScopeKey]);
 
     useEffect(() => {
         if (typeof ResizeObserver === 'undefined' || !bodyRef.current) {
@@ -306,7 +404,7 @@ export default function ProdTrendWidget({
 
         observer.observe(element);
         return () => observer.disconnect();
-    }, [grouped.length]);
+    }, [visibleGrouped.length]);
 
     const dataModeDot = (
         <AnalyticsDataModeDot
@@ -425,7 +523,7 @@ export default function ProdTrendWidget({
         });
     }
 
-    if (displayOptions.dataMode !== 'simulated' && (isLoadingData || dataSource.isLoading)) {
+    if (displayOptions.dataMode !== 'simulated' && (isLoadingData || dataSource.isLoading) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
@@ -433,15 +531,15 @@ export default function ProdTrendWidget({
         });
     }
 
-    if (displayOptions.dataMode !== 'simulated' && dataSource.error) {
+    if (displayOptions.dataMode !== 'simulated' && dataSource.error && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
-            ...resolveErrorState(dataSource.error),
+            state: 'error',
         });
     }
 
-    if (!activityData || activityData.series.length === 0) {
+    if ((!activityData || activityData.series.length === 0) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
@@ -450,20 +548,16 @@ export default function ProdTrendWidget({
         });
     }
 
-    try {
-        validateComputedAnalytics(computedAnalytics);
-    } catch (error) {
-        const resolvedState = resolveProcessingErrorState(error);
-
+    if (processingErrorState !== null && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
-            label: resolvedState.label,
-            state: resolvedState.state,
+            label: processingErrorState.label,
+            state: processingErrorState.state,
         });
     }
 
-    if (computedAnalytics.grouped.length === 0) {
+    if ((computedAnalytics?.grouped.length ?? 0) === 0 && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
             header,
@@ -474,9 +568,9 @@ export default function ProdTrendWidget({
 
     const chartViewportWidth = Math.max(bodySize?.width ?? 640, CHART_MIN_WIDTH_PX);
     const chartHeight = resolveProdTrendChartHeight(bodySize?.height ?? 180);
-    const groupsLayout = resolveGroupsLayout(chartViewportWidth, grouped.length);
+    const groupsLayout = resolveGroupsLayout(chartViewportWidth, visibleGrouped.length);
     const xAxisModel = resolveXAxisModel({
-        grouped,
+        grouped: visibleGrouped,
         width: chartViewportWidth,
         layout: groupsLayout,
     });
@@ -484,6 +578,7 @@ export default function ProdTrendWidget({
     return (
         <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`} data-testid="prod-trend-widget-root">
             {header}
+
             <div className="flex min-h-0 flex-1 flex-col" data-testid="prod-trend-widget-body">
                 <div
                     ref={bodyRef}
@@ -494,15 +589,20 @@ export default function ProdTrendWidget({
                         className="relative flex-1 min-h-0 overflow-hidden"
                         data-testid="prod-trend-widget-viewport"
                     >
+                        {isShowingRefreshFailedSnapshot ? (
+                            <HistoricalChartNotice variant="stale" testId="prod-trend-historical-notice" />
+                        ) : isShowingRefreshingSnapshot ? (
+                            <HistoricalChartNotice variant="refreshing" testId="prod-trend-historical-notice" />
+                        ) : null}
                         <div
                             className="relative h-full"
                             style={{ width: `${xAxisModel.chartWidth}px` }}
                             data-testid="prod-trend-widget-content"
                         >
                             <ProdTrendChart
-                                key={`${activeDisplayOptions.range}:${activeGroupBy}`}
+                                key={`${visibleSnapshot!.range}:${visibleSnapshot!.groupBy}`}
                                 widgetId={widget.id}
-                                grouped={grouped}
+                                grouped={visibleGrouped}
                                 width={xAxisModel.chartWidth}
                                 height={chartHeight}
                                 lineColors={displayOptions.trendLineColors}

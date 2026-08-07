@@ -12,18 +12,26 @@ import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
+import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
 import AnalyticsDataModeDot from '../../components/ui/AnalyticsDataModeDot';
 import { ANALYTICS_HISTORY_VARIABLE_KEY } from '../../domain/analyticsDataMode.types';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { createActivitySeriesQueryKey, createActivitySeriesQueryOptions, useActivitySeries } from '../../queries/useActivitySeries';
+import {
+    createActivitySeriesQueryKey,
+    createActivitySeriesQueryOptions,
+    isActivitySeriesResponseCompatible,
+    useActivitySeries,
+} from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
 import {
     recordActivityAnalyticsPerformanceDiagnostic,
     startActivityAnalyticsPerformanceTransition,
 } from '../../utils/activityAnalyticsPerformanceDiagnostics';
-import { validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
+import { buildActivityAnalytics, validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
 import {
     computeActivityAnalytics,
+    deriveComputedActivityAnalytics,
+    groupBuiltActivityAnalytics,
     resolveActivityAnalyticsComparableProductivityRatio,
     resolveActivityAnalyticsComparison,
 } from '../../utils/activityAnalyticsComputation';
@@ -514,7 +522,7 @@ export default function ActivityAnalyticsWidget({
     });
     const { config, shifts } = useTemporalSettings();
 
-    const activitySeries = useActivitySeries(!isSimulated && machineBinding.machineId != null ? {
+    const activitySeriesRequest = !isSimulated && machineBinding.machineId != null ? {
         machineId: machineBinding.machineId,
         ...(activeDisplayOptions.range === 'custom'
             ? {
@@ -525,7 +533,8 @@ export default function ActivityAnalyticsWidget({
             : {
                 range: activeDisplayOptions.range,
             }),
-    } : null);
+    } : null;
+    const activitySeries = useActivitySeries(activitySeriesRequest);
     const simulatedActivityData = useMemo(() => {
         if (!isSimulated) {
             return null;
@@ -565,40 +574,74 @@ export default function ActivityAnalyticsWidget({
             },
         };
     }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, isSimulated, simulatedMachineId, simulatedNowMs, widget.id]);
-    const activityData = isSimulated ? simulatedActivityData : activitySeries.data;
+    const hasIncompatibleTransientData = !isSimulated
+        && (activitySeries.isPlaceholderData || activitySeries.isError)
+        && activitySeries.data !== null
+        && !isActivitySeriesResponseCompatible(activitySeriesRequest, activitySeries.data);
+    const activityData = isSimulated
+        ? simulatedActivityData
+        : hasIncompatibleTransientData ? null : activitySeries.data;
     const resolvedTimezone = useMemo(() => resolveActivityAnalyticsTimezone({
         temporalSettings: { plantTimezone: config.plantTimezone },
         windowTimezone: activityData?.window.timezone,
     }), [config.plantTimezone, activityData?.window.timezone]);
-    const computedAnalytics = useMemo(() => {
-        if (!activityData) {
+    const analyticsSeries = activityData?.series;
+    const analyticsWindowStart = activityData?.window.start;
+    const analyticsWindowEnd = activityData?.window.end;
+    const analyticsBucketMs = activityData?.window.bucketMs;
+    const analyticsNowMs = isSimulated ? simulatedNowMs : undefined;
+    const baseAnalytics = useMemo(() => {
+        if (!analyticsSeries || analyticsBucketMs === undefined) {
             return null;
         }
 
-        return computeActivityAnalytics({
-            series: activityData.series,
+        return buildActivityAnalytics({
+            series: analyticsSeries,
+            bucketMs: analyticsBucketMs,
             thresholds: {
                 setupKw: activeDisplayOptions.setupThresholdKw,
                 prodKw: activeDisplayOptions.prodThresholdKw,
             },
+        });
+    }, [
+        activeDisplayOptions.prodThresholdKw,
+        activeDisplayOptions.setupThresholdKw,
+        analyticsBucketMs,
+        analyticsSeries,
+    ]);
+    const groupedAnalytics = useMemo(() => {
+        if (!baseAnalytics || analyticsWindowStart === undefined || analyticsWindowEnd === undefined || analyticsBucketMs === undefined) {
+            return null;
+        }
+
+        return groupBuiltActivityAnalytics({
+            analytics: baseAnalytics,
             range: activeDisplayOptions.range,
             groupBy: activeGroupBy,
             shifts,
             timezone: resolvedTimezone,
-            window: activityData.window,
-            nowMs: isSimulated ? simulatedNowMs : undefined,
+            window: {
+                start: analyticsWindowStart,
+                end: analyticsWindowEnd,
+                bucketMs: analyticsBucketMs,
+            },
+            nowMs: analyticsNowMs,
         });
     }, [
-        activityData,
-        activeDisplayOptions.prodThresholdKw,
         activeDisplayOptions.range,
-        activeDisplayOptions.setupThresholdKw,
         activeGroupBy,
+        analyticsBucketMs,
+        analyticsNowMs,
+        analyticsWindowEnd,
+        analyticsWindowStart,
+        baseAnalytics,
         resolvedTimezone,
         shifts,
-        isSimulated,
-        simulatedNowMs,
     ]);
+    const computedAnalytics = useMemo(
+        () => groupedAnalytics ? deriveComputedActivityAnalytics(groupedAnalytics) : null,
+        [groupedAnalytics],
+    );
     const displayGrouped = useMemo(() => {
         if (!computedAnalytics) {
             return [];
@@ -1122,7 +1165,7 @@ export default function ActivityAnalyticsWidget({
         return renderRuntimeState({
             className,
             header,
-            ...resolveErrorState(activitySeries.error),
+            state: 'error',
         });
     }
 
@@ -1156,21 +1199,16 @@ export default function ActivityAnalyticsWidget({
         <div ref={widgetRootRef} className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
             {header}
 
-            {isShowingRefreshingSnapshot ? (
-                <div role="status" className="mt-2 rounded-xl border border-industrial-border bg-industrial-bg/40 px-3 py-2 text-industrial-muted">
-                    <span className="uppercase">Actualizando</span>
-                    <span className="ml-2">Mostrando la última vista confirmada</span>
-                </div>
-            ) : null}
-
-            {isShowingRefreshFailedSnapshot ? (
-                <div role="alert" className="mt-2 rounded-xl border border-status-critical/30 bg-status-critical/10 px-3 py-2 text-industrial-text">
-                    <span className="uppercase">No se pudo actualizar</span>
-                    <span className="ml-2">Se mantiene la última vista confirmada</span>
-                </div>
-            ) : null}
-
-            <div ref={analyticsBodyRef} className="mt-1 flex min-h-0 flex-1 flex-col gap-3">
+            <div
+                ref={analyticsBodyRef}
+                className="relative mt-1 flex min-h-0 flex-1 flex-col gap-3"
+                data-testid="activity-analytics-widget-body"
+            >
+                {isShowingRefreshFailedSnapshot ? (
+                    <HistoricalChartNotice variant="stale" testId="activity-analytics-historical-notice" />
+                ) : isShowingRefreshingSnapshot ? (
+                    <HistoricalChartNotice variant="refreshing" testId="activity-analytics-historical-notice" />
+                ) : null}
                 <AnalyticsVisualPanels
                     analytics={visibleSnapshot!.analytics}
                     comparison={visibleSnapshot!.comparison}

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ShiftDefinition } from '../domain/admin.types';
 import {
@@ -12,6 +12,27 @@ import {
 const UTC = 'UTC';
 
 describe('weeklyShiftSchedule', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('constructs one timezone formatter for a weekly interval build', () => {
+        const NativeDateTimeFormat = Intl.DateTimeFormat;
+        function DateTimeFormatMock(locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
+            return new NativeDateTimeFormat(locales, options);
+        }
+        const formatterSpy = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(DateTimeFormatMock);
+
+        buildWeeklyShiftIntervals({
+            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00', weekdays: ALL_WEEKDAY_KEYS }],
+            timezone: 'America/New_York',
+            visibleStartMs: Date.parse('2026-03-01T00:00:00.000Z'),
+            visibleEndMs: Date.parse('2026-03-15T00:00:00.000Z'),
+        });
+
+        expect(formatterSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('normalizes legacy shifts without weekdays to every weekday in saved order', () => {
         expect(normalizeWeekdays(undefined)).toEqual(ALL_WEEKDAY_KEYS);
     });
@@ -89,6 +110,35 @@ describe('weeklyShiftSchedule', () => {
                 semanticEndMs: Date.parse('2026-06-18T14:00:00.000Z'),
             },
         ]);
+    });
+
+    it('preserves weekly shift extents across DST forward and backward transitions', () => {
+        const shifts: ShiftDefinition[] = [
+            { id: 'shift-dst', label: 'Turno DST', start: '00:00', end: '04:00', weekdays: ['sun'] },
+        ];
+        const springForward = buildWeeklyShiftIntervals({
+            shifts,
+            timezone: 'America/New_York',
+            visibleStartMs: Date.parse('2026-03-08T04:00:00.000Z'),
+            visibleEndMs: Date.parse('2026-03-09T05:00:00.000Z'),
+        });
+        const fallBackward = buildWeeklyShiftIntervals({
+            shifts,
+            timezone: 'America/New_York',
+            visibleStartMs: Date.parse('2026-11-01T03:00:00.000Z'),
+            visibleEndMs: Date.parse('2026-11-02T05:00:00.000Z'),
+        });
+
+        expect(springForward).toMatchObject([{
+            bucketKey: 'shift:shift-dst:2026-03-08',
+            semanticStartMs: Date.parse('2026-03-08T05:00:00.000Z'),
+            semanticEndMs: Date.parse('2026-03-08T08:00:00.000Z'),
+        }]);
+        expect(fallBackward).toMatchObject([{
+            bucketKey: 'shift:shift-dst:2026-11-01',
+            semanticStartMs: Date.parse('2026-11-01T04:00:00.000Z'),
+            semanticEndMs: Date.parse('2026-11-01T09:00:00.000Z'),
+        }]);
     });
 
     it('resolves uncovered weekly time to sin turno', () => {

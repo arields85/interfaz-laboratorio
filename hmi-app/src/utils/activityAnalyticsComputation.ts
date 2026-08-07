@@ -50,6 +50,19 @@ export interface ComputedActivityAnalytics {
     timezone: string;
 }
 
+export interface GroupedActivityAnalytics {
+    analytics: ActivityAnalyticsResult;
+    grouped: ActivityAnalyticsGroupedBucket[];
+    timezone: string;
+}
+
+export interface GroupBuiltActivityAnalyticsOptions extends Pick<
+    ComputeActivityAnalyticsOptions,
+    'range' | 'groupBy' | 'shifts' | 'timezone' | 'window' | 'nowMs'
+> {
+    analytics: ActivityAnalyticsResult;
+}
+
 export function computeActivityAnalytics(options: ComputeActivityAnalyticsOptions): ComputedActivityAnalytics {
     const analytics = buildActivityAnalytics({
         series: options.series,
@@ -57,6 +70,18 @@ export function computeActivityAnalytics(options: ComputeActivityAnalyticsOption
         thresholds: options.thresholds,
     });
 
+    return deriveComputedActivityAnalytics(groupBuiltActivityAnalytics({
+        analytics,
+        range: options.range,
+        groupBy: options.groupBy,
+        shifts: options.shifts,
+        timezone: options.timezone,
+        window: options.window,
+        nowMs: options.nowMs,
+    }));
+}
+
+export function groupBuiltActivityAnalytics(options: GroupBuiltActivityAnalyticsOptions): GroupedActivityAnalytics {
     const shouldApplyRollingCalendarWindowBehavior = shouldApplyRollingCalendarWindowBehaviorForRange(
         options.range,
         options.groupBy,
@@ -67,7 +92,7 @@ export function computeActivityAnalytics(options: ComputeActivityAnalyticsOption
     );
 
     const grouped = groupActivityAnalyticsIntervals({
-        intervals: analytics.intervals,
+        intervals: options.analytics.intervals,
         groupBy: options.groupBy,
         timezone: options.timezone,
         shifts: options.shifts,
@@ -79,19 +104,27 @@ export function computeActivityAnalytics(options: ComputeActivityAnalyticsOption
         trimLeadingPartialShiftBucket: shouldTrimLeadingPartialShiftBucket,
     });
 
-    const comparison = resolveActivityAnalyticsComparison(grouped);
-    const summaryRows = grouped.map((bucket) => ({
+    return {
+        analytics: options.analytics,
+        grouped,
+        timezone: options.timezone,
+    };
+}
+
+export function deriveComputedActivityAnalytics(groupedAnalytics: GroupedActivityAnalytics): ComputedActivityAnalytics {
+    const comparison = resolveActivityAnalyticsComparison(groupedAnalytics.grouped);
+    const summaryRows = groupedAnalytics.grouped.map((bucket) => ({
         bucketKey: bucket.bucketKey,
         label: bucket.label,
         productivityLabel: bucket.productivityLabel,
     }));
 
     return {
-        analytics,
-        grouped,
+        analytics: groupedAnalytics.analytics,
+        grouped: groupedAnalytics.grouped,
         comparison,
         summaryRows,
-        timezone: options.timezone,
+        timezone: groupedAnalytics.timezone,
     };
 }
 

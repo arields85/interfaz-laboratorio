@@ -12,6 +12,7 @@ import { useActivitySeries, type UseActivitySeriesResult } from '../../queries/u
 import { DataServiceError } from '../../services/dataOverview.service';
 import { subscribeActivityAnalyticsPerformanceDiagnostics } from '../../utils/activityAnalyticsPerformanceDiagnostics';
 import type { ActivityAnalyticsInterval } from '../../utils/activityAnalytics';
+import * as activityAnalytics from '../../utils/activityAnalytics';
 import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComputation';
 import { groupActivityAnalyticsIntervals } from '../../utils/activityAnalyticsGrouping';
 import { buildActivityAnalyticsSummarySegments } from '../../utils/activityAnalyticsSummarySegments';
@@ -239,6 +240,16 @@ const POPULATED_ACTIVITY_SERIES = {
     summary: { hidden: true },
 };
 
+const THIRTY_DAY_ACTIVITY_SERIES = {
+    ...POPULATED_ACTIVITY_SERIES,
+    range: '30d' as const,
+    window: {
+        ...POPULATED_ACTIVITY_SERIES.window,
+        start: '2026-05-20T12:00:00.000Z',
+    },
+    series: [...POPULATED_ACTIVITY_SERIES.series],
+};
+
 const CUSTOM_STATE_GRADIENTS = {
     prod: ['#112233', '#445566'],
     setup: ['#778899', '#aabbcc'],
@@ -303,7 +314,7 @@ function buildGroupedBucket(overrides?: Partial<ReturnType<typeof activityAnalyt
 }
 
 function mockComputedAnalytics(grouped: Array<ReturnType<typeof activityAnalyticsComputation.computeActivityAnalytics>['grouped'][number]>) {
-    vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+    vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
         analytics: {
             durationsMs: {
                 prod: 4 * 60 * 60 * 1000,
@@ -325,6 +336,38 @@ function mockComputedAnalytics(grouped: Array<ReturnType<typeof activityAnalytic
         summaryRows: grouped.map((bucket) => ({ label: bucket.label, productivityLabel: bucket.productivityLabel, bucketKey: bucket.bucketKey })),
         timezone: 'UTC',
     } as never);
+}
+
+function mockComputedAnalyticsForGrouping(
+    implementation: (
+        options: Parameters<typeof activityAnalyticsComputation.groupBuiltActivityAnalytics>[0],
+    ) => ReturnType<typeof activityAnalyticsComputation.computeActivityAnalytics>,
+) {
+    const computedByGrouped = new WeakMap<
+        ReturnType<typeof activityAnalyticsComputation.groupBuiltActivityAnalytics>,
+        ReturnType<typeof activityAnalyticsComputation.computeActivityAnalytics>
+    >();
+
+    vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics').mockImplementation((options) => {
+        const computed = implementation(options);
+        const groupedAnalytics = {
+            analytics: computed.analytics,
+            grouped: computed.grouped,
+            timezone: computed.timezone,
+        };
+
+        computedByGrouped.set(groupedAnalytics, computed);
+        return groupedAnalytics;
+    });
+    vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockImplementation((groupedAnalytics) => {
+        const computed = computedByGrouped.get(groupedAnalytics);
+
+        if (!computed) {
+            throw new Error('Missing computed analytics fixture for grouped analytics');
+        }
+
+        return computed;
+    });
 }
 
 function buildInterval(start: string, durationMs: number, state: ActivityAnalyticsInterval['state']): ActivityAnalyticsInterval {
@@ -737,7 +780,8 @@ describe('ActivityAnalyticsWidget', () => {
         const nowMs = Date.parse('2026-06-19T12:00:00.000Z');
         vi.spyOn(Date, 'now').mockReturnValue(nowMs);
         const buildHistory = vi.spyOn(activityAnalyticsSimulation, 'buildActivityAnalyticsSimulatedHistory');
-        const computeAnalytics = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics');
+        const buildAnalytics = vi.spyOn(activityAnalytics, 'buildActivityAnalytics');
+        const groupAnalytics = vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics');
 
         render(
             <ActivityAnalyticsWidget
@@ -764,9 +808,8 @@ describe('ActivityAnalyticsWidget', () => {
             range: '7d',
             nowMs,
         });
-        expect(computeAnalytics.mock.calls.some(([options]) => (
-            options.range === '7d' && options.series === sevenDayHistory?.series
-        ))).toBe(true);
+        expect(buildAnalytics.mock.calls.some(([options]) => options.series === sevenDayHistory?.series)).toBe(true);
+        expect(groupAnalytics.mock.calls.some(([options]) => options.range === '7d')).toBe(true);
 
         await user.click(screen.getByRole('button', { name: '30d' }));
 
@@ -775,9 +818,8 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(thirtyDayHistory).toBeDefined();
         expect(buildHistory.mock.calls[thirtyDayCallIndex]?.[0].nowMs).toBe(nowMs);
-        expect(computeAnalytics.mock.calls.some(([options]) => (
-            options.range === '30d' && options.series === thirtyDayHistory?.series
-        ))).toBe(true);
+        expect(buildAnalytics.mock.calls.some(([options]) => options.series === thirtyDayHistory?.series)).toBe(true);
+        expect(groupAnalytics.mock.calls.some(([options]) => options.range === '30d')).toBe(true);
         expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
     });
 
@@ -822,8 +864,8 @@ describe('ActivityAnalyticsWidget', () => {
             current: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
         };
         vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ series }) => (
-            buildComputedSnapshot(series.length > 1 ? 'Simulated snapshot' : 'Real snapshot')
+        mockComputedAnalyticsForGrouping(({ analytics }) => (
+            buildComputedSnapshot(analytics.intervals.length > 1 ? 'Simulated snapshot' : 'Real snapshot')
         ));
 
         const { rerender } = render(
@@ -1066,7 +1108,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(screen.queryByRole('status')).not.toBeInTheDocument();
     });
 
-    it('keeps the last confirmed analytics visible and marks them as refreshing while a new range is pending', () => {
+    it('keeps confirmed analytics visible without processing an incompatible range placeholder, then processes the final response once', () => {
         const activitySeriesState = {
             current: createActivitySeriesResult({
                 data: POPULATED_ACTIVITY_SERIES,
@@ -1074,9 +1116,12 @@ describe('ActivityAnalyticsWidget', () => {
         };
 
         vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+        mockComputedAnalyticsForGrouping(({ range }) => buildComputedSnapshot(
             range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
         ));
+        const buildSpy = vi.spyOn(activityAnalytics, 'buildActivityAnalytics');
+        const groupSpy = vi.mocked(activityAnalyticsComputation.groupBuiltActivityAnalytics);
+        const deriveSpy = vi.mocked(activityAnalyticsComputation.deriveComputedActivityAnalytics);
 
         const { rerender } = render(
             <ActivityAnalyticsWidget
@@ -1086,6 +1131,12 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(1);
+        expect(deriveSpy).toHaveBeenCalledTimes(1);
+        buildSpy.mockClear();
+        groupSpy.mockClear();
+        deriveSpy.mockClear();
 
         activitySeriesState.current = createActivitySeriesResult({
             data: POPULATED_ACTIVITY_SERIES,
@@ -1103,9 +1154,35 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
         expect(screen.queryByText('Requested snapshot 30d')).not.toBeInTheDocument();
-        expect(screen.getByRole('status')).toHaveTextContent('Actualizando');
-        expect(screen.getByText('Mostrando la última vista confirmada')).toBeInTheDocument();
+        const refreshingNotice = screen.getByTestId('activity-analytics-historical-notice');
+        const analyticsBody = screen.getByTestId('activity-analytics-widget-body');
+        expect(refreshingNotice).toHaveTextContent('Actualizando_');
+        expect(refreshingNotice).toHaveAttribute('role', 'status');
+        expect(refreshingNotice).toHaveAttribute('aria-live', 'polite');
+        expect(refreshingNotice).toHaveClass('absolute', 'inset-0', 'pointer-events-none');
+        expect(analyticsBody).toHaveClass('relative');
+        expect(refreshingNotice.parentElement).toBe(analyticsBody);
         expect(screen.queryByTestId('activity-analytics-widget-runtime-state')).not.toBeInTheDocument();
+        expect(buildSpy).not.toHaveBeenCalled();
+        expect(groupSpy).not.toHaveBeenCalled();
+        expect(deriveSpy).not.toHaveBeenCalled();
+
+        activitySeriesState.current = createActivitySeriesResult({
+            data: THIRTY_DAY_ACTIVITY_SERIES,
+        });
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'shift' } })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(screen.getAllByText('Requested snapshot 30d').length).toBeGreaterThan(0);
+        expect(screen.queryByTestId('activity-analytics-historical-notice')).not.toBeInTheDocument();
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(1);
+        expect(deriveSpy).toHaveBeenCalledTimes(1);
     });
 
     it('closes an in-flight transition measurement when the widget identity resets mid-refresh', async () => {
@@ -1117,7 +1194,7 @@ describe('ActivityAnalyticsWidget', () => {
         };
 
         vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+        mockComputedAnalyticsForGrouping(({ range }) => buildComputedSnapshot(
             range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
         ));
 
@@ -1164,9 +1241,12 @@ describe('ActivityAnalyticsWidget', () => {
         };
 
         vi.mocked(useActivitySeries).mockImplementation(() => activitySeriesState.current);
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+        mockComputedAnalyticsForGrouping(({ range }) => buildComputedSnapshot(
             range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
         ));
+        const buildSpy = vi.spyOn(activityAnalytics, 'buildActivityAnalytics');
+        const groupSpy = vi.mocked(activityAnalyticsComputation.groupBuiltActivityAnalytics);
+        const deriveSpy = vi.mocked(activityAnalyticsComputation.deriveComputedActivityAnalytics);
 
         const { rerender } = render(
             <ActivityAnalyticsWidget
@@ -1176,6 +1256,9 @@ describe('ActivityAnalyticsWidget', () => {
         );
 
         expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
+        buildSpy.mockClear();
+        groupSpy.mockClear();
+        deriveSpy.mockClear();
 
         activitySeriesState.current = createActivitySeriesResult({
             data: POPULATED_ACTIVITY_SERIES,
@@ -1192,10 +1275,18 @@ describe('ActivityAnalyticsWidget', () => {
 
         expect(screen.getAllByText('Visible snapshot 7d').length).toBeGreaterThan(0);
         expect(screen.queryByText('Requested snapshot 30d')).not.toBeInTheDocument();
-        expect(screen.getByRole('alert')).toHaveTextContent('No se pudo actualizar');
-        expect(screen.getByText('Se mantiene la última vista confirmada')).toBeInTheDocument();
-        expect(screen.queryByRole('status')).not.toBeInTheDocument();
+        const staleNotice = screen.getByTestId('activity-analytics-historical-notice');
+        expect(staleNotice).toHaveTextContent('Desactualizado');
+        expect(staleNotice).toHaveAttribute('role', 'status');
+        expect(staleNotice.querySelector('.widget-runtime-state-caret')).toBeNull();
+        expect(staleNotice.parentElement).toBe(screen.getByTestId('activity-analytics-widget-body'));
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.queryByText('No se pudo actualizar')).not.toBeInTheDocument();
+        expect(screen.queryByText('Se mantiene la última vista confirmada')).not.toBeInTheDocument();
         expect(screen.queryByTestId('activity-analytics-widget-runtime-state')).not.toBeInTheDocument();
+        expect(buildSpy).not.toHaveBeenCalled();
+        expect(groupSpy).not.toHaveBeenCalled();
+        expect(deriveSpy).not.toHaveBeenCalled();
     });
 
     it('prefetches at most two preset ranges when the widget is visible and healthy', async () => {
@@ -1654,7 +1745,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ groupBy }) => ({
+        mockComputedAnalyticsForGrouping(({ groupBy }) => ({
             analytics: {
                 durationsMs: {
                     prod: 7 * 60 * 60 * 1000,
@@ -1760,7 +1851,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ groupBy }) => ({
+        mockComputedAnalyticsForGrouping(({ groupBy }) => ({
             analytics: {
                 durationsMs: { prod: 2, setup: 0, stopped: 0, noData: 0 },
                 stopCount: 0,
@@ -2124,7 +2215,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 4 * 60 * 60 * 1000,
@@ -3515,7 +3606,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range, groupBy }) => {
+        mockComputedAnalyticsForGrouping(({ range, groupBy }) => {
             if (range === '30d' && groupBy === 'week') {
                 return {
                     analytics: {
@@ -4042,7 +4133,7 @@ describe('ActivityAnalyticsWidget', () => {
     it('applies resolved state gradients across approved renderer surfaces without recomputing analytics for palette-only changes', async () => {
         const user = userEvent.setup();
         const onPersistDisplayOptions = vi.fn();
-        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 4 * 60 * 60 * 1000,
@@ -4195,7 +4286,7 @@ describe('ActivityAnalyticsWidget', () => {
 
     it('applies resolved alpha and surface-specific visual effects without changing analytics results', async () => {
         const user = userEvent.setup();
-        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 4 * 60 * 60 * 1000,
@@ -4832,7 +4923,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation((options) => {
+        mockComputedAnalyticsForGrouping((options) => {
             const grouped = groupActivityAnalyticsIntervals({
                 intervals: [
                     buildInterval('2026-06-18T00:00:00.000Z', 4 * 60 * 60 * 1000, 'prod'),
@@ -4973,7 +5064,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 4 * 60 * 60 * 1000,
@@ -5433,7 +5524,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 4 * 60 * 60 * 1000,
@@ -6365,7 +6456,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 4 * 60 * 60 * 1000,
@@ -6502,7 +6593,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 2 * 60 * 60 * 1000,
@@ -6635,7 +6726,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 11 * 60 * 60 * 1000,
@@ -6725,7 +6816,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 6 * 60 * 60 * 1000,
@@ -6903,8 +6994,10 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByText('No se pudo conectar con Activity-Series')).toBeInTheDocument();
+        expect(screen.getByText('No se pudieron cargar los datos')).toBeInTheDocument();
         expect(screen.queryByText(/ECONNRESET/i)).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-historical-notice')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('activity-analytics-widget-body')).not.toBeInTheDocument();
     });
 
     it('shows a sanitized backend error state without exposing backend summary data', () => {
@@ -6923,7 +7016,7 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByText('Activity-Series rechazó la consulta')).toBeInTheDocument();
+        expect(screen.getByText('No se pudieron cargar los datos')).toBeInTheDocument();
         expect(screen.queryByText('summary')).not.toBeInTheDocument();
     });
 
@@ -6943,7 +7036,7 @@ describe('ActivityAnalyticsWidget', () => {
             />,
         );
 
-        expect(screen.getByText('Activity-Series devolvió datos inválidos')).toBeInTheDocument();
+        expect(screen.getByText('No se pudieron cargar los datos')).toBeInTheDocument();
         expect(screen.queryByText('La respuesta recibida no cumple el contrato esperado para esta analítica.')).not.toBeInTheDocument();
         expect(screen.queryByText('No fue posible calcular la analítica de actividad.')).not.toBeInTheDocument();
     });
@@ -7219,7 +7312,7 @@ describe('ActivityAnalyticsWidget', () => {
             error: null,
             isEnabled: true,
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockReturnValue({
+        vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics').mockReturnValue({
             analytics: {
                 durationsMs: {
                     prod: 6 * 60 * 60 * 1000,
@@ -8157,7 +8250,7 @@ describe('ActivityAnalyticsWidget', () => {
             isEnabled: true,
         });
 
-        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics');
+        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics');
 
         const { rerender } = render(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} className="initial" />);
 
@@ -8174,6 +8267,112 @@ describe('ActivityAnalyticsWidget', () => {
         expect(computeSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('does not rebuild base analytics when only groupBy changes', () => {
+        vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult({ data: THIRTY_DAY_ACTIVITY_SERIES }));
+        const buildSpy = vi.spyOn(activityAnalytics, 'buildActivityAnalytics');
+        const groupSpy = vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics');
+        const initialWidget = makeWidget({
+            displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'day' },
+        });
+        const { rerender } = render(<ActivityAnalyticsWidget widget={initialWidget} machines={MACHINES} />);
+
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'week' },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(2);
+        expect(groupSpy.mock.calls.map(([options]) => options.nowMs)).toEqual([undefined, undefined]);
+        expect(groupSpy.mock.calls[1]?.[0].shifts).toBe(groupSpy.mock.calls[0]?.[0].shifts);
+    });
+
+    it('keeps analyticsNowMs stable while regrouping simulated data from the same mount', () => {
+        const mountNowMs = Date.parse('2026-06-19T12:00:00.000Z');
+        const dateNowSpy = vi.spyOn(Date, 'now')
+            .mockReturnValueOnce(mountNowMs)
+            .mockReturnValueOnce(mountNowMs + 60_000)
+            .mockReturnValue(mountNowMs + 120_000);
+        const groupSpy = vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics');
+        const { rerender } = render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        dataMode: 'simulated',
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={[]}
+            />,
+        );
+
+        expect(dateNowSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(1);
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    title: 'Rerender without analytics changes',
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        dataMode: 'simulated',
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={[]}
+                className="rerendered"
+            />,
+        );
+
+        expect(dateNowSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(1);
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        dataMode: 'simulated',
+                        range: '7d',
+                        groupBy: 'shift',
+                    },
+                })}
+                machines={[]}
+            />,
+        );
+
+        rerender(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        dataMode: 'simulated',
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={[]}
+            />,
+        );
+
+        expect(dateNowSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(3);
+        expect(groupSpy.mock.calls.map(([options]) => options.nowMs)).toEqual([
+            mountNowMs,
+            mountNowMs,
+            mountNowMs,
+        ]);
+    });
+
     it('records one completed refresh transition while keeping request pressure bounded to the new demanded range', async () => {
         const diagnostics = collectPerformanceDiagnostics();
         const requestedSelections: string[] = [];
@@ -8188,7 +8387,7 @@ describe('ActivityAnalyticsWidget', () => {
 
             return activitySeriesState.current;
         });
-        vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics').mockImplementation(({ range }) => buildComputedSnapshot(
+        mockComputedAnalyticsForGrouping(({ range }) => buildComputedSnapshot(
             range === '7d' ? 'Visible snapshot 7d' : 'Requested snapshot 30d',
         ));
 
@@ -8261,7 +8460,7 @@ describe('ActivityAnalyticsWidget', () => {
     });
 
     it('recomputes analytics when calculation inputs change', () => {
-        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics');
+        const computeSpy = vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics');
         const shiftsA = [{ id: 'a', label: 'A', start: '06:00', end: '14:00' }];
         const shiftsB = [{ id: 'b', label: 'B', start: '14:00', end: '22:00' }];
         const dataA = POPULATED_ACTIVITY_SERIES;

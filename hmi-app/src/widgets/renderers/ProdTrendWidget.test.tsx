@@ -9,12 +9,15 @@ import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config'
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { useProdTrendDataSource, type UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
+import { DataServiceError } from '../../services/dataOverview.service';
 import {
     resolveWidgetChartLayoutMetrics,
     WIDGET_CHART_CONTAINER_CLASS,
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
 import * as activityAnalyticsSimulation from '../../utils/activityAnalyticsSimulation';
+import * as activityAnalytics from '../../utils/activityAnalytics';
+import * as activityAnalyticsComputation from '../../utils/activityAnalyticsComputation';
 import ProdTrendWidget, { clampLineGlowBlur, clampLineStrokeWidth, resolveProdTrendLatestValueLabelPlacement } from './ProdTrendWidget';
 
 function expectRuntimeControlIndicator(button: HTMLElement, expectedClasses: string[], unexpectedClasses: string[] = []) {
@@ -127,6 +130,16 @@ function makeDataSourceResult(overrides: Partial<UseProdTrendDataSourceResult> =
         ...overrides,
     };
 }
+
+const THIRTY_DAY_DATA_SOURCE_RESPONSE = {
+    ...makeDataSourceResult().response!,
+    range: '30d' as const,
+    window: {
+        ...makeDataSourceResult().response!.window,
+        start: '2026-05-20T00:00:00.000Z',
+    },
+    series: [...DENSE_ACTIVITY_SERIES],
+};
 
 describe('ProdTrendWidget', () => {
     afterEach(() => {
@@ -504,6 +517,195 @@ describe('ProdTrendWidget', () => {
         expect(getGroupButton('TURNO')).toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
         expect(getGroupButton('TURNO')).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
         expectRuntimeControlIndicator(getGroupButton('TURNO'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current']);
+    });
+
+    it('does not rebuild base analytics when only groupBy changes', async () => {
+        const user = userEvent.setup();
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult());
+        const monolithicSpy = vi.spyOn(activityAnalyticsComputation, 'computeActivityAnalytics');
+        const buildSpy = vi.spyOn(activityAnalytics, 'buildActivityAnalytics');
+        const groupSpy = vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics');
+        const deriveSpy = vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics');
+
+        render(<ProdTrendWidget widget={makeWidget()} machines={MACHINES} />);
+        await user.click(screen.getByRole('button', { name: 'TURNO' }));
+
+        expect(monolithicSpy).not.toHaveBeenCalled();
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(2);
+        expect(deriveSpy).toHaveBeenCalledTimes(2);
+        expect(groupSpy.mock.calls[1]?.[0].shifts).toBe(groupSpy.mock.calls[0]?.[0].shifts);
+    });
+
+    it('rebuilds base analytics for new series, bucket size, and thresholds', () => {
+        const dataSourceState = { current: makeDataSourceResult() };
+        vi.mocked(useProdTrendDataSource).mockImplementation(() => dataSourceState.current);
+        const buildSpy = vi.spyOn(activityAnalytics, 'buildActivityAnalytics');
+        const groupSpy = vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics');
+        const deriveSpy = vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics');
+        const initialWidget = makeWidget();
+        const { rerender } = render(<ProdTrendWidget widget={initialWidget} machines={MACHINES} />);
+
+        dataSourceState.current = makeDataSourceResult({
+            response: {
+                ...makeDataSourceResult().response!,
+                series: [...DENSE_ACTIVITY_SERIES],
+            },
+        });
+        rerender(<ProdTrendWidget widget={initialWidget} machines={MACHINES} />);
+
+        dataSourceState.current = makeDataSourceResult({
+            response: {
+                ...dataSourceState.current.response!,
+                window: { ...dataSourceState.current.response!.window, bucketMs: 600000 },
+            },
+        });
+        rerender(<ProdTrendWidget widget={initialWidget} machines={MACHINES} />);
+
+        rerender(<ProdTrendWidget
+            widget={makeWidget({
+                displayOptions: {
+                    ...makeWidget().displayOptions,
+                    setupThresholdKw: 0.2,
+                    prodThresholdKw: 0.3,
+                },
+            })}
+            machines={MACHINES}
+        />);
+
+        expect(buildSpy).toHaveBeenCalledTimes(4);
+        expect(groupSpy).toHaveBeenCalledTimes(4);
+        expect(deriveSpy).toHaveBeenCalledTimes(4);
+    });
+
+    it('keeps simulated analyticsNowMs stable with a growing clock and leaves Real nowMs undefined', async () => {
+        const user = userEvent.setup();
+        const firstNowMs = Date.parse('2026-06-19T12:00:00.000Z');
+        let clockMs = firstNowMs;
+        vi.spyOn(Date, 'now').mockImplementation(() => {
+            const current = clockMs;
+            clockMs += 60_000;
+            return current;
+        });
+        const stableShifts = [{ id: 'shift-a', label: 'A', start: '06:00', end: '14:00' }];
+        vi.mocked(useTemporalSettings).mockImplementation(() => ({
+            config: { plantTimezone: 'UTC', shifts: stableShifts },
+            shifts: stableShifts,
+            resolvedTimezone: 'UTC',
+        }));
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            configuredMode: 'simulated',
+            effectiveMode: 'simulated',
+            source: null,
+            response: null,
+        }));
+        const groupSpy = vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics');
+
+        const { unmount } = render(<ProdTrendWidget
+            widget={makeWidget({ displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' } })}
+            machines={MACHINES}
+        />);
+        await user.click(screen.getByRole('button', { name: 'TURNO' }));
+
+        expect(groupSpy.mock.calls.map(([options]) => options.nowMs)).toEqual([firstNowMs, firstNowMs]);
+        expect(groupSpy.mock.calls.every(([options]) => options.shifts === stableShifts)).toBe(true);
+
+        unmount();
+        groupSpy.mockClear();
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult());
+        render(<ProdTrendWidget widget={makeWidget()} machines={MACHINES} />);
+
+        expect(groupSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy.mock.calls[0]?.[0].nowMs).toBeUndefined();
+        expect(groupSpy.mock.calls[0]?.[0].shifts).toBe(stableShifts);
+    });
+
+    it('keeps the last valid Real chart while an incompatible placeholder refreshes, then processes the final response once', () => {
+        const dataSourceState = { current: makeDataSourceResult() };
+        vi.mocked(useProdTrendDataSource).mockImplementation(() => dataSourceState.current);
+        const buildSpy = vi.spyOn(activityAnalytics, 'buildActivityAnalytics');
+        const groupSpy = vi.spyOn(activityAnalyticsComputation, 'groupBuiltActivityAnalytics');
+        const deriveSpy = vi.spyOn(activityAnalyticsComputation, 'deriveComputedActivityAnalytics');
+        const { rerender } = render(<ProdTrendWidget widget={makeWidget()} machines={MACHINES} />);
+
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+        buildSpy.mockClear();
+        groupSpy.mockClear();
+        deriveSpy.mockClear();
+
+        dataSourceState.current = makeDataSourceResult({
+            source: null,
+            response: null,
+            isFetching: true,
+            isRefreshing: true,
+        });
+        rerender(<ProdTrendWidget
+            widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'day' } })}
+            machines={MACHINES}
+        />);
+
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+        const refreshingNotice = screen.getByTestId('prod-trend-historical-notice');
+        const viewport = screen.getByTestId('prod-trend-widget-viewport');
+        expect(refreshingNotice).toHaveTextContent('Actualizando_');
+        expect(refreshingNotice).toHaveAttribute('role', 'status');
+        expect(refreshingNotice).toHaveClass('absolute', 'inset-0', 'pointer-events-none');
+        expect(viewport).toHaveClass('relative');
+        expect(refreshingNotice.parentElement).toBe(viewport);
+        expect(buildSpy).not.toHaveBeenCalled();
+        expect(groupSpy).not.toHaveBeenCalled();
+        expect(deriveSpy).not.toHaveBeenCalled();
+
+        dataSourceState.current = makeDataSourceResult({ response: THIRTY_DAY_DATA_SOURCE_RESPONSE });
+        rerender(<ProdTrendWidget
+            widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'day' } })}
+            machines={MACHINES}
+        />);
+
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-historical-notice')).not.toBeInTheDocument();
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+        expect(groupSpy).toHaveBeenCalledTimes(1);
+        expect(deriveSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the last valid Real chart and current error affordance when refresh fails', () => {
+        const dataSourceState = { current: makeDataSourceResult() };
+        vi.mocked(useProdTrendDataSource).mockImplementation(() => dataSourceState.current);
+        const { rerender } = render(<ProdTrendWidget widget={makeWidget()} machines={MACHINES} />);
+
+        dataSourceState.current = makeDataSourceResult({
+            source: null,
+            response: null,
+            error: new DataServiceError('Activity-series data is temporarily unavailable', 503),
+        });
+        rerender(<ProdTrendWidget
+            widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '30d', groupBy: 'day' } })}
+            machines={MACHINES}
+        />);
+
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+        const staleNotice = screen.getByTestId('prod-trend-historical-notice');
+        expect(staleNotice).toHaveTextContent('Desactualizado');
+        expect(staleNotice.querySelector('.widget-runtime-state-caret')).toBeNull();
+        expect(staleNotice.parentElement).toBe(screen.getByTestId('prod-trend-widget-viewport'));
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.queryByText('No se pudo actualizar')).not.toBeInTheDocument();
+        expect(screen.queryByText('Se mantiene la última vista confirmada')).not.toBeInTheDocument();
+    });
+
+    it('renders the canonical full error state without a chart notice when no snapshot exists', () => {
+        vi.mocked(useProdTrendDataSource).mockReturnValue(makeDataSourceResult({
+            source: null,
+            response: null,
+            error: new DataServiceError('Activity-series request could not be completed', 503),
+        }));
+
+        render(<ProdTrendWidget widget={makeWidget()} machines={MACHINES} />);
+
+        expect(screen.getByTestId('prod-trend-widget-runtime-state')).toHaveTextContent('No se pudieron cargar los datos');
+        expect(screen.queryByTestId('prod-trend-historical-notice')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('prod-trend-widget-chart')).not.toBeInTheDocument();
     });
 
     it('renders temporal controls in one horizontal row with the separator restored', () => {

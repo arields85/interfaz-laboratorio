@@ -4,7 +4,14 @@ import type { ActivityAnalyticsResponse } from '../domain/activityAnalytics.type
 import { useActivitySeries } from './useActivitySeries';
 import { useProdTrendDataSource } from './useProdTrendDataSource';
 
-vi.mock('./useActivitySeries', () => ({ useActivitySeries: vi.fn() }));
+vi.mock('./useActivitySeries', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./useActivitySeries')>();
+
+    return {
+        ...actual,
+        useActivitySeries: vi.fn(),
+    };
+});
 
 const params = { machineId: 7, range: '24h' as const };
 const response: ActivityAnalyticsResponse = {
@@ -94,5 +101,52 @@ describe('useProdTrendDataSource', () => {
             'message',
             'Activity-series response identity does not match the requested identity',
         );
+    });
+
+    it('treats previous-key placeholder data as an in-flight refresh instead of an identity error', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            ...queryResult(response),
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        });
+
+        const { result } = renderHook(() => useProdTrendDataSource({
+            configuredMode: 'real',
+            params: { machineId: 7, range: '30d' },
+        }));
+
+        expect(result.current).toMatchObject({
+            source: null,
+            response: null,
+            error: null,
+            isFetching: true,
+            isRefreshing: true,
+        });
+    });
+
+    it('matches custom response windows by instant rather than offset spelling', () => {
+        vi.mocked(useActivitySeries).mockReturnValue(queryResult({
+            ...response,
+            range: 'custom',
+            window: {
+                ...response.window,
+                start: '2026-06-18T07:00:00.000-03:00',
+                end: '2026-06-19T07:00:00.000-03:00',
+            },
+        }));
+
+        const { result } = renderHook(() => useProdTrendDataSource({
+            configuredMode: 'real',
+            params: {
+                machineId: 7,
+                range: 'custom',
+                start: '2026-06-18T10:00:00.000Z',
+                end: '2026-06-19T10:00:00.000Z',
+            },
+        }));
+
+        expect(result.current.response).not.toBeNull();
+        expect(result.current.error).toBeNull();
     });
 });

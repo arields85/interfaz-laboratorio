@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ShiftDefinition } from '../domain/admin.types';
+import { buildActivityAnalytics } from './activityAnalytics';
 import {
     computeActivityAnalytics,
+    deriveComputedActivityAnalytics,
+    groupBuiltActivityAnalytics,
 } from './activityAnalyticsComputation';
+import { buildActivityAnalyticsSimulatedHistory } from './activityAnalyticsSimulation';
 
 const THRESHOLDS = {
     setupKw: 3,
@@ -57,6 +61,79 @@ function mergeSeries(...parts: ReturnType<typeof buildSeries>[]) {
 }
 
 describe('computeActivityAnalytics', () => {
+    it('composes build, grouping, and derivation without changing the facade result', () => {
+        const options = {
+            series: buildSeries('2026-06-12T12:00:00.000Z', 169, 60 * 60 * 1000, 10),
+            thresholds: THRESHOLDS,
+            range: '7d' as const,
+            groupBy: 'day' as const,
+            shifts: DAILY_SHIFTS,
+            timezone: 'UTC',
+            window: {
+                start: '2026-06-12T12:00:00.000Z',
+                end: '2026-06-19T12:00:00.000Z',
+                bucketMs: 60 * 60 * 1000,
+            },
+            nowMs: Date.parse('2026-06-19T12:00:00.000Z'),
+        };
+        const analytics = buildActivityAnalytics({
+            series: options.series,
+            bucketMs: options.window.bucketMs,
+            thresholds: options.thresholds,
+        });
+        const groupedAnalytics = groupBuiltActivityAnalytics({
+            analytics,
+            range: options.range,
+            groupBy: options.groupBy,
+            shifts: options.shifts,
+            timezone: options.timezone,
+            window: options.window,
+            nowMs: options.nowMs,
+        });
+
+        expect(deriveComputedActivityAnalytics(groupedAnalytics)).toEqual(computeActivityAnalytics(options));
+    });
+
+    it('matches the deterministic pre-refactor 7d/day output golden', async () => {
+        const nowMs = Date.parse('2026-06-19T12:00:00.000Z');
+        const history = buildActivityAnalyticsSimulatedHistory({
+            widgetId: 'stage1-benchmark',
+            machineId: 101,
+            variableKey: 'Total kW',
+            range: '7d',
+            baseValue: 5,
+            operatingLevels: {
+                stopped: 0.5,
+                setup: 5,
+                production: 10,
+            },
+            nowMs,
+        });
+        const window = history.window;
+
+        if (!window?.start || !window.end || typeof window.bucketMs !== 'number') {
+            throw new Error('Missing deterministic golden window');
+        }
+
+        const result = computeActivityAnalytics({
+            series: history.series,
+            thresholds: THRESHOLDS,
+            range: '7d',
+            groupBy: 'day',
+            shifts: DAILY_SHIFTS,
+            timezone: 'UTC',
+            window: {
+                start: window.start,
+                end: window.end,
+                bucketMs: window.bucketMs,
+            },
+            nowMs,
+        });
+
+        expect(Object.keys(result)).toEqual(['analytics', 'grouped', 'comparison', 'summaryRows', 'timezone']);
+        expect(await createSha256(JSON.stringify(result))).toBe('9736bb75578e37352e769244fcf76a54c1d0d86cb7b16fcd33b4d2d18fb5068b');
+    });
+
     it('returns analytics and grouped buckets for representative activity-series inputs', () => {
         const result = computeActivityAnalytics({
             series: [
@@ -586,3 +663,9 @@ describe('computeActivityAnalytics', () => {
         expect(result.comparison.worst?.label).not.toBe('18/06 (en curso)');
     });
 });
+
+async function createSha256(value: string): Promise<string> {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}

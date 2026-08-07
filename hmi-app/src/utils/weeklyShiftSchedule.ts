@@ -1,4 +1,9 @@
 import type { ShiftDefinition, WeekdayKey } from '../domain/admin.types';
+import {
+    createTimezoneOperationContext,
+    getZonedDateTimeParts,
+    type TimezoneOperationContext,
+} from './timezoneOperationContext';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -74,7 +79,8 @@ export function resolveWeeklyShiftAssignment(options: {
 }): WeeklyShiftAssignment {
     const { timestampMs, timezone } = options;
     const shifts = options.shifts.map(normalizeShiftDefinitionWithWeekdays);
-    const localParts = getZonedDateTimeParts(timestampMs, timezone);
+    const timezoneContext = createTimezoneOperationContext(timezone);
+    const localParts = getZonedDateTimeParts(timestampMs, timezoneContext);
     const localMinutes = (localParts.hour * 60) + localParts.minute;
     const localDateKey = formatDateKey(localParts.year, localParts.month, localParts.day);
     const localTimeKey = `${pad(localParts.hour)}:${pad(localParts.minute)}`;
@@ -95,7 +101,7 @@ export function resolveWeeklyShiftAssignment(options: {
 
         if (!crossesMidnight && weekdays.includes(localWeekday) && localMinutes >= startMinutes && localMinutes < endMinutes) {
             const anchorDate = { ...localParts, hour: 0, minute: 0 };
-            return buildAssignment({ shift, anchorDate, timezone, crossesMidnight: false });
+            return buildAssignment({ shift, anchorDate, timezoneContext, crossesMidnight: false });
         }
 
         if (!crossesMidnight) {
@@ -104,11 +110,11 @@ export function resolveWeeklyShiftAssignment(options: {
 
         if (localMinutes >= startMinutes && weekdays.includes(localWeekday)) {
             const anchorDate = { ...localParts, hour: 0, minute: 0 };
-            return buildAssignment({ shift, anchorDate, timezone, crossesMidnight: true });
+            return buildAssignment({ shift, anchorDate, timezoneContext, crossesMidnight: true });
         }
 
         if (localMinutes < endMinutes && weekdays.includes(previousWeekday)) {
-            return buildAssignment({ shift, anchorDate: previousLocalDate, timezone, crossesMidnight: true });
+            return buildAssignment({ shift, anchorDate: previousLocalDate, timezoneContext, crossesMidnight: true });
         }
     }
 
@@ -133,8 +139,29 @@ export function buildWeeklyShiftIntervals(options: {
         return [];
     }
 
+    return buildWeeklyShiftIntervalsWithTimezoneContext({
+        shifts: options.shifts,
+        visibleStartMs,
+        visibleEndMs,
+        timezoneContext: createTimezoneOperationContext(timezone),
+    });
+}
+
+/** @internal Shared-context entry point for composed timezone operations. */
+export function buildWeeklyShiftIntervalsWithTimezoneContext(options: {
+    shifts: ShiftDefinition[];
+    visibleStartMs: number;
+    visibleEndMs: number;
+    timezoneContext: TimezoneOperationContext;
+}): WeeklyShiftInterval[] {
+    const { visibleStartMs, visibleEndMs, timezoneContext } = options;
+
+    if (visibleEndMs <= visibleStartMs) {
+        return [];
+    }
+
     const shifts = options.shifts.map(normalizeShiftDefinitionWithWeekdays);
-    const localDates = collectVisibleLocalDates(visibleStartMs, visibleEndMs, timezone);
+    const localDates = collectVisibleLocalDates(visibleStartMs, visibleEndMs, timezoneContext);
 
     return localDates
         .flatMap((localDate) => {
@@ -148,7 +175,7 @@ export function buildWeeklyShiftIntervals(options: {
                 const assignment = buildAssignment({
                     shift,
                     anchorDate: { ...localDate, hour: 0, minute: 0 },
-                    timezone,
+                    timezoneContext,
                     crossesMidnight: parseShiftMinutes(shift.start)! >= parseShiftMinutes(shift.end)!,
                 });
 
@@ -173,10 +200,10 @@ export function buildWeeklyShiftIntervals(options: {
 function buildAssignment(options: {
     shift: ShiftDefinition;
     anchorDate: { year: number; month: number; day: number; hour: number; minute: number };
-    timezone: string;
+    timezoneContext: TimezoneOperationContext;
     crossesMidnight: boolean;
 }): WeeklyShiftAssignment {
-    const { shift, anchorDate, timezone, crossesMidnight } = options;
+    const { shift, anchorDate, timezoneContext, crossesMidnight } = options;
     const [startHour, startMinute] = shift.start.split(':').map(Number);
     const [endHour, endMinute] = shift.end.split(':').map(Number);
     const start = { ...anchorDate, hour: startHour, minute: startMinute };
@@ -189,8 +216,8 @@ function buildAssignment(options: {
         shiftId: shift.id,
         label: shift.label,
         bucketKey: `shift:${shift.id}:${keyDate}`,
-        startMs: zonedLocalDateTimeToUtcMs(start, timezone),
-        endMs: zonedLocalDateTimeToUtcMs(end, timezone),
+        startMs: zonedLocalDateTimeToUtcMs(start, timezoneContext),
+        endMs: zonedLocalDateTimeToUtcMs(end, timezoneContext),
     };
 }
 
@@ -220,11 +247,15 @@ function buildWeeklyValidationSegments(shift: ShiftDefinition): Array<{ startMin
     });
 }
 
-function collectVisibleLocalDates(visibleStartMs: number, visibleEndMs: number, timezone: string): Array<{ year: number; month: number; day: number }> {
+function collectVisibleLocalDates(
+    visibleStartMs: number,
+    visibleEndMs: number,
+    timezoneContext: TimezoneOperationContext,
+): Array<{ year: number; month: number; day: number }> {
     const uniqueDates = new Map<string, { year: number; month: number; day: number }>();
 
     for (let cursor = visibleStartMs - DAY_MS; cursor <= visibleEndMs + DAY_MS; cursor += 12 * 60 * 60 * 1000) {
-        const parts = getZonedDateTimeParts(cursor, timezone);
+        const parts = getZonedDateTimeParts(cursor, timezoneContext);
         const key = `${parts.year}-${parts.month}-${parts.day}`;
 
         if (!uniqueDates.has(key)) {
@@ -261,11 +292,14 @@ function pad(value: number): string {
     return value.toString().padStart(2, '0');
 }
 
-function zonedLocalDateTimeToUtcMs(localDateTime: { year: number; month: number; day: number; hour: number; minute: number }, timezone: string): number {
+function zonedLocalDateTimeToUtcMs(
+    localDateTime: { year: number; month: number; day: number; hour: number; minute: number },
+    timezoneContext: TimezoneOperationContext,
+): number {
     let guessMs = Date.UTC(localDateTime.year, localDateTime.month - 1, localDateTime.day, localDateTime.hour, localDateTime.minute, 0, 0);
 
     for (let iteration = 0; iteration < 4; iteration += 1) {
-        const actual = getZonedDateTimeParts(guessMs, timezone);
+        const actual = getZonedDateTimeParts(guessMs, timezoneContext);
         const diffMinutes = (
             Date.UTC(localDateTime.year, localDateTime.month - 1, localDateTime.day, localDateTime.hour, localDateTime.minute)
             - Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute)
@@ -280,41 +314,6 @@ function zonedLocalDateTimeToUtcMs(localDateTime: { year: number; month: number;
 
     return guessMs;
 }
-
-function getZonedDateTimeParts(timestampMs: number, timezone: string): { year: number; month: number; day: number; hour: number; minute: number; weekday: number } {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        weekday: 'short',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    });
-
-    const parts = formatter.formatToParts(new Date(timestampMs));
-    const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '0';
-
-    return {
-        year: Number(get('year')),
-        month: Number(get('month')),
-        day: Number(get('day')),
-        hour: Number(get('hour')),
-        minute: Number(get('minute')),
-        weekday: SHORT_WEEKDAY_TO_INDEX[get('weekday')] ?? 0,
-    };
-}
-
-const SHORT_WEEKDAY_TO_INDEX: Record<string, number> = {
-    Mon: 0,
-    Tue: 1,
-    Wed: 2,
-    Thu: 3,
-    Fri: 4,
-    Sat: 5,
-    Sun: 6,
-};
 
 function addLocalDays(localDateTime: { year: number; month: number; day: number; hour: number; minute: number }, days: number) {
     const date = new Date(Date.UTC(localDateTime.year, localDateTime.month - 1, localDateTime.day + days, localDateTime.hour, localDateTime.minute));

@@ -9,6 +9,7 @@ import {
     ACTIVITY_SERIES_QUERY_KEY_PREFIX,
     createActivitySeriesQueryKey,
     createActivitySeriesQueryOptions,
+    isActivitySeriesResponseCompatible,
     useActivitySeries,
 } from './useActivitySeries';
 
@@ -151,6 +152,52 @@ describe('useActivitySeries', () => {
             isPlaceholderData: true,
             isRefreshing: true,
         });
+    });
+
+    it('matches preset response identity and custom windows by normalized instant', () => {
+        const response = {
+            machineId: 7,
+            range: 'custom' as const,
+            window: {
+                start: '2026-06-18T07:00:00.000-03:00',
+                end: '2026-06-18T09:00:00.000-03:00',
+            },
+        };
+
+        expect(isActivitySeriesResponseCompatible({
+            machineId: 7,
+            range: 'custom',
+            start: '2026-06-18T10:00:00.000Z',
+            end: '2026-06-18T12:00:00.000Z',
+        }, response)).toBe(true);
+        expect(isActivitySeriesResponseCompatible({ machineId: 7, range: '7d' }, {
+            ...response,
+            range: '7d',
+        })).toBe(true);
+    });
+
+    it('rejects different custom instants, machines, and ranges', () => {
+        const response = {
+            machineId: 7,
+            range: 'custom' as const,
+            window: {
+                start: '2026-06-18T07:00:00.000-03:00',
+                end: '2026-06-18T09:00:00.000-03:00',
+            },
+        };
+        const request = {
+            machineId: 7,
+            range: 'custom' as const,
+            start: '2026-06-18T10:00:00.000Z',
+            end: '2026-06-18T12:00:00.000Z',
+        };
+
+        expect(isActivitySeriesResponseCompatible(request, {
+            ...response,
+            window: { ...response.window, start: '2026-06-18T07:01:00.000-03:00' },
+        })).toBe(false);
+        expect(isActivitySeriesResponseCompatible(request, { ...response, machineId: 8 })).toBe(false);
+        expect(isActivitySeriesResponseCompatible(request, { ...response, range: '7d' })).toBe(false);
     });
 
     it('keeps GET-only query execution inside the service boundary and does not label finalized data as refreshing', async () => {

@@ -23,6 +23,20 @@ describe('useTemporalSettings', () => {
         expect(result.current.resolvedTimezone).toBe('America/Bogota');
     });
 
+    it('preserves the shifts reference across rerenders until temporal config changes', () => {
+        saveTemporalSettingsConfig({
+            plantTimezone: 'America/Bogota',
+            shifts: [{ id: 'shift-a', label: 'Turno A', start: '06:00', end: '14:00' }],
+        });
+
+        const { result, rerender } = renderHook(() => useTemporalSettings());
+        const initialShifts = result.current.shifts;
+
+        rerender();
+
+        expect(result.current.shifts).toBe(initialShifts);
+    });
+
     it('re-renders immediately after the temporal settings save event fires', async () => {
         const { result } = renderHook(() => useTemporalSettings());
 
