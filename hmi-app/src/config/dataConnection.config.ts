@@ -16,8 +16,10 @@ export const DATA_DEFAULT_STALE_TIME = 4_000;
 export const DATA_DEFAULT_ENDPOINT = '/api/hmi-data';
 export const DATA_DEFAULT_HISTORY_ENDPOINT = '/api/hmi-data/history';
 export const DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT = '/api/hmi-data/activity-series';
+export const DATA_DEFAULT_VOICE_ENDPOINT = '/hmi/voice/latest';
 export const DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS = 5_000;
 export const DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS = 1_000;
+export const DATA_CONNECTION_CONFIG_CHANGED_EVENT = 'hmi:data-connection-config-changed';
 
 const LS_KEY_BASE_URL = 'hmi:node-red-base-url';
 const LS_KEY_ENDPOINT = 'hmi:node-red-endpoint';
@@ -26,6 +28,7 @@ const LS_KEY_ACTIVITY_SERIES_ENDPOINT = 'hmi:activity-series-endpoint';
 const LS_KEY_SNAPSHOT_EXPORT_ENDPOINT = 'hmi:snapshot-export-endpoint';
 const LS_KEY_SNAPSHOT_EXPORT_ENABLED = 'hmi:snapshot-export-enabled';
 const LS_KEY_SNAPSHOT_EXPORT_INTERVAL_MS = 'hmi:snapshot-export-interval-ms';
+const LS_KEY_VOICE_ENDPOINT = 'hmi:voice-endpoint';
 
 function stripTrailingSlashes(raw: string): string {
     return raw.replace(/\/+$/, '');
@@ -46,6 +49,14 @@ function normalizeSnapshotExportIntervalMs(intervalMs: number): number {
     }
 
     return Math.max(DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS, Math.trunc(intervalMs));
+}
+
+function notifyDataConnectionConfigChanged(): void {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+        return;
+    }
+
+    window.dispatchEvent(new Event(DATA_CONNECTION_CONFIG_CHANGED_EVENT));
 }
 
 // --- Base URL ---
@@ -71,11 +82,13 @@ export function saveDataBaseUrl(url: string): void {
     const normalized = normalizeUrl(url);
     if (normalized) {
         localStorage.setItem(LS_KEY_BASE_URL, normalized);
+        notifyDataConnectionConfigChanged();
     }
 }
 
 export function clearDataBaseUrl(): void {
     localStorage.removeItem(LS_KEY_BASE_URL);
+    notifyDataConnectionConfigChanged();
 }
 
 export function getSavedDataBaseUrl(): string {
@@ -191,6 +204,41 @@ export function isDataActivitySeriesEnabled(): boolean {
     return getDataBaseUrl() !== null && getDataActivitySeriesEndpoint() !== null;
 }
 
+// --- Voice Endpoint ---
+
+export function getDataVoiceEndpoint(): string | null {
+    try {
+        const stored = localStorage.getItem(LS_KEY_VOICE_ENDPOINT);
+
+        if (stored !== null) {
+            const trimmed = stored.trim();
+            return trimmed === '' ? null : '/' + stripLeadingSlashes(trimmed);
+        }
+    } catch {
+        // localStorage unavailable
+    }
+
+    return DATA_DEFAULT_VOICE_ENDPOINT;
+}
+
+export function saveDataVoiceEndpoint(endpoint: string): void {
+    localStorage.setItem(LS_KEY_VOICE_ENDPOINT, endpoint.trim());
+    notifyDataConnectionConfigChanged();
+}
+
+export function clearDataVoiceEndpoint(): void {
+    localStorage.removeItem(LS_KEY_VOICE_ENDPOINT);
+    notifyDataConnectionConfigChanged();
+}
+
+export function getSavedDataVoiceEndpoint(): string | null {
+    try {
+        return localStorage.getItem(LS_KEY_VOICE_ENDPOINT);
+    } catch {
+        return null;
+    }
+}
+
 // --- Full URLs ---
 
 export function getDataFullUrl(): string | null {
@@ -214,6 +262,14 @@ export function getDataActivitySeriesUrl(): string | null {
     const activitySeriesEndpoint = getDataActivitySeriesEndpoint();
     if (!activitySeriesEndpoint) return null;
     return `${base}/${stripLeadingSlashes(activitySeriesEndpoint)}`;
+}
+
+export function getDataVoiceUrl(): string | null {
+    const base = getDataBaseUrl();
+    if (!base) return null;
+    const voiceEndpoint = getDataVoiceEndpoint();
+    if (!voiceEndpoint) return null;
+    return `${base}/${stripLeadingSlashes(voiceEndpoint)}`;
 }
 
 export function getDataSnapshotExportEndpoint(): string | null {

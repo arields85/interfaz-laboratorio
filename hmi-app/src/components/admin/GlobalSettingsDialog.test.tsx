@@ -8,6 +8,7 @@ const CONNECTION_STORAGE_KEY = 'test:global-settings:connection';
 const DESIGN_STORAGE_KEY = 'test:global-settings:design';
 const LOADER_STORAGE_KEY = 'test:global-settings:loader';
 const TEMPORAL_STORAGE_KEY = 'test:global-settings:temporal';
+const VOICE_STORAGE_KEY = 'test:global-settings:voice';
 
 vi.mock('./ConnectionSettingsTab', async () => {
     const React = await vi.importActual<typeof import('react')>('react');
@@ -148,6 +149,37 @@ vi.mock('./TemporalSettingsTab', async () => {
     };
 });
 
+vi.mock('./VoiceSettingsTab', async () => {
+    const React = await vi.importActual<typeof import('react')>('react');
+
+    return {
+        default: function MockVoiceSettingsTab({ onDirtyChange, saveRef }: { onDirtyChange?: (dirty: boolean) => void; saveRef?: { current: (() => void) | null } }) {
+            const [value, setValue] = React.useState(() => localStorage.getItem(VOICE_STORAGE_KEY) ?? 'Persisted voice');
+
+            if (saveRef) {
+                saveRef.current = () => {
+                    localStorage.setItem(VOICE_STORAGE_KEY, value);
+                    onDirtyChange?.(false);
+                };
+            }
+
+            return (
+                <div>
+                    <label htmlFor="voice-draft">Voice draft</label>
+                    <input
+                        id="voice-draft"
+                        value={value}
+                        onChange={(event) => {
+                            setValue(event.target.value);
+                            onDirtyChange?.(true);
+                        }}
+                    />
+                </div>
+            );
+        },
+    };
+});
+
 import GlobalSettingsDialog from './GlobalSettingsDialog';
 
 function Harness() {
@@ -173,7 +205,16 @@ describe('GlobalSettingsDialog', () => {
         delete document.documentElement.dataset.designPreview;
     });
 
-    it('keeps Conexion, Diseno, Opciones, and Ajustes drafts alive while switching tabs in the open dialog', async () => {
+    it('renders VOZ as the final peer tab in the required order', () => {
+        render(<Harness />);
+
+        const dialog = screen.getByRole('dialog', { name: 'CONFIGURACION GENERAL' });
+        const tabNames = Array.from(dialog.querySelectorAll('button')).slice(0, 5).map((button) => button.textContent);
+
+        expect(tabNames).toEqual(['Conexion', 'Diseno', 'Opciones', 'Ajustes', 'Voz']);
+    });
+
+    it('keeps every tab draft alive while switching tabs in the open dialog', async () => {
         const user = userEvent.setup();
 
         render(<Harness />);
@@ -193,6 +234,10 @@ describe('GlobalSettingsDialog', () => {
         await user.clear(screen.getByLabelText('Temporal draft'));
         await user.type(screen.getByLabelText('Temporal draft'), 'Temporal unsaved');
 
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        await user.clear(screen.getByLabelText('Voice draft'));
+        await user.type(screen.getByLabelText('Voice draft'), 'Voice unsaved');
+
         await user.click(screen.getByRole('button', { name: 'Conexion' }));
         expect(screen.getByLabelText('Connection draft')).toHaveValue('Connection unsaved');
 
@@ -204,6 +249,9 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Ajustes' }));
         expect(screen.getByLabelText('Temporal draft')).toHaveValue('Temporal unsaved');
+
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        expect(screen.getByLabelText('Voice draft')).toHaveValue('Voice unsaved');
     });
 
     it('keeps the tab content in a scrollable panel', () => {
@@ -224,6 +272,7 @@ describe('GlobalSettingsDialog', () => {
         localStorage.setItem(DESIGN_STORAGE_KEY, 'Persisted design');
         localStorage.setItem(LOADER_STORAGE_KEY, 'Persisted loader');
         localStorage.setItem(TEMPORAL_STORAGE_KEY, 'Persisted timezone');
+        localStorage.setItem(VOICE_STORAGE_KEY, 'Persisted voice');
         document.documentElement.dataset.designPreview = 'Persisted design';
 
         render(<Harness />);
@@ -243,6 +292,10 @@ describe('GlobalSettingsDialog', () => {
         await user.clear(screen.getByLabelText('Temporal draft'));
         await user.type(screen.getByLabelText('Temporal draft'), 'Temporal unsaved');
 
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        await user.clear(screen.getByLabelText('Voice draft'));
+        await user.type(screen.getByLabelText('Voice draft'), 'Voice unsaved');
+
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
 
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -251,6 +304,7 @@ describe('GlobalSettingsDialog', () => {
         expect(localStorage.getItem(DESIGN_STORAGE_KEY)).toBe('Persisted design');
         expect(localStorage.getItem(LOADER_STORAGE_KEY)).toBe('Persisted loader');
         expect(localStorage.getItem(TEMPORAL_STORAGE_KEY)).toBe('Persisted timezone');
+        expect(localStorage.getItem(VOICE_STORAGE_KEY)).toBe('Persisted voice');
 
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
 
@@ -265,6 +319,9 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Ajustes' }));
         expect(screen.getByLabelText('Temporal draft')).toHaveValue('Persisted timezone');
+
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        expect(screen.getByLabelText('Voice draft')).toHaveValue('Persisted voice');
     });
 
     it('saves the active connection draft through the connection save branch only', async () => {
@@ -332,5 +389,20 @@ describe('GlobalSettingsDialog', () => {
         expect(getSaveButton()).toBeDisabled();
 
         document.removeEventListener('hmi:temporal-settings-changed', eventSpy);
+    });
+
+    it('saves the active Voz draft through the voice settings save branch', async () => {
+        const user = userEvent.setup();
+
+        localStorage.setItem(VOICE_STORAGE_KEY, 'Persisted voice');
+        render(<Harness />);
+
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        await user.clear(screen.getByLabelText('Voice draft'));
+        await user.type(screen.getByLabelText('Voice draft'), '/voice/new');
+        await user.click(getSaveButton());
+
+        expect(localStorage.getItem(VOICE_STORAGE_KEY)).toBe('/voice/new');
+        expect(getSaveButton()).toBeDisabled();
     });
 });

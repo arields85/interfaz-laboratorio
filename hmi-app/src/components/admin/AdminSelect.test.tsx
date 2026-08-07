@@ -27,6 +27,7 @@ function Harness() {
                 options={OPTIONS}
                 onChange={vi.fn()}
                 placeholder="Choose option"
+                ariaLabel="Named selector"
                 disabled={disabled}
             />
         </>
@@ -39,7 +40,7 @@ describe('AdminSelect', () => {
 
         render(<Harness />);
 
-        const trigger = screen.getByRole('button', { name: /choose option/i });
+        const trigger = screen.getByRole('button', { name: 'Named selector' });
         const toggleDisabled = screen.getByRole('button', { name: /toggle disabled/i });
 
         await user.click(trigger);

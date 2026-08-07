@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import { ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS } from './adminSidebarStyles';
 import DockColorField from './DockColorField';
 
@@ -42,5 +43,31 @@ describe('DockColorField', () => {
         );
 
         expect(screen.getByLabelText('Producción hex inicial')).toHaveValue('22d3ee');
+    });
+
+    it('owns optional preset color controls and reports the selected color', async () => {
+        const user = userEvent.setup();
+        const onColorChange = vi.fn();
+
+        render(
+            <DockColorField
+                label="Color del núcleo"
+                color="#1b6ee0"
+                hexCode="1b6ee0"
+                alpha={100}
+                showAlpha={false}
+                options={['#1b6ee0', '#1240c8']}
+                optionsAriaLabel="Colores de núcleo sugeridos"
+                optionAriaLabel={(color) => `Usar color de núcleo ${color}`}
+                onColorChange={onColorChange}
+                onHexCodeChange={() => undefined}
+                onAlphaChange={() => undefined}
+            />,
+        );
+
+        expect(screen.queryByRole('slider', { name: /alfa/i })).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Usar color de núcleo #1240c8' }));
+
+        expect(onColorChange).toHaveBeenCalledWith('#1240c8');
     });
 });

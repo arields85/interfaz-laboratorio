@@ -3,22 +3,28 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT,
     DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS,
+    DATA_DEFAULT_VOICE_ENDPOINT,
     DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS,
     clearDataActivitySeriesEndpoint,
     clearDataSnapshotExportEndpoint,
     clearDataSnapshotExportEnabledSetting,
     clearDataSnapshotExportIntervalMs,
+    clearDataVoiceEndpoint,
     getDataActivitySeriesEndpoint,
     getDataActivitySeriesUrl,
     getDataSnapshotExportEndpoint,
     getDataSnapshotExportIntervalMs,
     getDataSnapshotExportUrl,
+    getDataVoiceEndpoint,
+    getDataVoiceUrl,
+    getSavedDataVoiceEndpoint,
     isDataActivitySeriesEnabled,
     isDataSnapshotExportEnabled,
     saveDataActivitySeriesEndpoint,
     saveDataSnapshotExportEnabledSetting,
     saveDataSnapshotExportEndpoint,
     saveDataSnapshotExportIntervalMs,
+    saveDataVoiceEndpoint,
 } from './dataConnection.config';
 
 describe('dataConnection.config activity-series helpers', () => {
@@ -121,5 +127,49 @@ describe('dataConnection.config dashboard snapshot export helpers', () => {
         localStorage.setItem('hmi:snapshot-export-interval-ms', 'not-a-number');
 
         expect(getDataSnapshotExportIntervalMs()).toBe(DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS);
+    });
+});
+
+describe('dataConnection.config voice helpers', () => {
+    afterEach(() => {
+        localStorage.clear();
+        vi.unstubAllEnvs();
+    });
+
+    it('defaults the voice endpoint and composes it with the normalized Node-RED base url', () => {
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local///');
+
+        expect(getSavedDataVoiceEndpoint()).toBeNull();
+        expect(getDataVoiceEndpoint()).toBe(DATA_DEFAULT_VOICE_ENDPOINT);
+        expect(getDataVoiceUrl()).toBe('https://node-red.local/hmi/voice/latest');
+    });
+
+    it('persists a custom endpoint and normalizes duplicate joining slashes', () => {
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local///');
+
+        saveDataVoiceEndpoint('///custom/voice');
+
+        expect(getSavedDataVoiceEndpoint()).toBe('///custom/voice');
+        expect(getDataVoiceEndpoint()).toBe('/custom/voice');
+        expect(getDataVoiceUrl()).toBe('https://node-red.local/custom/voice');
+    });
+
+    it('preserves an empty saved endpoint as an explicit disabled state', () => {
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
+
+        saveDataVoiceEndpoint('   ');
+
+        expect(getSavedDataVoiceEndpoint()).toBe('');
+        expect(getDataVoiceEndpoint()).toBeNull();
+        expect(getDataVoiceUrl()).toBeNull();
+    });
+
+    it('clears the saved override back to the canonical default', () => {
+        saveDataVoiceEndpoint('/custom/voice');
+
+        clearDataVoiceEndpoint();
+
+        expect(getSavedDataVoiceEndpoint()).toBeNull();
+        expect(getDataVoiceEndpoint()).toBe(DATA_DEFAULT_VOICE_ENDPOINT);
     });
 });

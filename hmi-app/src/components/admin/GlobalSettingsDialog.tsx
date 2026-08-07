@@ -1,17 +1,19 @@
 import { useRef, useState } from 'react';
-import { Clock3, Palette, SlidersHorizontal, Wifi } from 'lucide-react';
+import { Clock3, Mic2, Palette, SlidersHorizontal, Wifi } from 'lucide-react';
 import AdminDialog from './AdminDialog';
 import AdminActionButton from './AdminActionButton';
 import ConnectionSettingsTab from './ConnectionSettingsTab';
 import DesignSettingsTab from './DesignSettingsTab';
 import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
 import TemporalSettingsTab from './TemporalSettingsTab';
+import VoiceSettingsTab from './VoiceSettingsTab';
 
 const TABS = [
     { id: 'connection', label: 'Conexion', icon: Wifi },
     { id: 'design', label: 'Diseno', icon: Palette },
     { id: 'options', label: 'Opciones', icon: SlidersHorizontal },
     { id: 'temporal', label: 'Ajustes', icon: Clock3 },
+    { id: 'voice', label: 'Voz', icon: Mic2 },
 ] as const;
 
 type GlobalSettingsDialogProps = {
@@ -31,13 +33,15 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     const [designDirty, setDesignDirty] = useState(false);
     const [optionsDirty, setOptionsDirty] = useState(false);
     const [temporalDirty, setTemporalDirty] = useState(false);
-    const dirty = connectionDirty || designDirty || optionsDirty || temporalDirty;
+    const [voiceDirty, setVoiceDirty] = useState(false);
+    const dirty = connectionDirty || designDirty || optionsDirty || temporalDirty || voiceDirty;
 
     const connectionSaveRef = useRef<(() => void) | null>(null);
     const designSaveRef = useRef<(() => void) | null>(null);
     const designRevertRef = useRef<(() => void) | null>(null);
     const optionsSaveRef = useRef<(() => void) | null>(null);
     const temporalSaveRef = useRef<(() => void) | null>(null);
+    const voiceSaveRef = useRef<(() => void) | null>(null);
 
     const handleSave = () => {
         if (activeTab === 'connection') {
@@ -55,6 +59,11 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
             return;
         }
 
+        if (activeTab === 'voice') {
+            voiceSaveRef.current?.();
+            return;
+        }
+
         optionsSaveRef.current?.();
     };
 
@@ -66,6 +75,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         setDesignDirty(false);
         setOptionsDirty(false);
         setTemporalDirty(false);
+        setVoiceDirty(false);
         onClose();
     };
 
@@ -146,6 +156,13 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                         <TemporalSettingsTab
                             onDirtyChange={setTemporalDirty}
                             saveRef={temporalSaveRef}
+                        />
+                    </div>
+
+                    <div hidden={activeTab !== 'voice'}>
+                        <VoiceSettingsTab
+                            onDirtyChange={setVoiceDirty}
+                            saveRef={voiceSaveRef}
                         />
                     </div>
                 </div>

@@ -26,13 +26,14 @@ interface AdminSelectProps {
     value: string;
     options: AdminSelectOption[];
     onChange: (value: string) => void;
+    ariaLabel?: string;
     className?: string;
     placeholder?: string;
     disabled?: boolean;
     style?: CSSProperties;
 }
 
-export default function AdminSelect({ value, options, onChange, className = '', placeholder, disabled = false, style }: AdminSelectProps) {
+export default function AdminSelect({ value, options, onChange, ariaLabel, className = '', placeholder, disabled = false, style }: AdminSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
     const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -68,6 +69,7 @@ export default function AdminSelect({ value, options, onChange, className = '', 
             <button
                 ref={triggerRef}
                 type="button"
+                aria-label={ariaLabel}
                 disabled={disabled}
                 onClick={handleToggle}
                 className={`${ADMIN_SIDEBAR_INPUT_TRIGGER_CLS} ${disabled ? ADMIN_SIDEBAR_INPUT_TRIGGER_DISABLED_CLS : ADMIN_SIDEBAR_INPUT_TRIGGER_ENABLED_CLS}`}

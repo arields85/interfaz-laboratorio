@@ -29,6 +29,9 @@ interface DockColorFieldProps {
     alphaMax?: number;
     alphaStep?: number;
     showAlpha?: boolean;
+    options?: readonly string[];
+    optionsAriaLabel?: string;
+    optionAriaLabel?: (color: string) => string;
 }
 
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
@@ -56,6 +59,9 @@ export default function DockColorField({
     alphaMax = 100,
     alphaStep = 1,
     showAlpha = true,
+    options = [],
+    optionsAriaLabel,
+    optionAriaLabel,
 }: DockColorFieldProps) {
     const resolvedAlpha = typeof alpha === 'number' ? alpha : Number(alpha);
     const resolvedInputClassName = [
@@ -102,6 +108,22 @@ export default function DockColorField({
                     />
                 </div>
             </DockInlineControlRow>
+
+            {options.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5" aria-label={optionsAriaLabel}>
+                    {options.map((option) => (
+                        <button
+                            key={option}
+                            type="button"
+                            disabled={disabled}
+                            aria-label={optionAriaLabel?.(option)}
+                            onClick={() => onColorChange(option)}
+                            className="size-5 rounded border border-white/20 transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-40"
+                            style={{ backgroundColor: option }}
+                        />
+                    ))}
+                </div>
+            ) : null}
 
             {showAlpha ? (
                 <DockSliderField
