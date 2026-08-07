@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getNearestTimestampPoint } from '../../utils/trendChartV2Interaction';
 
 interface TrendChartV2InteractionPoint {
     timestampMs: number;
@@ -37,11 +38,20 @@ export default function TrendChartV2InteractionLayer({
 }: TrendChartV2InteractionLayerProps) {
     const [dragStartX, setDragStartX] = useState<number | null>(null);
     const [dragCurrentX, setDragCurrentX] = useState<number | null>(null);
+    const lastEmittedHoverTimestampRef = useRef<number | null>(hoveredTimestampMs);
 
-    const hoveredPoint = useMemo(
-        () => points.find((point) => point.timestampMs === hoveredTimestampMs) ?? null,
-        [hoveredTimestampMs, points],
-    );
+    useEffect(() => {
+        lastEmittedHoverTimestampRef.current = hoveredTimestampMs;
+    }, [hoveredTimestampMs]);
+
+    const hoveredPoint = useMemo(() => {
+        if (hoveredTimestampMs === null) {
+            return null;
+        }
+
+        const nearestPoint = getNearestTimestampPoint(points, hoveredTimestampMs);
+        return nearestPoint?.timestampMs === hoveredTimestampMs ? nearestPoint : null;
+    }, [hoveredTimestampMs, points]);
 
     const selectionRect = dragStartX !== null && dragCurrentX !== null
         ? {
@@ -60,7 +70,12 @@ export default function TrendChartV2InteractionLayer({
 
         const hoveredTime = scaleXToTimestamp(x, plotLeft, plotWidth, domainStartMs, domainEndMs);
         const nearestPoint = getNearestTimestampPoint(points, hoveredTime);
-        onHoverChange(nearestPoint?.timestampMs ?? null);
+        const nextTimestampMs = nearestPoint?.timestampMs ?? null;
+
+        if (lastEmittedHoverTimestampRef.current !== nextTimestampMs) {
+            lastEmittedHoverTimestampRef.current = nextTimestampMs;
+            onHoverChange(nextTimestampMs);
+        }
     };
 
     const handleMouseDown = (event: React.MouseEvent<SVGRectElement>) => {
@@ -140,7 +155,10 @@ export default function TrendChartV2InteractionLayer({
                 onMouseLeave={() => {
                     setDragStartX(null);
                     setDragCurrentX(null);
-                    onHoverChange(null);
+                    if (lastEmittedHoverTimestampRef.current !== null) {
+                        lastEmittedHoverTimestampRef.current = null;
+                        onHoverChange(null);
+                    }
                 }}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
@@ -158,20 +176,4 @@ function getRelativeX(element: SVGRectElement, clientX: number, plotLeft: number
 function scaleXToTimestamp(x: number, plotLeft: number, plotWidth: number, domainStartMs: number, domainEndMs: number): number {
     const ratio = (x - plotLeft) / Math.max(plotWidth, 1);
     return Math.round(domainStartMs + ((domainEndMs - domainStartMs) * ratio));
-}
-
-function getNearestTimestampPoint(points: TrendChartV2InteractionPoint[], targetTimestampMs: number): TrendChartV2InteractionPoint | null {
-    if (points.length === 0) {
-        return null;
-    }
-
-    return points.reduce((nearest, point) => {
-        if (!nearest) {
-            return point;
-        }
-
-        const nearestDistance = Math.abs(nearest.timestampMs - targetTimestampMs);
-        const pointDistance = Math.abs(point.timestampMs - targetTimestampMs);
-        return pointDistance < nearestDistance ? point : nearest;
-    }, null as TrendChartV2InteractionPoint | null);
 }

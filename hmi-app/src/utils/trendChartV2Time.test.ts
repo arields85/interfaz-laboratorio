@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { HistoryDataPointV2, HistoryRangeV2, HistoryWindow } from '../domain/dataContract.types';
 import {
     buildTrendChartV2VisibleTickValues,
+    createTrendChartV2TimestampFormatter,
     formatTrendChartV2Timestamp,
     resolveTrendChartV2Timezone,
     resolveTrendChartV2VisibleWindow,
@@ -178,6 +179,40 @@ describe('trendChartV2Time', () => {
         })).toBe(100);
 
         expect(range).toBe('24h');
+    });
+
+    it('constructs one formatter per timestamp formatting operation instead of per point', () => {
+        const NativeDateTimeFormat = Intl.DateTimeFormat;
+        function DateTimeFormatMock(locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
+            return new NativeDateTimeFormat(locales, options);
+        }
+        const formatterSpy = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(DateTimeFormatMock);
+        const formatter = createTrendChartV2TimestampFormatter({ range: '24h', timezone: 'UTC' });
+
+        for (let index = 0; index < 1500; index += 1) {
+            formatter.format(Date.parse('2026-06-18T10:00:00.000Z') + (index * 60_000));
+        }
+
+        expect(formatterSpy).toHaveBeenCalledTimes(1);
+        formatterSpy.mockClear();
+
+        buildTrendChartV2VisibleTickValues({
+            points: Array.from({ length: 1500 }, (_, index) => ({
+                timestamp: new Date(Date.parse('2026-06-18T10:00:00.000Z') + (index * 60_000)).toISOString(),
+                timestampMs: Date.parse('2026-06-18T10:00:00.000Z') + (index * 60_000),
+                value: index,
+            })),
+            startMs: Date.parse('2026-06-18T10:00:00.000Z'),
+            endMs: Date.parse('2026-06-19T10:59:00.000Z'),
+            plotLeft: 38,
+            plotWidth: 360,
+            range: '24h',
+            timezone: 'UTC',
+            font: '400 12px monospace',
+            letterSpacing: 0,
+        });
+
+        expect(formatterSpy).toHaveBeenCalledTimes(1);
     });
 
     it('shows as many x-axis labels as fit without overlap based on available width', () => {

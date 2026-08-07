@@ -8,6 +8,7 @@ import {
     DATA_HISTORY_QUERY_KEY_PREFIX,
     createDataHistoryQueryKey,
     createDataHistoryQueryOptions,
+    isDataHistoryResponseCompatible,
     useDataHistory,
 } from './useDataHistory';
 
@@ -158,6 +159,68 @@ describe('useDataHistory', () => {
             isPlaceholderData: true,
             isRefreshing: true,
         });
+    });
+
+    it('matches V2 preset identity and custom response windows by normalized instant', () => {
+        const response = {
+            machineId: 7,
+            variableKey: 'pressure',
+            range: 'custom' as const,
+            window: {
+                start: '2026-06-18T07:00:00.000-03:00',
+                end: '2026-06-18T09:00:00.000-03:00',
+            },
+        };
+
+        expect(isDataHistoryResponseCompatible({
+            machineId: 7,
+            variableKey: 'pressure',
+            range: 'custom',
+            start: '2026-06-18T10:00:00.000Z',
+            end: '2026-06-18T12:00:00.000Z',
+            maxPoints: 1500,
+        }, response)).toBe(true);
+        expect(isDataHistoryResponseCompatible({ machineId: 7, variableKey: 'pressure', range: '24h' }, {
+            ...response,
+            range: '24h',
+        })).toBe(true);
+    });
+
+    it('rejects V2 responses for different machines, variables, ranges, or custom instants', () => {
+        const request = {
+            machineId: 7,
+            variableKey: 'pressure',
+            range: 'custom' as const,
+            start: '2026-06-18T10:00:00.000Z',
+            end: '2026-06-18T12:00:00.000Z',
+        };
+        const response = {
+            machineId: 7,
+            variableKey: 'pressure',
+            range: 'custom' as const,
+            window: {
+                start: request.start,
+                end: request.end,
+            },
+        };
+
+        expect(isDataHistoryResponseCompatible(request, { ...response, machineId: 8 })).toBe(false);
+        expect(isDataHistoryResponseCompatible(request, { ...response, variableKey: 'temperature' })).toBe(false);
+        expect(isDataHistoryResponseCompatible(request, { ...response, range: '24h' })).toBe(false);
+        expect(isDataHistoryResponseCompatible(request, {
+            ...response,
+            window: { ...response.window, end: '2026-06-18T12:01:00.000Z' },
+        })).toBe(false);
+    });
+
+    it('requires exact machine, variable, and range identity for legacy history responses', () => {
+        const request = { machineId: 7, variableKey: 'pressure', range: 'semana' as const };
+        const response = { machineId: 7, variableKey: 'pressure', range: 'semana' as const };
+
+        expect(isDataHistoryResponseCompatible(request, response)).toBe(true);
+        expect(isDataHistoryResponseCompatible(request, { ...response, machineId: 8 })).toBe(false);
+        expect(isDataHistoryResponseCompatible(request, { ...response, variableKey: 'temperature' })).toBe(false);
+        expect(isDataHistoryResponseCompatible(request, { ...response, range: 'mes' })).toBe(false);
     });
 
     it('passes react-query abort signals through exported query helpers and does not label finalized data as refreshing', async () => {

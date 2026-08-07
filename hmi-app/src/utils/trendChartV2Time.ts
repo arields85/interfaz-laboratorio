@@ -55,6 +55,10 @@ interface FormatTrendChartV2TimestampOptions {
     timezone: string;
 }
 
+export interface TrendChartV2TimestampFormatter {
+    format: (timestampMs: number) => string;
+}
+
 interface BuildTrendChartV2VisibleTickValuesOptions {
     points: HistoryDataPointV2[];
     startMs: number;
@@ -67,6 +71,7 @@ interface BuildTrendChartV2VisibleTickValuesOptions {
     maxLabelX?: number;
     font?: string;
     letterSpacing?: number;
+    formatter?: TrendChartV2TimestampFormatter;
 }
 
 export function resolveTrendChartV2VisibleWindow({
@@ -161,23 +166,37 @@ export function scaleTimestampToChartX({ timestampMs, startMs, endMs, x0, plotWi
 }
 
 export function formatTrendChartV2Timestamp({ timestampMs, range, timezone }: FormatTrendChartV2TimestampOptions): string {
-    const date = new Date(timestampMs);
+    return createTrendChartV2TimestampFormatter({ range, timezone }).format(timestampMs);
+}
 
-    if (Number.isNaN(date.getTime())) {
-        return '--';
-    }
-
-    const displayTimezone = isValidTimeZone(timezone)
-        ? timezone.trim()
-        : TEMPORAL_SETTINGS_FALLBACK_TIMEZONE;
-
-    const options: Intl.DateTimeFormatOptions = range === '12m'
+export function createTrendChartV2TimestampFormatter(options: {
+    range: HistoryRangeV2;
+    timezone: string;
+}): TrendChartV2TimestampFormatter {
+    const displayTimezone = options.timezone.trim() || TEMPORAL_SETTINGS_FALLBACK_TIMEZONE;
+    const formatOptions: Intl.DateTimeFormatOptions = options.range === '12m'
         ? { month: 'short', timeZone: displayTimezone }
-        : range === '7d' || range === '30d'
+        : options.range === '7d' || options.range === '30d'
             ? { day: '2-digit', month: '2-digit', timeZone: displayTimezone }
             : { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: displayTimezone };
+    let formatter: Intl.DateTimeFormat;
 
-    return new Intl.DateTimeFormat('en-GB', options).format(date);
+    try {
+        formatter = new Intl.DateTimeFormat('en-GB', formatOptions);
+    } catch {
+        formatter = new Intl.DateTimeFormat('en-GB', {
+            ...formatOptions,
+            timeZone: TEMPORAL_SETTINGS_FALLBACK_TIMEZONE,
+        });
+    }
+
+    return {
+        format(timestampMs: number) {
+            const date = new Date(timestampMs);
+
+            return Number.isNaN(date.getTime()) ? '--' : formatter.format(date);
+        },
+    };
 }
 
 export function buildTrendChartV2TickValues(startMs: number, endMs: number, count: number = 5): number[] {
@@ -203,6 +222,7 @@ export function buildTrendChartV2VisibleTickValues({
     maxLabelX,
     font = getChartTextFont(),
     letterSpacing = getChartLetterSpacingPx(),
+    formatter = createTrendChartV2TimestampFormatter({ range, timezone }),
 }: BuildTrendChartV2VisibleTickValuesOptions): number[] {
     const finitePoints = points.filter((point) => Number.isFinite(point.timestampMs));
     const anchorTicks = finitePoints.length > 0
@@ -210,7 +230,7 @@ export function buildTrendChartV2VisibleTickValues({
         : [startMs, endMs];
     const widestLabelPx = Math.max(
         ...anchorTicks.map((timestampMs) => measureChartTextWidthPx(
-            formatTrendChartV2Timestamp({ timestampMs, range, timezone }),
+            formatter.format(timestampMs),
             font,
             letterSpacing,
         )),
@@ -223,7 +243,7 @@ export function buildTrendChartV2VisibleTickValues({
 
     for (let count = estimatedMaxTickCount; count >= 2; count -= 1) {
         const candidates = buildTrendChartV2TickValues(startMs, endMs, count);
-        const labels = candidates.map((timestampMs) => formatTrendChartV2Timestamp({ timestampMs, range, timezone }));
+        const labels = candidates.map((timestampMs) => formatter.format(timestampMs));
         const positions = candidates.map((timestampMs) => scaleTimestampToChartX({
             timestampMs,
             startMs,

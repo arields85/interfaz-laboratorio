@@ -19,11 +19,21 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import type { TrendChartV2WidgetConfig, WidgetConfig } from '../../domain/admin.types';
-import type { ContractMachine, HistoryDataPointV2, HistoryQueryParamsAny, HistoryRangeV2 } from '../../domain/dataContract.types';
+import type {
+    ContractMachine,
+    DataHistoryResponseV2,
+    HistoryDataPointV2,
+    HistoryQueryParamsAny,
+    HistoryRangeV2,
+} from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { createDataHistoryQueryOptions, useDataHistory } from '../../queries/useDataHistory';
+import {
+    createDataHistoryQueryOptions,
+    isDataHistoryResponseCompatible,
+    useDataHistory,
+} from '../../queries/useDataHistory';
 import { resolveBinding } from '../resolvers/bindingResolver';
 import { coerceDataHistoryResponseForTrendChartV2 } from '../../utils/dataHistoryResponseV2';
 import { mapHistoricalDensityToMaxPoints, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -38,7 +48,7 @@ import {
 } from '../../utils/trendChartV2Shifts';
 import {
     buildTrendChartV2VisibleTickValues,
-    formatTrendChartV2Timestamp,
+    createTrendChartV2TimestampFormatter,
     resolveTrendChartV2Timezone,
     resolveTrendChartV2VisibleWindow,
     scaleTimestampToChartX,
@@ -52,6 +62,7 @@ import {
     smoothPath,
 } from '../../utils/chartHelpers';
 import TrendChartV2InteractionLayer from '../../components/ui/TrendChartV2InteractionLayer';
+import { getNearestTimestampPoint } from '../../utils/trendChartV2Interaction';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
 import {
@@ -63,6 +74,7 @@ import {
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
+import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
 import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
 import type { TrendChartV2RenderContext } from './trendChartV2RenderContext';
 import {
@@ -126,6 +138,15 @@ type PresetHistoryRange = Exclude<HistoryRangeV2, 'custom'>;
 interface ChartDimensions {
     width: number;
     height: number;
+}
+
+interface TrendChartV2HistorySnapshot {
+    ownerKey: string;
+    selectionKey: string;
+    revision: string;
+    range: HistoryRangeV2;
+    customWindow: { start: string; end: string } | null;
+    data: DataHistoryResponseV2;
 }
 
 function clampLineStrokeWidth(value: number | undefined): number {
@@ -268,6 +289,7 @@ export default function TrendChartV2Widget({
     const [zoomMessage, setZoomMessage] = useState<string | null>(null);
     const [measuredDimensions, setMeasuredDimensions] = useState<ChartDimensions>({ width: 0, height: 0 });
     const [renderDimensions, setRenderDimensions] = useState<ChartDimensions>({ width: 0, height: 0 });
+    const [confirmedHistorySnapshot, setConfirmedHistorySnapshot] = useState<TrendChartV2HistorySnapshot | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const isMountedRef = useRef(true);
     const measuredDimensionsRef = useRef<ChartDimensions>({ width: 0, height: 0 });
@@ -297,6 +319,7 @@ export default function TrendChartV2Widget({
     const bindingVariableKey = widget.binding?.variableKey;
     const isRealBinding = widget.binding?.mode === 'real_variable';
     const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
+    const historyOwnerKey = `${widget.id}:${widget.binding?.mode ?? 'unbound'}:${bindingMachineId ?? 'none'}:${bindingVariableKey ?? 'none'}`;
     const isBuilderTransientResizeActive = renderContext?.surface === 'builder' && renderContext.isTransientResizeActive === true;
 
     const stopResizeTransition = useCallback((reason: string) => {
@@ -464,23 +487,25 @@ export default function TrendChartV2Widget({
         };
     }, [clearPendingResizeWork]);
 
-    const historyParams = isRealBinding && bindingMachineId !== undefined && bindingVariableKey && historyEnabled
-        ? customWindow
-            ? {
-                machineId: bindingMachineId,
-                variableKey: bindingVariableKey,
-                range: 'custom' as const,
-                start: customWindow.start,
-                end: customWindow.end,
-                maxPoints,
-            }
-            : {
-                machineId: bindingMachineId,
-                variableKey: bindingVariableKey,
-                range,
-                maxPoints,
-            }
-        : null;
+    const historyParams = useMemo<HistoryQueryParamsAny | null>(() => (
+        isRealBinding && bindingMachineId !== undefined && bindingVariableKey && historyEnabled
+            ? customWindow
+                ? {
+                    machineId: bindingMachineId,
+                    variableKey: bindingVariableKey,
+                    range: 'custom',
+                    start: customWindow.start,
+                    end: customWindow.end,
+                    maxPoints,
+                }
+                : {
+                    machineId: bindingMachineId,
+                    variableKey: bindingVariableKey,
+                    range,
+                    maxPoints,
+                }
+            : null
+    ), [bindingMachineId, bindingVariableKey, customWindow, historyEnabled, isRealBinding, maxPoints, range]);
 
     const {
         data: historyData,
@@ -517,18 +542,71 @@ export default function TrendChartV2Widget({
         });
     }, [baseValue, bindingMachineId, bindingVariableKey, customWindow, isSimulatedBinding, range, widget.id]);
     const activeRange = customWindow ? 'custom' : range;
-    const v2Data = isSimulatedBinding
-        ? simulatedData
-        : coerceDataHistoryResponseForTrendChartV2(historyData, activeRange);
+    const hasCompatibleHistoryResponse = historyData != null
+        && isDataHistoryResponseCompatible(historyParams, historyData);
+    const currentRealData = useMemo(() => {
+        if (!isRealBinding || historyData === null || !hasCompatibleHistoryResponse) {
+            return null;
+        }
+
+        return coerceDataHistoryResponseForTrendChartV2(historyData, activeRange);
+    }, [activeRange, hasCompatibleHistoryResponse, historyData, isRealBinding]);
+    const currentRealSnapshot = useMemo<TrendChartV2HistorySnapshot | null>(() => currentRealData
+        ? {
+            ownerKey: historyOwnerKey,
+            selectionKey: requestedSelectionKey,
+            revision: JSON.stringify(currentRealData),
+            range: activeRange,
+            customWindow,
+            data: currentRealData,
+        }
+        : null, [activeRange, currentRealData, customWindow, historyOwnerKey, requestedSelectionKey]);
+
+    if (
+        currentRealSnapshot
+        && !isPlaceholderData
+        && !isError
+        && (
+            confirmedHistorySnapshot?.ownerKey !== currentRealSnapshot.ownerKey
+            || confirmedHistorySnapshot.selectionKey !== currentRealSnapshot.selectionKey
+            || confirmedHistorySnapshot.revision !== currentRealSnapshot.revision
+        )
+    ) {
+        setConfirmedHistorySnapshot(currentRealSnapshot);
+    }
+
+    const ownerConfirmedSnapshot = confirmedHistorySnapshot?.ownerKey === historyOwnerKey
+        ? confirmedHistorySnapshot
+        : null;
+    const shouldPreserveConfirmedSnapshot = (isPlaceholderData || isRefreshing || isError)
+        && ownerConfirmedSnapshot !== null;
+    const visibleRealSnapshot = shouldPreserveConfirmedSnapshot
+        ? ownerConfirmedSnapshot
+        : currentRealSnapshot;
+    const v2Data = isSimulatedBinding ? simulatedData : visibleRealSnapshot?.data ?? null;
+    const displayedRange = isSimulatedBinding ? activeRange : visibleRealSnapshot?.range ?? activeRange;
+    const displayedCustomWindow = isSimulatedBinding
+        ? customWindow
+        : visibleRealSnapshot
+            ? visibleRealSnapshot.customWindow
+            : customWindow;
+
     const visibleWindow = useMemo(() => resolveTrendChartV2VisibleWindow({
         responseWindow: v2Data?.window,
-        customWindow: customWindow ?? undefined,
-        range: activeRange,
+        customWindow: displayedCustomWindow ?? undefined,
+        range: displayedRange,
         series: v2Data?.series ?? [],
-    }), [activeRange, customWindow, v2Data?.series, v2Data?.window]);
+    }), [displayedCustomWindow, displayedRange, v2Data?.series, v2Data?.window]);
     const resolvedUnit = v2Data?.unit ?? (resolved.unit ? String(resolved.unit) : undefined);
     const hasUnit = Boolean(resolvedUnit);
-    const timezone = resolveTrendChartV2Timezone(v2Data?.window?.timezone, resolvedTimezone);
+    const timezone = useMemo(
+        () => resolveTrendChartV2Timezone(v2Data?.window?.timezone, resolvedTimezone),
+        [resolvedTimezone, v2Data?.window?.timezone],
+    );
+    const timestampFormatter = useMemo(
+        () => createTrendChartV2TimestampFormatter({ range: displayedRange, timezone }),
+        [displayedRange, timezone],
+    );
     const chartFont = getChartTextFont();
     const chartLetterSpacing = getChartLetterSpacingPx();
     const numericPoints = useMemo(() => (v2Data?.series ?? []).filter((point): point is HistoryDataPointV2 => (
@@ -564,7 +642,7 @@ export default function TrendChartV2Widget({
         visibleDurationMs: visibleWindow.endMs - visibleWindow.startMs,
     }), [shiftDisplayMode, shiftIntervals.length, visibleWindow.endMs, visibleWindow.startMs]);
     const visibleSummary = useMemo(() => {
-        if (!customWindow && v2Data?.summary) {
+        if (!displayedCustomWindow && v2Data?.summary) {
             const { min, max, avg } = v2Data.summary;
 
             if (min !== null && max !== null && avg !== null) {
@@ -587,20 +665,17 @@ export default function TrendChartV2Widget({
             max: Math.max(...values),
             avg: total / values.length,
         };
-    }, [customWindow, numericPoints, v2Data]);
+    }, [displayedCustomWindow, numericPoints, v2Data]);
     const hasSummary = Boolean(visibleSummary);
     const hasTopChartAdornments = hasUnit || hasSummary;
-    const rangeForLabels = customWindow ? 'custom' : range;
-    const firstXAxisLabel = useMemo(() => formatTrendChartV2Timestamp({
-        timestampMs: visibleWindow.startMs,
-        range: rangeForLabels,
-        timezone,
-    }), [rangeForLabels, timezone, visibleWindow.startMs]);
-    const lastXAxisLabel = useMemo(() => formatTrendChartV2Timestamp({
-        timestampMs: visibleWindow.endMs,
-        range: rangeForLabels,
-        timezone,
-    }), [rangeForLabels, timezone, visibleWindow.endMs]);
+    const firstXAxisLabel = useMemo(
+        () => timestampFormatter.format(visibleWindow.startMs),
+        [timestampFormatter, visibleWindow.startMs],
+    );
+    const lastXAxisLabel = useMemo(
+        () => timestampFormatter.format(visibleWindow.endMs),
+        [timestampFormatter, visibleWindow.endMs],
+    );
     const valueTickValues = useMemo(() => Array.from({ length: 5 }, (_, index) => (
         valueDomain.max - (((valueDomain.max - valueDomain.min) * index) / 4)
     )), [valueDomain.max, valueDomain.min]);
@@ -622,7 +697,7 @@ export default function TrendChartV2Widget({
         const toY = (value: number) => chartLayout.plotArea.top + plotHeight - (((value - valueDomain.min) / rangeY) * plotHeight);
         const gapThresholdMs = resolveTrendChartV2GapThresholdMs({
             bucketMs: v2Data?.window?.bucketMs,
-            range: customWindow ? 'custom' : range,
+            range: displayedRange,
             points: numericPoints,
         });
         const segments = buildTrendChartV2Segments({
@@ -656,11 +731,18 @@ export default function TrendChartV2Widget({
             toY,
             valueTicks,
         };
-    }, [chartLayout.plotArea.height, chartLayout.plotArea.left, chartLayout.plotArea.top, chartLayout.plotArea.width, customWindow, numericPoints, range, v2Data?.window?.bucketMs, valueDomain.max, valueDomain.min, valueTickValues, visibleWindow.endMs, visibleWindow.startMs]);
+    }, [chartLayout.plotArea.height, chartLayout.plotArea.left, chartLayout.plotArea.top, chartLayout.plotArea.width, displayedRange, numericPoints, v2Data?.window?.bucketMs, valueDomain.max, valueDomain.min, valueTickValues, visibleWindow.endMs, visibleWindow.startMs]);
 
-    const hoveredPoint = hoveredTimestampMs === null
+    const interactionSearchPoints = useMemo(
+        () => [...chartModel.interactionPoints].sort((left, right) => left.timestampMs - right.timestampMs),
+        [chartModel.interactionPoints],
+    );
+    const hoveredPointCandidate = hoveredTimestampMs === null
         ? null
-        : chartModel.interactionPoints.find((point) => point.timestampMs === hoveredTimestampMs) ?? null;
+        : getNearestTimestampPoint(interactionSearchPoints, hoveredTimestampMs);
+    const hoveredPoint = hoveredPointCandidate?.timestampMs === hoveredTimestampMs
+        ? hoveredPointCandidate
+        : null;
     const hoveredShiftLabel = showShifts && hoveredPoint
         ? resolveTrendChartV2TooltipShiftLabel({
             timestampMs: hoveredPoint.timestampMs,
@@ -674,25 +756,72 @@ export default function TrendChartV2Widget({
         endMs: visibleWindow.endMs,
         plotLeft: chartLayout.xAxisLabels.left,
         plotWidth: chartLayout.xAxisLabels.plotWidth,
-        range: customWindow ? 'custom' : range,
+        range: displayedRange,
         timezone,
         minLabelX: 0,
         maxLabelX: renderDimensions.width,
         font: chartFont,
         letterSpacing: chartLetterSpacing,
-    }), [chartFont, chartLetterSpacing, chartLayout.xAxisLabels.left, chartLayout.xAxisLabels.plotWidth, customWindow, numericPoints, range, renderDimensions.width, timezone, visibleWindow.endMs, visibleWindow.startMs]);
+        formatter: timestampFormatter,
+    }), [chartFont, chartLetterSpacing, chartLayout.xAxisLabels.left, chartLayout.xAxisLabels.plotWidth, displayedRange, numericPoints, renderDimensions.width, timestampFormatter, timezone, visibleWindow.endMs, visibleWindow.startMs]);
     const lastRenderablePoint = chartModel.interactionPoints.at(-1) ?? null;
     const leadingEdgeAnchor = useMemo(() => resolveLeadingEdgeAnchor({
-        range: activeRange,
+        range: displayedRange,
         visibleWindowSource: visibleWindow.source,
         visibleWindowStartMs: visibleWindow.startMs,
         segments: chartModel.segments,
-    }), [activeRange, chartModel.segments, visibleWindow.source, visibleWindow.startMs]);
+    }), [chartModel.segments, displayedRange, visibleWindow.source, visibleWindow.startMs]);
     const lineGradientId = `${widget.id}-line-gradient`;
     const areaGradientId = `${widget.id}-area-gradient`;
     const fadeGradientId = `${widget.id}-area-fade`;
     const maskId = `${widget.id}-area-mask`;
     const glowId = `${widget.id}-line-glow`;
+    const staticSegments = useMemo(() => chartModel.segments.map((segment, index) => {
+        const anchorPoint = leadingEdgeAnchor?.segmentIndex === index
+            ? {
+                x: chartLayout.plotArea.left,
+                y: chartModel.toY(leadingEdgeAnchor.point.value),
+            }
+            : null;
+        const renderablePoints = [
+            ...(anchorPoint ? [anchorPoint] : []),
+            ...segment
+                .filter((point): point is HistoryDataPointV2 & { value: number } => typeof point.value === 'number')
+                .map((point) => ({
+                    x: scaleTimestampToChartX({
+                        timestampMs: point.timestampMs,
+                        startMs: visibleWindow.startMs,
+                        endMs: visibleWindow.endMs,
+                        x0: chartLayout.plotArea.left,
+                        plotWidth: chartModel.plotWidth,
+                    }),
+                    y: chartModel.toY(point.value),
+                })),
+        ];
+        const linePath = renderablePoints.length >= 2 ? smoothPath(renderablePoints) : '';
+        const areaPath = renderablePoints.length >= 2
+            ? buildAreaPath(linePath, renderablePoints, chartLayout.plotArea.top + chartModel.plotHeight)
+            : '';
+
+        return {
+            areaPath,
+            linePath,
+            renderablePoints,
+            isOnlyVisibleFinitePoint: renderablePoints.length === 1
+                && chartModel.interactionPoints.length === 1,
+        };
+    }), [chartLayout.plotArea.left, chartLayout.plotArea.top, chartModel, leadingEdgeAnchor, visibleWindow.endMs, visibleWindow.startMs]);
+    const xTicks = useMemo(() => xTickValues.map((timestampMs) => ({
+        timestampMs,
+        x: scaleTimestampToChartX({
+            timestampMs,
+            startMs: visibleWindow.startMs,
+            endMs: visibleWindow.endMs,
+            x0: chartLayout.xAxisLabels.left,
+            plotWidth: chartLayout.xAxisLabels.plotWidth,
+        }),
+        label: timestampFormatter.format(timestampMs),
+    })), [chartLayout.xAxisLabels.left, chartLayout.xAxisLabels.plotWidth, timestampFormatter, visibleWindow.endMs, visibleWindow.startMs, xTickValues]);
 
     const handleZoomSelection = useCallback((selection: { startMs: number; endMs: number }) => {
         const start = new Date(selection.startMs).toISOString();
@@ -716,7 +845,7 @@ export default function TrendChartV2Widget({
     const hasData = chartModel.interactionPoints.length > 0;
     const isShowingRefreshingSnapshot = isRefreshing && hasData;
     const isShowingRefreshFailedSnapshot = isError && hasData;
-    const showLoading = isLoadingData || (historyParams !== null && isLoading);
+    const showLoading = (isLoadingData || (historyParams !== null && isLoading)) && !hasData;
     const hasRenderableDimensions = renderDimensions.width >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.width
         && renderDimensions.height >= WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE.height;
     const shouldShowState = showLoading || (!isShowingRefreshFailedSnapshot && isError) || !hasData || !hasRenderableDimensions;
@@ -763,7 +892,7 @@ export default function TrendChartV2Widget({
             return;
         }
 
-        if (isRefreshing) {
+        if (isShowingRefreshingSnapshot) {
             if (!refreshTransitionStopRef.current) {
                 refreshTransitionStopRef.current = startTrendChartV2PerformanceTransition(widget.id);
             }
@@ -775,7 +904,7 @@ export default function TrendChartV2Widget({
             refreshTransitionStopRef.current(requestedSelectionKey);
             refreshTransitionStopRef.current = null;
         }
-    }, [hasData, historyParams, isError, isRefreshing, requestedSelectionKey, widget.id]);
+    }, [hasData, historyParams, isError, isShowingRefreshingSnapshot, requestedSelectionKey, widget.id]);
 
     useEffect(() => {
         if (!hasData || !historyParams || !isError) {
@@ -1010,21 +1139,17 @@ export default function TrendChartV2Widget({
                 </div>
             )}
 
-            {isShowingRefreshingSnapshot ? (
-                <div role="status" className="mt-2 rounded-xl border border-industrial-border bg-industrial-bg/40 px-3 py-2 text-industrial-muted">
-                    <span className="uppercase">Actualizando</span>
-                    <span className="ml-2">Mostrando la última vista confirmada</span>
-                </div>
-            ) : null}
-
-            {isShowingRefreshFailedSnapshot ? (
-                <div role="alert" className="mt-2 rounded-xl border border-status-critical/30 bg-status-critical/10 px-3 py-2 text-industrial-text">
-                    <span className="uppercase">No se pudo actualizar</span>
-                    <span className="ml-2">Se mantiene la última vista confirmada</span>
-                </div>
-            ) : null}
-
-            <div ref={containerRef} className={WIDGET_CHART_CONTAINER_CLASS} style={transientSnapshotStyle}>
+            <div
+                ref={containerRef}
+                className={WIDGET_CHART_CONTAINER_CLASS}
+                style={transientSnapshotStyle}
+                data-testid="trend-chart-v2-chart-shell"
+            >
+                {isShowingRefreshFailedSnapshot ? (
+                    <HistoricalChartNotice variant="stale" testId="trend-chart-v2-historical-notice" />
+                ) : isShowingRefreshingSnapshot ? (
+                    <HistoricalChartNotice variant="refreshing" testId="trend-chart-v2-historical-notice" />
+                ) : null}
                 {showLoading ? (
                     <WidgetRuntimeState state={runtimeState} testId="trend-chart-v2-state" />
                 ) : shouldShowState ? (
@@ -1167,36 +1292,7 @@ export default function TrendChartV2Widget({
                                     );
                                 })}
 
-                                {chartModel.segments.map((segment, index) => {
-                                const anchorPoint = leadingEdgeAnchor?.segmentIndex === index
-                                    ? {
-                                        x: layout.plotArea.left,
-                                        y: chartModel.toY(leadingEdgeAnchor.point.value),
-                                    }
-                                    : null;
-                                const renderablePoints = [
-                                    ...(anchorPoint ? [anchorPoint] : []),
-                                    ...segment
-                                    .filter((point): point is HistoryDataPointV2 & { value: number } => typeof point.value === 'number')
-                                    .map((point) => ({
-                                        x: scaleTimestampToChartX({
-                                            timestampMs: point.timestampMs,
-                                            startMs: visibleWindow.startMs,
-                                            endMs: visibleWindow.endMs,
-                                            x0: layout.plotArea.left,
-                                            plotWidth: chartModel.plotWidth,
-                                        }),
-                                        y: chartModel.toY(point.value),
-                                    })),
-                                ];
-                                const linePath = renderablePoints.length >= 2 ? smoothPath(renderablePoints) : '';
-                                const areaPath = renderablePoints.length >= 2
-                                    ? buildAreaPath(linePath, renderablePoints, layout.plotArea.top + chartModel.plotHeight)
-                                    : '';
-
-                                const isOnlyVisibleFinitePoint = renderablePoints.length === 1
-                                    && chartModel.interactionPoints.length === 1;
-
+                                {staticSegments.map(({ areaPath, isOnlyVisibleFinitePoint, linePath, renderablePoints }, index) => {
                                 return (
                                     <g key={`segment-${index}`} data-testid="trend-chart-v2-segment">
                                         {areaPath.length > 0 && (
@@ -1233,18 +1329,12 @@ export default function TrendChartV2Widget({
                             <line x1={layout.plotArea.left} y1={layout.plotArea.top + chartModel.plotHeight} x2={layout.plotArea.right} y2={layout.plotArea.top + chartModel.plotHeight} stroke="var(--color-industrial-border)" />
                             <line x1={layout.plotArea.left} y1={layout.plotArea.top} x2={layout.plotArea.left} y2={layout.plotArea.top + chartModel.plotHeight} stroke="var(--color-industrial-border)" />
 
-                            {xTickValues.map((tickValue) => {
+                            {xTicks.map((tick) => {
                                 return (
                                     <text
                                         data-testid="trend-chart-v2-x-axis-label"
-                                        key={tickValue}
-                                        x={scaleTimestampToChartX({
-                                            timestampMs: tickValue,
-                                            startMs: visibleWindow.startMs,
-                                            endMs: visibleWindow.endMs,
-                                            x0: layout.xAxisLabels.left,
-                                            plotWidth: layout.xAxisLabels.plotWidth,
-                                        })}
+                                        key={tick.timestampMs}
+                                        x={tick.x}
                                         y={layout.xAxisLabels.y}
                                         textAnchor="middle"
                                         fill="var(--color-industrial-muted)"
@@ -1252,11 +1342,7 @@ export default function TrendChartV2Widget({
                                         fontFamily="var(--font-chart)"
                                         letterSpacing="var(--tracking-chart)"
                                     >
-                                        {formatTrendChartV2Timestamp({
-                                            timestampMs: tickValue,
-                                            range: customWindow ? 'custom' : range,
-                                            timezone,
-                                        })}
+                                        {tick.label}
                                     </text>
                                 );
                             })}
@@ -1284,7 +1370,7 @@ export default function TrendChartV2Widget({
                                 plotHeight={chartModel.plotHeight}
                                 domainStartMs={visibleWindow.startMs}
                                 domainEndMs={visibleWindow.endMs}
-                                points={chartModel.interactionPoints}
+                                points={interactionSearchPoints}
                                 hoveredTimestampMs={hoveredTimestampMs}
                                 onHoverChange={setHoveredTimestampMs}
                                 onZoomSelection={handleZoomSelection}
@@ -1319,11 +1405,7 @@ export default function TrendChartV2Widget({
 
                         {hoveredPoint && (
                             <ChartTooltip
-                                label={formatTrendChartV2Timestamp({
-                                    timestampMs: hoveredPoint.timestampMs,
-                                    range: customWindow ? 'custom' : range,
-                                    timezone,
-                                })}
+                                label={timestampFormatter.format(hoveredPoint.timestampMs)}
                                 x={hoveredPoint.x}
                                 containerWidth={renderDimensions.width}
                                 series={[{

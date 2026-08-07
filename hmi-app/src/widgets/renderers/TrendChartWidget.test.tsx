@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { Profiler } from 'react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrendChartWidgetConfig } from '../../domain/admin.types';
 import type { DataHistoryResponse, ContractMachine } from '../../domain/dataContract.types';
@@ -7,6 +8,8 @@ import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useDataHistory } from '../../queries/useDataHistory';
 import { DataHistoryServiceError } from '../../services/dataHistory.service';
 import { getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx } from '../../utils/chartHelpers';
+import * as chartHelpers from '../../utils/chartHelpers';
+import * as legacyModel from './trendChartLegacyModel';
 import TrendChartWidget from './TrendChartWidget';
 import { buildTrendChartVisibleLabelIndices } from './trendChartVisibleLabels';
 
@@ -14,20 +17,37 @@ vi.mock('../../config/dataConnection.config', () => ({
     isDataHistoryEnabled: vi.fn(),
 }));
 
-vi.mock('../../queries/useDataHistory', () => ({
+vi.mock('../../queries/useDataHistory', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../../queries/useDataHistory')>(),
     useDataHistory: vi.fn(),
 }));
 
 class MockResizeObserver implements ResizeObserver {
-    public constructor(private readonly callback: ResizeObserverCallback) {}
+    private static current: MockResizeObserver | null = null;
+
+    public constructor(private readonly callback: ResizeObserverCallback) {
+        MockResizeObserver.current = this;
+    }
+
+    public static latest(): MockResizeObserver {
+        if (!MockResizeObserver.current) {
+            throw new Error('ResizeObserver has not been created');
+        }
+
+        return MockResizeObserver.current;
+    }
 
     public observe(target: Element): void {
+        this.emit(target, 320, 180);
+    }
+
+    public emit(target: Element, width: number, height: number): void {
         this.callback([
             {
                 target,
                 contentRect: {
-                    width: 320,
-                    height: 180,
+                    width,
+                    height,
                     top: 0,
                     left: 0,
                     bottom: 180,
@@ -111,15 +131,17 @@ function makeHistoryResponse(): DataHistoryResponse {
     };
 }
 
-function makeDenseHistoryResponse(): DataHistoryResponse {
+function makeDenseHistoryResponse(pointCount: number = 12): DataHistoryResponse {
+    const startMs = Date.parse('2026-04-22T10:00:00.000Z');
+
     return {
         contractVersion: '1.0.0',
         machineId: 101,
         variableKey: 'temperature',
         range: 'hora',
         unit: '°C',
-        series: Array.from({ length: 12 }, (_, index) => ({
-            timestamp: `2026-04-22T10:${String(index * 5).padStart(2, '0')}:00.000Z`,
+        series: Array.from({ length: pointCount }, (_, index) => ({
+            timestamp: new Date(startMs + (index * 5 * 60 * 1000)).toISOString(),
             value: 40 + index,
         })),
         summary: {
@@ -153,6 +175,283 @@ describe('TrendChartWidget', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
         vi.clearAllMocks();
+    });
+
+    it('keeps the confirmed owner snapshot and its range semantics through incompatible placeholder and error states', () => {
+        const confirmedResponse = {
+            ...makeHistoryResponse(),
+            range: 'semana' as const,
+            series: [
+                { timestamp: '2026-04-20T10:00:00.000Z', value: 45 },
+                { timestamp: '2026-04-22T12:00:00.000Z', value: 52 },
+            ],
+        };
+        let queryState = {
+            data: confirmedResponse,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        };
+        vi.mocked(useDataHistory).mockImplementation(() => queryState);
+
+        const { container } = render(
+            <TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Semana' }));
+        const confirmedLabels = screen.getAllByTestId('trend-chart-x-axis-label').map((label) => label.textContent);
+        const confirmedPath = container.querySelector('path[filter^="url(#trend-glow-"]')?.getAttribute('d');
+
+        queryState = {
+            ...queryState,
+            data: confirmedResponse,
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        };
+        fireEvent.click(screen.getByRole('button', { name: 'Mes' }));
+
+        expect(screen.getAllByTestId('trend-chart-x-axis-label').map((label) => label.textContent)).toEqual(confirmedLabels);
+        expect(container.querySelector('path[filter^="url(#trend-glow-"]')).toHaveAttribute('d', confirmedPath);
+        expect(screen.getByTestId('trend-chart-summary-min')).toHaveTextContent('min 45°c');
+        const refreshingNotice = screen.getByTestId('trend-chart-historical-notice');
+        const chartShell = screen.getByTestId('trend-chart-widget-chart-shell');
+        expect(refreshingNotice).toHaveTextContent('Actualizando_');
+        expect(refreshingNotice).toHaveClass('absolute', 'inset-0', 'pointer-events-none');
+        expect(chartShell).toHaveClass('relative');
+        expect(refreshingNotice.parentElement).toBe(chartShell);
+        expect(screen.getByTestId('trend-chart-legacy-interaction-overlay')).toBeInTheDocument();
+
+        queryState = {
+            ...queryState,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+            isError: true,
+            error: new DataHistoryServiceError('refresh failed', 'network'),
+        };
+        fireEvent.click(screen.getByRole('button', { name: 'Día' }));
+
+        expect(screen.getAllByTestId('trend-chart-x-axis-label').map((label) => label.textContent)).toEqual(confirmedLabels);
+        expect(screen.queryByTestId('trend-chart-widget-state')).not.toBeInTheDocument();
+        const staleNotice = screen.getByTestId('trend-chart-historical-notice');
+        expect(staleNotice).toHaveTextContent('Desactualizado');
+        expect(staleNotice.querySelector('.widget-runtime-state-caret')).toBeNull();
+        expect(screen.queryByText('No se pudo actualizar')).not.toBeInTheDocument();
+        expect(screen.queryByText('Se mantiene la última vista confirmada')).not.toBeInTheDocument();
+    });
+
+    it('rejects incompatible placeholder data before mapping and never leaks a snapshot across owners', () => {
+        const mapSpy = vi.spyOn(legacyModel, 'mapTrendChartLegacyHistory');
+        let queryState = {
+            data: makeHistoryResponse(),
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        };
+        vi.mocked(useDataHistory).mockImplementation(() => queryState);
+
+        const { rerender } = render(
+            <TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />,
+        );
+        mapSpy.mockClear();
+
+        queryState = {
+            ...queryState,
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        };
+        rerender(
+            <TrendChartWidget
+                widget={makeWidget({
+                    mode: 'real_variable',
+                    bindingVersion: 'node-red-v1',
+                    machineId: 101,
+                    variableKey: 'pressure',
+                })}
+                equipmentMap={equipmentMap}
+                machines={makeMachines(50)}
+            />,
+        );
+
+        expect(mapSpy).not.toHaveBeenCalled();
+        expect(screen.queryByTestId('trend-chart-svg')).not.toBeInTheDocument();
+    });
+
+    it('maps a finalized compatible response exactly once after rejecting its placeholder', () => {
+        let queryState = {
+            data: makeHistoryResponse(),
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        };
+        vi.mocked(useDataHistory).mockImplementation(() => queryState);
+        const mapSpy = vi.spyOn(legacyModel, 'mapTrendChartLegacyHistory');
+        const rendered = render(
+            <TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />,
+        );
+        mapSpy.mockClear();
+
+        queryState = {
+            ...queryState,
+            isFetching: true,
+            isPlaceholderData: true,
+            isRefreshing: true,
+        };
+        fireEvent.click(screen.getByRole('button', { name: 'Día' }));
+        expect(mapSpy).not.toHaveBeenCalled();
+        expect(screen.getByTestId('trend-chart-historical-notice')).toHaveTextContent('Actualizando_');
+
+        queryState = {
+            ...queryState,
+            data: { ...makeHistoryResponse(), range: 'dia' },
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        };
+        rendered.rerender(
+            <TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />,
+        );
+        rendered.rerender(
+            <TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />,
+        );
+
+        expect(mapSpy).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText('Sin datos')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('trend-chart-historical-notice')).not.toBeInTheDocument();
+    });
+
+    it('does not rebuild the static model or paths across 100 real hover events', () => {
+        const response = makeDenseHistoryResponse(1000);
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: response,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+        const mapSpy = vi.spyOn(legacyModel, 'mapTrendChartLegacyHistory');
+        const modelSpy = vi.spyOn(legacyModel, 'buildTrendChartLegacyModel');
+        const pathSpy = vi.spyOn(chartHelpers, 'smoothPath');
+
+        render(<TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />);
+
+        expect(mapSpy).toHaveBeenCalledTimes(1);
+        expect(modelSpy).toHaveBeenCalledTimes(1);
+        expect(pathSpy).toHaveBeenCalledTimes(1);
+        mapSpy.mockClear();
+        modelSpy.mockClear();
+        pathSpy.mockClear();
+
+        const overlay = screen.getByTestId('trend-chart-legacy-interaction-overlay');
+        const overlayX = Number(overlay.getAttribute('x'));
+        const overlayWidth = Number(overlay.getAttribute('width'));
+        Object.defineProperty(overlay, 'getBoundingClientRect', {
+            configurable: true,
+            value: () => ({
+                x: overlayX,
+                y: 0,
+                width: overlayWidth,
+                height: 100,
+                top: 0,
+                left: overlayX,
+                right: overlayX + overlayWidth,
+                bottom: 100,
+                toJSON: () => ({}),
+            }),
+        });
+
+        const ratios = [0, 0.2, 0.4, 0.6, 0.8, 1];
+        for (let index = 0; index < 100; index += 1) {
+            fireEvent.mouseMove(overlay, {
+                clientX: overlayX + (overlayWidth * (ratios[index % ratios.length] ?? 0)),
+                clientY: 20,
+            });
+        }
+
+        expect(mapSpy).not.toHaveBeenCalled();
+        expect(modelSpy).not.toHaveBeenCalled();
+        expect(pathSpy).not.toHaveBeenCalled();
+        expect(document.querySelectorAll('rect[fill="transparent"]')).toHaveLength(1);
+    });
+
+    it('does not commit dimension updates for 100 equivalent ResizeObserver callbacks', () => {
+        const response = makeDenseHistoryResponse(1000);
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: response,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+        const onRender = vi.fn();
+        const modelSpy = vi.spyOn(legacyModel, 'buildTrendChartLegacyModel');
+
+        render(
+            <Profiler id="legacy-trend-resize" onRender={onRender}>
+                <TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />
+            </Profiler>,
+        );
+        expect(modelSpy).toHaveBeenCalledTimes(1);
+        onRender.mockClear();
+        modelSpy.mockClear();
+
+        const overlay = screen.getByTestId('trend-chart-legacy-interaction-overlay');
+        act(() => {
+            for (let index = 0; index < 100; index += 1) {
+                MockResizeObserver.latest().emit(overlay.parentElement as Element, 320, 180);
+            }
+        });
+
+        expect(onRender).not.toHaveBeenCalled();
+        expect(modelSpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps aria valid without showing a tooltip initially or after Escape', () => {
+        const response = makeDenseHistoryResponse(24);
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: response,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+
+        render(<TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />);
+        const overlay = screen.getByTestId('trend-chart-legacy-interaction-overlay');
+
+        expect(overlay).toHaveAttribute('aria-valuenow', '1');
+        expect(screen.queryByText('40 °C')).not.toBeInTheDocument();
+
+        fireEvent.keyDown(overlay, { key: 'ArrowRight' });
+        expect(overlay).toHaveAttribute('aria-valuenow', '2');
+        expect(screen.getByText('41 °C')).toBeInTheDocument();
+
+        fireEvent.keyDown(overlay, { key: 'Escape' });
+        expect(overlay).toHaveAttribute('aria-valuenow', '1');
+        expect(screen.queryByText('41 °C')).not.toBeInTheDocument();
     });
 
     it('renders the range selector and updates the history range query', () => {
@@ -429,6 +728,8 @@ describe('TrendChartWidget', () => {
         );
 
         expect(screen.getByTestId('trend-chart-widget-state')).toHaveTextContent('No se pudieron cargar los datos');
+        expect(screen.queryByTestId('trend-chart-historical-notice')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('trend-chart-svg')).not.toBeInTheDocument();
         expect(screen.queryByText('Error al cargar datos')).not.toBeInTheDocument();
         expect(screen.queryByText('upstream failed')).not.toBeInTheDocument();
     });

@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { getNearestTimestampPoint } from '../../utils/trendChartV2Interaction';
 import TrendChartV2InteractionLayer from './TrendChartV2InteractionLayer';
 
 function mockRect(element: Element, width: number, height: number, left: number = 0) {
@@ -52,9 +53,25 @@ describe('TrendChartV2InteractionLayer', () => {
         expect(overlay).toHaveAttribute('pointer-events', 'all');
         expect(overlay).toHaveAttribute('cursor', 'crosshair');
 
-        fireEvent.mouseMove(overlay, { clientX: 65, clientY: 20 });
+        for (let index = 0; index < 100; index += 1) {
+            fireEvent.mouseMove(overlay, { clientX: 65, clientY: 20 });
+        }
 
         expect(onHoverChange).toHaveBeenCalledWith(900);
+        expect(onHoverChange).toHaveBeenCalledTimes(1);
+    });
+
+    it('finds nearest timestamps with logarithmic comparisons while preserving earlier-point ties', () => {
+        const points = Array.from({ length: 1500 }, (_, index) => ({
+            timestampMs: index * 10,
+            x: index,
+            y: index,
+        }));
+        const diagnostics = { comparisons: 0 };
+
+        expect(getNearestTimestampPoint(points, 12_345, diagnostics)?.timestampMs).toBe(12_340);
+        expect(getNearestTimestampPoint(points, 12_345)?.timestampMs).toBe(12_340);
+        expect(diagnostics.comparisons).toBeLessThanOrEqual(12);
     });
 
     it('converts drag selection into sorted timestamp bounds and ignores too-small drags', () => {

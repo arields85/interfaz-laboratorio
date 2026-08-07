@@ -15,7 +15,8 @@ import TrendChartWidget from './TrendChartWidget';
 import HeaderWidgetRenderer from '../../components/viewer/HeaderWidgetRenderer';
 import { useDataHistory } from '../../queries/useDataHistory';
 
-vi.mock('../../queries/useDataHistory', () => ({
+vi.mock('../../queries/useDataHistory', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../../queries/useDataHistory')>(),
     useDataHistory: vi.fn(),
 }));
 

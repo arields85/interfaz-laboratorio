@@ -15,13 +15,15 @@
 import { keepPreviousData, useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { adaptDataHistory } from '../adapters/dataHistory.adapter';
 import { isDataHistoryEnabled } from '../config/dataConnection.config';
-import type {
-    DataHistoryResponse,
-    DataHistoryResponseAny,
-    DataHistoryResponseV2,
-    HistoryQueryParams,
-    HistoryQueryParamsAny,
-    HistoryQueryParamsV2,
+import {
+    HISTORY_RANGES_V2,
+    type DataHistoryResponse,
+    type DataHistoryResponseAny,
+    type DataHistoryResponseV2,
+    type HistoryQueryParams,
+    type HistoryQueryParamsAny,
+    type HistoryQueryParamsV2,
+    type HistoryRangeV2,
 } from '../domain/dataContract.types';
 import { fetchDataHistory } from '../services/dataHistory.service';
 import { validateAndNormalizeHistoryQueryParams } from '../utils/historyQueryValidation';
@@ -70,6 +72,39 @@ export function createDataHistoryQueryKey(params: HistoryQueryParamsAny | null) 
     return buildDataHistoryQueryKey(normalizedParams);
 }
 
+export function isDataHistoryResponseCompatible(
+    params: HistoryQueryParamsAny | null,
+    response: Pick<DataHistoryResponseAny, 'machineId' | 'variableKey' | 'range'> & {
+        window?: { start: string; end: string };
+    },
+): boolean {
+    const normalizedParams = normalizeHistoryQueryParams(params);
+
+    if (
+        normalizedParams === null
+        || response.machineId !== normalizedParams.machineId
+        || response.variableKey !== normalizedParams.variableKey
+    ) {
+        return false;
+    }
+
+    if (normalizedParams.range === 'custom') {
+        return response.range === 'custom'
+            && response.window !== undefined
+            && isSameInstant(normalizedParams.start, response.window.start)
+            && isSameInstant(normalizedParams.end, response.window.end);
+    }
+
+    const requestUsesV2Range = HISTORY_RANGES_V2.includes(normalizedParams.range as HistoryRangeV2);
+    const responseUsesV2Range = HISTORY_RANGES_V2.includes(response.range as HistoryRangeV2);
+
+    if (!requestUsesV2Range) {
+        return response.range === normalizedParams.range;
+    }
+
+    return !responseUsesV2Range || response.range === normalizedParams.range;
+}
+
 export function createDataHistoryQueryOptions(params: HistoryQueryParamsAny | null): DataHistoryQueryOptions {
     const normalizedParams = normalizeHistoryQueryParams(params);
     const enabled = normalizedParams !== null && isDataHistoryEnabled();
@@ -101,6 +136,13 @@ function normalizeHistoryQueryParams(params: HistoryQueryParamsAny | null): Hist
     }
 
     return validation.params;
+}
+
+function isSameInstant(left: string, right: string): boolean {
+    const leftMs = Date.parse(left);
+    const rightMs = Date.parse(right);
+
+    return Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs === rightMs;
 }
 
 function buildDataHistoryQueryKey(normalizedParams: ReturnType<typeof normalizeHistoryQueryParams>) {
