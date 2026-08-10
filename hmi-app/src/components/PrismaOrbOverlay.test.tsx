@@ -9,6 +9,7 @@ import type { VoiceEvent } from '../domain/voice.types';
 import type {
     PrismaOrbAudioTarget,
     PrismaVoiceAudioEngineContract,
+    PrismaVoiceAudioSource,
     VoicePlaybackLifecycle,
 } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
@@ -59,7 +60,11 @@ function createEngineMock() {
     return { engine, plays };
 }
 
-const TEST_AUDIO_SOURCE = { load: vi.fn(async () => new ArrayBuffer(8)) };
+const TEST_AUDIO_SOURCE: PrismaVoiceAudioSource = {
+    openLive: vi.fn(async () => {
+        throw new Error('Engine mock does not open the test source');
+    }),
+};
 
 interface OrbHarnessProps {
     engine: PrismaVoiceAudioEngineContract;
@@ -144,7 +149,7 @@ describe('PrismaOrbOverlay', () => {
         expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
     });
 
-    it('creates a dynamic source for every event from the current saved URL and VoiceEvent.text', () => {
+    it('propagates normalized optional event and Telegram chat ids to each source', () => {
         const { engine } = createEngineMock();
         const sourceFactory = vi.fn<PrismaVoiceAudioSourceFactory>(() => TEST_AUDIO_SOURCE);
         let serviceUrl = 'https://tts.example.test/first';
@@ -158,24 +163,51 @@ describe('PrismaOrbOverlay', () => {
             />,
         );
 
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
+        emitVoiceEvent(harnessRef, { ...FIRST_EVENT, telegramChatId: 995701520 });
         serviceUrl = 'https://tts.example.test/second';
         emitVoiceEvent(harnessRef, {
             ...FIRST_EVENT,
             id: 'voice-3',
             text: 'Latest response text',
             question: 'This must not be spoken',
+            telegramChatId: -1001234567890,
         });
+        const legacyEvent: VoiceEvent = {
+            timestamp: FIRST_EVENT.timestamp,
+            text: FIRST_EVENT.text,
+            question: FIRST_EVENT.question,
+        };
+        serviceUrl = 'https://tts.example.test/legacy';
+        emitVoiceEvent(harnessRef, legacyEvent);
+        serviceUrl = 'https://tts.example.test/invalid-chat';
+        emitVoiceEvent(harnessRef, {
+            ...FIRST_EVENT,
+            id: 'voice-4',
+            telegramChatId: '995701520',
+        } as unknown as VoiceEvent);
 
         expect(sourceFactory).toHaveBeenNthCalledWith(1, {
             serviceUrl: 'https://tts.example.test/first',
             text: 'Current response',
+            eventId: 'voice-2',
+            telegramChatId: 995701520,
         });
         expect(sourceFactory).toHaveBeenNthCalledWith(2, {
             serviceUrl: 'https://tts.example.test/second',
             text: 'Latest response text',
+            eventId: 'voice-3',
+            telegramChatId: -1001234567890,
         });
-        expect(engine.play).toHaveBeenCalledTimes(2);
+        expect(sourceFactory).toHaveBeenNthCalledWith(3, {
+            serviceUrl: 'https://tts.example.test/legacy',
+            text: 'Current response',
+        });
+        expect(sourceFactory).toHaveBeenNthCalledWith(4, {
+            serviceUrl: 'https://tts.example.test/invalid-chat',
+            text: 'Current response',
+            eventId: 'voice-4',
+        });
+        expect(engine.play).toHaveBeenCalledTimes(4);
     });
 
     it('stops active playback and hides without fetching when a newer event finds audio disabled', () => {

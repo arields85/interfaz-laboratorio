@@ -2,25 +2,32 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
     DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT,
+    DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT,
     DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS,
     DATA_DEFAULT_VOICE_ENDPOINT,
     DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS,
+    buildDataUrl,
     clearDataActivitySeriesEndpoint,
+    clearDataPrismaConfigEndpoint,
     clearDataSnapshotExportEndpoint,
     clearDataSnapshotExportEnabledSetting,
     clearDataSnapshotExportIntervalMs,
     clearDataVoiceEndpoint,
     getDataActivitySeriesEndpoint,
     getDataActivitySeriesUrl,
+    getDataPrismaConfigEndpoint,
+    getDataPrismaConfigUrl,
     getDataSnapshotExportEndpoint,
     getDataSnapshotExportIntervalMs,
     getDataSnapshotExportUrl,
     getDataVoiceEndpoint,
     getDataVoiceUrl,
     getSavedDataVoiceEndpoint,
+    getSavedDataPrismaConfigEndpoint,
     isDataActivitySeriesEnabled,
     isDataSnapshotExportEnabled,
     saveDataActivitySeriesEndpoint,
+    saveDataPrismaConfigEndpoint,
     saveDataSnapshotExportEnabledSetting,
     saveDataSnapshotExportEndpoint,
     saveDataSnapshotExportIntervalMs,
@@ -171,5 +178,88 @@ describe('dataConnection.config voice helpers', () => {
 
         expect(getSavedDataVoiceEndpoint()).toBeNull();
         expect(getDataVoiceEndpoint()).toBe(DATA_DEFAULT_VOICE_ENDPOINT);
+    });
+});
+
+describe('dataConnection.config Prisma config endpoint helpers', () => {
+    afterEach(() => {
+        localStorage.clear();
+        vi.restoreAllMocks();
+    });
+
+    it('uses the canonical Prisma config endpoint when no browser override exists', () => {
+        expect(getSavedDataPrismaConfigEndpoint()).toBeNull();
+        expect(getDataPrismaConfigEndpoint()).toBe(DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT);
+    });
+
+    it('reads a saved Prisma config endpoint with canonical leading-slash normalization', () => {
+        localStorage.setItem('hmi:prisma-config-endpoint', '///custom/prisma-config');
+
+        expect(getSavedDataPrismaConfigEndpoint()).toBe('///custom/prisma-config');
+        expect(getDataPrismaConfigEndpoint()).toBe('/custom/prisma-config');
+    });
+
+    it.each([
+        ['https://node-red.local', '/hmi/prisma-config'],
+        ['https://node-red.local/', '/hmi/prisma-config'],
+        ['https://node-red.local', 'hmi/prisma-config'],
+        ['https://node-red.local/', 'hmi/prisma-config'],
+    ])('composes base %s and endpoint %s without duplicate joining slashes', (baseUrl, endpoint) => {
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', baseUrl);
+        localStorage.setItem('hmi:prisma-config-endpoint', endpoint);
+
+        expect(getDataPrismaConfigUrl()).toBe('https://node-red.local/hmi/prisma-config');
+    });
+
+    it('builds a URL from an explicit draft endpoint with canonical slash handling', () => {
+        expect(buildDataUrl(' https://node-red.local/// ', ' ///custom/prisma-config '))
+            .toBe('https://node-red.local/custom/prisma-config');
+        expect(buildDataUrl(null, '/custom/prisma-config')).toBeNull();
+        expect(buildDataUrl('https://node-red.local', '   ')).toBeNull();
+    });
+
+    it('does not compose a Prisma config URL without a base or with a disabled endpoint', () => {
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', '');
+        expect(getDataPrismaConfigUrl()).toBeNull();
+
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
+        localStorage.setItem('hmi:prisma-config-endpoint', '');
+        expect(getDataPrismaConfigUrl()).toBeNull();
+    });
+
+    it('preserves an empty saved Prisma config endpoint as an explicit disabled state', () => {
+        saveDataPrismaConfigEndpoint('   ');
+
+        expect(getSavedDataPrismaConfigEndpoint()).toBe('');
+        expect(getDataPrismaConfigEndpoint()).toBeNull();
+    });
+
+    it('persists and clears the Prisma config endpoint through its own storage key', () => {
+        saveDataPrismaConfigEndpoint('  /custom/prisma-config  ');
+
+        expect(localStorage.getItem('hmi:prisma-config-endpoint')).toBe('/custom/prisma-config');
+        expect(localStorage.getItem('hmi:voice-endpoint')).toBeNull();
+
+        clearDataPrismaConfigEndpoint();
+
+        expect(getSavedDataPrismaConfigEndpoint()).toBeNull();
+        expect(getDataPrismaConfigEndpoint()).toBe(DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT);
+    });
+
+    it('falls back safely when browser storage is blocked', () => {
+        vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+            throw new Error('storage blocked');
+        });
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('storage blocked');
+        });
+        vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+            throw new Error('storage blocked');
+        });
+
+        expect(getSavedDataPrismaConfigEndpoint()).toBeNull();
+        expect(getDataPrismaConfigEndpoint()).toBe(DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT);
+        expect(() => saveDataPrismaConfigEndpoint('/custom/prisma-config')).not.toThrow();
+        expect(() => clearDataPrismaConfigEndpoint()).not.toThrow();
     });
 });

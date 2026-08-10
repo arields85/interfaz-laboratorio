@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,9 @@ const DESIGN_STORAGE_KEY = 'test:global-settings:design';
 const LOADER_STORAGE_KEY = 'test:global-settings:loader';
 const TEMPORAL_STORAGE_KEY = 'test:global-settings:temporal';
 const VOICE_STORAGE_KEY = 'test:global-settings:voice';
+
+let resolveVoiceSave: (() => void) | null = null;
+let voiceSaveShouldFail = false;
 
 vi.mock('./ConnectionSettingsTab', async () => {
     const React = await vi.importActual<typeof import('react')>('react');
@@ -153,13 +156,23 @@ vi.mock('./VoiceSettingsTab', async () => {
     const React = await vi.importActual<typeof import('react')>('react');
 
     return {
-        default: function MockVoiceSettingsTab({ onDirtyChange, saveRef }: { onDirtyChange?: (dirty: boolean) => void; saveRef?: { current: (() => void) | null } }) {
+        default: function MockVoiceSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: { onDirtyChange?: (dirty: boolean) => void; onSaveStatusChange?: (status: 'dirty' | 'saving' | 'saved' | 'error' | null) => void; saveRef?: { current: (() => void | Promise<void>) | null } }) {
             const [value, setValue] = React.useState(() => localStorage.getItem(VOICE_STORAGE_KEY) ?? 'Persisted voice');
 
             if (saveRef) {
-                saveRef.current = () => {
+                saveRef.current = async () => {
+                    onSaveStatusChange?.('saving');
+                    await new Promise<void>((resolve) => {
+                        resolveVoiceSave = resolve;
+                    });
+                    if (voiceSaveShouldFail) {
+                        onSaveStatusChange?.('error');
+                        onDirtyChange?.(true);
+                        return;
+                    }
                     localStorage.setItem(VOICE_STORAGE_KEY, value);
                     onDirtyChange?.(false);
+                    onSaveStatusChange?.('saved');
                 };
             }
 
@@ -172,6 +185,19 @@ vi.mock('./VoiceSettingsTab', async () => {
                         onChange={(event) => {
                             setValue(event.target.value);
                             onDirtyChange?.(true);
+                            onSaveStatusChange?.('dirty');
+                        }}
+                    />
+                    <label htmlFor="voice-effect-draft">Intensidad del efecto robótico</label>
+                    <input
+                        id="voice-effect-draft"
+                        type="range"
+                        min="0"
+                        max="100"
+                        defaultValue="50"
+                        onChange={() => {
+                            onDirtyChange?.(true);
+                            onSaveStatusChange?.('dirty');
                         }}
                     />
                 </div>
@@ -203,6 +229,8 @@ describe('GlobalSettingsDialog', () => {
     beforeEach(() => {
         localStorage.clear();
         delete document.documentElement.dataset.designPreview;
+        resolveVoiceSave = null;
+        voiceSaveShouldFail = false;
     });
 
     it('renders VOZ as the final peer tab in the required order', () => {
@@ -263,6 +291,78 @@ describe('GlobalSettingsDialog', () => {
         expect(scrollPanel).toBeInTheDocument();
         expect(scrollPanel).toHaveClass('overflow-y-auto');
         expect(scrollPanel).toHaveClass('min-h-0');
+    });
+
+    it('projects the dirty Prisma effect status immediately before Save in the footer only on VOZ', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
+            target: { value: '65' },
+        });
+
+        const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
+        const content = screen.getByRole('region', { name: 'Contenido de configuración general' });
+        const status = within(actions).getByText('Cambios sin guardar');
+        expect(status).toHaveClass('text-status-warning');
+        expect(status).toHaveAttribute('aria-live', 'polite');
+        expect(status).toHaveAttribute('aria-atomic', 'true');
+        expect(getSaveButton().previousElementSibling).toBe(status);
+        expect(within(content).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Conexion' }));
+        expect(within(actions).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
+    });
+
+    it('projects saving and saved with their semantic tones in the same footer position', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
+            target: { value: '65' },
+        });
+
+        await user.click(getSaveButton());
+
+        const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
+        const saving = within(actions).getByText('Guardando...');
+        expect(saving).toHaveClass('text-admin-accent');
+        expect(getSaveButton().previousElementSibling).toBe(saving);
+
+        await act(async () => resolveVoiceSave?.());
+
+        const saved = await within(actions).findByText('Guardado');
+        expect(saved).toHaveClass('text-status-normal');
+        expect(getSaveButton().previousElementSibling).toBe(saved);
+    });
+
+    it('projects save errors as critical and clears the projected status on close', async () => {
+        const user = userEvent.setup();
+        voiceSaveShouldFail = true;
+        render(<Harness />);
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
+            target: { value: '65' },
+        });
+        await user.click(getSaveButton());
+
+        await act(async () => resolveVoiceSave?.());
+
+        const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
+        const error = await within(actions).findByText('Error al guardar');
+        expect(error).toHaveClass('text-status-critical');
+        expect(getSaveButton().previousElementSibling).toBe(error);
+
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
+        await user.click(screen.getByRole('button', { name: 'Voz' }));
+
+        await waitFor(() => {
+            expect(screen.queryByText('Error al guardar')).not.toBeInTheDocument();
+        });
     });
 
     it('discards mounted drafts on close without save and restores persisted values on reopen', async () => {
@@ -401,8 +501,11 @@ describe('GlobalSettingsDialog', () => {
         await user.clear(screen.getByLabelText('Voice draft'));
         await user.type(screen.getByLabelText('Voice draft'), '/voice/new');
         await user.click(getSaveButton());
+        await act(async () => resolveVoiceSave?.());
 
-        expect(localStorage.getItem(VOICE_STORAGE_KEY)).toBe('/voice/new');
+        await waitFor(() => {
+            expect(localStorage.getItem(VOICE_STORAGE_KEY)).toBe('/voice/new');
+        });
         expect(getSaveButton()).toBeDisabled();
     });
 });

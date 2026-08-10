@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
 import type { VoiceEvent } from '../domain/voice.types';
+import { normalizeTelegramChatId } from '../domain/voice';
 import { readPrismaVoiceTtsServiceUrl } from '../config/prismaVoiceTts.config';
 import {
     PrismaVoiceAudioEngine,
@@ -71,9 +72,12 @@ export function usePrismaOrbPresentation(
     const presentVoiceEvent = (event: VoiceEvent): void => {
         generationRef.current += 1;
         clearFadeTimer(fadeTimerRef);
+        const telegramChatId = normalizeTelegramChatId(event.telegramChatId);
         const audioSource = audioSourceFactoryRef.current({
             serviceUrl: getServiceUrlRef.current(),
             text: event.text,
+            ...(event.id === undefined ? {} : { eventId: event.id }),
+            ...(telegramChatId === undefined ? {} : { telegramChatId }),
         });
         if (!audioSource) {
             startedGenerationRef.current = generationRef.current;

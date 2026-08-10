@@ -1,9 +1,12 @@
-import { normalizePrismaVoiceTtsServiceUrl } from '../config/prismaVoiceTts.config';
+import { resolvePrismaVoiceTtsServiceUrls } from '../config/prismaVoiceTts.config';
+import { normalizeTelegramChatId } from '../domain/voice';
 import type { PrismaVoiceAudioSource } from './prismaVoiceAudioEngine';
 
 export interface PrismaVoiceTtsAudioRequest {
     serviceUrl: string;
     text: string;
+    eventId?: string;
+    telegramChatId?: number;
 }
 
 export type PrismaVoiceAudioSourceFactory = (
@@ -11,6 +14,9 @@ export type PrismaVoiceAudioSourceFactory = (
 ) => PrismaVoiceAudioSource | null;
 
 const WAV_CONTENT_TYPES = new Set(['audio/wav', 'audio/x-wav', 'audio/wave']);
+const LIVE_AUDIO_FORMAT = 'pcm_s16le';
+const LIVE_SAMPLE_RATE = 24_000;
+const LIVE_CHANNELS = 1;
 
 function normalizeContentType(value: string | null): string {
     return value?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
@@ -36,14 +42,53 @@ export function createPrismaVoiceTtsAudioSource(
     request: PrismaVoiceTtsAudioRequest,
     fetchImpl: typeof fetch = (...args) => fetch(...args),
 ): PrismaVoiceAudioSource | null {
-    const serviceUrl = normalizePrismaVoiceTtsServiceUrl(request.serviceUrl);
-    if (!serviceUrl) {
+    const serviceUrls = resolvePrismaVoiceTtsServiceUrls(request.serviceUrl);
+    if (!serviceUrls?.liveUrl) {
         return null;
     }
 
-    return {
-        async load(signal) {
-            const response = await fetchImpl(serviceUrl, {
+    const source: PrismaVoiceAudioSource = {
+        async openLive(signal) {
+            const telegramChatId = normalizeTelegramChatId(request.telegramChatId);
+            const body = {
+                text: request.text,
+                ...(request.eventId?.trim() ? { eventId: request.eventId } : {}),
+                ...(telegramChatId === undefined ? {} : { telegramChatId }),
+            };
+            const response = await fetchImpl(serviceUrls.liveUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                cache: 'no-store',
+                signal,
+            });
+            if (!response.ok) {
+                throw new Error(`Prisma Live request failed with status ${response.status}`);
+            }
+            if (response.headers.get('X-Prisma-Audio-Format')?.toLowerCase() !== LIVE_AUDIO_FORMAT) {
+                throw new Error('Prisma Live response has invalid audio format');
+            }
+            if (Number(response.headers.get('X-Prisma-Sample-Rate')) !== LIVE_SAMPLE_RATE) {
+                throw new Error('Prisma Live response has invalid sample rate');
+            }
+            if (Number(response.headers.get('X-Prisma-Channels')) !== LIVE_CHANNELS) {
+                throw new Error('Prisma Live response has invalid channels');
+            }
+            if (!response.body) {
+                throw new Error('Prisma Live response has no readable body');
+            }
+
+            return {
+                reader: response.body.getReader(),
+                sampleRate: LIVE_SAMPLE_RATE,
+                channels: LIVE_CHANNELS,
+            };
+        },
+    };
+
+    if (serviceUrls.fallbackUrl) {
+        source.loadWav = async (signal) => {
+            const response = await fetchImpl(serviceUrls.fallbackUrl as string, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: request.text }),
@@ -53,7 +98,6 @@ export function createPrismaVoiceTtsAudioSource(
             if (!response.ok) {
                 throw new Error(`Prisma voice TTS request failed with status ${response.status}`);
             }
-
             const responseContentType = normalizeContentType(response.headers.get('Content-Type'));
             if (responseContentType !== '' && !WAV_CONTENT_TYPES.has(responseContentType)) {
                 throw new Error(`Prisma voice TTS response has invalid Content-Type: ${responseContentType}`);
@@ -78,6 +122,8 @@ export function createPrismaVoiceTtsAudioSource(
             }
 
             return encodedAudio;
-        },
-    };
+        };
+    }
+
+    return source;
 }

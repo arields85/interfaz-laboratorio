@@ -7,6 +7,10 @@ import DesignSettingsTab from './DesignSettingsTab';
 import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
 import TemporalSettingsTab from './TemporalSettingsTab';
 import VoiceSettingsTab from './VoiceSettingsTab';
+import {
+    VOICE_SAVE_STATUS_UI,
+    type VoiceSaveStatus,
+} from './voiceSaveStatus';
 
 const TABS = [
     { id: 'connection', label: 'Conexion', icon: Wifi },
@@ -34,6 +38,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     const [optionsDirty, setOptionsDirty] = useState(false);
     const [temporalDirty, setTemporalDirty] = useState(false);
     const [voiceDirty, setVoiceDirty] = useState(false);
+    const [voiceSaveStatus, setVoiceSaveStatus] = useState<VoiceSaveStatus>(null);
     const dirty = connectionDirty || designDirty || optionsDirty || temporalDirty || voiceDirty;
 
     const connectionSaveRef = useRef<(() => void) | null>(null);
@@ -41,7 +46,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     const designRevertRef = useRef<(() => void) | null>(null);
     const optionsSaveRef = useRef<(() => void) | null>(null);
     const temporalSaveRef = useRef<(() => void) | null>(null);
-    const voiceSaveRef = useRef<(() => void) | null>(null);
+    const voiceSaveRef = useRef<(() => void | Promise<void>) | null>(null);
 
     const handleSave = () => {
         if (activeTab === 'connection') {
@@ -60,7 +65,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         }
 
         if (activeTab === 'voice') {
-            voiceSaveRef.current?.();
+            void voiceSaveRef.current?.();
             return;
         }
 
@@ -76,6 +81,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         setOptionsDirty(false);
         setTemporalDirty(false);
         setVoiceDirty(false);
+        setVoiceSaveStatus(null);
         onClose();
     };
 
@@ -86,7 +92,20 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
             onClose={handleClose}
             maxWidth="max-w-3xl"
             actions={(
-                <div className="flex gap-2">
+                <div
+                    role="group"
+                    aria-label="Acciones de configuración general"
+                    className="flex items-center gap-2"
+                >
+                    {activeTab === 'voice' && voiceSaveStatus ? (
+                        <p
+                            className={`mr-2 text-sm ${VOICE_SAVE_STATUS_UI[voiceSaveStatus].className}`}
+                            aria-live="polite"
+                            aria-atomic="true"
+                        >
+                            {VOICE_SAVE_STATUS_UI[voiceSaveStatus].label}
+                        </p>
+                    ) : null}
                     <AdminActionButton
                         variant="primary"
                         onClick={handleSave}
@@ -129,7 +148,11 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     </div>
                 </div>
 
-                <div className="hmi-scrollbar min-h-0 flex-1 overflow-y-auto pr-2 pt-4">
+                <div
+                    role="region"
+                    aria-label="Contenido de configuración general"
+                    className="hmi-scrollbar min-h-0 flex-1 overflow-y-auto pr-2 pt-4"
+                >
                     <div hidden={activeTab !== 'connection'}>
                         <ConnectionSettingsTab
                             onDirtyChange={setConnectionDirty}
@@ -162,6 +185,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <div hidden={activeTab !== 'voice'}>
                         <VoiceSettingsTab
                             onDirtyChange={setVoiceDirty}
+                            onSaveStatusChange={setVoiceSaveStatus}
                             saveRef={voiceSaveRef}
                         />
                     </div>

@@ -17,6 +17,7 @@ export const DATA_DEFAULT_ENDPOINT = '/api/hmi-data';
 export const DATA_DEFAULT_HISTORY_ENDPOINT = '/api/hmi-data/history';
 export const DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT = '/api/hmi-data/activity-series';
 export const DATA_DEFAULT_VOICE_ENDPOINT = '/hmi/voice/latest';
+export const DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT = '/hmi/prisma-config';
 export const DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS = 5_000;
 export const DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS = 1_000;
 export const DATA_CONNECTION_CONFIG_CHANGED_EVENT = 'hmi:data-connection-config-changed';
@@ -29,6 +30,7 @@ const LS_KEY_SNAPSHOT_EXPORT_ENDPOINT = 'hmi:snapshot-export-endpoint';
 const LS_KEY_SNAPSHOT_EXPORT_ENABLED = 'hmi:snapshot-export-enabled';
 const LS_KEY_SNAPSHOT_EXPORT_INTERVAL_MS = 'hmi:snapshot-export-interval-ms';
 const LS_KEY_VOICE_ENDPOINT = 'hmi:voice-endpoint';
+const LS_KEY_PRISMA_CONFIG_ENDPOINT = 'hmi:prisma-config-endpoint';
 
 function stripTrailingSlashes(raw: string): string {
     return raw.replace(/\/+$/, '');
@@ -41,6 +43,16 @@ function stripLeadingSlashes(raw: string): string {
 function normalizeUrl(raw: string | null | undefined): string | null {
     if (!raw || raw.trim() === '') return null;
     return stripTrailingSlashes(raw.trim());
+}
+
+export function buildDataUrl(
+    baseUrl: string | null | undefined,
+    endpoint: string | null | undefined,
+): string | null {
+    const base = normalizeUrl(baseUrl);
+    const normalizedEndpoint = endpoint?.trim();
+    if (!base || !normalizedEndpoint) return null;
+    return `${base}/${stripLeadingSlashes(normalizedEndpoint)}`;
 }
 
 function normalizeSnapshotExportIntervalMs(intervalMs: number): number {
@@ -239,6 +251,47 @@ export function getSavedDataVoiceEndpoint(): string | null {
     }
 }
 
+// --- Prisma Config Endpoint ---
+
+export function getDataPrismaConfigEndpoint(): string | null {
+    try {
+        const stored = localStorage.getItem(LS_KEY_PRISMA_CONFIG_ENDPOINT);
+
+        if (stored !== null) {
+            const trimmed = stored.trim();
+            return trimmed === '' ? null : '/' + stripLeadingSlashes(trimmed);
+        }
+    } catch {
+        // localStorage unavailable
+    }
+
+    return DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT;
+}
+
+export function saveDataPrismaConfigEndpoint(endpoint: string): void {
+    try {
+        localStorage.setItem(LS_KEY_PRISMA_CONFIG_ENDPOINT, endpoint.trim());
+    } catch {
+        // Browser storage may be blocked by policy or privacy mode.
+    }
+}
+
+export function clearDataPrismaConfigEndpoint(): void {
+    try {
+        localStorage.removeItem(LS_KEY_PRISMA_CONFIG_ENDPOINT);
+    } catch {
+        // Browser storage may be blocked by policy or privacy mode.
+    }
+}
+
+export function getSavedDataPrismaConfigEndpoint(): string | null {
+    try {
+        return localStorage.getItem(LS_KEY_PRISMA_CONFIG_ENDPOINT);
+    } catch {
+        return null;
+    }
+}
+
 // --- Full URLs ---
 
 export function getDataFullUrl(): string | null {
@@ -270,6 +323,10 @@ export function getDataVoiceUrl(): string | null {
     const voiceEndpoint = getDataVoiceEndpoint();
     if (!voiceEndpoint) return null;
     return `${base}/${stripLeadingSlashes(voiceEndpoint)}`;
+}
+
+export function getDataPrismaConfigUrl(): string | null {
+    return buildDataUrl(getDataBaseUrl(), getDataPrismaConfigEndpoint());
 }
 
 export function getDataSnapshotExportEndpoint(): string | null {

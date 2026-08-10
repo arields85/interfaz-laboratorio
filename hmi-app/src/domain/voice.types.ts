@@ -1,5 +1,6 @@
 export interface VoiceEvent {
-    id: string;
+    id?: string;
+    telegramChatId?: number;
     timestamp: string;
     text: string;
     question: string;
