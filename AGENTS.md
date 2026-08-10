@@ -122,6 +122,13 @@ Incluso en esos casos, mantené el criterio de mínimo alcance y no conviertas u
 
 > Regla explícita: **"cambio quirúrgico" NO es excusa para saltearse la delegación.** Si el trabajo deja de ser mecánico o aparece criterio de producto, diseño, testing, validación o refactor, vuelve al flujo delegado.
 
+### Gestión de pendientes
+
+- `docs/PENDING_WORK.md` es la autoridad de descubrimiento sobre **qué** está pendiente y su estado activo. Leelo cuando el usuario mencione pendientes, backlog, continuación o próximos pasos, y antes de trabajar en un área indexada.
+- Para resolver el detalle, contexto, decisiones y criterios, usá el `Engram topic` de la fila: buscalo con `mem_search` y recuperalo con `mem_get_observation`. Nunca implementes basándote solo en el resumen del índice.
+- Para dar de alta un pendiente: guardá primero el detalle en Engram con un `topic_key` estable `backlog/<slug>`, verificá que sea recuperable y recién entonces agregá la fila al índice. No uses IDs numéricos de Engram como referencia canónica ni dejes filas huérfanas sin un topic verificable.
+- Para cerrar un pendiente: actualizá o cerrá primero el detalle en Engram y después retirá la fila activa. Git conserva el historial de las entradas resueltas o eliminadas.
+
 ### Antes de escribir código, verificá:
 
 1. ¿El archivo que voy a modificar existe realmente? (no inventar rutas)
@@ -158,6 +165,7 @@ Consultá los documentos en `Directrices/` antes de tomar una decisión arquitec
 | [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) | Tokens, fuentes, Tailwind v4, Regla de Oro |
 | [`docs/TESTING.md`](docs/TESTING.md) | Stack de testing, coverage, TDD, mocks, fixtures |
 | [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) | Contrato JSON estable de integración de datos en tiempo real, estados oficiales, resolución, fallbacks |
+| [`docs/PENDING_WORK.md`](docs/PENDING_WORK.md) | Índice activo de pendientes y referencias a su detalle en Engram |
 | [`Directrices/Directiva_maestra_v3.1.md`](Directrices/Directiva_maestra_v3.1.md) | Directiva maestra: visión, principios, restricciones globales |
 | [`Directrices/Arquitectura Técnica de Implementación HMI v1.3.md`](Directrices/Arquitectura%20Técnica%20de%20Implementación%20HMI%20v1.3.md) | Arquitectura técnica formal |
 | [`Directrices/Especificación funcional_Modo Administrador.md`](Directrices/Especificación%20funcional_Modo%20Administrador.md) | Spec funcional del modo administrador |
