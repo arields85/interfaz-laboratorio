@@ -101,10 +101,28 @@ describe('HeaderWidgetRenderer', () => {
             />,
         );
 
-        expect(screen.getByText('Global connection')).toBeInTheDocument();
         expect(screen.getByText('Degradado')).toBeInTheDocument();
         expect(screen.getByText('1min')).toBeInTheDocument();
         expect(screen.getByTestId('connection-header-icon-degradado')).toBeInTheDocument();
+    });
+
+    it('lays out header connection status horizontally with the icon before the status details', () => {
+        render(
+            <HeaderWidgetRenderer
+                widget={makeWidget({ id: 'connection-global', type: 'connection-status' })}
+                equipmentMap={new Map()}
+                connection={{ globalStatus: 'online', lastSuccess: null, ageMs: 10_000 }}
+            />,
+        );
+
+        const layout = screen.getByTestId('connection-header-layout');
+        const icon = screen.getByTestId('connection-header-icon-online');
+        const details = screen.getByTestId('connection-header-details');
+
+        expect(layout).toHaveClass('flex-row', 'items-center');
+        expect(icon.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(details).toContainElement(screen.getByText('Online'));
+        expect(details).toContainElement(screen.getByText('10s'));
     });
 
     it('renders machine-scoped connection widgets for real, simulated, and missing machine states', () => {

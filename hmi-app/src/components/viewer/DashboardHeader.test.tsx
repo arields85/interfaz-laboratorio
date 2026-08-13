@@ -6,6 +6,7 @@ import DashboardHeader from './DashboardHeader';
 import { makeDashboard, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import type { DashboardView } from '../../domain/admin.types';
 import { HEADER_VIEW_ICON_BUTTON_ACTIVE_CLS, HEADER_VIEW_ICON_BUTTON_CLS } from '../layout/topbarIconButtonStyles';
+import { HEADER_WIDGET_SLOT_HEIGHT_PX } from '../../utils/headerWidgets';
 
 vi.mock('lucide-react', async () => {
     const actual = await vi.importActual<typeof import('lucide-react')>('lucide-react');
@@ -27,11 +28,13 @@ vi.mock('./HeaderWidgetCanvas', () => ({
     default: ({
         widgets,
         widgetColumnMap,
+        viewerEntranceKey,
     }: {
         widgets: Array<{ id: string; title?: string }>;
         widgetColumnMap?: Map<string, number>;
+        viewerEntranceKey?: string;
     }) => (
-        <div data-testid="header-widget-canvas">
+        <div data-testid="header-widget-canvas" data-viewer-entrance-key={viewerEntranceKey}>
             {widgets.map((widget) => (
                 <div
                     key={widget.id}
@@ -80,6 +83,43 @@ function renderViewerHeader(overrides: Parameters<typeof makeDashboard>[0] = {},
 }
 
 describe('DashboardHeader', () => {
+    it('keeps the 72px header band and widget canvas mounted when no header slots are occupied', () => {
+        renderViewerHeader({ headerConfig: { widgetSlots: [] } });
+
+        expect(screen.getByTestId('dashboard-header')).toHaveStyle({
+            height: `${HEADER_WIDGET_SLOT_HEIGHT_PX}px`,
+            minHeight: `${HEADER_WIDGET_SLOT_HEIGHT_PX}px`,
+            maxHeight: `${HEADER_WIDGET_SLOT_HEIGHT_PX}px`,
+        });
+        expect(screen.getByTestId('header-widget-canvas')).toBeInTheDocument();
+    });
+
+    it('passes dashboard identity to the viewer widget canvas so entrances retrigger across dashboards', () => {
+        const { rerender } = render(
+            <DashboardHeader
+                dashboard={makeDashboard({ id: 'dashboard-line-a' })}
+                equipmentMap={new Map()}
+            />,
+        );
+
+        expect(screen.getByTestId('header-widget-canvas')).toHaveAttribute('data-viewer-entrance-key', 'dashboard-line-a');
+
+        rerender(
+            <DashboardHeader
+                dashboard={makeDashboard({ id: 'dashboard-line-b' })}
+                equipmentMap={new Map()}
+            />,
+        );
+
+        expect(screen.getByTestId('header-widget-canvas')).toHaveAttribute('data-viewer-entrance-key', 'dashboard-line-b');
+    });
+
+    it('keeps the dashboard title on one truncating line', () => {
+        renderViewerHeader({ name: 'A dashboard title that must never wrap across lines' });
+
+        expect(screen.getByRole('heading')).toHaveClass('truncate', 'whitespace-nowrap');
+    });
+
     it('renders icon-only internal-view controls and prefixes the subtitle with the active view name in viewer mode', () => {
         renderViewerHeader({
             headerConfig: { subtitle: 'Main line overview' },

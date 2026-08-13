@@ -12,6 +12,7 @@ import { getDashboardViewIconComponent } from '../../utils/dashboardViewIcons';
 import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
 import HeaderWidgetCanvas from './HeaderWidgetCanvas';
 import { HEADER_VIEW_ICON_BUTTON_ACTIVE_CLS, HEADER_VIEW_ICON_BUTTON_CLS } from '../layout/topbarIconButtonStyles';
+import { HEADER_WIDGET_SLOT_HEIGHT_PX } from '../../utils/headerWidgets';
 
 // =============================================================================
 // DashboardHeader
@@ -106,7 +107,7 @@ function InlineEditableText({
                 setDraftValue(value ?? '');
                 setIsEditing(true);
             }}
-            className="group flex items-center gap-2 text-left"
+            className="group flex min-w-0 max-w-full items-center gap-2 text-left"
             title="Editar directamente en el preview"
         >
             <span className={`${className} ${!displayValue ? emptyClassName ?? '' : ''}`} style={textStyle}>
@@ -325,7 +326,15 @@ export default function DashboardHeader({
     };
 
     return (
-        <div className="flex shrink-0 items-start justify-between gap-6">
+        <div
+            data-testid="dashboard-header"
+            className="flex shrink-0 items-center justify-between gap-6"
+            style={{
+                height: HEADER_WIDGET_SLOT_HEIGHT_PX,
+                minHeight: HEADER_WIDGET_SLOT_HEIGHT_PX,
+                maxHeight: HEADER_WIDGET_SLOT_HEIGHT_PX,
+            }}
+        >
             <div data-testid="dashboard-header-title-block" className="min-w-0 flex-1">
                 {isEditablePreview ? (
                     <div className="space-y-1.5">
@@ -334,9 +343,9 @@ export default function DashboardHeader({
                                 value={title}
                                 placeholder="Título del header"
                                 onCommit={(value) => onTitleChange?.(value)}
-                                className="text-industrial-text leading-none"
+                                className="block min-w-0 max-w-full flex-1 truncate whitespace-nowrap text-industrial-text leading-none"
                                 emptyClassName="text-industrial-muted/60"
-                                inputClassName="w-full min-w-[20rem] bg-transparent text-industrial-text leading-none border-b border-white/10 focus:border-admin-accent/60 focus:outline-none"
+                                inputClassName="w-full min-w-0 bg-transparent text-industrial-text leading-none border-b border-white/10 focus:border-admin-accent/60 focus:outline-none"
                                 textStyle={dashboardTitleTypography}
                                 inputStyle={dashboardTitleTypography}
                             />
@@ -351,7 +360,7 @@ export default function DashboardHeader({
                     </div>
                 ) : (
                     <>
-                        <h1 className="text-industrial-text mb-1 leading-none" style={dashboardTitleTypography}>
+                        <h1 className="mb-1 truncate whitespace-nowrap text-industrial-text leading-none" style={dashboardTitleTypography}>
                             {title}
                         </h1>
                         <DashboardHeaderSubtitleRow activeViewName={activeViewName} subtitle={resolvedSubtitle} isEditablePreview={false} />
@@ -360,7 +369,7 @@ export default function DashboardHeader({
 
             </div>
 
-            <div data-testid="dashboard-header-actions" className="flex items-center gap-3 self-center">
+            <div data-testid="dashboard-header-actions" className="flex min-w-0 items-center gap-3 self-center">
                 {hasInternalViewNavigation && dashboard.views && resolvedActiveViewId && (
                     <DashboardViewNavigation
                         views={dashboard.views}
@@ -368,31 +377,30 @@ export default function DashboardHeader({
                         onSelectView={onSelectView}
                     />
                 )}
-                {(isPreview || headerWidgets.length > 0) && (
-                        <HeaderWidgetCanvas
-                            widgets={headerWidgets}
-                            widgetColumnMap={widgetColumnMap}
-                            equipmentMap={equipmentMap}
-                            connection={connection}
-                            machines={machines}
-                            mode={isPreview ? 'preview' : 'viewer'}
-                            onNavigateDashboard={onNavigateDashboard}
-                            selectedWidgetId={selectedWidgetId}
-                            onWidgetSelect={onSelectHeaderWidget}
-                        onMoveWidget={onMoveHeaderWidget}
-                        onRemoveWidget={onRemoveHeaderWidget}
-                        onDeleteWidget={onDeleteHeaderWidget}
-                        onHeaderDragEnter={onHeaderDragEnter}
-                        onHeaderDragOver={onHeaderDragOver}
-                        onHeaderDragLeave={onHeaderDragLeave}
-                        onHeaderDrop={onHeaderDrop}
-                        isHeaderDropActive={isHeaderDropActive}
-                        canDropHeaderWidget={canDropHeaderWidget}
-                        onAddHeaderWidget={onAddHeaderWidget}
-                        onDropWidgetAtSlot={onDropWidgetAtSlot}
-                        hierarchyContext={hierarchyContext}
-                    />
-                )}
+                <HeaderWidgetCanvas
+                    widgets={headerWidgets}
+                    widgetColumnMap={widgetColumnMap}
+                    equipmentMap={equipmentMap}
+                    connection={connection}
+                    machines={machines}
+                    mode={isPreview ? 'preview' : 'viewer'}
+                    viewerEntranceKey={isPreview ? undefined : dashboard.id}
+                    onNavigateDashboard={onNavigateDashboard}
+                    selectedWidgetId={selectedWidgetId}
+                    onWidgetSelect={onSelectHeaderWidget}
+                    onMoveWidget={onMoveHeaderWidget}
+                    onRemoveWidget={onRemoveHeaderWidget}
+                    onDeleteWidget={onDeleteHeaderWidget}
+                    onHeaderDragEnter={onHeaderDragEnter}
+                    onHeaderDragOver={onHeaderDragOver}
+                    onHeaderDragLeave={onHeaderDragLeave}
+                    onHeaderDrop={onHeaderDrop}
+                    isHeaderDropActive={isHeaderDropActive}
+                    canDropHeaderWidget={canDropHeaderWidget}
+                    onAddHeaderWidget={onAddHeaderWidget}
+                    onDropWidgetAtSlot={onDropWidgetAtSlot}
+                    hierarchyContext={hierarchyContext}
+                />
             </div>
         </div>
     );

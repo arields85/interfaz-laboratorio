@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import type { DragEvent, KeyboardEvent, ReactNode, RefObject } from 'react';
+import type { CSSProperties, DragEvent, KeyboardEvent, ReactNode, RefObject } from 'react';
 import { ArrowDown, ChevronLeft, ChevronRight, Plus, Trash2, Activity, Wifi } from 'lucide-react';
 import AnchoredOverlay from '../ui/AnchoredOverlay';
 import type { WidgetConfig, WidgetType } from '../../domain/admin.types';
@@ -11,9 +11,16 @@ import WidgetHoverActions from '../ui/WidgetHoverActions';
 import {
     HEADER_WIDGET_DRAG_MIME,
     HEADER_WIDGET_SLOT_COUNT,
+    HEADER_WIDGET_SLOT_HEIGHT_PX,
     parseHeaderWidgetDragPayload,
 } from '../../utils/headerWidgets';
 import HeaderWidgetRenderer from './HeaderWidgetRenderer';
+
+const HEADER_WIDGET_ENTRANCE_STAGGER_MS = 110;
+
+type HeaderWidgetEntranceStyle = CSSProperties & {
+    '--header-widget-entrance-delay'?: string;
+};
 
 // =============================================================================
 // Opciones del menú contextual del slot vacío de header.
@@ -180,6 +187,8 @@ interface HeaderWidgetCanvasProps {
     connection?: ConnectionHealth;
     machines?: ContractMachine[];
     mode?: 'viewer' | 'preview';
+    /** Identidad estable del dashboard para reiniciar la entrada al navegar entre dashboards. */
+    viewerEntranceKey?: string;
     selectedWidgetId?: string;
     onWidgetSelect?: (widgetId: string) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
@@ -208,6 +217,7 @@ export default function HeaderWidgetCanvas({
     connection,
     machines,
     mode = 'viewer',
+    viewerEntranceKey,
     selectedWidgetId,
     onWidgetSelect,
     onNavigateDashboard,
@@ -226,9 +236,8 @@ export default function HeaderWidgetCanvas({
 }: HeaderWidgetCanvasProps) {
     void hierarchyContext;
     const isPreview = mode === 'preview';
-    // Debe mantenerse sincronizado con `.glass-panel { border-radius: 1.5rem }` en hmi-app/src/index.css
     const widgetCornerRadius = '1.5rem';
-    const emptySlotWidth = '72px';
+    const headerSlotSize = `${HEADER_WIDGET_SLOT_HEIGHT_PX}px`;
 
     // Construir un mapa columna → widget para el renderizado explícito por columna.
     // Si existe widgetColumnMap usamos sus valores; si no, fallback al índice del array.
@@ -237,6 +246,11 @@ export default function HeaderWidgetCanvas({
         const col = widgetColumnMap?.get(widget.id) ?? idx;
         columnToWidget.set(col, widget);
     });
+    const viewerEntranceOrderByColumn = new Map(
+        [...columnToWidget.keys()]
+            .sort((left, right) => left - right)
+            .map((column, entranceIndex) => [column, entranceIndex]),
+    );
 
     const emptySlotCount = Math.max(HEADER_WIDGET_SLOT_COUNT - widgets.length, 0);
     // Índice del slot vacío que está siendo el drop target activo (para resalte individual)
@@ -320,11 +334,10 @@ export default function HeaderWidgetCanvas({
                     }
                 }}
                 onKeyDown={(event) => handleSelectByKeyboard(event, widget)}
-                className="glass-panel relative flex h-full min-h-18 w-full flex-col px-3 py-2 text-left transition-all focus:outline-none md:w-auto"
+                className="relative flex h-full w-full flex-col justify-center px-3 py-2 text-left transition-all focus:outline-none md:w-auto"
                 style={{
+                    minHeight: HEADER_WIDGET_SLOT_HEIGHT_PX,
                     borderRadius: widgetCornerRadius,
-                    borderColor: 'color-mix(in srgb, var(--color-industrial-border) 85%, transparent)',
-                    boxShadow: 'none',
                     transform: 'scale(1)',
                 }}
             >
@@ -339,7 +352,7 @@ export default function HeaderWidgetCanvas({
                         ) : null}
                     </div>
 
-                    <div className={hasDisplayTitle ? 'border-t border-white/6 pt-1' : ''}>
+                    <div className={hasDisplayTitle ? 'pt-1' : ''}>
                         <HeaderWidgetRenderer
                             widget={widget}
                             equipmentMap={equipmentMap}
@@ -404,12 +417,14 @@ export default function HeaderWidgetCanvas({
 
     return (
         <div
-            className="min-w-[18rem] rounded-2xl border border-dashed px-3 py-2.5 transition-all"
+            data-header-widget-canvas="true"
+            className={`min-w-0 max-w-full rounded-2xl ${isPreview || widgets.length > 0 ? 'w-72' : 'w-0'} ${isPreview && isHeaderDropActive ? 'border border-dashed' : ''}`}
             style={{
+                height: HEADER_WIDGET_SLOT_HEIGHT_PX,
+                minHeight: HEADER_WIDGET_SLOT_HEIGHT_PX,
                 borderColor: isPreview && isHeaderDropActive
                     ? 'color-mix(in srgb, var(--color-admin-accent) 60%, transparent)'
-                    : 'color-mix(in srgb, var(--color-industrial-border) 100%, transparent)',
-                background: 'transparent',
+                    : undefined,
                 boxShadow: isPreview && isHeaderDropActive
                     ? '0 0 0 1px color-mix(in srgb, var(--color-admin-accent) 20%, transparent), 0 0 24px color-mix(in srgb, var(--color-admin-accent) 12%, transparent)'
                     : 'none',
@@ -420,36 +435,40 @@ export default function HeaderWidgetCanvas({
             onDrop={handleCanvasDrop}
         >
             {/* ── Layout de slots del header ──────────────────────────────────────
-                Iteramos SIEMPRE los 3 slots en orden.
-                En desktop usamos flex con `order` explícito para preservar la
-                columna lógica de cada slot, pero sin forzar tracks de igual ancho.
-                Así los widgets ocupan solo su contenido y los slots vacíos se
-                mantienen compactos con ancho fijo.
+                Iteramos SIEMPRE los 3 slots en una fila y usamos `order` explícito
+                para preservar su columna lógica sin alterar la altura del header.
              ── */}
-            <div className="flex flex-col items-end gap-2.5 md:flex-row md:flex-wrap md:justify-end">
+            <div className="flex h-full flex-row flex-nowrap items-center justify-end gap-2.5">
                 {Array.from({ length: HEADER_WIDGET_SLOT_COUNT }, (_, colIndex) => {
                     const widget = columnToWidget.get(colIndex);
 
                     if (widget) {
                         // ── Columna ocupada: renderizar widget ──────────────
                         const isSelected = selectedWidgetId === widget.id;
+                        const viewerEntranceIndex = viewerEntranceOrderByColumn.get(colIndex) ?? 0;
+                        const entranceStyle: HeaderWidgetEntranceStyle = {
+                            borderRadius: widgetCornerRadius,
+                            order: colIndex,
+                            '--header-widget-entrance-delay': isPreview
+                                ? undefined
+                                : `${viewerEntranceIndex * HEADER_WIDGET_ENTRANCE_STAGGER_MS}ms`,
+                        };
 
                         return (
                             <div
-                                key={widget.id}
-                                className="group relative min-w-0 w-full md:w-auto md:max-w-full md:flex-none"
-                                style={{
-                                    borderRadius: widgetCornerRadius,
-                                    order: colIndex,
-                                }}
+                                key={isPreview ? widget.id : `${viewerEntranceKey ?? 'viewer'}:${widget.id}`}
+                                className={`group relative min-w-0 w-full md:w-auto md:max-w-full md:flex-none ${isPreview ? '' : 'hmi-header-widget-entrance'}`}
+                                style={entranceStyle}
                                 data-header-drop-kind="widget"
                                 data-widget-id={widget.id}
                                 data-testid={`header-widget-slot-${widget.id}`}
                             >
-                                <HeaderSelectionFrame
-                                    isSelected={isSelected}
-                                    radius={widgetCornerRadius}
-                                />
+                                {isPreview ? (
+                                    <HeaderSelectionFrame
+                                        isSelected={isSelected}
+                                        radius={widgetCornerRadius}
+                                    />
+                                ) : null}
 
                                 {isPreview && (
                                     <WidgetHoverActions
@@ -496,7 +515,7 @@ export default function HeaderWidgetCanvas({
                                 data-header-slot-spacer="true"
                                 data-slot-index={colIndex}
                                 className="hidden md:block md:flex-none"
-                                style={{ minHeight: '72px', width: emptySlotWidth, minWidth: emptySlotWidth, order: colIndex }}
+                                style={{ minHeight: HEADER_WIDGET_SLOT_HEIGHT_PX, width: headerSlotSize, minWidth: headerSlotSize, order: colIndex }}
                             />
                         );
                     }
@@ -517,11 +536,10 @@ export default function HeaderWidgetCanvas({
                             onDragLeave={handleEmptySlotDragLeave}
                             onDrop={(e) => handleEmptySlotDrop(e, colIndex)}
                             style={{
-                                // Misma geometría base que el widget real del header:
-                                // min-h-18 (72px) + px-3 py-2 internos.
-                                minHeight: '72px',
-                                width: emptySlotWidth,
-                                minWidth: emptySlotWidth,
+                                // Misma geometría base que el widget real del header.
+                                minHeight: HEADER_WIDGET_SLOT_HEIGHT_PX,
+                                width: headerSlotSize,
+                                minWidth: headerSlotSize,
                                 borderRadius: widgetCornerRadius,
                                 order: colIndex,
                                 borderColor: isThisSlotDropTarget

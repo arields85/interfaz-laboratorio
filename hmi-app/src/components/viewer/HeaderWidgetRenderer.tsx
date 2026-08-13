@@ -179,34 +179,30 @@ export default function HeaderWidgetRenderer({
         const copy = CONNECTION_COPY[status] ?? CONNECTION_COPY.unknown;
         const label = resolveContractStatusLabel(status, options);
         const Icon = copy.icon;
-        const title = widget.title?.trim() ?? '';
         const showLastUpdate = options?.showLastUpdate !== false;
         const relativeTime = formatConnectionFreshness(ageMs, lastSuccess);
 
         return (
-            <div className="flex h-full w-full flex-col text-center">
-                {title ? (
-                    <span className="w-full truncate uppercase text-industrial-muted text-center">
-                        {title}
-                    </span>
-                ) : null}
+            <div
+                data-testid="connection-header-layout"
+                className="flex h-full w-full flex-row items-center gap-3 text-left"
+            >
+                <Icon
+                    size={24}
+                    strokeWidth={2}
+                    className="shrink-0 opacity-100"
+                    style={{ color: copy.color }}
+                    data-testid={`connection-header-icon-${status}`}
+                    aria-hidden="true"
+                />
 
-                <div className="flex flex-1 flex-col items-center justify-center">
-                    <Icon
-                        size={24}
-                        strokeWidth={2}
-                        className="shrink-0 opacity-100 mb-2"
-                        style={{ color: copy.color }}
-                        data-testid={`connection-header-icon-${status}`}
-                        aria-hidden="true"
-                    />
-
-                    <span className="max-w-full truncate uppercase text-center text-industrial-muted">
+                <div data-testid="connection-header-details" className="flex min-w-0 flex-col items-start justify-center">
+                    <span className="max-w-full truncate uppercase text-industrial-muted">
                         {label}
                     </span>
 
                     {showLastUpdate ? (
-                        <div className="mt-0.5 flex items-center justify-center gap-1.5">
+                        <div className="mt-0.5 flex items-center gap-1.5">
                             <span
                                 className={`h-2 w-2 shrink-0 rounded-full -translate-y-px ${copy.pulse ? 'animate-pulse-slow' : ''}`}
                                 style={{

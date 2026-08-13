@@ -2,6 +2,7 @@ import type { WidgetConfig, WidgetType } from '../domain/admin.types';
 
 export const HEADER_COMPATIBLE_WIDGET_TYPES = ['status', 'connection-status'] as const;
 export const HEADER_WIDGET_SLOT_COUNT = 3;
+export const HEADER_WIDGET_SLOT_HEIGHT_PX = 72;
 
 export const HEADER_WIDGET_DRAG_MIME = 'application/x-interfaz-laboratorio-header-widget';
 

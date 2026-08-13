@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ComponentProps, ReactNode } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -5,6 +8,8 @@ import { describe, expect, it, vi } from 'vitest';
 import HeaderWidgetCanvas from './HeaderWidgetCanvas';
 import { makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { HEADER_WIDGET_DRAG_MIME } from '../../utils/headerWidgets';
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 vi.mock('./HeaderWidgetRenderer', () => ({
     default: ({ widget }: { widget: { id: string; title?: string; type?: string } }) => {
@@ -58,6 +63,115 @@ function renderPreviewCanvas(overrides: Partial<ComponentProps<typeof HeaderWidg
 }
 
 describe('HeaderWidgetCanvas', () => {
+    it('renders header widgets without a persistent panel, background, or border shell', () => {
+        const { container } = render(
+            <HeaderWidgetCanvas
+                widgets={[makeWidget({ id: 'header-status', type: 'status', title: 'Status widget' })]}
+                equipmentMap={new Map()}
+                mode="viewer"
+            />,
+        );
+
+        const canvas = container.querySelector('[data-header-widget-canvas="true"]');
+        const surface = container.querySelector('[data-header-widget-surface="true"]');
+
+        expect(canvas).not.toHaveClass('border', 'border-dashed');
+        expect(surface).not.toHaveClass('glass-panel', 'border');
+        expect((surface as HTMLElement).style.background).toBe('');
+    });
+
+    it('animates viewer widgets in logical left-to-right slot order without transitioning canvas width', () => {
+        const leftWidget = makeWidget({ id: 'header-left', type: 'status', title: 'Left status' });
+        const rightWidget = makeWidget({ id: 'header-right', type: 'status', title: 'Right status' });
+
+        const { container } = render(
+            <HeaderWidgetCanvas
+                widgets={[rightWidget, leftWidget]}
+                widgetColumnMap={new Map([
+                    ['header-left', 0],
+                    ['header-right', 2],
+                ])}
+                equipmentMap={new Map()}
+                mode="viewer"
+                viewerEntranceKey="dashboard-line-a"
+            />,
+        );
+
+        const canvas = container.querySelector('[data-header-widget-canvas="true"]');
+        const leftSlot = screen.getByTestId('header-widget-slot-header-left');
+        const rightSlot = screen.getByTestId('header-widget-slot-header-right');
+
+        expect(canvas).not.toHaveClass('transition-all');
+        expect(leftSlot).toHaveClass('hmi-header-widget-entrance');
+        expect(rightSlot).toHaveClass('hmi-header-widget-entrance');
+        expect(leftSlot.style.getPropertyValue('--header-widget-entrance-delay')).toBe('0ms');
+        expect(rightSlot.style.getPropertyValue('--header-widget-entrance-delay')).toBe('110ms');
+    });
+
+    it('uses the explicit viewer entrance distance, duration, and easing', () => {
+        const indexCss = fs.readFileSync(path.resolve(currentDir, '../../index.css'), 'utf-8');
+        const entranceKeyframes = indexCss.match(
+            /@keyframes hmi-header-widget-entrance\s*{([\s\S]*?)}\s*\.hmi-header-widget-entrance/,
+        );
+        const entranceRule = indexCss.match(
+            /\.hmi-header-widget-entrance\s*{([\s\S]*?)}/,
+        );
+
+        expect(entranceKeyframes?.[1]).toContain('opacity: 0;');
+        expect(entranceKeyframes?.[1]).toContain('transform: translateX(48px);');
+        expect(entranceKeyframes?.[1]).toContain('opacity: 1;');
+        expect(entranceKeyframes?.[1]).toContain('transform: translateX(0);');
+        expect(entranceRule?.[1]).toContain(
+            'animation: hmi-header-widget-entrance 320ms cubic-bezier(0.22, 1, 0.36, 1) both;',
+        );
+    });
+
+    it('restarts viewer entrance when the dashboard identity changes even if widget ids coincide', () => {
+        const widget = makeWidget({ id: 'shared-header-widget', type: 'status', title: 'Shared status' });
+        const { rerender } = render(
+            <HeaderWidgetCanvas
+                widgets={[widget]}
+                equipmentMap={new Map()}
+                mode="viewer"
+                viewerEntranceKey="dashboard-line-a"
+            />,
+        );
+        const firstSlot = screen.getByTestId('header-widget-slot-shared-header-widget');
+
+        rerender(
+            <HeaderWidgetCanvas
+                widgets={[widget]}
+                equipmentMap={new Map()}
+                mode="viewer"
+                viewerEntranceKey="dashboard-line-b"
+            />,
+        );
+
+        expect(screen.getByTestId('header-widget-slot-shared-header-widget')).not.toBe(firstSlot);
+    });
+
+    it('does not apply viewer entrance animation to preview widgets', () => {
+        renderPreviewCanvas({
+            widgets: [makeWidget({ id: 'header-status', type: 'status', title: 'Status widget' })],
+            widgetColumnMap: new Map([['header-status', 0]]),
+        });
+
+        const widgetSlot = screen.getByTestId('header-widget-slot-header-status');
+
+        expect(widgetSlot).not.toHaveClass('hmi-header-widget-entrance');
+        expect(widgetSlot.style.getPropertyValue('--header-widget-entrance-delay')).toBe('');
+    });
+
+    it('disables header widget entrance animation and delay for reduced motion', () => {
+        const indexCss = fs.readFileSync(path.resolve(currentDir, '../../index.css'), 'utf-8');
+        const reducedMotionRule = indexCss.match(
+            /@media \(prefers-reduced-motion: reduce\)\s*{[\s\S]*?\.hmi-header-widget-entrance\s*{([\s\S]*?)}[\s\S]*?}/,
+        );
+
+        expect(reducedMotionRule?.[1]).toContain('animation: none;');
+        expect(reducedMotionRule?.[1]).toContain('animation-delay: 0ms;');
+    });
+
     it('selects a widget by click, Enter, and Space', async () => {
         const user = userEvent.setup();
         const onWidgetSelect = vi.fn();
