@@ -40,9 +40,12 @@ describe('StatusWidget', () => {
         render(<StatusWidget widget={makeWidget()} equipmentMap={equipmentMap} />);
 
         const label = screen.getByText('Advertencia');
+        const dot = screen.getByTestId('status-widget-data-mode');
         expect(label).toBeInTheDocument();
         expect(label).toHaveClass('text-accent-amber');
-        expect(screen.getByTestId('status-widget-data-mode')).toHaveClass('text-status-normal');
+        expect(dot).toHaveClass('text-status-normal', 'h-1.5', 'w-1.5', 'shrink-0', 'rounded-full');
+        expect(dot).not.toHaveClass('border-l', 'pl-2');
+        expect(dot.parentElement).toHaveClass('border-l', 'border-industrial-muted/25', 'pl-2');
     });
 
     it('falls back to unknown when the asset is missing or there is no binding', () => {
@@ -71,7 +74,7 @@ describe('StatusWidget', () => {
         );
 
         expect(screen.getByText('Mantenimiento')).toBeInTheDocument();
-        expect(screen.getByTestId('status-widget-data-mode')).toHaveClass('text-admin-accent');
+        expect(screen.getByTestId('status-widget-data-mode')).toHaveClass('text-industrial-muted');
 
         rerender(
             <StatusWidget

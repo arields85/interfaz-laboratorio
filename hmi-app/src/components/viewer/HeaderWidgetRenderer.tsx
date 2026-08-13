@@ -153,7 +153,7 @@ export default function HeaderWidgetRenderer({
                     <WidgetHeaderDataMode
                         dataMode={dataMode}
                         dataModeTestId="header-widget-data-mode"
-                        className="border-l border-industrial-muted/25 pl-2"
+                        withLeadingSeparator
                     />
                 </div>
             </div>

@@ -766,7 +766,7 @@ describe('ActivityAnalyticsWidget', () => {
         expect(prefetchQuery).not.toHaveBeenCalled();
         expect(icon.nextElementSibling).toBe(dot);
         expect(dot.nextElementSibling).toBe(title);
-        expect(dot).toHaveClass('text-admin-accent');
+        expect(dot).toHaveClass('text-industrial-muted');
         expect(dot).toHaveAttribute('aria-hidden', 'true');
         expect(dot).not.toHaveAttribute('role');
         expect(dot).not.toHaveAttribute('aria-live');

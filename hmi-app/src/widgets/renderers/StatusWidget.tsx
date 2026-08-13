@@ -50,7 +50,7 @@ export default function StatusWidget({
             <WidgetHeaderDataMode
                 dataMode={dataMode}
                 dataModeTestId="status-widget-data-mode"
-                className="border-l border-industrial-muted/25 pl-2"
+                withLeadingSeparator
             />
         </div>
     );

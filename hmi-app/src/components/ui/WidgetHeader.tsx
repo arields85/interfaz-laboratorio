@@ -94,25 +94,25 @@ export interface WidgetHeaderProps {
 interface WidgetHeaderDataModeProps {
     dataMode?: AnalyticsDataMode | null;
     dataModeTestId?: string;
-    className?: string;
+    withLeadingSeparator?: boolean;
 }
 
 export function WidgetHeaderDataMode({
     dataMode,
     dataModeTestId,
-    className = '',
+    withLeadingSeparator = false,
 }: WidgetHeaderDataModeProps) {
     if (!dataMode) {
         return null;
     }
 
-    return (
-        <AnalyticsDataModeDot
-            mode={dataMode}
-            testId={dataModeTestId}
-            className={className}
-        />
+    const dot = (
+        <AnalyticsDataModeDot mode={dataMode} testId={dataModeTestId} />
     );
+
+    return withLeadingSeparator
+        ? <span className="flex items-center border-l border-industrial-muted/25 pl-2">{dot}</span>
+        : dot;
 }
 
 export default function WidgetHeader({
@@ -164,8 +164,8 @@ export default function WidgetHeader({
                     titleLeading || dataModeNode ? (
                         <div className="flex min-w-0 items-center gap-2">
                             {titleLeading}
-                            {titleNode}
                             {dataModeNode}
+                            {titleNode}
                         </div>
                     ) : titleNode
                 ) : null}
@@ -194,12 +194,14 @@ export default function WidgetHeader({
                     </>
                 ) : (
                     <>
-                        {titleLeading}
-                        {titleNode}
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                            {titleLeading}
+                            {dataModeNode}
+                            {titleNode}
+                        </div>
 
-                        {(dataModeNode || iconNode || trailing) && (
+                        {(iconNode || trailing) && (
                             <div className="flex items-center gap-2 shrink-0 leading-none">
-                                {dataModeNode}
                                 {iconNode}
                                 {trailing}
                             </div>

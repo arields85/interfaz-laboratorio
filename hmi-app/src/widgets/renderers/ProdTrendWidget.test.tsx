@@ -301,7 +301,7 @@ describe('ProdTrendWidget', () => {
             />,
         );
 
-        expectModeDot('text-admin-accent');
+        expectModeDot('text-industrial-muted');
         expect(buildHistory).toHaveBeenCalledWith(expect.objectContaining({
             widgetId: 'prod-trend-1',
             range: '7d',
@@ -321,7 +321,7 @@ describe('ProdTrendWidget', () => {
 
         render(<ProdTrendWidget widget={makeWidget({ displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
 
-        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveClass('text-admin-accent');
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveClass('text-industrial-muted');
         expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
         expect(vi.mocked(useActivitySeries)).not.toHaveBeenCalled();
         expect(vi.mocked(isDataActivitySeriesEnabled)).not.toHaveBeenCalled();
@@ -389,7 +389,7 @@ describe('ProdTrendWidget', () => {
             />,
         );
 
-        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveClass('text-admin-accent');
+        expect(screen.getByTestId('prod-trend-widget-data-mode')).toHaveClass('text-industrial-muted');
         expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
         const displayPoints = screen.getAllByTestId('prod-trend-widget-hit-area');

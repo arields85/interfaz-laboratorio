@@ -33,7 +33,10 @@ describe('HeaderWidgetRenderer', () => {
         );
 
         expect(screen.getByText('Advertencia')).toBeInTheDocument();
-        expect(screen.getByTestId('header-widget-data-mode')).toHaveClass('text-admin-accent');
+        const dot = screen.getByTestId('header-widget-data-mode');
+        expect(dot).toHaveClass('text-industrial-muted', 'h-1.5', 'w-1.5', 'shrink-0', 'rounded-full');
+        expect(dot).not.toHaveClass('border-l', 'pl-2');
+        expect(dot.parentElement).toHaveClass('border-l', 'border-industrial-muted/25', 'pl-2');
 
         rerender(
             <HeaderWidgetRenderer
@@ -169,7 +172,7 @@ describe('HeaderWidgetRenderer', () => {
 
         expect(screen.getByText('Online')).toBeInTheDocument();
         expect(screen.getByTestId('connection-header-icon-online')).toBeInTheDocument();
-        expect(screen.getByTestId('header-widget-data-mode')).toHaveClass('text-admin-accent');
+        expect(screen.getByTestId('header-widget-data-mode')).toHaveClass('text-industrial-muted');
 
         rerender(
             <HeaderWidgetRenderer

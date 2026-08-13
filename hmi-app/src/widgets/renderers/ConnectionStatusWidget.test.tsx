@@ -28,8 +28,12 @@ describe('ConnectionStatusWidget data mode', () => {
             />,
         );
 
-        expect(screen.getByTestId('connection-status-widget-data-mode')).toHaveClass('text-status-normal');
-        expect(screen.getByTestId('connection-status-widget-data-mode')).toHaveAttribute('aria-hidden', 'true');
+        const dot = screen.getByTestId('connection-status-widget-data-mode');
+        const title = screen.getByText('Connection');
+
+        expect(dot.nextElementSibling).toBe(title);
+        expect(dot).toHaveClass('text-status-normal');
+        expect(dot).toHaveAttribute('aria-hidden', 'true');
     });
 
     it('keeps simulated mode visible in the intentional no-title variant', () => {
@@ -46,8 +50,8 @@ describe('ConnectionStatusWidget data mode', () => {
         const icon = screen.getByTestId('connection-status-icon-online');
         const dot = screen.getByTestId('connection-status-widget-data-mode');
 
-        expect(icon.compareDocumentPosition(dot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(dot).toHaveClass('text-admin-accent');
+        expect(icon.nextElementSibling).toBe(dot);
+        expect(dot).toHaveClass('text-industrial-muted');
     });
 
     it('omits the source-mode indicator without a configured binding', () => {
