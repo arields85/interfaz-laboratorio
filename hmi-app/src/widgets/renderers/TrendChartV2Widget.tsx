@@ -76,6 +76,7 @@ import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTempor
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
 import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import type { TrendChartV2RenderContext } from './trendChartV2RenderContext';
 import {
     recordTrendChartV2PerformanceDiagnostic,
@@ -1093,6 +1094,8 @@ export default function TrendChartV2Widget({
                 iconColor={TOKEN.icon}
                 iconPosition="left"
                 iconTestId="trend-chart-v2-header-icon"
+                dataMode={resolveWidgetDataMode(widget) ?? undefined}
+                dataModeTestId="trend-chart-v2-widget-data-mode"
                 className={WIDGET_CHART_HEADER_CLASS}
                 trailing={(
                     <div className="flex items-center gap-2">

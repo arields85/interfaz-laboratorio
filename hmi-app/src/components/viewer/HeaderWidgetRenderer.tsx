@@ -15,6 +15,8 @@ import {
     resolveContractStatusLabel,
 } from '../../utils/connectionWidget';
 import { CircleHelp, Wifi, WifiOff, WifiHigh, type LucideIcon } from 'lucide-react';
+import { WidgetHeaderDataMode } from '../ui/WidgetHeader';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 
 // =============================================================================
 // HeaderWidgetRenderer
@@ -121,6 +123,7 @@ export default function HeaderWidgetRenderer({
     machines,
     align = 'end',
 }: HeaderWidgetRendererProps) {
+    const dataMode = resolveWidgetDataMode(widget);
     const alignmentClasses = align === 'start'
         ? 'items-start text-left'
         : 'items-end text-right';
@@ -140,12 +143,19 @@ export default function HeaderWidgetRenderer({
 
         return (
             <div className={`flex flex-col gap-0.5 ${alignmentClasses}`}>
-                <CompactIndicator
-                    label={label}
-                    color={copy.color}
-                    pulse={copy.pulse}
-                    align={align}
-                />
+                <div className="flex items-center gap-2">
+                    <CompactIndicator
+                        label={label}
+                        color={copy.color}
+                        pulse={copy.pulse}
+                        align={align}
+                    />
+                    <WidgetHeaderDataMode
+                        dataMode={dataMode}
+                        dataModeTestId="header-widget-data-mode"
+                        className="border-l border-industrial-muted/25 pl-2"
+                    />
+                </div>
             </div>
         );
     }
@@ -195,6 +205,7 @@ export default function HeaderWidgetRenderer({
                     data-testid={`connection-header-icon-${status}`}
                     aria-hidden="true"
                 />
+                <WidgetHeaderDataMode dataMode={dataMode} dataModeTestId="header-widget-data-mode" />
 
                 <div data-testid="connection-header-details" className="flex min-w-0 flex-col items-start justify-center">
                     <span className="max-w-full truncate uppercase text-industrial-muted">

@@ -3,6 +3,7 @@ import type { EquipmentSummary } from '../../../../hmi-app/src/domain/equipment.
 import WidgetCenteredContentLayout from '../../../../hmi-app/src/components/ui/WidgetCenteredContentLayout';
 import WidgetHeader from '../../../../hmi-app/src/components/ui/WidgetHeader';
 import WidgetRuntimeState from '../../../../hmi-app/src/components/ui/WidgetRuntimeState';
+import { resolveWidgetDataMode } from '../../../../hmi-app/src/utils/widgetDataMode';
 
 interface NewWidgetTemplateProps {
   widget: WidgetConfig;
@@ -35,11 +36,16 @@ export default function NewWidgetTemplate({
   // - false => flujo natural (header + body + footer)
   // - true  => contenido centrado respecto de toda la superficie del widget
   const useOpticalCenterLayout = false;
+  const dataMode = resolveWidgetDataMode(widget) ?? undefined;
 
   if (isLoadingData) {
     return (
-      <div className={`glass-panel group p-5 w-full h-full flex items-center justify-center ${className ?? ''}`}>
-        <WidgetRuntimeState state="loading" />
+      <div className={`glass-panel group p-5 w-full h-full ${className ?? ''}`}>
+        <WidgetCenteredContentLayout
+          header={<WidgetHeader title={widget.title ?? 'Nuevo widget'} dataMode={dataMode} />}
+        >
+          <WidgetRuntimeState state="loading" />
+        </WidgetCenteredContentLayout>
       </div>
     );
   }
@@ -65,6 +71,7 @@ export default function NewWidgetTemplate({
           header={(
             <WidgetHeader
               title={widget.title ?? 'Nuevo widget'}
+              dataMode={dataMode}
               // iconPosition="left"  ← descomentar si el ícono debe preceder al título
               // trailing={(
               //   <WidgetHeaderTemporalControls
@@ -83,6 +90,7 @@ export default function NewWidgetTemplate({
         <>
           <WidgetHeader
             title={widget.title ?? 'Nuevo widget'}
+            dataMode={dataMode}
             // iconPosition="left"  ← descomentar si el ícono debe preceder al título
             // trailing={(
             //   <WidgetHeaderTemporalControls

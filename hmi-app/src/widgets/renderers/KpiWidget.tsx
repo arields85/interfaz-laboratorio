@@ -20,6 +20,7 @@ import {
     resolveKpiTravelingTopCapShape,
 } from '../../utils/kpiTopCapEffects';
 import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     'Gauge': Gauge,
@@ -143,10 +144,12 @@ function createCircularTopCapConfig({
 }
 
 export default function KpiWidget({ widget, equipmentMap, machines, isLoadingData, className }: KpiWidgetProps) {
+    const dataMode = resolveWidgetDataMode(widget) ?? undefined;
+
     if (isLoadingData) {
         return (
             <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
-                <div className="h-4 w-24 bg-industrial-hover rounded mb-6" />
+                <WidgetHeader title={widget.title ?? 'KPI'} dataMode={dataMode} className="mb-2" />
                 <div className="h-20 w-full bg-industrial-hover rounded-full" />
             </div>
         );
@@ -297,6 +300,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
                         icon={Icon}
                         iconColor={iconColor}
                         subtitle={subtitle}
+                        dataMode={dataMode}
                         alignment="none"
                         className="mb-2"
                     />

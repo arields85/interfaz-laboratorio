@@ -7,6 +7,7 @@ import { resolveBinding } from '../resolvers/bindingResolver';
 import { buildHierarchyAggregationTrace, type HierarchyContext } from '../resolvers/hierarchyResolver';
 import { toCardStatus } from '../resolvers/thresholdEvaluator';
 import { resolveActivityAnalyticsDonutCenterValueFontSize } from '../../utils/activityAnalyticsWidgetDefaults';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import { Gauge, Activity, Thermometer, Zap, Droplet, Wind, Settings, Fan, FoldVertical, HelpCircle, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -56,8 +57,10 @@ export default function MetricWidget({
     className,
     hierarchyContext,
 }: MetricWidgetProps) {
+    const dataMode = resolveWidgetDataMode(widget) ?? undefined;
+
     if (isLoadingData) {
-        return <MetricCard label={widget.title ?? '—'} value={undefined} isLoading className={className} />;
+        return <MetricCard label={widget.title ?? '—'} value={undefined} dataMode={dataMode} isLoading className={className} />;
     }
 
     const hierarchyTrace = widget.hierarchyMode && hierarchyContext
@@ -120,6 +123,7 @@ export default function MetricWidget({
                 status={cardStatus}
                 icon={Icon}
                 iconColor={iconColor}
+                dataMode={dataMode}
                 subtitle={subtitle}
                 subtext={subtext}
                 isError={resolved.source === 'error' && resolved.status === 'no-data'}

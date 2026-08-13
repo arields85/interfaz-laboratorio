@@ -31,6 +31,7 @@ import {
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
 import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import TrendChartLegacyInteractionLayer from './TrendChartLegacyInteractionLayer';
 import {
     buildTrendChartLegacyModel,
@@ -599,6 +600,31 @@ export default function TrendChartWidget({
     const displayOptions = widget.displayOptions as TrendChartDisplayOptions | undefined;
     const lineStrokeWidth = clampLineStrokeWidth(displayOptions?.lineStrokeWidth);
     const lineGlowBlur = clampLineGlowBlur(displayOptions?.lineGlowBlur);
+    const dataMode = resolveWidgetDataMode(widget) ?? undefined;
+    const header = (
+        <WidgetHeader
+            title={widget.title ?? 'Trend Chart'}
+            icon={TrendingUp}
+            iconColor={TOKEN.icon}
+            iconPosition="left"
+            dataMode={dataMode}
+            dataModeTestId="trend-chart-widget-data-mode"
+            className={WIDGET_CHART_HEADER_CLASS}
+            trailing={(
+                <WidgetHeaderTemporalControls
+                    variant="pill"
+                    testId="trend-chart-widget-runtime-controls"
+                    indicatorTestId="trend-chart-widget-runtime-control-indicator"
+                    groups={[{
+                        testId: 'trend-chart-widget-runtime-range-selector',
+                        options: HISTORY_RANGE_OPTIONS,
+                        selectedValue: range,
+                        onSelect: (value) => setRange(value as HistoryRange),
+                    }]}
+                />
+            )}
+        />
+    );
 
     // Modo real cargando → skeleton; Modo simulado no muestra loading por histórico
     const isRealLoading = !isSimulated && historyParams !== null && isLoadingHistory && visibleHistorySnapshot === null;
@@ -609,7 +635,8 @@ export default function TrendChartWidget({
 
     if (isLoadingData || isRealLoading) {
         return (
-            <div className={`glass-panel p-5 w-full h-full flex items-center justify-center ${className ?? ''}`}>
+            <div className={`glass-panel group p-5 w-full h-full flex flex-col ${className ?? ''}`}>
+                {header}
                 <WidgetRuntimeState state="loading" testId="trend-chart-widget-loading" />
             </div>
         );
@@ -617,28 +644,7 @@ export default function TrendChartWidget({
 
     return (
         <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
-            <WidgetHeader
-                title={widget.title ?? 'Trend Chart'}
-                icon={TrendingUp}
-                iconColor={TOKEN.icon}
-                iconPosition="left"
-                className={WIDGET_CHART_HEADER_CLASS}
-                trailing={(
-                    <WidgetHeaderTemporalControls
-                        variant="pill"
-                        testId="trend-chart-widget-runtime-controls"
-                        indicatorTestId="trend-chart-widget-runtime-control-indicator"
-                        groups={[
-                            {
-                                testId: 'trend-chart-widget-runtime-range-selector',
-                                options: HISTORY_RANGE_OPTIONS,
-                                selectedValue: range,
-                                onSelect: (value) => setRange(value as HistoryRange),
-                            },
-                        ]}
-                    />
-                )}
-            />
+            {header}
 
             <div className={WIDGET_CHART_CONTAINER_CLASS} data-testid="trend-chart-widget-chart-shell">
                 {isShowingRefreshFailedSnapshot ? (

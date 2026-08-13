@@ -900,6 +900,7 @@ describe('TrendChartV2Widget', () => {
         render(<TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />);
 
         const state = screen.getByTestId('trend-chart-v2-state');
+        expect(screen.getByTestId('trend-chart-v2-widget-data-mode')).toHaveClass('text-status-normal');
 
         expect(state).toHaveTextContent('Cargando_');
         expect(state.querySelector('.widget-runtime-state-caret')).not.toBeNull();

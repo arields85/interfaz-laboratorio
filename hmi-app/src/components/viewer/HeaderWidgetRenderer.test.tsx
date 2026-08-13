@@ -33,6 +33,7 @@ describe('HeaderWidgetRenderer', () => {
         );
 
         expect(screen.getByText('Advertencia')).toBeInTheDocument();
+        expect(screen.getByTestId('header-widget-data-mode')).toHaveClass('text-admin-accent');
 
         rerender(
             <HeaderWidgetRenderer
@@ -48,6 +49,7 @@ describe('HeaderWidgetRenderer', () => {
         );
 
         expect(screen.getByText('En Producción')).toBeInTheDocument();
+        expect(screen.getByTestId('header-widget-data-mode')).toHaveClass('text-status-normal');
 
         rerender(
             <HeaderWidgetRenderer
@@ -167,6 +169,7 @@ describe('HeaderWidgetRenderer', () => {
 
         expect(screen.getByText('Online')).toBeInTheDocument();
         expect(screen.getByTestId('connection-header-icon-online')).toBeInTheDocument();
+        expect(screen.getByTestId('header-widget-data-mode')).toHaveClass('text-admin-accent');
 
         rerender(
             <HeaderWidgetRenderer

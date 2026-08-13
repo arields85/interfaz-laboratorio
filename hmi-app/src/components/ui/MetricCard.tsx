@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
 import type { HierarchyAggregationTrace } from '../../widgets/resolvers/hierarchyResolver';
 import {
     getHierarchyAggregationModeLabel,
@@ -26,6 +27,7 @@ interface MetricCardProps {
     icon?: LucideIcon;
     /** Override semántico para color del ícono del header. */
     iconColor?: string;
+    dataMode?: AnalyticsDataMode;
     /**
      * Subtítulo en el HEADER (debajo del título, mismo color que el ícono).
      * Concepto diferente a `subtext` — subtitle = cabecera, subtext = footer.
@@ -69,6 +71,7 @@ export default function MetricCard({
     status = 'normal',
     icon: Icon,
     iconColor,
+    dataMode,
     subtitle,
     subtext,
     isLoading = false,
@@ -150,7 +153,7 @@ export default function MetricCard({
     if (isLoading) {
         return (
             <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className}`}>
-                <div className="h-3 w-24 bg-industrial-hover rounded mb-4" />
+                <WidgetHeader title={label} icon={Icon} iconColor={iconColor} dataMode={dataMode} />
                 <div className="h-10 w-20 bg-industrial-hover rounded mb-3" />
                 <div className="h-2 w-32 bg-industrial-hover rounded" />
             </div>
@@ -159,9 +162,9 @@ export default function MetricCard({
 
     if (isError) {
         return (
-            <div className={`p-5 rounded-3xl bg-industrial-surface border border-accent-ruby/20 flex flex-col justify-center items-center gap-2 ${className}`}>
-                <span className="uppercase text-slate-500">{label}</span>
-                <span style={{ color: 'var(--color-status-critical)' }}>Error de lectura</span>
+            <div className={`p-5 rounded-3xl bg-industrial-surface border border-accent-ruby/20 flex flex-col gap-2 ${className}`}>
+                <WidgetHeader title={label} icon={Icon} iconColor={iconColor} dataMode={dataMode} />
+                <span className="flex flex-1 items-center justify-center" style={{ color: 'var(--color-status-critical)' }}>Error de lectura</span>
             </div>
         );
     }
@@ -194,6 +197,7 @@ export default function MetricCard({
                     icon={Icon}
                     iconColor={iconColor ?? styles.color}
                     subtitle={subtitle}
+                    dataMode={dataMode}
                 />
             </div>
 

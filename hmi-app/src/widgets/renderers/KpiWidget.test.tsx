@@ -228,7 +228,8 @@ describe('KpiWidget', () => {
         );
 
         expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
-        expect(screen.queryByText('Potencia')).not.toBeInTheDocument();
+        expect(screen.getByText('Potencia')).toBeInTheDocument();
+        expect(container.querySelector('.text-status-normal')).toBeInTheDocument();
         expect(screen.queryByTestId('gauge-circular')).not.toBeInTheDocument();
         expect(screen.queryByTestId('gauge-bar-fill')).not.toBeInTheDocument();
         expect(screen.queryByText('1.1')).not.toBeInTheDocument();

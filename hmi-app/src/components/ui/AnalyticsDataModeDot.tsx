@@ -8,14 +8,15 @@ const ANALYTICS_DATA_MODE_DOT_CLASSES: Record<AnalyticsDataMode, string> = {
 interface AnalyticsDataModeDotProps {
     mode: AnalyticsDataMode;
     testId?: string;
+    className?: string;
 }
 
-export default function AnalyticsDataModeDot({ mode, testId }: AnalyticsDataModeDotProps) {
+export default function AnalyticsDataModeDot({ mode, testId, className = '' }: AnalyticsDataModeDotProps) {
     return (
         <span
             data-testid={testId}
             aria-hidden="true"
-            className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${ANALYTICS_DATA_MODE_DOT_CLASSES[mode]}`}
+            className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${ANALYTICS_DATA_MODE_DOT_CLASSES[mode]} ${className}`.trim()}
         />
     );
 }

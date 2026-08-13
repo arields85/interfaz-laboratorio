@@ -177,6 +177,22 @@ describe('TrendChartWidget', () => {
         vi.clearAllMocks();
     });
 
+    it('keeps the configured source-mode indicator visible while real data is loading', () => {
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: null,
+            isLoading: true,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+
+        render(<TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />);
+
+        expect(screen.getByTestId('trend-chart-widget-loading')).toBeInTheDocument();
+        expect(screen.getByTestId('trend-chart-widget-data-mode')).toHaveClass('text-status-normal');
+        expect(screen.getByText('Temperatura')).toBeInTheDocument();
+    });
+
     it('keeps the confirmed owner snapshot and its range semantics through incompatible placeholder and error states', () => {
         const confirmedResponse = {
             ...makeHistoryResponse(),

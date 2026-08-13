@@ -288,6 +288,8 @@ describe('MachineActivityWidget', () => {
 
         expect(loadingState).toHaveTextContent('Cargando_');
         expect(loadingState.querySelector('.widget-runtime-state-caret')).not.toBeNull();
+        expect(screen.getByText('Actividad de Máquina')).toBeInTheDocument();
+        expect(document.querySelector('.text-status-normal')).toBeInTheDocument();
 
         loadingView.unmount();
 

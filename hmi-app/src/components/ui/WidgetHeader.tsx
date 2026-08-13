@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
+import AnalyticsDataModeDot from './AnalyticsDataModeDot';
 
 // =============================================================================
 // WidgetHeader
@@ -38,6 +40,10 @@ export interface WidgetHeaderProps {
     title: string;
     /** Contenido visual opcional renderizado inmediatamente antes del título. */
     titleLeading?: ReactNode;
+    /** Modo de fuente veraz renderizado como indicador decorativo compartido. */
+    dataMode?: AnalyticsDataMode;
+    /** Test id opcional para el indicador de modo de fuente. */
+    dataModeTestId?: string;
     /** Ícono Lucide a mostrar en la esquina superior derecha */
     icon?: LucideIcon;
     /**
@@ -85,9 +91,35 @@ export interface WidgetHeaderProps {
     alignment?: 'standard' | 'none';
 }
 
+interface WidgetHeaderDataModeProps {
+    dataMode?: AnalyticsDataMode | null;
+    dataModeTestId?: string;
+    className?: string;
+}
+
+export function WidgetHeaderDataMode({
+    dataMode,
+    dataModeTestId,
+    className = '',
+}: WidgetHeaderDataModeProps) {
+    if (!dataMode) {
+        return null;
+    }
+
+    return (
+        <AnalyticsDataModeDot
+            mode={dataMode}
+            testId={dataModeTestId}
+            className={className}
+        />
+    );
+}
+
 export default function WidgetHeader({
     title,
     titleLeading,
+    dataMode,
+    dataModeTestId,
     icon: Icon,
     iconPosition = 'right',
     iconColor = 'var(--color-widget-icon)',
@@ -101,6 +133,9 @@ export default function WidgetHeader({
     const alignmentClassName = alignment === 'standard' ? '-translate-y-1' : '';
     const centered = iconPosition === 'centered';
     const iconOnLeft = iconPosition === 'left';
+    const dataModeNode = dataMode ? (
+        <WidgetHeaderDataMode dataMode={dataMode} dataModeTestId={dataModeTestId} />
+    ) : null;
     const iconNode = Icon ? (
         <Icon
             size={24}
@@ -126,10 +161,11 @@ export default function WidgetHeader({
         return (
             <div className={`flex flex-col items-center gap-2 ${className}`}>
                 {hasTitle ? (
-                    titleLeading ? (
+                    titleLeading || dataModeNode ? (
                         <div className="flex min-w-0 items-center gap-2">
                             {titleLeading}
                             {titleNode}
+                            {dataModeNode}
                         </div>
                     ) : titleNode
                 ) : null}
@@ -147,6 +183,7 @@ export default function WidgetHeader({
                         <div className="flex min-w-0 flex-1 items-center gap-2">
                             {iconNode}
                             {titleLeading}
+                            {dataModeNode}
                             {titleNode}
                         </div>
                         {trailing && (
@@ -160,8 +197,9 @@ export default function WidgetHeader({
                         {titleLeading}
                         {titleNode}
 
-                        {(iconNode || trailing) && (
+                        {(dataModeNode || iconNode || trailing) && (
                             <div className="flex items-center gap-2 shrink-0 leading-none">
+                                {dataModeNode}
                                 {iconNode}
                                 {trailing}
                             </div>

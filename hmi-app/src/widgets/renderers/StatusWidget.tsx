@@ -1,7 +1,9 @@
 import type { StatusDisplayOptions, WidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary, EquipmentStatus } from '../../domain/equipment.types';
 import StatusBadge from '../../components/ui/StatusBadge';
+import { WidgetHeaderDataMode } from '../../components/ui/WidgetHeader';
 import { normalizeSimulatedEquipmentStatus, resolveStatusLabel } from '../../utils/statusWidget';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 
 // =============================================================================
 // StatusWidget
@@ -40,10 +42,16 @@ export default function StatusWidget({
         })();
 
     const label = resolveStatusLabel(status, options);
+    const dataMode = resolveWidgetDataMode(widget);
 
     return (
-        <div className={`w-full h-full flex items-center justify-center glass-panel group ${className ?? ''}`}>
+        <div className={`relative w-full h-full flex items-center justify-center gap-2 glass-panel group ${className ?? ''}`}>
             <StatusBadge status={status} label={label} compact={compact} />
+            <WidgetHeaderDataMode
+                dataMode={dataMode}
+                dataModeTestId="status-widget-data-mode"
+                className="border-l border-industrial-muted/25 pl-2"
+            />
         </div>
     );
 }

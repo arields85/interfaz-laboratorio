@@ -42,6 +42,7 @@ describe('StatusWidget', () => {
         const label = screen.getByText('Advertencia');
         expect(label).toBeInTheDocument();
         expect(label).toHaveClass('text-accent-amber');
+        expect(screen.getByTestId('status-widget-data-mode')).toHaveClass('text-status-normal');
     });
 
     it('falls back to unknown when the asset is missing or there is no binding', () => {
@@ -70,6 +71,7 @@ describe('StatusWidget', () => {
         );
 
         expect(screen.getByText('Mantenimiento')).toBeInTheDocument();
+        expect(screen.getByTestId('status-widget-data-mode')).toHaveClass('text-admin-accent');
 
         rerender(
             <StatusWidget
@@ -132,5 +134,11 @@ describe('StatusWidget', () => {
         );
 
         expect(screen.queryByText('Crítico')).not.toBeInTheDocument();
+    });
+
+    it('omits the source-mode indicator when there is no configured binding', () => {
+        render(<StatusWidget widget={makeWidget({ binding: undefined })} equipmentMap={new Map()} />);
+
+        expect(screen.queryByTestId('status-widget-data-mode')).not.toBeInTheDocument();
     });
 });

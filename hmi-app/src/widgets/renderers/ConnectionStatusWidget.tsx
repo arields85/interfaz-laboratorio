@@ -2,12 +2,13 @@ import { CircleHelp, Wifi, WifiHigh, WifiOff, type LucideIcon } from 'lucide-rea
 import type { ConnectionStatusDisplayOptions, WidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ContractStatus, ConnectionHealth } from '../../domain/dataContract.types';
-import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetHeader, { WidgetHeaderDataMode } from '../../components/ui/WidgetHeader';
 import {
     formatConnectionFreshness,
     normalizeSimulatedToContractStatus,
     resolveContractStatusLabel,
 } from '../../utils/connectionWidget';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 
 // =============================================================================
 // ConnectionStatusWidget
@@ -112,6 +113,7 @@ export default function ConnectionStatusWidget({
     const relativeTime = formatConnectionFreshness(ageMs, lastSuccess);
     const title = widget.title?.trim() ?? '';
     const hasTitle = title.trim().length > 0;
+    const dataMode = resolveWidgetDataMode(widget);
 
     return (
         <div className={`glass-panel group flex h-full w-full flex-col p-5 ${className ?? ''}`}>
@@ -122,6 +124,8 @@ export default function ConnectionStatusWidget({
                     iconPosition="centered"
                     iconColor={visual.iconColor}
                     iconTestId={`connection-status-icon-${status}`}
+                    dataMode={dataMode ?? undefined}
+                    dataModeTestId="connection-status-widget-data-mode"
                     alignment="none"
                     className="w-full"
                 />
@@ -129,14 +133,20 @@ export default function ConnectionStatusWidget({
 
             <div className="flex flex-1 flex-col items-center justify-center text-center">
                 {hasTitle ? null : (
-                    <Icon
-                        size={24}
-                        strokeWidth={2}
-                        className="shrink-0 mb-2"
-                        style={{ color: visual.iconColor }}
-                        data-testid={`connection-status-icon-${status}`}
-                        aria-hidden="true"
-                    />
+                    <div className="mb-2 flex items-center gap-2">
+                        <Icon
+                            size={24}
+                            strokeWidth={2}
+                            className="shrink-0"
+                            style={{ color: visual.iconColor }}
+                            data-testid={`connection-status-icon-${status}`}
+                            aria-hidden="true"
+                        />
+                        <WidgetHeaderDataMode
+                            dataMode={dataMode}
+                            dataModeTestId="connection-status-widget-data-mode"
+                        />
+                    </div>
                 )}
 
                 <span className="uppercase text-industrial-muted">

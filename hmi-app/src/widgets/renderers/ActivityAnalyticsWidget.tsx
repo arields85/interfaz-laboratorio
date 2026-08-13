@@ -13,7 +13,6 @@ import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
-import AnalyticsDataModeDot from '../../components/ui/AnalyticsDataModeDot';
 import { ANALYTICS_HISTORY_VARIABLE_KEY } from '../../domain/analyticsDataMode.types';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import {
@@ -23,6 +22,7 @@ import {
     useActivitySeries,
 } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import {
     recordActivityAnalyticsPerformanceDiagnostic,
     startActivityAnalyticsPerformanceTransition,
@@ -438,6 +438,7 @@ export default function ActivityAnalyticsWidget({
 }: ActivityAnalyticsWidgetProps) {
     const queryClient = useContext(QueryClientContext);
     const displayOptions = resolveActivityAnalyticsDisplayOptions(widget.displayOptions);
+    const dataMode = resolveWidgetDataMode(widget) ?? displayOptions.dataMode;
     const [runtimeViewState, setRuntimeViewState] = useState<ActivityAnalyticsRuntimeViewState>(() => createRuntimeViewState(displayOptions));
     const [simulatedNowMs] = useState(() => Date.now());
     const [analyticsBodySize, setAnalyticsBodySize] = useState<{ width: number; height: number } | null>(null);
@@ -1031,15 +1032,11 @@ export default function ActivityAnalyticsWidget({
     const header = (
         <WidgetHeader
             title={widget.title?.trim() || DEFAULT_ACTIVITY_ANALYTICS_TITLE}
-            titleLeading={(
-                <AnalyticsDataModeDot
-                    mode={displayOptions.dataMode}
-                    testId="activity-analytics-widget-data-mode"
-                />
-            )}
             icon={BarChart2}
             iconPosition="left"
             iconTestId="activity-analytics-widget-header-icon"
+            dataMode={dataMode}
+            dataModeTestId="activity-analytics-widget-data-mode"
             className="min-w-0 shrink-0"
             trailing={(
                 <WidgetHeaderTemporalControls

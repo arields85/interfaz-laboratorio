@@ -24,6 +24,7 @@ import {
 } from '../../utils/kpiTopCapEffects';
 import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
 import { resolveMachineActivityUnits } from '../utils/machineActivityRuntime';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     Gauge,
@@ -249,6 +250,7 @@ export default function MachineActivityWidget({
         max: opts.travelingTopCapMaxSpeed,
     });
     const Icon = resolveIcon(widget.displayOptions);
+    const dataMode = resolveWidgetDataMode(widget) ?? undefined;
     const prefersReducedMotion = usePrefersReducedMotion();
     const usesDynamicColor = opts.showDynamicColor !== false;
     const showsAnimation = opts.showStateAnimation !== false;
@@ -622,8 +624,12 @@ export default function MachineActivityWidget({
 
     if (isLoadingData) {
         return (
-            <div className={`glass-panel p-5 w-full h-full flex items-center justify-center ${className ?? ''}`}>
-                <WidgetRuntimeState state="loading" testId="machine-activity-widget-loading" />
+            <div className={`glass-panel group p-5 w-full h-full ${className ?? ''}`}>
+                <WidgetCenteredContentLayout
+                    header={<WidgetHeader title={widget.title ?? 'Actividad de Máquina'} icon={Icon} dataMode={dataMode} />}
+                >
+                    <WidgetRuntimeState state="loading" testId="machine-activity-widget-loading" />
+                </WidgetCenteredContentLayout>
             </div>
         );
     }
@@ -639,6 +645,7 @@ export default function MachineActivityWidget({
                         icon={Icon}
                         iconColor={usesDynamicColor ? stateVisuals.primary : 'var(--color-widget-icon)'}
                         subtitle={opts.showStateSubtitle !== false ? stateLabel : undefined}
+                        dataMode={dataMode}
                         alignment="none"
                         className="mb-2"
                     />

@@ -14,7 +14,6 @@ import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
-import AnalyticsDataModeDot from '../../components/ui/AnalyticsDataModeDot';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import type { ProdTrendWidgetConfig, ShiftDefinition } from '../../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
@@ -33,6 +32,7 @@ import { resolveActivityAnalyticsDisplayRules } from '../../utils/activityAnalyt
 import { resolveActivityAnalyticsTimezone } from '../../utils/activityAnalyticsGrouping';
 import { buildAreaPath, clamp, computeVisibleLabelIndices, getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx, measureSmoothPathLength, resolveAnimationDurationSecondsFromPathLength, smoothPath } from '../../utils/chartHelpers';
 import { createDefaultProdTrendDisplayOptions, resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
+import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import { buildActivityAnalyticsSimulatedHistory } from '../../utils/activityAnalyticsSimulation';
 
 interface ProdTrendWidgetProps {
@@ -149,6 +149,7 @@ export default function ProdTrendWidget({
     className,
 }: ProdTrendWidgetProps) {
     const displayOptions = resolveProdTrendDisplayOptions(widget.displayOptions ?? createDefaultProdTrendDisplayOptions());
+    const dataMode = resolveWidgetDataMode(widget) ?? displayOptions.dataMode;
     const lineStrokeWidth = clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth);
     const lineGlowBlur = clampLineGlowBlur(widget.displayOptions?.lineGlowBlur);
     const [runtimeViewState, setRuntimeViewState] = useState<ProdTrendRuntimeViewState>(() => createRuntimeViewState(displayOptions));
@@ -406,19 +407,14 @@ export default function ProdTrendWidget({
         return () => observer.disconnect();
     }, [visibleGrouped.length]);
 
-    const dataModeDot = (
-        <AnalyticsDataModeDot
-            mode={dataSource.effectiveMode}
-            testId="prod-trend-widget-data-mode"
-        />
-    );
     const header = (
         <WidgetHeader
             title={widget.title ?? 'PROD-TREND'}
-            titleLeading={dataModeDot}
             icon={TrendingUp}
             iconPosition="left"
             iconTestId="prod-trend-widget-header-icon"
+            dataMode={dataMode}
+            dataModeTestId="prod-trend-widget-data-mode"
             className={WIDGET_CHART_HEADER_CLASS}
             trailing={(
                 <WidgetHeaderTemporalControls
