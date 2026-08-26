@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../../config/loaderOptions.config';
 import type { AuthSession } from '../../domain';
@@ -68,11 +68,23 @@ function LocationIndicator() {
     return <div data-testid="current-path">{`${location.pathname}${location.search}`}</div>;
 }
 
-function renderTopbar(initialEntry = '/') {
+function HistoryControls() {
+    const navigate = useNavigate();
+
+    return (
+        <>
+            <button type="button" onClick={() => navigate(-1)}>Atrás</button>
+            <button type="button" onClick={() => navigate(1)}>Adelante</button>
+        </>
+    );
+}
+
+function renderTopbar(initialEntry: string | { pathname: string; state?: unknown } = '/') {
     return render(
         <MemoryRouter initialEntries={[initialEntry]}>
             <Topbar />
             <LocationIndicator />
+            <HistoryControls />
         </MemoryRouter>,
     );
 }
@@ -202,6 +214,73 @@ describe('Topbar', () => {
         expect(notificationsButton).toHaveClass('cursor-default');
         expect(notificationsButton).toHaveClass('text-industrial-muted/50');
         expect(container.querySelector('.led-glow-red')).not.toBeInTheDocument();
+    });
+
+    it('hides Core-only notifications while keeping the EPPI profile actions', () => {
+        useAuthStore.setState({
+            session: adminSession,
+            isHydrated: true,
+            isAuthenticating: false,
+            error: null,
+        });
+
+        renderTopbar('/eppi/orders');
+
+        expect(screen.queryByRole('button', { name: 'Notificaciones' })).not.toBeInTheDocument();
+        expect(screen.getByTitle('Personalizar fondo')).toBeInTheDocument();
+        expect(screen.getByTitle('Administracion')).toBeInTheDocument();
+        expect(screen.getByTitle('Usuario')).toBeInTheDocument();
+    });
+
+    it('enters EPPI from the brand while preserving the exact CoreAnalytics location', async () => {
+        const user = userEvent.setup();
+
+        renderTopbar('/equipment/reactor-1?tab=telemetry&range=8h');
+
+        await user.click(screen.getByRole('button', { name: 'Abrir EPPI' }));
+
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/eppi/orders');
+        expect(screen.getByRole('button', { name: 'Volver a CoreAnalytics' })).toHaveTextContent('EPPI');
+        expect(screen.getByRole('navigation', { name: 'Navegación EPPI' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Visión General' })).not.toBeInTheDocument();
+    });
+
+    it('returns from EPPI to the captured CoreAnalytics pathname and query', async () => {
+        const user = userEvent.setup();
+
+        renderTopbar({
+            pathname: '/eppi/tools',
+            state: { coreReturnTo: '/alerts?severity=critical' },
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Volver a CoreAnalytics' }));
+
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/alerts?severity=critical');
+    });
+
+    it('falls back to the CoreAnalytics root for an EPPI deep link without prior Core state', async () => {
+        const user = userEvent.setup();
+
+        renderTopbar('/eppi/orders');
+
+        await user.click(screen.getByRole('button', { name: 'Volver a CoreAnalytics' }));
+
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/');
+    });
+
+    it('derives mode coherently while traversing browser history', async () => {
+        const user = userEvent.setup();
+
+        renderTopbar('/alerts?severity=warning');
+        await user.click(screen.getByRole('button', { name: 'Abrir EPPI' }));
+
+        await user.click(screen.getByRole('button', { name: 'Atrás' }));
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/alerts?severity=warning');
+        expect(screen.getByRole('button', { name: 'Abrir EPPI' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Adelante' }));
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/eppi/orders');
+        expect(screen.getByRole('button', { name: 'Volver a CoreAnalytics' })).toBeInTheDocument();
     });
 
     it('keeps the current Home fallback when no plant main dashboard can be resolved', async () => {

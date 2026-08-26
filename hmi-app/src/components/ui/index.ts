@@ -18,3 +18,30 @@ export { default as CursorTooltip } from './CursorTooltip';
 export type { CursorTooltipProps } from './CursorTooltip';
 export { default as HmiButton } from './HmiButton';
 export type { HmiButtonProps } from './HmiButton';
+export { default as DataTable } from './DataTable';
+export type { DataTableProps } from './DataTable';
+export { default as RuntimeDialog } from './RuntimeDialog';
+export type { RuntimeDialogProps } from './RuntimeDialog';
+export { default as RuntimeField } from './RuntimeField';
+export type { RuntimeFieldProps } from './RuntimeField';
+export {
+    defineDataTableColumns,
+    filterAndSortRows,
+    getPageCount,
+    isDataTableDataColumn,
+    paginateRows,
+    validateDataTableColumns,
+} from './dataTableModel';
+export type {
+    DataTableAlignment,
+    DataTableCellContext,
+    DataTableCellSemantics,
+    DataTableColumn,
+    DataTableDataColumn,
+    DataTableDensity,
+    DataTableHeader,
+    DataTableHeaderSemantics,
+    DataTableReservedColumn,
+    DataTableScrollMode,
+    DataTableSortDirection,
+} from './dataTableModel';

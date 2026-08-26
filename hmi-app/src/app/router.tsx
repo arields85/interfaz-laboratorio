@@ -14,6 +14,7 @@ import TraceabilityPage from '../pages/TraceabilityPage';
 import OverviewPage from '../pages/OverviewPage';
 import DiagnosticsPage from '../pages/DiagnosticsPage';
 import LogsPage from '../pages/LogsPage';
+import EppiViewer from '../components/viewer/eppi/EppiViewer';
 
 // =============================================================================
 // APP ROUTER
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
             { path: 'overview', element: <OverviewPage /> },
             { path: 'diagnostics', element: <DiagnosticsPage /> },
             { path: 'logs', element: <LogsPage /> },
+            { path: 'eppi/*', element: <EppiViewer /> },
         ],
     },
     {

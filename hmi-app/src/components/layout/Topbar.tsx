@@ -9,6 +9,12 @@ import { useUIStore } from '../../store/ui.store';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { dashboardStorage } from '../../services/DashboardStorageService';
 import { TOPBAR_ICON_BUTTON_ACTIVE_CLS, TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
+import EppiTopbarNavigation from '../viewer/eppi/EppiTopbarNavigation';
+import {
+    createEppiEntryState,
+    getCoreReturnTarget,
+    isEppiPathname,
+} from '../viewer/eppi/eppiRouting';
 
 const navLeftItems = [
     { icon: FolderTree, label: 'Explorador', path: '/explorer' },
@@ -94,8 +100,21 @@ export default function Topbar() {
     const userButtonRef = useRef<HTMLButtonElement>(null);
     const isHydrated = useAuthStore((state) => state.isHydrated);
     const hasAdminAccess = useAuthStore((state) => state.hasPermission('admin:access'));
+    const location = useLocation();
     const navigate = useNavigate();
     const shouldShowAdminActions = isHydrated && hasAdminAccess;
+    const isEppiMode = isEppiPathname(location.pathname);
+
+    const handleBrandNavigation = () => {
+        if (isEppiMode) {
+            navigate(getCoreReturnTarget(location.state));
+            return;
+        }
+
+        navigate('/eppi/orders', {
+            state: createEppiEntryState(location.pathname, location.search),
+        });
+    };
 
     const handleAdminNavigation = () => {
         requestShieldReveal({
@@ -111,46 +130,64 @@ export default function Topbar() {
         <>
             <header className="relative z-50 sticky top-0 flex items-center justify-between border-b border-industrial-border bg-industrial-surface/80 px-6 py-4 backdrop-blur-xl lg:px-10">
                 {/* Left: Logo */}
-                <h2 className="shrink-0 uppercase text-industrial-text" style={{ fontSize: 'var(--font-size-logo)' }}>
-                    Core<span className="text-gradient">Analytics</span>
-                </h2>
+                <button
+                    type="button"
+                    aria-label={isEppiMode ? 'Volver a CoreAnalytics' : 'Abrir EPPI'}
+                    className="shrink-0 uppercase text-industrial-text"
+                    style={{ fontSize: 'var(--font-size-logo)' }}
+                    onClick={handleBrandNavigation}
+                >
+                    {isEppiMode ? (
+                        <span className="text-gradient">EPPI</span>
+                    ) : (
+                        <>Core<span className="text-gradient">Analytics</span></>
+                    )}
+                </button>
 
                 {/* Center: Nav Left + Search + Nav Right */}
-                <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
-                    <nav className="flex items-center gap-1">
-                        <HomeNavButton />
-                        {navLeftItems.map((item) => (
-                            <NavIconLink key={item.path} {...item} />
-                        ))}
-                    </nav>
+                <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
+                    {isEppiMode ? (
+                        <EppiTopbarNavigation />
+                    ) : (
+                        <>
+                            <nav className="flex items-center gap-1">
+                                <HomeNavButton />
+                                {navLeftItems.map((item) => (
+                                    <NavIconLink key={item.path} {...item} />
+                                ))}
+                            </nav>
 
-                    <div className="hidden w-80 items-center rounded-2xl border border-industrial-border bg-industrial-hover px-4 py-2 lg:flex">
-                        <Search className="shrink-0 text-industrial-muted" size={20} />
-                        <input
-                            className="ml-2 w-full border-none bg-transparent text-industrial-text placeholder:text-industrial-muted focus:outline-none focus:ring-0"
-                            placeholder="Analyze equipment..."
-                            type="text"
-                        />
-                    </div>
+                            <div className="hidden w-80 items-center rounded-2xl border border-industrial-border bg-industrial-hover px-4 py-2 lg:flex">
+                                <Search className="shrink-0 text-industrial-muted" size={20} />
+                                <input
+                                    className="ml-2 w-full border-none bg-transparent text-industrial-text placeholder:text-industrial-muted focus:outline-none focus:ring-0"
+                                    placeholder="Analyze equipment..."
+                                    type="text"
+                                />
+                            </div>
 
-                    <nav className="flex items-center gap-1">
-                        {navRightItems.map((item) => (
-                            <NavIconLink key={item.path} {...item} />
-                        ))}
-                    </nav>
+                            <nav className="flex items-center gap-1">
+                                {navRightItems.map((item) => (
+                                    <NavIconLink key={item.path} {...item} />
+                                ))}
+                            </nav>
+                        </>
+                    )}
                 </div>
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1">
-                    <button
-                        type="button"
-                        disabled
-                        title="Notificaciones"
-                        aria-label="Notificaciones"
-                        className="cursor-default rounded-lg p-2 text-industrial-muted/50 transition-colors"
-                    >
-                        <Bell size={20} />
-                    </button>
+                    {!isEppiMode ? (
+                        <button
+                            type="button"
+                            disabled
+                            title="Notificaciones"
+                            aria-label="Notificaciones"
+                            className="cursor-default rounded-lg p-2 text-industrial-muted/50 transition-colors"
+                        >
+                            <Bell size={20} />
+                        </button>
+                    ) : null}
                     {shouldShowAdminActions ? (
                         <button
                             title="Personalizar fondo"

@@ -42,6 +42,7 @@ vi.mock('../pages/TraceabilityPage', () => ({ default: () => <div>Traceability p
 vi.mock('../pages/OverviewPage', () => ({ default: () => <div>Overview page</div> }));
 vi.mock('../pages/DiagnosticsPage', () => ({ default: () => <div>Diagnostics page</div> }));
 vi.mock('../pages/LogsPage', () => ({ default: () => <div>Logs page</div> }));
+vi.mock('../components/viewer/eppi/EppiViewer', () => ({ default: () => <div>EPPI viewer</div> }));
 vi.mock('../pages/admin/DashboardManagerPage', () => ({ default: () => <div>Admin dashboards</div> }));
 vi.mock('../pages/admin/DashboardBuilderPage', () => ({ default: () => <div>Admin builder</div> }));
 vi.mock('../pages/admin/HierarchyPage', () => ({ default: () => <div>Admin hierarchy</div> }));
@@ -135,5 +136,14 @@ describe('AppRouter admin guard', () => {
 
         expect(await screen.findByText('Dashboard viewer')).toBeInTheDocument();
         expect(screen.queryByText('Admin hierarchy')).not.toBeInTheDocument();
+    });
+
+    it('renders EPPI deep links inside the persistent main layout', async () => {
+        await renderRouterAt('/eppi/logbook?page=2');
+
+        expect(await screen.findByText('Main layout')).toBeInTheDocument();
+        expect(screen.getByText('EPPI viewer')).toBeInTheDocument();
+        expect(window.location.pathname).toBe('/eppi/logbook');
+        expect(window.location.search).toBe('?page=2');
     });
 });
