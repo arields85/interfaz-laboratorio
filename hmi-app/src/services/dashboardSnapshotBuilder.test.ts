@@ -5,6 +5,7 @@ import type { ContractMachine, ConnectionHealth } from '../domain/dataContract.t
 import type { EquipmentSummary } from '../domain/equipment.types';
 import { makeDashboard, makeLayout, makeWidget } from '../test/fixtures/dashboard.fixture';
 import { buildDashboardSnapshot } from './dashboardSnapshotBuilder';
+import type { DashboardPresentationFrame } from '../domain/dashboardPresentation.types';
 
 function makeMachines(): ContractMachine[] {
     return [{
@@ -50,6 +51,35 @@ const connection: ConnectionHealth = {
 describe('buildDashboardSnapshot', () => {
     afterEach(() => {
         localStorage.clear();
+    });
+
+    it('serializes the registered presentation frame without resolving widget data', () => {
+        const widget = makeWidget({ id: 'frame-metric', title: 'Frame metric' });
+        const entry = Object.freeze({
+            widgetId: widget.id,
+            widgetType: widget.type,
+            capability: 'scalar' as const,
+            revisionKey: 'dashboard-1:view-default:4',
+            widget,
+            payload: Object.freeze({ value: 88, unit: '%', dataSummary: { source: 'controller' } }),
+        });
+        const frame: DashboardPresentationFrame = {
+            dashboardId: 'dashboard-1',
+            viewId: 'view-default',
+            profileRevision: 4,
+            revisionKey: entry.revisionKey,
+            expectedWidgetIds: [widget.id],
+            entries: new Map([[widget.id, entry]]),
+            ready: true,
+        };
+
+        const snapshot = buildDashboardSnapshot({
+            dashboard: makeDashboard({ widgets: [widget] }),
+            equipmentMap: new Map(),
+            presentationFrame: frame,
+        });
+
+        expect(snapshot.widgets[0]).toMatchObject({ value: 88, unit: '%', dataSummary: { source: 'controller' } });
     });
 
     it('uses exportId as the external widget id and resolves metric + status widgets', () => {

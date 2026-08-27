@@ -3,6 +3,7 @@ import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig } from '../domain/
 import type { EquipmentSummary } from '../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../domain/dataContract.types';
 import type { HierarchyContext } from './resolvers/hierarchyResolver';
+import type { WidgetPresentationEntry } from '../domain/dashboardPresentation.types';
 import MetricWidget from './renderers/MetricWidget';
 import StatusWidget from './renderers/StatusWidget';
 import ConnectionStatusWidget from './renderers/ConnectionStatusWidget';
@@ -65,6 +66,7 @@ interface WidgetRendererProps {
     onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
     renderContext?: TrendChartV2RenderContext;
+    presentationEntry?: WidgetPresentationEntry;
 }
 
 const NAVIGATION_INTERACTIVE_SELECTOR = [
@@ -102,7 +104,17 @@ export default function WidgetRenderer({
     onPersistWidgetDisplayOptions,
     onNavigateDashboard,
     renderContext,
+    presentationEntry,
 }: WidgetRendererProps) {
+    if (presentationEntry) {
+        return presentationEntry.capability === 'unsupported'
+            ? <UnsupportedWidget type={presentationEntry.widgetType} />
+            : <div className={`glass-panel flex h-full w-full flex-col justify-center p-4 ${className ?? ''}`} data-testid={`presentation-widget-${presentationEntry.widgetId}`}>
+                <span className="truncate uppercase text-industrial-muted">{presentationEntry.widget.title ?? presentationEntry.widgetType}</span>
+                <span className="text-industrial-text">{presentationEntry.payload.value == null ? '—' : String(presentationEntry.payload.value)}{presentationEntry.payload.unit ? ` ${presentationEntry.payload.unit}` : ''}</span>
+            </div>;
+    }
+
     let renderedWidget: ReactNode;
 
     switch (widget.type) {
