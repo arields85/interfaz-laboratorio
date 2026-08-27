@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 import { createDefaultPrismaVoiceConfig } from '../domain/prismaVoiceConfig';
 import { PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX } from './usePrismaVoiceConfig';
 import { useUpdatePrismaVoiceConfig } from './useUpdatePrismaVoiceConfig';
@@ -19,7 +20,12 @@ function createHarness() {
 }
 
 describe('useUpdatePrismaVoiceConfig', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
     afterEach(() => {
+        localStorage.clear();
         vi.unstubAllGlobals();
     });
 
@@ -84,5 +90,36 @@ describe('useUpdatePrismaVoiceConfig', () => {
         })).rejects.toThrow();
 
         expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url])).toBe(cached);
+    });
+
+    it('aborts a stale local PUT when the runtime profile changes', async () => {
+        savePrismaRuntimeMode('local');
+        let localSignal: AbortSignal | undefined;
+        const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            localSignal = init?.signal;
+            return new Promise<Response>((_resolve, reject) => {
+                localSignal?.addEventListener('abort', () => {
+                    reject(new DOMException('Aborted', 'AbortError'));
+                });
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const { result } = renderHook(() => useUpdatePrismaVoiceConfig(), {
+            wrapper: createHarness().wrapper,
+        });
+        let update!: Promise<unknown>;
+        act(() => {
+            update = result.current.mutateAsync({
+                url: 'https://node-red.local/hmi/prisma-config',
+                config: createDefaultPrismaVoiceConfig(),
+            });
+        });
+        await waitFor(() => expect(localSignal).toBeDefined());
+
+        act(() => savePrismaRuntimeMode('central'));
+
+        expect(localSignal?.aborted).toBe(true);
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('http://127.0.0.1:5057/hmi/prisma-config');
+        await expect(update).rejects.toMatchObject({ name: 'AbortError' });
     });
 });

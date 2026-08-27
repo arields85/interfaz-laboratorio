@@ -4,12 +4,15 @@ import {
     DATA_CONNECTION_CONFIG_CHANGED_EVENT,
     getDataVoiceUrl,
 } from '../config/dataConnection.config';
+import { resolvePrismaVoiceUrl } from '../config/prismaAssistant.config';
 import type { VoiceEvent } from '../domain/voice.types';
 import { startVoiceEventListener } from '../services/voiceEventListener.service';
+import { usePrismaRuntimeProfile } from './usePrismaRuntimeProfile';
 
 export function useVoiceEventListener(onEvent: (event: VoiceEvent) => void): void {
     const onEventRef = useRef(onEvent);
     const [configRevision, setConfigRevision] = useState(0);
+    const runtimeProfile = usePrismaRuntimeProfile();
 
     useEffect(() => {
         onEventRef.current = onEvent;
@@ -27,10 +30,13 @@ export function useVoiceEventListener(onEvent: (event: VoiceEvent) => void): voi
         };
     }, []);
 
+    const voiceUrl = resolvePrismaVoiceUrl(runtimeProfile.mode, getDataVoiceUrl());
+    const centralConfigRevision = runtimeProfile.mode === 'central' ? configRevision : 0;
+
     useEffect(() => {
         return startVoiceEventListener({
-            url: getDataVoiceUrl(),
+            url: voiceUrl,
             onEvent: (event) => onEventRef.current(event),
         });
-    }, [configRevision]);
+    }, [centralConfigRevision, runtimeProfile.revision, voiceUrl]);
 }

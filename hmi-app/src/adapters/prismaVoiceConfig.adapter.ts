@@ -120,7 +120,10 @@ export class HttpPrismaVoiceConfigWriter implements PrismaVoiceConfigWriter {
         this.fetchImpl = fetchImpl;
     }
 
-    public async updateConfig(config: PrismaVoiceConfig): Promise<PrismaVoiceConfig> {
+    public async updateConfig(
+        config: PrismaVoiceConfig,
+        signal?: AbortSignal,
+    ): Promise<PrismaVoiceConfig> {
         const requestValidation = validatePrismaVoiceConfig(config);
         if (!requestValidation.valid) {
             throw new PrismaVoiceConfigWriteError(
@@ -141,9 +144,10 @@ export class HttpPrismaVoiceConfigWriter implements PrismaVoiceConfigWriter {
                 },
                 body: JSON.stringify(requestValidation.value),
                 cache: 'no-store',
+                ...(signal === undefined ? {} : { signal }),
             });
         } catch (error) {
-            return this.confirmAmbiguousWrite(requestValidation.value, error);
+            return this.confirmAmbiguousWrite(requestValidation.value, error, signal);
         }
 
         if (!response.ok) {
@@ -164,7 +168,7 @@ export class HttpPrismaVoiceConfigWriter implements PrismaVoiceConfigWriter {
                 undefined,
                 undefined,
                 { cause: error },
-            ));
+            ), signal);
         }
 
         const responseValidation = validatePrismaVoiceConfig(payload);
@@ -174,7 +178,7 @@ export class HttpPrismaVoiceConfigWriter implements PrismaVoiceConfigWriter {
                 'response-validation',
                 undefined,
                 responseValidation.issues,
-            ));
+            ), signal);
         }
 
         return responseValidation.value;
@@ -183,12 +187,17 @@ export class HttpPrismaVoiceConfigWriter implements PrismaVoiceConfigWriter {
     private async confirmAmbiguousWrite(
         sentConfig: PrismaVoiceConfig,
         ambiguousError: unknown,
+        signal?: AbortSignal,
     ): Promise<PrismaVoiceConfig> {
+        if (signal?.aborted) {
+            throw ambiguousError;
+        }
+
         try {
             const confirmedConfig = await new HttpPrismaVoiceConfigReader(
                 this.url,
                 this.fetchImpl,
-            ).readConfig(new AbortController().signal);
+            ).readConfig(signal ?? new AbortController().signal);
             if (arePrismaVoiceConfigsEqual(confirmedConfig, sentConfig)) {
                 return confirmedConfig;
             }
