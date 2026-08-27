@@ -21,6 +21,10 @@ import {
     PRISMA_ORB_VISUAL_DEFAULTS,
     readPrismaOrbVisualConfig,
 } from '../../config/prismaOrb.config';
+import {
+    PRISMA_RUNTIME_MODE_STORAGE_KEY,
+    savePrismaRuntimeMode,
+} from '../../config/prismaRuntime.config';
 import PrismaOrbOverlay from '../PrismaOrbOverlay';
 import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
 import { usePrismaOrbVisualConfig } from '../../hooks/usePrismaOrbVisualConfig';
@@ -837,5 +841,35 @@ describe('VoiceSettingsTab', () => {
 
         expect(readPrismaVoiceTtsServiceUrl()).toBe('https://tts.example.test/persisted');
         expect(screen.getByLabelText('URL Servicio Voz Prisma')).toHaveValue('https://tts.example.test/persisted');
+    });
+
+    it('selects the Prisma runtime profile only in Voice settings and persists the selected mode', async () => {
+        const user = userEvent.setup();
+        render(<VoiceSettingsTab />);
+
+        const selector = screen.getByRole('button', { name: 'Modo de ejecución de Prisma' });
+        expect(selector).toHaveTextContent('Server (Node-RED)');
+
+        await user.click(selector);
+        await user.click(screen.getByRole('button', { name: 'Local (presentations)' }));
+
+        expect(selector).toHaveTextContent('Local (presentations)');
+        expect(localStorage.getItem(PRISMA_RUNTIME_MODE_STORAGE_KEY)).toBe('local');
+    });
+
+    it('disables profile selection and explains the temporary local query override', () => {
+        localStorage.setItem(PRISMA_RUNTIME_MODE_STORAGE_KEY, 'central');
+        window.history.pushState({}, '', '/?prismaMode=local');
+
+        render(<VoiceSettingsTab />);
+
+        const selector = screen.getByRole('button', { name: 'Modo de ejecución de Prisma' });
+        expect(selector).toBeDisabled();
+        expect(selector).toHaveTextContent('Local (presentations)');
+        expect(screen.getByText(/parámetro temporal de la URL/i)).toBeInTheDocument();
+        expect(localStorage.getItem(PRISMA_RUNTIME_MODE_STORAGE_KEY)).toBe('central');
+
+        window.history.pushState({}, '', '/');
+        savePrismaRuntimeMode('central');
     });
 });
