@@ -17,6 +17,8 @@ import { getDefaultDashboardView, materializeDashboardView, normalizeDashboardVi
 import { getDataSnapshotExportIntervalMs, isDataSnapshotExportEnabled } from '../config/dataConnection.config';
 import { buildDashboardSnapshot } from '../services/dashboardSnapshotBuilder';
 import { exportDashboardSnapshot } from '../services/dashboardSnapshotExport.service';
+import { DashboardPresentationFrameProvider } from '../services/dashboardPresentationFrame.service';
+import { usePrismaRuntimeProfile } from '../hooks/usePrismaRuntimeProfile';
 
 // =============================================================================
 // Dashboard Público (Visor)
@@ -47,6 +49,7 @@ export default function Dashboard() {
         isError: hasOverviewError,
     } = useDataOverview();
     const setSelectedPlant = useUIStore((state) => state.setSelectedPlant);
+    const prismaRuntimeProfile = usePrismaRuntimeProfile(searchParams.toString());
 
     // Mapeo de equipos simulado (para resolver bindings)
     const equipmentMap = useMemo(() => {
@@ -223,6 +226,10 @@ export default function Dashboard() {
         const slots = activeDashboard?.headerConfig?.widgetSlots ?? [];
         return new Set(slots.map(s => s.widgetId));
     }, [activeDashboard]);
+    const presentationWidgetIds = useMemo(
+        () => activeDashboard?.widgets.map((widget) => widget.id) ?? [],
+        [activeDashboard],
+    );
 
     const hierarchyContext = useMemo<HierarchyContext>(() => ({
         allNodes,
@@ -424,6 +431,12 @@ export default function Dashboard() {
     }
 
     return (
+        <DashboardPresentationFrameProvider
+            dashboardId={activeDashboard.id}
+            viewId={activeDashboard.activeViewId ?? 'view-default'}
+            profileRevision={prismaRuntimeProfile.revision}
+            expectedWidgetIds={presentationWidgetIds}
+        >
         <div className="flex flex-col h-full space-y-4 px-2 overflow-hidden">
 
             {/* HEADER CONFIGURADO DESDE dashboard.headerConfig */}
@@ -436,6 +449,7 @@ export default function Dashboard() {
                 onNavigateDashboard={handleNavigateDashboard}
                 onSelectView={handleSelectView}
                 hierarchyContext={hierarchyContext}
+                presentationFrame
             />
 
             {/* GRID DEL DASHBOARD — widgets del header excluidos */}
@@ -453,9 +467,11 @@ export default function Dashboard() {
                     cols={activeDashboard.cols}
                     rows={activeDashboard.rows}
                     onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
-                    onNavigateDashboard={handleNavigateDashboard}
-                />
+                     onNavigateDashboard={handleNavigateDashboard}
+                     presentationFrame
+                 />
             </div>
         </div>
+        </DashboardPresentationFrameProvider>
     );
 }

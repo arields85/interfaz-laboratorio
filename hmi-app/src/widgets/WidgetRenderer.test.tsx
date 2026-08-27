@@ -15,6 +15,7 @@ import type {
     TrendChartV2WidgetConfig,
 } from '../domain/admin.types';
 import type { HierarchyContext } from './resolvers/hierarchyResolver';
+import { createPresentationEntry } from '../domain/dashboardPresentation.types';
 import { isDataHistoryEnabled } from '../config/dataConnection.config';
 import { useTemporalSettings } from '../hooks/useTemporalSettings';
 import { useActivitySeries } from '../queries/useActivitySeries';
@@ -511,6 +512,34 @@ describe('WidgetRenderer', () => {
 
         expect(onNavigateDashboard).toHaveBeenCalledWith('dashboard-linea-a');
     });
+
+    it('bypasses the generic presentation surface for legacy presentation entries', () => {
+        const prodHistoryWidget: ProdHistoryWidgetConfig = {
+            id: 'legacy-presentation-entry',
+            type: 'prod-history',
+            title: 'Legacy Production History',
+            position: { x: 0, y: 0 },
+            size: { w: 11, h: 9 },
+            displayOptions: { chartTitle: 'Legacy Production History' },
+        };
+
+        render(
+            <WidgetRenderer
+                widget={prodHistoryWidget}
+                equipmentMap={equipmentMap}
+                presentationEntry={createPresentationEntry({
+                    widget: prodHistoryWidget,
+                    capability: 'legacy-presentation',
+                    revisionKey: 'dashboard:view:1',
+                    payload: {},
+                })}
+            />,
+        );
+
+        expect(screen.getByRole('checkbox', { name: 'Mostrar OEE (%)' })).toBeInTheDocument();
+        expect(screen.queryByTestId('presentation-widget-legacy-presentation-entry')).not.toBeInTheDocument();
+    });
+
 
     it('dispatches trend-chart-v2 widgets to the dedicated timestamp renderer without breaking legacy types', () => {
         const trendChartV2Widget: TrendChartV2WidgetConfig = {

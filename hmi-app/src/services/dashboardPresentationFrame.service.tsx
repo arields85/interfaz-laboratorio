@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DashboardPresentationFrame, WidgetPresentationEntry } from '../domain/dashboardPresentation.types';
 
 interface PresentationFrameContext {
@@ -15,6 +15,7 @@ export interface DashboardPresentationFrameProviderProps { dashboardId: string; 
 export function DashboardPresentationFrameProvider({ dashboardId, viewId, profileRevision, expectedWidgetIds, children }: DashboardPresentationFrameProviderProps) {
     const revisionKey = `${dashboardId}:${viewId}:${profileRevision}`;
     const [entries, setEntries] = useState<Map<string, WidgetPresentationEntry>>(new Map());
+    const mountedRevisionKey = useRef(revisionKey);
     const registerEntry = useCallback((entry: WidgetPresentationEntry) => {
         if (entry.revisionKey !== revisionKey) return;
         setEntries((current) => {
@@ -22,8 +23,17 @@ export function DashboardPresentationFrameProvider({ dashboardId, viewId, profil
             return next.get(entry.widgetId) === entry ? current : next.set(entry.widgetId, entry);
         });
     }, [revisionKey]);
-    const ready = expectedWidgetIds.every((id) => entries.get(id)?.revisionKey === revisionKey);
-    const frame = Object.freeze({ dashboardId, viewId, profileRevision, revisionKey, expectedWidgetIds: [...expectedWidgetIds], entries: new Map(entries), ready });
+    useEffect(() => {
+        if (mountedRevisionKey.current === revisionKey) return;
+        mountedRevisionKey.current = revisionKey;
+        setEntries(new Map());
+    }, [revisionKey]);
+    const currentEntries = useMemo(
+        () => new Map([...entries].filter(([, entry]) => entry.revisionKey === revisionKey)),
+        [entries, revisionKey],
+    );
+    const ready = expectedWidgetIds.every((id) => currentEntries.has(id));
+    const frame = Object.freeze({ dashboardId, viewId, profileRevision, revisionKey, expectedWidgetIds: [...expectedWidgetIds], entries: currentEntries, ready });
     return <FrameContext.Provider value={{ frame, registerEntry }}>{children}</FrameContext.Provider>;
 }
 

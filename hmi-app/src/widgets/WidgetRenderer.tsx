@@ -106,7 +106,7 @@ export default function WidgetRenderer({
     renderContext,
     presentationEntry,
 }: WidgetRendererProps) {
-    if (presentationEntry) {
+    if (presentationEntry && presentationEntry.capability !== 'legacy-presentation') {
         return presentationEntry.capability === 'unsupported'
             ? <UnsupportedWidget type={presentationEntry.widgetType} />
             : <div className={`glass-panel flex h-full w-full flex-col justify-center p-4 ${className ?? ''}`} data-testid={`presentation-widget-${presentationEntry.widgetId}`}>
@@ -116,7 +116,6 @@ export default function WidgetRenderer({
     }
 
     let renderedWidget: ReactNode;
-
     switch (widget.type) {
         case 'metric-card':
             renderedWidget = (
@@ -270,11 +269,11 @@ export default function WidgetRenderer({
         // No lanza error: el builder puede incluir tipos futuros en una config
         // sin romper la renderización del dashboard actual.
         // -----------------------------------------------------------------------
-        default:
-            renderedWidget = (
-                <UnsupportedWidget type={widget.type} title={widget.title} />
-            );
-            break;
+            default:
+                renderedWidget = (
+                    <UnsupportedWidget type={widget.type} title={widget.title} />
+                );
+                break;
     }
 
     const navigationTargetDashboardId = widget.navigationTargetDashboardId?.trim() ?? '';

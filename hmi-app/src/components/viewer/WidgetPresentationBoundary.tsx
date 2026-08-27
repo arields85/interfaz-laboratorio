@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { WidgetConfig } from '../../domain/admin.types';
+import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig } from '../../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import { getWidgetPresentationCapability } from '../../utils/widgetCapabilities';
@@ -10,6 +10,8 @@ import {
     UnsupportedPresentationController,
 } from '../../widgets/controllers/PresentationControllers';
 import WidgetRenderer from '../../widgets/WidgetRenderer';
+import type { TrendChartV2RenderContext } from '../../widgets/renderers/trendChartV2RenderContext';
+import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 
 interface WidgetPresentationBoundaryProps {
     widget: WidgetConfig;
@@ -17,6 +19,14 @@ interface WidgetPresentationBoundaryProps {
     machines?: ContractMachine[];
     connection?: ConnectionHealth;
     className?: string;
+    isLoadingOverview?: boolean;
+    hasOverviewError?: boolean;
+    isLoadingData?: boolean;
+    siblingWidgets?: WidgetConfig[];
+    hierarchyContext?: HierarchyContext;
+    onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
+    onNavigateDashboard?: (dashboardId: string) => void;
+    renderContext?: TrendChartV2RenderContext;
 }
 
 const CONTROLLERS = {

@@ -143,6 +143,7 @@ interface DashboardHeaderViewerProps {
     onNavigateDashboard?: (dashboardId: string) => void;
     onSelectView?: (viewId: string) => void;
     hierarchyContext?: HierarchyContext;
+    presentationFrame?: boolean;
 }
 
 interface DashboardHeaderPreviewProps {
@@ -172,6 +173,7 @@ interface DashboardHeaderPreviewProps {
     onNavigateDashboard?: never;
     onSelectView?: (viewId: string) => void;
     hierarchyContext?: HierarchyContext;
+    presentationFrame?: boolean;
 }
 
 type DashboardHeaderProps = DashboardHeaderViewerProps | DashboardHeaderPreviewProps;
@@ -282,6 +284,7 @@ export default function DashboardHeader({
     onNavigateDashboard,
     onSelectView,
     hierarchyContext,
+    presentationFrame = false,
 }: DashboardHeaderProps) {
     const headerConfig = dashboard.headerConfig;
     const title = getDashboardHeaderTitle(dashboard);
@@ -400,6 +403,7 @@ export default function DashboardHeader({
                     onAddHeaderWidget={onAddHeaderWidget}
                     onDropWidgetAtSlot={onDropWidgetAtSlot}
                     hierarchyContext={hierarchyContext}
+                    presentationFrame={presentationFrame}
                 />
             </div>
         </div>

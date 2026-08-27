@@ -5,6 +5,7 @@ import type { ContractMachine, ConnectionHealth } from '../../domain/dataContrac
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import { useCanvasReference } from '../../utils/useCanvasReference';
 import { DEFAULT_COLS, DEFAULT_ROWS, getGridTemplateStyle } from '../../utils/gridConfig';
+import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 interface DashboardViewerProps {
     widgets: WidgetConfig[];
@@ -25,6 +26,7 @@ interface DashboardViewerProps {
     rows?: number;
     onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
+    presentationFrame?: boolean;
 }
 
 // =============================================================================
@@ -57,6 +59,7 @@ export default function DashboardViewer({
     rows = DEFAULT_ROWS,
     onPersistWidgetDisplayOptions,
     onNavigateDashboard,
+    presentationFrame = false,
 }: DashboardViewerProps) {
     const { containerRef, width, height, rowHeight, hasFirstValidMeasurement } = useCanvasReference({
         cols,
@@ -106,20 +109,36 @@ export default function DashboardViewer({
                                     className="relative z-0 h-full w-full box-border"
                                     style={{ padding: 'var(--widget-spacing)' }}
                                 >
-                                    <WidgetRenderer 
-                                        widget={widget} 
-                                        equipmentMap={equipmentMap} 
-                                        machines={machines}
-                                        connection={connection}
-                                        isLoadingOverview={isLoadingOverview}
-                                        hasOverviewError={hasOverviewError}
-                                        isLoadingData={false} 
-                                      siblingWidgets={widgets}
-                                      hierarchyContext={hierarchyContext}
-                                      className="w-full h-full"
-                                      onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
-                                      onNavigateDashboard={onNavigateDashboard}
-                                  />
+                                    {presentationFrame ? (
+                                        <WidgetPresentationBoundary
+                                            widget={widget}
+                                            equipmentMap={equipmentMap}
+                                            machines={machines}
+                                            connection={connection}
+                                            isLoadingOverview={isLoadingOverview}
+                                            hasOverviewError={hasOverviewError}
+                                            siblingWidgets={widgets}
+                                            hierarchyContext={hierarchyContext}
+                                            onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                                            onNavigateDashboard={onNavigateDashboard}
+                                            className="w-full h-full"
+                                        />
+                                    ) : (
+                                        <WidgetRenderer
+                                            widget={widget}
+                                            equipmentMap={equipmentMap}
+                                            machines={machines}
+                                            connection={connection}
+                                            isLoadingOverview={isLoadingOverview}
+                                            hasOverviewError={hasOverviewError}
+                                            isLoadingData={false}
+                                            siblingWidgets={widgets}
+                                            hierarchyContext={hierarchyContext}
+                                            className="w-full h-full"
+                                            onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                                            onNavigateDashboard={onNavigateDashboard}
+                                        />
+                                    )}
                                 </div>
                             </div>
                         );

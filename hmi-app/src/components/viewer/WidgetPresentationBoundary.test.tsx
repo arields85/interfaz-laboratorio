@@ -1,9 +1,29 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { DashboardPresentationFrameProvider, useDashboardPresentationFrame } from '../../services/dashboardPresentationFrame.service';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
+
+const rendererEntries = new Map<string, unknown>();
+
+vi.mock('../../queries/useDataHistory', () => ({
+    useDataHistory: vi.fn(() => ({
+        data: null,
+        isLoading: false,
+        isError: false,
+        error: null,
+        isEnabled: false,
+    })),
+    createDataHistoryQueryOptions: vi.fn(),
+}));
+
+vi.mock('../../widgets/WidgetRenderer', () => ({
+    default: ({ widget, presentationEntry }: { widget: { id: string }; presentationEntry?: unknown }) => {
+        rendererEntries.set(widget.id, presentationEntry);
+        return <div data-testid={`rendered-${widget.id}`} />;
+    },
+}));
 
 function FrameProbe({ widgetId }: { widgetId: string }) {
     const frame = useDashboardPresentationFrame();
@@ -12,22 +32,44 @@ function FrameProbe({ widgetId }: { widgetId: string }) {
 }
 
 describe('WidgetPresentationBoundary', () => {
-    it('registers the exact frozen entry passed to the renderer', () => {
-        const widget = makeWidget({ id: 'boundary-1' });
+    it.each([
+        ['metric-card', 'scalar'], ['kpi', 'scalar'], ['status', 'status'], ['connection-status', 'connection'],
+        ['trend-chart', 'trend-chart'], ['trend-chart-v2', 'trend-chart-v2'], ['prod-history', 'legacy-presentation'],
+        ['machine-activity', 'legacy-presentation'], ['activity-analytics', 'legacy-presentation'], ['prod-trend', 'legacy-presentation'],
+        ['alert-history', 'legacy-presentation'], ['text-title', 'static'], ['info-card', 'static'],
+    ] as const)('registers and renders the %s capability route', (type, capability) => {
+        const widget = makeWidget({ id: `route-${type}`, type: type as never });
 
-        render(
-            <DashboardPresentationFrameProvider
-                dashboardId="dashboard-1"
-                viewId="view-1"
-                profileRevision={7}
-                expectedWidgetIds={[widget.id]}
-            >
+        function IdentityProbe() {
+            const frame = useDashboardPresentationFrame();
+            const registeredEntry = frame.entries.get(widget.id);
+            const rendererEntry = rendererEntries.get(widget.id);
+
+            return <output data-testid="identity-state">{`${frame.ready}:${registeredEntry?.capability}:${rendererEntry === registeredEntry}`}</output>;
+        }
+
+        render(<DashboardPresentationFrameProvider dashboardId="dashboard-routes" viewId="view-routes" profileRevision={3} expectedWidgetIds={[widget.id]}>
                 <WidgetPresentationBoundary widget={widget} equipmentMap={new Map()} />
-                <FrameProbe widgetId={widget.id} />
-            </DashboardPresentationFrameProvider>,
-        );
+                <IdentityProbe />
+            </DashboardPresentationFrameProvider>);
+
+        expect(screen.getByTestId('identity-state')).toHaveTextContent(`true:${capability}:true`);
+    });
+
+    it('removes stale registrations when the dashboard revision changes', () => {
+        const firstWidget = makeWidget({ id: 'first-revision' });
+        const { rerender } = render(<DashboardPresentationFrameProvider dashboardId="dashboard-revision" viewId="view-one" profileRevision={1} expectedWidgetIds={[firstWidget.id]}>
+                <WidgetPresentationBoundary widget={firstWidget} equipmentMap={new Map()} />
+                <FrameProbe widgetId={firstWidget.id} />
+            </DashboardPresentationFrameProvider>);
 
         expect(screen.getByTestId('frame-state')).toHaveTextContent('true:true:true');
+
+        rerender(<DashboardPresentationFrameProvider dashboardId="dashboard-revision" viewId="view-two" profileRevision={2} expectedWidgetIds={[]}>
+                <FrameProbe widgetId={firstWidget.id} />
+            </DashboardPresentationFrameProvider>);
+
+        expect(screen.getByTestId('frame-state')).toHaveTextContent('missing');
     });
     it('keeps an unsupported visible widget non-fatal', () => {
         render(<DashboardPresentationFrameProvider dashboardId="d" viewId="v" profileRevision={1} expectedWidgetIds={['unsupported-1']}>

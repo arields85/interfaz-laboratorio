@@ -3,10 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from './Dashboard';
-import { makeDashboard } from '../test/fixtures/dashboard.fixture';
+import { makeDashboard, makeWidget } from '../test/fixtures/dashboard.fixture';
 import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.types';
 import type { DashboardView } from '../domain/admin.types';
 import { useUIStore } from '../store/ui.store';
+import { useDashboardPresentationFrame } from '../services/dashboardPresentationFrame.service';
 
 const CONTENT_READY_ATTRIBUTE = 'data-hmi-content-ready';
 
@@ -75,7 +76,13 @@ vi.mock('../components/viewer/DashboardHeader', () => ({
 vi.mock('../components/viewer/DashboardViewer', () => ({
     default: (props: Record<string, unknown>) => {
         dashboardViewerMock(props);
-        return <div data-testid="dashboard-viewer-root">Viewer canvas</div>;
+        const frame = useDashboardPresentationFrame();
+        return (
+            <div data-testid="dashboard-viewer-root">
+                Viewer canvas
+                <output data-testid="dashboard-presentation-frame">{`${frame.dashboardId}:${frame.viewId}:${frame.profileRevision}:${frame.expectedWidgetIds.join(',')}`}</output>
+            </div>
+        );
     },
 }));
 
@@ -181,6 +188,36 @@ describe('Dashboard page layout', () => {
         expect(pageColumn).toContainElement(header);
         expect(pageColumn).toContainElement(canvasShell);
         expect(canvasShell).toHaveClass('overflow-hidden');
+    });
+
+    it('provides the current dashboard view and visible widget IDs to production presentation paths', async () => {
+        const dashboardWidget = makeWidget({ id: 'current-view-widget' });
+        const headerWidget = makeWidget({ id: 'current-header-widget', type: 'status' as never });
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({
+                id: 'dashboard-presentation',
+                status: 'published',
+                views: [{
+                    id: 'view-presentation',
+                    name: 'Presentation',
+                    order: 0,
+                    widgets: [dashboardWidget, headerWidget],
+                    layout: [makeView('view-presentation', 'Presentation', dashboardWidget.id).layout[0]],
+                }],
+                headerConfig: { widgetSlots: [{ widgetId: headerWidget.id, column: 0 }] },
+            }),
+        ]);
+
+        renderDashboard('/?prismaMode=local');
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-presentation-frame')).toHaveTextContent(
+                new RegExp(`^dashboard-presentation:view-presentation:\\d+:${dashboardWidget.id},${headerWidget.id}$`),
+            );
+        });
+
+        expect(dashboardViewerMock).toHaveBeenCalledWith(expect.objectContaining({ presentationFrame: true }));
+        expect(dashboardHeaderMock).toHaveBeenCalledWith(expect.objectContaining({ presentationFrame: true }));
     });
 
     it('passes published snapshot cols to the viewer when rendering a published dashboard', async () => {

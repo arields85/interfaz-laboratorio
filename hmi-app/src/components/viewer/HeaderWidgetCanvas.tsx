@@ -15,6 +15,7 @@ import {
     parseHeaderWidgetDragPayload,
 } from '../../utils/headerWidgets';
 import HeaderWidgetRenderer from './HeaderWidgetRenderer';
+import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 const HEADER_WIDGET_ENTRANCE_STAGGER_MS = 110;
 
@@ -208,6 +209,7 @@ interface HeaderWidgetCanvasProps {
      *  Recibe el widgetId y el índice de columna (0-2) objetivo. */
     onDropWidgetAtSlot?: (widgetId: string, slotIndex: number) => void;
     hierarchyContext?: HierarchyContext;
+    presentationFrame?: boolean;
 }
 
 export default function HeaderWidgetCanvas({
@@ -233,6 +235,7 @@ export default function HeaderWidgetCanvas({
     onAddHeaderWidget,
     onDropWidgetAtSlot,
     hierarchyContext,
+    presentationFrame = false,
 }: HeaderWidgetCanvasProps) {
     void hierarchyContext;
     const isPreview = mode === 'preview';
@@ -353,13 +356,23 @@ export default function HeaderWidgetCanvas({
                     </div>
 
                     <div className={hasDisplayTitle ? 'pt-1' : ''}>
-                        <HeaderWidgetRenderer
-                            widget={widget}
-                            equipmentMap={equipmentMap}
-                            connection={connection}
-                            machines={machines}
-                            align="start"
-                        />
+                         {presentationFrame ? (
+                             <WidgetPresentationBoundary
+                                 widget={widget}
+                                 equipmentMap={equipmentMap}
+                                 connection={connection}
+                                 machines={machines}
+                                 onNavigateDashboard={onNavigateDashboard}
+                             />
+                         ) : (
+                             <HeaderWidgetRenderer
+                                 widget={widget}
+                                 equipmentMap={equipmentMap}
+                                 connection={connection}
+                                 machines={machines}
+                                 align="start"
+                             />
+                         )}
                     </div>
                 </div>
             </div>
