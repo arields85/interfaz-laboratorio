@@ -7,6 +7,8 @@ export type PresentationCapability =
     | 'trend-chart'
     | 'trend-chart-v2'
     | 'static'
+    | 'activity-analytics'
+    | 'prod-trend'
     | 'legacy-presentation'
     | 'unsupported';
 

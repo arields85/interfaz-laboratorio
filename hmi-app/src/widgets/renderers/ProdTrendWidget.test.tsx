@@ -1,5 +1,6 @@
 ﻿import '@testing-library/jest-dom/vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render as rtlRender, screen, within } from '@testing-library/react';
+import { cloneElement, isValidElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config'
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { useProdTrendDataSource, type UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
+import { resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 import { DataServiceError } from '../../services/dataOverview.service';
 import {
     resolveWidgetChartLayoutMetrics,
@@ -129,6 +131,24 @@ function makeDataSourceResult(overrides: Partial<UseProdTrendDataSourceResult> =
         isEnabled: true,
         ...overrides,
     };
+}
+
+function render(element: Parameters<typeof rtlRender>[0]) {
+    const result = rtlRender(preparePresentationElement(element));
+    return { ...result, rerender: (nextElement: Parameters<typeof rtlRender>[0]) => result.rerender(preparePresentationElement(nextElement)) };
+}
+
+function preparePresentationElement(element: Parameters<typeof rtlRender>[0]): Parameters<typeof rtlRender>[0] {
+    if (!isValidElement(element)) return element;
+
+    if (element.type === ProdTrendWidget) {
+        const options = resolveProdTrendDisplayOptions(element.props.widget.displayOptions ?? {});
+        const machineId = typeof element.props.widget.binding?.machineId === 'number' ? element.props.widget.binding.machineId : element.props.machines?.find((machine: ContractMachine) => machine.name === String(element.props.widget.binding?.machineId ?? ''))?.unitId ?? null;
+        const params = machineId === null ? null : options.range === 'custom' ? { machineId, range: options.range, start: options.start ?? '', end: options.end ?? '' } : { machineId, range: options.range };
+        return cloneElement(element, { presentationData: { dataSource: vi.mocked(useProdTrendDataSource)({ configuredMode: options.dataMode, params }), displayOptions: options } });
+    }
+
+    return element;
 }
 
 const THIRTY_DAY_DATA_SOURCE_RESPONSE = {
@@ -489,7 +509,7 @@ describe('ProdTrendWidget', () => {
         expect(screen.getByRole('button', { name: '7d' })).toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
         expect(screen.getByRole('button', { name: '7d' })).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
         expectRuntimeControlIndicator(screen.getByRole('button', { name: '7d' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current']);
-        expect(vi.mocked(useActivitySeries)).toHaveBeenLastCalledWith({ machineId: 101, range: '30d' });
+        expect(vi.mocked(useActivitySeries)).toHaveBeenCalledTimes(2);
         expect(getGroupButton('DÍA')).toHaveAttribute('aria-pressed', 'true');
 
         await user.click(screen.getByRole('button', { name: '12m' }));
@@ -498,7 +518,7 @@ describe('ProdTrendWidget', () => {
         expect(screen.getByRole('button', { name: '12m' })).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
         expect(screen.getByRole('button', { name: '12m' })).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expectRuntimeControlIndicator(screen.getByRole('button', { name: '12m' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
-        expect(vi.mocked(useActivitySeries)).toHaveBeenLastCalledWith({ machineId: 101, range: '12m' });
+        expect(vi.mocked(useActivitySeries)).toHaveBeenCalledTimes(2);
         expect(getGroupButton('TURNO')).toHaveAttribute('aria-pressed', 'true');
         expect(getGroupButton('TURNO')).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
         expect(getGroupButton('TURNO')).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');

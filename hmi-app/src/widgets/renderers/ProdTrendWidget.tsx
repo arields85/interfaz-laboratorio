@@ -19,7 +19,7 @@ import type { ProdTrendWidgetConfig, ShiftDefinition } from '../../domain/admin.
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import { PROD_TREND_HISTORY_VARIABLE_KEY } from '../../domain/prodTrendDataMode.types';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { useProdTrendDataSource } from '../../queries/useProdTrendDataSource';
+import type { UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
 import { DataServiceError } from '../../services/dataOverview.service';
 import { buildActivityAnalytics, validateActivityAnalyticsThresholds } from '../../utils/activityAnalytics';
 import {
@@ -43,6 +43,7 @@ interface ProdTrendWidgetProps {
     hasOverviewError?: boolean;
     isLoadingData?: boolean;
     className?: string;
+    presentationData?: unknown;
 }
 
 type ResolvedProdTrendDisplayOptions = ReturnType<typeof resolveProdTrendDisplayOptions>;
@@ -147,8 +148,15 @@ export default function ProdTrendWidget({
     hasOverviewError = false,
     isLoadingData = false,
     className,
+    presentationData,
 }: ProdTrendWidgetProps) {
-    const displayOptions = resolveProdTrendDisplayOptions(widget.displayOptions ?? createDefaultProdTrendDisplayOptions());
+    const presented = presentationData as {
+        dataSource?: UseProdTrendDataSourceResult;
+        displayOptions?: ResolvedProdTrendDisplayOptions;
+        onRangeChange?: (range: ResolvedProdTrendDisplayOptions['range']) => void;
+        onGroupByChange?: (groupBy: ResolvedProdTrendDisplayOptions['groupBy']) => void;
+    } | undefined;
+    const displayOptions = presented?.displayOptions ?? resolveProdTrendDisplayOptions(widget.displayOptions ?? createDefaultProdTrendDisplayOptions());
     const dataMode = resolveWidgetDataMode(widget) ?? displayOptions.dataMode;
     const lineStrokeWidth = clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth);
     const lineGlowBlur = clampLineGlowBlur(widget.displayOptions?.lineGlowBlur);
@@ -174,7 +182,8 @@ export default function ProdTrendWidget({
     }
 
     const { selectionOverride, runtimeGroupBy } = runtimeViewState;
-    const selectedDisplayOptions = selectionOverride ?? displayOptions;
+    const controllerOwnsSelection = presented?.onRangeChange !== undefined || presented?.onGroupByChange !== undefined;
+    const selectedDisplayOptions = controllerOwnsSelection ? displayOptions : selectionOverride ?? displayOptions;
     const displayRules = resolveActivityAnalyticsDisplayRules({
         range: selectedDisplayOptions.range,
         start: selectedDisplayOptions.start,
@@ -217,18 +226,7 @@ export default function ProdTrendWidget({
         ?.find((machine) => machine.unitId === simulatedMachineId)
         ?.values[simulatedMetricKey];
     const { config, shifts } = useTemporalSettings();
-    const activitySeriesParams = sourceMachineId != null
-        ? {
-            machineId: sourceMachineId,
-            ...(activeDisplayOptions.range === 'custom'
-                ? { range: 'custom' as const, start: activeDisplayOptions.start ?? '', end: activeDisplayOptions.end ?? '' }
-                : { range: activeDisplayOptions.range }),
-        }
-        : null;
-    const dataSource = useProdTrendDataSource({
-        configuredMode: displayOptions.dataMode,
-        params: activitySeriesParams,
-    });
+    const dataSource: UseProdTrendDataSourceResult = presented?.dataSource ?? ({ response: null } as UseProdTrendDataSourceResult);
     const simulatedActivityData = useMemo(() => {
         if (displayOptions.dataMode !== 'simulated') {
             return null;
@@ -269,11 +267,13 @@ export default function ProdTrendWidget({
         };
     }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, displayOptions.dataMode, simulatedMachineId, simulatedMetric?.unit, simulatedMetricKey, simulatedNowMs, widget.binding?.unit, widget.id]);
     const activityData = displayOptions.dataMode === 'simulated'
-        ? simulatedActivityData
+        ? dataSource.response ?? simulatedActivityData
         : dataSource.response;
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const timezone = useMemo(() => resolveActivityAnalyticsTimezone({
         temporalSettings: { plantTimezone: config.plantTimezone },
         windowTimezone: activityData?.window.timezone,
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     }), [activityData?.window.timezone, config.plantTimezone]);
     const analyticsSeries = activityData?.series;
     const analyticsWindowStart = activityData?.window.start;
@@ -436,10 +436,13 @@ export default function ProdTrendWidget({
                                     end: undefined,
                                 } satisfies ResolvedProdTrendDisplayOptions;
 
-                                setRuntimeViewState((current) => ({
-                                    ...current,
-                                    selectionOverride: nextDisplayOptions,
-                                }));
+                                 if (!controllerOwnsSelection) {
+                                     setRuntimeViewState((current) => ({
+                                         ...current,
+                                         selectionOverride: nextDisplayOptions,
+                                     }));
+                                 }
+                                 presented?.onRangeChange?.(nextRange);
                             },
                         },
                         {
@@ -449,10 +452,13 @@ export default function ProdTrendWidget({
                             onSelect: (value) => {
                                 const nextGroupBy = value as RuntimeProdTrendGroupBy;
 
-                                setRuntimeViewState((current) => ({
-                                    ...current,
-                                    runtimeGroupBy: nextGroupBy,
-                                }));
+                                 if (!controllerOwnsSelection) {
+                                     setRuntimeViewState((current) => ({
+                                         ...current,
+                                         runtimeGroupBy: nextGroupBy,
+                                     }));
+                                 }
+                                 presented?.onGroupByChange?.(nextGroupBy ?? activeGroupBy);
                             },
                         },
                     ]}

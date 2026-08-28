@@ -1,15 +1,29 @@
-import { useEffect, useMemo, type ReactNode } from 'react';
-import type { QueryClient } from '@tanstack/react-query';
+import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { QueryClientContext, type QueryClient } from '@tanstack/react-query';
 import type { ConnectionHealth, ContractMachine, HistoryQueryParams, HistoryQueryParamsV2 } from '../../domain/dataContract.types';
+import type { ActivityAnalyticsGroupBy, ActivityAnalyticsRange, ActivityAnalyticsResponse } from '../../domain/activityAnalytics.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
-import type { WidgetConfig } from '../../domain/admin.types';
-import { createPresentationEntry, type PresentationCapability, type PresentationPayload, type WidgetPresentationEntry } from '../../domain/dashboardPresentation.types';
+import type { ActivityAnalyticsWidgetConfig, ProdTrendWidgetConfig, WidgetConfig } from '../../domain/admin.types';
+import { createPresentationEntry, type PresentationCapability, type WidgetPresentationEntry } from '../../domain/dashboardPresentation.types';
 import { usePresentationRegistration, useDashboardPresentationFrame } from '../../services/dashboardPresentationFrame.service';
 import { resolveBinding } from '../resolvers/bindingResolver';
 import { createDataHistoryQueryOptions, useDataHistory } from '../../queries/useDataHistory';
+import { createActivitySeriesQueryOptions, isActivitySeriesResponseCompatible, useActivitySeries } from '../../queries/useActivitySeries';
+import { useProdTrendDataSource } from '../../queries/useProdTrendDataSource';
+import { resolveActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
+import { resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 import { normalizeSimulatedEquipmentStatus } from '../../utils/statusWidget';
 import { normalizeSimulatedToContractStatus } from '../../utils/connectionWidget';
 import { resolveInfoCardFieldContent, resolveInfoCardFields } from '../../utils/infoCardDisplayOptions';
+import { buildActivityAnalyticsSimulatedHistory } from '../../utils/activityAnalyticsSimulation';
+
+function createActivityFixture(widgetId: string, machineId: number | undefined, range: ActivityAnalyticsRange, setupThresholdKw: number, prodThresholdKw: number, nowMs: number, customWindow?: { start: string; end: string }) {
+    const history = buildActivityAnalyticsSimulatedHistory({ widgetId, machineId, variableKey: 'Total kW', range, customWindow, baseValue: (setupThresholdKw + prodThresholdKw) / 2, operatingLevels: { stopped: setupThresholdKw * 0.2, setup: setupThresholdKw, production: prodThresholdKw }, nowMs });
+    return { ...history, contractVersion: 'presentation-fixture', unit: 'kW', purpose: 'activity-analytics' as const, window: { ...history.window, timezone: 'UTC', bucket: 'synthetic' } } as ActivityAnalyticsResponse;
+}
+function resolvePresentationValue<T>(configured: boolean, response: T | null | undefined, fixture: T) {
+    return configured ? { value: fixture, provenance: 'configured' as const } : response ? { value: response, provenance: 'central-read-only' as const } : { value: fixture, provenance: 'deterministic-fixture' as const };
+}
 
 export interface PresentationControllerProps {
     widget: WidgetConfig;
@@ -22,8 +36,9 @@ export interface PresentationControllerProps {
 
 function useEntry(widget: WidgetConfig, capability: PresentationCapability, payload: Parameters<typeof createPresentationEntry>[0]['payload']) {
     const { frame } = useFrameController();
-    const payloadKey = JSON.stringify(payload);
-    const entry = useMemo(() => createPresentationEntry({ widget, capability, revisionKey: frame.revisionKey, payload: JSON.parse(payloadKey) as PresentationPayload }), [capability, frame.revisionKey, payloadKey, widget]);
+    const payloadKey = JSON.stringify(payload, (_key, value) => typeof value === 'function' ? '[callback]' : value);
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization, react-hooks/exhaustive-deps
+    const entry = useMemo(() => createPresentationEntry({ widget, capability, revisionKey: frame.revisionKey, payload }), [capability, frame.revisionKey, payloadKey, widget]);
     usePresentationRegistration(entry);
     return entry;
 }
@@ -73,6 +88,81 @@ export function TrendChartV2Controller({ widget, queryClient, render }: Presenta
         if (params && queryClient) void queryClient.prefetchQuery(createDataHistoryQueryOptions(params));
     }, [params, queryClient]);
     const entry = useEntry(widget, 'trend-chart-v2', { data: history.data, dataSummary: { isLoading: history.isLoading, isError: history.isError } });
+    return <>{render(entry)}</>;
+}
+
+export function ActivityAnalyticsPresentationController({ widget, machines, queryClient, render }: PresentationControllerProps) {
+    const frame = useDashboardPresentationFrame();
+    const options = resolveActivityAnalyticsDisplayOptions((widget as ActivityAnalyticsWidgetConfig).displayOptions);
+    const [range, setRange] = useState<ActivityAnalyticsRange>(options.range);
+    const [groupBy, setGroupBy] = useState<ActivityAnalyticsGroupBy>(options.groupBy);
+    const [turnoMode, setTurnoMode] = useState<'summary' | 'detail'>('summary');
+    const [sessionAnchor] = useState(() => Date.now());
+    const machineId = typeof widget.binding?.machineId === 'number'
+        ? widget.binding.machineId
+        : machines?.find((machine) => machine.name === String(widget.binding?.machineId ?? ''))?.unitId;
+    const params = options.dataMode === 'simulated' || machineId === undefined ? null : range === 'custom'
+        ? { machineId, range, start: options.start ?? '', end: options.end ?? '' }
+        : { machineId, range };
+    const activitySeries = useActivitySeries(params);
+    const fixture = createActivityFixture(widget.id, machineId, range, options.setupThresholdKw, options.prodThresholdKw, sessionAnchor, range === 'custom' ? { start: options.start ?? '', end: options.end ?? '' } : undefined);
+    const hasIncompatibleTransientData = !options.dataMode || options.dataMode === 'real'
+        ? (activitySeries.isPlaceholderData || activitySeries.isError)
+            && activitySeries.data !== null
+            && !isActivitySeriesResponseCompatible(params, activitySeries.data)
+        : false;
+    const centralActivityData = hasIncompatibleTransientData ? undefined : activitySeries.data ?? undefined;
+    const resolvedActivity = resolvePresentationValue(options.dataMode === 'simulated', centralActivityData, fixture);
+    const presentationActivitySeries = activitySeries.isLoading || activitySeries.isError
+        ? { ...activitySeries, data: hasIncompatibleTransientData ? null : activitySeries.data }
+        : { ...activitySeries, data: resolvedActivity.value };
+    const contextClient = useContext(QueryClientContext);
+    const client = queryClient ?? contextClient;
+    useEffect(() => {
+        if (!client || !activitySeries.isEnabled || options.dataMode === 'simulated' || machineId === undefined || range === '12m') return;
+        const nextRange: ActivityAnalyticsRange = range === '7d' ? '30d' : '7d';
+        let cancelled = false;
+        const prefetch = () => {
+            if (cancelled) return;
+            void client.prefetchQuery(createActivitySeriesQueryOptions({ machineId, range: nextRange })).catch(() => undefined);
+        };
+        if (typeof requestIdleCallback === 'function') {
+            const handle = requestIdleCallback(prefetch);
+            return () => {
+                cancelled = true;
+                if (typeof cancelIdleCallback === 'function') {
+                    cancelIdleCallback(handle);
+                }
+            };
+        }
+
+        const handle = window.setTimeout(prefetch, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(handle);
+        };
+    }, [activitySeries.isEnabled, client, frame.revisionKey, machineId, options.dataMode, range]);
+    const activeOptions = useMemo(() => ({ ...options, range, groupBy }), [groupBy, options, range]);
+    const entry = useEntry(widget, 'activity-analytics', { data: { activitySeries: presentationActivitySeries, displayOptions: activeOptions, turnoMode, onRangeChange: setRange, onGroupByChange: setGroupBy, onTurnoModeChange: setTurnoMode, provenance: resolvedActivity.provenance } });
+    return <>{render(entry)}</>;
+}
+
+export function ProdTrendPresentationController({ widget, machines, render }: PresentationControllerProps) {
+    const options = (widget as ProdTrendWidgetConfig).displayOptions;
+    const [range, setRange] = useState<ActivityAnalyticsRange>(options?.range ?? '7d');
+    const [groupBy, setGroupBy] = useState<ActivityAnalyticsGroupBy>(options?.groupBy ?? 'day');
+    const [sessionAnchor] = useState(() => Date.now());
+    const machineId = typeof widget.binding?.machineId === 'number'
+        ? widget.binding.machineId
+        : machines?.find((machine) => machine.name === String(widget.binding?.machineId ?? ''))?.unitId ?? null;
+    const dataSource = useProdTrendDataSource({ configuredMode: options?.dataMode, params: machineId === null ? null : { machineId, range } });
+    const resolvedOptions = resolveProdTrendDisplayOptions(options ?? {});
+    const fixture = createActivityFixture(widget.id, machineId ?? undefined, range, resolvedOptions.setupThresholdKw, resolvedOptions.prodThresholdKw, sessionAnchor);
+    const resolvedData = resolvePresentationValue(options?.dataMode === 'simulated', dataSource.response, fixture);
+    const presentationDataSource = dataSource.isLoading || dataSource.error
+        ? dataSource
+        : { ...dataSource, response: resolvedData.value };
+    const entry = useEntry(widget, 'prod-trend', { data: { dataSource: presentationDataSource, displayOptions: { ...resolvedOptions, range, groupBy }, onRangeChange: setRange, onGroupByChange: setGroupBy, provenance: resolvedData.provenance } });
     return <>{render(entry)}</>;
 }
 

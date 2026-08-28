@@ -69,6 +69,7 @@ interface WidgetRendererProps {
     presentationEntry?: WidgetPresentationEntry;
 }
 
+const DATA_PRESENTATION_CAPABILITIES = new Set(['activity-analytics', 'prod-trend']);
 const NAVIGATION_INTERACTIVE_SELECTOR = [
     'button',
     'a',
@@ -106,7 +107,7 @@ export default function WidgetRenderer({
     renderContext,
     presentationEntry,
 }: WidgetRendererProps) {
-    if (presentationEntry && presentationEntry.capability !== 'legacy-presentation') {
+    if (presentationEntry && !DATA_PRESENTATION_CAPABILITIES.has(presentationEntry.capability) && presentationEntry.capability !== 'legacy-presentation') {
         return presentationEntry.capability === 'unsupported'
             ? <UnsupportedWidget type={presentationEntry.widgetType} />
             : <div className={`glass-panel flex h-full w-full flex-col justify-center p-4 ${className ?? ''}`} data-testid={`presentation-widget-${presentationEntry.widgetId}`}>
@@ -166,6 +167,7 @@ export default function WidgetRenderer({
                     className={className}
                     siblingWidgets={siblingWidgets}
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
@@ -180,6 +182,7 @@ export default function WidgetRenderer({
                     hasOverviewError={hasOverviewError}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;

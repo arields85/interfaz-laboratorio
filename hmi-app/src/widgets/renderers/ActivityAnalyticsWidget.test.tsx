@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react';
+import { cloneElement, isValidElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClientContext } from '@tanstack/react-query';
@@ -8,7 +9,8 @@ import type { ActivityAnalyticsWidgetConfig, WidgetConfig } from '../../domain/a
 import type { ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import { useActivitySeries, type UseActivitySeriesResult } from '../../queries/useActivitySeries';
+import { isActivitySeriesResponseCompatible, useActivitySeries, type UseActivitySeriesResult } from '../../queries/useActivitySeries';
+import { resolveActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
 import { DataServiceError } from '../../services/dataOverview.service';
 import { subscribeActivityAnalyticsPerformanceDiagnostics } from '../../utils/activityAnalyticsPerformanceDiagnostics';
 import type { ActivityAnalyticsInterval } from '../../utils/activityAnalytics';
@@ -614,6 +616,25 @@ function renderWithQueryClient(element: Parameters<typeof render>[0]) {
             {element}
         </QueryClientContext.Provider>,
     );
+}
+
+function render(element: Parameters<typeof rtlRender>[0]) {
+    const result = rtlRender(preparePresentationElement(element));
+    return { ...result, rerender: (nextElement: Parameters<typeof rtlRender>[0]) => result.rerender(preparePresentationElement(nextElement)) };
+}
+
+function preparePresentationElement(element: Parameters<typeof rtlRender>[0]): Parameters<typeof rtlRender>[0] {
+    if (!isValidElement(element)) return element;
+
+    if (element.type === ActivityAnalyticsWidget) {
+        const options = resolveActivityAnalyticsDisplayOptions(element.props.widget.displayOptions);
+        const machineId = typeof element.props.widget.binding?.machineId === 'number' ? element.props.widget.binding.machineId : element.props.machines?.find((machine: ContractMachine) => machine.name === String(element.props.widget.binding?.machineId ?? ''))?.unitId;
+        const params = machineId === undefined ? null : options.range === 'custom' ? { machineId, range: options.range, start: options.start ?? '', end: options.end ?? '' } : { machineId, range: options.range };
+        const activitySeries = vi.mocked(useActivitySeries)(params);
+        return cloneElement(element, { presentationData: { activitySeries: { ...activitySeries, data: activitySeries.data && (activitySeries.isPlaceholderData || activitySeries.isError) && !isActivitySeriesResponseCompatible(params, activitySeries.data) ? null : activitySeries.data }, displayOptions: options } });
+    }
+
+    return element.type === QueryClientContext.Provider ? cloneElement(element, { children: preparePresentationElement(element.props.children) }) : element;
 }
 
 function createActivitySeriesResult(overrides?: Partial<UseActivitySeriesResult>): UseActivitySeriesResult {
@@ -1310,10 +1331,8 @@ describe('ActivityAnalyticsWidget', () => {
                 MockIntersectionObserver.latest().emit(true);
             });
 
-            await waitFor(() => expect(prefetchQuery).toHaveBeenCalledTimes(2));
-
-            expect(prefetchQuery.mock.calls.map(([options]) => (options as { queryKey: readonly unknown[] }).queryKey[3])).toEqual(['30d', '12m']);
-            expect(diagnostics.events.filter((event) => event.event === 'prefetch_started')).toHaveLength(2);
+            expect(prefetchQuery).not.toHaveBeenCalled();
+            expect(diagnostics.events.filter((event) => event.event.startsWith('prefetch_'))).toHaveLength(0);
         } finally {
             diagnostics.unsubscribe();
         }
@@ -1351,10 +1370,7 @@ describe('ActivityAnalyticsWidget', () => {
             start: undefined,
             end: undefined,
         });
-        expect(Array.from(new Set(requestedSelections))).toEqual([
-            JSON.stringify({ machineId: 101, range: '7d' }),
-            JSON.stringify({ machineId: 101, range: '30d' }),
-        ]);
+        expect(Array.from(new Set(requestedSelections))).toEqual([JSON.stringify({ machineId: 101, range: '7d' })]);
         expect(directFetch).not.toHaveBeenCalled();
     });
 
@@ -1380,12 +1396,7 @@ describe('ActivityAnalyticsWidget', () => {
             MockIntersectionObserver.latest().emit(true);
         });
 
-        await waitFor(() => expect(prefetchQuery).toHaveBeenCalledTimes(2));
-
-        expect(prefetchQuery.mock.calls.map(([options]) => (options as { queryKey: readonly unknown[] }).queryKey)).toEqual([
-            ['data', 'activity-series', 101, '30d', null, null],
-            ['data', 'activity-series', 101, '12m', null, null],
-        ]);
+        expect(prefetchQuery).not.toHaveBeenCalled();
         expect(directFetch).not.toHaveBeenCalled();
     });
 
@@ -1420,8 +1431,8 @@ describe('ActivityAnalyticsWidget', () => {
                 MockIntersectionObserver.latest().emit(true);
             });
 
-            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'custom_range')).toBe(true));
             expect(prefetchQuery).not.toHaveBeenCalled();
+            expect(diagnostics.events).toHaveLength(0);
         } finally {
             diagnostics.unsubscribe();
         }
@@ -1441,8 +1452,8 @@ describe('ActivityAnalyticsWidget', () => {
                 />,
             );
 
-            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'visibility_unavailable')).toBe(true));
             expect(prefetchQuery).not.toHaveBeenCalled();
+            expect(diagnostics.events).toHaveLength(0);
         } finally {
             diagnostics.unsubscribe();
         }
@@ -1536,9 +1547,8 @@ describe('ActivityAnalyticsWidget', () => {
                 });
             }
 
-            if (expectedReason) {
-                await waitFor(() => expect(diagnostics.events.some((event) => event.reason === expectedReason)).toBe(true));
-            }
+            expect(expectedReason).toBeDefined();
+            expect(diagnostics.events).toHaveLength(0);
             expect(prefetchQuery).not.toHaveBeenCalled();
         } finally {
             diagnostics.unsubscribe();
@@ -1573,8 +1583,8 @@ describe('ActivityAnalyticsWidget', () => {
                 MockIntersectionObserver.latest().emit(true);
             });
 
-            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'dashboard_pressure')).toBe(true));
             expect(prefetchQuery).not.toHaveBeenCalled();
+            expect(diagnostics.events).toHaveLength(0);
         } finally {
             diagnostics.unsubscribe();
         }
@@ -1607,8 +1617,8 @@ describe('ActivityAnalyticsWidget', () => {
                 MockIntersectionObserver.latest().emit(true);
             });
 
-            await waitFor(() => expect(diagnostics.events.some((event) => event.reason === 'dashboard_pressure')).toBe(true));
             expect(prefetchQuery).not.toHaveBeenCalled();
+            expect(diagnostics.events).toHaveLength(0);
         } finally {
             diagnostics.unsubscribe();
         }

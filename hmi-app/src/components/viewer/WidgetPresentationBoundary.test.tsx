@@ -18,6 +18,13 @@ vi.mock('../../queries/useDataHistory', () => ({
     createDataHistoryQueryOptions: vi.fn(),
 }));
 
+vi.mock('../../queries/useActivitySeries', () => ({
+    useActivitySeries: vi.fn(() => ({ data: null, isLoading: false, isError: false, error: null, isEnabled: false, isFetching: false, isPlaceholderData: false, isRefreshing: false })),
+}));
+vi.mock('../../queries/useProdTrendDataSource', () => ({
+    useProdTrendDataSource: vi.fn(() => ({ configuredMode: 'real', effectiveMode: 'real', source: null, response: null, error: null, isLoading: false, isFetching: false, isRefreshing: false, isEnabled: false })),
+}));
+
 vi.mock('../../widgets/WidgetRenderer', () => ({
     default: ({ widget, presentationEntry }: { widget: { id: string }; presentationEntry?: unknown }) => {
         rendererEntries.set(widget.id, presentationEntry);
@@ -35,7 +42,7 @@ describe('WidgetPresentationBoundary', () => {
     it.each([
         ['metric-card', 'scalar'], ['kpi', 'scalar'], ['status', 'status'], ['connection-status', 'connection'],
         ['trend-chart', 'trend-chart'], ['trend-chart-v2', 'trend-chart-v2'], ['prod-history', 'legacy-presentation'],
-        ['machine-activity', 'legacy-presentation'], ['activity-analytics', 'legacy-presentation'], ['prod-trend', 'legacy-presentation'],
+        ['machine-activity', 'legacy-presentation'], ['activity-analytics', 'activity-analytics'], ['prod-trend', 'prod-trend'],
         ['alert-history', 'legacy-presentation'], ['text-title', 'static'], ['info-card', 'static'],
     ] as const)('registers and renders the %s capability route', (type, capability) => {
         const widget = makeWidget({ id: `route-${type}`, type: type as never });

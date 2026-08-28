@@ -5,7 +5,7 @@ import type { EquipmentSummary } from '../../domain/equipment.types';
 import { getWidgetPresentationCapability } from '../../utils/widgetCapabilities';
 import type { PresentationControllerProps } from '../../widgets/controllers/PresentationControllers';
 import {
-    ConnectionPresentationController, LegacyPresentationController, ScalarPresentationController,
+    ActivityAnalyticsPresentationController, ConnectionPresentationController, LegacyPresentationController, ProdTrendPresentationController, ScalarPresentationController,
     StaticPresentationController, StatusPresentationController, TrendChartController, TrendChartV2Controller,
     UnsupportedPresentationController,
 } from '../../widgets/controllers/PresentationControllers';
@@ -36,6 +36,8 @@ const CONTROLLERS = {
     'trend-chart': TrendChartController,
     'trend-chart-v2': TrendChartV2Controller,
     static: StaticPresentationController,
+    'activity-analytics': ActivityAnalyticsPresentationController,
+    'prod-trend': ProdTrendPresentationController,
     'legacy-presentation': LegacyPresentationController,
 } as const;
 
