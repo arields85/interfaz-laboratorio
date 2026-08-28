@@ -78,11 +78,15 @@ describe('WidgetPresentationBoundary', () => {
 
         expect(screen.getByTestId('frame-state')).toHaveTextContent('missing');
     });
-    it('keeps an unsupported visible widget non-fatal', () => {
+    it('keeps an unsupported visible widget non-fatal and emits one diagnostic per frame revision', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
         render(<DashboardPresentationFrameProvider dashboardId="d" viewId="v" profileRevision={1} expectedWidgetIds={['unsupported-1']}>
             <WidgetPresentationBoundary widget={makeWidget({ id: 'unsupported-1', type: 'badge' })} equipmentMap={new Map()} />
             <FrameProbe widgetId="unsupported-1" />
         </DashboardPresentationFrameProvider>);
         expect(screen.getByTestId('frame-state')).toHaveTextContent('true:true:true');
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Unsupported presentation capability'), expect.objectContaining({ widgetId: 'unsupported-1' }));
+        warnSpy.mockRestore();
     });
 });

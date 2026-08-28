@@ -19,6 +19,7 @@ const {
     useDataOverviewMock,
     buildDashboardSnapshotMock,
     exportDashboardSnapshotMock,
+    startPrismaLocalSnapshotExporterMock,
     getDataSnapshotExportIntervalMsMock,
     isDataSnapshotExportEnabledMock,
 } = vi.hoisted(() => ({
@@ -33,6 +34,7 @@ const {
     useDataOverviewMock: vi.fn(),
     buildDashboardSnapshotMock: vi.fn(),
     exportDashboardSnapshotMock: vi.fn(),
+    startPrismaLocalSnapshotExporterMock: vi.fn(),
     getDataSnapshotExportIntervalMsMock: vi.fn(),
     isDataSnapshotExportEnabledMock: vi.fn(),
 }));
@@ -73,18 +75,20 @@ vi.mock('../components/viewer/DashboardHeader', () => ({
     },
 }));
 
-vi.mock('../components/viewer/DashboardViewer', () => ({
-    default: (props: Record<string, unknown>) => {
+vi.mock('../components/viewer/DashboardViewer', () => {
+    function DashboardViewerMock(props: Record<string, unknown>) {
         dashboardViewerMock(props);
         const frame = useDashboardPresentationFrame();
         return (
             <div data-testid="dashboard-viewer-root">
                 Viewer canvas
                 <output data-testid="dashboard-presentation-frame">{`${frame.dashboardId}:${frame.viewId}:${frame.profileRevision}:${frame.expectedWidgetIds.join(',')}`}</output>
-            </div>
+                </div>
         );
-    },
-}));
+    }
+
+    return { default: DashboardViewerMock };
+});
 
 vi.mock('../queries/useDataOverview', () => ({
     useDataOverview: useDataOverviewMock,
@@ -96,6 +100,7 @@ vi.mock('../services/dashboardSnapshotBuilder', () => ({
 
 vi.mock('../services/dashboardSnapshotExport.service', () => ({
     exportDashboardSnapshot: exportDashboardSnapshotMock,
+    startPrismaLocalSnapshotExporter: startPrismaLocalSnapshotExporterMock,
 }));
 
 vi.mock('../config/dataConnection.config', async () => {
@@ -148,6 +153,7 @@ describe('Dashboard page layout', () => {
         hierarchyStorageMock.getNodes.mockResolvedValue([]);
         buildDashboardSnapshotMock.mockReturnValue({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
         exportDashboardSnapshotMock.mockResolvedValue(true);
+        startPrismaLocalSnapshotExporterMock.mockReturnValue(vi.fn());
         getDataSnapshotExportIntervalMsMock.mockReturnValue(5_000);
         isDataSnapshotExportEnabledMock.mockReturnValue(true);
         useUIStore.setState({
@@ -798,5 +804,34 @@ describe('Dashboard page layout', () => {
             machines: nextMachines,
         }));
         expect(exportDashboardSnapshotMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('starts only the local exporter for local mode when central settings are empty or disabled', async () => {
+        isDataSnapshotExportEnabledMock.mockReturnValue(false);
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({ id: 'local-dashboard', status: 'published', widgets: [], layout: [] }),
+        ]);
+
+        renderDashboard('/?prismaMode=local');
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        });
+
+        expect(startPrismaLocalSnapshotExporterMock).toHaveBeenCalledWith(expect.objectContaining({
+            intervalMs: 5_000,
+            revision: expect.any(Number),
+            getSnapshot: expect.any(Function),
+        }));
+        expect(exportDashboardSnapshotMock).not.toHaveBeenCalled();
+
+        const localExporterOptions = startPrismaLocalSnapshotExporterMock.mock.calls[0]?.[0] as { getSnapshot: () => unknown };
+        expect(localExporterOptions.getSnapshot()).toMatchObject({
+            widgets: [],
+        });
+        expect(buildDashboardSnapshotMock).toHaveBeenCalledWith(expect.objectContaining({
+            dashboard: expect.objectContaining({ id: 'local-dashboard' }),
+            presentationFrame: expect.objectContaining({ dashboardId: 'local-dashboard' }),
+        }));
     });
 });

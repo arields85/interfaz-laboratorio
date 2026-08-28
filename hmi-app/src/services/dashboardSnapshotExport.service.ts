@@ -9,6 +9,7 @@ const SNAPSHOT_EXPORT_TIMEOUT_MESSAGE = '[dashboard-snapshot-export] Snapshot ex
 const SNAPSHOT_EXPORT_TIMEOUT_MS = 4_500;
 const SNAPSHOT_EXPORT_TIMEOUT_CODE = 'dashboard-snapshot-export-timeout';
 const SNAPSHOT_EXPORT_FAILED_EVENT = 'hmi:snapshot-export-failed';
+const PRISMA_LOCAL_SNAPSHOT_EXPORT_URL = 'http://127.0.0.1:5057/hmi/current-snapshot';
 
 type SnapshotExportFailureReason = 'disabled-missing-endpoint' | 'timeout' | 'request-failed';
 
@@ -19,6 +20,13 @@ interface SnapshotExportFailureDetail {
 }
 
 let inFlightExportRequest: Promise<void> | null = null;
+let activeLocalSnapshotExporter: { revision: number; stop: () => void } | null = null;
+
+export interface PrismaLocalSnapshotExporterOptions {
+    revision: number;
+    intervalMs?: number;
+    getSnapshot: () => unknown | null;
+}
 
 export async function exportDashboardSnapshot(snapshot: unknown): Promise<boolean> {
     const url = getDataSnapshotExportUrl();
@@ -47,6 +55,113 @@ export async function exportDashboardSnapshot(snapshot: unknown): Promise<boolea
     inFlightExportRequest = trackedCompletion;
 
     return result;
+}
+
+export async function exportPrismaLocalSnapshot(snapshot: unknown, lifecycleSignal?: AbortSignal): Promise<boolean> {
+    if (lifecycleSignal?.aborted) {
+        return false;
+    }
+
+    if (typeof AbortController !== 'function') {
+        try {
+            return await postDashboardSnapshot(PRISMA_LOCAL_SNAPSHOT_EXPORT_URL, snapshot);
+        } catch (error: unknown) {
+            if (!lifecycleSignal?.aborted) {
+                dispatchSnapshotExportFailedEvent({
+                    reason: 'request-failed',
+                    status: getSnapshotExportErrorStatus(error),
+                    url: PRISMA_LOCAL_SNAPSHOT_EXPORT_URL,
+                });
+                console.warn(SNAPSHOT_EXPORT_FAILED_MESSAGE, error);
+            }
+            return false;
+        }
+    }
+
+    const requestController = new AbortController();
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        requestController.abort(createSnapshotExportTimeoutError());
+    }, SNAPSHOT_EXPORT_TIMEOUT_MS);
+    const abortRequest = () => requestController.abort(lifecycleSignal?.reason);
+    lifecycleSignal?.addEventListener('abort', abortRequest, { once: true });
+
+    try {
+        return await postDashboardSnapshot(PRISMA_LOCAL_SNAPSHOT_EXPORT_URL, snapshot, requestController.signal);
+    } catch (error: unknown) {
+        if (lifecycleSignal?.aborted) {
+            return false;
+        }
+
+        if (timedOut || isSnapshotExportTimeoutError(error)) {
+            dispatchSnapshotExportFailedEvent({
+                reason: 'timeout',
+                status: null,
+                url: PRISMA_LOCAL_SNAPSHOT_EXPORT_URL,
+            });
+            console.warn(SNAPSHOT_EXPORT_TIMEOUT_MESSAGE, error);
+            return false;
+        }
+
+        dispatchSnapshotExportFailedEvent({
+            reason: 'request-failed',
+            status: getSnapshotExportErrorStatus(error),
+            url: PRISMA_LOCAL_SNAPSHOT_EXPORT_URL,
+        });
+        console.warn(SNAPSHOT_EXPORT_FAILED_MESSAGE, error);
+        return false;
+    } finally {
+        window.clearTimeout(timeoutId);
+        lifecycleSignal?.removeEventListener('abort', abortRequest);
+    }
+}
+
+export function startPrismaLocalSnapshotExporter({ revision, intervalMs = 5_000, getSnapshot }: PrismaLocalSnapshotExporterOptions): () => void {
+    activeLocalSnapshotExporter?.stop();
+
+    let stopped = false;
+    let inFlight: Promise<boolean> | null = null;
+    const lifecycleController = new AbortController();
+
+    const exportCurrentSnapshot = () => {
+        if (stopped || inFlight) {
+            return;
+        }
+
+        const snapshot = getSnapshot();
+        if (snapshot === null) {
+            return;
+        }
+
+        const request = exportPrismaLocalSnapshot(snapshot, lifecycleController.signal).finally(() => {
+            if (inFlight === request) {
+                inFlight = null;
+            }
+        });
+
+        inFlight = request;
+        void request;
+    };
+
+    const intervalId = window.setInterval(exportCurrentSnapshot, intervalMs);
+    const owner = { revision, stop: () => undefined as void };
+    const stop = () => {
+        if (stopped) {
+            return;
+        }
+
+        stopped = true;
+        window.clearInterval(intervalId);
+        lifecycleController.abort();
+        if (activeLocalSnapshotExporter === owner) {
+            activeLocalSnapshotExporter = null;
+        }
+    };
+
+    owner.stop = stop;
+    activeLocalSnapshotExporter = owner;
+    return stop;
 }
 
 function runSnapshotExport(url: string, snapshot: unknown): {

@@ -225,6 +225,19 @@ export function LegacyPresentationController({ widget, render }: PresentationCon
 }
 
 export function UnsupportedPresentationController({ widget, render }: PresentationControllerProps) {
+    const frame = useDashboardPresentationFrame();
     const entry = useEntry(widget, 'unsupported', { dataSummary: { reason: 'unsupported-presentation-capability' } });
+
+    const diagnosticKey = `${frame.revisionKey}:${widget.id}`;
+    const lastDiagnosticKey = useRef<string | null>(null);
+    useEffect(() => {
+        if (lastDiagnosticKey.current === diagnosticKey) {
+            return;
+        }
+
+        lastDiagnosticKey.current = diagnosticKey;
+        console.warn('Unsupported presentation capability', { widgetId: widget.id, widgetType: widget.type });
+    }, [diagnosticKey, widget.id, widget.type]);
+
     return <>{render(entry)}</>;
 }
