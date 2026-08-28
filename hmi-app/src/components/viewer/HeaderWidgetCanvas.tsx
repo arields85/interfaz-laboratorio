@@ -361,9 +361,19 @@ export default function HeaderWidgetCanvas({
                                  widget={widget}
                                  equipmentMap={equipmentMap}
                                  connection={connection}
-                                 machines={machines}
-                                 onNavigateDashboard={onNavigateDashboard}
-                             />
+                                  machines={machines}
+                                  onNavigateDashboard={onNavigateDashboard}
+                                  renderEntry={(entry) => (
+                                      <HeaderWidgetRenderer
+                                          widget={widget}
+                                          equipmentMap={equipmentMap}
+                                          connection={connection}
+                                          machines={machines}
+                                          align="start"
+                                          presentationData={entry.payload}
+                                      />
+                                  )}
+                              />
                          ) : (
                              <HeaderWidgetRenderer
                                  widget={widget}

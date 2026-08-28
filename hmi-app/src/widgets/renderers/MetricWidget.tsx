@@ -1,4 +1,5 @@
 import type { MetricCardWidgetConfig } from '../../domain/admin.types';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import MetricCard from '../../components/ui/MetricCard';
@@ -47,6 +48,7 @@ interface MetricWidgetProps {
     isLoadingData?: boolean;
     className?: string;
     hierarchyContext?: HierarchyContext;
+    presentationData?: PresentationPayload;
 }
 
 export default function MetricWidget({
@@ -56,6 +58,7 @@ export default function MetricWidget({
     isLoadingData = false,
     className,
     hierarchyContext,
+    presentationData,
 }: MetricWidgetProps) {
     const dataMode = resolveWidgetDataMode(widget) ?? undefined;
 
@@ -63,10 +66,11 @@ export default function MetricWidget({
         return <MetricCard label={widget.title ?? '—'} value={undefined} dataMode={dataMode} isLoading className={className} />;
     }
 
-    const hierarchyTrace = widget.hierarchyMode && hierarchyContext
+    const hierarchyTrace = !presentationData && widget.hierarchyMode && hierarchyContext
         ? buildHierarchyAggregationTrace(widget, hierarchyContext, equipmentMap, machines)
         : undefined;
-    const resolved = hierarchyTrace?.resolved ?? resolveBinding(widget, equipmentMap, machines);
+    const presented = presentationData as (PresentationPayload & { binding?: ReturnType<typeof resolveBinding> }) | undefined;
+    const resolved = presented?.binding ?? hierarchyTrace?.resolved ?? resolveBinding(widget, equipmentMap, machines);
     const cardStatus = toCardStatus(resolved.status);
 
     // --- Construcción del subtext (footer) ---

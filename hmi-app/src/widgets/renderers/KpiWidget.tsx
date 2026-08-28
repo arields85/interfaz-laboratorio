@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties } from 'react';
 import type { KpiWidgetConfig, ThresholdRule } from '../../domain/admin.types';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import { resolveBinding } from '../resolvers/bindingResolver';
@@ -95,6 +96,7 @@ interface KpiWidgetProps {
     machines?: ContractMachine[];
     isLoadingData?: boolean;
     className?: string;
+    presentationData?: PresentationPayload;
 }
 
 type CircularTopCapConfig = NonNullable<ComponentProps<typeof GaugeDisplay>['circularTopCap']>;
@@ -143,19 +145,11 @@ function createCircularTopCapConfig({
     };
 }
 
-export default function KpiWidget({ widget, equipmentMap, machines, isLoadingData, className }: KpiWidgetProps) {
+export default function KpiWidget({ widget, equipmentMap, machines, isLoadingData, className, presentationData }: KpiWidgetProps) {
     const dataMode = resolveWidgetDataMode(widget) ?? undefined;
 
-    if (isLoadingData) {
-        return (
-            <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
-                <WidgetHeader title={widget.title ?? 'KPI'} dataMode={dataMode} className="mb-2" />
-                <div className="h-20 w-full bg-industrial-hover rounded-full" />
-            </div>
-        );
-    }
-
-    const resolved = resolveBinding(widget, equipmentMap, machines);
+    const presented = presentationData as (PresentationPayload & { binding?: ReturnType<typeof resolveBinding> }) | undefined;
+    const resolved = presented?.binding ?? resolveBinding(widget, equipmentMap, machines);
     
     const numericValue = resolved.value == null
         ? null
@@ -229,6 +223,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
     const displayedValueRef = useRef(numericValue);
     const animationFrameRef = useRef<number | null>(null);
 
+    /* eslint-disable react-hooks/set-state-in-effect -- animation state must synchronize immediately when the source value changes. */
     useEffect(() => {
         displayedValueRef.current = displayedValue;
     }, [displayedValue]);
@@ -288,6 +283,16 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
             }
         };
     }, [mode, numericValue, prefersReducedMotion]);
+    /* eslint-enable react-hooks/set-state-in-effect */
+
+    if (isLoadingData) {
+        return (
+            <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
+                <WidgetHeader title={widget.title ?? 'KPI'} dataMode={dataMode} className="mb-2" />
+                <div className="h-20 w-full bg-industrial-hover rounded-full" />
+            </div>
+        );
+    }
 
     return (
         <div className={`p-5 glass-panel group relative w-full h-full ${className ?? ''}`}>

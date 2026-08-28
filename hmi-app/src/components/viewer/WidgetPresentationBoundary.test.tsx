@@ -4,8 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { DashboardPresentationFrameProvider, useDashboardPresentationFrame } from '../../services/dashboardPresentationFrame.service';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
-
-const rendererEntries = new Map<string, unknown>();
+import HeaderWidgetRenderer from './HeaderWidgetRenderer';
 
 vi.mock('../../queries/useDataHistory', () => ({
     useDataHistory: vi.fn(() => ({
@@ -25,13 +24,6 @@ vi.mock('../../queries/useProdTrendDataSource', () => ({
     useProdTrendDataSource: vi.fn(() => ({ configuredMode: 'real', effectiveMode: 'real', source: null, response: null, error: null, isLoading: false, isFetching: false, isRefreshing: false, isEnabled: false })),
 }));
 
-vi.mock('../../widgets/WidgetRenderer', () => ({
-    default: ({ widget, presentationEntry }: { widget: { id: string }; presentationEntry?: unknown }) => {
-        rendererEntries.set(widget.id, presentationEntry);
-        return <div data-testid={`rendered-${widget.id}`} />;
-    },
-}));
-
 function FrameProbe({ widgetId }: { widgetId: string }) {
     const frame = useDashboardPresentationFrame();
     const entry = frame.entries.get(widgetId);
@@ -47,20 +39,101 @@ describe('WidgetPresentationBoundary', () => {
     ] as const)('registers and renders the %s capability route', (type, capability) => {
         const widget = makeWidget({ id: `route-${type}`, type: type as never });
 
-        function IdentityProbe() {
+        function CapabilityProbe() {
             const frame = useDashboardPresentationFrame();
             const registeredEntry = frame.entries.get(widget.id);
-            const rendererEntry = rendererEntries.get(widget.id);
 
-            return <output data-testid="identity-state">{`${frame.ready}:${registeredEntry?.capability}:${rendererEntry === registeredEntry}`}</output>;
+            return <output data-testid="identity-state">{`${frame.ready}:${registeredEntry?.capability}`}</output>;
         }
 
         render(<DashboardPresentationFrameProvider dashboardId="dashboard-routes" viewId="view-routes" profileRevision={3} expectedWidgetIds={[widget.id]}>
                 <WidgetPresentationBoundary widget={widget} equipmentMap={new Map()} />
-                <IdentityProbe />
+                <CapabilityProbe />
             </DashboardPresentationFrameProvider>);
 
-        expect(screen.getByTestId('identity-state')).toHaveTextContent(`true:${capability}:true`);
+        expect(screen.getByTestId('identity-state')).toHaveTextContent(`true:${capability}`);
+    });
+
+    it('renders published static, status, metric, and KPI widgets through their canonical renderers', () => {
+        const widgets = [
+            makeWidget({ id: 'published-title', type: 'text-title', title: 'Published title' }),
+            makeWidget({
+                id: 'published-info',
+                type: 'info-card',
+                title: 'Published info',
+                displayOptions: { fields: [{ id: 'batch', label: 'Batch', value: 'B-204' }] },
+            }),
+            makeWidget({
+                id: 'published-status',
+                type: 'status',
+                title: 'Published status',
+                binding: { mode: 'simulated_value', simulatedValue: 'warning' },
+            }),
+            makeWidget({
+                id: 'published-metric',
+                type: 'metric-card',
+                title: 'Published metric',
+                binding: { mode: 'simulated_value', simulatedValue: 42, unit: 'kW' },
+            }),
+            makeWidget({
+                id: 'published-kpi',
+                type: 'kpi',
+                title: 'Published KPI',
+                binding: { mode: 'simulated_value', simulatedValue: 42, unit: '%' },
+            }),
+        ];
+
+        render(
+            <DashboardPresentationFrameProvider
+                dashboardId="dashboard-published"
+                viewId="view-published"
+                profileRevision={1}
+                expectedWidgetIds={widgets.map((widget) => widget.id)}
+            >
+                {widgets.map((widget) => (
+                    <WidgetPresentationBoundary key={widget.id} widget={widget} equipmentMap={new Map()} />
+                ))}
+            </DashboardPresentationFrameProvider>,
+        );
+
+        expect(screen.getByText('Published title')).not.toHaveClass('glass-panel');
+        expect(screen.getByTestId('info-card-header')).toBeInTheDocument();
+        expect(screen.getByText('Advertencia')).toBeInTheDocument();
+        expect(screen.getByTestId('metric-card-header')).toBeInTheDocument();
+        expect(screen.getByTestId('metric-card-value-row')).toHaveTextContent('42');
+        expect(screen.getByTestId('gauge-circular')).toBeInTheDocument();
+        expect(screen.queryByTestId('presentation-widget-published-title')).not.toBeInTheDocument();
+    });
+
+    it('feeds compact header widgets from the same controller entry into HeaderWidgetRenderer', () => {
+        const widget = makeWidget({
+            id: 'published-header-status',
+            type: 'connection-status',
+            title: 'Header connection',
+        });
+
+        render(
+            <DashboardPresentationFrameProvider dashboardId="dashboard-header" viewId="view-header" profileRevision={1} expectedWidgetIds={[widget.id]}>
+                <WidgetPresentationBoundary
+                    widget={widget}
+                    equipmentMap={new Map()}
+                    connection={{ globalStatus: 'degradado', lastSuccess: '2026-04-21T13:00:00.000Z', ageMs: 65_000 }}
+                    renderEntry={(entry) => (
+                        <HeaderWidgetRenderer
+                            widget={widget}
+                            equipmentMap={new Map()}
+                            align="start"
+                            presentationData={entry.payload}
+                        />
+                    )}
+                />
+            </DashboardPresentationFrameProvider>,
+        );
+
+        expect(screen.getByText('Degradado')).toBeInTheDocument();
+        expect(screen.getByText('1min')).toBeInTheDocument();
+        expect(screen.getByTestId('connection-header-icon-degradado')).toBeInTheDocument();
+        expect(screen.queryByTestId('presentation-widget-published-header-status')).not.toBeInTheDocument();
     });
 
     it('removes stale registrations when the dashboard revision changes', () => {

@@ -4,6 +4,7 @@ import type { ConnectionHealth, ContractMachine } from '../../domain/dataContrac
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import { getWidgetPresentationCapability } from '../../utils/widgetCapabilities';
 import type { PresentationControllerProps } from '../../widgets/controllers/PresentationControllers';
+import type { WidgetPresentationEntry } from '../../domain/dashboardPresentation.types';
 import {
     ActivityAnalyticsPresentationController, AlertHistoryPresentationController, ConnectionPresentationController, LegacyPresentationController, MachineActivityPresentationController, ProdTrendPresentationController, ProductionHistoryPresentationController, ScalarPresentationController,
     StaticPresentationController, StatusPresentationController, TrendChartController, TrendChartV2Controller,
@@ -19,6 +20,7 @@ interface WidgetPresentationBoundaryProps {
     machines?: ContractMachine[];
     connection?: ConnectionHealth;
     className?: string;
+    renderEntry?: (entry: WidgetPresentationEntry) => ReactNode;
     isLoadingOverview?: boolean;
     hasOverviewError?: boolean;
     isLoadingData?: boolean;
@@ -51,7 +53,7 @@ export default function WidgetPresentationBoundary(props: WidgetPresentationBoun
         : UnsupportedPresentationController;
     const controllerProps: PresentationControllerProps = {
         ...props,
-        render: (entry) => <WidgetRenderer {...props} presentationEntry={entry} />,
+        render: (entry) => props.renderEntry?.(entry) ?? <WidgetRenderer {...props} presentationEntry={entry} />,
     };
     return <Controller {...controllerProps} /> as ReactNode;
 }

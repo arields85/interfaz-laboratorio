@@ -69,7 +69,19 @@ interface WidgetRendererProps {
     presentationEntry?: WidgetPresentationEntry;
 }
 
-const DATA_PRESENTATION_CAPABILITIES = new Set(['activity-analytics', 'prod-trend', 'production-history', 'machine-activity', 'alert-history']);
+const CANONICAL_PRESENTATION_CAPABILITIES = new Set([
+    'scalar',
+    'status',
+    'connection',
+    'static',
+    'trend-chart',
+    'trend-chart-v2',
+    'activity-analytics',
+    'prod-trend',
+    'production-history',
+    'machine-activity',
+    'alert-history',
+]);
 const NAVIGATION_INTERACTIVE_SELECTOR = [
     'button',
     'a',
@@ -107,7 +119,7 @@ export default function WidgetRenderer({
     renderContext,
     presentationEntry,
 }: WidgetRendererProps) {
-    if (presentationEntry && !DATA_PRESENTATION_CAPABILITIES.has(presentationEntry.capability) && presentationEntry.capability !== 'legacy-presentation') {
+    if (presentationEntry && !CANONICAL_PRESENTATION_CAPABILITIES.has(presentationEntry.capability) && presentationEntry.capability !== 'legacy-presentation') {
         return presentationEntry.capability === 'unsupported'
             ? <UnsupportedWidget type={presentationEntry.widgetType} />
             : <div className={`glass-panel flex h-full w-full flex-col justify-center p-4 ${className ?? ''}`} data-testid={`presentation-widget-${presentationEntry.widgetId}`}>
@@ -127,6 +139,7 @@ export default function WidgetRenderer({
                     isLoadingData={isLoadingData}
                     className={className}
                     hierarchyContext={hierarchyContext}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -139,6 +152,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -194,6 +208,7 @@ export default function WidgetRenderer({
                     widget={widget}
                     equipmentMap={equipmentMap}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -206,6 +221,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     connection={connection}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -263,11 +279,11 @@ export default function WidgetRenderer({
             break;
 
         case 'text-title':
-            renderedWidget = <TextTitleWidget widget={widget} className={className} />;
+            renderedWidget = <TextTitleWidget widget={widget} className={className} presentationData={presentationEntry?.payload} />;
             break;
 
         case 'info-card':
-            renderedWidget = <InfoCardWidget widget={widget} className={className} />;
+            renderedWidget = <InfoCardWidget widget={widget} className={className} presentationData={presentationEntry?.payload} />;
             break;
 
         // -----------------------------------------------------------------------

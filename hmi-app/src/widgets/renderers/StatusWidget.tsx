@@ -1,4 +1,5 @@
 import type { StatusDisplayOptions, WidgetConfig } from '../../domain/admin.types';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 import type { EquipmentSummary, EquipmentStatus } from '../../domain/equipment.types';
 import StatusBadge from '../../components/ui/StatusBadge';
 import { WidgetHeaderDataMode } from '../../components/ui/WidgetHeader';
@@ -22,6 +23,7 @@ interface StatusWidgetProps {
     equipmentMap: Map<string, EquipmentSummary>;
     compact?: boolean;
     className?: string;
+    presentationData?: PresentationPayload;
 }
 
 export default function StatusWidget({
@@ -29,17 +31,20 @@ export default function StatusWidget({
     equipmentMap,
     compact = false,
     className,
+    presentationData,
 }: StatusWidgetProps) {
     const options = widget.displayOptions as StatusDisplayOptions | undefined;
     const binding = widget.binding;
 
-    const status: EquipmentStatus = binding?.mode === 'simulated_value'
-        ? normalizeSimulatedEquipmentStatus(binding.simulatedValue)
-        : (() => {
-            const assetId = binding?.assetId;
-            const equipment = assetId ? equipmentMap.get(assetId) : undefined;
-            return equipment?.status ?? 'unknown';
-        })();
+    const status = presentationData?.status !== undefined || presentationData?.value !== undefined
+        ? (presentationData.status ?? presentationData.value) as EquipmentStatus
+        : binding?.mode === 'simulated_value'
+            ? normalizeSimulatedEquipmentStatus(binding.simulatedValue)
+            : (() => {
+                const assetId = binding?.assetId;
+                const equipment = assetId ? equipmentMap.get(assetId) : undefined;
+                return equipment?.status ?? 'unknown';
+            })();
 
     const label = resolveStatusLabel(status, options);
     const dataMode = resolveWidgetDataMode(widget);

@@ -6,7 +6,7 @@ import type { ActivityAnalyticsGroupBy, ActivityAnalyticsRange, ActivityAnalytic
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ActivityAnalyticsWidgetConfig, AlertHistoryWidgetConfig, MachineActivityWidgetConfig, ProdHistoryWidgetConfig, ProdTrendWidgetConfig, TemporalBucket, WidgetConfig } from '../../domain/admin.types';
 import { useMachineActivity } from '../../hooks/useMachineActivity';
-import { createPresentationEntry, type PresentationCapability, type WidgetPresentationEntry } from '../../domain/dashboardPresentation.types';
+import { createPresentationEntry, type PresentationCapability, type WidgetPresentationEntry, type WidgetPresentationPayloadByCapability } from '../../domain/dashboardPresentation.types';
 import { usePresentationRegistration, useDashboardPresentationFrame } from '../../services/dashboardPresentationFrame.service';
 import { resolveBinding } from '../resolvers/bindingResolver';
 import { createDataHistoryQueryOptions, useDataHistory } from '../../queries/useDataHistory';
@@ -75,7 +75,7 @@ export interface PresentationControllerProps {
     render: (entry: WidgetPresentationEntry) => ReactNode;
 }
 
-function useEntry(widget: WidgetConfig, capability: PresentationCapability, payload: Parameters<typeof createPresentationEntry>[0]['payload']) {
+function useEntry<C extends PresentationCapability>(widget: WidgetConfig, capability: C, payload: WidgetPresentationPayloadByCapability[C]): WidgetPresentationEntry<C> {
     const { frame } = useFrameController();
     const payloadKey = JSON.stringify(payload, (_key, value) => typeof value === 'function' ? '[callback]' : value);
     // eslint-disable-next-line react-hooks/preserve-manual-memoization, react-hooks/exhaustive-deps
@@ -91,7 +91,16 @@ function useFrameController() {
 
 export function ScalarPresentationController({ widget, equipmentMap, machines, render }: PresentationControllerProps) {
     const resolved = resolveBinding(widget, equipmentMap, machines);
-    const entry = useEntry(widget, 'scalar', { value: resolved.value, unit: resolved.unit, dataSummary: { status: resolved.status, source: resolved.source } });
+    const entry = useEntry(widget, 'scalar', {
+        value: resolved.value,
+        unit: resolved.unit,
+        binding: resolved,
+        status: resolved.status,
+        lastUpdateAt: resolved.lastUpdateAt,
+        connectionState: resolved.connectionState,
+        source: resolved.source,
+        dataSummary: { status: resolved.status, source: resolved.source },
+    });
     return <>{render(entry)}</>;
 }
 
@@ -99,7 +108,12 @@ export function StatusPresentationController({ widget, equipmentMap, render }: P
     const status = widget.binding?.mode === 'simulated_value'
         ? normalizeSimulatedEquipmentStatus(widget.binding.simulatedValue)
         : equipmentMap.get(widget.binding?.assetId ?? '')?.status ?? 'unknown';
-    const entry = useEntry(widget, 'status', { value: typeof status === 'string' ? status : null, dataSummary: { source: 'equipment-status' } });
+    const entry = useEntry(widget, 'status', {
+        value: status,
+        status,
+        source: widget.binding?.mode === 'simulated_value' ? 'simulated' : equipmentMap.has(widget.binding?.assetId ?? '') ? 'real' : 'error',
+        dataSummary: { source: 'equipment-status' },
+    });
     return <>{render(entry)}</>;
 }
 
@@ -109,7 +123,14 @@ export function ConnectionPresentationController({ widget, connection, machines,
     const status = widget.binding?.mode === 'simulated_value'
         ? normalizeSimulatedToContractStatus(widget.binding.simulatedValue)
         : machine?.status ?? connection?.globalStatus ?? 'unknown';
-    const entry = useEntry(widget, 'connection', { value: typeof status === 'string' ? status : null, dataSummary: { source: machine ? 'machine' : 'global' } });
+    const entry = useEntry(widget, 'connection', {
+        value: status,
+        status,
+        lastSuccess: options?.scope === 'machine' ? machine?.lastSuccess ?? null : connection?.lastSuccess ?? null,
+        ageMs: options?.scope === 'machine' ? machine?.ageMs ?? null : connection?.ageMs ?? null,
+        source: widget.binding?.mode === 'simulated_value' ? 'simulated' : options?.scope === 'machine' ? machine ? 'real' : 'error' : connection ? 'real' : 'error',
+        dataSummary: { source: machine ? 'machine' : 'global' },
+    });
     return <>{render(entry)}</>;
 }
 
@@ -243,7 +264,10 @@ export function AlertHistoryPresentationController({ widget, equipmentMap, machi
 
 export function StaticPresentationController({ widget, render }: PresentationControllerProps) {
     const data = widget.type === 'info-card'
-        ? { fields: resolveInfoCardFields(widget.displayOptions).map((field) => ({ ...field, ...resolveInfoCardFieldContent(field) })) }
+        ? { fields: resolveInfoCardFields(widget.displayOptions).map((field) => {
+            const content = resolveInfoCardFieldContent(field);
+            return { id: field.id, label: field.label, ...content, text: content.text ?? '' };
+        }) }
         : undefined;
     const entry = useEntry(widget, 'static', { value: widget.title ?? null, data });
     return <>{render(entry)}</>;

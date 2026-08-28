@@ -8,6 +8,7 @@ import { DashboardPresentationFrameProvider } from '../../services/dashboardPres
 import {
     ActivityAnalyticsPresentationController,
     AlertHistoryPresentationController,
+    ConnectionPresentationController,
     MachineActivityPresentationController,
     ProductionHistoryPresentationController,
     ScalarPresentationController,
@@ -65,6 +66,13 @@ describe('presentation controllers', () => {
         );
 
         expect(screen.getByTestId('entry')).toHaveTextContent('42');
+    });
+
+    it('does not leak global freshness into a missing machine connection payload', () => {
+        const widget = makeWidget({ id: 'missing-machine-connection', type: 'connection-status', displayOptions: { scope: 'machine', machineId: 999 } });
+        render(<ConnectionPresentationController widget={widget} machines={[]} connection={{ globalStatus: 'online', lastSuccess: '2026-04-21T13:00:00.000Z', ageMs: 65_000 }} render={(entry) => <output data-testid="missing-machine-entry">{JSON.stringify(entry.payload)}</output>} />);
+        expect(screen.getByTestId('missing-machine-entry')).toHaveTextContent('"lastSuccess":null');
+        expect(screen.getByTestId('missing-machine-entry')).toHaveTextContent('"ageMs":null');
     });
 
     it('keeps trend V2 prefetch ownership in its controller seam', () => {
