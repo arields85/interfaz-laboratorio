@@ -1,10 +1,14 @@
 import { act, render, screen } from '@testing-library/react';
+import { QueryClientContext } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
 import { makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { useDataHistory } from '../../queries/useDataHistory';
 import { useActivitySeries } from '../../queries/useActivitySeries';
+import { useProdTrendDataSource } from '../../queries/useProdTrendDataSource';
 import { DashboardPresentationFrameProvider } from '../../services/dashboardPresentationFrame.service';
+import WidgetPresentationBoundary from '../../components/viewer/WidgetPresentationBoundary';
+import * as activityAnalyticsSimulation from '../../utils/activityAnalyticsSimulation';
 import {
     ActivityAnalyticsPresentationController,
     AlertHistoryPresentationController,
@@ -58,6 +62,12 @@ vi.mock('../../queries/useDataHistory', async (importOriginal) => ({
 vi.mock('../../queries/useActivitySeries', () => ({
     useActivitySeries: vi.fn(() => ({ data: null, isLoading: false, isError: false, error: null, isEnabled: true, isFetching: false, isPlaceholderData: false, isRefreshing: false })),
     createActivitySeriesQueryOptions: vi.fn(({ machineId, range }: { machineId: number; range: string }) => ({ queryKey: ['data', 'activity-series', machineId, range, null, null] })),
+}));
+vi.mock('../../queries/useProdTrendDataSource', () => ({
+    useProdTrendDataSource: vi.fn(),
+}));
+vi.mock('../../hooks/useTemporalSettings', () => ({
+    useTemporalSettings: vi.fn(() => ({ config: { plantTimezone: 'UTC', shifts: [] }, shifts: [], resolvedTimezone: 'UTC' })),
 }));
 
 describe('presentation controllers', () => {
@@ -325,6 +335,48 @@ describe('presentation controllers', () => {
 
         unmount();
         act(() => callbacks[1]?.({ entries: [], activeSeverity: 'warning' }));
+    });
+
+    it('renders every operational family through the boundary with one controller-owned simulation', () => {
+        const simulationSpy = vi.spyOn(activityAnalyticsSimulation, 'buildActivityAnalyticsSimulatedHistory');
+        vi.mocked(useActivitySeries).mockClear();
+        vi.mocked(useProdTrendDataSource).mockClear();
+        controllerSeams.useMachineActivity.mockClear();
+        controllerSeams.subscribeAlertHistory.mockClear();
+        vi.mocked(useActivitySeries).mockReturnValue({ data: null, isLoading: false, isError: false, error: null, isEnabled: false, isFetching: false, isPlaceholderData: false, isRefreshing: false });
+        vi.mocked(useProdTrendDataSource).mockReturnValue({ configuredMode: 'simulated', effectiveMode: 'simulated', source: null, response: null, error: null, isLoading: false, isFetching: false, isRefreshing: false, isEnabled: false });
+        const prefetchQuery = vi.fn();
+        const getQueryState = vi.fn();
+        const widgets = [
+            makeWidget({ id: 'u4-production', type: 'prod-history', title: 'Production history' }),
+            makeWidget({ id: 'u4-machine', type: 'machine-activity', title: 'Machine activity', binding: { mode: 'simulated_value', simulatedValue: 0.64, unit: 'kW' } }),
+            makeWidget({ id: 'u4-analytics', type: 'activity-analytics', title: 'Activity analytics', binding: { mode: 'real_variable', machineId: 101 }, displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'shift', setupThresholdKw: 0.15, prodThresholdKw: 0.25, displayMode: 'kpis-and-bars' } }),
+            makeWidget({ id: 'u4-trend', type: 'prod-trend', title: 'Production trend', binding: { mode: 'real_variable', machineId: 101 }, displayOptions: { dataMode: 'simulated', range: '7d', groupBy: 'day', setupThresholdKw: 0.15, prodThresholdKw: 0.25 } }),
+            makeWidget({ id: 'u4-alerts', type: 'alert-history', title: 'Alert history' }),
+        ];
+
+        render(
+            <QueryClientContext.Provider value={{ prefetchQuery, getQueryState } as never}>
+                <DashboardPresentationFrameProvider dashboardId="dashboard" viewId="view" profileRevision={1} expectedWidgetIds={widgets.map((widget) => widget.id)}>
+                    {widgets.map((widget) => (
+                        <WidgetPresentationBoundary key={widget.id} widget={widget} equipmentMap={new Map()} machines={[]} />
+                    ))}
+                </DashboardPresentationFrameProvider>
+            </QueryClientContext.Provider>,
+        );
+
+        expect(screen.getByText('Production history')).toBeInTheDocument();
+        expect(screen.getByText('Machine activity')).toBeInTheDocument();
+        expect(screen.getByText('Activity analytics')).toBeInTheDocument();
+        expect(screen.getByText('Production trend')).toBeInTheDocument();
+        expect(screen.getByText('Alert history')).toBeInTheDocument();
+        expect(simulationSpy).toHaveBeenCalledTimes(4);
+        expect(useActivitySeries).toHaveBeenCalledTimes(2);
+        expect(useProdTrendDataSource).toHaveBeenCalledTimes(2);
+        expect(controllerSeams.useMachineActivity).toHaveBeenCalledTimes(2);
+        expect(controllerSeams.subscribeAlertHistory).toHaveBeenCalledTimes(1);
+        expect(prefetchQuery).not.toHaveBeenCalled();
+        expect(getQueryState).not.toHaveBeenCalled();
     });
 
 });

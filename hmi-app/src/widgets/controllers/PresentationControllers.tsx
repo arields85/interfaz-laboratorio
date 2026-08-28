@@ -5,13 +5,13 @@ import type { ConnectionHealth, ContractMachine, DataHistoryResponse, DataHistor
 import type { ActivityAnalyticsGroupBy, ActivityAnalyticsRange, ActivityAnalyticsResponse } from '../../domain/activityAnalytics.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ActivityAnalyticsWidgetConfig, AlertHistoryWidgetConfig, MachineActivityWidgetConfig, ProdHistoryWidgetConfig, ProdTrendWidgetConfig, TemporalBucket, WidgetConfig } from '../../domain/admin.types';
-import { useMachineActivity } from '../../hooks/useMachineActivity';
+import { useMachineActivity, type MachineActivityResult } from '../../hooks/useMachineActivity';
 import { createPresentationEntry, type PresentationCapability, type WidgetPresentationEntry, type WidgetPresentationPayloadByCapability } from '../../domain/dashboardPresentation.types';
 import { usePresentationRegistration, useDashboardPresentationFrame } from '../../services/dashboardPresentationFrame.service';
 import { resolveBinding } from '../resolvers/bindingResolver';
 import { createDataHistoryQueryOptions, useDataHistory } from '../../queries/useDataHistory';
-import { createActivitySeriesQueryOptions, isActivitySeriesResponseCompatible, useActivitySeries } from '../../queries/useActivitySeries';
-import { useProdTrendDataSource } from '../../queries/useProdTrendDataSource';
+import { createActivitySeriesQueryOptions, isActivitySeriesResponseCompatible, useActivitySeries, type UseActivitySeriesResult } from '../../queries/useActivitySeries';
+import { useProdTrendDataSource, type UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
 import { resolveActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
 import { resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 import { normalizeSimulatedEquipmentStatus } from '../../utils/statusWidget';
@@ -32,6 +32,8 @@ import { coerceDataHistoryResponseForTrendChartV2 } from '../../utils/dataHistor
 import { buildTrendChartV2SimulatedHistory } from '../../utils/trendChartV2Simulation';
 import { mapHistoricalDensityToMaxPoints } from '../../utils/trendChartV2Density';
 import { recordTrendChartV2PerformanceDiagnostic } from '../../utils/trendChartV2PerformanceDiagnostics';
+import type { AlertHistoryEntry } from '../../domain/alertHistory.types';
+import type { ResolvedBinding } from '../../domain/widget.types';
 
 const PRODUCTION_HISTORY_WINDOW_SIZE: Record<TemporalBucket, number> = { hour: 24, shift: 15, day: 14, month: 12 };
 
@@ -116,6 +118,47 @@ export interface TrendChartV2PresentationData {
     runtimeState: 'loading' | 'disconnected' | 'error' | 'empty';
     onRangeChange: (range: Exclude<HistoryRangeV2, 'custom'>) => void;
     onCustomWindowChange: (window: { start: string; end: string } | null) => void;
+}
+
+export type PresentationDataProvenance = 'configured' | 'central-read-only' | 'deterministic-fixture';
+
+export interface ProductionHistoryPresentationData {
+    data: TemporalTrendPoint[];
+    bucket: TemporalBucket;
+    onBucketChange: (bucket: TemporalBucket) => void;
+    provenance: 'deterministic-fixture';
+    sessionAnchor: number;
+}
+
+export interface MachineActivityPresentationData {
+    resolved: ResolvedBinding;
+    activity: MachineActivityResult;
+    sourceKey: string;
+    provenance: PresentationDataProvenance;
+}
+
+export interface ActivityAnalyticsPresentationData {
+    activitySeries: UseActivitySeriesResult;
+    displayOptions: ReturnType<typeof resolveActivityAnalyticsDisplayOptions>;
+    turnoMode: 'summary' | 'detail';
+    onRangeChange: (range: ActivityAnalyticsRange) => void;
+    onGroupByChange: (groupBy: ActivityAnalyticsGroupBy) => void;
+    onTurnoModeChange: (mode: 'summary' | 'detail') => void;
+    provenance: PresentationDataProvenance;
+}
+
+export interface ProdTrendPresentationData {
+    dataSource: UseProdTrendDataSourceResult;
+    displayOptions: ReturnType<typeof resolveProdTrendDisplayOptions>;
+    onRangeChange: (range: ActivityAnalyticsRange) => void;
+    onGroupByChange: (groupBy: ActivityAnalyticsGroupBy) => void;
+    provenance: PresentationDataProvenance;
+}
+
+export interface AlertHistoryPresentationData {
+    entries: AlertHistoryEntry[];
+    activeSeverity: AlertHistoryCoordinatorState['activeSeverity'];
+    onClear: () => void;
 }
 
 const TREND_V2_PREFETCH_MAX_WIDGETS = 12;
@@ -466,7 +509,8 @@ export function ActivityAnalyticsPresentationController({ widget, machines, sibl
         };
     }, [activityAnalyticsWidgetCount, activitySeries.isEnabled, client, frame.revisionKey, machineId, options.dataMode, range, widget.id]);
     const activeOptions = useMemo(() => ({ ...options, range, groupBy }), [groupBy, options, range]);
-    const entry = useEntry(widget, 'activity-analytics', { data: { activitySeries: presentationActivitySeries, displayOptions: activeOptions, turnoMode, onRangeChange: setRange, onGroupByChange: setGroupBy, onTurnoModeChange: setTurnoMode, provenance: resolvedActivity.provenance } });
+    const presentationData: ActivityAnalyticsPresentationData = { activitySeries: presentationActivitySeries, displayOptions: activeOptions, turnoMode, onRangeChange: setRange, onGroupByChange: setGroupBy, onTurnoModeChange: setTurnoMode, provenance: resolvedActivity.provenance };
+    const entry = useEntry(widget, 'activity-analytics', { data: presentationData });
     return <>{render(entry)}</>;
 }
 
@@ -485,13 +529,14 @@ export function ProdTrendPresentationController({ widget, machines, render }: Pr
     const presentationDataSource = dataSource.isLoading || dataSource.error
         ? dataSource
         : { ...dataSource, response: resolvedData.value };
-    const entry = useEntry(widget, 'prod-trend', { data: { dataSource: presentationDataSource, displayOptions: { ...resolvedOptions, range, groupBy }, onRangeChange: setRange, onGroupByChange: setGroupBy, provenance: resolvedData.provenance } });
+    const presentationData: ProdTrendPresentationData = { dataSource: presentationDataSource, displayOptions: { ...resolvedOptions, range, groupBy }, onRangeChange: setRange, onGroupByChange: setGroupBy, provenance: resolvedData.provenance };
+    const entry = useEntry(widget, 'prod-trend', { data: presentationData });
     return <>{render(entry)}</>;
 }
 
-export function ProductionHistoryPresentationController({ widget, render }: PresentationControllerProps) { const [bucket, setBucket] = useState<TemporalBucket>((widget as ProdHistoryWidgetConfig).displayOptions?.defaultTemporalGrouping ?? 'hour'); const [sessionAnchor] = useState(() => Date.now()); const data = useMemo(() => generateProductionHistorySeries(bucket, new Date(sessionAnchor)), [bucket, sessionAnchor]); const entry = useEntry(widget, 'production-history', { data: { data, bucket, onBucketChange: setBucket, provenance: 'deterministic-fixture', sessionAnchor } }); return <>{render(entry)}</>; }
+export function ProductionHistoryPresentationController({ widget, render }: PresentationControllerProps) { const [bucket, setBucket] = useState<TemporalBucket>((widget as ProdHistoryWidgetConfig).displayOptions?.defaultTemporalGrouping ?? 'hour'); const [sessionAnchor] = useState(() => Date.now()); const data = useMemo(() => generateProductionHistorySeries(bucket, new Date(sessionAnchor)), [bucket, sessionAnchor]); const presentationData: ProductionHistoryPresentationData = { data, bucket, onBucketChange: setBucket, provenance: 'deterministic-fixture', sessionAnchor }; const entry = useEntry(widget, 'production-history', { data: presentationData }); return <>{render(entry)}</>; }
 
-export function MachineActivityPresentationController({ widget, equipmentMap, machines, isLoadingData, render }: PresentationControllerProps) { const frame = useDashboardPresentationFrame(); const options = (widget as MachineActivityWidgetConfig).displayOptions ?? {}; const resolved = resolveBinding(widget, equipmentMap, machines); const isSimulatedBinding = widget.binding?.mode === 'simulated_value'; const activitySourceKey = isSimulatedBinding ? 'simulated' : `${widget.binding?.bindingVersion ?? 'legacy'}:${widget.binding?.assetId ?? ''}:${widget.binding?.machineId ?? ''}:${widget.binding?.variableKey ?? ''}`; const resolvedActivity = isSimulatedBinding && resolved.value !== null ? { value: resolved.value, provenance: 'configured' as const } : resolvePresentationValue(false, resolved.value, resolveMachineActivityFixtureValue(widget.id)); const activity = useMachineActivity(isLoadingData ? null : resolvedActivity.value, options, { simulated: isSimulatedBinding, sourceKey: `${frame.revisionKey}:${activitySourceKey}` }); const entry = useEntry(widget, 'machine-activity', { data: { resolved, activity, sourceKey: `${frame.revisionKey}:${activitySourceKey}`, provenance: resolvedActivity.provenance } }); return <>{render(entry)}</>; }
+export function MachineActivityPresentationController({ widget, equipmentMap, machines, isLoadingData, render }: PresentationControllerProps) { const frame = useDashboardPresentationFrame(); const options = (widget as MachineActivityWidgetConfig).displayOptions ?? {}; const resolved = resolveBinding(widget, equipmentMap, machines); const isSimulatedBinding = widget.binding?.mode === 'simulated_value'; const activitySourceKey = isSimulatedBinding ? 'simulated' : `${widget.binding?.bindingVersion ?? 'legacy'}:${widget.binding?.assetId ?? ''}:${widget.binding?.machineId ?? ''}:${widget.binding?.variableKey ?? ''}`; const resolvedActivity = isSimulatedBinding && resolved.value !== null ? { value: resolved.value, provenance: 'configured' as const } : resolvePresentationValue(false, resolved.value, resolveMachineActivityFixtureValue(widget.id)); const activity = useMachineActivity(isLoadingData ? null : resolvedActivity.value, options, { simulated: isSimulatedBinding, sourceKey: `${frame.revisionKey}:${activitySourceKey}` }); const presentationData: MachineActivityPresentationData = { resolved, activity, sourceKey: `${frame.revisionKey}:${activitySourceKey}`, provenance: resolvedActivity.provenance }; const entry = useEntry(widget, 'machine-activity', { data: presentationData }); return <>{render(entry)}</>; }
 
 export function AlertHistoryPresentationController({ widget, equipmentMap, machines, siblingWidgets, render }: PresentationControllerProps) {
     const frame = useDashboardPresentationFrame();
@@ -503,7 +548,8 @@ export function AlertHistoryPresentationController({ widget, equipmentMap, machi
     useEffect(() => { contextRef.current = { widgets: siblingWidgets ?? [], equipmentMap, machines }; }, [equipmentMap, machines, siblingWidgets]);
     useEffect(() => { const revisionKey = frame.revisionKey; let active = true; const unsubscribe = subscribeAlertHistory({ dashboardId, pollInterval, getContext: () => contextRef.current, onState: (nextState) => { if (active && frame.revisionKey === revisionKey) setState(nextState); } }); return () => { active = false; unsubscribe(); }; }, [dashboardId, frame.revisionKey, pollInterval]);
 
-    const entry = useEntry(widget, 'alert-history', { data: { ...state, onClear: () => clearAlertHistoryEntries(dashboardId) } });
+    const presentationData: AlertHistoryPresentationData = { ...state, onClear: () => clearAlertHistoryEntries(dashboardId) };
+    const entry = useEntry(widget, 'alert-history', { data: presentationData });
     return <>{render(entry)}</>;
 }
 

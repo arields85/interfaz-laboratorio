@@ -6,6 +6,7 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import type { AlertHistoryEntry } from '../../domain/alertHistory.types';
 import { formatAlertHistoryAge, formatAlertHistoryValue } from '../../utils/alertHistoryFormatting';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import type { AlertHistoryPresentationData } from '../controllers/PresentationControllers';
 
 // =============================================================================
 // AlertHistoryWidget
@@ -62,11 +63,7 @@ export default function AlertHistoryWidget({
     className,
     presentationData,
 }: AlertHistoryWidgetProps) {
-    const presented = presentationData as {
-        entries?: AlertHistoryEntry[];
-        activeSeverity?: 'normal' | 'warning' | 'critical';
-        onClear?: () => void;
-    } | undefined;
+    const presented = presentationData as AlertHistoryPresentationData | undefined;
     const maxVisible = widget.displayOptions?.maxVisible ?? 5;
 
     // El ícono del header es NEUTRAL (no dinámico). El único elemento dinámico

@@ -141,6 +141,8 @@ function render(element: Parameters<typeof rtlRender>[0]) {
 function preparePresentationElement(element: Parameters<typeof rtlRender>[0]): Parameters<typeof rtlRender>[0] {
     if (!isValidElement(element)) return element;
 
+    if (element.props.presentationData !== undefined) return element;
+
     if (element.type === ProdTrendWidget) {
         const options = resolveProdTrendDisplayOptions(element.props.widget.displayOptions ?? {});
         const machineId = typeof element.props.widget.binding?.machineId === 'number' ? element.props.widget.binding.machineId : element.props.machines?.find((machine: ContractMachine) => machine.name === String(element.props.widget.binding?.machineId ?? ''))?.unitId ?? null;
@@ -202,6 +204,62 @@ describe('ProdTrendWidget', () => {
                 isEnabled: query.isEnabled,
             });
         });
+    });
+
+    it('does not create renderer-owned simulated history or read the clock for a canonical presentation payload', () => {
+        const buildHistory = vi.spyOn(activityAnalyticsSimulation, 'buildActivityAnalyticsSimulatedHistory');
+        vi.spyOn(Date, 'now').mockImplementation(() => {
+            throw new Error('renderer must not read the clock for presentation data');
+        });
+        const displayOptions = resolveProdTrendDisplayOptions({
+            ...makeWidget().displayOptions,
+            dataMode: 'simulated',
+        });
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({ displayOptions })}
+                machines={MACHINES}
+                presentationData={{
+                    dataSource: makeDataSourceResult({
+                        configuredMode: 'simulated',
+                        effectiveMode: 'simulated',
+                        source: 'deterministic-fixture',
+                    }),
+                    displayOptions,
+                    onRangeChange: vi.fn(),
+                    onGroupByChange: vi.fn(),
+                    provenance: 'deterministic-fixture',
+                }}
+            />,
+        );
+
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
+        expect(buildHistory).not.toHaveBeenCalled();
+    });
+
+    it('keeps a second canonical simulated selection on the supplied data path', () => {
+        const displayOptions = resolveProdTrendDisplayOptions({
+            ...makeWidget().displayOptions,
+            dataMode: 'simulated',
+            range: '30d',
+        });
+
+        render(
+            <ProdTrendWidget
+                widget={makeWidget({ displayOptions })}
+                machines={MACHINES}
+                presentationData={{
+                    dataSource: makeDataSourceResult(),
+                    displayOptions,
+                    onRangeChange: vi.fn(),
+                    onGroupByChange: vi.fn(),
+                    provenance: 'deterministic-fixture',
+                }}
+            />,
+        );
+
+        expect(screen.getByTestId('prod-trend-widget-chart')).toBeInTheDocument();
     });
 
     it('renders the standalone trend with the standard header, scales, and no extra inner panel', () => {

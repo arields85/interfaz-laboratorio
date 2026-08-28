@@ -2,13 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { MachineActivityDisplayOptions, MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
-import type { ResolvedBinding } from '../../domain/widget.types';
 import { Activity, Thermometer, Zap, Droplet, Wind, Settings, Gauge, Fan, FoldVertical, HelpCircle, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 import GaugeDisplay, { CIRCULAR_VIEWBOX_SIZE } from '../../components/ui/GaugeDisplay';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
-import type { MachineActivityResult } from '../../hooks/useMachineActivity';
 import { getStateVisuals } from '../utils/machineActivity';
 import {
     DEFAULT_GAUGE_VALUE_FONT_SIZE,
@@ -25,6 +23,7 @@ import {
 import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
 import { resolveMachineActivityUnits } from '../utils/machineActivityRuntime';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
+import type { MachineActivityPresentationData } from '../controllers/PresentationControllers';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     Gauge,
@@ -221,11 +220,7 @@ export default function MachineActivityWidget({
     className,
     presentationData,
 }: MachineActivityWidgetProps) {
-    const presented = presentationData as {
-        resolved?: ResolvedBinding;
-        activity?: MachineActivityResult;
-        sourceKey?: string;
-    } | undefined;
+    const presented = presentationData as MachineActivityPresentationData | undefined;
     const circularGaugeContainerRef = useRef<HTMLDivElement>(null);
     const [circularTextSizing, setCircularTextSizing] = useState(DEFAULT_CIRCULAR_TEXT_SIZING);
     const resolved = presented?.resolved ?? { value: null, unit: null };

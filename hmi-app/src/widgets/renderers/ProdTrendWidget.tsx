@@ -34,6 +34,7 @@ import { buildAreaPath, clamp, computeVisibleLabelIndices, getChartLetterSpacing
 import { createDefaultProdTrendDisplayOptions, resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import { buildActivityAnalyticsSimulatedHistory } from '../../utils/activityAnalyticsSimulation';
+import type { ProdTrendPresentationData } from '../controllers/PresentationControllers';
 
 interface ProdTrendWidgetProps {
     widget: ProdTrendWidgetConfig;
@@ -150,12 +151,8 @@ export default function ProdTrendWidget({
     className,
     presentationData,
 }: ProdTrendWidgetProps) {
-    const presented = presentationData as {
-        dataSource?: UseProdTrendDataSourceResult;
-        displayOptions?: ResolvedProdTrendDisplayOptions;
-        onRangeChange?: (range: ResolvedProdTrendDisplayOptions['range']) => void;
-        onGroupByChange?: (groupBy: ResolvedProdTrendDisplayOptions['groupBy']) => void;
-    } | undefined;
+    const presented = presentationData as ProdTrendPresentationData | undefined;
+    const hasCanonicalPresentationData = presented?.provenance !== undefined;
     const displayOptions = presented?.displayOptions ?? resolveProdTrendDisplayOptions(widget.displayOptions ?? createDefaultProdTrendDisplayOptions());
     const dataMode = resolveWidgetDataMode(widget) ?? displayOptions.dataMode;
     const lineStrokeWidth = clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth);
@@ -167,7 +164,7 @@ export default function ProdTrendWidget({
     } | null>(null);
     const bodyRef = useRef<HTMLDivElement | null>(null);
     const [bodySize, setBodySize] = useState<{ width: number; height: number } | null>(null);
-    const [simulatedNowMs] = useState(() => Date.now());
+    const [simulatedNowMs] = useState(() => hasCanonicalPresentationData ? 0 : Date.now());
     const displayKey = createDisplayOptionsSyncKey(displayOptions);
 
     if (runtimeViewState.sourceDisplayKey !== displayKey || runtimeViewState.sourceGroupBy !== displayOptions.groupBy) {
@@ -228,7 +225,7 @@ export default function ProdTrendWidget({
     const { config, shifts } = useTemporalSettings();
     const dataSource: UseProdTrendDataSourceResult = presented?.dataSource ?? ({ response: null } as UseProdTrendDataSourceResult);
     const simulatedActivityData = useMemo(() => {
-        if (displayOptions.dataMode !== 'simulated') {
+        if (displayOptions.dataMode !== 'simulated' || hasCanonicalPresentationData) {
             return null;
         }
 
@@ -265,7 +262,7 @@ export default function ProdTrendWidget({
                 bucket: 'synthetic',
             },
         };
-    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, displayOptions.dataMode, simulatedMachineId, simulatedMetric?.unit, simulatedMetricKey, simulatedNowMs, widget.binding?.unit, widget.id]);
+    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, displayOptions.dataMode, hasCanonicalPresentationData, simulatedMachineId, simulatedMetric?.unit, simulatedMetricKey, simulatedNowMs, widget.binding?.unit, widget.id]);
     const activityData = displayOptions.dataMode === 'simulated'
         ? dataSource.response ?? simulatedActivityData
         : dataSource.response;

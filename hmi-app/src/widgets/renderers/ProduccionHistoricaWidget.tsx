@@ -30,7 +30,6 @@ import type { EquipmentSummary } from '../../domain/equipment.types';
 import {
     groupByTemporalBucket,
     type TemporalGroupedPoint,
-    type TemporalTrendPoint,
 } from '../../utils/temporalGrouping';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
@@ -54,6 +53,7 @@ import {
     getChartLetterSpacingPx,
     getChartTextFont,
 } from '../../utils/chartHelpers';
+import type { ProductionHistoryPresentationData } from '../controllers/PresentationControllers';
 
 const PROD_HISTORY_LAYOUT_BASE_MARGIN = { top: 17, right: 16, bottom: 30, left: 48 } as const;
 const PROD_HISTORY_RIGHT_AXIS_MARGIN_RIGHT = 48;
@@ -684,11 +684,7 @@ export default function ProdHistoryWidget({
     onPersistDisplayOptions,
     presentationData,
 }: ProdHistoryWidgetProps) {
-    const presented = presentationData as {
-        data?: TemporalTrendPoint[];
-        bucket?: TemporalBucket;
-        onBucketChange?: (bucket: TemporalBucket) => void;
-    } | undefined;
+    const presented = presentationData as ProductionHistoryPresentationData | undefined;
     const displayOptions = widget.displayOptions;
     const chartTitle = widget.title ?? displayOptions?.chartTitle ?? 'PRODUCCIÓN HISTÓRICA';
     const productionBaseLabel = displayOptions?.productionLabel ?? 'Producción';

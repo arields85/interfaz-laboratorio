@@ -50,6 +50,7 @@ import {
 import { DEFAULT_ACTIVITY_ANALYTICS_TITLE } from '../../utils/activityAnalyticsTitle';
 import { buildActivityAnalyticsSimulatedHistory } from '../../utils/activityAnalyticsSimulation';
 import { buildActivityAnalyticsSummarySegments, type ActivityAnalyticsSummarySegmentBar } from '../../utils/activityAnalyticsSummarySegments';
+import type { ActivityAnalyticsPresentationData } from '../controllers/PresentationControllers';
 import {
     buildAreaPath,
     computeVisibleLabelIndices,
@@ -429,18 +430,12 @@ export default function ActivityAnalyticsWidget({
     onPersistDisplayOptions,
     presentationData,
 }: ActivityAnalyticsWidgetProps) {
-    const presented = presentationData as {
-        activitySeries?: UseActivitySeriesResult;
-        displayOptions?: ResolvedActivityAnalyticsDisplayOptions;
-        onRangeChange?: (range: ResolvedActivityAnalyticsDisplayOptions['range']) => void;
-        onGroupByChange?: (groupBy: ResolvedActivityAnalyticsDisplayOptions['groupBy']) => void;
-        turnoMode?: 'summary' | 'detail';
-        onTurnoModeChange?: (mode: 'summary' | 'detail') => void;
-    } | undefined;
+    const presented = presentationData as ActivityAnalyticsPresentationData | undefined;
+    const hasCanonicalPresentationData = presented?.provenance !== undefined;
     const displayOptions = presented?.displayOptions ?? resolveActivityAnalyticsDisplayOptions(widget.displayOptions);
     const dataMode = resolveWidgetDataMode(widget) ?? displayOptions.dataMode;
     const [runtimeViewState, setRuntimeViewState] = useState<ActivityAnalyticsRuntimeViewState>(() => createRuntimeViewState(displayOptions));
-    const [simulatedNowMs] = useState(() => Date.now());
+    const [simulatedNowMs] = useState(() => hasCanonicalPresentationData ? 0 : Date.now());
     const [analyticsBodySize, setAnalyticsBodySize] = useState<{ width: number; height: number } | null>(null);
     const [lastSuccessfulSnapshotState, setLastSuccessfulSnapshotState] = useState<{
         ownerKey: string;
@@ -519,7 +514,7 @@ export default function ActivityAnalyticsWidget({
 
     const activitySeries: UseActivitySeriesResult = presented?.activitySeries ?? ({ data: null } as UseActivitySeriesResult);
     const simulatedActivityData = useMemo(() => {
-        if (!isSimulated) {
+        if (!isSimulated || hasCanonicalPresentationData) {
             return null;
         }
 
@@ -556,7 +551,7 @@ export default function ActivityAnalyticsWidget({
                 bucket: 'synthetic',
             },
         };
-    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, isSimulated, simulatedMachineId, simulatedNowMs, widget.id]);
+    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, hasCanonicalPresentationData, isSimulated, simulatedMachineId, simulatedNowMs, widget.id]);
     const activityData = isSimulated ? activitySeries.data ?? simulatedActivityData : activitySeries.data;
     const resolvedTimezone = useMemo(() => resolveActivityAnalyticsTimezone({
         temporalSettings: { plantTimezone: config.plantTimezone },

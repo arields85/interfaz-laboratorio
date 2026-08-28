@@ -626,6 +626,8 @@ function render(element: Parameters<typeof rtlRender>[0]) {
 function preparePresentationElement(element: Parameters<typeof rtlRender>[0]): Parameters<typeof rtlRender>[0] {
     if (!isValidElement(element)) return element;
 
+    if (element.props.presentationData !== undefined) return element;
+
     if (element.type === ActivityAnalyticsWidget) {
         const options = resolveActivityAnalyticsDisplayOptions(element.props.widget.displayOptions);
         const machineId = typeof element.props.widget.binding?.machineId === 'number' ? element.props.widget.binding.machineId : element.props.machines?.find((machine: ContractMachine) => machine.name === String(element.props.widget.binding?.machineId ?? ''))?.unitId;
@@ -734,6 +736,62 @@ describe('ActivityAnalyticsWidget', () => {
             resolvedTimezone: 'UTC',
         });
         vi.mocked(useActivitySeries).mockReturnValue(createActivitySeriesResult());
+    });
+
+    it('does not create renderer-owned simulated history or read the clock for a canonical presentation payload', () => {
+        const buildHistory = vi.spyOn(activityAnalyticsSimulation, 'buildActivityAnalyticsSimulatedHistory');
+        vi.spyOn(Date, 'now').mockImplementation(() => {
+            throw new Error('renderer must not read the clock for presentation data');
+        });
+        const displayOptions = resolveActivityAnalyticsDisplayOptions({
+            ...makeWidget().displayOptions,
+            dataMode: 'simulated',
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions })}
+                machines={[]}
+                presentationData={{
+                    activitySeries: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
+                    displayOptions,
+                    turnoMode: 'summary',
+                    onRangeChange: vi.fn(),
+                    onGroupByChange: vi.fn(),
+                    onTurnoModeChange: vi.fn(),
+                    provenance: 'deterministic-fixture',
+                }}
+            />,
+        );
+
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
+        expect(buildHistory).not.toHaveBeenCalled();
+    });
+
+    it('keeps a second canonical simulated selection on the supplied data path', () => {
+        const displayOptions = resolveActivityAnalyticsDisplayOptions({
+            ...makeWidget().displayOptions,
+            dataMode: 'simulated',
+            groupBy: 'day',
+        });
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({ displayOptions })}
+                machines={MACHINES}
+                presentationData={{
+                    activitySeries: createActivitySeriesResult({ data: POPULATED_ACTIVITY_SERIES }),
+                    displayOptions,
+                    turnoMode: 'summary',
+                    onRangeChange: vi.fn(),
+                    onGroupByChange: vi.fn(),
+                    onTurnoModeChange: vi.fn(),
+                    provenance: 'deterministic-fixture',
+                }}
+            />,
+        );
+
+        expect(screen.getByTestId('activity-analytics-summary-bars')).toBeInTheDocument();
     });
 
     it('supports analytics data mode: simulated renders immediately and bypasses real network states', () => {
