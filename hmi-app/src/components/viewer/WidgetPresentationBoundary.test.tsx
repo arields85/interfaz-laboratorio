@@ -192,6 +192,70 @@ describe('WidgetPresentationBoundary', () => {
         }
     });
 
+    it('runs V2 history once through the controller before the canonical renderer and frame', async () => {
+        class ImmediateResizeObserver implements ResizeObserver {
+            public constructor(private readonly callback: ResizeObserverCallback) {}
+            public observe(target: Element): void {
+                this.callback([{ target, contentRect: { width: 320, height: 180 } } as ResizeObserverEntry], this);
+            }
+            public disconnect(): void {}
+            public unobserve(): void {}
+        }
+
+        const widget = {
+            ...makeWidget({ id: 'published-v2-trend', title: 'Published V2 trend' }),
+            type: 'trend-chart-v2' as const,
+            binding: { mode: 'real_variable' as const, machineId: 101, variableKey: 'temperature' },
+        };
+        historyServiceSeam.fetchDataHistory.mockClear();
+        historyServiceSeam.fetchDataHistory.mockResolvedValue({
+            contractVersion: '1.1.0',
+            machineId: 101,
+            variableKey: 'temperature',
+            range: '24h',
+            unit: '°C',
+            window: {
+                start: '2026-04-22T10:00:00.000Z',
+                end: '2026-04-22T12:00:00.000Z',
+                timezone: 'UTC',
+                bucketMs: 60_000,
+            },
+            series: [
+                { timestamp: '2026-04-22T10:00:00.000Z', timestampMs: Date.parse('2026-04-22T10:00:00.000Z'), value: 45 },
+                { timestamp: '2026-04-22T12:00:00.000Z', timestampMs: Date.parse('2026-04-22T12:00:00.000Z'), value: 52 },
+            ],
+            summary: { last: 52, min: 45, max: 52, avg: 48.5 },
+        });
+        localStorage.setItem('hmi:node-red-base-url', 'http://history.test');
+        vi.stubGlobal('ResizeObserver', ImmediateResizeObserver);
+
+        try {
+            const rendered = render(
+                <DashboardPresentationFrameProvider dashboardId="dashboard-v2" viewId="view-v2" profileRevision={1} expectedWidgetIds={[widget.id]}>
+                    <WidgetPresentationBoundary widget={widget} equipmentMap={new Map()} />
+                    <FrameProbe widgetId={widget.id} />
+                </DashboardPresentationFrameProvider>,
+            );
+
+            await waitFor(() => expect(screen.getByTestId('trend-chart-v2-summary-max')).toHaveTextContent('max 52°c'));
+
+            expect(historyServiceSeam.fetchDataHistory).toHaveBeenCalledTimes(1);
+            expect(screen.getByTestId('trend-chart-v2-svg')).toBeInTheDocument();
+            expect(screen.getByTestId('frame-state')).toHaveTextContent('true:true:true');
+
+            rendered.rerender(
+                <DashboardPresentationFrameProvider dashboardId="dashboard-v2" viewId="view-v2" profileRevision={2} expectedWidgetIds={[]}>
+                    <FrameProbe widgetId={widget.id} />
+                </DashboardPresentationFrameProvider>,
+            );
+
+            expect(screen.getByTestId('frame-state')).toHaveTextContent('missing');
+        } finally {
+            localStorage.removeItem('hmi:node-red-base-url');
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('removes stale registrations when the dashboard revision changes', () => {
         const firstWidget = makeWidget({ id: 'first-revision' });
         const { rerender } = render(<DashboardPresentationFrameProvider dashboardId="dashboard-revision" viewId="view-one" profileRevision={1} expectedWidgetIds={[firstWidget.id]}>

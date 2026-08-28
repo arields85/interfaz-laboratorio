@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { QueryClientContext, type QueryClient } from '@tanstack/react-query';
-import type { ConnectionHealth, ContractMachine, DataHistoryResponse, HistoryQueryParams, HistoryQueryParamsV2, HistoryRange } from '../../domain/dataContract.types';
+import type { ConnectionHealth, ContractMachine, DataHistoryResponse, DataHistoryResponseV2, HistoryQueryParams, HistoryQueryParamsV2, HistoryRange, HistoryRangeV2 } from '../../domain/dataContract.types';
 import type { ActivityAnalyticsGroupBy, ActivityAnalyticsRange, ActivityAnalyticsResponse } from '../../domain/activityAnalytics.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ActivityAnalyticsWidgetConfig, AlertHistoryWidgetConfig, MachineActivityWidgetConfig, ProdHistoryWidgetConfig, ProdTrendWidgetConfig, TemporalBucket, WidgetConfig } from '../../domain/admin.types';
@@ -28,6 +28,10 @@ import { isDataHistoryConnectionError } from '../../services/dataHistory.service
 import { generateTrendData } from '../../utils/trendDataGenerator';
 import { isDataHistoryResponseCompatible } from '../../queries/useDataHistory';
 import { mapTrendChartLegacyHistory, type TrendChartLegacyDataPoint } from '../renderers/trendChartLegacyModel';
+import { coerceDataHistoryResponseForTrendChartV2 } from '../../utils/dataHistoryResponseV2';
+import { buildTrendChartV2SimulatedHistory } from '../../utils/trendChartV2Simulation';
+import { mapHistoricalDensityToMaxPoints } from '../../utils/trendChartV2Density';
+import { recordTrendChartV2PerformanceDiagnostic } from '../../utils/trendChartV2PerformanceDiagnostics';
 
 const PRODUCTION_HISTORY_WINDOW_SIZE: Record<TemporalBucket, number> = { hour: 24, shift: 15, day: 14, month: 12 };
 
@@ -92,6 +96,35 @@ export interface TrendChartPresentationData {
     isShowingRefreshFailedSnapshot: boolean;
     runtimeState: 'disconnected' | 'error' | 'empty';
     onRangeChange: (range: HistoryRange) => void;
+}
+
+export interface TrendChartV2PresentationData {
+    data: DataHistoryResponseV2 | null;
+    displayedRange: HistoryRangeV2;
+    displayedCustomWindow: { start: string; end: string } | null;
+    isSimulated: boolean;
+    isLoading: boolean;
+    isError: boolean;
+    error: Error | null;
+    isFetching: boolean;
+    isPlaceholderData: boolean;
+    isRefreshing: boolean;
+    isLoadingData: boolean;
+    isShowingRefreshingSnapshot: boolean;
+    isShowingRefreshFailedSnapshot: boolean;
+    isNoData: boolean;
+    runtimeState: 'loading' | 'disconnected' | 'error' | 'empty';
+    onRangeChange: (range: Exclude<HistoryRangeV2, 'custom'>) => void;
+    onCustomWindowChange: (window: { start: string; end: string } | null) => void;
+}
+
+const TREND_V2_PREFETCH_MAX_WIDGETS = 12;
+const TREND_V2_PREFETCH_MAX_HISTORY_WIDGETS = 3;
+
+function resolveAdjacentTrendV2Range(range: Exclude<HistoryRangeV2, 'custom'>): Exclude<HistoryRangeV2, 'custom'> | null {
+    const ranges: Array<Exclude<HistoryRangeV2, 'custom'>> = ['1h', '24h', '7d', '30d', '12m'];
+    const index = ranges.indexOf(range);
+    return index < 0 ? null : ranges[index + 1] ?? ranges[index - 1] ?? null;
 }
 
 function useEntry<C extends PresentationCapability>(widget: WidgetConfig, capability: C, payload: WidgetPresentationPayloadByCapability[C]): WidgetPresentationEntry<C> {
@@ -247,15 +280,122 @@ export function TrendChartController({ widget, equipmentMap, machines, isLoading
     return <>{render(entry)}</>;
 }
 
-export function TrendChartV2Controller({ widget, queryClient, render }: PresentationControllerProps) {
-    const params = useMemo<HistoryQueryParamsV2 | null>(() => widget.binding?.mode === 'real_variable' && widget.binding.machineId !== undefined && widget.binding.variableKey
-        ? { machineId: widget.binding.machineId, variableKey: widget.binding.variableKey, range: '24h' } : null, [widget.binding]);
+export function TrendChartV2Controller({ widget, equipmentMap, machines, isLoadingData = false, siblingWidgets, queryClient, render }: PresentationControllerProps) {
+    const frame = useDashboardPresentationFrame();
+    const [range, setRange] = useState<Exclude<HistoryRangeV2, 'custom'>>('24h');
+    const [customWindow, setCustomWindow] = useState<{ start: string; end: string } | null>(null);
+    const [confirmedHistorySnapshot, setConfirmedHistorySnapshot] = useState<{
+        ownerKey: string;
+        selectionKey: string;
+        revision: string;
+        range: HistoryRangeV2;
+        customWindow: { start: string; end: string } | null;
+        data: DataHistoryResponseV2;
+    } | null>(null);
+    const [isWidgetVisible, setIsWidgetVisible] = useState<boolean | null>(null);
+    const visibilityObserverRef = useRef<IntersectionObserver | null>(null);
+    const contextClient = useContext(QueryClientContext);
+    const client = queryClient ?? contextClient;
+    const historyEnabled = isDataHistoryEnabled();
+    const resolved = resolveBinding(widget, equipmentMap, machines);
+    const maxPoints = mapHistoricalDensityToMaxPoints((widget as { displayOptions?: { historicalDensity?: unknown } }).displayOptions?.historicalDensity);
+    const isSimulatedBinding = widget.binding?.mode === 'simulated_value';
+    const isRealBinding = widget.binding?.mode === 'real_variable';
+    const bindingMachineId = widget.binding?.machineId;
+    const bindingVariableKey = widget.binding?.variableKey;
+    const historyOwnerKey = `${widget.id}:${widget.binding?.mode ?? 'unbound'}:${bindingMachineId ?? 'none'}:${bindingVariableKey ?? 'none'}`;
+    const params = useMemo<HistoryQueryParamsV2 | null>(() => isRealBinding && bindingMachineId !== undefined && bindingVariableKey && historyEnabled
+        ? customWindow
+            ? { machineId: bindingMachineId, variableKey: bindingVariableKey, range: 'custom', start: customWindow.start, end: customWindow.end, maxPoints }
+            : { machineId: bindingMachineId, variableKey: bindingVariableKey, range, maxPoints }
+        : null, [bindingMachineId, bindingVariableKey, customWindow, historyEnabled, isRealBinding, maxPoints, range]);
     const history = useDataHistory(params);
+    const activeRange: HistoryRangeV2 = customWindow ? 'custom' : range;
+    const isCompatible = history.data !== null && isDataHistoryResponseCompatible(params, history.data);
+    const currentData = isRealBinding && history.data !== null && isCompatible
+        ? coerceDataHistoryResponseForTrendChartV2(history.data, activeRange)
+        : null;
+    const currentSnapshot = currentData ? {
+        ownerKey: historyOwnerKey,
+        selectionKey: `${activeRange}:${customWindow?.start ?? ''}:${customWindow?.end ?? ''}`,
+        revision: JSON.stringify(currentData),
+        range: activeRange,
+        customWindow,
+        data: currentData,
+    } : null;
+
+    if (currentSnapshot && !history.isPlaceholderData && !history.isError && (
+        confirmedHistorySnapshot?.ownerKey !== currentSnapshot.ownerKey
+        || confirmedHistorySnapshot.selectionKey !== currentSnapshot.selectionKey
+        || confirmedHistorySnapshot.revision !== currentSnapshot.revision
+    )) {
+        setConfirmedHistorySnapshot(currentSnapshot);
+    }
+
+    const ownerConfirmedSnapshot = confirmedHistorySnapshot?.ownerKey === historyOwnerKey ? confirmedHistorySnapshot : null;
+    const shouldPreserveSnapshot = (history.isPlaceholderData || history.isRefreshing || history.isError) && ownerConfirmedSnapshot !== null;
+    const visibleSnapshot = shouldPreserveSnapshot ? ownerConfirmedSnapshot : currentSnapshot;
+    const baseValue = resolved.value == null ? null : typeof resolved.value === 'number' ? resolved.value : Number.parseFloat(String(resolved.value));
+    const simulatedData = useMemo(() => isSimulatedBinding && baseValue !== null && Number.isFinite(baseValue)
+        ? buildTrendChartV2SimulatedHistory({ widgetId: widget.id, machineId: bindingMachineId, variableKey: bindingVariableKey, range: customWindow ? 'custom' : range, customWindow: customWindow ?? undefined, baseValue })
+        : null, [baseValue, bindingMachineId, bindingVariableKey, customWindow, isSimulatedBinding, range, widget.id]);
+    const data = isSimulatedBinding ? simulatedData : visibleSnapshot?.data ?? null;
+    const displayedRange = isSimulatedBinding ? activeRange : visibleSnapshot?.range ?? activeRange;
+    const displayedCustomWindow = isSimulatedBinding ? customWindow : visibleSnapshot?.customWindow ?? customWindow;
+    const isNoData = isSimulatedBinding ? data === null : !history.isLoading && data === null;
+    const isRealLoading = !isSimulatedBinding && params !== null && history.isLoading && visibleSnapshot === null;
+    const runtimeState: TrendChartV2PresentationData['runtimeState'] = isRealLoading || isLoadingData
+        ? 'loading'
+        : history.isError
+            ? (isDataHistoryConnectionError(history.error) ? 'disconnected' : 'error')
+            : 'empty';
+    const onVisibilityTargetChange = useCallback((element: HTMLDivElement | null) => {
+        visibilityObserverRef.current?.disconnect();
+        visibilityObserverRef.current = null;
+        if (!element || typeof IntersectionObserver === 'undefined') {
+            setIsWidgetVisible(null);
+            return;
+        }
+        const observer = new IntersectionObserver(([intersection]) => setIsWidgetVisible(intersection?.isIntersecting ?? false));
+        observer.observe(element);
+        visibilityObserverRef.current = observer;
+    }, []);
+
+    useEffect(() => () => visibilityObserverRef.current?.disconnect(), []);
     useEffect(() => {
-        if (params && queryClient) void queryClient.prefetchQuery(createDataHistoryQueryOptions(params));
-    }, [params, queryClient]);
-    const entry = useEntry(widget, 'trend-chart-v2', { data: history.data, dataSummary: { isLoading: history.isLoading, isError: history.isError } });
-    return <>{render(entry)}</>;
+        if (!client || !params || !isWidgetVisible || customWindow || history.isLoading || history.isFetching || history.isRefreshing || history.isPlaceholderData || history.isError || !history.data) return;
+        const totalWidgetCount = siblingWidgets?.length ?? 0;
+        const heavyHistoryWidgetCount = siblingWidgets?.filter((candidate) => candidate.type === 'trend-chart-v2').length ?? 0;
+        const targetRange = resolveAdjacentTrendV2Range(range);
+        if (!targetRange || totalWidgetCount === 0 || heavyHistoryWidgetCount === 0 || totalWidgetCount > TREND_V2_PREFETCH_MAX_WIDGETS || heavyHistoryWidgetCount > TREND_V2_PREFETCH_MAX_HISTORY_WIDGETS) return;
+        if (typeof document !== 'undefined' && (document.hidden || document.visibilityState === 'hidden')) return;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+        if (typeof client.getQueryState !== 'function' || (typeof client.isFetching === 'function' && client.isFetching() > 0)) return;
+        const prefetchParams = { machineId: bindingMachineId as number, variableKey: bindingVariableKey as string, range: targetRange, maxPoints };
+        const options = createDataHistoryQueryOptions(prefetchParams);
+        const targetState = client.getQueryState(options.queryKey);
+        if (targetState && (targetState.status === 'success' || targetState.fetchStatus === 'fetching')) return;
+        let cancelled = false;
+        const schedule = typeof requestIdleCallback === 'function' ? requestIdleCallback : ((callback: IdleRequestCallback) => window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 0));
+        const cancel = typeof cancelIdleCallback === 'function' ? cancelIdleCallback : window.clearTimeout;
+        const handle = schedule(() => {
+            if (cancelled) return;
+            void client.prefetchQuery(options).catch((prefetchError: unknown) => {
+                if (!(prefetchError instanceof DOMException && prefetchError.name === 'AbortError')) recordTrendChartV2PerformanceDiagnostic({ widgetId: widget.id, event: 'prefetch_denied', reason: 'prefetch_failed' });
+            });
+        });
+        return () => {
+            cancelled = true;
+            cancel(handle as never);
+            if (typeof client.cancelQueries === 'function') void client.cancelQueries({ queryKey: options.queryKey });
+        };
+    }, [bindingMachineId, bindingVariableKey, client, customWindow, frame.revisionKey, history.data, history.isError, history.isFetching, history.isLoading, history.isPlaceholderData, history.isRefreshing, isWidgetVisible, maxPoints, params, range, siblingWidgets, widget.id, widget.type]);
+
+    const entry = useEntry(widget, 'trend-chart-v2', {
+        data: { data, displayedRange, displayedCustomWindow, isSimulated: isSimulatedBinding, isLoading: history.isLoading, isError: history.isError, error: history.error, isFetching: history.isFetching, isPlaceholderData: history.isPlaceholderData, isRefreshing: history.isRefreshing, isLoadingData, isShowingRefreshingSnapshot: !isSimulatedBinding && history.isRefreshing && ownerConfirmedSnapshot !== null, isShowingRefreshFailedSnapshot: !isSimulatedBinding && history.isError && ownerConfirmedSnapshot !== null, isNoData, runtimeState, onRangeChange: setRange, onCustomWindowChange: setCustomWindow },
+        dataSummary: { isLoading: history.isLoading, isError: history.isError },
+    });
+    return <div ref={onVisibilityTargetChange} className="h-full w-full">{render(entry)}</div>;
 }
 
 export function ActivityAnalyticsPresentationController({ widget, machines, siblingWidgets, queryClient, render }: PresentationControllerProps) {

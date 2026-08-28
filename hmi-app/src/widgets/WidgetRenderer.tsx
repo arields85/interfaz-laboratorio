@@ -249,6 +249,7 @@ export default function WidgetRenderer({
                     className={className}
                     renderContext={renderContext}
                     siblingWidgets={siblingWidgets}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;

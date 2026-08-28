@@ -80,22 +80,71 @@ describe('presentation controllers', () => {
         expect(screen.getByTestId('missing-machine-entry')).toHaveTextContent('"ageMs":null');
     });
 
-    it('keeps trend V2 prefetch ownership in its controller seam', () => {
+    it('publishes the V2 continuity payload and suppresses cached prefetch targets', () => {
+        let emitVisibility: IntersectionObserverCallback | undefined;
+        class VisibilityObserver { public constructor(callback: IntersectionObserverCallback) { emitVisibility = callback; } public observe(): void {} public disconnect(): void {} }
+
+        vi.stubGlobal('IntersectionObserver', VisibilityObserver);
+        const scheduled: IdleRequestCallback[] = [];
+        const cancelIdleCallback = vi.fn();
+        vi.stubGlobal('requestIdleCallback', ((callback: IdleRequestCallback) => { scheduled.push(callback); return scheduled.length; }) as typeof requestIdleCallback);
+        vi.stubGlobal('cancelIdleCallback', cancelIdleCallback as typeof cancelIdleCallback);
         const prefetchQuery = vi.fn().mockResolvedValue(undefined);
-        const widget = { ...makeWidget({ id: 'trend-v2' }), type: 'trend-chart-v2' as const, binding: { mode: 'real_variable' as const, machineId: 101, variableKey: 'temperature' } };
-        render(
-            <TrendChartV2Controller
-                widget={widget}
-                equipmentMap={new Map()}
-                queryClient={{ prefetchQuery } as never}
-                render={(entry) => <output data-testid="entry">{entry.capability}</output>}
-            />,
+        const getQueryState = vi.fn().mockReturnValue(undefined);
+        const cancelQueries = vi.fn().mockResolvedValue(undefined);
+        const response = {
+            contractVersion: '1.1.0',
+            machineId: 101,
+            variableKey: 'temperature',
+            range: '24h' as const,
+            unit: '°C',
+            window: { start: '2026-06-18T12:00:00.000Z', end: '2026-06-18T14:00:00.000Z', timezone: 'UTC', bucketMs: 60_000 },
+            series: [
+                { timestamp: '2026-06-18T12:00:00.000Z', timestampMs: Date.parse('2026-06-18T12:00:00.000Z'), value: 45 },
+                { timestamp: '2026-06-18T14:00:00.000Z', timestampMs: Date.parse('2026-06-18T14:00:00.000Z'), value: 52 },
+            ],
+            summary: { last: 52, min: 45, max: 52, avg: 48.5 },
+        };
+        vi.mocked(useDataHistory).mockReturnValue({ data: response, isLoading: false, isError: false, error: null, isEnabled: true, isFetching: false, isPlaceholderData: false, isRefreshing: false });
+
+        const widget = { ...makeWidget({ id: 'trend-v2-presentation' }), type: 'trend-chart-v2' as const, binding: { mode: 'real_variable' as const, machineId: 101, variableKey: 'temperature' } };
+        const { rerender } = render(
+            <DashboardPresentationFrameProvider dashboardId="dashboard" viewId="view" profileRevision={1} expectedWidgetIds={[widget.id]}>
+                <TrendChartV2Controller
+                    widget={widget}
+                    equipmentMap={new Map()}
+                    siblingWidgets={[widget]}
+                    queryClient={{ prefetchQuery, getQueryState, cancelQueries } as never}
+                    render={(entry) => {
+                        const payload = entry.payload.data as { data: typeof response; displayedRange: string };
+                        return <div data-testid="v2-presentation-payload">{`${entry.revisionKey}:${payload.data.series.length}:${payload.displayedRange}`}</div>;
+                    }}
+                />
+            </DashboardPresentationFrameProvider>,
         );
 
-        expect(screen.getByTestId('entry')).toHaveTextContent('trend-chart-v2');
-        expect(useDataHistory).toHaveBeenCalledTimes(1);
-        expect(prefetchQuery).toHaveBeenCalledTimes(1);
-        expect(prefetchQuery.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ queryKey: ['data', 'history', 101, 'temperature', '24h', null, null, null] }));
+        expect(screen.getByTestId('v2-presentation-payload')).toHaveTextContent('dashboard:view:1:2:24h');
+        expect(prefetchQuery).not.toHaveBeenCalled();
+
+        act(() => emitVisibility?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+
+        expect(scheduled).toHaveLength(1);
+        const adjacentQueryKey = ['data', 'history', 101, 'temperature', '7d', null, null, 800];
+        expect(getQueryState).toHaveBeenLastCalledWith(adjacentQueryKey);
+
+        getQueryState.mockReturnValue({ status: 'success', fetchStatus: 'idle' });
+        rerender(
+            <DashboardPresentationFrameProvider dashboardId="dashboard" viewId="view" profileRevision={2} expectedWidgetIds={[widget.id]}>
+                <TrendChartV2Controller widget={widget} equipmentMap={new Map()} siblingWidgets={[widget]} queryClient={{ prefetchQuery, getQueryState, cancelQueries } as never} render={(entry) => <div data-testid="v2-presentation-payload">{entry.revisionKey}</div>} />
+            </DashboardPresentationFrameProvider>,
+        );
+
+        expect(cancelIdleCallback).toHaveBeenCalledWith(1);
+        expect(cancelQueries).toHaveBeenCalledWith({ queryKey: adjacentQueryKey });
+        expect(scheduled).toHaveLength(1);
+        expect(screen.getByTestId('v2-presentation-payload')).toHaveTextContent('dashboard:view:2');
+        expect(prefetchQuery).not.toHaveBeenCalled();
+        vi.unstubAllGlobals();
     });
 
     it('owns legacy trend history and sends the canonical renderer one continuity payload', () => {
