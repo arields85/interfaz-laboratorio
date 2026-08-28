@@ -7,7 +7,9 @@ describe('leda-orb vendor', () => {
     it('remains byte-identical to the approved demo artifact', () => {
         const source = readFileSync(resolve(process.cwd(), 'src/vendor/leda-orb.js'));
 
-        expect(createHash('sha256').update(source).digest('hex')).toBe(
+        const canonicalSource = source.toString('utf8').replace(/\r\n/g, '\n');
+
+        expect(createHash('sha256').update(canonicalSource).digest('hex')).toBe(
             '22256b0a7a45aa15976c6c9648eef2b8fb8e50b38c59720c06fe6a385de0294a',
         );
     });

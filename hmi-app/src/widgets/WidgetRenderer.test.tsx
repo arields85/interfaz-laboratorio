@@ -22,6 +22,7 @@ import { useActivitySeries } from '../queries/useActivitySeries';
 import { useDataHistory } from '../queries/useDataHistory';
 import { subscribeActivityAnalyticsPerformanceDiagnostics } from '../utils/activityAnalyticsPerformanceDiagnostics';
 import WidgetPresentationBoundary from '../components/viewer/WidgetPresentationBoundary';
+import { DashboardPresentationFrameProvider } from '../services/dashboardPresentationFrame.service';
 import WidgetRenderer from './WidgetRenderer';
 
 const trendChartV2RendererSpy = vi.fn();
@@ -1005,12 +1006,19 @@ describe('WidgetRenderer', () => {
 
         try {
             renderWithQueryClient(
-                <WidgetRenderer
-                    widget={activityAnalyticsWidget}
-                    equipmentMap={equipmentMap}
-                    machines={machines}
-                    siblingWidgets={siblingWidgets}
-                />,
+                <DashboardPresentationFrameProvider
+                    dashboardId="activity-pressure-dashboard"
+                    viewId="activity-pressure-view"
+                    profileRevision={1}
+                    expectedWidgetIds={[activityAnalyticsWidget.id]}
+                >
+                    <WidgetPresentationBoundary
+                        widget={activityAnalyticsWidget}
+                        equipmentMap={equipmentMap}
+                        machines={machines}
+                        siblingWidgets={siblingWidgets}
+                    />
+                </DashboardPresentationFrameProvider>,
                 { prefetchQuery },
             );
 

@@ -18,9 +18,11 @@ import { normalizeSimulatedEquipmentStatus } from '../../utils/statusWidget';
 import { normalizeSimulatedToContractStatus } from '../../utils/connectionWidget';
 import { resolveInfoCardFieldContent, resolveInfoCardFields } from '../../utils/infoCardDisplayOptions';
 import { buildActivityAnalyticsSimulatedHistory } from '../../utils/activityAnalyticsSimulation';
+import { recordActivityAnalyticsPerformanceDiagnostic } from '../../utils/activityAnalyticsPerformanceDiagnostics';
 import { subscribeAlertHistory, clearAlertHistoryEntries, type AlertHistoryCoordinatorState } from '../renderers/alertHistoryCoordinator';
 import { clamp, round2 } from '../../utils/chartHelpers';
 import type { TemporalTrendPoint } from '../../utils/temporalGrouping';
+import { getWidgetPresentationCapability } from '../../utils/widgetCapabilities';
 
 const PRODUCTION_HISTORY_WINDOW_SIZE: Record<TemporalBucket, number> = { hour: 24, shift: 15, day: 14, month: 12 };
 
@@ -48,6 +50,18 @@ function resolvePresentationValue<T>(configured: boolean, response: T | null | u
 function resolveMachineActivityFixtureValue(widgetId: string): number {
     const hash = [...widgetId].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0);
     return 0.35 + ((hash % 30) / 100);
+}
+
+function countActivityAnalyticsWidgets(widgetId: string, siblingWidgets?: WidgetConfig[]): number {
+    const activityAnalyticsWidgetIds = new Set<string>([widgetId]);
+
+    siblingWidgets?.forEach((candidate) => {
+        if (getWidgetPresentationCapability(candidate.type) === 'activity-analytics') {
+            activityAnalyticsWidgetIds.add(candidate.id);
+        }
+    });
+
+    return activityAnalyticsWidgetIds.size;
 }
 
 export interface PresentationControllerProps {
@@ -118,7 +132,7 @@ export function TrendChartV2Controller({ widget, queryClient, render }: Presenta
     return <>{render(entry)}</>;
 }
 
-export function ActivityAnalyticsPresentationController({ widget, machines, queryClient, render }: PresentationControllerProps) {
+export function ActivityAnalyticsPresentationController({ widget, machines, siblingWidgets, queryClient, render }: PresentationControllerProps) {
     const frame = useDashboardPresentationFrame();
     const options = resolveActivityAnalyticsDisplayOptions((widget as ActivityAnalyticsWidgetConfig).displayOptions);
     const [range, setRange] = useState<ActivityAnalyticsRange>(options.range);
@@ -145,8 +159,24 @@ export function ActivityAnalyticsPresentationController({ widget, machines, quer
         : { ...activitySeries, data: resolvedActivity.value };
     const contextClient = useContext(QueryClientContext);
     const client = queryClient ?? contextClient;
+    const activityAnalyticsWidgetCount = countActivityAnalyticsWidgets(widget.id, siblingWidgets);
+    const lastPrefetchDecisionKeyRef = useRef<string | null>(null);
     useEffect(() => {
         if (!client || !activitySeries.isEnabled || options.dataMode === 'simulated' || machineId === undefined || range === '12m') return;
+
+        if (activityAnalyticsWidgetCount > 2) {
+            const decisionKey = `${frame.revisionKey}:${range}:dashboard_pressure`;
+            if (lastPrefetchDecisionKeyRef.current !== decisionKey) {
+                lastPrefetchDecisionKeyRef.current = decisionKey;
+                recordActivityAnalyticsPerformanceDiagnostic({
+                    widgetId: widget.id,
+                    event: 'prefetch_suppressed',
+                    reason: 'dashboard_pressure',
+                });
+            }
+            return;
+        }
+
         const nextRange: ActivityAnalyticsRange = range === '7d' ? '30d' : '7d';
         let cancelled = false;
         const prefetch = () => {
@@ -168,7 +198,7 @@ export function ActivityAnalyticsPresentationController({ widget, machines, quer
             cancelled = true;
             window.clearTimeout(handle);
         };
-    }, [activitySeries.isEnabled, client, frame.revisionKey, machineId, options.dataMode, range]);
+    }, [activityAnalyticsWidgetCount, activitySeries.isEnabled, client, frame.revisionKey, machineId, options.dataMode, range, widget.id]);
     const activeOptions = useMemo(() => ({ ...options, range, groupBy }), [groupBy, options, range]);
     const entry = useEntry(widget, 'activity-analytics', { data: { activitySeries: presentationActivitySeries, displayOptions: activeOptions, turnoMode, onRangeChange: setRange, onGroupByChange: setGroupBy, onTurnoModeChange: setTurnoMode, provenance: resolvedActivity.provenance } });
     return <>{render(entry)}</>;
