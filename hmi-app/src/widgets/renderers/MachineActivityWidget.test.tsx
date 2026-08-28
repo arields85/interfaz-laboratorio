@@ -1,10 +1,13 @@
 import '@testing-library/jest-dom/vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render as rtlRender, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cloneElement, type ReactElement } from 'react';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import MachineActivityWidget, { resolveActivityVisualAnimationDuration } from './MachineActivityWidget';
+import * as bindingResolver from '../resolvers/bindingResolver';
+import * as machineActivityHook from '../../hooks/useMachineActivity';
 import {
     DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
     FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX,
@@ -16,6 +19,25 @@ import {
 import { resolveTravelingTopCapSpeed } from '../../utils/travelingTopCapSpeed';
 
 const equipmentMap = new Map<string, EquipmentSummary>();
+const presentationActivity = { activityIndex: 64, productiveState: 'producing' as const, stateLabel: 'Produciendo', stateVisuals: { primary: 'var(--color-status-normal)', gradientColors: ['var(--color-status-normal)', 'var(--color-status-normal)'] as [string, string], glowColor: 'var(--color-status-normal)', animationDuration: 500 }, smoothedPower: 0.64, rawPower: 0.64, isValid: true };
+
+function MachineActivityTestHarness({ element }: { element: ReactElement }) {
+    const presentationData = (element.props as { presentationData?: unknown }).presentationData;
+    return presentationData === undefined ? <MachineActivityComputedHarness element={element} /> : cloneElement(element as ReactElement<{ presentationData?: unknown }>, { presentationData });
+}
+
+function MachineActivityComputedHarness({ element }: { element: ReactElement }) {
+    const props = element.props as { widget: MachineActivityWidgetConfig; equipmentMap: Map<string, EquipmentSummary>; machines?: ContractMachine[]; isLoadingData?: boolean };
+    const resolved = bindingResolver.resolveBinding(props.widget, props.equipmentMap, props.machines);
+    const isSimulated = props.widget.binding?.mode === 'simulated_value';
+    const activity = machineActivityHook.useMachineActivity(props.isLoadingData ? null : resolved.value, props.widget.displayOptions ?? {}, { simulated: isSimulated, sourceKey: isSimulated ? 'simulated' : 'test-source' });
+    return cloneElement(element as ReactElement<{ presentationData?: unknown }>, { presentationData: { resolved, activity } });
+}
+
+function render(element: ReactElement) {
+    const rendered = rtlRender(<MachineActivityTestHarness element={element} />);
+    return { ...rendered, rerender: (nextElement: ReactElement) => rendered.rerender(<MachineActivityTestHarness element={nextElement} />) };
+}
 
 class MockResizeObserver implements ResizeObserver {
     public constructor(private readonly callback: ResizeObserverCallback) {}
@@ -233,6 +255,16 @@ describe('MachineActivityWidget', () => {
         expect(screen.getAllByTestId('gauge-circular-arc-segment')[0]).toHaveAttribute('stroke-linecap', 'butt');
         expect(screen.queryByTestId('gauge-circular-static-top-cap')).not.toBeInTheDocument();
         expect(screen.queryByTestId('gauge-circular-top-cap')).not.toBeInTheDocument();
+    });
+
+    it('renders controller-provided activity without resolving bindings or running the hook', () => {
+        vi.spyOn(bindingResolver, 'resolveBinding').mockImplementation(() => { throw new Error('renderer must not resolve bindings'); });
+        vi.spyOn(machineActivityHook, 'useMachineActivity').mockImplementation(() => { throw new Error('renderer must not run activity processing'); });
+
+        render(<MachineActivityWidget widget={makeWidget()} equipmentMap={equipmentMap} presentationData={{ resolved: { value: 0.64, unit: 'kW', status: 'normal', source: 'real' }, activity: presentationActivity, provenance: 'central-read-only' }} />);
+
+        expect(screen.getByText('64')).toBeInTheDocument();
+        expect(screen.getByText('Produciendo')).toBeInTheDocument();
     });
 
     it('renders invalid/no data state', () => {

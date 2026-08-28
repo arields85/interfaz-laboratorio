@@ -21,6 +21,7 @@ import { useTemporalSettings } from '../hooks/useTemporalSettings';
 import { useActivitySeries } from '../queries/useActivitySeries';
 import { useDataHistory } from '../queries/useDataHistory';
 import { subscribeActivityAnalyticsPerformanceDiagnostics } from '../utils/activityAnalyticsPerformanceDiagnostics';
+import WidgetPresentationBoundary from '../components/viewer/WidgetPresentationBoundary';
 import WidgetRenderer from './WidgetRenderer';
 
 const trendChartV2RendererSpy = vi.fn();
@@ -263,7 +264,7 @@ describe('WidgetRenderer', () => {
 
     it('dispatches machine-activity widgets to the dedicated renderer', () => {
         render(
-            <WidgetRenderer
+            <WidgetPresentationBoundary
                 widget={widget}
                 equipmentMap={equipmentMap}
                 machines={machines}
@@ -693,7 +694,7 @@ describe('WidgetRenderer', () => {
         });
 
         render(
-            <WidgetRenderer
+            <WidgetPresentationBoundary
                 widget={activityAnalyticsWidget}
                 equipmentMap={equipmentMap}
                 machines={machines}
@@ -757,7 +758,7 @@ describe('WidgetRenderer', () => {
         });
 
         renderWithQueryClient(
-            <WidgetRenderer
+            <WidgetPresentationBoundary
                 widget={prodTrendWidget}
                 equipmentMap={equipmentMap}
                 machines={machines}

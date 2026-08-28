@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState, useMemo, forwardRef } from 'react';
+import { useEffect, useRef, useMemo, useState, forwardRef } from 'react';
 import { AlertTriangle, AlertCircle, Clock, History, Gauge, Activity, Thermometer, Zap, Droplet, Wind, Settings, Fan, FoldVertical, HelpCircle, Trash2, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 import type { AlertHistoryWidgetConfig, WidgetConfig } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
@@ -6,10 +6,6 @@ import type { ContractMachine } from '../../domain/dataContract.types';
 import type { AlertHistoryEntry } from '../../domain/alertHistory.types';
 import { formatAlertHistoryAge, formatAlertHistoryValue } from '../../utils/alertHistoryFormatting';
 import WidgetHeader from '../../components/ui/WidgetHeader';
-import {
-    clearAlertHistoryEntries,
-    subscribeAlertHistory,
-} from './alertHistoryCoordinator';
 
 // =============================================================================
 // AlertHistoryWidget
@@ -39,11 +35,8 @@ interface AlertHistoryWidgetProps {
     /** Lista de todos los widgets del mismo dashboard (para evaluar hermanos). */
     siblingWidgets?: WidgetConfig[];
     className?: string;
+    presentationData?: unknown;
 }
-
-// Intervalo de polling default: 10 segundos
-const DEFAULT_POLL_INTERVAL = 10_000;
-
 
 // Mapa de íconos disponibles para el header (mismo catálogo que los demás widgets + History)
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -66,14 +59,15 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 export default function AlertHistoryWidget({
     widget,
-    equipmentMap,
-    machines,
-    siblingWidgets = [],
     className,
+    presentationData,
 }: AlertHistoryWidgetProps) {
-    const dashboardId = widget.displayOptions?.dashboardId ?? 'unknown';
+    const presented = presentationData as {
+        entries?: AlertHistoryEntry[];
+        activeSeverity?: 'normal' | 'warning' | 'critical';
+        onClear?: () => void;
+    } | undefined;
     const maxVisible = widget.displayOptions?.maxVisible ?? 5;
-    const pollInterval = widget.displayOptions?.pollInterval ?? DEFAULT_POLL_INTERVAL;
 
     // El ícono del header es NEUTRAL (no dinámico). El único elemento dinámico
     // es el punto lumínico pulsante. El ícono toma el color del título (muted).
@@ -107,33 +101,11 @@ export default function AlertHistoryWidget({
     //   Sin alertas activas → fondo estándar.
     // -------------------------------------------------------------------------
 
-    const [entries, setEntries] = useState<AlertHistoryEntry[]>([]);
-    const [activeSeverity, setActiveSeverity] = useState<'normal' | 'warning' | 'critical'>('normal');
+    const entries = presented?.entries ?? [];
+    const activeSeverity = presented?.activeSeverity ?? 'normal';
     const [visibleCount, setVisibleCount] = useState(5);
     const listRef = useRef<HTMLDivElement>(null);
     const entryRef = useRef<HTMLDivElement>(null);
-    const getEvaluationContext = useEffectEvent(() => ({
-        widgets: siblingWidgets,
-        equipmentMap,
-        machines,
-    }));
-    const applyCoordinatorState = useEffectEvent((state: {
-        entries: AlertHistoryEntry[];
-        activeSeverity: 'normal' | 'warning' | 'critical';
-    }) => {
-        setEntries(state.entries);
-        setActiveSeverity(state.activeSeverity);
-    });
-
-    // El coordinator mantiene una sola evaluación y un solo timer por dashboard.
-    useEffect(() => {
-        return subscribeAlertHistory({
-            dashboardId,
-            pollInterval,
-            getContext: getEvaluationContext,
-            onState: applyCoordinatorState,
-        });
-    }, [dashboardId, pollInterval]);
 
     // ResizeObserver: calcula cuántas filas caben en el contenedor sin scroll
     useEffect(() => {
@@ -226,7 +198,7 @@ export default function AlertHistoryWidget({
                     disabled={entries.length === 0}
                     className={entries.length === 0 ? 'text-industrial-muted/30 cursor-not-allowed' : 'text-industrial-muted hover:text-white transition-colors cursor-pointer'}
                     onClick={() => {
-                        clearAlertHistoryEntries(dashboardId);
+                        presented?.onClear?.();
                     }}
                 >
                     <Trash2 size={14} aria-hidden="true" />

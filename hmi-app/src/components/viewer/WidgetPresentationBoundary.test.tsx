@@ -41,9 +41,9 @@ function FrameProbe({ widgetId }: { widgetId: string }) {
 describe('WidgetPresentationBoundary', () => {
     it.each([
         ['metric-card', 'scalar'], ['kpi', 'scalar'], ['status', 'status'], ['connection-status', 'connection'],
-        ['trend-chart', 'trend-chart'], ['trend-chart-v2', 'trend-chart-v2'], ['prod-history', 'legacy-presentation'],
-        ['machine-activity', 'legacy-presentation'], ['activity-analytics', 'activity-analytics'], ['prod-trend', 'prod-trend'],
-        ['alert-history', 'legacy-presentation'], ['text-title', 'static'], ['info-card', 'static'],
+        ['trend-chart', 'trend-chart'], ['trend-chart-v2', 'trend-chart-v2'], ['prod-history', 'production-history'],
+        ['machine-activity', 'machine-activity'], ['activity-analytics', 'activity-analytics'], ['prod-trend', 'prod-trend'],
+        ['alert-history', 'alert-history'], ['text-title', 'static'], ['info-card', 'static'],
     ] as const)('registers and renders the %s capability route', (type, capability) => {
         const widget = makeWidget({ id: `route-${type}`, type: type as never });
 

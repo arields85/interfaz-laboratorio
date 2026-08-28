@@ -69,7 +69,7 @@ interface WidgetRendererProps {
     presentationEntry?: WidgetPresentationEntry;
 }
 
-const DATA_PRESENTATION_CAPABILITIES = new Set(['activity-analytics', 'prod-trend']);
+const DATA_PRESENTATION_CAPABILITIES = new Set(['activity-analytics', 'prod-trend', 'production-history', 'machine-activity', 'alert-history']);
 const NAVIGATION_INTERACTIVE_SELECTOR = [
     'button',
     'a',
@@ -151,6 +151,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
@@ -243,6 +244,7 @@ export default function WidgetRenderer({
                     isLoadingData={isLoadingData}
                     className={className}
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
@@ -255,6 +257,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     siblingWidgets={siblingWidgets}
                     className={className}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;

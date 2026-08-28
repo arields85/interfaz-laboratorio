@@ -50,7 +50,6 @@ import {
     buildAreaPath,
     formatTick,
     clamp,
-    round2,
     computeVisibleLabelIndices,
     getChartLetterSpacingPx,
     getChartTextFont,
@@ -122,19 +121,13 @@ const GROUPING_OPTIONS: Array<{ value: TemporalBucket; label: string }> = [
     { value: 'month', label: 'Mes' },
 ];
 
-const WINDOW_SIZE: Record<TemporalBucket, number> = {
-    hour: 24,
-    shift: 15,
-    day: 14,
-    month: 12,
-};
-
 interface ProdHistoryWidgetProps {
     widget: ProdHistoryWidgetConfig;
     equipmentMap: Map<string, EquipmentSummary>;
     isLoadingData?: boolean;
     className?: string;
     onPersistDisplayOptions?: (displayOptions: ProdHistoryPersistedDisplayPatch) => void;
+    presentationData?: unknown;
 }
 
 interface ManualBounds {
@@ -170,46 +163,6 @@ interface ProdHistoryBarsSvgProps {
 }
 
 type ProdHistoryBarsContainerProps = Omit<ProdHistoryBarsSvgProps, 'width' | 'height' | 'hoveredIndex' | 'onHoverChange'>;
-
-function stepBackByBucket(now: Date, bucket: TemporalBucket, steps: number): Date {
-    const date = new Date(now.getTime());
-
-    switch (bucket) {
-        case 'hour':
-            date.setHours(date.getHours() - steps);
-            return date;
-        case 'shift':
-            date.setHours(date.getHours() - (steps * 8));
-            return date;
-        case 'day':
-            date.setDate(date.getDate() - steps);
-            return date;
-        case 'month':
-            date.setMonth(date.getMonth() - steps);
-            return date;
-    }
-}
-
-function generateHistoricalSeries(bucket: TemporalBucket, reference: Date): TemporalTrendPoint[] {
-    const total = WINDOW_SIZE[bucket];
-
-    return Array.from({ length: total }, (_, index) => {
-        const stepsFromNow = total - 1 - index;
-        const timestamp = stepBackByBucket(reference, bucket, stepsFromNow);
-        const seasonal = Math.sin((index / Math.max(total - 1, 1)) * Math.PI * 2);
-        const microNoise = Math.sin(index * 0.61) * 1.9;
-        const trendDrift = Math.cos(index * 0.27) * 0.8;
-
-        const oee = clamp(74 + seasonal * 8 + microNoise + trendDrift, 58, 93);
-        const production = Math.max(90, (oee * 2.15) + 32 + seasonal * 9 + (Math.cos(index * 0.35) * 11));
-
-        return {
-            timestamp: timestamp.toISOString(),
-            production: round2(production),
-            oee: round2(oee),
-        };
-    });
-}
 
 function resolveAutoDomain(values: number[], minPadding: number, maxClamp?: number): [number, number] {
     if (values.length === 0) {
@@ -729,7 +682,13 @@ export default function ProdHistoryWidget({
     isLoadingData = false,
     className,
     onPersistDisplayOptions,
+    presentationData,
 }: ProdHistoryWidgetProps) {
+    const presented = presentationData as {
+        data?: TemporalTrendPoint[];
+        bucket?: TemporalBucket;
+        onBucketChange?: (bucket: TemporalBucket) => void;
+    } | undefined;
     const displayOptions = widget.displayOptions;
     const chartTitle = widget.title ?? displayOptions?.chartTitle ?? 'PRODUCCIÓN HISTÓRICA';
     const productionBaseLabel = displayOptions?.productionLabel ?? 'Producción';
@@ -767,9 +726,10 @@ export default function ProdHistoryWidget({
     const barWidthFactor = clamp(displayOptions?.productionBarWidth ?? 1, 0.5, 1.5);
     const HeaderIcon = resolveHeaderIcon(displayOptions?.icon);
 
-    const [bucket, setBucket] = useState<TemporalBucket>(() => displayOptions?.defaultTemporalGrouping ?? 'hour');
     const [showOee, setShowOee] = useState<boolean>(() => displayOptions?.defaultShowOee ?? true);
-    const rawSeries = useMemo(() => generateHistoricalSeries(bucket, new Date()), [bucket]);
+    const [localBucket, setLocalBucket] = useState<TemporalBucket>(() => displayOptions?.defaultTemporalGrouping ?? 'hour');
+    const bucket = presented?.bucket ?? localBucket;
+    const presentedData = presented?.data;
 
     if (productionChartModeState.sourceMode !== persistedProductionChartMode) {
         setProductionChartModeState({
@@ -794,7 +754,7 @@ export default function ProdHistoryWidget({
         setShowOee(checked);
     }, []);
 
-    const groupedData = useMemo(() => groupByTemporalBucket(rawSeries, bucket), [rawSeries, bucket]);
+    const groupedData = useMemo(() => groupByTemporalBucket(presentedData ?? [], bucket), [presentedData, bucket]);
 
     const { productionDomain, oeeDomain } = useMemo(() => resolveDomains(
         groupedData,
@@ -844,7 +804,7 @@ export default function ProdHistoryWidget({
                                     testId: 'prod-history-widget-runtime-group-selector',
                                     options: GROUPING_OPTIONS,
                                     selectedValue: bucket,
-                                    onSelect: (value) => setBucket(value as TemporalBucket),
+                                    onSelect: (value) => { const nextBucket = value as TemporalBucket; setLocalBucket(nextBucket); presented?.onBucketChange?.(nextBucket); },
                                 },
                             ]}
                         />

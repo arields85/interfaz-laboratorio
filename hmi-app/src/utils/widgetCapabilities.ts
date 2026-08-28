@@ -39,8 +39,8 @@ const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
 const WIDGET_PRESENTATION_CAPABILITIES: Record<WidgetType, PresentationCapability | undefined> = {
     'kpi': 'scalar', 'metric-card': 'scalar', 'status': 'status', 'connection-status': 'connection',
     'trend-chart': 'trend-chart', 'trend-chart-v2': 'trend-chart-v2', 'text-title': 'static', 'info-card': 'static',
-    'prod-history': 'legacy-presentation', 'machine-activity': 'legacy-presentation', 'activity-analytics': 'activity-analytics',
-    'prod-trend': 'prod-trend', 'alert-history': 'legacy-presentation',
+    'prod-history': 'production-history', 'machine-activity': 'machine-activity', 'activity-analytics': 'activity-analytics',
+    'prod-trend': 'prod-trend', 'alert-history': 'alert-history',
     'badge': undefined, 'sparkline': undefined, 'table': undefined, 'alert-list': undefined, 'text-summary': undefined,
     'multi-metric': undefined, 'ai-summary': undefined, 'section-title': undefined,
 };

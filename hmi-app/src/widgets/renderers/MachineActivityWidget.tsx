@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { MachineActivityDisplayOptions, MachineActivityWidgetConfig } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
+import type { ResolvedBinding } from '../../domain/widget.types';
 import { Activity, Thermometer, Zap, Droplet, Wind, Settings, Gauge, Fan, FoldVertical, HelpCircle, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 import GaugeDisplay, { CIRCULAR_VIEWBOX_SIZE } from '../../components/ui/GaugeDisplay';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
-import { useMachineActivity } from '../../hooks/useMachineActivity';
+import type { MachineActivityResult } from '../../hooks/useMachineActivity';
 import { getStateVisuals } from '../utils/machineActivity';
-import { resolveBinding } from '../resolvers/bindingResolver';
 import {
     DEFAULT_GAUGE_VALUE_FONT_SIZE,
     resolveActivityAnalyticsDonutCenterValueFontSize,
@@ -49,6 +49,7 @@ interface MachineActivityWidgetProps {
     machines?: ContractMachine[];
     isLoadingData?: boolean;
     className?: string;
+    presentationData?: unknown;
 }
 
 const WIDGET_VALUE_TEXT_STYLE = {
@@ -93,6 +94,7 @@ function clamp(value: number, min: number, max: number) {
     return Math.min(Math.max(value, min), max);
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only pure animation helper
 export function resolveActivityVisualAnimationDuration(deltaPoints: number) {
     return clamp(
         ACTIVITY_VISUAL_ANIMATION_BASE_MS + (Math.abs(deltaPoints) * ACTIVITY_VISUAL_ANIMATION_MS_PER_POINT),
@@ -215,16 +217,18 @@ function resolveIcon(displayOptions?: MachineActivityDisplayOptions) {
 
 export default function MachineActivityWidget({
     widget,
-    equipmentMap,
-    machines,
     isLoadingData,
     className,
+    presentationData,
 }: MachineActivityWidgetProps) {
+    const presented = presentationData as {
+        resolved?: ResolvedBinding;
+        activity?: MachineActivityResult;
+        sourceKey?: string;
+    } | undefined;
     const circularGaugeContainerRef = useRef<HTMLDivElement>(null);
     const [circularTextSizing, setCircularTextSizing] = useState(DEFAULT_CIRCULAR_TEXT_SIZING);
-    const resolved = isLoadingData
-        ? { value: null, unit: null }
-        : resolveBinding(widget, equipmentMap, machines);
+    const resolved = presented?.resolved ?? { value: null, unit: null };
     const opts = widget.displayOptions ?? {};
     const mode = opts.kpiMode ?? 'circular';
     const valueFontSizeOverride = resolveActivityAnalyticsDonutCenterValueFontSize(opts.valueFontSize)
@@ -254,9 +258,9 @@ export default function MachineActivityWidget({
     const prefersReducedMotion = usePrefersReducedMotion();
     const usesDynamicColor = opts.showDynamicColor !== false;
     const showsAnimation = opts.showStateAnimation !== false;
-    const activitySourceKey = isSimulatedBinding
+    const activitySourceKey = presented?.sourceKey ?? (isSimulatedBinding
         ? 'simulated'
-        : `${widget.binding?.bindingVersion ?? 'legacy'}:${widget.binding?.assetId ?? ''}:${widget.binding?.machineId ?? ''}:${widget.binding?.variableKey ?? ''}`;
+        : `${widget.binding?.bindingVersion ?? 'legacy'}:${widget.binding?.assetId ?? ''}:${widget.binding?.machineId ?? ''}:${widget.binding?.variableKey ?? ''}`);
     const {
         activityIndex,
         productiveState,
@@ -264,10 +268,15 @@ export default function MachineActivityWidget({
         stateVisuals,
         smoothedPower,
         isValid,
-    } = useMachineActivity(resolved.value, opts, {
-        simulated: isSimulatedBinding,
-        sourceKey: activitySourceKey,
-    });
+    } = presented?.activity ?? {
+        activityIndex: 0,
+        productiveState: 'stopped' as const,
+        stateLabel: 'Sin datos',
+        stateVisuals: getStateVisuals('stopped'),
+        smoothedPower: 0,
+        rawPower: null,
+        isValid: false,
+    };
     const prevProductiveStateRef = useRef(productiveState);
     const justEnteredSetupRef = useRef(false);
     const lastSetupNormalizedRef = useRef(0);
