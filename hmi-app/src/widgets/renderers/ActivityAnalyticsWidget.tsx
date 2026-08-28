@@ -1,5 +1,4 @@
-import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { QueryClientContext } from '@tanstack/react-query';
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { BarChart2 } from 'lucide-react';
 import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapter';
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, ShiftDefinition, WidgetConfig } from '../../domain/admin.types';
@@ -15,12 +14,7 @@ import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
 import { ANALYTICS_HISTORY_VARIABLE_KEY } from '../../domain/analyticsDataMode.types';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
-import {
-    createActivitySeriesQueryKey,
-    createActivitySeriesQueryOptions,
-    isActivitySeriesResponseCompatible,
-    useActivitySeries,
-} from '../../queries/useActivitySeries';
+import type { UseActivitySeriesResult } from '../../queries/useActivitySeries';
 import { DataServiceError } from '../../services/dataOverview.service';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import {
@@ -56,6 +50,7 @@ import {
 import { DEFAULT_ACTIVITY_ANALYTICS_TITLE } from '../../utils/activityAnalyticsTitle';
 import { buildActivityAnalyticsSimulatedHistory } from '../../utils/activityAnalyticsSimulation';
 import { buildActivityAnalyticsSummarySegments, type ActivityAnalyticsSummarySegmentBar } from '../../utils/activityAnalyticsSummarySegments';
+import type { ActivityAnalyticsPresentationData } from '../controllers/PresentationControllers';
 import {
     buildAreaPath,
     computeVisibleLabelIndices,
@@ -76,6 +71,7 @@ interface ActivityAnalyticsWidgetProps {
     className?: string;
     siblingWidgets?: WidgetConfig[];
     onPersistDisplayOptions?: (displayOptions: ActivityAnalyticsPersistedDisplayPatch) => void;
+    presentationData?: unknown;
 }
 
 type ResolvedActivityAnalyticsDisplayOptions = ReturnType<typeof resolveActivityAnalyticsDisplayOptions>;
@@ -134,8 +130,6 @@ const GROUP_BY_OPTIONS: Array<{ value: ResolvedActivityAnalyticsDisplayOptions['
     { value: 'week', label: 'SEMANA' },
     { value: 'month', label: 'MES' },
 ];
-const PREFETCHABLE_ACTIVITY_ANALYTICS_RANGES: Array<Exclude<ResolvedActivityAnalyticsDisplayOptions['range'], 'custom'>> = ['7d', '30d', '12m'];
-
 const GENERAL_TYPOGRAPHY_STYLE: CSSProperties = {
     fontFamily: 'var(--font-system)',
     fontWeight: 'var(--font-weight-system)',
@@ -433,28 +427,23 @@ export default function ActivityAnalyticsWidget({
     hasOverviewError = false,
     isLoadingData = false,
     className,
-    siblingWidgets,
     onPersistDisplayOptions,
+    presentationData,
 }: ActivityAnalyticsWidgetProps) {
-    const queryClient = useContext(QueryClientContext);
-    const displayOptions = resolveActivityAnalyticsDisplayOptions(widget.displayOptions);
+    const presented = presentationData as ActivityAnalyticsPresentationData | undefined;
+    const hasCanonicalPresentationData = presented?.provenance !== undefined;
+    const displayOptions = presented?.displayOptions ?? resolveActivityAnalyticsDisplayOptions(widget.displayOptions);
     const dataMode = resolveWidgetDataMode(widget) ?? displayOptions.dataMode;
     const [runtimeViewState, setRuntimeViewState] = useState<ActivityAnalyticsRuntimeViewState>(() => createRuntimeViewState(displayOptions));
-    const [simulatedNowMs] = useState(() => Date.now());
+    const [simulatedNowMs] = useState(() => hasCanonicalPresentationData ? 0 : Date.now());
     const [analyticsBodySize, setAnalyticsBodySize] = useState<{ width: number; height: number } | null>(null);
     const [lastSuccessfulSnapshotState, setLastSuccessfulSnapshotState] = useState<{
         ownerKey: string;
         snapshot: ActivityAnalyticsRenderSnapshot;
     } | null>(null);
-    const [widgetVisibilityState, setWidgetVisibilityState] = useState<{
-        ownerKey: string;
-        value: boolean | null;
-    } | null>(null);
     const analyticsBodyRef = useRef<HTMLDivElement | null>(null);
-    const widgetRootRef = useRef<HTMLDivElement | null>(null);
     const transitionStopRef = useRef<((reason?: string) => number) | null>(null);
     const lastRefreshFailureKeyRef = useRef<string | null>(null);
-    const lastPrefetchDecisionKeyRef = useRef<string | null>(null);
     const displayKey = createDisplayOptionsSyncKey(displayOptions);
 
     if (runtimeViewState.sourceDisplayKey !== displayKey || runtimeViewState.sourceGroupBy !== displayOptions.groupBy) {
@@ -470,7 +459,8 @@ export default function ActivityAnalyticsWidget({
     }
 
     const { selectionOverride, runtimeGroupBy } = runtimeViewState;
-    const selectedDisplayOptions = selectionOverride ?? displayOptions;
+    const controllerOwnsSelection = presented?.onRangeChange !== undefined || presented?.onGroupByChange !== undefined;
+    const selectedDisplayOptions = controllerOwnsSelection ? displayOptions : selectionOverride ?? displayOptions;
     const activeDisplayRules = resolveActivityAnalyticsDisplayRules({
         range: selectedDisplayOptions.range,
         start: selectedDisplayOptions.start,
@@ -494,7 +484,9 @@ export default function ActivityAnalyticsWidget({
         selectedDisplayOptions.groupBarWidth,
     );
     const showTurnoModeControl = activeGroupBy === 'shift' && activeDisplayRules.range === '7d';
-    const activeTurnoMode = activeDisplayRules.turnoDetailEligible ? runtimeViewState.turnoMode : 'summary';
+    const activeTurnoMode = activeDisplayRules.turnoDetailEligible
+        ? presented?.onTurnoModeChange ? presented.turnoMode ?? 'summary' : runtimeViewState.turnoMode
+        : 'summary';
     const groupsTitle = resolveActivityAnalyticsGroupsTitle({
         range: activeDisplayRules.range,
         groupBy: activeGroupBy,
@@ -514,30 +506,15 @@ export default function ActivityAnalyticsWidget({
     const lastSuccessfulSnapshot = lastSuccessfulSnapshotState?.ownerKey === runtimeScopeKey
         ? lastSuccessfulSnapshotState.snapshot
         : null;
-    const isWidgetVisible = widgetVisibilityState?.ownerKey === runtimeScopeKey
-        ? widgetVisibilityState.value
-        : null;
     const isOverviewUnavailable = isActivityOverviewUnavailable({
         connection,
         hasOverviewError,
     });
     const { config, shifts } = useTemporalSettings();
 
-    const activitySeriesRequest = !isSimulated && machineBinding.machineId != null ? {
-        machineId: machineBinding.machineId,
-        ...(activeDisplayOptions.range === 'custom'
-            ? {
-                range: 'custom' as const,
-                start: activeDisplayOptions.start ?? '',
-                end: activeDisplayOptions.end ?? '',
-            }
-            : {
-                range: activeDisplayOptions.range,
-            }),
-    } : null;
-    const activitySeries = useActivitySeries(activitySeriesRequest);
+    const activitySeries: UseActivitySeriesResult = presented?.activitySeries ?? ({ data: null } as UseActivitySeriesResult);
     const simulatedActivityData = useMemo(() => {
-        if (!isSimulated) {
+        if (!isSimulated || hasCanonicalPresentationData) {
             return null;
         }
 
@@ -574,14 +551,8 @@ export default function ActivityAnalyticsWidget({
                 bucket: 'synthetic',
             },
         };
-    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, isSimulated, simulatedMachineId, simulatedNowMs, widget.id]);
-    const hasIncompatibleTransientData = !isSimulated
-        && (activitySeries.isPlaceholderData || activitySeries.isError)
-        && activitySeries.data !== null
-        && !isActivitySeriesResponseCompatible(activitySeriesRequest, activitySeries.data);
-    const activityData = isSimulated
-        ? simulatedActivityData
-        : hasIncompatibleTransientData ? null : activitySeries.data;
+    }, [activeDisplayOptions.end, activeDisplayOptions.prodThresholdKw, activeDisplayOptions.range, activeDisplayOptions.setupThresholdKw, activeDisplayOptions.start, hasCanonicalPresentationData, isSimulated, simulatedMachineId, simulatedNowMs, widget.id]);
+    const activityData = isSimulated ? activitySeries.data ?? simulatedActivityData : activitySeries.data;
     const resolvedTimezone = useMemo(() => resolveActivityAnalyticsTimezone({
         temporalSettings: { plantTimezone: config.plantTimezone },
         windowTimezone: activityData?.window.timezone,
@@ -591,6 +562,7 @@ export default function ActivityAnalyticsWidget({
     const analyticsWindowEnd = activityData?.window.end;
     const analyticsBucketMs = activityData?.window.bucketMs;
     const analyticsNowMs = isSimulated ? simulatedNowMs : undefined;
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const baseAnalytics = useMemo(() => {
         if (!analyticsSeries || analyticsBucketMs === undefined) {
             return null;
@@ -610,6 +582,7 @@ export default function ActivityAnalyticsWidget({
         analyticsBucketMs,
         analyticsSeries,
     ]);
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const groupedAnalytics = useMemo(() => {
         if (!baseAnalytics || analyticsWindowStart === undefined || analyticsWindowEnd === undefined || analyticsBucketMs === undefined) {
             return null;
@@ -725,7 +698,6 @@ export default function ActivityAnalyticsWidget({
         transitionStopRef.current?.('widget_reset');
         transitionStopRef.current = null;
         lastRefreshFailureKeyRef.current = null;
-        lastPrefetchDecisionKeyRef.current = null;
     }, [runtimeScopeKey]);
 
     useEffect(() => {
@@ -786,173 +758,15 @@ export default function ActivityAnalyticsWidget({
     }, [activitySeries.isError, isSimulated, lastSuccessfulSnapshot, requestedSelectionKey, widget.id]);
 
     useEffect(() => {
-        if (!widgetRootRef.current) {
-            return;
-        }
-
-        if (typeof IntersectionObserver === 'undefined') {
-            return;
-        }
-
-        const observer = new IntersectionObserver((entries) => {
-            const entry = entries[0];
-            const nextVisibility = entry?.isIntersecting ?? false;
-
-            setWidgetVisibilityState((current) => {
-                if (current?.ownerKey === runtimeScopeKey && current.value === nextVisibility) {
-                    return current;
-                }
-
-                return {
-                    ownerKey: runtimeScopeKey,
-                    value: nextVisibility,
-                };
-            });
-        });
-
-        observer.observe(widgetRootRef.current);
-
-        return () => {
-            observer.disconnect();
-        };
-    }, [runtimeScopeKey, widget.id]);
-
-    useEffect(() => {
-        const widgetId = widget.id;
-        const recordPrefetchDecision = (decisionKey: string, event: 'prefetch_started' | 'prefetch_suppressed' | 'prefetch_failed', reason?: string) => {
-            if (lastPrefetchDecisionKeyRef.current === decisionKey) {
-                return;
-            }
-
-            lastPrefetchDecisionKeyRef.current = decisionKey;
-            recordActivityAnalyticsPerformanceDiagnostic({
-                widgetId,
-                event,
-                reason,
-            });
-        };
-
-        const suppress = (reason: string) => {
-            recordPrefetchDecision(`${requestedSelectionKey}:suppressed:${reason}`, 'prefetch_suppressed', reason);
-            return undefined;
-        };
-
-        if (isSimulated) {
+        const target = analyticsBodyRef.current;
+        if (typeof IntersectionObserver === 'undefined' || !target) {
             return undefined;
         }
 
-        if (activeDisplayOptions.range === 'custom') {
-            return suppress('custom_range');
-        }
-
-        if (typeof IntersectionObserver === 'undefined' || isWidgetVisible === null) {
-            return suppress('visibility_unavailable');
-        }
-
-        if (isWidgetVisible === false) {
-            return suppress('hidden');
-        }
-
-        if (document.hidden || document.visibilityState === 'hidden') {
-            return suppress('document_hidden');
-        }
-
-        const activityAnalyticsWidgetIds = new Set<string>([widget.id]);
-
-        siblingWidgets?.forEach((candidate) => {
-            if (candidate.type === 'activity-analytics') {
-                activityAnalyticsWidgetIds.add(candidate.id);
-            }
-        });
-
-        if (activityAnalyticsWidgetIds.size > 2) {
-            return suppress('dashboard_pressure');
-        }
-
-        if (connection?.globalStatus === 'offline') {
-            return suppress('offline');
-        }
-
-        if (connection && connection.globalStatus !== 'online') {
-            return suppress('unhealthy');
-        }
-
-        if (isLoadingData || activitySeries.isLoading || activitySeries.isFetching || activitySeries.isRefreshing || currentRenderSnapshot === null) {
-            return suppress('loading');
-        }
-
-        if (activitySeries.isError) {
-            return suppress('error');
-        }
-
-        if (machineBinding.machineId == null) {
-            return suppress('invalid_machine');
-        }
-
-        if (!queryClient) {
-            return suppress('query_client_unavailable');
-        }
-
-        const rangesToPrefetch = PREFETCHABLE_ACTIVITY_ANALYTICS_RANGES
-            .filter((range) => range !== activeDisplayOptions.range)
-            .slice(0, 2)
-            .filter((range) => {
-                const queryKey = createActivitySeriesQueryKey({
-                    machineId: machineBinding.machineId,
-                    range,
-                });
-                const queryState = queryClient.getQueryState(queryKey);
-
-                return !(queryState && (queryState.status === 'success' || queryState.fetchStatus === 'fetching'));
-            });
-
-        if (rangesToPrefetch.length === 0) {
-            return suppress('already_cached');
-        }
-
-        const scheduleIdle = typeof requestIdleCallback === 'function'
-            ? requestIdleCallback
-            : ((callback: IdleRequestCallback) => window.setTimeout(() => callback({
-                didTimeout: false,
-                timeRemaining: () => 0,
-            } as IdleDeadline), 0));
-        const cancelIdle = typeof cancelIdleCallback === 'function'
-            ? cancelIdleCallback
-            : window.clearTimeout;
-        const handle = scheduleIdle(() => {
-            void Promise.all(rangesToPrefetch.map(async (range) => {
-                try {
-                    await queryClient.prefetchQuery(createActivitySeriesQueryOptions({
-                        machineId: machineBinding.machineId!,
-                        range,
-                    }));
-                    recordPrefetchDecision(`${requestedSelectionKey}:started:${range}`, 'prefetch_started', range);
-                } catch {
-                    recordPrefetchDecision(`${requestedSelectionKey}:failed:${range}`, 'prefetch_failed', range);
-                }
-            }));
-        });
-
-        return () => {
-            cancelIdle(handle as never);
-        };
-    }, [
-        activeDisplayOptions.range,
-        activitySeries.isError,
-        activitySeries.isFetching,
-        activitySeries.isLoading,
-        activitySeries.isRefreshing,
-        connection,
-        currentRenderSnapshot,
-        isLoadingData,
-        isSimulated,
-        isWidgetVisible,
-        machineBinding.machineId,
-        queryClient,
-        requestedSelectionKey,
-        siblingWidgets,
-        widget.id,
-    ]);
+        const observer = new IntersectionObserver(() => undefined);
+        observer.observe(target);
+        return () => observer.disconnect();
+    }, [groupedCount]);
 
     useEffect(() => {
         if (typeof ResizeObserver === 'undefined' || !analyticsBodyRef.current) {
@@ -1058,11 +872,14 @@ export default function ActivityAnalyticsWidget({
                                     end: undefined,
                                 } satisfies ResolvedActivityAnalyticsDisplayOptions;
 
-                                setRuntimeViewState((current) => ({
-                                    ...current,
-                                    selectionOverride: nextDisplayOptions,
-                                    turnoMode: 'summary',
-                                }));
+                                     if (!controllerOwnsSelection) {
+                                         setRuntimeViewState((current) => ({
+                                             ...current,
+                                             selectionOverride: nextDisplayOptions,
+                                             turnoMode: 'summary',
+                                         }));
+                                     }
+                                 presented?.onRangeChange?.(nextRange);
                                 onPersistDisplayOptions?.({
                                     range: nextRange,
                                     start: undefined,
@@ -1080,11 +897,14 @@ export default function ActivityAnalyticsWidget({
                             onSelect: (value) => {
                                 const nextGroupBy = value as RuntimeActivityAnalyticsGroupBy;
 
-                                setRuntimeViewState((current) => ({
-                                    ...current,
-                                    runtimeGroupBy: nextGroupBy,
-                                    turnoMode: nextGroupBy === 'shift' ? current.turnoMode : 'summary',
-                                }));
+                                 if (!controllerOwnsSelection) {
+                                     setRuntimeViewState((current) => ({
+                                         ...current,
+                                         runtimeGroupBy: nextGroupBy,
+                                         turnoMode: nextGroupBy === 'shift' ? current.turnoMode : 'summary',
+                                     }));
+                                 }
+                                 presented?.onGroupByChange?.(nextGroupBy ?? activeGroupBy);
                             },
                         },
                     ]}
@@ -1193,7 +1013,7 @@ export default function ActivityAnalyticsWidget({
     }
 
     return (
-        <div ref={widgetRootRef} className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
+        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
             {header}
 
             <div
@@ -1225,7 +1045,10 @@ export default function ActivityAnalyticsWidget({
                     title={visibleSnapshot!.title}
                     showTurnoModeControl={visibleSnapshot!.showTurnoModeControl}
                     turnoMode={visibleSnapshot!.turnoMode}
-                    onTurnoModeChange={(nextTurnoMode) => setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }))}
+                     onTurnoModeChange={(nextTurnoMode) => {
+                         if (presented?.onTurnoModeChange) presented.onTurnoModeChange(nextTurnoMode);
+                         else setRuntimeViewState((current) => ({ ...current, turnoMode: nextTurnoMode }));
+                     }}
                     emptyMessage={visibleSnapshot!.emptyMessage}
                 />
             </div>

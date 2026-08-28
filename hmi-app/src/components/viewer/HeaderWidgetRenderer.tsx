@@ -17,6 +17,7 @@ import {
 import { CircleHelp, Wifi, WifiOff, WifiHigh, type LucideIcon } from 'lucide-react';
 import { WidgetHeaderDataMode } from '../ui/WidgetHeader';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 
 // =============================================================================
 // HeaderWidgetRenderer
@@ -31,6 +32,7 @@ interface HeaderWidgetRendererProps {
     connection?: ConnectionHealth;
     machines?: ContractMachine[];
     align?: 'start' | 'end';
+    presentationData?: PresentationPayload;
 }
 
 const STATUS_COPY: Record<EquipmentStatus, { color: string; pulse?: boolean }> = {
@@ -122,6 +124,7 @@ export default function HeaderWidgetRenderer({
     connection,
     machines,
     align = 'end',
+    presentationData,
 }: HeaderWidgetRendererProps) {
     const dataMode = resolveWidgetDataMode(widget);
     const alignmentClasses = align === 'start'
@@ -130,13 +133,15 @@ export default function HeaderWidgetRenderer({
 
     if (widget.type === 'status') {
         const options = widget.displayOptions as StatusDisplayOptions | undefined;
-        const status: EquipmentStatus = widget.binding?.mode === 'simulated_value'
-            ? normalizeSimulatedEquipmentStatus(widget.binding.simulatedValue)
-            : (() => {
-                const assetId = widget.binding?.assetId;
-                const equipment = assetId ? equipmentMap.get(assetId) : undefined;
-                return equipment?.status ?? 'unknown';
-            })();
+        const status = presentationData?.status !== undefined || presentationData?.value !== undefined
+            ? (presentationData.status ?? presentationData.value) as EquipmentStatus
+            : widget.binding?.mode === 'simulated_value'
+                ? normalizeSimulatedEquipmentStatus(widget.binding.simulatedValue)
+                : (() => {
+                    const assetId = widget.binding?.assetId;
+                    const equipment = assetId ? equipmentMap.get(assetId) : undefined;
+                    return equipment?.status ?? 'unknown';
+                })();
 
         const copy = STATUS_COPY[status] ?? STATUS_COPY.unknown;
         const label = resolveStatusLabel(status, options);
@@ -169,7 +174,11 @@ export default function HeaderWidgetRenderer({
         let lastSuccess: string | null = null;
         let ageMs: number | null = null;
 
-        if (binding?.mode === 'simulated_value') {
+        if (presentationData?.status !== undefined || presentationData?.value !== undefined) {
+            status = (presentationData.status ?? presentationData.value) as ContractStatus;
+            lastSuccess = presentationData.lastSuccess ?? null;
+            ageMs = presentationData.ageMs ?? null;
+        } else if (binding?.mode === 'simulated_value') {
             status = normalizeSimulatedToContractStatus(binding.simulatedValue);
         } else if (scope === 'machine') {
             if (machineId != null && machines) {

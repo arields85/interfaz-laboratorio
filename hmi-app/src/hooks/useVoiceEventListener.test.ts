@@ -1,5 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 
 const { getDataVoiceUrlMock, startVoiceEventListenerMock } = vi.hoisted(() => ({
     getDataVoiceUrlMock: vi.fn(),
@@ -19,8 +21,13 @@ import { useVoiceEventListener } from './useVoiceEventListener';
 
 describe('useVoiceEventListener', () => {
     beforeEach(() => {
+        localStorage.clear();
         getDataVoiceUrlMock.mockReset();
         startVoiceEventListenerMock.mockReset();
+    });
+
+    afterEach(() => {
+        localStorage.clear();
     });
 
     it('restarts with the new URL and cleans the previous historical reference when config changes', () => {
@@ -65,5 +72,39 @@ describe('useVoiceEventListener', () => {
         });
 
         expect(startVoiceEventListenerMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('routes local voice polling to the fixed loopback endpoint', () => {
+        localStorage.setItem('hmi:prisma-runtime-mode', 'local');
+        getDataVoiceUrlMock.mockReturnValue('https://node-red.local/hmi/voice/latest');
+        startVoiceEventListenerMock.mockReturnValue(vi.fn());
+
+        renderHook(() => useVoiceEventListener(vi.fn()));
+
+        expect(startVoiceEventListenerMock).toHaveBeenCalledWith({
+            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            onEvent: expect.any(Function),
+        });
+    });
+
+    it('aborts the old listener before replacing it when the runtime profile changes', () => {
+        getDataVoiceUrlMock.mockReturnValue('https://node-red.local/hmi/voice/latest');
+        const firstStop = vi.fn();
+        const secondStop = vi.fn();
+        startVoiceEventListenerMock
+            .mockReturnValueOnce(firstStop)
+            .mockReturnValueOnce(secondStop);
+
+        renderHook(() => useVoiceEventListener(vi.fn()));
+
+        act(() => savePrismaRuntimeMode('local'));
+
+        expect(firstStop.mock.invocationCallOrder[0]).toBeLessThan(
+            startVoiceEventListenerMock.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+        );
+        expect(startVoiceEventListenerMock).toHaveBeenLastCalledWith({
+            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            onEvent: expect.any(Function),
+        });
     });
 });

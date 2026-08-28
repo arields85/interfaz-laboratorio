@@ -308,7 +308,7 @@ describe('Node-RED null renderer fallbacks', () => {
         vi.useRealTimers();
     });
 
-    it('renders header global connection widgets from contract connection health with muted status text, centered content and exact icons', () => {
+    it('renders header global connection widgets from contract connection health with compact details and exact icons', () => {
         const { container } = render(
             <HeaderWidgetRenderer
                 widget={makeConnectionWidget()}
@@ -318,16 +318,14 @@ describe('Node-RED null renderer fallbacks', () => {
             />,
         );
 
-        const title = screen.getByText('Estado Conexión');
         const label = screen.getByText('Degradado');
         const freshness = screen.getByText('0s');
 
-        expect(title).toHaveClass('text-center');
-        expect(title.parentElement).toHaveClass('w-full');
+        expect(screen.queryByText('Estado Conexión')).not.toBeInTheDocument();
         expect(label).toHaveClass('uppercase', 'text-industrial-muted');
-        expect(freshness.parentElement).toHaveClass('mt-0.5', 'flex', 'items-center', 'justify-center', 'gap-1.5');
-        expect(container.firstChild).toHaveClass('flex', 'h-full', 'w-full', 'flex-col');
-        expect(label.parentElement).toHaveClass('flex', 'flex-1', 'flex-col', 'items-center', 'justify-center');
+        expect(freshness.parentElement).toHaveClass('mt-0.5', 'flex', 'items-center', 'gap-1.5');
+        expect(container.firstChild).toHaveClass('flex', 'h-full', 'w-full', 'flex-row');
+        expect(label.parentElement).toHaveClass('flex', 'min-w-0', 'flex-col', 'items-start', 'justify-center');
         expect(screen.getByText('0s')).toBeInTheDocument();
         expect(screen.queryByText('Sin datos')).not.toBeInTheDocument();
         expect(screen.getByTestId('connection-header-icon-degradado')).toHaveClass('lucide-wifi-high');

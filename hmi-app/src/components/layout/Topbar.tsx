@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react';
-import { Bell, Search, User, Home, FolderTree, Activity, AlertTriangle, Box, Settings, LayoutDashboard, Stethoscope, ScrollText, Palette } from 'lucide-react';
+import { Bell, Search, User, Home, FolderTree, Activity, AlertTriangle, Box, Settings, LayoutDashboard, Stethoscope, ScrollText, Palette, Sparkles } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import LoginOverlay from '../auth/LoginOverlay';
 import ShaderSettingsPanel from './ShaderSettingsPanel';
 import { useAuthStore } from '../../store/auth.store';
 import { requestShieldReveal } from '../../hooks/useBootShield';
+import { usePrismaRuntimeProfile } from '../../hooks/usePrismaRuntimeProfile';
 import { useUIStore } from '../../store/ui.store';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { dashboardStorage } from '../../services/DashboardStorageService';
@@ -102,6 +103,7 @@ export default function Topbar() {
     const hasAdminAccess = useAuthStore((state) => state.hasPermission('admin:access'));
     const location = useLocation();
     const navigate = useNavigate();
+    const prismaRuntimeProfile = usePrismaRuntimeProfile(location.search);
     const shouldShowAdminActions = isHydrated && hasAdminAccess;
     const isEppiMode = isEppiPathname(location.pathname);
 
@@ -177,6 +179,18 @@ export default function Topbar() {
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1">
+                    {prismaRuntimeProfile.mode === 'local' ? (
+                        <div
+                            role="status"
+                            aria-label="PRISMA LOCAL"
+                            title="Modo local de presentaciones de Prisma"
+                            data-testid="prisma-local-indicator"
+                            className="mr-2 flex items-center gap-1.5 rounded-full border border-accent-cyan/40 bg-accent-cyan/10 px-2.5 py-1 text-[10px] font-semibold tracking-[0.12em] text-accent-cyan"
+                        >
+                            <Sparkles size={12} aria-hidden="true" />
+                            <span>PRISMA LOCAL</span>
+                        </div>
+                    ) : null}
                     {!isEppiMode ? (
                         <button
                             type="button"

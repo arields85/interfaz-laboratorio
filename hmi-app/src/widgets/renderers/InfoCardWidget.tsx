@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { HelpCircle, Info, type LucideIcon } from 'lucide-react';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import type { InfoCardWidgetConfig } from '../../domain/admin.types';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 import {
     DEFAULT_INFO_CARD_VALUE_FONT_SIZE,
     resolveInfoCardFieldContent,
@@ -12,6 +13,7 @@ import {
 interface InfoCardWidgetProps {
     widget: InfoCardWidgetConfig;
     className?: string;
+    presentationData?: PresentationPayload;
 }
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -68,7 +70,7 @@ type LayoutState = {
     contentOffsetPx: number;
 };
 
-export default function InfoCardWidget({ widget, className }: InfoCardWidgetProps) {
+export default function InfoCardWidget({ widget, className, presentationData }: InfoCardWidgetProps) {
     const [{ isCompact, contentOffsetPx }, setLayoutState] = useState<LayoutState>({
         isCompact: false,
         contentOffsetPx: 0,
@@ -80,7 +82,8 @@ export default function InfoCardWidget({ widget, className }: InfoCardWidgetProp
     const compactStateRef = useRef(false);
     const compactReleaseHeightRef = useRef<number | null>(null);
     const displayOptions = widget.displayOptions;
-    const fields = resolveInfoCardFields(displayOptions);
+    const presentedFields = (presentationData?.data as { fields?: Array<{ id: string; label?: string; text: string; subtext?: string; tag?: string }> } | undefined)?.fields;
+    const fields = presentedFields ?? resolveInfoCardFields(displayOptions).map((field) => ({ ...field, ...resolveInfoCardFieldContent(field) }));
     const canMeasureLayout = fields.length > 0 && typeof ResizeObserver !== 'undefined';
     const valueFontSize = displayOptions?.valueFontSize ?? DEFAULT_INFO_CARD_VALUE_FONT_SIZE;
     const textAlign = resolveInfoCardTextAlign(displayOptions);
@@ -201,7 +204,7 @@ export default function InfoCardWidget({ widget, className }: InfoCardWidgetProp
                         style={contentStackStyle}
                     >
                         {fields.map((field) => {
-                            const { text, subtext, tag } = resolveInfoCardFieldContent(field);
+                            const { text, subtext = '', tag } = field;
                             const trimmedSubtext = subtext.trim();
                             const trimmedTag = tag?.trim() ?? '';
 

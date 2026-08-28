@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cloneElement, useState, type ReactElement } from 'react';
 import type { AlertHistoryEntry, WidgetStateSnapshot } from '../../domain/alertHistory.types';
 import type { AlertHistoryWidgetConfig } from '../../domain/admin.types';
 import AlertHistoryWidget from './AlertHistoryWidget';
@@ -75,6 +76,17 @@ class MockResizeObserver implements ResizeObserver {
 
 const equipmentMap = new Map();
 const FIXED_NOW = new Date('2026-06-17T12:00:00.000Z').getTime();
+const controllerAlertData = { entries: [makeEntry({ id: 'controller-entry', widgetTitle: 'Pressure', toStatus: 'critical' })], activeSeverity: 'critical' as const, onClear: vi.fn() };
+
+function AlertHistoryTestHarness({ element }: { element: ReactElement }) {
+    const provided = (element.props as { presentationData?: unknown }).presentationData;
+    const [state, setState] = useState<CoordinatorState>({ entries: alertHistoryMock.state.entries, activeSeverity: alertHistoryMock.state.severity });
+    const widget = (element.props as { widget: AlertHistoryWidgetConfig }).widget;
+    const injected = { ...state, onClear: () => { alertHistoryMock.clearAlertHistoryEntries(widget.displayOptions?.dashboardId ?? 'unknown'); setState((current) => ({ ...current, entries: [] })); } };
+    return cloneElement(element as ReactElement<{ presentationData?: unknown }>, { presentationData: provided ?? injected });
+}
+
+function render(element: ReactElement) { return rtlRender(<AlertHistoryTestHarness element={element} />); }
 
 function makeWidget(overrides?: Partial<AlertHistoryWidgetConfig>): AlertHistoryWidgetConfig {
     return {
@@ -123,7 +135,14 @@ describe('AlertHistoryWidget', () => {
         expect(screen.getByRole('button', { name: 'Ver historial completo (funcionalidad pendiente)' })).toHaveAttribute('tabindex', '-1');
     });
 
-    it('subscribes to the dashboard coordinator with fresh evaluation context', () => {
+    it('renders controller-provided state without subscribing or coordinating', () => {
+        render(<AlertHistoryWidget widget={makeWidget()} equipmentMap={equipmentMap} presentationData={controllerAlertData} />);
+
+        expect(screen.getByText('PRESSURE')).toBeInTheDocument();
+        expect(screen.getByText('Crítica')).toBeInTheDocument();
+    });
+
+    it('does not subscribe to or coordinate dashboard history from the renderer', () => {
         const siblingWidgets = [makeWidget({ id: 'peer-widget' })];
         render(
             <AlertHistoryWidget
@@ -133,20 +152,7 @@ describe('AlertHistoryWidget', () => {
             />,
         );
 
-        expect(alertHistoryMock.subscribeAlertHistory).toHaveBeenCalledWith(expect.objectContaining({
-            dashboardId: 'dashboard-a',
-            pollInterval: 10_000,
-            onState: expect.any(Function),
-            getContext: expect.any(Function),
-        }));
-        const subscription = alertHistoryMock.subscribeAlertHistory.mock.calls[0]?.[0] as {
-            getContext: () => { widgets: AlertHistoryWidgetConfig[]; equipmentMap: Map<unknown, unknown> };
-        };
-        expect(subscription.getContext()).toEqual({
-            widgets: siblingWidgets,
-            equipmentMap,
-            machines: undefined,
-        });
+        expect(alertHistoryMock.subscribeAlertHistory).not.toHaveBeenCalled();
     });
 
     it('renders warning and critical entries with formatted timestamps and values', async () => {

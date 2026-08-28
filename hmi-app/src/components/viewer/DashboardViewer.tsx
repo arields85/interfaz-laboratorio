@@ -1,10 +1,10 @@
-import { WidgetRenderer } from '../../widgets';
 import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import { useCanvasReference } from '../../utils/useCanvasReference';
 import { DEFAULT_COLS, DEFAULT_ROWS, getGridTemplateStyle } from '../../utils/gridConfig';
+import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 interface DashboardViewerProps {
     widgets: WidgetConfig[];
@@ -106,20 +106,20 @@ export default function DashboardViewer({
                                     className="relative z-0 h-full w-full box-border"
                                     style={{ padding: 'var(--widget-spacing)' }}
                                 >
-                                    <WidgetRenderer 
-                                        widget={widget} 
-                                        equipmentMap={equipmentMap} 
+                                    <WidgetPresentationBoundary
+                                        widget={widget}
+                                        equipmentMap={equipmentMap}
                                         machines={machines}
                                         connection={connection}
                                         isLoadingOverview={isLoadingOverview}
                                         hasOverviewError={hasOverviewError}
-                                        isLoadingData={false} 
-                                      siblingWidgets={widgets}
-                                      hierarchyContext={hierarchyContext}
-                                      className="w-full h-full"
-                                      onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
-                                      onNavigateDashboard={onNavigateDashboard}
-                                  />
+                                        isLoadingData={false}
+                                        siblingWidgets={widgets}
+                                        hierarchyContext={hierarchyContext}
+                                        onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                                        onNavigateDashboard={onNavigateDashboard}
+                                        className="w-full h-full"
+                                    />
                                 </div>
                             </div>
                         );

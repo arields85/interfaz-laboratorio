@@ -10,6 +10,7 @@ import type {
 import type { AlertHistoryEntry } from '../domain/alertHistory.types';
 import type { ConnectionHealth, ContractMachine, ContractStatus } from '../domain/dataContract.types';
 import type { EquipmentStatus, EquipmentSummary } from '../domain/equipment.types';
+import type { DashboardPresentationFrame } from '../domain/dashboardPresentation.types';
 import { alertHistoryStorage } from './AlertHistoryStorageService';
 import { resolveBinding } from '../widgets/resolvers/bindingResolver';
 import { normalizeSimulatedToContractStatus } from '../utils/connectionWidget';
@@ -80,6 +81,7 @@ export interface BuildDashboardSnapshotInput {
     equipmentMap: Map<string, EquipmentSummary>;
     hierarchyNodes?: HierarchyNode[];
     timestamp?: string;
+    presentationFrame?: DashboardPresentationFrame;
 }
 
 const RUNTIME_ONLY_WIDGET_TYPES = new Set<WidgetConfig['type']>([
@@ -99,6 +101,7 @@ export function buildDashboardSnapshot({
     equipmentMap,
     hierarchyNodes = [],
     timestamp = new Date().toISOString(),
+    presentationFrame,
 }: BuildDashboardSnapshotInput): DashboardSnapshot {
     const layoutByWidgetId = new Map(dashboard.layout.map((layout) => [layout.widgetId, layout]));
     const hierarchyById = new Map(hierarchyNodes.map((node) => [node.id, node]));
@@ -131,7 +134,26 @@ export function buildDashboardSnapshot({
             activeViewName: activeView?.name ?? null,
             widgetCount: dashboard.widgets.length,
         },
-        widgets: dashboard.widgets.map((widget) => buildSnapshotWidget(widget, layoutByWidgetId, equipmentMap, machines, connection, snapshotTime)),
+        widgets: dashboard.widgets.map((widget) => presentationFrame
+            ? buildFrameSnapshotWidget(widget, layoutByWidgetId, presentationFrame)
+            : buildSnapshotWidget(widget, layoutByWidgetId, equipmentMap, machines, connection, snapshotTime)),
+    };
+}
+
+function buildFrameSnapshotWidget(widget: WidgetConfig, layoutByWidgetId: Map<string, WidgetLayout>, frame: DashboardPresentationFrame): DashboardSnapshotWidget {
+    const entry = frame.entries.get(widget.id);
+    const base = {
+        id: widget.exportId?.trim() || widget.id,
+        widgetId: widget.id,
+        title: widget.title?.trim() || null,
+        type: widget.type,
+        placement: resolvePlacement(widget, layoutByWidgetId.get(widget.id)),
+        value: entry?.payload.value ?? null,
+        unit: entry?.payload.unit ?? null,
+    } satisfies DashboardSnapshotWidget;
+    return entry ? { ...base, data: entry.payload.data, dataSummary: entry.payload.dataSummary ?? null } : {
+        ...base,
+        dataSummary: { exportKind: widget.exportId?.trim() || 'generic-widget', reason: 'unsupported-presentation-capability' },
     };
 }
 

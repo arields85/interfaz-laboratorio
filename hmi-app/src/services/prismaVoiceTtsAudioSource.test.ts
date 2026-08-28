@@ -180,6 +180,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         ['sample rate', { sampleRate: '16000' }, /sample rate/],
         ['channels', { channels: '2' }, /channels/],
         ['missing body', { body: null }, /body/],
+        ['missing headers', { format: '', sampleRate: '', channels: '' }, /format/],
         ['failed status', { status: 503 }, /503/],
     ] as const)('rejects invalid Live %s', async (_case, responseOptions, expected) => {
         const source = createPrismaVoiceTtsAudioSource(
@@ -188,6 +189,17 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         );
 
         await expect(source?.openLive(new AbortController().signal)).rejects.toThrow(expected);
+    });
+
+    it('rejects an unreadable Live stream without disrupting the caller', async () => {
+        const source = createPrismaVoiceTtsAudioSource(
+            { serviceUrl: 'https://tts.test/prisma/speak-live', text: 'Voice text' },
+            vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse({
+                body: { getReader: () => { throw new Error('stream unreadable'); } } as unknown as ReadableStream<Uint8Array>,
+            })),
+        );
+
+        await expect(source?.openLive(new AbortController().signal)).rejects.toThrow('unreadable');
     });
 
     it('returns null for empty or invalid service URLs without fetching', () => {

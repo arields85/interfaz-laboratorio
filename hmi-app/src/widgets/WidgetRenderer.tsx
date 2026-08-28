@@ -3,6 +3,7 @@ import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig } from '../domain/
 import type { EquipmentSummary } from '../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../domain/dataContract.types';
 import type { HierarchyContext } from './resolvers/hierarchyResolver';
+import type { WidgetPresentationEntry } from '../domain/dashboardPresentation.types';
 import MetricWidget from './renderers/MetricWidget';
 import StatusWidget from './renderers/StatusWidget';
 import ConnectionStatusWidget from './renderers/ConnectionStatusWidget';
@@ -65,6 +66,7 @@ interface WidgetRendererProps {
     onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
     renderContext?: TrendChartV2RenderContext;
+    presentationEntry?: WidgetPresentationEntry;
 }
 
 const NAVIGATION_INTERACTIVE_SELECTOR = [
@@ -102,9 +104,9 @@ export default function WidgetRenderer({
     onPersistWidgetDisplayOptions,
     onNavigateDashboard,
     renderContext,
+    presentationEntry,
 }: WidgetRendererProps) {
     let renderedWidget: ReactNode;
-
     switch (widget.type) {
         case 'metric-card':
             renderedWidget = (
@@ -115,6 +117,7 @@ export default function WidgetRenderer({
                     isLoadingData={isLoadingData}
                     className={className}
                     hierarchyContext={hierarchyContext}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -127,6 +130,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -139,6 +143,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
@@ -155,6 +160,7 @@ export default function WidgetRenderer({
                     className={className}
                     siblingWidgets={siblingWidgets}
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
@@ -169,6 +175,7 @@ export default function WidgetRenderer({
                     hasOverviewError={hasOverviewError}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
@@ -179,6 +186,7 @@ export default function WidgetRenderer({
                     widget={widget}
                     equipmentMap={equipmentMap}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -191,6 +199,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     connection={connection}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -203,6 +212,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -217,6 +227,7 @@ export default function WidgetRenderer({
                     className={className}
                     renderContext={renderContext}
                     siblingWidgets={siblingWidgets}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
@@ -229,6 +240,7 @@ export default function WidgetRenderer({
                     isLoadingData={isLoadingData}
                     className={className}
                     onPersistDisplayOptions={(displayOptions) => onPersistWidgetDisplayOptions?.(widget.id, displayOptions)}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
@@ -241,16 +253,17 @@ export default function WidgetRenderer({
                     machines={machines}
                     siblingWidgets={siblingWidgets}
                     className={className}
+                    presentationData={presentationEntry?.payload.data}
                 />
             );
             break;
 
         case 'text-title':
-            renderedWidget = <TextTitleWidget widget={widget} className={className} />;
+            renderedWidget = <TextTitleWidget widget={widget} className={className} presentationData={presentationEntry?.payload} />;
             break;
 
         case 'info-card':
-            renderedWidget = <InfoCardWidget widget={widget} className={className} />;
+            renderedWidget = <InfoCardWidget widget={widget} className={className} presentationData={presentationEntry?.payload} />;
             break;
 
         // -----------------------------------------------------------------------
@@ -258,11 +271,11 @@ export default function WidgetRenderer({
         // No lanza error: el builder puede incluir tipos futuros en una config
         // sin romper la renderización del dashboard actual.
         // -----------------------------------------------------------------------
-        default:
-            renderedWidget = (
-                <UnsupportedWidget type={widget.type} title={widget.title} />
-            );
-            break;
+            default:
+                renderedWidget = (
+                    <UnsupportedWidget type={widget.type} title={widget.title} />
+                );
+                break;
     }
 
     const navigationTargetDashboardId = widget.navigationTargetDashboardId?.trim() ?? '';

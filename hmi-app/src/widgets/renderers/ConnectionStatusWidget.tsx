@@ -1,5 +1,6 @@
 import { CircleHelp, Wifi, WifiHigh, WifiOff, type LucideIcon } from 'lucide-react';
 import type { ConnectionStatusDisplayOptions, WidgetConfig } from '../../domain/admin.types';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ContractStatus, ConnectionHealth } from '../../domain/dataContract.types';
 import WidgetHeader, { WidgetHeaderDataMode } from '../../components/ui/WidgetHeader';
@@ -31,6 +32,7 @@ interface ConnectionStatusWidgetProps {
     machines?: ContractMachine[];
     connection?: ConnectionHealth;
     className?: string;
+    presentationData?: PresentationPayload;
 }
 
 // --- Visual config por estado ---
@@ -71,6 +73,7 @@ export default function ConnectionStatusWidget({
     machines,
     connection,
     className,
+    presentationData,
 }: ConnectionStatusWidgetProps) {
     const options = widget.displayOptions as ConnectionStatusDisplayOptions | undefined;
     const scope = options?.scope ?? 'global';
@@ -83,7 +86,11 @@ export default function ConnectionStatusWidget({
     let lastSuccess: string | null = null;
     let ageMs: number | null = null;
 
-    if (binding?.mode === 'simulated_value') {
+    if (presentationData?.value !== undefined) {
+        status = presentationData.value as ContractStatus;
+        lastSuccess = (presentationData as { lastSuccess?: string | null }).lastSuccess ?? null;
+        ageMs = (presentationData as { ageMs?: number | null }).ageMs ?? null;
+    } else if (binding?.mode === 'simulated_value') {
         // Simulated mode — status from config value
         status = normalizeSimulatedToContractStatus(binding.simulatedValue);
     } else if (scope === 'machine') {

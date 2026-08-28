@@ -78,6 +78,8 @@ import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
 import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import type { TrendChartV2RenderContext } from './trendChartV2RenderContext';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
+import type { TrendChartV2PresentationData } from '../controllers/PresentationControllers';
 import {
     recordTrendChartV2PerformanceDiagnostic,
     startTrendChartV2PerformanceTransition,
@@ -98,6 +100,7 @@ interface TrendChartV2WidgetProps {
     className?: string;
     renderContext?: TrendChartV2RenderContext;
     siblingWidgets?: WidgetConfig[];
+    presentationData?: PresentationPayload;
 }
 
 interface LeadingEdgeAnchor {
@@ -274,7 +277,97 @@ function resolveLeadingEdgeAnchor(options: {
     };
 }
 
-export default function TrendChartV2Widget({
+export default function TrendChartV2Widget(props: TrendChartV2WidgetProps) {
+    const presentationData = props.presentationData?.data as TrendChartV2PresentationData | undefined;
+
+    if (presentationData && typeof presentationData.onRangeChange === 'function' && 'displayedRange' in presentationData) {
+        return <TrendChartV2PresentationRenderer {...props} presentationData={presentationData} />;
+    }
+
+    return <LegacyTrendChartV2Widget {...props} />;
+}
+
+function TrendChartV2PresentationRenderer({ widget, className, renderContext, presentationData }: TrendChartV2WidgetProps & { presentationData: TrendChartV2PresentationData }) {
+    const [hoveredTimestampMs, setHoveredTimestampMs] = useState<number | null>(null);
+    const setZoomMessage = (message: string) => { void message; };
+    const [dimensions, setDimensions] = useState<ChartDimensions>({ width: 320, height: 180 });
+    const chartShellRef = useRef<HTMLDivElement>(null);
+    const { resolvedTimezone } = useTemporalSettings();
+    const v2Data = presentationData.data;
+    const displayedRange = presentationData.displayedRange;
+    const displayedCustomWindow = presentationData.displayedCustomWindow;
+    const resolvedUnit = v2Data?.unit ?? undefined;
+    const timezone = useMemo(() => resolveTrendChartV2Timezone(v2Data?.window?.timezone, resolvedTimezone), [resolvedTimezone, v2Data?.window?.timezone]);
+    const formatter = useMemo(() => createTrendChartV2TimestampFormatter({ range: displayedRange, timezone }), [displayedRange, timezone]);
+    const visibleWindow = useMemo(() => resolveTrendChartV2VisibleWindow({ responseWindow: v2Data?.window, customWindow: displayedCustomWindow ?? undefined, range: displayedRange, series: v2Data?.series ?? [] }), [displayedCustomWindow, displayedRange, v2Data?.series, v2Data?.window]);
+    const numericPoints = useMemo(() => (v2Data?.series ?? []).filter((point) => Number.isFinite(point.timestampMs) && point.timestampMs >= visibleWindow.startMs && point.timestampMs <= visibleWindow.endMs), [v2Data?.series, visibleWindow.endMs, visibleWindow.startMs]);
+    const valueDomain = useMemo(() => {
+        const values = numericPoints.map((point) => point.value).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+        if (values.length === 0) return { min: 0, max: 1 };
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const padding = Math.max((max - min) * 0.15, 1);
+        return { min: min - padding, max: max + padding };
+    }, [numericPoints]);
+    const valueTicks = useMemo(() => Array.from({ length: 5 }, (_, index) => valueDomain.max - (((valueDomain.max - valueDomain.min) * index) / 4)), [valueDomain.max, valueDomain.min]);
+    const chartLayout = useMemo(() => resolveWidgetChartLayoutMetrics({ width: dimensions.width, height: dimensions.height, hasTopAdornments: Boolean(resolvedUnit || v2Data?.summary), firstXAxisLabel: formatter.format(visibleWindow.startMs), lastXAxisLabel: formatter.format(visibleWindow.endMs), yAxisTickLabels: valueTicks.map((value) => formatTick(value)), idPrefix: widget.id, font: getChartTextFont(), letterSpacing: getChartLetterSpacingPx() }), [dimensions.height, dimensions.width, formatter, resolvedUnit, v2Data?.summary, valueTicks, visibleWindow.endMs, visibleWindow.startMs, widget.id]);
+    const chartModel = useMemo(() => {
+        const plotWidth = chartLayout.plotArea.width;
+        const plotHeight = chartLayout.plotArea.height;
+        const rangeY = Math.max(valueDomain.max - valueDomain.min, 1);
+        const toY = (value: number) => chartLayout.plotArea.top + plotHeight - (((value - valueDomain.min) / rangeY) * plotHeight);
+        const segments = buildTrendChartV2Segments({ points: numericPoints, gapThresholdMs: resolveTrendChartV2GapThresholdMs({ bucketMs: v2Data?.window?.bucketMs, range: displayedRange, points: numericPoints }) });
+        const interactionPoints = numericPoints.filter((point): point is HistoryDataPointV2 & { value: number } => typeof point.value === 'number').map((point) => ({ ...point, x: scaleTimestampToChartX({ timestampMs: point.timestampMs, startMs: visibleWindow.startMs, endMs: visibleWindow.endMs, x0: chartLayout.plotArea.left, plotWidth }), y: toY(point.value) }));
+        return { plotWidth, plotHeight, segments, interactionPoints, toY, valueTicks: valueTicks.map((value, index) => ({ value, y: chartLayout.plotArea.top + ((index / 4) * plotHeight) })) };
+    }, [chartLayout.plotArea.height, chartLayout.plotArea.left, chartLayout.plotArea.top, chartLayout.plotArea.width, displayedRange, numericPoints, valueDomain.max, valueDomain.min, valueTicks, v2Data?.window?.bucketMs, visibleWindow.endMs, visibleWindow.startMs]);
+    const interactionPoints = useMemo(() => [...chartModel.interactionPoints].sort((left, right) => left.timestampMs - right.timestampMs), [chartModel.interactionPoints]);
+    const hoveredPoint = hoveredTimestampMs === null ? null : getNearestTimestampPoint(interactionPoints, hoveredTimestampMs)?.timestampMs === hoveredTimestampMs ? getNearestTimestampPoint(interactionPoints, hoveredTimestampMs) : null;
+    const xTicks = useMemo(() => buildTrendChartV2VisibleTickValues({ points: numericPoints, startMs: visibleWindow.startMs, endMs: visibleWindow.endMs, plotLeft: chartLayout.xAxisLabels.left, plotWidth: chartLayout.xAxisLabels.plotWidth, range: displayedRange, timezone, minLabelX: 0, maxLabelX: dimensions.width, font: getChartTextFont(), letterSpacing: getChartLetterSpacingPx(), formatter }).map((timestampMs) => ({ timestampMs, x: scaleTimestampToChartX({ timestampMs, startMs: visibleWindow.startMs, endMs: visibleWindow.endMs, x0: chartLayout.xAxisLabels.left, plotWidth: chartLayout.xAxisLabels.plotWidth }), label: formatter.format(timestampMs) })), [chartLayout.xAxisLabels.left, chartLayout.xAxisLabels.plotWidth, dimensions.width, displayedRange, formatter, numericPoints, timezone, visibleWindow.endMs, visibleWindow.startMs]);
+    const staticSegments = useMemo(() => chartModel.segments.map((segment) => {
+        const points = segment.filter((point): point is HistoryDataPointV2 & { value: number } => typeof point.value === 'number').map((point) => ({ x: scaleTimestampToChartX({ timestampMs: point.timestampMs, startMs: visibleWindow.startMs, endMs: visibleWindow.endMs, x0: chartLayout.plotArea.left, plotWidth: chartModel.plotWidth }), y: chartModel.toY(point.value) }));
+        const linePath = points.length >= 2 ? smoothPath(points) : '';
+        return { points, linePath, areaPath: points.length >= 2 ? buildAreaPath(linePath, points, chartLayout.plotArea.top + chartModel.plotHeight) : '' };
+    }), [chartLayout.plotArea.left, chartLayout.plotArea.top, chartModel, visibleWindow.endMs, visibleWindow.startMs]);
+
+    useEffect(() => {
+        const element = chartShellRef.current;
+        if (!element || typeof ResizeObserver === 'undefined') return;
+        const update = (width: number, height: number) => { if (width > 0 && height > 0) setDimensions({ width: Math.round(width), height: Math.round(height) }); };
+        const initial = element.getBoundingClientRect();
+        update(initial.width, initial.height);
+        const observer = new ResizeObserver(([entry]) => update(entry.contentRect.width, entry.contentRect.height));
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
+    const handleZoomSelection = (selection: { startMs: number; endMs: number }) => {
+        const start = new Date(selection.startMs).toISOString();
+        const end = new Date(selection.endMs).toISOString();
+        if (!validateCustomHistoryWindow(start, end).ok) return;
+        presentationData.onCustomWindowChange({ start, end });
+        setHoveredTimestampMs(null);
+    };
+    const hasData = chartModel.interactionPoints.length > 0;
+    const showLoading = presentationData.isLoadingData || (presentationData.isLoading && !hasData);
+    const runtimeState = showLoading ? 'loading' : presentationData.runtimeState;
+    const shouldShowState = showLoading || presentationData.isNoData || !hasData;
+    const header = (
+        <WidgetHeader title={widget.title || 'Trend Chart V2'} icon={resolveHeaderIcon(widget.displayOptions?.icon) ?? TrendingUp} iconColor={TOKEN.icon} iconPosition="left" iconTestId="trend-chart-v2-header-icon" dataMode={resolveWidgetDataMode(widget) ?? undefined} dataModeTestId="trend-chart-v2-widget-data-mode" className={WIDGET_CHART_HEADER_CLASS} trailing={(
+            <div className="flex items-center gap-2"><WidgetHeaderTemporalControls variant="pill" testId="trend-chart-v2-widget-runtime-controls" indicatorTestId="trend-chart-v2-widget-runtime-control-indicator" groups={[{ testId: 'trend-chart-v2-widget-runtime-range-selector', options: RANGE_OPTIONS, selectedValue: displayedRange === 'custom' ? '24h' : displayedRange, onSelect: (value) => { presentationData.onRangeChange(value as Exclude<HistoryRangeV2, 'custom'>); presentationData.onCustomWindowChange(null); } }]} />{displayedCustomWindow && <button type="button" onClick={() => presentationData.onCustomWindowChange(null)} className="rounded-md border border-admin-accent/30 bg-admin-accent/10 px-2.5 py-1 uppercase text-admin-accent">Back to preset</button>}</div>
+        )} />
+    );
+
+    return <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`} data-prefetch-history-widget="true" data-resize-surface={renderContext?.surface ?? 'viewer'}>
+        {header}
+        <div ref={chartShellRef} className={WIDGET_CHART_CONTAINER_CLASS} style={{ width: `${dimensions.width}px`, height: `${dimensions.height}px` }} data-testid="trend-chart-v2-chart-shell">
+            {presentationData.isShowingRefreshFailedSnapshot && <HistoricalChartNotice variant="stale" testId="trend-chart-v2-historical-notice" />}
+            {!presentationData.isShowingRefreshFailedSnapshot && presentationData.isShowingRefreshingSnapshot && <HistoricalChartNotice variant="refreshing" testId="trend-chart-v2-historical-notice" />}
+            {shouldShowState ? <WidgetRuntimeState state={runtimeState} testId="trend-chart-v2-state" /> : <WidgetChartLayout layout={chartLayout} svgTestId="trend-chart-v2-svg" overlaySvgTestId="trend-chart-v2-overlay-svg" renderMain={(layout) => <><defs><linearGradient id={`${widget.id}-line-gradient`}><stop offset="0%" stopColor={TOKEN.gradientFrom} /><stop offset="100%" stopColor={TOKEN.gradientTo} /></linearGradient></defs>{resolvedUnit && <text data-testid="trend-chart-v2-unit-label" x={layout.yAxisUnitSlot.x} y={layout.yAxisUnitSlot.y} fill={TOKEN.icon}>{resolvedUnit.toUpperCase()}</text>}{v2Data?.summary && <text data-testid="trend-chart-v2-summary" x={layout.topMetaSlot.x} y={layout.topMetaSlot.y} fill={TOKEN.muted}><tspan data-testid="trend-chart-v2-summary-min">{`min ${formatTrendChartV2SummaryValue(v2Data.summary.min ?? 0, resolvedUnit)}`}</tspan><tspan data-testid="trend-chart-v2-summary-max" dx="12">{`max ${formatTrendChartV2SummaryValue(v2Data.summary.max ?? 0, resolvedUnit)}`}</tspan><tspan data-testid="trend-chart-v2-summary-avg" dx="12">{`avg ${formatTrendChartV2SummaryValue(v2Data.summary.avg ?? 0, resolvedUnit)}`}</tspan></text>}{chartModel.valueTicks.map((tick) => <line key={tick.y} data-testid="trend-chart-v2-y-grid-line" x1={layout.plotArea.left} x2={layout.plotArea.right} y1={tick.y} y2={tick.y} stroke={TOKEN.grid} strokeDasharray="3 3" />)}{staticSegments.map((segment, index) => <g key={index} data-testid="trend-chart-v2-segment">{segment.areaPath && <path d={segment.areaPath} fill={TOKEN.gradientFrom} fillOpacity={0.2} />}{segment.points.length >= 2 && <path data-testid="trend-chart-v2-line-segment" d={segment.linePath} fill="none" stroke={`url(#${widget.id}-line-gradient)`} strokeWidth={clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth)} />}</g>)}{xTicks.map((tick) => <text data-testid="trend-chart-v2-x-axis-label" key={tick.timestampMs} x={tick.x} y={layout.xAxisLabels.y} textAnchor="middle" fill={TOKEN.muted}>{tick.label}</text>)}<TrendChartV2InteractionLayer plotLeft={layout.plotArea.left} plotTop={layout.plotArea.top} plotWidth={chartModel.plotWidth} plotHeight={chartModel.plotHeight} domainStartMs={visibleWindow.startMs} domainEndMs={visibleWindow.endMs} points={interactionPoints} hoveredTimestampMs={hoveredTimestampMs} onHoverChange={setHoveredTimestampMs} onZoomSelection={handleZoomSelection} onInvalidSelection={() => setZoomMessage('Selection too small to zoom. Drag a wider time window.')} /></>} renderOverlay={() => null} />}
+            {hoveredPoint && <ChartTooltip label={formatter.format(hoveredPoint.timestampMs)} x={hoveredPoint.x} containerWidth={dimensions.width} series={[{ name: widget.title ?? 'Trend Chart V2', value: `${hoveredPoint.value}${resolvedUnit ? ` ${resolvedUnit}` : ''}`, color: TOKEN.gradientTo }]} />}
+        </div>
+    </div>;
+}
+
+function LegacyTrendChartV2Widget({
     widget,
     equipmentMap,
     machines,

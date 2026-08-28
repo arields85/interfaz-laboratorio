@@ -9,6 +9,7 @@ import { useDataHistory } from '../../queries/useDataHistory';
 import { DataHistoryServiceError } from '../../services/dataHistory.service';
 import { getChartLetterSpacingPx, getChartTextFont, measureChartTextWidthPx } from '../../utils/chartHelpers';
 import * as chartHelpers from '../../utils/chartHelpers';
+import * as bindingResolver from '../resolvers/bindingResolver';
 import * as legacyModel from './trendChartLegacyModel';
 import TrendChartWidget from './TrendChartWidget';
 import { buildTrendChartVisibleLabelIndices } from './trendChartVisibleLabels';
@@ -153,6 +154,24 @@ function makeDenseHistoryResponse(pointCount: number = 12): DataHistoryResponse 
     };
 }
 
+function makePresentationData(onRangeChange = vi.fn()) {
+    return {
+        data: {
+            data: [{ time: '10:00', value: 45 }, { time: '12:00', value: 52 }],
+            range: 'hora' as const,
+            unit: '°C',
+            response: makeHistoryResponse(),
+            isSimulated: false,
+            isRealLoading: false,
+            isNoData: false,
+            isShowingRefreshingSnapshot: false,
+            isShowingRefreshFailedSnapshot: false,
+            runtimeState: 'empty' as const,
+            onRangeChange,
+        },
+    };
+}
+
 function formatLocalHourMinute(timestamp: string): string {
     const date = new Date(timestamp);
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
@@ -191,6 +210,30 @@ describe('TrendChartWidget', () => {
         expect(screen.getByTestId('trend-chart-widget-loading')).toBeInTheDocument();
         expect(screen.getByTestId('trend-chart-widget-data-mode')).toHaveClass('text-status-normal');
         expect(screen.getByText('Temperatura')).toBeInTheDocument();
+    });
+
+    it('renders controller-owned trend data without resolving binding or creating a renderer query', () => {
+        const resolveBindingSpy = vi.spyOn(bindingResolver, 'resolveBinding');
+        const presentationData = makePresentationData();
+        render(<TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} presentationData={presentationData} />);
+
+        expect(screen.getByTestId('trend-chart-summary-min')).toHaveTextContent('min 45°c');
+        expect(screen.getByTestId('trend-chart-summary-max')).toHaveTextContent('max 52°c');
+        expect(useDataHistory).not.toHaveBeenCalled();
+        expect(resolveBindingSpy).not.toHaveBeenCalled();
+    });
+
+    it('sends range changes back to the controller while preserving its canonical visual state', () => {
+        const onRangeChange = vi.fn();
+        const presentationData = makePresentationData(onRangeChange);
+
+        render(<TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} presentationData={presentationData} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Día' }));
+
+        expect(onRangeChange).toHaveBeenCalledWith('dia');
+        expect(screen.getByTestId('trend-chart-summary-max')).toHaveTextContent('max 52°c');
+        expect(useDataHistory).not.toHaveBeenCalled();
     });
 
     it('keeps the confirmed owner snapshot and its range semantics through incompatible placeholder and error states', () => {

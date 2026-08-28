@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
+import { resolvePrismaTtsUrl } from '../config/prismaAssistant.config';
 import type { VoiceEvent } from '../domain/voice.types';
 import { normalizeTelegramChatId } from '../domain/voice';
 import { readPrismaVoiceTtsServiceUrl } from '../config/prismaVoiceTts.config';
@@ -18,6 +19,7 @@ import type {
     PrismaVoiceAudioSourceFactory,
 } from '../services/prismaVoiceTtsAudioSource';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
+import { usePrismaRuntimeProfile } from './usePrismaRuntimeProfile';
 
 export const PRISMA_ORB_FADE_DURATION_MS = 200;
 
@@ -58,6 +60,8 @@ export function usePrismaOrbPresentation(
     const [request, setRequest] = useState<PlaybackRequest | null>(null);
     const orbRef = useRef<LedaOrbElement>(null);
     const engineRef = useRef<PrismaVoiceAudioEngineContract | null>(null);
+    const runtimeProfile = usePrismaRuntimeProfile();
+    const profileRevisionRef = useRef(runtimeProfile.revision);
     const audioSourceFactoryRef = useRef<PrismaVoiceAudioSourceFactory>(
         options.audioSourceFactory ?? createPrismaVoiceTtsAudioSource,
     );
@@ -69,12 +73,37 @@ export function usePrismaOrbPresentation(
     if (engineRef.current === null) {
         engineRef.current = options.engine ?? new PrismaVoiceAudioEngine();
     }
+
+    useLayoutEffect(() => {
+        if (profileRevisionRef.current === runtimeProfile.revision) {
+            return;
+        }
+
+        profileRevisionRef.current = runtimeProfile.revision;
+        generationRef.current += 1;
+        const resetGeneration = generationRef.current;
+        clearFadeTimer(fadeTimerRef);
+        engineRef.current?.stop();
+        queueMicrotask(() => {
+            if (profileRevisionRef.current !== runtimeProfile.revision
+                || generationRef.current !== resetGeneration) {
+                return;
+            }
+
+            setRequest(null);
+            setPhase('hidden');
+        });
+    }, [runtimeProfile.revision]);
+
     const presentVoiceEvent = (event: VoiceEvent): void => {
         generationRef.current += 1;
         clearFadeTimer(fadeTimerRef);
         const telegramChatId = normalizeTelegramChatId(event.telegramChatId);
         const audioSource = audioSourceFactoryRef.current({
-            serviceUrl: getServiceUrlRef.current(),
+            serviceUrl: resolvePrismaTtsUrl(
+                runtimeProfile.mode,
+                getServiceUrlRef.current(),
+            ),
             text: event.text,
             ...(event.id === undefined ? {} : { eventId: event.id }),
             ...(telegramChatId === undefined ? {} : { telegramChatId }),

@@ -90,7 +90,6 @@ class MockResizeObserver implements ResizeObserver {
 }
 
 const equipmentMap = new Map();
-
 function resetMockData(): void {
     mockState.groupedDataByBucket = {
         hour: [
@@ -683,6 +682,17 @@ describe('ProduccionHistoricaWidget', () => {
         expect(strokedPaths).toHaveLength(2);
         expect(strokedPaths[0]).toHaveAttribute('stroke-width', '2.5');
         expect(strokedPaths[1]).toHaveAttribute('stroke-width', '6');
+    });
+
+    it('renders controller-provided history without owning the generator or clock', () => {
+        vi.spyOn(Date, 'now').mockImplementation(() => {
+            throw new Error('renderer must not read the clock');
+        });
+
+        render(<ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} presentationData={{ data: [], bucket: 'hour', onBucketChange: vi.fn(), provenance: 'deterministic-fixture', sessionAnchor: 123 }} />);
+
+        expect(screen.getByText('Producción (unidades)')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Hora' })).toHaveAttribute('aria-pressed', 'true');
     });
 
 });

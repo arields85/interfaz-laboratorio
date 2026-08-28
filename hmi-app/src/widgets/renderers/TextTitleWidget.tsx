@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { TextTitleDisplayOptions, TextTitleWidgetConfig } from '../../domain/admin.types';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 
 export const DEFAULT_TEXT_TITLE_FONT_SIZE = 35;
 
@@ -12,9 +13,10 @@ const TEXT_COLOR_MAP: Record<string, string> = {
 interface TextTitleWidgetProps {
     widget: TextTitleWidgetConfig;
     className?: string;
+    presentationData?: PresentationPayload;
 }
 
-export default function TextTitleWidget({ widget, className }: TextTitleWidgetProps) {
+export default function TextTitleWidget({ widget, className, presentationData }: TextTitleWidgetProps) {
     const displayOptions = widget.displayOptions as TextTitleDisplayOptions | undefined;
     const fontSize = displayOptions?.fontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE;
     const textAlign = displayOptions?.textAlign ?? 'left';
@@ -31,7 +33,7 @@ export default function TextTitleWidget({ widget, className }: TextTitleWidgetPr
 
     const content = (
         <span className="block w-full break-words" style={titleStyle}>
-            {widget.title ?? ''}
+            {typeof presentationData?.value === 'string' ? presentationData.value : widget.title ?? ''}
         </span>
     );
 

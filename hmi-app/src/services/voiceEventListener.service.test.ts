@@ -16,6 +16,14 @@ function jsonResponse(body: unknown): Response {
     } as Response;
 }
 
+function deferred<Value>() {
+    let resolve!: (value: Value) => void;
+    const promise = new Promise<Value>((resolvePromise) => {
+        resolve = resolvePromise;
+    });
+    return { promise, resolve };
+}
+
 describe('startVoiceEventListener', () => {
     beforeEach(() => {
         vi.useFakeTimers();
@@ -268,6 +276,49 @@ describe('startVoiceEventListener', () => {
         expect(onEvent).not.toHaveBeenCalled();
 
         stop();
+    });
+
+    it.each([
+        ['5057 outage', () => Promise.reject(new TypeError('Failed to fetch'))],
+        ['CORS preflight denial', () => Promise.reject(new TypeError('CORS request rejected'))],
+        ['timeout', () => Promise.reject(new DOMException('Request timed out', 'TimeoutError'))],
+        ['malformed JSON', () => Promise.resolve({ ok: true, json: async () => { throw new SyntaxError('invalid'); } } as Response)],
+        ['non-2xx', () => Promise.resolve({ ok: false, status: 503 } as Response)],
+    ] as const)('isolates %s and retries the voice request', async (_case, failure) => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockImplementationOnce(failure)
+            .mockResolvedValueOnce(jsonResponse(FIRST_EVENT));
+        const onEvent = vi.fn();
+        const stop = startVoiceEventListener({
+            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            onEvent,
+            fetchImpl: fetchMock,
+            intervalMs: 1_000,
+        });
+
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(onEvent).not.toHaveBeenCalled();
+        stop();
+    });
+
+    it('rejects a stale GET completion after the listener is stopped', async () => {
+        const request = deferred<Response>();
+        const onEvent = vi.fn();
+        const fetchMock = vi.fn<typeof fetch>().mockReturnValue(request.promise);
+        const stop = startVoiceEventListener({
+            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            onEvent,
+            fetchImpl: fetchMock,
+        });
+
+        stop();
+        request.resolve(jsonResponse(FIRST_EVENT));
+        await Promise.resolve();
+
+        expect(onEvent).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('waits for the active request to settle before scheduling the next poll', async () => {

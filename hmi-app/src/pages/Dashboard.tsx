@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { AlertTriangle, Loader2, Link2Off } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { dashboardStorage } from '../services/DashboardStorageService';
@@ -16,7 +16,90 @@ import { useUIStore } from '../store/ui.store';
 import { getDefaultDashboardView, materializeDashboardView, normalizeDashboardViews } from '../utils/dashboardViews';
 import { getDataSnapshotExportIntervalMs, isDataSnapshotExportEnabled } from '../config/dataConnection.config';
 import { buildDashboardSnapshot } from '../services/dashboardSnapshotBuilder';
-import { exportDashboardSnapshot } from '../services/dashboardSnapshotExport.service';
+import { exportDashboardSnapshot, startPrismaLocalSnapshotExporter } from '../services/dashboardSnapshotExport.service';
+import { DashboardPresentationFrameProvider, useDashboardPresentationFrame } from '../services/dashboardPresentationFrame.service';
+import { usePrismaRuntimeProfile } from '../hooks/usePrismaRuntimeProfile';
+
+type DashboardViewState = 'loading' | 'error' | 'empty' | 'viewer';
+
+interface SnapshotExportRuntimeValues {
+    activeDashboard?: Dashboard;
+    allNodes: HierarchyNode[];
+    connection?: ConnectionHealth;
+    dashboardViewState: DashboardViewState;
+    equipmentMap: Map<string, EquipmentSummary>;
+    machines?: ContractMachine[];
+}
+
+interface LocalSnapshotExportControllerProps extends SnapshotExportRuntimeValues {
+    enabled: boolean;
+    profileRevision: number;
+    children: ReactNode;
+}
+
+function LocalSnapshotExportController({
+    enabled,
+    profileRevision,
+    activeDashboard,
+    allNodes,
+    connection,
+    dashboardViewState,
+    equipmentMap,
+    machines,
+    children,
+}: LocalSnapshotExportControllerProps) {
+    const frame = useDashboardPresentationFrame();
+    const latestValuesRef = useRef<SnapshotExportRuntimeValues & { frame: typeof frame }>({
+        activeDashboard,
+        allNodes,
+        connection,
+        dashboardViewState,
+        equipmentMap,
+        machines,
+        frame,
+    });
+
+    useEffect(() => {
+        latestValuesRef.current = {
+            activeDashboard,
+            allNodes,
+            connection,
+            dashboardViewState,
+            equipmentMap,
+            machines,
+            frame,
+        };
+    }, [activeDashboard, allNodes, connection, dashboardViewState, equipmentMap, frame, machines]);
+
+    useEffect(() => {
+        if (!enabled) {
+            return;
+        }
+
+        return startPrismaLocalSnapshotExporter({
+            revision: profileRevision,
+            intervalMs: 5_000,
+            getSnapshot: () => {
+                const current = latestValuesRef.current;
+
+                if (!current.activeDashboard || current.dashboardViewState !== 'viewer' || !current.frame.ready) {
+                    return null;
+                }
+
+                return buildDashboardSnapshot({
+                    dashboard: current.activeDashboard,
+                    connection: current.connection,
+                    machines: current.machines,
+                    equipmentMap: current.equipmentMap,
+                    hierarchyNodes: current.allNodes,
+                    presentationFrame: current.frame,
+                });
+            },
+        });
+    }, [enabled, profileRevision]);
+
+    return <>{children}</>;
+}
 
 // =============================================================================
 // Dashboard Público (Visor)
@@ -47,6 +130,7 @@ export default function Dashboard() {
         isError: hasOverviewError,
     } = useDataOverview();
     const setSelectedPlant = useUIStore((state) => state.setSelectedPlant);
+    const prismaRuntimeProfile = usePrismaRuntimeProfile(searchParams.toString());
 
     // Mapeo de equipos simulado (para resolver bindings)
     const equipmentMap = useMemo(() => {
@@ -223,6 +307,10 @@ export default function Dashboard() {
         const slots = activeDashboard?.headerConfig?.widgetSlots ?? [];
         return new Set(slots.map(s => s.widgetId));
     }, [activeDashboard]);
+    const presentationWidgetIds = useMemo(
+        () => activeDashboard?.widgets.map((widget) => widget.id) ?? [],
+        [activeDashboard],
+    );
 
     const hierarchyContext = useMemo<HierarchyContext>(() => ({
         allNodes,
@@ -230,16 +318,8 @@ export default function Dashboard() {
         currentNodeId: activeDashboard?.ownerNodeId,
     }), [allNodes, allDashboards, activeDashboard?.ownerNodeId]);
 
-    interface SnapshotExportRuntimeValues {
-        activeDashboard?: Dashboard;
-        allNodes: HierarchyNode[];
-        connection?: ConnectionHealth;
-        dashboardViewState: typeof dashboardViewState;
-        equipmentMap: Map<string, EquipmentSummary>;
-        machines?: ContractMachine[];
-    }
-
-    const snapshotExportEnabled = isDataSnapshotExportEnabled();
+    const isLocalRuntime = prismaRuntimeProfile.mode === 'local';
+    const snapshotExportEnabled = !isLocalRuntime && isDataSnapshotExportEnabled();
     const snapshotExportIntervalMs = getDataSnapshotExportIntervalMs();
     const latestSnapshotExportValuesRef = useRef<SnapshotExportRuntimeValues>({
         activeDashboard: undefined,
@@ -333,7 +413,7 @@ export default function Dashboard() {
             cancelled = true;
             window.clearInterval(intervalId);
         };
-    }, [snapshotExportEnabled, snapshotExportIntervalMs]);
+    }, [isLocalRuntime, snapshotExportEnabled, snapshotExportIntervalMs]);
 
     const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => {
         if (!activeDashboard) {
@@ -424,6 +504,22 @@ export default function Dashboard() {
     }
 
     return (
+        <DashboardPresentationFrameProvider
+            dashboardId={activeDashboard.id}
+            viewId={activeDashboard.activeViewId ?? 'view-default'}
+            profileRevision={prismaRuntimeProfile.revision}
+            expectedWidgetIds={presentationWidgetIds}
+        >
+        <LocalSnapshotExportController
+            enabled={isLocalRuntime}
+            profileRevision={prismaRuntimeProfile.revision}
+            activeDashboard={activeDashboard}
+            allNodes={allNodes}
+            connection={connection}
+            dashboardViewState={dashboardViewState}
+            equipmentMap={equipmentMap}
+            machines={machines}
+        >
         <div className="flex flex-col h-full space-y-4 px-2 overflow-hidden">
 
             {/* HEADER CONFIGURADO DESDE dashboard.headerConfig */}
@@ -433,10 +529,10 @@ export default function Dashboard() {
                 equipmentMap={equipmentMap}
                 connection={connection}
                 machines={machines}
-                onNavigateDashboard={handleNavigateDashboard}
-                onSelectView={handleSelectView}
-                hierarchyContext={hierarchyContext}
-            />
+                 onNavigateDashboard={handleNavigateDashboard}
+                 onSelectView={handleSelectView}
+                 hierarchyContext={hierarchyContext}
+             />
 
             {/* GRID DEL DASHBOARD — widgets del header excluidos */}
             <div className="flex-1 bg-[url('/grid.svg')] bg-center rounded-xl border border-white/5 overflow-hidden">
@@ -452,10 +548,12 @@ export default function Dashboard() {
                     hierarchyContext={hierarchyContext}
                     cols={activeDashboard.cols}
                     rows={activeDashboard.rows}
-                    onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
-                    onNavigateDashboard={handleNavigateDashboard}
-                />
+                     onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
+                      onNavigateDashboard={handleNavigateDashboard}
+                  />
             </div>
         </div>
+        </LocalSnapshotExportController>
+        </DashboardPresentationFrameProvider>
     );
 }

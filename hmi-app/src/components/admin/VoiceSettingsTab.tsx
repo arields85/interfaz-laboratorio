@@ -24,12 +24,14 @@ import {
     readPrismaOrbVisualConfig,
     savePrismaOrbVisualConfig,
 } from '../../config/prismaOrb.config';
+import { savePrismaRuntimeMode } from '../../config/prismaRuntime.config';
 import {
     clonePrismaVoiceConfig,
     validatePrismaVoiceConfig,
 } from '../../domain/prismaVoiceConfig';
 import type { PrismaOrbVisualConfig } from '../../domain/voice.types';
 import { usePrismaVoiceConfigDraft } from '../../hooks/usePrismaVoiceConfigDraft';
+import { usePrismaRuntimeProfile } from '../../hooks/usePrismaRuntimeProfile';
 import { usePrismaVoiceConfig } from '../../queries/usePrismaVoiceConfig';
 import { useUpdatePrismaVoiceConfig } from '../../queries/useUpdatePrismaVoiceConfig';
 import PrismaOrb from '../PrismaOrb';
@@ -69,6 +71,11 @@ const PREVIEW_BACKDROP_OPTIONS = [
     { value: 'Light panel', label: 'Panel claro' },
 ] satisfies Array<{ value: PreviewBackdrop; label: string }>;
 
+const PRISMA_RUNTIME_MODE_OPTIONS = [
+    { value: 'central', label: 'Server (Node-RED)' },
+    { value: 'local', label: 'Local (presentations)' },
+] satisfies Array<{ value: string; label: string }>;
+
 function visualConfigsEqual(left: PrismaOrbVisualConfig, right: PrismaOrbVisualConfig): boolean {
     return left.rays === right.rays
         && left.speed === right.speed
@@ -79,6 +86,7 @@ function visualConfigsEqual(left: PrismaOrbVisualConfig, right: PrismaOrbVisualC
 }
 
 export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: VoiceSettingsTabProps) {
+    const runtimeProfile = usePrismaRuntimeProfile();
     const voiceConfigDraft = usePrismaVoiceConfigDraft();
     const updateVoiceConfig = useUpdatePrismaVoiceConfig();
     const [initialSettings] = useState(() => {
@@ -335,6 +343,29 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
     return (
         <div className="space-y-4">
+            <section className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
+                <div className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
+                    Modo de ejecución de Prisma
+                </div>
+                <AdminSelect
+                    ariaLabel="Modo de ejecución de Prisma"
+                    value={runtimeProfile.mode}
+                    options={PRISMA_RUNTIME_MODE_OPTIONS}
+                    disabled={runtimeProfile.isTemporaryOverride}
+                    onChange={(value) => savePrismaRuntimeMode(value)}
+                />
+                <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    {runtimeProfile.mode === 'local'
+                        ? 'Usa servicios locales de presentación para demostraciones offline; no modifica la conexión industrial.'
+                        : 'Usa la conexión central configurada en Node-RED para la asistencia de Prisma.'}
+                </p>
+                {runtimeProfile.isTemporaryOverride ? (
+                    <p className={`mt-1 ${ADMIN_SIDEBAR_HINT_CLS}`} aria-live="polite">
+                        El modo Local está activo por un parámetro temporal de la URL. La selección está deshabilitada y la preferencia guardada no cambia.
+                    </p>
+                ) : null}
+            </section>
+
             <section className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
                 <label htmlFor="voice-settings-endpoint" className={`${ADMIN_SIDEBAR_LABEL_CLS} mb-1.5 block w-auto`}>
                     Endpoint Voz HMI

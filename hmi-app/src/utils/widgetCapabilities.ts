@@ -1,4 +1,5 @@
 import type { WidgetConfig, WidgetType } from '../domain/admin.types';
+import type { PresentationCapability } from '../domain/dashboardPresentation.types';
 
 /**
  * Capability flags available for each widget type.
@@ -34,6 +35,19 @@ const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
     'text-title': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 5, h: 2 }, defaultIcon: null },
     'info-card': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 5 }, defaultIcon: 'Info' },
 };
+
+const WIDGET_PRESENTATION_CAPABILITIES: Record<WidgetType, PresentationCapability | undefined> = {
+    'kpi': 'scalar', 'metric-card': 'scalar', 'status': 'status', 'connection-status': 'connection',
+    'trend-chart': 'trend-chart', 'trend-chart-v2': 'trend-chart-v2', 'text-title': 'static', 'info-card': 'static',
+    'prod-history': 'production-history', 'machine-activity': 'machine-activity', 'activity-analytics': 'activity-analytics',
+    'prod-trend': 'prod-trend', 'alert-history': 'alert-history',
+    'badge': undefined, 'sparkline': undefined, 'table': undefined, 'alert-list': undefined, 'text-summary': undefined,
+    'multi-metric': undefined, 'ai-summary': undefined, 'section-title': undefined,
+};
+
+export function getWidgetPresentationCapability(widgetType: string): PresentationCapability | undefined {
+    return WIDGET_PRESENTATION_CAPABILITIES[widgetType as WidgetType];
+}
 
 /** Default capabilities for unknown widget types. */
 const DEFAULT_CAPABILITIES: WidgetCapabilities = {

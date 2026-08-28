@@ -15,6 +15,7 @@ import {
     parseHeaderWidgetDragPayload,
 } from '../../utils/headerWidgets';
 import HeaderWidgetRenderer from './HeaderWidgetRenderer';
+import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 const HEADER_WIDGET_ENTRANCE_STAGGER_MS = 110;
 
@@ -353,13 +354,23 @@ export default function HeaderWidgetCanvas({
                     </div>
 
                     <div className={hasDisplayTitle ? 'pt-1' : ''}>
-                        <HeaderWidgetRenderer
-                            widget={widget}
-                            equipmentMap={equipmentMap}
-                            connection={connection}
-                            machines={machines}
-                            align="start"
-                        />
+                         <WidgetPresentationBoundary
+                             widget={widget}
+                             equipmentMap={equipmentMap}
+                             connection={connection}
+                             machines={machines}
+                             onNavigateDashboard={onNavigateDashboard}
+                             renderEntry={(entry) => (
+                                 <HeaderWidgetRenderer
+                                     widget={widget}
+                                     equipmentMap={equipmentMap}
+                                     connection={connection}
+                                     machines={machines}
+                                     align="start"
+                                     presentationData={entry.payload}
+                                 />
+                             )}
+                         />
                     </div>
                 </div>
             </div>

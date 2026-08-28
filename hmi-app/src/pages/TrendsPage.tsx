@@ -3,7 +3,7 @@ import { Activity, ChevronDown, Gauge } from 'lucide-react';
 import { useEquipmentList } from '../queries/useEquipmentList';
 import TrendWidget from '../components/TrendWidget';
 import { LoadingSkeleton, ErrorState, EmptyState } from '../components/ui';
-import { WidgetRenderer } from '../widgets';
+import WidgetPresentationBoundary from '../components/viewer/WidgetPresentationBoundary';
 import type { WidgetConfig } from '../domain/admin.types';
 import type { EquipmentSummary } from '../domain/equipment.types';
 
@@ -224,7 +224,7 @@ export default function TrendsPage() {
 
                         <div className="grid grid-cols-2 xl:grid-cols-4 gap-5">
                             {metricWidgets.map(widget => (
-                                <WidgetRenderer
+                                <WidgetPresentationBoundary
                                     key={widget.id}
                                     widget={widget}
                                     equipmentMap={equipmentMap}

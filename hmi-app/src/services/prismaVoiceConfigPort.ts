@@ -5,7 +5,7 @@ export interface PrismaVoiceConfigReader {
 }
 
 export interface PrismaVoiceConfigWriter {
-    updateConfig(config: PrismaVoiceConfig): Promise<PrismaVoiceConfig>;
+    updateConfig(config: PrismaVoiceConfig, signal?: AbortSignal): Promise<PrismaVoiceConfig>;
 }
 
 export type PrismaVoiceConfigPort = PrismaVoiceConfigReader & PrismaVoiceConfigWriter;
