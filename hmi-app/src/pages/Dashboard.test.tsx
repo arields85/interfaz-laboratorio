@@ -222,8 +222,8 @@ describe('Dashboard page layout', () => {
             );
         });
 
-        expect(dashboardViewerMock).toHaveBeenCalledWith(expect.objectContaining({ presentationFrame: true }));
-        expect(dashboardHeaderMock).toHaveBeenCalledWith(expect.objectContaining({ presentationFrame: true }));
+        expect(dashboardViewerMock).toHaveBeenCalledWith(expect.not.objectContaining({ presentationFrame: expect.anything() }));
+        expect(dashboardHeaderMock).toHaveBeenCalledWith(expect.not.objectContaining({ presentationFrame: expect.anything() }));
     });
 
     it('passes published snapshot cols to the viewer when rendering a published dashboard', async () => {

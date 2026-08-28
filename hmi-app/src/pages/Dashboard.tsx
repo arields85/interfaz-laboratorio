@@ -529,11 +529,10 @@ export default function Dashboard() {
                 equipmentMap={equipmentMap}
                 connection={connection}
                 machines={machines}
-                onNavigateDashboard={handleNavigateDashboard}
-                onSelectView={handleSelectView}
-                hierarchyContext={hierarchyContext}
-                presentationFrame
-            />
+                 onNavigateDashboard={handleNavigateDashboard}
+                 onSelectView={handleSelectView}
+                 hierarchyContext={hierarchyContext}
+             />
 
             {/* GRID DEL DASHBOARD — widgets del header excluidos */}
             <div className="flex-1 bg-[url('/grid.svg')] bg-center rounded-xl border border-white/5 overflow-hidden">
@@ -549,10 +548,9 @@ export default function Dashboard() {
                     hierarchyContext={hierarchyContext}
                     cols={activeDashboard.cols}
                     rows={activeDashboard.rows}
-                    onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
-                     onNavigateDashboard={handleNavigateDashboard}
-                     presentationFrame
-                 />
+                     onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
+                      onNavigateDashboard={handleNavigateDashboard}
+                  />
             </div>
         </div>
         </LocalSnapshotExportController>

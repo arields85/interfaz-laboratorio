@@ -69,19 +69,6 @@ interface WidgetRendererProps {
     presentationEntry?: WidgetPresentationEntry;
 }
 
-const CANONICAL_PRESENTATION_CAPABILITIES = new Set([
-    'scalar',
-    'status',
-    'connection',
-    'static',
-    'trend-chart',
-    'trend-chart-v2',
-    'activity-analytics',
-    'prod-trend',
-    'production-history',
-    'machine-activity',
-    'alert-history',
-]);
 const NAVIGATION_INTERACTIVE_SELECTOR = [
     'button',
     'a',
@@ -119,15 +106,6 @@ export default function WidgetRenderer({
     renderContext,
     presentationEntry,
 }: WidgetRendererProps) {
-    if (presentationEntry && !CANONICAL_PRESENTATION_CAPABILITIES.has(presentationEntry.capability) && presentationEntry.capability !== 'legacy-presentation') {
-        return presentationEntry.capability === 'unsupported'
-            ? <UnsupportedWidget type={presentationEntry.widgetType} />
-            : <div className={`glass-panel flex h-full w-full flex-col justify-center p-4 ${className ?? ''}`} data-testid={`presentation-widget-${presentationEntry.widgetId}`}>
-                <span className="truncate uppercase text-industrial-muted">{presentationEntry.widget.title ?? presentationEntry.widgetType}</span>
-                <span className="text-industrial-text">{presentationEntry.payload.value == null ? '—' : String(presentationEntry.payload.value)}{presentationEntry.payload.unit ? ` ${presentationEntry.payload.unit}` : ''}</span>
-            </div>;
-    }
-
     let renderedWidget: ReactNode;
     switch (widget.type) {
         case 'metric-card':

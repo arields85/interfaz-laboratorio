@@ -34,6 +34,7 @@ import { mapHistoricalDensityToMaxPoints } from '../../utils/trendChartV2Density
 import { recordTrendChartV2PerformanceDiagnostic } from '../../utils/trendChartV2PerformanceDiagnostics';
 import type { AlertHistoryEntry } from '../../domain/alertHistory.types';
 import type { ResolvedBinding } from '../../domain/widget.types';
+import type { TrendChartV2RenderContext } from '../renderers/trendChartV2RenderContext';
 
 const PRODUCTION_HISTORY_WINDOW_SIZE: Record<TemporalBucket, number> = { hour: 24, shift: 15, day: 14, month: 12 };
 
@@ -83,6 +84,7 @@ export interface PresentationControllerProps {
     isLoadingData?: boolean;
     siblingWidgets?: WidgetConfig[];
     queryClient?: QueryClient;
+    renderContext?: TrendChartV2RenderContext;
     render: (entry: WidgetPresentationEntry) => ReactNode;
 }
 
@@ -561,11 +563,6 @@ export function StaticPresentationController({ widget, render }: PresentationCon
         }) }
         : undefined;
     const entry = useEntry(widget, 'static', { value: widget.title ?? null, data });
-    return <>{render(entry)}</>;
-}
-
-export function LegacyPresentationController({ widget, render }: PresentationControllerProps) {
-    const entry = useEntry(widget, 'legacy-presentation', {});
     return <>{render(entry)}</>;
 }
 

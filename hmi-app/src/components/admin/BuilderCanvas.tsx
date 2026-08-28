@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, Trash2, ArrowUp, LayoutDashboard } from 'lucide-react';
-import { WidgetRenderer } from '../../widgets';
 import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
@@ -29,6 +28,7 @@ import {
     type WidgetPixelBounds,
 } from '../../utils/widgetInteraction';
 import type { TrendChartV2RenderContext } from '../../widgets/renderers/trendChartV2RenderContext';
+import WidgetPresentationBoundary from '../viewer/WidgetPresentationBoundary';
 
 interface BuilderCanvasProps {
     widgets: WidgetConfig[];
@@ -575,7 +575,7 @@ export default function BuilderCanvas({
                                     className="pointer-events-none relative z-0 h-full w-full box-border"
                                     style={{ padding: 'var(--widget-spacing)' }}
                                 >
-                                    <WidgetRenderer
+                                    <WidgetPresentationBoundary
                                         widget={widget}
                                         equipmentMap={equipmentMap}
                                         connection={connection}

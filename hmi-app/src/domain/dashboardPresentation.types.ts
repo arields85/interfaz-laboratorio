@@ -15,7 +15,6 @@ export type PresentationCapability =
     | 'static'
     | 'activity-analytics'
     | 'prod-trend'
-    | 'legacy-presentation'
     | 'unsupported';
 
 export type PresentationScalar = number | string | boolean | null;
@@ -83,7 +82,6 @@ export interface WidgetPresentationPayloadByCapability {
     'alert-history': PresentationPayload;
     'activity-analytics': PresentationPayload;
     'prod-trend': PresentationPayload;
-    'legacy-presentation': PresentationPayload;
     unsupported: PresentationPayload;
 }
 

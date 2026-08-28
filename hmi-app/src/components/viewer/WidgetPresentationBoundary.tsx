@@ -6,7 +6,7 @@ import { getWidgetPresentationCapability } from '../../utils/widgetCapabilities'
 import type { PresentationControllerProps } from '../../widgets/controllers/PresentationControllers';
 import type { WidgetPresentationEntry } from '../../domain/dashboardPresentation.types';
 import {
-    ActivityAnalyticsPresentationController, AlertHistoryPresentationController, ConnectionPresentationController, LegacyPresentationController, MachineActivityPresentationController, ProdTrendPresentationController, ProductionHistoryPresentationController, ScalarPresentationController,
+    ActivityAnalyticsPresentationController, AlertHistoryPresentationController, ConnectionPresentationController, MachineActivityPresentationController, ProdTrendPresentationController, ProductionHistoryPresentationController, ScalarPresentationController,
     StaticPresentationController, StatusPresentationController, TrendChartController, TrendChartV2Controller,
     UnsupportedPresentationController,
 } from '../../widgets/controllers/PresentationControllers';
@@ -43,14 +43,13 @@ const CONTROLLERS = {
     'activity-analytics': ActivityAnalyticsPresentationController,
     'prod-trend': ProdTrendPresentationController,
     'alert-history': AlertHistoryPresentationController,
-    'legacy-presentation': LegacyPresentationController,
 } as const;
 
 export default function WidgetPresentationBoundary(props: WidgetPresentationBoundaryProps) {
     const capability = getWidgetPresentationCapability(props.widget.type);
-    const Controller = capability && capability !== 'unsupported'
-        ? CONTROLLERS[capability]
-        : UnsupportedPresentationController;
+    const Controller = capability === undefined || capability === 'unsupported'
+        ? UnsupportedPresentationController
+        : CONTROLLERS[capability];
     const controllerProps: PresentationControllerProps = {
         ...props,
         render: (entry) => props.renderEntry?.(entry) ?? <WidgetRenderer {...props} presentationEntry={entry} />,

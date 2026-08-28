@@ -187,8 +187,8 @@ function renderBuilderCanvasWithoutMeasurement(overrides?: {
     };
 }
 
-vi.mock('../../widgets', () => ({
-    WidgetRenderer: ({
+vi.mock('../viewer/WidgetPresentationBoundary', () => ({
+    default: ({
         widget,
         renderContext,
     }: {

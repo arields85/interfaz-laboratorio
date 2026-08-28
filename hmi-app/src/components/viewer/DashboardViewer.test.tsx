@@ -62,8 +62,8 @@ function emitResize(target: Element, width: number, height: number) {
 
 const widgetRendererMock = vi.fn();
 
-vi.mock('../../widgets', () => ({
-    WidgetRenderer: (props: { widget: { id: string; title?: string } }) => {
+vi.mock('./WidgetPresentationBoundary', () => ({
+    default: (props: { widget: { id: string; title?: string } }) => {
         widgetRendererMock(props);
         return <div data-testid={`widget-renderer-${props.widget.id}`}>{props.widget.title ?? props.widget.id}</div>;
     },
@@ -441,7 +441,7 @@ describe('DashboardViewer', () => {
         );
 
         expect(screen.queryByText('connection-status')).not.toBeInTheDocument();
-        expect(screen.getByTestId('header-widget-renderer-header-connection')).toBeInTheDocument();
+        expect(screen.getByTestId('widget-renderer-header-connection')).toBeInTheDocument();
     });
 
     it('offers arrow actions and moves header widgets with explicit target columns', async () => {
