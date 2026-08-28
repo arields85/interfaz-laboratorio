@@ -1,20 +1,20 @@
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 
 import { makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { DashboardPresentationFrameProvider, useDashboardPresentationFrame } from '../../services/dashboardPresentationFrame.service';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 import HeaderWidgetRenderer from './HeaderWidgetRenderer';
 
-vi.mock('../../queries/useDataHistory', () => ({
-    useDataHistory: vi.fn(() => ({
-        data: null,
-        isLoading: false,
-        isError: false,
-        error: null,
-        isEnabled: false,
-    })),
-    createDataHistoryQueryOptions: vi.fn(),
+const historyServiceSeam = vi.hoisted(() => ({
+    fetchDataHistory: vi.fn(),
+}));
+
+vi.mock('../../services/dataHistory.service', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../../services/dataHistory.service')>(),
+    fetchDataHistory: historyServiceSeam.fetchDataHistory,
 }));
 
 vi.mock('../../queries/useActivitySeries', () => ({
@@ -28,6 +28,11 @@ function FrameProbe({ widgetId }: { widgetId: string }) {
     const frame = useDashboardPresentationFrame();
     const entry = frame.entries.get(widgetId);
     return <output data-testid="frame-state">{entry ? `${frame.ready}:${entry === frame.entries.get(widgetId)}:${Object.isFrozen(entry)}` : 'missing'}</output>;
+}
+
+function render(ui: ReactNode) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
 
 describe('WidgetPresentationBoundary', () => {
@@ -46,7 +51,7 @@ describe('WidgetPresentationBoundary', () => {
             return <output data-testid="identity-state">{`${frame.ready}:${registeredEntry?.capability}`}</output>;
         }
 
-        render(<DashboardPresentationFrameProvider dashboardId="dashboard-routes" viewId="view-routes" profileRevision={3} expectedWidgetIds={[widget.id]}>
+         render(<DashboardPresentationFrameProvider dashboardId="dashboard-routes" viewId="view-routes" profileRevision={3} expectedWidgetIds={[widget.id]}>
                 <WidgetPresentationBoundary widget={widget} equipmentMap={new Map()} />
                 <CapabilityProbe />
             </DashboardPresentationFrameProvider>);
@@ -134,6 +139,57 @@ describe('WidgetPresentationBoundary', () => {
         expect(screen.getByText('1min')).toBeInTheDocument();
         expect(screen.getByTestId('connection-header-icon-degradado')).toBeInTheDocument();
         expect(screen.queryByTestId('presentation-widget-published-header-status')).not.toBeInTheDocument();
+    });
+
+    it('runs legacy trend history once through the controller before the real canonical renderer', async () => {
+        class ImmediateResizeObserver implements ResizeObserver {
+            public constructor(private readonly callback: ResizeObserverCallback) {}
+
+            public observe(target: Element): void {
+                this.callback([{ target, contentRect: { width: 320, height: 180 } } as ResizeObserverEntry], this);
+            }
+
+            public disconnect(): void {}
+            public unobserve(): void {}
+        }
+
+        const widget = {
+            ...makeWidget({ id: 'published-legacy-trend', title: 'Published trend' }),
+            type: 'trend-chart' as const,
+            binding: { mode: 'real_variable' as const, machineId: 101, variableKey: 'temperature' },
+        };
+        const historyResponse = {
+            contractVersion: '1.0.0',
+            machineId: 101,
+            variableKey: 'temperature',
+            range: 'hora' as const,
+            unit: '°C',
+            series: [
+                { timestamp: '2026-04-22T10:00:00.000Z', value: 45 },
+                { timestamp: '2026-04-22T12:00:00.000Z', value: 52 },
+            ],
+            summary: { last: 52, min: 45, max: 52, avg: 48.5 },
+        };
+
+        localStorage.setItem('hmi:node-red-base-url', 'http://history.test');
+        historyServiceSeam.fetchDataHistory.mockResolvedValue(historyResponse);
+        vi.stubGlobal('ResizeObserver', ImmediateResizeObserver);
+
+        try {
+        render(
+                <DashboardPresentationFrameProvider dashboardId="dashboard-trend" viewId="view-trend" profileRevision={1} expectedWidgetIds={[widget.id]}>
+                    <WidgetPresentationBoundary widget={widget} equipmentMap={new Map()} />
+                </DashboardPresentationFrameProvider>,
+            );
+
+            await waitFor(() => expect(screen.getByTestId('trend-chart-summary-max')).toHaveTextContent('max 52°c'));
+
+            expect(historyServiceSeam.fetchDataHistory).toHaveBeenCalledTimes(1);
+            expect(screen.getByTestId('trend-chart-svg')).toBeInTheDocument();
+        } finally {
+            localStorage.removeItem('hmi:node-red-base-url');
+            vi.unstubAllGlobals();
+        }
     });
 
     it('removes stale registrations when the dashboard revision changes', () => {

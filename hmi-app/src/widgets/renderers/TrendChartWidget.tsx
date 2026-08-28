@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EquipmentSummary } from '../../domain/equipment.types';
+import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 import {
     HISTORY_RANGES,
     HISTORY_RANGE_LABELS,
@@ -38,6 +39,7 @@ import {
     mapTrendChartLegacyHistory,
     type TrendChartLegacyDataPoint,
 } from './trendChartLegacyModel';
+import type { TrendChartPresentationData } from '../controllers/PresentationControllers';
 
 const SYSTEM_TEXT_STYLE = {
     fontSize: 'var(--font-size-system)',
@@ -100,6 +102,7 @@ interface TrendChartWidgetProps {
     machines?: ContractMachine[];
     isLoadingData?: boolean;
     className?: string;
+    presentationData?: PresentationPayload;
 }
 
 interface TrendChartSvgProps {
@@ -482,7 +485,85 @@ function TrendChartContainer({
     );
 }
 
-export default function TrendChartWidget({
+function TrendChartPresentationRenderer({ widget, isLoadingData = false, className, presentationData }: {
+    widget: TrendChartWidgetConfig;
+    isLoadingData?: boolean;
+    className?: string;
+    presentationData: TrendChartPresentationData;
+}) {
+    const header = (
+        <WidgetHeader
+            title={widget.title ?? 'Trend Chart'}
+            icon={TrendingUp}
+            iconColor={TOKEN.icon}
+            iconPosition="left"
+            dataMode={resolveWidgetDataMode(widget) ?? undefined}
+            dataModeTestId="trend-chart-widget-data-mode"
+            className={WIDGET_CHART_HEADER_CLASS}
+            trailing={(
+                <WidgetHeaderTemporalControls
+                    variant="pill"
+                    testId="trend-chart-widget-runtime-controls"
+                    indicatorTestId="trend-chart-widget-runtime-control-indicator"
+                    groups={[{
+                        testId: 'trend-chart-widget-runtime-range-selector',
+                        options: HISTORY_RANGE_OPTIONS,
+                        selectedValue: presentationData.range,
+                        onSelect: (value) => presentationData.onRangeChange(value as HistoryRange),
+                    }]}
+                />
+            )}
+        />
+    );
+
+    if (isLoadingData || presentationData.isRealLoading) {
+        return (
+            <div className={`glass-panel group p-5 w-full h-full flex flex-col ${className ?? ''}`}>
+                {header}
+                <WidgetRuntimeState state="loading" testId="trend-chart-widget-loading" />
+            </div>
+        );
+    }
+
+    return (
+        <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
+            {header}
+            <div className={WIDGET_CHART_CONTAINER_CLASS} data-testid="trend-chart-widget-chart-shell">
+                {presentationData.isShowingRefreshFailedSnapshot ? (
+                    <HistoricalChartNotice variant="stale" testId="trend-chart-historical-notice" />
+                ) : presentationData.isShowingRefreshingSnapshot ? (
+                    <HistoricalChartNotice variant="refreshing" testId="trend-chart-historical-notice" />
+                ) : null}
+                {presentationData.isNoData ? (
+                    !presentationData.isSimulated ? <WidgetRuntimeState state={presentationData.runtimeState} testId="trend-chart-widget-state" /> : null
+                ) : (
+                    <TrendChartContainer
+                        widgetId={widget.id}
+                        data={presentationData.data}
+                        thresholds={widget.thresholds}
+                        seriesName={widget.title ?? 'Valor'}
+                        unit={presentationData.unit}
+                        summary={!presentationData.isSimulated ? presentationData.response?.summary : undefined}
+                        lineStrokeWidth={clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth)}
+                        lineGlowBlur={clampLineGlowBlur(widget.displayOptions?.lineGlowBlur)}
+                    />
+                )}
+            </div>
+        </div>
+    );
+}
+
+export default function TrendChartWidget(props: TrendChartWidgetProps) {
+    const presentationData = props.presentationData?.data as TrendChartPresentationData | undefined;
+
+    if (presentationData && Array.isArray(presentationData.data) && typeof presentationData.onRangeChange === 'function') {
+        return <TrendChartPresentationRenderer {...props} presentationData={presentationData} />;
+    }
+
+    return <LegacyTrendChartWidget {...props} />;
+}
+
+function LegacyTrendChartWidget({
     widget,
     equipmentMap,
     machines,

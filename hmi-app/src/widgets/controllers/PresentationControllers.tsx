@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { QueryClientContext, type QueryClient } from '@tanstack/react-query';
-import type { ConnectionHealth, ContractMachine, HistoryQueryParams, HistoryQueryParamsV2 } from '../../domain/dataContract.types';
+import type { ConnectionHealth, ContractMachine, DataHistoryResponse, HistoryQueryParams, HistoryQueryParamsV2, HistoryRange } from '../../domain/dataContract.types';
 import type { ActivityAnalyticsGroupBy, ActivityAnalyticsRange, ActivityAnalyticsResponse } from '../../domain/activityAnalytics.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ActivityAnalyticsWidgetConfig, AlertHistoryWidgetConfig, MachineActivityWidgetConfig, ProdHistoryWidgetConfig, ProdTrendWidgetConfig, TemporalBucket, WidgetConfig } from '../../domain/admin.types';
@@ -23,6 +23,11 @@ import { subscribeAlertHistory, clearAlertHistoryEntries, type AlertHistoryCoord
 import { clamp, round2 } from '../../utils/chartHelpers';
 import type { TemporalTrendPoint } from '../../utils/temporalGrouping';
 import { getWidgetPresentationCapability } from '../../utils/widgetCapabilities';
+import { isDataHistoryEnabled } from '../../config/dataConnection.config';
+import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
+import { generateTrendData } from '../../utils/trendDataGenerator';
+import { isDataHistoryResponseCompatible } from '../../queries/useDataHistory';
+import { mapTrendChartLegacyHistory, type TrendChartLegacyDataPoint } from '../renderers/trendChartLegacyModel';
 
 const PRODUCTION_HISTORY_WINDOW_SIZE: Record<TemporalBucket, number> = { hour: 24, shift: 15, day: 14, month: 12 };
 
@@ -73,6 +78,20 @@ export interface PresentationControllerProps {
     siblingWidgets?: WidgetConfig[];
     queryClient?: QueryClient;
     render: (entry: WidgetPresentationEntry) => ReactNode;
+}
+
+export interface TrendChartPresentationData {
+    data: TrendChartLegacyDataPoint[];
+    response: DataHistoryResponse | null;
+    range: HistoryRange;
+    unit?: string;
+    isSimulated: boolean;
+    isRealLoading: boolean;
+    isNoData: boolean;
+    isShowingRefreshingSnapshot: boolean;
+    isShowingRefreshFailedSnapshot: boolean;
+    runtimeState: 'disconnected' | 'error' | 'empty';
+    onRangeChange: (range: HistoryRange) => void;
 }
 
 function useEntry<C extends PresentationCapability>(widget: WidgetConfig, capability: C, payload: WidgetPresentationPayloadByCapability[C]): WidgetPresentationEntry<C> {
@@ -134,11 +153,97 @@ export function ConnectionPresentationController({ widget, connection, machines,
     return <>{render(entry)}</>;
 }
 
-export function TrendChartController({ widget, render }: PresentationControllerProps) {
-    const params = useMemo<HistoryQueryParams | null>(() => widget.binding?.mode === 'real_variable' && widget.binding.machineId !== undefined && widget.binding.variableKey
-        ? { machineId: widget.binding.machineId, variableKey: widget.binding.variableKey, range: 'hora' } : null, [widget.binding]);
-    const history = useDataHistory(params);
-    const entry = useEntry(widget, 'trend-chart', { data: history.data, dataSummary: { isLoading: history.isLoading, isError: history.isError } });
+export function TrendChartController({ widget, equipmentMap, machines, isLoadingData = false, render }: PresentationControllerProps) {
+    const [range, setRange] = useState<HistoryRange>('hora');
+    const resolved = resolveBinding(widget, equipmentMap, machines);
+    const isSimulated = widget.binding?.mode === 'simulated_value';
+    const bindingMachineId = widget.binding?.machineId;
+    const bindingVariableKey = widget.binding?.variableKey;
+    const historyEnabled = isDataHistoryEnabled();
+    const historyOwnerKey = `${widget.id}:${widget.binding?.mode ?? 'unbound'}:${bindingMachineId ?? 'none'}:${bindingVariableKey ?? 'none'}`;
+    const historyParams = useMemo<HistoryQueryParams | null>(() => (
+        !isSimulated && bindingMachineId !== undefined && bindingVariableKey && historyEnabled
+            ? { machineId: bindingMachineId, variableKey: bindingVariableKey, range }
+            : null
+    ), [bindingMachineId, bindingVariableKey, historyEnabled, isSimulated, range]);
+    const history = useDataHistory(historyParams);
+    const [confirmedHistorySnapshot, setConfirmedHistorySnapshot] = useState<{
+        ownerKey: string;
+        selectionKey: string;
+        revision: string;
+        range: HistoryRange;
+        data: TrendChartLegacyDataPoint[];
+        response: DataHistoryResponse;
+    } | null>(null);
+    const hasCompatibleHistoryResponse = history.data !== null && isDataHistoryResponseCompatible(historyParams, history.data);
+    const requestedSelectionKey = `${bindingMachineId ?? 'none'}:${bindingVariableKey ?? 'none'}:${range}`;
+    const currentResponseRevision = history.data !== null && hasCompatibleHistoryResponse ? JSON.stringify(history.data) : null;
+    const canReuseConfirmedMapping = currentResponseRevision !== null
+        && confirmedHistorySnapshot?.ownerKey === historyOwnerKey
+        && confirmedHistorySnapshot.selectionKey === requestedSelectionKey
+        && confirmedHistorySnapshot.revision === currentResponseRevision;
+    const currentHistoryTrendData = history.data !== null && hasCompatibleHistoryResponse
+        ? canReuseConfirmedMapping
+            ? confirmedHistorySnapshot.data
+            : mapTrendChartLegacyHistory(history.data, range)
+        : null;
+    const currentHistorySnapshot = history.data !== null && currentHistoryTrendData && currentResponseRevision !== null
+        ? {
+            ownerKey: historyOwnerKey,
+            selectionKey: requestedSelectionKey,
+            revision: currentResponseRevision,
+            range,
+            data: currentHistoryTrendData,
+            response: history.data,
+        }
+        : null;
+
+    if (currentHistorySnapshot && !history.isPlaceholderData && !history.isError && (
+        confirmedHistorySnapshot?.ownerKey !== currentHistorySnapshot.ownerKey
+        || confirmedHistorySnapshot.selectionKey !== currentHistorySnapshot.selectionKey
+        || confirmedHistorySnapshot.revision !== currentHistorySnapshot.revision
+    )) {
+        setConfirmedHistorySnapshot(currentHistorySnapshot);
+    }
+
+    const ownerConfirmedSnapshot = confirmedHistorySnapshot?.ownerKey === historyOwnerKey ? confirmedHistorySnapshot : null;
+    const isShowingRefreshingSnapshot = !isSimulated && history.isRefreshing && ownerConfirmedSnapshot !== null;
+    const isShowingRefreshFailedSnapshot = !isSimulated && history.isError && ownerConfirmedSnapshot !== null;
+    const preserveConfirmedSnapshot = (history.isPlaceholderData || history.isRefreshing || history.isError) && ownerConfirmedSnapshot !== null;
+    const visibleHistorySnapshot = preserveConfirmedSnapshot ? ownerConfirmedSnapshot : currentHistorySnapshot;
+    const baseValue = resolved.value == null
+        ? null
+        : typeof resolved.value === 'number'
+            ? resolved.value
+            : typeof resolved.value === 'string'
+                ? Number.parseFloat(resolved.value)
+                : null;
+    const simulatedData = useMemo(() => isSimulated && baseValue !== null && Number.isFinite(baseValue)
+        ? generateTrendData(baseValue, undefined, 24)
+        : [], [baseValue, isSimulated]);
+    const data = isSimulated ? simulatedData : visibleHistorySnapshot?.data ?? [];
+    const isRealLoading = isLoadingData || (!isSimulated && historyParams !== null && history.isLoading && visibleHistorySnapshot === null);
+    const hasBinding = bindingMachineId !== undefined && Boolean(bindingVariableKey);
+    const isNoData = isSimulated ? data.length === 0 && (!hasBinding || baseValue === null) : !history.isLoading && data.length === 0;
+    const runtimeState = history.isError
+        ? (isDataHistoryConnectionError(history.error) ? 'disconnected' : 'error')
+        : 'empty' as const;
+    const entry = useEntry(widget, 'trend-chart', {
+        data: {
+            data,
+            response: isSimulated ? null : visibleHistorySnapshot?.response ?? null,
+            range,
+            unit: isSimulated ? (resolved.unit ? String(resolved.unit) : undefined) : visibleHistorySnapshot?.response.unit ?? (resolved.unit ? String(resolved.unit) : undefined),
+            isSimulated,
+            isRealLoading,
+            isNoData,
+            isShowingRefreshingSnapshot,
+            isShowingRefreshFailedSnapshot,
+            runtimeState,
+            onRangeChange: setRange,
+        } satisfies TrendChartPresentationData,
+        dataSummary: { isLoading: history.isLoading, isError: history.isError },
+    });
     return <>{render(entry)}</>;
 }
 

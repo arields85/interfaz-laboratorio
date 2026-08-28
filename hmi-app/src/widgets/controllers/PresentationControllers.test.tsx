@@ -12,6 +12,7 @@ import {
     MachineActivityPresentationController,
     ProductionHistoryPresentationController,
     ScalarPresentationController,
+    TrendChartController,
     TrendChartV2Controller,
     generateProductionHistorySeries,
 } from './PresentationControllers';
@@ -34,6 +35,10 @@ vi.mock('../../hooks/useMachineActivity', () => ({
 vi.mock('../renderers/alertHistoryCoordinator', () => ({
     subscribeAlertHistory: controllerSeams.subscribeAlertHistory,
     clearAlertHistoryEntries: vi.fn(),
+}));
+
+vi.mock('../../config/dataConnection.config', () => ({
+    isDataHistoryEnabled: vi.fn(() => true),
 }));
 
 vi.mock('../../queries/useDataHistory', async (importOriginal) => ({
@@ -91,6 +96,79 @@ describe('presentation controllers', () => {
         expect(useDataHistory).toHaveBeenCalledTimes(1);
         expect(prefetchQuery).toHaveBeenCalledTimes(1);
         expect(prefetchQuery.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ queryKey: ['data', 'history', 101, 'temperature', '24h', null, null, null] }));
+    });
+
+    it('owns legacy trend history and sends the canonical renderer one continuity payload', () => {
+        const widget = { ...makeWidget({ id: 'trend-legacy' }), type: 'trend-chart' as const, binding: { mode: 'real_variable' as const, machineId: 101, variableKey: 'temperature' } };
+        vi.mocked(useDataHistory).mockClear();
+        vi.mocked(useDataHistory).mockReturnValue({
+            data: {
+                contractVersion: '1.0.0',
+                machineId: 101,
+                variableKey: 'temperature',
+                range: 'hora',
+                unit: '°C',
+                series: [
+                    { timestamp: '2026-04-22T10:00:00.000Z', value: 45 },
+                    { timestamp: '2026-04-22T11:00:00.000Z', value: null },
+                    { timestamp: '2026-04-22T12:00:00.000Z', value: 52 },
+                ],
+                summary: { last: 52, min: 45, max: 52, avg: 48.5 },
+            },
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+            isFetching: false,
+            isPlaceholderData: false,
+            isRefreshing: false,
+        });
+
+        let registeredPayload: { range: string; data: Array<{ value: number; time: string }>; response: { unit: string }; onRangeChange: unknown } | undefined;
+        render(
+            <DashboardPresentationFrameProvider dashboardId="dashboard" viewId="view" profileRevision={1} expectedWidgetIds={[widget.id]}>
+                <TrendChartController
+                    widget={widget}
+                    equipmentMap={new Map()}
+                    render={(entry) => {
+                        registeredPayload = entry.payload.data as typeof registeredPayload;
+                        return <output data-testid="legacy-trend-entry">{JSON.stringify(entry.payload.data)}</output>;
+                    }}
+                />
+            </DashboardPresentationFrameProvider>,
+        );
+
+        const payload = JSON.parse(screen.getByTestId('legacy-trend-entry').textContent ?? '{}') as { range: string; data: Array<{ value: number }>; response: { unit: string }; onRangeChange: string };
+
+        expect(useDataHistory).toHaveBeenCalledWith({ machineId: 101, variableKey: 'temperature', range: 'hora' });
+        expect(payload.range).toBe('hora');
+        expect(payload.data.map((point) => point.value)).toEqual([45, 52]);
+        expect(payload.data.every((point) => /^\d{2}:\d{2}$/.test(point.time))).toBe(true);
+        expect(payload.response.unit).toBe('°C');
+        expect(registeredPayload?.onRangeChange).toBeTypeOf('function');
+    });
+
+    it('keeps simulated trend fixtures in the controller and disables history for that runtime mode', () => {
+        const widget = { ...makeWidget({ id: 'trend-simulated' }), type: 'trend-chart' as const, binding: { mode: 'simulated_value' as const, simulatedValue: 37, unit: '°C' } };
+        vi.mocked(useDataHistory).mockClear();
+
+        render(
+            <DashboardPresentationFrameProvider dashboardId="dashboard" viewId="view" profileRevision={1} expectedWidgetIds={[widget.id]}>
+                <TrendChartController
+                    widget={widget}
+                    equipmentMap={new Map()}
+                    render={(entry) => <output data-testid="simulated-trend-entry">{JSON.stringify(entry.payload.data)}</output>}
+                />
+            </DashboardPresentationFrameProvider>,
+        );
+
+        const payload = JSON.parse(screen.getByTestId('simulated-trend-entry').textContent ?? '{}') as { data: Array<{ value: number }>; isSimulated: boolean; response: unknown };
+
+        expect(useDataHistory).toHaveBeenCalledWith(null);
+        expect(payload.data).toHaveLength(24);
+        expect(payload.data.some((point) => point.value !== 37)).toBe(true);
+        expect(payload.isSimulated).toBe(true);
+        expect(payload.response).toBeNull();
     });
 
     it('does not prefetch without a real binding', () => {

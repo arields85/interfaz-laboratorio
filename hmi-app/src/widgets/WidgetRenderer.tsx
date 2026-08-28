@@ -234,6 +234,7 @@ export default function WidgetRenderer({
                     machines={machines}
                     isLoadingData={isLoadingData}
                     className={className}
+                    presentationData={presentationEntry?.payload}
                 />
             );
             break;
