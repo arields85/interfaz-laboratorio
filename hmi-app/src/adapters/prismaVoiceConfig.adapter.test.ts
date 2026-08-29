@@ -7,6 +7,9 @@ import {
     PrismaVoiceConfigReadError,
 } from './prismaVoiceConfig.adapter';
 
+const LEGACY_CONTRACT = 'legacy-flat';
+const LOCAL_CONTRACT = 'local-envelope';
+
 function response(overrides: Partial<Response> = {}): Response {
     return {
         ok: true,
@@ -22,6 +25,7 @@ describe('HttpPrismaVoiceConfigReader', () => {
         const signal = new AbortController().signal;
         const reader = new HttpPrismaVoiceConfigReader(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -41,6 +45,7 @@ describe('HttpPrismaVoiceConfigReader', () => {
     it('rejects non-OK HTTP responses', async () => {
         const reader = new HttpPrismaVoiceConfigReader(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             vi.fn(async () => response({ ok: false, status: 503 })) as typeof fetch,
         );
 
@@ -54,6 +59,7 @@ describe('HttpPrismaVoiceConfigReader', () => {
     it('rejects invalid JSON responses', async () => {
         const reader = new HttpPrismaVoiceConfigReader(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             vi.fn(async () => response({
                 json: vi.fn(async () => {
                     throw new SyntaxError('Unexpected token');
@@ -70,6 +76,7 @@ describe('HttpPrismaVoiceConfigReader', () => {
     it('rejects payloads that fail domain validation', async () => {
         const reader = new HttpPrismaVoiceConfigReader(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             vi.fn(async () => response({
                 json: vi.fn(async () => ({ effectEnabled: true })),
             })) as typeof fetch,
@@ -85,6 +92,7 @@ describe('HttpPrismaVoiceConfigReader', () => {
         const networkError = new TypeError('Failed to fetch');
         const reader = new HttpPrismaVoiceConfigReader(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             vi.fn(async () => {
                 throw networkError;
             }) as typeof fetch,
@@ -93,11 +101,12 @@ describe('HttpPrismaVoiceConfigReader', () => {
         await expect(reader.readConfig(new AbortController().signal)).rejects.toBe(networkError);
     });
 
-    it('returns a validated clone of a valid response', async () => {
+    it('accepts a valid flat Legacy response and returns a validated clone', async () => {
         const payload = createDefaultPrismaVoiceConfig();
         payload.effectIntensity = 42;
         const reader = new HttpPrismaVoiceConfigReader(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             vi.fn(async () => response({ json: vi.fn(async () => payload) })) as typeof fetch,
         );
 
@@ -108,6 +117,98 @@ describe('HttpPrismaVoiceConfigReader', () => {
         expect(result.robotic).not.toBe(payload.robotic);
         expect(PrismaVoiceConfigReadError).toBeDefined();
     });
+
+    it('defaults an omitted response contract to Legacy flat validation', async () => {
+        const payload = createDefaultPrismaVoiceConfig();
+        const fetchMock = vi.fn(async () => response({ json: vi.fn(async () => payload) }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        try {
+            const reader = new HttpPrismaVoiceConfigReader(
+                'https://node-red.local/hmi/prisma-config',
+            );
+
+            await expect(reader.readConfig(new AbortController().signal)).resolves.toEqual(payload);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('accepts a Local envelope and returns a validated clone of its config', async () => {
+        const config = createDefaultPrismaVoiceConfig();
+        config.effectIntensity = 42;
+        const payload = {
+            config,
+            sync: {
+                centralUrlConfigured: false,
+                lastSyncAt: null,
+                lastSyncError: "RuntimeError('PRISMA_CONFIG_URL_MISSING')",
+                source: 'local_fallback',
+            },
+        };
+        const reader = new HttpPrismaVoiceConfigReader(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            LOCAL_CONTRACT,
+            vi.fn(async () => response({ json: vi.fn(async () => payload) })) as typeof fetch,
+        );
+
+        const result = await reader.readConfig(new AbortController().signal);
+
+        expect(result).toEqual(config);
+        expect(result).not.toBe(config);
+        expect(result.robotic).not.toBe(config.robotic);
+    });
+
+    it.each([
+        ['a non-object envelope', null],
+        ['an envelope without config', { sync: { source: 'local_fallback' } }],
+        ['an envelope with inherited config', Object.create({ config: createDefaultPrismaVoiceConfig() })],
+        ['a flat config body', createDefaultPrismaVoiceConfig()],
+    ])('rejects Local GET %s with a transport-contract validation error', async (_case, payload) => {
+        const reader = new HttpPrismaVoiceConfigReader(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            LOCAL_CONTRACT,
+            vi.fn(async () => response({ json: vi.fn(async () => payload) })) as typeof fetch,
+        );
+
+        await expect(reader.readConfig(new AbortController().signal)).rejects.toMatchObject({
+            name: 'PrismaVoiceConfigReadError',
+            kind: 'validation',
+            message: expect.stringMatching(/Local.*config.*envelope/i),
+        });
+    });
+
+    it('rejects a Local envelope whose inner config fails strict domain validation', async () => {
+        const reader = new HttpPrismaVoiceConfigReader(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            LOCAL_CONTRACT,
+            vi.fn(async () => response({
+                json: vi.fn(async () => ({ config: { effectEnabled: true }, sync: {} })),
+            })) as typeof fetch,
+        );
+
+        await expect(reader.readConfig(new AbortController().signal)).rejects.toMatchObject({
+            name: 'PrismaVoiceConfigReadError',
+            kind: 'validation',
+            message: expect.stringMatching(/domain validation/i),
+            issues: expect.arrayContaining([expect.objectContaining({ path: expect.any(String) })]),
+        });
+    });
+
+    it('rejects a wrapped Legacy GET response', async () => {
+        const reader = new HttpPrismaVoiceConfigReader(
+            'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
+            vi.fn(async () => response({
+                json: vi.fn(async () => ({ config: createDefaultPrismaVoiceConfig(), sync: {} })),
+            })) as typeof fetch,
+        );
+
+        await expect(reader.readConfig(new AbortController().signal)).rejects.toMatchObject({
+            name: 'PrismaVoiceConfigReadError',
+            kind: 'validation',
+        });
+    });
 });
 
 describe('HttpPrismaVoiceConfigWriter', () => {
@@ -116,6 +217,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         const fetchMock = vi.fn(async () => response({ json: vi.fn(async () => config) }));
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -160,6 +262,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         const fetchMock = vi.fn();
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -174,6 +277,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         const fetchMock = vi.fn(async () => response({ ok: false, status }));
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -205,6 +309,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         ));
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -222,6 +327,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         });
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -240,6 +346,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         ));
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -261,6 +368,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         ));
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -278,6 +386,7 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         const fetchMock = vi.fn(async () => response({ json: vi.fn(async () => normalized) }));
         const writer = new HttpPrismaVoiceConfigWriter(
             'https://node-red.local/hmi/prisma-config',
+            LEGACY_CONTRACT,
             fetchMock as typeof fetch,
         );
 
@@ -288,5 +397,49 @@ describe('HttpPrismaVoiceConfigWriter', () => {
         expect(result.robotic).not.toBe(normalized.robotic);
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
+    });
+
+    it('accepts a wrapped Local PUT response and returns its validated inner config', async () => {
+        const normalized = createDefaultPrismaVoiceConfig();
+        normalized.effectIntensity = 64;
+        const fetchMock = vi.fn(async () => response({
+            json: vi.fn(async () => ({
+                config: normalized,
+                sync: {
+                    centralUrlConfigured: false,
+                    lastSyncAt: null,
+                    lastSyncError: "RuntimeError('PRISMA_CONFIG_URL_MISSING')",
+                    source: 'local_fallback',
+                },
+            })),
+        }));
+        const writer = new HttpPrismaVoiceConfigWriter(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            LOCAL_CONTRACT,
+            fetchMock as typeof fetch,
+        );
+
+        await expect(writer.updateConfig(createDefaultPrismaVoiceConfig())).resolves.toEqual(normalized);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PUT');
+    });
+
+    it.each([
+        ['an envelope without config', { sync: { source: 'local_fallback' } }],
+        ['a flat config body', createDefaultPrismaVoiceConfig()],
+        ['an invalid inner config', { config: { effectEnabled: true }, sync: {} }],
+    ])('rejects a Local PUT response containing %s', async (_case, payload) => {
+        const fetchMock = vi.fn(async () => response({ json: vi.fn(async () => payload) }));
+        const writer = new HttpPrismaVoiceConfigWriter(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            LOCAL_CONTRACT,
+            fetchMock as typeof fetch,
+        );
+
+        await expect(writer.updateConfig(createDefaultPrismaVoiceConfig())).rejects.toMatchObject({
+            name: 'PrismaVoiceConfigWriteError',
+            kind: 'response-validation',
+        });
+        expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['PUT', 'GET']);
     });
 });
