@@ -5,16 +5,17 @@ import { HttpPrismaVoiceConfigWriter } from '../adapters/prismaVoiceConfig.adapt
 import { resolvePrismaConfigUrl } from '../config/prismaAssistant.config';
 import type { PrismaVoiceConfig } from '../domain/prismaVoiceConfig';
 import { usePrismaRuntimeProfile } from '../hooks/usePrismaRuntimeProfile';
-import { PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX } from './usePrismaVoiceConfig';
+import { createPrismaVoiceConfigQueryKey } from './usePrismaVoiceConfig';
 
 interface UpdatePrismaVoiceConfigVariables {
-    url: string;
+    url: string | null;
     config: PrismaVoiceConfig;
 }
 
 export function useUpdatePrismaVoiceConfig() {
     const queryClient = useQueryClient();
     const runtimeProfile = usePrismaRuntimeProfile();
+    const responseContract = runtimeProfile.mode === 'local' ? 'local-envelope' : 'legacy-flat';
     const generationRef = useRef(0);
     const controllerRef = useRef<AbortController | null>(null);
 
@@ -38,7 +39,7 @@ export function useUpdatePrismaVoiceConfig() {
             }
 
             try {
-                const result = await new HttpPrismaVoiceConfigWriter(effectiveUrl)
+                const result = await new HttpPrismaVoiceConfigWriter(effectiveUrl, responseContract)
                     .updateConfig(config, controller.signal);
                 if (generationRef.current !== generation || controller.signal.aborted) {
                     throw new DOMException('Stale Prisma voice config update', 'AbortError');
@@ -54,7 +55,11 @@ export function useUpdatePrismaVoiceConfig() {
             const effectiveUrl = resolvePrismaConfigUrl(runtimeProfile.mode, url);
             if (!effectiveUrl) return;
             queryClient.setQueryData(
-                [...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, effectiveUrl],
+                createPrismaVoiceConfigQueryKey(
+                    runtimeProfile.mode,
+                    effectiveUrl,
+                    responseContract,
+                ),
                 config,
             );
         },

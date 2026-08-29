@@ -5,8 +5,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 import { createDefaultPrismaVoiceConfig } from '../domain/prismaVoiceConfig';
-import { PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX } from './usePrismaVoiceConfig';
+import { createPrismaVoiceConfigQueryKey } from './usePrismaVoiceConfig';
 import { useUpdatePrismaVoiceConfig } from './useUpdatePrismaVoiceConfig';
+
+function localEnvelope(config = createDefaultPrismaVoiceConfig()) {
+    return {
+        config,
+        sync: {
+            centralUrlConfigured: false,
+            lastSyncAt: null,
+            lastSyncError: "RuntimeError('PRISMA_CONFIG_URL_MISSING')",
+            source: 'local_fallback',
+        },
+    };
+}
 
 function createHarness() {
     const queryClient = new QueryClient({
@@ -45,7 +57,7 @@ describe('useUpdatePrismaVoiceConfig', () => {
             await result.current.mutateAsync({ url, config: createDefaultPrismaVoiceConfig() });
         });
 
-        expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url]))
+        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat')))
             .toEqual(normalized);
     });
 
@@ -68,7 +80,7 @@ describe('useUpdatePrismaVoiceConfig', () => {
             await result.current.mutateAsync({ url, config: sent });
         });
 
-        expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url]))
+        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat')))
             .toEqual(sent);
         expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['PUT', 'GET']);
     });
@@ -82,14 +94,14 @@ describe('useUpdatePrismaVoiceConfig', () => {
             json: vi.fn(),
         } as unknown as Response)));
         const { queryClient, wrapper } = createHarness();
-        queryClient.setQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url], cached);
+        queryClient.setQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat'), cached);
         const { result } = renderHook(() => useUpdatePrismaVoiceConfig(), { wrapper });
 
         await expect(act(async () => {
             await result.current.mutateAsync({ url, config: createDefaultPrismaVoiceConfig() });
         })).rejects.toThrow();
 
-        expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url])).toBe(cached);
+        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat'))).toBe(cached);
     });
 
     it('aborts a stale local PUT when the runtime profile changes', async () => {
@@ -121,5 +133,50 @@ describe('useUpdatePrismaVoiceConfig', () => {
         expect(localSignal?.aborted).toBe(true);
         expect(fetchMock.mock.calls[0]?.[0]).toBe('http://127.0.0.1:5057/hmi/prisma-config');
         await expect(update).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it.each([null, '', '/api/hmi-data'])('saves a wrapped Local response at the exact endpoint without using central URL %j', async (centralUrl) => {
+        savePrismaRuntimeMode('local');
+        const config = createDefaultPrismaVoiceConfig();
+        const fetchMock = vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => localEnvelope(config),
+        } as Response));
+        vi.stubGlobal('fetch', fetchMock);
+        const { result } = renderHook(() => useUpdatePrismaVoiceConfig(), {
+            wrapper: createHarness().wrapper,
+        });
+
+        await act(async () => {
+            await result.current.mutateAsync({ url: centralUrl, config });
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            expect.objectContaining({ method: 'PUT' }),
+        );
+    });
+
+    it('rejects an invalid Local response envelope without updating the cache', async () => {
+        savePrismaRuntimeMode('local');
+        const config = createDefaultPrismaVoiceConfig();
+        vi.stubGlobal('fetch', vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({ sync: { source: 'local_fallback' } }),
+        } as Response)));
+        const { queryClient, wrapper } = createHarness();
+        const { result } = renderHook(() => useUpdatePrismaVoiceConfig(), { wrapper });
+        const localUrl = 'http://127.0.0.1:5057/hmi/prisma-config';
+
+        await expect(act(async () => {
+            await result.current.mutateAsync({ url: null, config });
+        })).rejects.toMatchObject({
+            name: 'PrismaVoiceConfigWriteError',
+            kind: 'response-validation',
+        });
+        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('local', localUrl, 'local-envelope')))
+            .toBeUndefined();
     });
 });
