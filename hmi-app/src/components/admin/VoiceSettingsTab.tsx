@@ -17,6 +17,7 @@ import {
     readPrismaVoiceTtsServiceUrl,
     savePrismaVoiceTtsServiceUrl,
 } from '../../config/prismaVoiceTts.config';
+import { resolvePrismaConfigUrl } from '../../config/prismaAssistant.config';
 import {
     PRISMA_ORB_CORE_OPTIONS,
     PRISMA_ORB_GLOW_OPTIONS,
@@ -29,6 +30,7 @@ import {
     clonePrismaVoiceConfig,
     validatePrismaVoiceConfig,
 } from '../../domain/prismaVoiceConfig';
+import type { PrismaRuntimeMode } from '../../domain/prismaRuntime.types';
 import type { PrismaOrbVisualConfig } from '../../domain/voice.types';
 import { usePrismaVoiceConfigDraft } from '../../hooks/usePrismaVoiceConfigDraft';
 import { usePrismaRuntimeProfile } from '../../hooks/usePrismaRuntimeProfile';
@@ -96,7 +98,6 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return {
             endpoint: getSavedDataVoiceEndpoint() ?? DATA_DEFAULT_VOICE_ENDPOINT,
             prismaConfigEndpoint: getSavedDataPrismaConfigEndpoint() ?? DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT,
-            prismaConfigUrl: getDataPrismaConfigUrl(),
             prismaConfigUnavailableReason: prismaConfigEndpoint === null
                 ? 'endpoint-disabled' as const
                 : dataBaseUrl === null
@@ -104,19 +105,24 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                     : null,
             ttsServiceUrl: readPrismaVoiceTtsServiceUrl(),
             visualConfig: readPrismaOrbVisualConfig(),
+            runtimeMode: runtimeProfile.mode,
         };
     });
-    const remoteVoiceConfig = usePrismaVoiceConfig(initialSettings.prismaConfigUrl);
+    const remoteVoiceConfig = usePrismaVoiceConfig(
+        runtimeProfile.mode === 'central' ? getDataPrismaConfigUrl() : null,
+    );
     const persistedSettingsRef = useRef({
         endpoint: initialSettings.endpoint,
         prismaConfigEndpoint: initialSettings.prismaConfigEndpoint,
         ttsServiceUrl: initialSettings.ttsServiceUrl,
         visualConfig: initialSettings.visualConfig,
+        runtimeMode: initialSettings.runtimeMode,
     });
     const [draftEndpoint, setDraftEndpoint] = useState(initialSettings.endpoint);
     const [draftPrismaConfigEndpoint, setDraftPrismaConfigEndpoint] = useState(initialSettings.prismaConfigEndpoint);
     const [draftTtsServiceUrl, setDraftTtsServiceUrl] = useState(initialSettings.ttsServiceUrl);
     const [draftVisualConfig, setDraftVisualConfig] = useState(initialSettings.visualConfig);
+    const [draftRuntimeMode, setDraftRuntimeMode] = useState(initialSettings.runtimeMode);
     const [coreHexCode, setCoreHexCode] = useState(initialSettings.visualConfig.core.slice(1));
     const [glowHexCode, setGlowHexCode] = useState(initialSettings.visualConfig.glow.slice(1));
     const [showSlider, setShowSlider] = useState(true);
@@ -184,25 +190,28 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
     useEffect(() => {
         const persisted = persistedSettingsRef.current;
-        onDirtyChange?.(
-            draftEndpoint !== persisted.endpoint
+        const hasUnsavedChanges = draftEndpoint !== persisted.endpoint
             || draftPrismaConfigEndpoint !== persisted.prismaConfigEndpoint
             || draftTtsServiceUrl !== persisted.ttsServiceUrl
             || !visualConfigsEqual(draftVisualConfig, persisted.visualConfig)
+            || draftRuntimeMode !== persisted.runtimeMode
             || voiceConfigDraft.isDirty
-            || !voiceConfigValid
+            || !voiceConfigValid;
+        onDirtyChange?.(
+            hasUnsavedChanges
             || saveStatus === 'saving'
             || saveStatus === 'error',
         );
     }, [
         draftEndpoint,
         draftPrismaConfigEndpoint,
+        draftRuntimeMode,
         draftTtsServiceUrl,
         draftVisualConfig,
         onDirtyChange,
+        saveStatus,
         voiceConfigDraft.isDirty,
         voiceConfigValid,
-        saveStatus,
     ]);
 
     useEffect(() => {
@@ -216,31 +225,56 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         const savedEndpoint = draftEndpoint.trim();
         const savedPrismaConfigEndpoint = draftPrismaConfigEndpoint.trim();
-        const prismaConfigUrl = buildDataUrl(getDataBaseUrl(), savedPrismaConfigEndpoint);
+        const centralPrismaConfigUrl = runtimeProfile.mode === 'central'
+            ? buildDataUrl(getDataBaseUrl(), savedPrismaConfigEndpoint)
+            : null;
+        const prismaConfigUrl = resolvePrismaConfigUrl(runtimeProfile.mode, centralPrismaConfigUrl);
         const voiceConfigSnapshot = clonePrismaVoiceConfig(voiceConfigDraft.draft);
+        const savedRuntimeMode = draftRuntimeMode;
+        const runtimeModeChanged = !runtimeProfile.isTemporaryOverride
+            && savedRuntimeMode !== persistedSettingsRef.current.runtimeMode;
+        const hasVoiceSettingsChanges = draftEndpoint !== persistedSettingsRef.current.endpoint
+            || draftPrismaConfigEndpoint !== persistedSettingsRef.current.prismaConfigEndpoint
+            || draftTtsServiceUrl !== persistedSettingsRef.current.ttsServiceUrl
+            || !visualConfigsEqual(draftVisualConfig, persistedSettingsRef.current.visualConfig)
+            || voiceConfigDraft.isDirty;
+        if (runtimeModeChanged && !hasVoiceSettingsChanges) {
+            const persistedRuntimeMode = savePrismaRuntimeMode(savedRuntimeMode);
+            persistedSettingsRef.current.runtimeMode = persistedRuntimeMode;
+            setSaveStatus(persistedRuntimeMode === savedRuntimeMode ? 'saved' : 'error');
+            return Promise.resolve();
+        }
         const validation = validatePrismaVoiceConfig(voiceConfigSnapshot);
         if (!voiceConfigValidRef.current || !validation.valid || !prismaConfigUrl) {
             setSaveStatus('error');
             return Promise.resolve();
         }
 
-        if (savedEndpoint !== persistedSettingsRef.current.endpoint) {
+        const isCentralRuntime = runtimeProfile.mode === 'central';
+        if (isCentralRuntime && savedEndpoint !== persistedSettingsRef.current.endpoint) {
             saveDataVoiceEndpoint(savedEndpoint);
         }
-        if (savedPrismaConfigEndpoint !== persistedSettingsRef.current.prismaConfigEndpoint) {
+        if (isCentralRuntime && savedPrismaConfigEndpoint !== persistedSettingsRef.current.prismaConfigEndpoint) {
             saveDataPrismaConfigEndpoint(savedPrismaConfigEndpoint);
         }
-        const savedTtsServiceUrl = savePrismaVoiceTtsServiceUrl(draftTtsServiceUrl);
+        const savedTtsServiceUrl = isCentralRuntime
+            ? savePrismaVoiceTtsServiceUrl(draftTtsServiceUrl)
+            : persistedSettingsRef.current.ttsServiceUrl;
         const savedVisualConfig = savePrismaOrbVisualConfig(draftVisualConfig);
         persistedSettingsRef.current = {
-            endpoint: savedEndpoint,
-            prismaConfigEndpoint: savedPrismaConfigEndpoint,
+            endpoint: isCentralRuntime ? savedEndpoint : persistedSettingsRef.current.endpoint,
+            prismaConfigEndpoint: isCentralRuntime
+                ? savedPrismaConfigEndpoint
+                : persistedSettingsRef.current.prismaConfigEndpoint,
             ttsServiceUrl: savedTtsServiceUrl,
             visualConfig: savedVisualConfig,
+            runtimeMode: persistedSettingsRef.current.runtimeMode,
         };
-        setDraftEndpoint(savedEndpoint);
-        setDraftPrismaConfigEndpoint(savedPrismaConfigEndpoint);
-        setDraftTtsServiceUrl(savedTtsServiceUrl);
+        if (isCentralRuntime) {
+            setDraftEndpoint(savedEndpoint);
+            setDraftPrismaConfigEndpoint(savedPrismaConfigEndpoint);
+            setDraftTtsServiceUrl(savedTtsServiceUrl);
+        }
         setDraftVisualConfig(savedVisualConfig);
         const sentEditGeneration = editGenerationRef.current;
         const sentEffectEditGeneration = effectEditGenerationRef.current;
@@ -262,6 +296,9 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                     remoteConfig,
                     !hasInvalidConcurrentEffectEdit,
                 );
+                if (runtimeModeChanged) {
+                    persistedSettingsRef.current.runtimeMode = savePrismaRuntimeMode(savedRuntimeMode);
+                }
                 setSaveStatus(hasConcurrentEdits ? 'dirty' : 'saved');
             } catch {
                 if (mountedRef.current) {
@@ -280,8 +317,11 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     }, [
         draftEndpoint,
         draftPrismaConfigEndpoint,
+        draftRuntimeMode,
         draftTtsServiceUrl,
         draftVisualConfig,
+        runtimeProfile.isTemporaryOverride,
+        runtimeProfile.mode,
         voiceConfigDraft,
         updateVoiceConfig,
     ]);
@@ -305,6 +345,24 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     ) => {
         markPersistentEdit();
         setDraftVisualConfig((current) => ({ ...current, [key]: value }));
+    };
+
+    const updateRuntimeMode = (value: string) => {
+        const nextRuntimeMode = value as PrismaRuntimeMode;
+        const persisted = persistedSettingsRef.current;
+        const hasOtherUnsavedChanges = draftEndpoint !== persisted.endpoint
+            || draftPrismaConfigEndpoint !== persisted.prismaConfigEndpoint
+            || draftTtsServiceUrl !== persisted.ttsServiceUrl
+            || !visualConfigsEqual(draftVisualConfig, persisted.visualConfig)
+            || voiceConfigDraft.isDirty
+            || !voiceConfigValid;
+        editGenerationRef.current += 1;
+        setDraftRuntimeMode(nextRuntimeMode);
+        setSaveStatus(
+            nextRuntimeMode !== persisted.runtimeMode || hasOtherUnsavedChanges
+                ? 'dirty'
+                : null,
+        );
     };
 
     const updateColor = (key: ColorKey, value: string) => {
@@ -349,13 +407,13 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 </div>
                 <AdminSelect
                     ariaLabel="Modo de ejecución de Prisma"
-                    value={runtimeProfile.mode}
+                    value={draftRuntimeMode}
                     options={PRISMA_RUNTIME_MODE_OPTIONS}
                     disabled={runtimeProfile.isTemporaryOverride}
-                    onChange={(value) => savePrismaRuntimeMode(value)}
+                    onChange={updateRuntimeMode}
                 />
                 <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                    {runtimeProfile.mode === 'local'
+                    {draftRuntimeMode === 'local'
                         ? 'Usa servicios locales de presentación para demostraciones offline; no modifica la conexión industrial.'
                         : 'Usa la conexión central configurada en Node-RED para la asistencia de Prisma.'}
                 </p>
@@ -373,6 +431,7 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 <input
                     id="voice-settings-endpoint"
                     value={draftEndpoint}
+                    disabled={runtimeProfile.mode === 'local'}
                     onChange={(event) => {
                         markPersistentEdit();
                         setDraftEndpoint(event.target.value);
@@ -396,6 +455,7 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 <input
                     id="voice-settings-prisma-config-endpoint"
                     value={draftPrismaConfigEndpoint}
+                    disabled={runtimeProfile.mode === 'local'}
                     onChange={(event) => {
                         markPersistentEdit();
                         setDraftPrismaConfigEndpoint(event.target.value);
@@ -407,14 +467,16 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 <p id="voice-settings-prisma-config-endpoint-legend" className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                     /hmi/prisma-config → Node-RED, configuración central de efectos
                 </p>
-                {initialSettings.prismaConfigUnavailableReason === 'base-missing' ? (
+                {runtimeProfile.mode === 'central' && initialSettings.prismaConfigUnavailableReason === 'base-missing' ? (
                     <p className={`mt-1 ${ADMIN_SIDEBAR_HINT_CLS}`} aria-live="polite">
                         Configurá la conexión a Node-RED para cargar la configuración central de Prisma.
                     </p>
                 ) : null}
                 {remoteVoiceConfig.error ? (
                     <p className={`mt-1 ${ADMIN_SIDEBAR_HINT_CLS}`} aria-live="polite">
-                        No se pudo cargar la configuración central de Prisma. Se mantienen los valores actuales.
+                        {runtimeProfile.mode === 'local'
+                            ? 'No se pudo cargar la configuración local de Prisma. Se mantienen los valores actuales.'
+                            : 'No se pudo cargar la configuración central de Prisma. Se mantienen los valores actuales.'}
                     </p>
                 ) : null}
             </section>
@@ -426,6 +488,7 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 <input
                     id="voice-settings-tts-service-url"
                     value={draftTtsServiceUrl}
+                    disabled={runtimeProfile.mode === 'local'}
                     onChange={(event) => {
                         markPersistentEdit();
                         setDraftTtsServiceUrl(event.target.value);

@@ -100,6 +100,16 @@ describe('prismaRuntime.config', () => {
             expect(localStorage.getItem(key)).toBe(values[key]);
         }
     });
+    it('restores Server after a Local round-trip without changing any Server preference', () => {
+        const values = Object.fromEntries(preservedKeys.map((key, index) => [key, `server-${index}`]));
+        for (const [key, value] of Object.entries(values)) localStorage.setItem(key, value);
+
+        savePrismaRuntimeMode('local');
+        savePrismaRuntimeMode('central');
+
+        for (const key of preservedKeys) expect(localStorage.getItem(key)).toBe(values[key]);
+        expect(readPrismaRuntimeMode()).toBe('central');
+    });
     it('leaves industrial route helpers on their central defaults', () => {
         vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
 

@@ -84,6 +84,22 @@ function successfulConfigResponse(config = validRemoteConfig()): Response {
     } as Response;
 }
 
+function successfulLocalConfigResponse(config = validRemoteConfig()): Response {
+    return {
+        ok: true,
+        status: 200,
+        json: vi.fn(async () => ({
+            config,
+            sync: {
+                centralUrlConfigured: false,
+                lastSyncAt: null,
+                lastSyncError: "RuntimeError('PRISMA_CONFIG_URL_MISSING')",
+                source: 'local_fallback',
+            },
+        })),
+    } as Response;
+}
+
 describe('VoiceSettingsTab', () => {
     beforeEach(() => {
         localStorage.clear();
@@ -364,6 +380,106 @@ describe('VoiceSettingsTab', () => {
 
         expect(onSaveStatusChange).toHaveBeenLastCalledWith('error');
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+    });
+
+    it('loads and saves Local Prisma configuration when the Node-RED base URL is empty', async () => {
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', '');
+        savePrismaRuntimeMode('local');
+        const config = createDefaultPrismaVoiceConfig();
+        const fetchMock = vi.fn(async () => successfulLocalConfigResponse(config));
+        vi.stubGlobal('fetch', fetchMock);
+        const saveRef = { current: null as null | (() => void | Promise<void>) };
+        const onSaveStatusChange = vi.fn();
+
+        render(<VoiceSettingsTab saveRef={saveRef} onSaveStatusChange={onSaveStatusChange} />);
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            expect.objectContaining({ method: 'GET' }),
+        ));
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
+            target: { value: '65' },
+        });
+
+        await act(async () => { await saveRef.current?.(); });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            expect.objectContaining({ method: 'PUT' }),
+        );
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('saved');
+        expect(screen.queryByText(/Configurá la conexión a Node-RED/)).not.toBeInTheDocument();
+    });
+
+    it('does not inherit an intentional Server cancellation after Local config succeeds', async () => {
+        let centralSignal: AbortSignal | undefined;
+        const config = createDefaultPrismaVoiceConfig();
+        const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            if (url === 'http://127.0.0.1:5057/hmi/prisma-config') {
+                return Promise.resolve(successfulLocalConfigResponse(config));
+            }
+
+            centralSignal = init?.signal;
+            return new Promise<Response>((_resolve, reject) => {
+                centralSignal?.addEventListener('abort', () => {
+                    reject(new DOMException('Profile changed', 'AbortError'));
+                });
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(<VoiceSettingsTab />);
+        await waitFor(() => expect(centralSignal).toBeDefined());
+
+        act(() => savePrismaRuntimeMode('local'));
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+            'http://127.0.0.1:5057/hmi/prisma-config',
+            expect.objectContaining({ method: 'GET' }),
+        ));
+        await waitFor(() => expect(screen.queryByText('No se pudo cargar la configuración local de Prisma. Se mantienen los valores actuales.')).not.toBeInTheDocument());
+        expect(centralSignal?.aborted).toBe(true);
+        expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('100');
+    });
+
+    it.each([
+        ['Server', 'central', 'https://node-red.local/hmi/prisma-config'],
+        ['Local', 'local', 'http://127.0.0.1:5057/hmi/prisma-config'],
+    ] as const)('tracks a real editable voice draft and saves it through %s', async (_label, mode, expectedUrl) => {
+        if (mode === 'local') savePrismaRuntimeMode('local');
+        const fetchMock = vi.fn(async () => mode === 'local'
+            ? successfulLocalConfigResponse(createDefaultPrismaVoiceConfig())
+            : successfulConfigResponse(createDefaultPrismaVoiceConfig()));
+        vi.stubGlobal('fetch', fetchMock);
+        const onDirtyChange = vi.fn();
+        const onSaveStatusChange = vi.fn();
+        const saveRef = { current: null as null | (() => void | Promise<void>) };
+
+        render(
+            <VoiceSettingsTab
+                onDirtyChange={onDirtyChange}
+                onSaveStatusChange={onSaveStatusChange}
+                saveRef={saveRef}
+            />,
+        );
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+            expectedUrl,
+            expect.objectContaining({ method: 'GET' }),
+        ));
+        onDirtyChange.mockClear();
+
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
+            target: { value: '65' },
+        });
+
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+
+        await act(async () => { await saveRef.current?.(); });
+
+        expect(fetchMock).toHaveBeenCalledWith(expectedUrl, expect.objectContaining({ method: 'PUT' }));
+        expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('saved');
     });
 
     it('deduplicates double Save while PUT is in flight', async () => {
@@ -843,9 +959,12 @@ describe('VoiceSettingsTab', () => {
         expect(screen.getByLabelText('URL Servicio Voz Prisma')).toHaveValue('https://tts.example.test/persisted');
     });
 
-    it('selects the Prisma runtime profile only in Voice settings and persists the selected mode', async () => {
+    it('drafts the Prisma runtime profile in Voice settings and persists it through Save', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => successfulConfigResponse(createDefaultPrismaVoiceConfig())));
         const user = userEvent.setup();
-        render(<VoiceSettingsTab />);
+        const onDirtyChange = vi.fn();
+        const saveRef = { current: null as null | (() => void | Promise<void>) };
+        render(<VoiceSettingsTab onDirtyChange={onDirtyChange} saveRef={saveRef} />);
 
         const selector = screen.getByRole('button', { name: 'Modo de ejecución de Prisma' });
         expect(selector).toHaveTextContent('Server (Node-RED)');
@@ -854,7 +973,36 @@ describe('VoiceSettingsTab', () => {
         await user.click(screen.getByRole('button', { name: 'Local (presentations)' }));
 
         expect(selector).toHaveTextContent('Local (presentations)');
+        expect(localStorage.getItem(PRISMA_RUNTIME_MODE_STORAGE_KEY)).toBeNull();
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+        await act(async () => { await saveRef.current?.(); });
+
         expect(localStorage.getItem(PRISMA_RUNTIME_MODE_STORAGE_KEY)).toBe('local');
+        expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('preserves every Server URL preference through a Local save and Server round-trip', async () => {
+        localStorage.setItem('hmi:node-red-base-url', 'https://server.example');
+        localStorage.setItem('hmi:voice-endpoint', '/server/voice');
+        localStorage.setItem('hmi:prisma-config-endpoint', '/server/prisma-config');
+        localStorage.setItem(PRISMA_VOICE_TTS_STORAGE_KEY, 'https://server.example/prisma/speak-live');
+        savePrismaRuntimeMode('local');
+        vi.stubGlobal('fetch', vi.fn(async () => successfulLocalConfigResponse(createDefaultPrismaVoiceConfig())));
+        const saveRef = { current: null as null | (() => void | Promise<void>) };
+        render(<VoiceSettingsTab saveRef={saveRef} />);
+        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toBeInTheDocument());
+
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
+            target: { value: '65' },
+        });
+        await act(async () => { await saveRef.current?.(); });
+        act(() => savePrismaRuntimeMode('central'));
+
+        expect(localStorage.getItem('hmi:node-red-base-url')).toBe('https://server.example');
+        expect(localStorage.getItem('hmi:voice-endpoint')).toBe('/server/voice');
+        expect(localStorage.getItem('hmi:prisma-config-endpoint')).toBe('/server/prisma-config');
+        expect(localStorage.getItem(PRISMA_VOICE_TTS_STORAGE_KEY)).toBe('https://server.example/prisma/speak-live');
     });
 
     it('disables profile selection and explains the temporary local query override', () => {
