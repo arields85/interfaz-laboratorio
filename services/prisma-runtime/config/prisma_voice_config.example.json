@@ -1,0 +1,19 @@
+{
+  "effectEnabled": true,
+  "preset": "robotic_medium_light",
+  "effectIntensity": 100,
+  "robotic": {
+    "modulationHz": 30,
+    "baseGain": 0.78,
+    "modulationDepth": 0.22,
+    "quantizationSteps": 260,
+    "metallicHz": 410,
+    "metallicMix": 0.04,
+    "echo1DelayMs": 40,
+    "echo1Gain": 0.22,
+    "echo2DelayMs": 95,
+    "echo2Gain": 0.1,
+    "normalizationTarget": 29500,
+    "normalizationMaxGain": 1.6
+  }
+}
