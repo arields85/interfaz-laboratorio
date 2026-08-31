@@ -81,7 +81,7 @@ class PresentationHealthTests(unittest.TestCase):
 
 
 class RuntimeOwnershipTests(unittest.TestCase):
-    def test_valid_simple_handoff_resolves_listener_and_reaps_only_wrapper(self) -> None:
+    def test_listener_handoff_keeps_different_wrapper_alive_and_resolves_listener(self) -> None:
         helper = OPERATIONS_ROOT / "process-ownership.ps1"
         powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
         command = f"""
@@ -92,15 +92,25 @@ function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [
 function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) if ($Filter -match '200') {{ [pscustomobject]@{{ ProcessId = 200; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m prisma_runtime.voice_service' }} }} elseif ($Filter -match '100') {{ [pscustomobject]@{{ ProcessId = 100; ExecutablePath = 'C:\\venv\\python.exe'; CommandLine = 'C:\\venv\\python.exe -m prisma_runtime.voice_service' }} }} }}
 function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
 $listener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service'
-Stop-PrismaWrapperIfSeparate -WrapperProcessId 100 -ListenerProcessId $listener.pid -ExpectedModule 'prisma_runtime.voice_service'
 Write-Output ('listener=' + $listener.pid + ';command=' + $listener.commandLine + ';stopped=' + ($global:stopped -join ','))
 """
         result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("listener=200", result.stdout)
         self.assertIn("-m prisma_runtime.voice_service", result.stdout)
-        self.assertIn("stopped=100", result.stdout)
-        self.assertNotIn("stopped=200", result.stdout)
+        self.assertIn("stopped=", result.stdout)
+
+    def test_startup_never_terminates_wrapper_after_listener_resolution(self) -> None:
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertNotIn("Stop-PrismaWrapperIfSeparate", source)
+        startup = source.index("$startupComplete = $false")
+        startup_try = source[source.index("try {", startup):source.index("finally {")]
+        self.assertNotIn("Stop-PrismaLaunchedProcess", startup_try)
+
+        ownership = (OPERATIONS_ROOT / "process-ownership.ps1").read_text(encoding="utf-8-sig")
+        self.assertNotIn("function Stop-PrismaWrapperIfSeparate", ownership)
+        self.assertIn("Resolve-PrismaVerifiedListener", source)
+        self.assertIn("New-ProcessRecord", source)
 
     def test_wrong_module_is_not_admitted(self) -> None:
         helper = OPERATIONS_ROOT / "process-ownership.ps1"
@@ -201,6 +211,7 @@ Write-Output ('exists=' + (Test-Path -LiteralPath '{manifest}'))
         self.assertIn("module = [string]$Listener.module", source)
         self.assertIn("commandLine = [string]$Listener.commandLine", source)
         self.assertNotIn("creationIdentity", source)
+        self.assertNotIn("Stop-PrismaWrapperIfSeparate", source)
         ownership = (OPERATIONS_ROOT / "process-ownership.ps1").read_text(encoding="utf-8-sig")
         self.assertNotIn("ParentProcessId", ownership)
         self.assertNotIn("CreationDate", ownership)
@@ -209,7 +220,23 @@ Write-Output ('exists=' + (Test-Path -LiteralPath '{manifest}'))
     def test_failed_startup_removes_manifest_records_after_rollback(self) -> None:
         source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
         cleanup = source.index("if (-not $startupComplete)")
+        startup = source.index("$startupComplete = $false")
+        try_body = source[source.index("try {", startup):cleanup]
+        cleanup_body = source[cleanup:]
+        self.assertNotIn("Stop-PrismaLaunchedProcess -Process", try_body)
+        self.assertIn("Stop-PrismaLaunchedProcess -Process $presentationProcess", cleanup_body)
+        self.assertIn("Stop-PrismaLaunchedProcess -Process $voiceProcess", cleanup_body)
+        self.assertLess(cleanup_body.index("Stop-PrismaLaunchedProcess"), cleanup_body.index("stop-local.ps1"))
+        self.assertIn("stop-local.ps1", source[cleanup:])
         self.assertIn("Remove-Item -LiteralPath $manifestPath", source[cleanup:])
+        launcher_cleanup = source[source.index("function Stop-PrismaLaunchedProcess"):source.index("New-Item -ItemType Directory")]
+        self.assertIn("Stop-Process -Id $Process.Id", launcher_cleanup)
+        self.assertIn("$Process.HasExited", launcher_cleanup)
+        self.assertIn("-ErrorAction SilentlyContinue", launcher_cleanup)
+        self.assertNotIn("Get-Process", launcher_cleanup)
+
+        stop_local = (OPERATIONS_ROOT / "stop-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("Stop-Process -Id $recordedPid", stop_local)
 
 
 if __name__ == "__main__":

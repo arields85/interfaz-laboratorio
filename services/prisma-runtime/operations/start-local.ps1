@@ -79,6 +79,18 @@ function Wait-PresentationReady {
     return $false
 }
 
+function Stop-PrismaLaunchedProcess {
+    param([System.Diagnostics.Process]$Process)
+
+    if (-not $Process) { return }
+    try {
+        if (-not $Process.HasExited) {
+            Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+    }
+}
+
 New-Item -ItemType Directory -Path $run, $logs -Force | Out-Null
 . (Join-Path $PSScriptRoot 'startup-preflight.ps1')
 Prune-PrismaProcessManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot
@@ -104,7 +116,6 @@ try {
     if (-not (Wait-VoiceReady -Process $voiceProcess)) { throw "Prisma voice did not become ready. See $stderr" }
     $voiceListener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service'
     if (-not $voiceListener) { throw "Prisma voice listener identity could not be verified. See $stderr" }
-    Stop-PrismaWrapperIfSeparate -WrapperProcessId $voiceProcess.Id -ListenerProcessId $voiceListener.pid -ExpectedModule 'prisma_runtime.voice_service'
     $script:manifestProcesses += New-ProcessRecord -Service 'prisma-voice' -Port 5056 -Listener $voiceListener
     Save-ProcessManifest
     Write-Host 'Prisma voice is ready at http://127.0.0.1:5056.' -ForegroundColor Green
@@ -112,7 +123,6 @@ try {
     if (-not (Wait-PresentationReady -Process $presentationProcess)) { throw "Prisma Local presentation did not become ready. See $presentationStderr" }
     $presentationListener = Resolve-PrismaVerifiedListener -Port 5057 -ExpectedModule 'prisma_runtime.local_presentation'
     if (-not $presentationListener) { throw "Prisma Local presentation listener identity could not be verified. See $presentationStderr" }
-    Stop-PrismaWrapperIfSeparate -WrapperProcessId $presentationProcess.Id -ListenerProcessId $presentationListener.pid -ExpectedModule 'prisma_runtime.local_presentation'
     $script:manifestProcesses += New-ProcessRecord -Service 'prisma-local-presentation' -Port 5057 -Listener $presentationListener
     Save-ProcessManifest
     Write-Host 'Starting Prisma Local presentation at http://127.0.0.1:5057.' -ForegroundColor Green
@@ -121,8 +131,8 @@ try {
 }
 finally {
     if (-not $startupComplete) {
-        if ($presentationProcess) { Stop-PrismaWrapperIfSeparate -WrapperProcessId $presentationProcess.Id -ListenerProcessId $(if ($presentationListener) { $presentationListener.pid } else { 0 }) -ExpectedModule 'prisma_runtime.local_presentation' }
-        if ($voiceProcess) { Stop-PrismaWrapperIfSeparate -WrapperProcessId $voiceProcess.Id -ListenerProcessId $(if ($voiceListener) { $voiceListener.pid } else { 0 }) -ExpectedModule 'prisma_runtime.voice_service' }
+        Stop-PrismaLaunchedProcess -Process $presentationProcess
+        Stop-PrismaLaunchedProcess -Process $voiceProcess
         & (Join-Path $PSScriptRoot 'stop-local.ps1')
         Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
     }
