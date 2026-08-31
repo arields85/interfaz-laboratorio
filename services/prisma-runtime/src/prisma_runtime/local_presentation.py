@@ -17,6 +17,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 from flask import Flask, Response, jsonify, request
@@ -33,6 +34,59 @@ DEFAULT_TELEGRAM_API_URL = "https://api.telegram.org"
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _safe_response_status(response: Any) -> int | None:
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599 else None
+
+
+def _safe_voice_target(voice_url: str) -> dict[str, Any]:
+    try:
+        parsed = urlsplit(voice_url)
+        scheme = parsed.scheme.lower() if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9+.-]{0,15}", parsed.scheme) else None
+        host = parsed.hostname
+        if host is not None and (len(host) > 253 or not re.fullmatch(r"[a-zA-Z0-9.:%-]+", host)):
+            host = None
+        port = parsed.port
+        if port is None and scheme in {"http", "https"}:
+            port = 80 if scheme == "http" else 443
+    except ValueError:
+        scheme, host, port = None, None, None
+    return {"scheme": scheme, "host": host, "port": port, "path": "/health"}
+
+
+def _voice_probe_error(category: str, error_type: str, message: str) -> dict[str, str]:
+    return {"category": category, "type": error_type, "message": message[:160]}
+
+
+def _probe_voice(local_http: requests.Session, voice_url: str) -> tuple[bool, dict[str, Any]]:
+    probe: dict[str, Any] = {"target": _safe_voice_target(voice_url), "status": None, "ok": None, "error": None}
+    try:
+        response = local_http.get(f"{voice_url}/health", timeout=1)
+        probe["status"] = _safe_response_status(response)
+        try:
+            payload = response.json()
+        except (TypeError, ValueError):
+            probe["error"] = _voice_probe_error("response", "malformed_json", "Upstream health response was not valid JSON.")
+            return False, probe
+        if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
+            probe["error"] = _voice_probe_error("response", "malformed_json", "Upstream health response had an invalid JSON shape.")
+            return False, probe
+        probe["ok"] = payload["ok"]
+        if not payload["ok"]:
+            probe["error"] = _voice_probe_error("upstream", "ok_false", "Upstream health reported ok=false.")
+        return payload["ok"], probe
+    except requests.Timeout as error:
+        probe["status"] = _safe_response_status(getattr(error, "response", None))
+        probe["error"] = _voice_probe_error("request", "timeout", "Voice health request timed out.")
+    except requests.ConnectionError as error:
+        probe["status"] = _safe_response_status(getattr(error, "response", None))
+        probe["error"] = _voice_probe_error("request", "connection", "Voice health request failed to connect.")
+    except requests.RequestException as error:
+        probe["status"] = _safe_response_status(getattr(error, "response", None))
+        probe["error"] = _voice_probe_error("request", "request_error", "Voice health request failed.")
+    return False, probe
 
 
 def normalize(value: Any) -> str:
@@ -364,7 +418,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None) -> Fla
     paths = runtime_paths()
     snapshot_store = snapshot_store or JsonFileStore(paths.snapshot)
     voice_events = voice_events or VoiceEventStore()
-    voice_url = os.environ.get("PRISMA_LOCAL_VOICE_URL", DEFAULT_PRISMA_VOICE_URL).rstrip("/")
+    voice_url = (os.environ.get("PRISMA_LOCAL_VOICE_URL") or DEFAULT_PRISMA_VOICE_URL).rstrip("/")
     local_http = requests.Session(); local_http.trust_env = False
     app = Flask(__name__); app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot)
 
@@ -376,10 +430,8 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None) -> Fla
 
     @app.route("/health", methods=["GET"])
     def health():
-        snapshot = snapshot_store.read(); voice_ok = False
-        try: voice_ok = bool(local_http.get(f"{voice_url}/health", timeout=1).json().get("ok"))
-        except (requests.RequestException, ValueError): pass
-        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_bot is not None, "telegramConfigured": bool(telegram_bot and telegram_bot.token), "telegramConnected": bool(telegram_bot and telegram_bot.bot_username), "telegramLastError": telegram_bot.last_error if telegram_bot else None, "prismaVoiceReady": voice_ok})
+        snapshot = snapshot_store.read(); voice_ok, voice_probe = _probe_voice(local_http, voice_url)
+        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_bot is not None, "telegramConfigured": bool(telegram_bot and telegram_bot.token), "telegramConnected": bool(telegram_bot and telegram_bot.bot_username), "telegramLastError": telegram_bot.last_error if telegram_bot else None, "prismaVoiceReady": voice_ok, "voiceProbe": voice_probe})
 
     @app.route("/hmi/current-snapshot", methods=["GET", "POST", "OPTIONS"])
     def current_snapshot():
