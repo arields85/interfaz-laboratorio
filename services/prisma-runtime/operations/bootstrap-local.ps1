@@ -19,6 +19,7 @@ if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {
 
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $stateRoot 'logs') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $stateRoot 'run') -Force | Out-Null
 if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
     Copy-Item -LiteralPath $template -Destination $config
 }

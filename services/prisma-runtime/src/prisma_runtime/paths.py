@@ -21,6 +21,8 @@ class RuntimePaths:
     snapshot: Path
     chat_state: Path
     logs: Path
+    run: Path
+    process_manifest: Path
 
     @property
     def mutable_files(self) -> tuple[Path, ...]:
@@ -36,6 +38,8 @@ def runtime_paths() -> RuntimePaths:
         snapshot=Path(os.environ.get("PRISMA_LOCAL_SNAPSHOT_FILE", root / "prisma_local_snapshot.json")),
         chat_state=Path(os.environ.get("PRISMA_LOCAL_STATE_FILE", root / "prisma_local_state.json")),
         logs=root / "logs",
+        run=root / "run",
+        process_manifest=root / "run" / "process-manifest.json",
     )
 
 
@@ -43,4 +47,5 @@ def ensure_runtime_state(paths: RuntimePaths | None = None) -> RuntimePaths:
     resolved = paths or runtime_paths()
     resolved.root.mkdir(parents=True, exist_ok=True)
     resolved.logs.mkdir(parents=True, exist_ok=True)
+    resolved.run.mkdir(parents=True, exist_ok=True)
     return resolved

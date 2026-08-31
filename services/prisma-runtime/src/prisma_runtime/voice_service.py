@@ -27,6 +27,7 @@ from flask import Flask, Response, jsonify, request
 
 from .audio_observability import BoundedAudioSink
 from .paths import runtime_paths
+from .telegram_config import telegram_token
 from .voice_dsp import PrismaStreamingDSP, apply_prisma_dsp_full_pcm
 
 
@@ -57,7 +58,7 @@ def _safe_event_id(value):
 
 
 def _telegram_token():
-    return os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    return telegram_token()
 
 
 def _telegram_chat_action(chat_id, action):
