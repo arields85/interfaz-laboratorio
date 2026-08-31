@@ -23,9 +23,9 @@ foreach ($record in @($manifest.processes)) {
     try { $recordedPid = [int]$record.pid; $recordedPort = [int]$record.port } catch { $remaining += $record; continue }
     if ($recordedPort -notin @(5056, 5057) -or $recordedPid -le 0) { $remaining += $record; continue }
 
-    $expectedModule = if ($record.service -eq 'prisma-voice') { 'prisma_runtime.voice_service' } elseif ($record.service -eq 'prisma-local-presentation') { 'prisma_runtime.local_presentation' } else { '' }
-    $listener = if ($expectedModule) { Resolve-PrismaVerifiedListener -Port $recordedPort -ExpectedModule $expectedModule -RepositoryRoot $runtimeRoot } else { $null }
-    $identityMatches = $listener -and $listener.pid -eq $recordedPid -and [StringComparer]::OrdinalIgnoreCase.Equals([IO.Path]::GetFullPath([string]$listener.executable), [IO.Path]::GetFullPath([string]$record.executable))
+    $expectedModule = if ($record.module) { [string]$record.module } elseif ($record.service -eq 'prisma-voice') { 'prisma_runtime.voice_service' } elseif ($record.service -eq 'prisma-local-presentation') { 'prisma_runtime.local_presentation' } else { '' }
+    $listener = if ($expectedModule) { Resolve-PrismaVerifiedListener -Port $recordedPort -ExpectedModule $expectedModule -ExpectedExecutableName ([IO.Path]::GetFileName([string]$record.executable)) } else { $null }
+    $identityMatches = $listener -and $listener.pid -eq $recordedPid -and (Test-PrismaManifestIdentity -Listener $listener -Record $record)
     if ($identityMatches) {
         try {
             Stop-Process -Id $recordedPid -Force -ErrorAction Stop

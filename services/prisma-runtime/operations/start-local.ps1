@@ -46,8 +46,10 @@ function New-ProcessRecord {
         port = $Port
         pid = [int]$Listener.pid
         executable = [string]$Listener.executable
+        module = [string]$Listener.module
         arguments = $Arguments
         commandLine = [string]$Listener.commandLine
+        creationIdentity = $Listener.creationIdentity
         workingDirectory = $runtimeRoot
     }
 }
@@ -93,28 +95,33 @@ $presentationStderr = Join-Path $logs 'prisma-presentation-stderr.log'
 Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $presentationStdout, $presentationStderr -Force -ErrorAction SilentlyContinue
 
-$ownerArgument = '--prisma-runtime-root="' + $runtimeRoot + '"'
-$voiceArguments = @('-m', 'prisma_runtime.voice_service', $ownerArgument)
-$presentationArguments = @('-m', 'prisma_runtime.local_presentation', $ownerArgument)
+$voiceArguments = @('-m', 'prisma_runtime.voice_service')
+$presentationArguments = @('-m', 'prisma_runtime.local_presentation')
 $voiceProcess = $null
 $presentationProcess = $null
+$voiceWrapperIdentity = $null
+$presentationWrapperIdentity = $null
 $voiceListener = $null
 $presentationListener = $null
 $startupComplete = $false
 try {
     $voiceProcess = Start-Process -FilePath $python -ArgumentList $voiceArguments -WorkingDirectory $runtimeRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $voiceWrapperIdentity = Get-PrismaProcessIdentity -ProcessId $voiceProcess.Id
+    if (-not $voiceWrapperIdentity -or -not (Test-PrismaProcessIdentity -ProcessIdentity $voiceWrapperIdentity -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName ([IO.Path]::GetFileName($python)))) { throw "Prisma voice wrapper identity could not be verified. See $stderr" }
     if (-not (Wait-VoiceReady -Process $voiceProcess)) { throw "Prisma voice did not become ready. See $stderr" }
-    $voiceListener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service' -RepositoryRoot $runtimeRoot
+    $voiceListener = Resolve-PrismaVerifiedListener -Port 5056 -WrapperIdentity $voiceWrapperIdentity -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName ([IO.Path]::GetFileName($python))
     if (-not $voiceListener) { throw "Prisma voice listener identity could not be verified. See $stderr" }
-    Stop-PrismaWrapperIfSeparate -WrapperProcessId $voiceProcess.Id -ListenerProcessId $voiceListener.pid -ExpectedModule 'prisma_runtime.voice_service' -RepositoryRoot $runtimeRoot
+    Stop-PrismaWrapperIfSeparate -WrapperIdentity $voiceWrapperIdentity -ListenerProcessId $voiceListener.pid -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName ([IO.Path]::GetFileName($python))
     $script:manifestProcesses += New-ProcessRecord -Service 'prisma-voice' -Port 5056 -Listener $voiceListener -Arguments ($voiceArguments -join ' ')
     Save-ProcessManifest
     Write-Host 'Prisma voice is ready at http://127.0.0.1:5056.' -ForegroundColor Green
     $presentationProcess = Start-Process -FilePath $python -ArgumentList $presentationArguments -WorkingDirectory $runtimeRoot -WindowStyle Hidden -RedirectStandardOutput $presentationStdout -RedirectStandardError $presentationStderr -PassThru
+    $presentationWrapperIdentity = Get-PrismaProcessIdentity -ProcessId $presentationProcess.Id
+    if (-not $presentationWrapperIdentity -or -not (Test-PrismaProcessIdentity -ProcessIdentity $presentationWrapperIdentity -ExpectedModule 'prisma_runtime.local_presentation' -ExpectedExecutableName ([IO.Path]::GetFileName($python)))) { throw "Prisma Local presentation wrapper identity could not be verified. See $presentationStderr" }
     if (-not (Wait-PresentationReady -Process $presentationProcess)) { throw "Prisma Local presentation did not become ready. See $presentationStderr" }
-    $presentationListener = Resolve-PrismaVerifiedListener -Port 5057 -ExpectedModule 'prisma_runtime.local_presentation' -RepositoryRoot $runtimeRoot
+    $presentationListener = Resolve-PrismaVerifiedListener -Port 5057 -WrapperIdentity $presentationWrapperIdentity -ExpectedModule 'prisma_runtime.local_presentation' -ExpectedExecutableName ([IO.Path]::GetFileName($python))
     if (-not $presentationListener) { throw "Prisma Local presentation listener identity could not be verified. See $presentationStderr" }
-    Stop-PrismaWrapperIfSeparate -WrapperProcessId $presentationProcess.Id -ListenerProcessId $presentationListener.pid -ExpectedModule 'prisma_runtime.local_presentation' -RepositoryRoot $runtimeRoot
+    Stop-PrismaWrapperIfSeparate -WrapperIdentity $presentationWrapperIdentity -ListenerProcessId $presentationListener.pid -ExpectedModule 'prisma_runtime.local_presentation' -ExpectedExecutableName ([IO.Path]::GetFileName($python))
     $script:manifestProcesses += New-ProcessRecord -Service 'prisma-local-presentation' -Port 5057 -Listener $presentationListener -Arguments ($presentationArguments -join ' ')
     Save-ProcessManifest
     Write-Host 'Starting Prisma Local presentation at http://127.0.0.1:5057.' -ForegroundColor Green
@@ -123,8 +130,8 @@ try {
 }
 finally {
     if (-not $startupComplete) {
-        if ($presentationProcess) { Stop-PrismaWrapperIfSeparate -WrapperProcessId $presentationProcess.Id -ListenerProcessId $(if ($presentationListener) { $presentationListener.pid } else { 0 }) -ExpectedModule 'prisma_runtime.local_presentation' -RepositoryRoot $runtimeRoot }
-        if ($voiceProcess) { Stop-PrismaWrapperIfSeparate -WrapperProcessId $voiceProcess.Id -ListenerProcessId $(if ($voiceListener) { $voiceListener.pid } else { 0 }) -ExpectedModule 'prisma_runtime.voice_service' -RepositoryRoot $runtimeRoot }
+        if ($presentationWrapperIdentity) { Stop-PrismaWrapperIfSeparate -WrapperIdentity $presentationWrapperIdentity -ListenerProcessId $(if ($presentationListener) { $presentationListener.pid } else { 0 }) -ExpectedModule 'prisma_runtime.local_presentation' -ExpectedExecutableName ([IO.Path]::GetFileName($python)) }
+        if ($voiceWrapperIdentity) { Stop-PrismaWrapperIfSeparate -WrapperIdentity $voiceWrapperIdentity -ListenerProcessId $(if ($voiceListener) { $voiceListener.pid } else { 0 }) -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName ([IO.Path]::GetFileName($python)) }
         & (Join-Path $PSScriptRoot 'stop-local.ps1')
         Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
     }
