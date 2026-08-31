@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 import { createDefaultPrismaVoiceConfig } from '../domain/prismaVoiceConfig';
-import { createPrismaVoiceConfigQueryKey } from './usePrismaVoiceConfig';
+import { PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX } from './usePrismaVoiceConfig';
 import { useUpdatePrismaVoiceConfig } from './useUpdatePrismaVoiceConfig';
 
 function localEnvelope(config = createDefaultPrismaVoiceConfig()) {
@@ -57,7 +57,7 @@ describe('useUpdatePrismaVoiceConfig', () => {
             await result.current.mutateAsync({ url, config: createDefaultPrismaVoiceConfig() });
         });
 
-        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat')))
+        expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url, 'legacy-flat']))
             .toEqual(normalized);
     });
 
@@ -80,7 +80,7 @@ describe('useUpdatePrismaVoiceConfig', () => {
             await result.current.mutateAsync({ url, config: sent });
         });
 
-        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat')))
+        expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url, 'legacy-flat']))
             .toEqual(sent);
         expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['PUT', 'GET']);
     });
@@ -94,14 +94,14 @@ describe('useUpdatePrismaVoiceConfig', () => {
             json: vi.fn(),
         } as unknown as Response)));
         const { queryClient, wrapper } = createHarness();
-        queryClient.setQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat'), cached);
+        queryClient.setQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url, 'legacy-flat'], cached);
         const { result } = renderHook(() => useUpdatePrismaVoiceConfig(), { wrapper });
 
         await expect(act(async () => {
             await result.current.mutateAsync({ url, config: createDefaultPrismaVoiceConfig() });
         })).rejects.toThrow();
 
-        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('central', url, 'legacy-flat'))).toBe(cached);
+        expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, url, 'legacy-flat'])).toBe(cached);
     });
 
     it('aborts a stale local PUT when the runtime profile changes', async () => {
@@ -176,7 +176,7 @@ describe('useUpdatePrismaVoiceConfig', () => {
             name: 'PrismaVoiceConfigWriteError',
             kind: 'response-validation',
         });
-        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey('local', localUrl, 'local-envelope')))
+        expect(queryClient.getQueryData([...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, localUrl, 'local-envelope']))
             .toBeUndefined();
     });
 });

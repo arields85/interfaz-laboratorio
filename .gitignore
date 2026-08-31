@@ -1,4 +1,6 @@
 hmi-app/coverage/
+__pycache__/
+*.py[cod]
 .atl/skill-registry.md
 .atl/.skill-registry.cache.json
 .codegraph/

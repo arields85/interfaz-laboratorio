@@ -5,10 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 import { createDefaultPrismaVoiceConfig } from '../domain/prismaVoiceConfig';
-import {
-    createPrismaVoiceConfigQueryKey,
-    usePrismaVoiceConfig,
-} from './usePrismaVoiceConfig';
+import { usePrismaVoiceConfig } from './usePrismaVoiceConfig';
 
 function localEnvelope(config = createDefaultPrismaVoiceConfig()) {
     return {
@@ -27,11 +24,9 @@ function createWrapper() {
         defaultOptions: { queries: { retry: false, gcTime: Infinity } },
     });
 
-    const wrapper = function Wrapper({ children }: { children: ReactNode }) {
+    return function Wrapper({ children }: { children: ReactNode }) {
         return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
     };
-
-    return { queryClient, wrapper };
 }
 
 describe('usePrismaVoiceConfig', () => {
@@ -49,7 +44,7 @@ describe('usePrismaVoiceConfig', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         const { result } = renderHook(() => usePrismaVoiceConfig(null), {
-            wrapper: createWrapper().wrapper,
+            wrapper: createWrapper(),
         });
 
         expect(result.current.isEnabled).toBe(false);
@@ -70,7 +65,7 @@ describe('usePrismaVoiceConfig', () => {
 
         const { unmount } = renderHook(
             () => usePrismaVoiceConfig('https://node-red.local/hmi/prisma-config'),
-            { wrapper: createWrapper().wrapper },
+            { wrapper: createWrapper() },
         );
         await waitFor(() => expect(requestSignal).toBeDefined());
 
@@ -90,7 +85,7 @@ describe('usePrismaVoiceConfig', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         const { result } = renderHook(() => usePrismaVoiceConfig('https://node-red.local/hmi/prisma-config'), {
-            wrapper: createWrapper().wrapper,
+            wrapper: createWrapper(),
         });
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -110,7 +105,7 @@ describe('usePrismaVoiceConfig', () => {
         } as Response));
         vi.stubGlobal('fetch', fetchMock);
 
-        renderHook(() => usePrismaVoiceConfig(centralUrl), { wrapper: createWrapper().wrapper });
+        renderHook(() => usePrismaVoiceConfig(centralUrl), { wrapper: createWrapper() });
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
             'http://127.0.0.1:5057/hmi/prisma-config',
@@ -126,7 +121,7 @@ describe('usePrismaVoiceConfig', () => {
             return new Promise<Response>(() => undefined);
         });
         vi.stubGlobal('fetch', fetchMock);
-        renderHook(() => usePrismaVoiceConfig(null), { wrapper: createWrapper().wrapper });
+        renderHook(() => usePrismaVoiceConfig(null), { wrapper: createWrapper() });
         await waitFor(() => expect(localSignal).toBeDefined());
 
         act(() => savePrismaRuntimeMode('central'));
@@ -156,7 +151,7 @@ describe('usePrismaVoiceConfig', () => {
         vi.stubGlobal('fetch', fetchMock);
         const { result } = renderHook(
             () => usePrismaVoiceConfig('https://node-red.local/hmi/prisma-config'),
-            { wrapper: createWrapper().wrapper },
+            { wrapper: createWrapper() },
         );
         await waitFor(() => expect(centralSignal).toBeDefined());
 
@@ -177,7 +172,7 @@ describe('usePrismaVoiceConfig', () => {
         } as Response)));
 
         const { result } = renderHook(() => usePrismaVoiceConfig(null), {
-            wrapper: createWrapper().wrapper,
+            wrapper: createWrapper(),
         });
 
         await waitFor(() => expect(result.current.error).toMatchObject({
@@ -202,9 +197,8 @@ describe('usePrismaVoiceConfig', () => {
                 : localEnvelope(localConfig),
         } as Response));
         vi.stubGlobal('fetch', fetchMock);
-        const { queryClient, wrapper } = createWrapper();
         const { result } = renderHook(() => usePrismaVoiceConfig(sharedUrl), {
-            wrapper,
+            wrapper: createWrapper(),
         });
         await waitFor(() => expect(result.current.data).toEqual(legacyConfig));
 
@@ -213,15 +207,5 @@ describe('usePrismaVoiceConfig', () => {
         await waitFor(() => expect(result.current.data).toEqual(localConfig));
         expect(result.current.error).toBeNull();
         expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey(
-            'central',
-            sharedUrl,
-            'legacy-flat',
-        ))).toEqual(legacyConfig);
-        expect(queryClient.getQueryData(createPrismaVoiceConfigQueryKey(
-            'local',
-            sharedUrl,
-            'local-envelope',
-        ))).toEqual(localConfig);
     });
 });

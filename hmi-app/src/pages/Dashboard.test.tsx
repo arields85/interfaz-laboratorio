@@ -8,6 +8,7 @@ import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.t
 import type { DashboardView } from '../domain/admin.types';
 import { useUIStore } from '../store/ui.store';
 import { useDashboardPresentationFrame } from '../services/dashboardPresentationFrame.service';
+import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 
 const CONTENT_READY_ATTRIBUTE = 'data-hmi-content-ready';
 
@@ -19,7 +20,10 @@ const {
     useDataOverviewMock,
     buildDashboardSnapshotMock,
     exportDashboardSnapshotMock,
+    cancelDashboardSnapshotExportMock,
+    startDashboardSnapshotExporterMock,
     startPrismaLocalSnapshotExporterMock,
+    stopPrismaLocalSnapshotExporterMock,
     getDataSnapshotExportIntervalMsMock,
     isDataSnapshotExportEnabledMock,
 } = vi.hoisted(() => ({
@@ -34,7 +38,10 @@ const {
     useDataOverviewMock: vi.fn(),
     buildDashboardSnapshotMock: vi.fn(),
     exportDashboardSnapshotMock: vi.fn(),
+    cancelDashboardSnapshotExportMock: vi.fn(),
+    startDashboardSnapshotExporterMock: vi.fn(),
     startPrismaLocalSnapshotExporterMock: vi.fn(),
+    stopPrismaLocalSnapshotExporterMock: vi.fn(),
     getDataSnapshotExportIntervalMsMock: vi.fn(),
     isDataSnapshotExportEnabledMock: vi.fn(),
 }));
@@ -99,8 +106,11 @@ vi.mock('../services/dashboardSnapshotBuilder', () => ({
 }));
 
 vi.mock('../services/dashboardSnapshotExport.service', () => ({
+    cancelDashboardSnapshotExport: cancelDashboardSnapshotExportMock,
     exportDashboardSnapshot: exportDashboardSnapshotMock,
+    startDashboardSnapshotExporter: startDashboardSnapshotExporterMock,
     startPrismaLocalSnapshotExporter: startPrismaLocalSnapshotExporterMock,
+    stopPrismaLocalSnapshotExporter: stopPrismaLocalSnapshotExporterMock,
 }));
 
 vi.mock('../config/dataConnection.config', async () => {
@@ -148,12 +158,31 @@ function makeView(id: string, name: string, widgetId = `${id}-widget`): Dashboar
 
 describe('Dashboard page layout', () => {
     beforeEach(() => {
+        localStorage.clear();
         const dashboard = makeDashboard({ status: 'published', publishedSnapshot: undefined });
         dashboardStorageMock.getDashboards.mockResolvedValue([dashboard]);
         hierarchyStorageMock.getNodes.mockResolvedValue([]);
         buildDashboardSnapshotMock.mockReturnValue({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
         exportDashboardSnapshotMock.mockResolvedValue(true);
         startPrismaLocalSnapshotExporterMock.mockReturnValue(vi.fn());
+        startDashboardSnapshotExporterMock.mockImplementation(({ intervalMs, getSnapshot }: { intervalMs: number; getSnapshot: () => unknown | null }) => {
+            let stopped = false;
+            let inFlight = false;
+            const intervalId = window.setInterval(() => {
+                if (stopped || inFlight) return;
+                const snapshot = getSnapshot();
+                if (snapshot === null) return;
+                inFlight = true;
+                void exportDashboardSnapshotMock(snapshot).finally(() => {
+                    inFlight = false;
+                });
+            }, intervalMs);
+
+            return () => {
+                stopped = true;
+                window.clearInterval(intervalId);
+            };
+        });
         getDataSnapshotExportIntervalMsMock.mockReturnValue(5_000);
         isDataSnapshotExportEnabledMock.mockReturnValue(true);
         useUIStore.setState({
@@ -173,6 +202,7 @@ describe('Dashboard page layout', () => {
     });
 
     afterEach(() => {
+        localStorage.clear();
         vi.useRealTimers();
         vi.clearAllMocks();
     });
@@ -832,6 +862,47 @@ describe('Dashboard page layout', () => {
         expect(buildDashboardSnapshotMock).toHaveBeenCalledWith(expect.objectContaining({
             dashboard: expect.objectContaining({ id: 'local-dashboard' }),
             presentationFrame: expect.objectContaining({ dashboardId: 'local-dashboard' }),
+        }));
+    });
+
+    it('switches exporter ownership Server → Local → Server without mixed schedules or requests', async () => {
+        const firstServerStop = vi.fn();
+        const secondServerStop = vi.fn();
+        const stopLocal = vi.fn();
+        startDashboardSnapshotExporterMock
+            .mockReturnValueOnce(firstServerStop)
+            .mockReturnValueOnce(secondServerStop);
+        startPrismaLocalSnapshotExporterMock.mockReturnValue(stopLocal);
+        renderDashboard();
+        await waitFor(() => expect(startDashboardSnapshotExporterMock).toHaveBeenCalledTimes(1));
+
+        act(() => savePrismaRuntimeMode('local'));
+        await act(async () => { await Promise.resolve(); });
+
+        expect(firstServerStop.mock.invocationCallOrder[0]).toBeLessThan(
+            startPrismaLocalSnapshotExporterMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+        );
+        expect(startPrismaLocalSnapshotExporterMock).toHaveBeenCalledTimes(1);
+
+        act(() => savePrismaRuntimeMode('central'));
+        await act(async () => { await Promise.resolve(); });
+        expect(stopLocal).toHaveBeenCalledTimes(1);
+        expect(stopLocal.mock.invocationCallOrder[0]).toBeLessThan(
+            startDashboardSnapshotExporterMock.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+        );
+        expect(startDashboardSnapshotExporterMock).toHaveBeenCalledTimes(2);
+        expect(startPrismaLocalSnapshotExporterMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('delegates the Server schedule to the same exclusive service ownership boundary as Local', async () => {
+        renderDashboard();
+
+        await waitFor(() => expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument());
+
+        expect(startDashboardSnapshotExporterMock).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+            revision: expect.any(Number),
+            intervalMs: 5_000,
+            getSnapshot: expect.any(Function),
         }));
     });
 });

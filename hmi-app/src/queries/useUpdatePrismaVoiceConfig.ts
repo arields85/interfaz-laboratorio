@@ -5,7 +5,7 @@ import { HttpPrismaVoiceConfigWriter } from '../adapters/prismaVoiceConfig.adapt
 import { resolvePrismaConfigUrl } from '../config/prismaAssistant.config';
 import type { PrismaVoiceConfig } from '../domain/prismaVoiceConfig';
 import { usePrismaRuntimeProfile } from '../hooks/usePrismaRuntimeProfile';
-import { createPrismaVoiceConfigQueryKey } from './usePrismaVoiceConfig';
+import { PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX } from './usePrismaVoiceConfig';
 
 interface UpdatePrismaVoiceConfigVariables {
     url: string | null;
@@ -55,11 +55,7 @@ export function useUpdatePrismaVoiceConfig() {
             const effectiveUrl = resolvePrismaConfigUrl(runtimeProfile.mode, url);
             if (!effectiveUrl) return;
             queryClient.setQueryData(
-                createPrismaVoiceConfigQueryKey(
-                    runtimeProfile.mode,
-                    effectiveUrl,
-                    responseContract,
-                ),
+                [...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, effectiveUrl, responseContract],
                 config,
             );
         },

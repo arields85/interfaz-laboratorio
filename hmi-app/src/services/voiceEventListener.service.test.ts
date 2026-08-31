@@ -102,6 +102,36 @@ describe('startVoiceEventListener', () => {
         stop();
     });
 
+    it.each([
+        ['missing', undefined],
+        ['empty', ''],
+        ['whitespace', '   '],
+        ['wrong type', 42],
+    ])('rejects a Local event with a %s modern id instead of presenting or replaying it', async (_case, id) => {
+        const invalidLocalEvent = { ...FIRST_EVENT, id };
+        const validBaseline = { ...FIRST_EVENT, id: 'local-1' };
+        const validNext = { ...FIRST_EVENT, id: ' local-2 ', text: 'Current Local response' };
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(invalidLocalEvent))
+            .mockResolvedValueOnce(jsonResponse(validBaseline))
+            .mockResolvedValueOnce(jsonResponse(validNext));
+        const onEvent = vi.fn();
+
+        const stop = startVoiceEventListener({
+            mode: 'local',
+            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            onEvent,
+            fetchImpl: fetchMock,
+            intervalMs: 1_000,
+        });
+
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(onEvent).toHaveBeenCalledExactlyOnceWith(validNext);
+        expect(onEvent.mock.calls[0]?.[0].id).toBe(' local-2 ');
+        stop();
+    });
+
     it('normalizes and emits a valid Telegram chat id', async () => {
         const fetchMock = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(FIRST_EVENT))
@@ -254,6 +284,37 @@ describe('startVoiceEventListener', () => {
         expect(requestSignal?.aborted).toBe(true);
         vi.advanceTimersByTime(5_000);
         expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('cancels the previous profile listener before starting replacement polling', () => {
+        const signals: AbortSignal[] = [];
+        const fetchMock = vi.fn<typeof fetch>((_input, init) => {
+            if (init?.signal) signals.push(init.signal);
+            return new Promise<Response>(() => undefined);
+        });
+
+        const stopServer = startVoiceEventListener({
+            mode: 'central',
+            url: 'https://node-red.local/hmi/voice/latest',
+            onEvent: vi.fn(),
+            fetchImpl: fetchMock,
+        });
+        const stopLocal = startVoiceEventListener({
+            mode: 'local',
+            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            onEvent: vi.fn(),
+            fetchImpl: fetchMock,
+        });
+
+        expect(signals).toHaveLength(2);
+        expect(signals[0]?.aborted).toBe(true);
+        expect(signals[1]?.aborted).toBe(false);
+        expect(vi.getTimerCount()).toBe(0);
+
+        stopServer();
+        expect(signals[1]?.aborted).toBe(false);
+        stopLocal();
+        expect(signals[1]?.aborted).toBe(true);
     });
 
     it('ignores invalid responses and network failures without emitting or stopping later polls', async () => {

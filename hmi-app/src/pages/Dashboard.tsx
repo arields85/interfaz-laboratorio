@@ -16,7 +16,10 @@ import { useUIStore } from '../store/ui.store';
 import { getDefaultDashboardView, materializeDashboardView, normalizeDashboardViews } from '../utils/dashboardViews';
 import { getDataSnapshotExportIntervalMs, isDataSnapshotExportEnabled } from '../config/dataConnection.config';
 import { buildDashboardSnapshot } from '../services/dashboardSnapshotBuilder';
-import { exportDashboardSnapshot, startPrismaLocalSnapshotExporter } from '../services/dashboardSnapshotExport.service';
+import {
+    startDashboardSnapshotExporter,
+    startPrismaLocalSnapshotExporter,
+} from '../services/dashboardSnapshotExport.service';
 import { DashboardPresentationFrameProvider, useDashboardPresentationFrame } from '../services/dashboardPresentationFrame.service';
 import { usePrismaRuntimeProfile } from '../hooks/usePrismaRuntimeProfile';
 
@@ -329,8 +332,6 @@ export default function Dashboard() {
         equipmentMap,
         machines: undefined,
     });
-    const snapshotExportInFlightRef = useRef(false);
-
     useEffect(() => {
         latestSnapshotExportValuesRef.current = {
             activeDashboard,
@@ -368,52 +369,37 @@ export default function Dashboard() {
             return;
         }
 
-        let cancelled = false;
+        return startDashboardSnapshotExporter({
+            revision: prismaRuntimeProfile.revision,
+            intervalMs: snapshotExportIntervalMs,
+            getSnapshot: () => {
+                if (document.visibilityState === 'hidden') {
+                    return null;
+                }
 
-        const exportVisibleSnapshot = async () => {
-            if (cancelled || snapshotExportInFlightRef.current || document.visibilityState === 'hidden') {
-                return;
-            }
+                const {
+                    activeDashboard: latestDashboard,
+                    allNodes: latestAllNodes,
+                    connection: latestConnection,
+                    dashboardViewState: latestDashboardViewState,
+                    equipmentMap: latestEquipmentMap,
+                    machines: latestMachines,
+                } = latestSnapshotExportValuesRef.current;
 
-            const {
-                activeDashboard: latestDashboard,
-                allNodes: latestAllNodes,
-                connection: latestConnection,
-                dashboardViewState: latestDashboardViewState,
-                equipmentMap: latestEquipmentMap,
-                machines: latestMachines,
-            } = latestSnapshotExportValuesRef.current;
+                if (!latestDashboard || latestDashboardViewState !== 'viewer') {
+                    return null;
+                }
 
-            if (!latestDashboard || latestDashboardViewState !== 'viewer') {
-                return;
-            }
-
-            snapshotExportInFlightRef.current = true;
-
-            try {
-                const snapshot = buildDashboardSnapshot({
+                return buildDashboardSnapshot({
                     dashboard: latestDashboard,
                     connection: latestConnection,
                     machines: latestMachines,
                     equipmentMap: latestEquipmentMap,
                     hierarchyNodes: latestAllNodes,
                 });
-
-                await exportDashboardSnapshot(snapshot);
-            } finally {
-                snapshotExportInFlightRef.current = false;
-            }
-        };
-
-        const intervalId = window.setInterval(() => {
-            void exportVisibleSnapshot();
-        }, snapshotExportIntervalMs);
-
-        return () => {
-            cancelled = true;
-            window.clearInterval(intervalId);
-        };
-    }, [isLocalRuntime, snapshotExportEnabled, snapshotExportIntervalMs]);
+            },
+        });
+    }, [prismaRuntimeProfile.revision, snapshotExportEnabled, snapshotExportIntervalMs]);
 
     const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => {
         if (!activeDashboard) {

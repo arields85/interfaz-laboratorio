@@ -703,7 +703,10 @@ export function sanitizePortableDashboardFileName(fileName: string): string {
         .replace(/\.json$/i, '')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[<>:"/\\|?*\x00-\x1f]+/g, '-')
+        .replace(/[<>:"/\\|?*]+/g, '-')
+        .split('')
+        .map((character) => character.charCodeAt(0) <= 0x1f ? '-' : character)
+        .join('')
         .replace(/\s+/g, '-')
         .replace(/-+/g, '-')
         .replace(/^[.-]+|[.-]+$/g, '');

@@ -4,10 +4,37 @@ import {
     normalizeAudioLevel,
 } from './audioLevel';
 import type { AudioLevelPolicy } from './audioLevel';
+import {
+    createOpaqueBrowserRunId,
+    dispatchPrismaBrowserMetric,
+} from './prismaVoiceMetrics';
+import type {
+    PrismaBrowserMetric,
+    PrismaBrowserMetricSink,
+} from './prismaVoiceMetrics';
+import type { PrismaAudioMetricPayload } from '../domain/prismaAudioMetric.types';
+import prismaPcmAudioWorkletUrl from './prismaPcmAudioWorklet.ts?worker&url';
+import {
+    PcmS16LeChunkParser,
+    PrismaLocalPlaybackError,
+    decidePrismaLocalPlaybackStart,
+} from './prismaLocalAudioPlayback';
+import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
+import { PRISMA_PCM_WORKLET_PROCESSOR_NAME } from './prismaPcmWorkletBuffer';
 
-export const PRISMA_PCM_SAMPLE_RATE = 24_000;
+export const PRISMA_PCM_SAMPLE_RATE = PRISMA_PCM_AUDIO_FORMAT.sampleRate;
 export const PRISMA_PCM_BLOCK_SAMPLES = 1_800;
+// Two minutes is a generous MVP answer ceiling while bounding retained Local PCM to 5,760,000 bytes.
+export const PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS = 120;
+export const PRISMA_LOCAL_PCM_MAX_BYTES = PRISMA_PCM_SAMPLE_RATE
+    * PRISMA_PCM_AUDIO_FORMAT.channels
+    * PRISMA_PCM_AUDIO_FORMAT.bytesPerSample
+    * PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS;
 const PRISMA_PCM_PLAYBACK_LEAD_SECONDS = 0.025;
+
+export type PrismaVoicePlaybackTransport = 'progressive' | 'buffer-before-playback';
+
+export type PrismaVoiceAudioDiagnostic = PrismaBrowserMetric;
 
 export interface PrismaOrbAudioTarget {
     level: number;
@@ -21,6 +48,7 @@ export interface PrismaVoicePcmStream {
 }
 
 export interface PrismaVoiceAudioSource {
+    playbackTransport: PrismaVoicePlaybackTransport;
     openLive(signal: AbortSignal): Promise<PrismaVoicePcmStream>;
     loadWav?: (signal: AbortSignal) => Promise<ArrayBuffer>;
 }
@@ -41,8 +69,13 @@ export interface PrismaVoiceAudioEngineContract {
     dispose(): void;
 }
 
-interface PrismaVoiceAudioEngineDependencies {
-    createAudioContext?: () => AudioContext;
+export interface PrismaVoiceAudioEngineDependencies {
+    createAudioContext?: (options?: AudioContextOptions) => AudioContext;
+    createAudioWorkletNode?: (
+        context: AudioContext,
+        name: string,
+        options: AudioWorkletNodeOptions,
+    ) => AudioWorkletNode;
     requestAnimationFrame?: (callback: FrameRequestCallback) => number;
     cancelAnimationFrame?: (handle: number) => void;
     setTimeout?: (callback: () => void, delay: number) => number;
@@ -50,16 +83,21 @@ interface PrismaVoiceAudioEngineDependencies {
     now?: () => number;
     log?: (message: string) => void;
     warn?: (message: string, error: unknown) => void;
+    onDiagnostic?: PrismaBrowserMetricSink;
     levelPolicy?: AudioLevelPolicy;
 }
 
 interface ActivePlayback {
     generation: number;
+    runId: string;
+    requestStartedAt: number;
     abortController: AbortController;
     target: PrismaOrbAudioTarget;
     lifecycle: VoicePlaybackLifecycle;
     reader: ReadableStreamDefaultReader<Uint8Array> | null;
     sourceNodes: Set<AudioBufferSourceNode>;
+    workletNode: AudioWorkletNode | null;
+    workletProcessorErrorHandler: EventListener | null;
     analyser: AnalyserNode | null;
     animationFrame: number | null;
     playbackTimer: number | null;
@@ -69,7 +107,14 @@ interface ActivePlayback {
     playbackStarted: boolean;
     firstAudioReceived: boolean;
     liveRequestStarted: boolean;
+    pcmBytes: number;
+    pcmDurationSeconds: number;
+    underflowCount: number;
+    canonicalDecodeEmitted: boolean;
+    localStartCommandSent: boolean;
+    lastMetricAt: number;
     mode: 'live' | 'fallback';
+    metricSequence: number;
 }
 
 export class PcmS16LeBlockAssembler {
@@ -139,12 +184,14 @@ export class PcmS16LeBlockAssembler {
     }
 }
 
-function createBrowserAudioContext(): AudioContext {
+function createBrowserAudioContext(options?: AudioContextOptions): AudioContext {
     if (typeof window === 'undefined' || typeof window.AudioContext !== 'function') {
         throw new Error('Web Audio API is unavailable');
     }
 
-    return new window.AudioContext();
+    return options
+        ? new window.AudioContext(options)
+        : new window.AudioContext();
 }
 
 function safeDisconnect(node: AudioNode | null): void {
@@ -169,9 +216,12 @@ function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array> | null): v
     }
 
     try {
-        void reader.cancel().catch(() => undefined);
+        void reader.cancel()
+            .catch(() => undefined)
+            .finally(() => releaseReader(reader));
     } catch {
         // Reader cancellation may race with stream closure.
+        releaseReader(reader);
     }
 }
 
@@ -188,7 +238,12 @@ function isAudioContextRunning(context: AudioContext): boolean {
 }
 
 export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
-    private readonly createAudioContext: () => AudioContext;
+    private readonly createAudioContext: (options?: AudioContextOptions) => AudioContext;
+    private readonly createAudioWorkletNode: (
+        context: AudioContext,
+        name: string,
+        options: AudioWorkletNodeOptions,
+    ) => AudioWorkletNode;
     private readonly requestFrame: (callback: FrameRequestCallback) => number;
     private readonly cancelFrame: (handle: number) => void;
     private readonly setTimer: (callback: () => void, delay: number) => number;
@@ -196,13 +251,19 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     private readonly now: () => number;
     private readonly log: (message: string) => void;
     private readonly warn: (message: string, error: unknown) => void;
+    private readonly onDiagnostic: (diagnostic: PrismaVoiceAudioDiagnostic) => void;
     private readonly levelPolicy: AudioLevelPolicy;
     private context: AudioContext | null = null;
+    private localWorkletContext: AudioContext | null = null;
+    private workletModuleContext: AudioContext | null = null;
+    private workletModulePromise: Promise<void> | null = null;
     private active: ActivePlayback | null = null;
     private generation = 0;
 
     public constructor(dependencies: PrismaVoiceAudioEngineDependencies = {}) {
         this.createAudioContext = dependencies.createAudioContext ?? createBrowserAudioContext;
+        this.createAudioWorkletNode = dependencies.createAudioWorkletNode
+            ?? ((context, name, options) => new AudioWorkletNode(context, name, options));
         this.requestFrame = dependencies.requestAnimationFrame
             ?? ((callback) => window.requestAnimationFrame(callback));
         this.cancelFrame = dependencies.cancelAnimationFrame
@@ -212,8 +273,9 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         this.clearTimer = dependencies.clearTimeout
             ?? ((handle) => window.clearTimeout(handle));
         this.now = dependencies.now ?? (() => performance.now());
-        this.log = dependencies.log ?? ((message) => console.log(message));
+        this.log = dependencies.log ?? (() => undefined);
         this.warn = dependencies.warn ?? ((message, error) => console.warn(message, error));
+        this.onDiagnostic = dependencies.onDiagnostic ?? dispatchPrismaBrowserMetric;
         this.levelPolicy = dependencies.levelPolicy ?? DEFAULT_AUDIO_LEVEL_POLICY;
     }
 
@@ -227,11 +289,15 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
         const active: ActivePlayback = {
             generation: this.generation,
+            runId: createOpaqueBrowserRunId(),
+            requestStartedAt: this.now(),
             abortController: new AbortController(),
             target,
             lifecycle,
             reader: null,
             sourceNodes: new Set(),
+            workletNode: null,
+            workletProcessorErrorHandler: null,
             analyser: null,
             animationFrame: null,
             playbackTimer: null,
@@ -241,11 +307,19 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             playbackStarted: false,
             firstAudioReceived: false,
             liveRequestStarted: false,
+            pcmBytes: 0,
+            pcmDurationSeconds: 0,
+            underflowCount: 0,
+            canonicalDecodeEmitted: false,
+            localStartCommandSent: false,
+            lastMetricAt: -Infinity,
             mode: 'live',
+            metricSequence: 0,
         };
         target.level = 0;
         target.setSpeaking(false);
         this.active = active;
+        this.emitDiagnostic(active, { record_type: 'request-start', payload: {} });
 
         void this.startPlayback(source, active);
     }
@@ -257,16 +331,21 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
     public dispose(): void {
         this.stop();
-        const context = this.context;
+        const contexts = new Set([this.context, this.localWorkletContext]);
         this.context = null;
+        this.localWorkletContext = null;
+        this.workletModuleContext = null;
+        this.workletModulePromise = null;
 
-        if (context && context.state !== 'closed') {
-            try {
-                void context.close().catch((error: unknown) => {
+        for (const context of contexts) {
+            if (context && context.state !== 'closed') {
+                try {
+                    void context.close().catch((error: unknown) => {
+                        this.warn('Prisma voice AudioContext close failed.', error);
+                    });
+                } catch (error) {
                     this.warn('Prisma voice AudioContext close failed.', error);
-                });
-            } catch (error) {
-                this.warn('Prisma voice AudioContext close failed.', error);
+                }
             }
         }
     }
@@ -301,6 +380,18 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     }
 
     private async playLive(source: PrismaVoiceAudioSource, active: ActivePlayback): Promise<void> {
+        if (source.playbackTransport === 'buffer-before-playback') {
+            await this.playLocalWorklet(source, active);
+            return;
+        }
+
+        await this.playProgressiveLive(source, active);
+    }
+
+    private async playProgressiveLive(
+        source: PrismaVoiceAudioSource,
+        active: ActivePlayback,
+    ): Promise<void> {
         const requestStartedAt = this.now();
         active.liveRequestStarted = true;
         this.log('Prisma Live request started');
@@ -326,11 +417,19 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
                 break;
             }
 
+            active.pcmBytes += result.value.byteLength;
+
             for (const block of assembler.push(result.value)) {
                 if (!active.firstAudioReceived) {
                     active.firstAudioReceived = true;
-                    this.log(`Prisma Live first audio: ${Math.round(this.now() - requestStartedAt)} ms`);
+                    const elapsedMs = this.now() - requestStartedAt;
+                    this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
+                    this.emitDiagnostic(active, {
+                        record_type: 'first-readable-audio',
+                        payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
+                    });
                 }
+                this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, block.length / stream.sampleRate);
                 await this.schedulePcmBlock(block, stream.sampleRate, active);
                 scheduledSamples += block.length;
             }
@@ -340,8 +439,14 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         if (finalBlock && this.isCurrent(active)) {
             if (!active.firstAudioReceived) {
                 active.firstAudioReceived = true;
-                this.log(`Prisma Live first audio: ${Math.round(this.now() - requestStartedAt)} ms`);
+                const elapsedMs = this.now() - requestStartedAt;
+                this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
+                this.emitDiagnostic(active, {
+                    record_type: 'first-readable-audio',
+                    payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
+                });
             }
+            this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, finalBlock.length / stream.sampleRate);
             await this.schedulePcmBlock(finalBlock, stream.sampleRate, active);
             scheduledSamples += finalBlock.length;
         }
@@ -352,11 +457,316 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             throw new Error('Prisma Live stream contained no complete PCM samples');
         }
 
+        this.emitDiagnostic(active, {
+            record_type: 'eof',
+            payload: {
+                elapsed_ms: this.elapsedMs(active),
+                transport: 'progressive',
+                pcm_bytes: active.pcmBytes,
+                pcm_duration_seconds: active.pcmDurationSeconds,
+            },
+        });
         active.reader = null;
         releaseReader(stream.reader);
         active.streamCompleted = true;
         this.log('Prisma Live stream completed');
         this.completeLiveIfFinished(active);
+    }
+
+    private async playLocalWorklet(
+        source: PrismaVoiceAudioSource,
+        active: ActivePlayback,
+    ): Promise<void> {
+        const requestStartedAt = this.now();
+        active.liveRequestStarted = true;
+        this.log('Prisma Live request started');
+        const stream = await source.openLive(active.abortController.signal);
+        if (!this.isCurrent(active)) {
+            cancelReader(stream.reader);
+            return;
+        }
+
+        active.reader = stream.reader;
+        if (stream.sampleRate !== PRISMA_PCM_AUDIO_FORMAT.sampleRate
+            || stream.channels !== PRISMA_PCM_AUDIO_FORMAT.channels) {
+            throw new Error('Prisma Live stream has unsupported PCM metadata');
+        }
+
+        const context = this.getLocalWorkletContext();
+        await this.ensureContextRunning(context);
+        if (!this.isCurrent(active)) {
+            return;
+        }
+        await this.prepareLocalWorklet(context, active);
+        if (!this.isCurrent(active)) {
+            return;
+        }
+
+        const parser = new PcmS16LeChunkParser();
+        let totalBytes = 0;
+        let totalSamples = 0;
+        while (this.isCurrent(active)) {
+            const result = await stream.reader.read();
+            if (!this.isCurrent(active)) {
+                return;
+            }
+            if (result.done) {
+                break;
+            }
+            if (result.value.byteLength === 0) {
+                continue;
+            }
+            if (result.value.byteLength > PRISMA_LOCAL_PCM_MAX_BYTES - totalBytes) {
+                throw new Error(
+                    `Prisma Live stream exceeds the ${PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS}-second Local PCM limit`,
+                );
+            }
+
+            totalBytes += result.value.byteLength;
+            active.pcmBytes = totalBytes;
+            const samples = parser.push(result.value);
+            if (!samples) {
+                continue;
+            }
+
+            totalSamples += samples.length;
+            active.pcmDurationSeconds = totalSamples / stream.sampleRate;
+            if (!active.firstAudioReceived) {
+                active.firstAudioReceived = true;
+                const elapsedMs = this.now() - requestStartedAt;
+                this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
+                this.emitDiagnostic(active, {
+                    record_type: 'first-readable-audio',
+                    payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
+                });
+            }
+            this.emitCanonicalDecode(
+                active,
+                'buffer-before-playback',
+                totalBytes,
+                active.pcmDurationSeconds,
+            );
+            this.enqueueLocalSamples(active, samples);
+
+            const decision = decidePrismaLocalPlaybackStart({
+                bufferedSamples: totalSamples,
+                endOfStream: false,
+                sampleRate: stream.sampleRate,
+            });
+            if (decision === 'start-at-target') {
+                this.sendLocalStart(active);
+            }
+        }
+        if (!this.isCurrent(active)) {
+            return;
+        }
+        totalSamples = parser.finish();
+        if (totalSamples === 0) {
+            throw new Error('Prisma Live stream contained no complete PCM samples');
+        }
+
+        active.reader = null;
+        releaseReader(stream.reader);
+        active.streamCompleted = true;
+        active.pcmDurationSeconds = totalSamples / stream.sampleRate;
+        const bufferingElapsedMs = this.now() - requestStartedAt;
+        this.log('Prisma Live stream completed');
+        this.emitDiagnostic(active, {
+            record_type: 'eof',
+            payload: {
+                elapsed_ms: bufferingElapsedMs,
+                transport: 'buffer-before-playback',
+                pcm_bytes: totalBytes,
+                pcm_duration_seconds: active.pcmDurationSeconds,
+            },
+        });
+        this.emitDiagnostic(active, {
+            record_type: 'buffering-complete',
+            payload: {
+                elapsed_ms: bufferingElapsedMs,
+                pcm_bytes: totalBytes,
+                pcm_duration_seconds: active.pcmDurationSeconds,
+            },
+        });
+        active.workletNode?.port.postMessage({ type: 'end' });
+        const decision = decidePrismaLocalPlaybackStart({
+            bufferedSamples: totalSamples,
+            endOfStream: true,
+            sampleRate: stream.sampleRate,
+        });
+        if (decision === 'start-at-eof') {
+            this.sendLocalStart(active);
+        }
+    }
+
+    private emitCanonicalDecode(
+        active: ActivePlayback,
+        transport: PrismaVoicePlaybackTransport,
+        pcmBytes: number,
+        pcmDurationSeconds: number,
+    ): void {
+        if (active.canonicalDecodeEmitted) {
+            return;
+        }
+
+        active.canonicalDecodeEmitted = true;
+        this.emitDiagnostic(active, {
+            record_type: 'canonical-decode',
+            payload: {
+                elapsed_ms: this.elapsedMs(active),
+                transport,
+                pcm_bytes: pcmBytes,
+                pcm_duration_seconds: pcmDurationSeconds,
+            },
+        });
+    }
+
+    private async prepareLocalWorklet(
+        context: AudioContext,
+        active: ActivePlayback,
+    ): Promise<void> {
+        await this.ensureLocalWorkletModule(context);
+        if (!this.isCurrent(active)) {
+            return;
+        }
+
+        const node = this.createAudioWorkletNode(
+            context,
+            PRISMA_PCM_WORKLET_PROCESSOR_NAME,
+            {
+                numberOfInputs: 0,
+                numberOfOutputs: 1,
+                outputChannelCount: [PRISMA_PCM_AUDIO_FORMAT.channels],
+                channelCount: PRISMA_PCM_AUDIO_FORMAT.channels,
+            },
+        );
+        active.workletNode = node;
+        node.port.onmessage = (event: MessageEvent<unknown>) => {
+            if (!this.isCurrent(active) || active.workletNode !== node) {
+                return;
+            }
+            const message = event.data;
+            if (!message || typeof message !== 'object' || !('type' in message)) {
+                return;
+            }
+
+            if (message.type === 'started') {
+                this.handleLocalWorkletStarted(active);
+            } else if (message.type === 'ended') {
+                this.handleLocalWorkletEnded(active);
+            } else if (message.type === 'underflow') {
+                active.underflowCount += 1;
+                this.emitDiagnostic(active, {
+                    record_type: 'underflow',
+                    payload: { underflow_count: active.underflowCount },
+                });
+                this.failActive(
+                    active,
+                    new PrismaLocalPlaybackError('audio-worklet-underflow'),
+                );
+            }
+        };
+        const processorErrorHandler: EventListener = () => {
+            if (this.isCurrent(active) && active.workletNode === node) {
+                this.failActive(
+                    active,
+                    new PrismaLocalPlaybackError('audio-worklet-processor-error'),
+                );
+            }
+        };
+        active.workletProcessorErrorHandler = processorErrorHandler;
+        node.addEventListener('processorerror', processorErrorHandler);
+        node.connect(this.getAnalyser(context, active));
+    }
+
+    private async ensureLocalWorkletModule(context: AudioContext): Promise<void> {
+        if (!context.audioWorklet || typeof context.audioWorklet.addModule !== 'function') {
+            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
+        }
+
+        if (this.workletModuleContext !== context || !this.workletModulePromise) {
+            this.workletModuleContext = context;
+            this.workletModulePromise = context.audioWorklet.addModule(prismaPcmAudioWorkletUrl);
+        }
+
+        try {
+            await this.workletModulePromise;
+        } catch {
+            if (this.workletModuleContext === context) {
+                this.workletModuleContext = null;
+                this.workletModulePromise = null;
+            }
+            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
+        }
+    }
+
+    private enqueueLocalSamples(
+        active: ActivePlayback,
+        samples: Float32Array<ArrayBuffer>,
+    ): void {
+        const node = active.workletNode;
+        if (!node) {
+            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
+        }
+        node.port.postMessage(
+            { type: 'enqueue', samples },
+            [samples.buffer],
+        );
+    }
+
+    private sendLocalStart(active: ActivePlayback): void {
+        if (active.localStartCommandSent) {
+            return;
+        }
+        const node = active.workletNode;
+        if (!node) {
+            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
+        }
+        active.localStartCommandSent = true;
+        node.port.postMessage({ type: 'start' });
+    }
+
+    private handleLocalWorkletStarted(active: ActivePlayback): void {
+        if (!this.isCurrent(active) || active.playbackStarted) {
+            return;
+        }
+
+        active.playbackStarted = true;
+        active.firstPlaybackTime = this.localWorkletContext?.currentTime ?? null;
+        active.target.setSpeaking(true);
+        active.lifecycle.onStarted?.();
+        this.log('Prisma Live playback started');
+        this.emitDiagnostic(active, {
+            record_type: 'playback-started',
+            payload: {
+                elapsed_ms: this.elapsedMs(active),
+                transport: 'buffer-before-playback',
+                pcm_bytes: active.pcmBytes,
+                pcm_duration_seconds: active.pcmDurationSeconds,
+                underflow_count: active.underflowCount,
+            },
+        });
+        this.scheduleAnalysis(active);
+    }
+
+    private handleLocalWorkletEnded(active: ActivePlayback): void {
+        if (!this.isCurrent(active) || !active.streamCompleted) {
+            return;
+        }
+
+        this.log('Prisma Live playback completed');
+        this.emitDiagnostic(active, {
+            record_type: 'playback-ended',
+            payload: {
+                elapsed_ms: this.elapsedMs(active),
+                transport: 'buffer-before-playback',
+                pcm_bytes: active.pcmBytes,
+                pcm_duration_seconds: active.pcmDurationSeconds,
+                underflow_count: active.underflowCount,
+            },
+        });
+        this.cleanupActive('complete', false);
+        active.lifecycle.onEnded?.();
     }
 
     private async schedulePcmBlock(
@@ -380,8 +790,12 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             active.nextPlaybackTime,
             context.currentTime + PRISMA_PCM_PLAYBACK_LEAD_SECONDS,
         );
+        if (active.nextPlaybackTime > 0 && startTime > active.nextPlaybackTime) {
+            active.underflowCount += 1;
+        }
         active.firstPlaybackTime ??= startTime;
         active.nextPlaybackTime = startTime + audioBuffer.duration;
+        active.pcmDurationSeconds += audioBuffer.duration;
         active.sourceNodes.add(sourceNode);
         sourceNode.onended = () => {
             if (!this.isCurrent(active)) {
@@ -414,6 +828,16 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
                 active.target.setSpeaking(true);
                 active.lifecycle.onStarted?.();
                 this.log('Prisma Live playback started');
+                this.emitDiagnostic(active, {
+                    record_type: 'playback-started',
+                    payload: {
+                        elapsed_ms: this.elapsedMs(active),
+                        transport: 'progressive',
+                        pcm_bytes: active.pcmBytes,
+                        pcm_duration_seconds: null,
+                        underflow_count: active.underflowCount,
+                    },
+                });
                 this.scheduleAnalysis(active);
             }, delay);
         }
@@ -470,6 +894,9 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         active.firstAudioReceived = false;
         active.firstPlaybackTime = null;
         active.nextPlaybackTime = 0;
+        active.pcmDurationSeconds = 0;
+        active.underflowCount = 0;
+        active.localStartCommandSent = false;
         active.target.level = 0;
         active.target.setSpeaking(false);
     }
@@ -480,6 +907,22 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         }
 
         return this.context;
+    }
+
+    private getLocalWorkletContext(): AudioContext {
+        if (!this.localWorkletContext || this.localWorkletContext.state === 'closed') {
+            this.localWorkletContext = this.createAudioContext({
+                sampleRate: PRISMA_PCM_AUDIO_FORMAT.sampleRate,
+            });
+        }
+
+        if (this.localWorkletContext.sampleRate !== PRISMA_PCM_AUDIO_FORMAT.sampleRate) {
+            throw new Error(
+                `Prisma Local AudioContext sample rate mismatch: expected ${PRISMA_PCM_AUDIO_FORMAT.sampleRate} Hz, received ${this.localWorkletContext.sampleRate} Hz`,
+            );
+        }
+
+        return this.localWorkletContext;
     }
 
     private async ensureContextRunning(context: AudioContext): Promise<void> {
@@ -536,14 +979,51 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         }
 
         this.log('Prisma Live playback completed');
+        this.emitDiagnostic(active, {
+            record_type: 'playback-ended',
+            payload: {
+                elapsed_ms: this.elapsedMs(active),
+                transport: 'progressive',
+                pcm_bytes: active.pcmBytes,
+                pcm_duration_seconds: active.pcmDurationSeconds,
+                underflow_count: active.underflowCount,
+            },
+        });
         this.cleanupActive('complete', false);
         active.lifecycle.onEnded?.();
     }
 
     private failActive(active: ActivePlayback, error: unknown): void {
+        if (!this.isCurrent(active)) {
+            return;
+        }
         this.cleanupActive('error', true);
         this.warn('Prisma voice audio playback failed.', error);
         active.lifecycle.onError?.(error);
+    }
+
+    private elapsedMs(active: ActivePlayback): number {
+        return Math.max(0, this.now() - active.requestStartedAt);
+    }
+
+    private emitDiagnostic(active: ActivePlayback, payload: PrismaAudioMetricPayload): void {
+        const monotonicMs = Math.max(active.lastMetricAt, this.now());
+        active.lastMetricAt = monotonicMs;
+        try {
+            const metric: PrismaBrowserMetric = {
+                ...payload,
+                schema_version: '1',
+                layer: 'browser',
+                run_id: active.runId,
+                sequence: active.metricSequence,
+                monotonic_ms: monotonicMs,
+                elapsed_ms: this.elapsedMs(active),
+            };
+            active.metricSequence += 1;
+            this.onDiagnostic(metric);
+        } catch {
+            // Diagnostics must never change audio playback behavior.
+        }
     }
 
     private isCurrent(active: ActivePlayback): boolean {
@@ -552,6 +1032,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
     private hasLivePlaybackBegun(active: ActivePlayback): boolean {
         return active.playbackStarted
+            || active.localStartCommandSent
             || (active.firstPlaybackTime !== null
                 && this.context !== null
                 && this.context.currentTime >= active.firstPlaybackTime);
@@ -574,6 +1055,24 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             safeDisconnect(sourceNode);
         }
         active.sourceNodes.clear();
+        const workletNode = active.workletNode;
+        if (workletNode) {
+            workletNode.port.onmessage = null;
+            if (active.workletProcessorErrorHandler) {
+                workletNode.removeEventListener(
+                    'processorerror',
+                    active.workletProcessorErrorHandler,
+                );
+            }
+            try {
+                workletNode.port.postMessage({ type: 'reset' });
+            } catch {
+                // The processor port may already be closed after a processor error.
+            }
+            safeDisconnect(workletNode);
+        }
+        active.workletNode = null;
+        active.workletProcessorErrorHandler = null;
         safeDisconnect(active.analyser);
         active.analyser = null;
     }
@@ -594,6 +1093,18 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         this.clearPlaybackResources(active, stopSources);
         active.target.level = 0;
         active.target.setSpeaking(false);
+        if (reason === 'cancel') {
+            this.emitDiagnostic(active, {
+                record_type: 'cancel',
+                payload: { elapsed_ms: this.elapsedMs(active) },
+            });
+        }
+        if (reason === 'error') {
+            this.emitDiagnostic(active, {
+                record_type: 'error',
+                payload: { elapsed_ms: this.elapsedMs(active), error_code: 'audio-failure' },
+            });
+        }
         if (reason === 'cancel' && active.mode === 'live' && active.liveRequestStarted) {
             this.log('Prisma Live cancelled');
         }

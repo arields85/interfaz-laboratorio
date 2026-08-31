@@ -118,22 +118,6 @@ describe('HttpPrismaVoiceConfigReader', () => {
         expect(PrismaVoiceConfigReadError).toBeDefined();
     });
 
-    it('defaults an omitted response contract to Legacy flat validation', async () => {
-        const payload = createDefaultPrismaVoiceConfig();
-        const fetchMock = vi.fn(async () => response({ json: vi.fn(async () => payload) }));
-        vi.stubGlobal('fetch', fetchMock);
-
-        try {
-            const reader = new HttpPrismaVoiceConfigReader(
-                'https://node-red.local/hmi/prisma-config',
-            );
-
-            await expect(reader.readConfig(new AbortController().signal)).resolves.toEqual(payload);
-        } finally {
-            vi.unstubAllGlobals();
-        }
-    });
-
     it('accepts a Local envelope and returns a validated clone of its config', async () => {
         const config = createDefaultPrismaVoiceConfig();
         config.effectIntensity = 42;

@@ -76,7 +76,7 @@ export class HttpPrismaVoiceConfigReader implements PrismaVoiceConfigReader {
 
     public constructor(
         url: string,
-        responseContract: PrismaVoiceConfigResponseContract = 'legacy-flat',
+        responseContract: PrismaVoiceConfigResponseContract,
         fetchImpl: typeof fetch = (...args) => fetch(...args),
     ) {
         this.url = url;
@@ -164,7 +164,7 @@ export class HttpPrismaVoiceConfigWriter implements PrismaVoiceConfigWriter {
 
     public constructor(
         url: string,
-        responseContract: PrismaVoiceConfigResponseContract = 'legacy-flat',
+        responseContract: PrismaVoiceConfigResponseContract,
         fetchImpl: typeof fetch = (...args) => fetch(...args),
     ) {
         this.url = url;

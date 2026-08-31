@@ -5,6 +5,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PRISMA_ORB_VISUAL_DEFAULTS, savePrismaOrbVisualConfig } from '../config/prismaOrb.config';
+import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 import type { VoiceEvent } from '../domain/voice.types';
 import type {
     PrismaOrbAudioTarget,
@@ -61,6 +62,7 @@ function createEngineMock() {
 }
 
 const TEST_AUDIO_SOURCE: PrismaVoiceAudioSource = {
+    playbackTransport: 'progressive',
     openLive: vi.fn(async () => {
         throw new Error('Engine mock does not open the test source');
     }),
@@ -149,6 +151,32 @@ describe('PrismaOrbOverlay', () => {
         expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
     });
 
+    it('mounts Local buffering hidden and reveals it only from onStarted', () => {
+        savePrismaRuntimeMode('local');
+        const { engine, plays } = createEngineMock();
+        const harnessRef = createRef<OrbHarnessHandle>();
+        render(
+            <OrbHarness
+                ref={harnessRef}
+                engine={engine}
+                audioSourceFactory={() => ({ ...TEST_AUDIO_SOURCE, playbackTransport: 'buffer-before-playback' })}
+            />,
+        );
+        emitVoiceEvent(harnessRef, FIRST_EVENT);
+
+        const overlay = screen.getByTestId('prisma-orb-overlay');
+        expect(overlay).toHaveAttribute('data-phase', 'buffering');
+        expect(overlay).toHaveClass('opacity-0', 'pointer-events-none');
+
+        act(() => plays[0]?.lifecycle.onStarted?.());
+        expect(overlay).toHaveAttribute('data-phase', 'visible');
+        expect(overlay).toHaveClass('opacity-100');
+
+        act(() => plays[0]?.lifecycle.onEnded?.());
+        expect(overlay).toHaveAttribute('data-phase', 'fading');
+        expect(overlay).toHaveClass('opacity-0');
+    });
+
     it('propagates normalized optional event and Telegram chat ids to each source', () => {
         const { engine } = createEngineMock();
         const sourceFactory = vi.fn<PrismaVoiceAudioSourceFactory>(() => TEST_AUDIO_SOURCE);
@@ -188,22 +216,30 @@ describe('PrismaOrbOverlay', () => {
 
         expect(sourceFactory).toHaveBeenNthCalledWith(1, {
             serviceUrl: 'https://tts.example.test/first',
+            fallbackPolicy: 'legacy-wav',
+            playbackTransport: 'progressive',
             text: 'Current response',
             eventId: 'voice-2',
             telegramChatId: 995701520,
         });
         expect(sourceFactory).toHaveBeenNthCalledWith(2, {
             serviceUrl: 'https://tts.example.test/second',
+            fallbackPolicy: 'legacy-wav',
+            playbackTransport: 'progressive',
             text: 'Latest response text',
             eventId: 'voice-3',
             telegramChatId: -1001234567890,
         });
         expect(sourceFactory).toHaveBeenNthCalledWith(3, {
             serviceUrl: 'https://tts.example.test/legacy',
+            fallbackPolicy: 'legacy-wav',
+            playbackTransport: 'progressive',
             text: 'Current response',
         });
         expect(sourceFactory).toHaveBeenNthCalledWith(4, {
             serviceUrl: 'https://tts.example.test/invalid-chat',
+            fallbackPolicy: 'legacy-wav',
+            playbackTransport: 'progressive',
             text: 'Current response',
             eventId: 'voice-4',
         });

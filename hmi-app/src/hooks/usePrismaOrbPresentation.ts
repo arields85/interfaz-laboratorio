@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { startTransition, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
 import { resolvePrismaTtsUrl } from '../config/prismaAssistant.config';
@@ -23,7 +23,7 @@ import { usePrismaRuntimeProfile } from './usePrismaRuntimeProfile';
 
 export const PRISMA_ORB_FADE_DURATION_MS = 200;
 
-export type PrismaOrbPresentationPhase = 'hidden' | 'visible' | 'fading';
+export type PrismaOrbPresentationPhase = 'hidden' | 'buffering' | 'visible' | 'fading';
 
 interface PrismaOrbPresentation {
     phase: PrismaOrbPresentationPhase;
@@ -84,12 +84,12 @@ export function usePrismaOrbPresentation(
         const resetGeneration = generationRef.current;
         clearFadeTimer(fadeTimerRef);
         engineRef.current?.stop();
-        queueMicrotask(() => {
-            if (profileRevisionRef.current !== runtimeProfile.revision
-                || generationRef.current !== resetGeneration) {
-                return;
-            }
+        if (profileRevisionRef.current !== runtimeProfile.revision
+            || generationRef.current !== resetGeneration) {
+            return;
+        }
 
+        startTransition(() => {
             setRequest(null);
             setPhase('hidden');
         });
@@ -104,6 +104,10 @@ export function usePrismaOrbPresentation(
                 runtimeProfile.mode,
                 getServiceUrlRef.current(),
             ),
+            fallbackPolicy: runtimeProfile.mode === 'local' ? 'none' : 'legacy-wav',
+            playbackTransport: runtimeProfile.mode === 'local'
+                ? 'buffer-before-playback'
+                : 'progressive',
             text: event.text,
             ...(event.id === undefined ? {} : { eventId: event.id }),
             ...(telegramChatId === undefined ? {} : { telegramChatId }),
@@ -116,7 +120,7 @@ export function usePrismaOrbPresentation(
             return;
         }
 
-        setPhase('visible');
+        setPhase(runtimeProfile.mode === 'local' ? 'buffering' : 'visible');
         setRequest({ generation: generationRef.current, audioSource });
     };
 
@@ -129,10 +133,17 @@ export function usePrismaOrbPresentation(
         }
 
         startedGenerationRef.current = request.generation;
+        let terminalCallbackHandled = false;
         const beginFade = (): void => {
             if (generationRef.current !== request.generation) {
                 return;
             }
+
+            if (terminalCallbackHandled) {
+                return;
+            }
+
+            terminalCallbackHandled = true;
 
             clearFadeTimer(fadeTimerRef);
             setPhase('fading');
@@ -146,9 +157,31 @@ export function usePrismaOrbPresentation(
                 setRequest(null);
             }, PRISMA_ORB_FADE_DURATION_MS);
         };
+        const hideAfterError = (): void => {
+            if (generationRef.current !== request.generation || terminalCallbackHandled) {
+                return;
+            }
+
+            terminalCallbackHandled = true;
+            clearFadeTimer(fadeTimerRef);
+            setPhase('hidden');
+            setRequest(null);
+        };
+        const handleStarted = (): void => {
+            if (generationRef.current !== request.generation || terminalCallbackHandled) {
+                return;
+            }
+
+            if (request.audioSource.playbackTransport === 'buffer-before-playback') {
+                setPhase('visible');
+            }
+        };
         engine.play(request.audioSource, orb, {
+            onStarted: handleStarted,
             onEnded: beginFade,
-            onError: beginFade,
+            onError: request.audioSource.playbackTransport === 'buffer-before-playback'
+                ? hideAfterError
+                : beginFade,
         });
     }, [request]);
 

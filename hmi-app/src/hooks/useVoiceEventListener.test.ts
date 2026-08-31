@@ -44,6 +44,7 @@ describe('useVoiceEventListener', () => {
         const { unmount } = renderHook(() => useVoiceEventListener(onEvent));
 
         expect(startVoiceEventListenerMock).toHaveBeenNthCalledWith(1, {
+            mode: 'central',
             url: 'https://node-red.local/hmi/voice/latest',
             onEvent: expect.any(Function),
         });
@@ -54,6 +55,7 @@ describe('useVoiceEventListener', () => {
 
         expect(firstStop).toHaveBeenCalledTimes(1);
         expect(startVoiceEventListenerMock).toHaveBeenNthCalledWith(2, {
+            mode: 'central',
             url: 'https://node-red.local/custom/voice',
             onEvent: expect.any(Function),
         });
@@ -82,6 +84,7 @@ describe('useVoiceEventListener', () => {
         renderHook(() => useVoiceEventListener(vi.fn()));
 
         expect(startVoiceEventListenerMock).toHaveBeenCalledWith({
+            mode: 'local',
             url: 'http://127.0.0.1:5057/hmi/voice/latest',
             onEvent: expect.any(Function),
         });
@@ -103,6 +106,7 @@ describe('useVoiceEventListener', () => {
             startVoiceEventListenerMock.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
         );
         expect(startVoiceEventListenerMock).toHaveBeenLastCalledWith({
+            mode: 'local',
             url: 'http://127.0.0.1:5057/hmi/voice/latest',
             onEvent: expect.any(Function),
         });

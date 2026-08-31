@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    cancelDashboardSnapshotExport,
     exportDashboardSnapshot,
     exportPrismaLocalSnapshot,
     resetDashboardSnapshotExportStateForTests,
+    startDashboardSnapshotExporter,
     startPrismaLocalSnapshotExporter,
+    stopPrismaLocalSnapshotExporter,
 } from './dashboardSnapshotExport.service';
 
 const {
@@ -255,6 +258,29 @@ describe('exportDashboardSnapshot', () => {
         expect(getDataSnapshotExportUrlMock).not.toHaveBeenCalled();
     });
 
+    it('aborts a pending central POST before activating the Local exporter', async () => {
+        let centralSignal: AbortSignal | undefined;
+        fetchMock.mockImplementationOnce((_url: string, init?: RequestInit) => {
+            centralSignal = init?.signal;
+            return new Promise((_resolve, reject) => {
+                centralSignal?.addEventListener('abort', () => reject(centralSignal?.reason));
+            });
+        });
+
+        const centralRequest = exportDashboardSnapshot({ timestamp: 'central', widgets: [] });
+        await Promise.resolve();
+
+        const stopLocal = startPrismaLocalSnapshotExporter({
+            revision: 2,
+            getSnapshot: () => ({ timestamp: 'local', widgets: [] }),
+        });
+
+        expect(centralSignal?.aborted).toBe(true);
+        await expect(centralRequest).resolves.toBe(false);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        stopLocal();
+    });
+
     it('keeps local non-202 responses non-fatal and retryable', async () => {
         fetchMock.mockResolvedValue({ ok: false, status: 503 });
 
@@ -332,5 +358,83 @@ describe('exportDashboardSnapshot', () => {
         stopFirst();
         stopSecond();
         expect((fetchMock.mock.calls[1]?.[1] as RequestInit).signal?.aborted).toBe(true);
+    });
+
+    it('removes Local timers and requests before restoring the Server exporter boundary', async () => {
+        let localSignal: AbortSignal | undefined;
+        fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+            localSignal = init?.signal;
+            return new Promise<Response>(() => undefined);
+        });
+        startPrismaLocalSnapshotExporter({
+            revision: 4,
+            intervalMs: 1_000,
+            getSnapshot: () => ({ timestamp: 'local', widgets: [] }),
+        });
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        stopPrismaLocalSnapshotExporter();
+        cancelDashboardSnapshotExport();
+
+        expect(localSignal?.aborted).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('owns three complete Server → Local → Server cycles without stale schedules or requests', async () => {
+        const centralSignals: AbortSignal[] = [];
+        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+            if (url === 'http://127.0.0.1:5057/hmi/current-snapshot') {
+                return Promise.resolve({ ok: true, status: 202 });
+            }
+
+            const signal = init?.signal as AbortSignal;
+            centralSignals.push(signal);
+            return new Promise((_resolve, reject) => {
+                signal.addEventListener('abort', () => reject(signal.reason));
+            });
+        });
+
+        let stopServer = startDashboardSnapshotExporter({
+            revision: 1,
+            intervalMs: 5_000,
+            getSnapshot: () => ({ timestamp: 'server-1', widgets: [] }),
+        });
+        const staleStops: Array<() => void> = [];
+
+        for (let cycle = 1; cycle <= 3; cycle += 1) {
+            await vi.advanceTimersByTimeAsync(5_000);
+            const centralCallsBeforeLocal = fetchMock.mock.calls.filter(([url]) => String(url).includes('node-red.local')).length;
+            expect(centralSignals.at(-1)?.aborted).toBe(false);
+
+            staleStops.push(stopServer);
+            const stopLocal = startPrismaLocalSnapshotExporter({
+                revision: cycle * 2,
+                intervalMs: 5_000,
+                getSnapshot: () => ({ timestamp: `local-${cycle}`, widgets: [] }),
+            });
+            await Promise.resolve();
+
+            expect(centralSignals.at(-1)?.aborted).toBe(true);
+            expect(vi.getTimerCount()).toBe(1);
+
+            await vi.advanceTimersByTimeAsync(5_000);
+            expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('node-red.local'))).toHaveLength(centralCallsBeforeLocal);
+            expect(fetchMock.mock.calls.filter(([url]) => url === 'http://127.0.0.1:5057/hmi/current-snapshot')).toHaveLength(cycle);
+            expect(vi.getTimerCount()).toBe(1);
+
+            stopServer = startDashboardSnapshotExporter({
+                revision: cycle * 2 + 1,
+                intervalMs: 5_000,
+                getSnapshot: () => ({ timestamp: `server-${cycle + 1}`, widgets: [] }),
+            });
+            stopLocal();
+            for (const staleStop of staleStops) staleStop();
+            expect(vi.getTimerCount()).toBe(1);
+        }
+
+        stopServer();
+        expect(vi.getTimerCount()).toBe(0);
     });
 });

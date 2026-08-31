@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { PrismaVoiceAudioEngine } from './prismaVoiceAudioEngine';
 import { createPrismaVoiceTtsAudioSource } from './prismaVoiceTtsAudioSource';
 
 const WAV_HEADER = Uint8Array.from([
@@ -53,10 +54,61 @@ function createLiveResponse({
 }
 
 describe('createPrismaVoiceTtsAudioSource', () => {
+    it('creates a Local live-only source with no executable WAV fallback and preserves eventId exactly', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse());
+        const source = createPrismaVoiceTtsAudioSource({
+            serviceUrl: 'http://127.0.0.1:5056/prisma/speak-live',
+            fallbackPolicy: 'none',
+            playbackTransport: 'buffer-before-playback',
+            text: 'Local response',
+            eventId: ' local-event-42 ',
+        }, fetchMock);
+
+        expect(source?.loadWav).toBeUndefined();
+        expect(source?.playbackTransport).toBe('buffer-before-playback');
+        await source?.openLive(new AbortController().signal);
+
+        expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+            'http://127.0.0.1:5056/prisma/speak-live',
+            expect.objectContaining({
+                method: 'POST',
+                body: JSON.stringify({
+                    text: 'Local response',
+                    eventId: ' local-event-42 ',
+                }),
+            }),
+        );
+    });
+
+    it('does not POST the unauthorized WAV fallback when Local live playback fails', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(createLiveResponse({ status: 503 }))
+            .mockResolvedValueOnce(createWavResponse());
+        const source = createPrismaVoiceTtsAudioSource({
+            serviceUrl: 'http://127.0.0.1:5056/prisma/speak-live',
+            fallbackPolicy: 'none',
+            playbackTransport: 'buffer-before-playback',
+            text: 'Local response',
+            eventId: 'local-event-43',
+        }, fetchMock);
+        const onError = vi.fn();
+        const engine = new PrismaVoiceAudioEngine({
+            createAudioContext: () => ({ state: 'running' } as AudioContext),
+        });
+
+        engine.play(source!, { level: 0, setSpeaking: vi.fn() }, { onError });
+        for (let index = 0; index < 12; index += 1) await Promise.resolve();
+
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/prisma/speak'))).toBe(false);
+    });
+
     it('includes valid event and Telegram chat ids in the exact Live request body', async () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse());
         const source = createPrismaVoiceTtsAudioSource({
             serviceUrl: 'https://tts.test/prisma/speak-live',
+            playbackTransport: 'progressive',
             text: 'El OEE actual es 88.6 %.',
             eventId: '1786387415998-l2tkwj',
             telegramChatId: 995701520,
@@ -76,6 +128,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse());
         const source = createPrismaVoiceTtsAudioSource({
             serviceUrl: 'https://tts.test/prisma/speak-live',
+            playbackTransport: 'progressive',
             text: 'Telegram response',
             telegramChatId: -1001234567890,
         }, fetchMock);
@@ -93,6 +146,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse());
         const source = createPrismaVoiceTtsAudioSource({
             serviceUrl: 'https://tts.test/prisma/speak-live',
+            playbackTransport: 'progressive',
             text: 'Event response',
             eventId: 'voice-42',
         }, fetchMock);
@@ -114,6 +168,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         const signal = new AbortController().signal;
         const source = createPrismaVoiceTtsAudioSource({
             serviceUrl: 'https://tts.test/prisma/speak',
+            playbackTransport: 'progressive',
             text: 'Respuesta real de Leda',
         }, fetchMock);
 
@@ -136,6 +191,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse());
         const source = createPrismaVoiceTtsAudioSource({
             serviceUrl: 'https://tts.test/prisma/speak-live',
+            playbackTransport: 'progressive',
             text: 'Legacy response',
             eventId,
         }, fetchMock);
@@ -161,6 +217,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse());
         const source = createPrismaVoiceTtsAudioSource({
             serviceUrl: 'https://tts.test/prisma/speak-live',
+            playbackTransport: 'progressive',
             text: 'Response without chat identity',
             eventId: 'voice-42',
             telegramChatId: telegramChatId as number,
@@ -184,7 +241,11 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         ['failed status', { status: 503 }, /503/],
     ] as const)('rejects invalid Live %s', async (_case, responseOptions, expected) => {
         const source = createPrismaVoiceTtsAudioSource(
-            { serviceUrl: 'https://tts.test/prisma/speak', text: 'Voice text' },
+            {
+                serviceUrl: 'https://tts.test/prisma/speak',
+                playbackTransport: 'progressive',
+                text: 'Voice text',
+            },
             vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse(responseOptions)),
         );
 
@@ -193,7 +254,11 @@ describe('createPrismaVoiceTtsAudioSource', () => {
 
     it('rejects an unreadable Live stream without disrupting the caller', async () => {
         const source = createPrismaVoiceTtsAudioSource(
-            { serviceUrl: 'https://tts.test/prisma/speak-live', text: 'Voice text' },
+            {
+                serviceUrl: 'https://tts.test/prisma/speak-live',
+                playbackTransport: 'progressive',
+                text: 'Voice text',
+            },
             vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse({
                 body: { getReader: () => { throw new Error('stream unreadable'); } } as unknown as ReadableStream<Uint8Array>,
             })),
@@ -206,10 +271,10 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         const fetchMock = vi.fn<typeof fetch>();
 
         expect(createPrismaVoiceTtsAudioSource({
-            serviceUrl: '   ', text: 'Disabled',
+            serviceUrl: '   ', playbackTransport: 'progressive', text: 'Disabled',
         }, fetchMock)).toBeNull();
         expect(createPrismaVoiceTtsAudioSource({
-            serviceUrl: '/relative', text: 'Invalid',
+            serviceUrl: '/relative', playbackTransport: 'progressive', text: 'Invalid',
         }, fetchMock)).toBeNull();
         expect(fetchMock).not.toHaveBeenCalled();
     });
@@ -220,6 +285,8 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         const signal = new AbortController().signal;
         const source = createPrismaVoiceTtsAudioSource({
             serviceUrl: 'https://tts.test/prisma/speak-live',
+            fallbackPolicy: 'legacy-wav',
+            playbackTransport: 'progressive',
             text: 'Fallback response',
             eventId: 'voice-fallback',
             telegramChatId: 995701520,
@@ -241,7 +308,9 @@ describe('createPrismaVoiceTtsAudioSource', () => {
     it('preserves an unrecognized custom URL as Live without inventing a fallback', async () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createLiveResponse());
         const source = createPrismaVoiceTtsAudioSource({
-            serviceUrl: 'https://tts.test/custom-stream', text: 'Voice text',
+            serviceUrl: 'https://tts.test/custom-stream',
+            playbackTransport: 'progressive',
+            text: 'Voice text',
         }, fetchMock);
 
         await source?.openLive(new AbortController().signal);
@@ -252,7 +321,11 @@ describe('createPrismaVoiceTtsAudioSource', () => {
 
     it.each(['audio/wav', 'audio/x-wav', 'audio/wave'])('accepts supported fallback WAV MIME %s', async (type) => {
         const source = createPrismaVoiceTtsAudioSource(
-            { serviceUrl: 'https://tts.test/prisma/speak-live', text: 'Voice text' },
+            {
+                serviceUrl: 'https://tts.test/prisma/speak-live',
+                playbackTransport: 'progressive',
+                text: 'Voice text',
+            },
             vi.fn<typeof fetch>().mockResolvedValue(createWavResponse({ responseType: type })),
         );
 
@@ -268,7 +341,11 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         }), /valid WAV/],
     ])('rejects %s', async (_case, response, expected) => {
         const source = createPrismaVoiceTtsAudioSource(
-            { serviceUrl: 'https://tts.test/prisma/speak-live', text: 'Voice text' },
+            {
+                serviceUrl: 'https://tts.test/prisma/speak-live',
+                playbackTransport: 'progressive',
+                text: 'Voice text',
+            },
             vi.fn<typeof fetch>().mockResolvedValue(response),
         );
 
@@ -277,7 +354,11 @@ describe('createPrismaVoiceTtsAudioSource', () => {
 
     it('accepts a valid RIFF/WAVE signature when MIME is absent', async () => {
         const source = createPrismaVoiceTtsAudioSource(
-            { serviceUrl: 'https://tts.test/prisma/speak-live', text: 'Voice text' },
+            {
+                serviceUrl: 'https://tts.test/prisma/speak-live',
+                playbackTransport: 'progressive',
+                text: 'Voice text',
+            },
             vi.fn<typeof fetch>().mockResolvedValue(createWavResponse({ responseType: '', blobType: '' })),
         );
 

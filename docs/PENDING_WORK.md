@@ -16,6 +16,7 @@ Este documento es la autoridad de descubrimiento sobre **qué** está pendiente 
 | ID | Estado | Área | Resumen | Engram topic | Agregado |
 |---|---|---|---|---|---|
 | PW-001 | pending | Configuración general | aplicar a CONEXIÓN, DISEÑO, OPCIONES y AJUSTES el patrón aprobado en VOZ para mostrar el estado de guardado en el footer a la izquierda de Guardar, con tonos semánticos. | `backlog/global-settings-save-status-all-tabs` | 2026-08-10 |
+| PW-002 | pending | Prisma Runtime | ejecutar la Unidad 0.5: integrar selectivamente el runtime productivo de Prisma al monorepositorio, eliminar acoplamientos a rutas externas y realizar un cutover único con rollback verificable. | `backlog/prisma-runtime-monorepo-integration` | 2026-08-30 |
 
 ## Protocolo
 

@@ -1,22 +1,30 @@
 import { resolvePrismaVoiceTtsServiceUrls } from '../config/prismaVoiceTts.config';
 import { normalizeTelegramChatId } from '../domain/voice';
-import type { PrismaVoiceAudioSource } from './prismaVoiceAudioEngine';
+import type {
+    PrismaVoiceAudioSource,
+    PrismaVoicePlaybackTransport,
+} from './prismaVoiceAudioEngine';
+import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
 
 export interface PrismaVoiceTtsAudioRequest {
     serviceUrl: string;
+    fallbackPolicy?: PrismaVoiceTtsFallbackPolicy;
+    playbackTransport?: PrismaVoicePlaybackTransport;
     text: string;
     eventId?: string;
     telegramChatId?: number;
 }
+
+export type PrismaVoiceTtsFallbackPolicy = 'none' | 'legacy-wav';
 
 export type PrismaVoiceAudioSourceFactory = (
     request: PrismaVoiceTtsAudioRequest,
 ) => PrismaVoiceAudioSource | null;
 
 const WAV_CONTENT_TYPES = new Set(['audio/wav', 'audio/x-wav', 'audio/wave']);
-const LIVE_AUDIO_FORMAT = 'pcm_s16le';
-const LIVE_SAMPLE_RATE = 24_000;
-const LIVE_CHANNELS = 1;
+const LIVE_AUDIO_FORMAT = PRISMA_PCM_AUDIO_FORMAT.encoding;
+const LIVE_SAMPLE_RATE = PRISMA_PCM_AUDIO_FORMAT.sampleRate;
+const LIVE_CHANNELS = PRISMA_PCM_AUDIO_FORMAT.channels;
 
 function normalizeContentType(value: string | null): string {
     return value?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
@@ -48,6 +56,7 @@ export function createPrismaVoiceTtsAudioSource(
     }
 
     const source: PrismaVoiceAudioSource = {
+        playbackTransport: request.playbackTransport ?? 'progressive',
         async openLive(signal) {
             const telegramChatId = normalizeTelegramChatId(request.telegramChatId);
             const body = {
@@ -86,7 +95,8 @@ export function createPrismaVoiceTtsAudioSource(
         },
     };
 
-    if (serviceUrls.fallbackUrl) {
+    const fallbackPolicy = request.fallbackPolicy ?? 'legacy-wav';
+    if (fallbackPolicy === 'legacy-wav' && serviceUrls.fallbackUrl) {
         source.loadWav = async (signal) => {
             const response = await fetchImpl(serviceUrls.fallbackUrl as string, {
                 method: 'POST',

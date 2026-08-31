@@ -35,8 +35,9 @@ export function useVoiceEventListener(onEvent: (event: VoiceEvent) => void): voi
 
     useEffect(() => {
         return startVoiceEventListener({
+            mode: runtimeProfile.mode,
             url: voiceUrl,
             onEvent: (event) => onEventRef.current(event),
         });
-    }, [centralConfigRevision, runtimeProfile.revision, voiceUrl]);
+    }, [centralConfigRevision, runtimeProfile.mode, runtimeProfile.revision, voiceUrl]);
 }

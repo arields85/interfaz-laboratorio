@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prisma-audio-record.v1",
+  "title": "Prisma Audio Opaque Record v1",
+  "x-record-types": {
+    "provider": ["dispatch", "completion"],
+    "backend": ["receipt", "dsp", "yield", "finalization"],
+    "browser": ["request-start", "first-readable-audio", "buffering-complete", "eof", "canonical-decode", "playback-started", "playback-ended", "underflow", "error", "cancel"]
+  },
+  "x-payload-fields": {
+    "dispatch": [],
+    "completion": ["status"],
+    "receipt": [],
+    "dsp": ["sample_count"],
+    "yield": ["sample_count"],
+    "finalization": ["status", "sample_count", "duration_ms"],
+    "request-start": [],
+    "first-readable-audio": ["elapsed_ms", "pcm_bytes"],
+    "buffering-complete": ["elapsed_ms", "pcm_bytes", "pcm_duration_seconds"],
+    "eof": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds"],
+    "canonical-decode": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds"],
+    "playback-started": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds", "underflow_count"],
+    "playback-ended": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds", "underflow_count"],
+    "underflow": ["underflow_count"],
+    "error": ["code", "status", "elapsed_ms", "error_code"],
+    "cancel": ["code", "status", "elapsed_ms"]
+  },
+  "x-required-payload-fields": {
+    "request-start": [],
+    "first-readable-audio": ["elapsed_ms", "pcm_bytes"],
+    "buffering-complete": ["elapsed_ms", "pcm_bytes", "pcm_duration_seconds"],
+    "eof": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds"],
+    "canonical-decode": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds"],
+    "playback-started": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds", "underflow_count"],
+    "playback-ended": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds", "underflow_count"],
+    "underflow": ["underflow_count"],
+    "error": ["elapsed_ms", "error_code"],
+    "cancel": ["elapsed_ms"]
+  },
+  "x-payload-kinds": {
+    "status": "enum",
+    "code": "enum",
+    "sample_count": "nonnegative-integer",
+    "duration_ms": "nonnegative-number",
+    "elapsed_ms": "nonnegative-number",
+    "transport": "enum",
+    "pcm_bytes": "nonnegative-number",
+    "pcm_duration_seconds": "nullable-nonnegative-number",
+    "underflow_count": "nonnegative-integer",
+    "error_code": "enum"
+  },
+  "x-payload-enums": {
+    "status": ["success", "error", "cancel"],
+    "code": ["provider-failure", "backend-failure", "browser-failure", "cancelled", "invalid-format", "unknown"],
+    "transport": ["progressive", "buffer-before-playback"],
+    "error_code": ["audio-failure"]
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "layer", "record_type", "sequence", "monotonic_ms", "elapsed_ms", "payload"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "run_id": {"type": "string", "pattern": "^prisma-[0-9a-f]{16,64}$"},
+    "layer": {"enum": ["provider", "backend", "browser"]},
+    "record_type": {"enum": ["dispatch", "completion", "receipt", "dsp", "yield", "finalization", "request-start", "first-readable-audio", "buffering-complete", "eof", "canonical-decode", "playback-started", "playback-ended", "underflow", "error", "cancel"]},
+    "sequence": {"type": "integer", "minimum": 0},
+    "monotonic_ms": {"type": "number", "minimum": 0},
+    "elapsed_ms": {"type": "number", "minimum": 0},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {"enum": ["success", "error", "cancel"]},
+        "code": {"enum": ["provider-failure", "backend-failure", "browser-failure", "cancelled", "invalid-format", "unknown"]},
+        "sample_count": {"type": "integer", "minimum": 0},
+        "duration_ms": {"type": "number", "minimum": 0},
+        "elapsed_ms": {"type": "number", "minimum": 0},
+        "transport": {"enum": ["progressive", "buffer-before-playback"]},
+        "pcm_bytes": {"type": "number", "minimum": 0},
+        "pcm_duration_seconds": {"type": ["number", "null"], "minimum": 0},
+        "underflow_count": {"type": "integer", "minimum": 0},
+        "error_code": {"enum": ["audio-failure"]}
+      }
+    }
+  }
+}

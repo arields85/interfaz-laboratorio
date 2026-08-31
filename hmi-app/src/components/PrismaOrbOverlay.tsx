@@ -20,7 +20,8 @@ export default function PrismaOrbOverlay({ phase, orbRef, config }: PrismaOrbOve
         <div
             aria-hidden="true"
             data-testid="prisma-orb-overlay"
-            className={`pointer-events-none fixed left-1/2 top-[46px] z-[100] size-[min(var(--prisma-orb-size),calc(100vw-2rem),calc(100vh-62px))] -translate-x-1/2 bg-transparent transition-opacity duration-200 ease-out motion-reduce:transition-none motion-reduce:duration-0 ${phase === 'fading' ? 'opacity-0' : 'opacity-100'}`}
+            data-phase={phase}
+            className={`pointer-events-none fixed left-1/2 top-[46px] z-[100] size-[min(var(--prisma-orb-size),calc(100vw-2rem),calc(100vh-62px))] -translate-x-1/2 bg-transparent transition-opacity duration-200 ease-out motion-reduce:transition-none motion-reduce:duration-0 ${phase === 'visible' ? 'opacity-100' : 'opacity-0'}`}
             style={{ '--prisma-orb-size': `${config.size}px` } as CSSProperties}
         >
             <PrismaOrb config={config} orbRef={orbRef} />
