@@ -24,14 +24,22 @@ the environment management process used for this machine.
 Required process environment variables:
 
 - `GEMINI_API_KEY`
+
+Telegram is disabled unless both of these variables are present:
+
+- `PRISMA_LOCAL_TELEGRAM_ENABLED=1`
 - `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN`
+
+A token without the explicit opt-in does not construct the Telegram bot or make
+Telegram requests. Enabling Telegram without a token fails before either
+runtime service starts.
 
 Optional variables include `PRISMA_PYTHON` and `PRISMA_RUNTIME_STATE_DIR`.
 Secrets are never stored by these launchers.
 
 ## State and exclusions
 
-Mutable configuration, snapshots, pairing state, and logs live under
+Mutable configuration, snapshots, pairing state, logs, and owned-process state live under
 `%LOCALAPPDATA%\CoreAnalytics\Prisma` (or `PRISMA_RUNTIME_STATE_DIR`). The
 repository contains only source, tests, dependency declarations, launchers,
 and a secret-free configuration template. Virtual environments, caches,

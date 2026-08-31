@@ -36,7 +36,7 @@ catch {{ Write-Output "$($_.Exception.Message)|ports=$($script:portsChecked -joi
         start_index = source.index("Start-Process")
         self.assertLess(preflight_index, start_index)
         self.assertIn("@(5056, 5057)", source)
-        self.assertGreater(source.index("Stop-Process"), start_index)
+        self.assertIn("stop-local.ps1", source)
 
     def test_operations_are_self_relative_and_do_not_reference_legacy_source(self) -> None:
         for script in OPERATIONS_ROOT.iterdir():

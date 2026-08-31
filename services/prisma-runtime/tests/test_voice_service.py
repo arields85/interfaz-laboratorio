@@ -83,7 +83,7 @@ class VoiceServiceTests(unittest.TestCase):
         }
         responses = [Mock(ok=False, status_code=500), Mock(ok=False, status_code=502), Mock(ok=True)]
 
-        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test-token"}), patch.object(service, "_telegram_post", side_effect=responses) as telegram_post:
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}), patch.object(service, "_telegram_post", side_effect=responses) as telegram_post:
             service._send_same_prisma_audio_to_telegram(job)
 
         self.assertEqual(telegram_post.call_count, 3)
