@@ -81,6 +81,73 @@ class PresentationHealthTests(unittest.TestCase):
 
 
 class RuntimeOwnershipTests(unittest.TestCase):
+    def test_module_handoff_without_repository_text_admits_child_and_reaps_wrapper(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$global:stopped = @()
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) if ($Filter -match '200') {{ [pscustomobject]@{{ ProcessId = 200; ParentProcessId = 100; CreationDate = '2026-08-31T10:00:01Z'; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m prisma_runtime.voice_service' }} }} elseif ($Filter -match '100') {{ [pscustomobject]@{{ ProcessId = 100; ParentProcessId = 1; CreationDate = '2026-08-31T10:00:00Z'; ExecutablePath = 'C:\\venv\\python.exe'; CommandLine = 'C:\\venv\\python.exe -m prisma_runtime.voice_service' }} }} }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+$wrapper = [pscustomobject]@{{ pid = 100; creationTimeUtc = '2026-08-31T10:00:00.0000000Z'; executable = 'C:\\venv\\python.exe'; commandLine = 'C:\\venv\\python.exe -m prisma_runtime.voice_service' }}
+$listener = Resolve-PrismaVerifiedListener -Port 5056 -WrapperIdentity $wrapper -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName 'python.exe'
+Stop-PrismaWrapperIfSeparate -WrapperIdentity $wrapper -ListenerProcessId $listener.pid -ExpectedModule 'prisma_runtime.voice_service'
+Write-Output ('listener=' + $listener.pid + ';created=' + $listener.creationTimeUtc + ';stopped=' + ($global:stopped -join ','))
+"""
+        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("listener=200", result.stdout)
+        self.assertIn("created=2026-08-31T10:00:01.0000000Z", result.stdout)
+        self.assertIn("stopped=100", result.stdout)
+        self.assertNotIn("stopped=200", result.stdout)
+
+    def test_wrong_module_is_not_admitted(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 200; ParentProcessId = 100; CreationDate = '2026-08-31T10:00:01Z'; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m other.service' }} }}
+$wrapper = [pscustomobject]@{{ pid = 100; creationTimeUtc = '2026-08-31T10:00:00.0000000Z' }}
+Write-Output ([bool](Resolve-PrismaVerifiedListener -Port 5056 -WrapperIdentity $wrapper -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName 'python.exe'))
+"""
+        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("False", result.stdout)
+
+    def test_wrong_parent_is_not_admitted(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 200; ParentProcessId = 999; CreationDate = '2026-08-31T10:00:01Z'; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m prisma_runtime.voice_service' }} }}
+$wrapper = [pscustomobject]@{{ pid = 100; creationTimeUtc = '2026-08-31T10:00:00.0000000Z' }}
+Write-Output ([bool](Resolve-PrismaVerifiedListener -Port 5056 -WrapperIdentity $wrapper -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName 'python.exe'))
+"""
+        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("False", result.stdout)
+
+    def test_listener_created_before_owned_wrapper_is_not_admitted(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 200; ParentProcessId = 100; CreationDate = '2026-08-31T09:59:59Z'; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m prisma_runtime.voice_service' }} }}
+$wrapper = [pscustomobject]@{{ pid = 100; creationTimeUtc = '2026-08-31T10:00:00.0000000Z' }}
+Write-Output ([bool](Resolve-PrismaVerifiedListener -Port 5056 -WrapperIdentity $wrapper -ExpectedModule 'prisma_runtime.voice_service' -ExpectedExecutableName 'python.exe'))
+"""
+        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("False", result.stdout)
+
     def test_listener_resolution_admits_child_and_reaps_only_wrapper(self) -> None:
         helper = OPERATIONS_ROOT / "process-ownership.ps1"
         powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
@@ -89,10 +156,10 @@ $ErrorActionPreference = 'Stop'
 . '{helper}'
 $global:stopped = @()
 function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 200 }} }}
-function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) if ($Filter -match '200') {{ [pscustomobject]@{{ ProcessId = 200; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m prisma_runtime.voice_service --prisma-runtime-root=C:\\repo' }} }} elseif ($Filter -match '100') {{ [pscustomobject]@{{ ProcessId = 100; ExecutablePath = 'C:\\venv\\python.exe'; CommandLine = 'C:\\venv\\python.exe -m prisma_runtime.voice_service --prisma-runtime-root=C:\\repo' }} }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) if ($Filter -match '200') {{ [pscustomobject]@{{ ProcessId = 200; ParentProcessId = 100; CreationDate = '2026-08-31T10:00:01Z'; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m prisma_runtime.voice_service --prisma-runtime-root=C:\\repo' }} }} elseif ($Filter -match '100') {{ [pscustomobject]@{{ ProcessId = 100; ParentProcessId = 1; CreationDate = '2026-08-31T10:00:00Z'; ExecutablePath = 'C:\\venv\\python.exe'; CommandLine = 'C:\\venv\\python.exe -m prisma_runtime.voice_service --prisma-runtime-root=C:\\repo' }} }} }}
 function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
-$listener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service' -RepositoryRoot 'C:\\repo'
-Stop-PrismaWrapperIfSeparate -WrapperProcessId 100 -ListenerProcessId $listener.pid -ExpectedModule 'prisma_runtime.voice_service' -RepositoryRoot 'C:\\repo'
+$listener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service'
+Stop-PrismaWrapperIfSeparate -WrapperProcessId 100 -ListenerProcessId $listener.pid -ExpectedModule 'prisma_runtime.voice_service'
 Write-Output ('listener=' + $listener.pid + ';stopped=' + ($global:stopped -join ','))
 """
         result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
@@ -111,7 +178,7 @@ $global:stopped = @()
 function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }} }}
 function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 999; ExecutablePath = 'C:\\Other\\python.exe'; CommandLine = 'C:\\Other\\python.exe -m other_service --root=C:\\other' }} }}
 function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
-$listener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service' -RepositoryRoot 'C:\\repo'
+$listener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service'
 Write-Output ('listener=' + [bool]$listener + ';stopped=' + ($global:stopped -join ','))
 """
         result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
@@ -134,6 +201,8 @@ Write-Output ('listener=' + [bool]$listener + ';stopped=' + ($global:stopped -jo
         cleanup = source.index("if (-not $startupComplete)")
         self.assertIn("Remove-Item -LiteralPath $manifestPath", source[cleanup:])
         self.assertIn("Prune-PrismaProcessManifest", source)
+        ownership = (OPERATIONS_ROOT / "process-ownership.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("CreationDate", ownership)
 
     def test_stale_manifest_record_is_pruned_without_stopping_unknown_processes(self) -> None:
         helper = OPERATIONS_ROOT / "process-ownership.ps1"
@@ -167,6 +236,9 @@ Write-Output ('exists=' + (Test-Path -LiteralPath '{manifest}'))
         self.assertIn("5057", source)
         self.assertIn("pid = [int]$Listener.pid", source)
         self.assertNotIn("pid = [int]$Process.Id", source)
+        self.assertIn("module = [string]$Listener.module", source)
+        self.assertIn("commandLine = [string]$Listener.commandLine", source)
+        self.assertIn("creationIdentity = $Listener.creationIdentity", source)
         self.assertNotIn("GEMINI_API_KEY", source[source.index("ConvertTo-Json") :])
 
     def test_start_health_gates_presentation_after_voice_with_exact_identity(self) -> None:
@@ -189,8 +261,8 @@ Write-Output ('exists=' + (Test-Path -LiteralPath '{manifest}'))
                         "schemaVersion": 1,
                         "repositoryRoot": str(RUNTIME_ROOT),
                         "processes": [
-                            {"service": "prisma-voice", "port": 5056, "pid": 111, "executable": "C:\\Python.exe", "arguments": "-m prisma_runtime.voice_service"},
-                            {"service": "prisma-local-presentation", "port": 5057, "pid": 222, "executable": "C:\\Python.exe", "arguments": "-m prisma_runtime.local_presentation"},
+                            {"service": "prisma-voice", "port": 5056, "pid": 111, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "arguments": "-m prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service", "creationIdentity": {"pid": 111, "createdUtc": "2026-08-31T09:00:00.0000000Z", "parentPid": 1, "parentCreatedUtc": ""}},
+                            {"service": "prisma-local-presentation", "port": 5057, "pid": 222, "executable": "C:\\Python.exe", "module": "prisma_runtime.local_presentation", "arguments": "-m prisma_runtime.local_presentation", "commandLine": "python.exe -m prisma_runtime.local_presentation", "creationIdentity": {"pid": 222, "createdUtc": "2026-08-31T10:00:00.0000000Z", "parentPid": 1, "parentCreatedUtc": ""}},
                         ],
                     }
                 ),
@@ -201,7 +273,7 @@ Write-Output ('exists=' + (Test-Path -LiteralPath '{manifest}'))
 $ErrorActionPreference = 'Stop'
 $env:PRISMA_RUNTIME_STATE_DIR = '{state}'
 function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) if ($LocalPort -eq 5056) {{ [pscustomobject]@{{ LocalPort = 5056; OwningProcess = 999 }} }} elseif ($LocalPort -eq 5057) {{ [pscustomobject]@{{ LocalPort = 5057; OwningProcess = 222 }} }} }}
-function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) if ($Filter -match '111') {{ [pscustomobject]@{{ ProcessId = 111; ExecutablePath = 'C:\\Python.exe'; CommandLine = 'python.exe -m prisma_runtime.voice_service --prisma-runtime-root=C:\\Users\\Ariel\\repo' }} }} elseif ($Filter -match '222') {{ [pscustomobject]@{{ ProcessId = 222; ExecutablePath = 'C:\\Python.exe'; CommandLine = 'python.exe -m prisma_runtime.local_presentation --prisma-runtime-root={str(RUNTIME_ROOT)}' }} }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) if ($Filter -match '111') {{ [pscustomobject]@{{ ProcessId = 111; ParentProcessId = 1; CreationDate = '2026-08-31T09:00:00Z'; ExecutablePath = 'C:\\Python.exe'; CommandLine = 'python.exe -m prisma_runtime.voice_service' }} }} elseif ($Filter -match '222') {{ [pscustomobject]@{{ ProcessId = 222; ParentProcessId = 1; CreationDate = '2026-08-31T10:00:00Z'; ExecutablePath = 'C:\\Python.exe'; CommandLine = 'python.exe -m prisma_runtime.local_presentation' }} }} }}
 $global:stopped = @()
 function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
 & '{stop_script}'
@@ -223,7 +295,30 @@ Write-Output ('stopped=' + ($global:stopped -join ','))
         source = (OPERATIONS_ROOT / "stop-local.ps1").read_text(encoding="utf-8-sig")
         self.assertIn("$listener.pid -eq $recordedPid", source)
         ownership = (OPERATIONS_ROOT / "process-ownership.ps1").read_text(encoding="utf-8-sig")
-        self.assertIn("$ProcessInfo.CommandLine", ownership)
+        self.assertIn("$processInfo[0].CommandLine", ownership)
+        self.assertNotIn("IndexOf($RepositoryRoot", ownership)
+
+    def test_stop_rejects_pid_reuse_when_creation_identity_changes(self) -> None:
+        stop_script = OPERATIONS_ROOT / "stop-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            (state / "run" / "process-manifest.json").write_text(json.dumps({"schemaVersion": 1, "repositoryRoot": str(RUNTIME_ROOT), "processes": [{"service": "prisma-voice", "port": 5056, "pid": 222, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service", "creationIdentity": {"pid": 222, "createdUtc": "2026-08-31T09:00:00.0000000Z", "parentPid": 100, "parentCreatedUtc": "2026-08-31T08:59:59.0000000Z"}}]}), encoding="utf-8")
+            powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            command = f"""
+$ErrorActionPreference = 'Stop'
+$env:PRISMA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ LocalPort = 5056; OwningProcess = 222 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 222; ParentProcessId = 100; CreationDate = '2026-08-31T10:00:00Z'; ExecutablePath = 'C:\\Python.exe'; CommandLine = 'python.exe -m prisma_runtime.voice_service' }} }}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+& '{stop_script}'
+Write-Output ('stopped=' + ($global:stopped -join ','))
+"""
+            result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=", result.stdout)
+        self.assertNotIn("stopped=222", result.stdout)
 
 
 if __name__ == "__main__":
