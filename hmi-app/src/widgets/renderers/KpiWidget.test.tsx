@@ -141,19 +141,6 @@ describe('KpiWidget', () => {
         vi.unstubAllGlobals();
     });
 
-    function runNextAnimationFrame(now: number) {
-        const nextFrame = Array.from(animationFrameCallbacks.entries()).at(-1);
-
-        expect(nextFrame).toBeDefined();
-
-        const [frameId, callback] = nextFrame!;
-        animationFrameCallbacks.delete(frameId);
-
-        act(() => {
-            callback(now);
-        });
-    }
-
     function runPendingAnimationFrames(now: number) {
         const pendingFrames = Array.from(animationFrameCallbacks.entries());
 

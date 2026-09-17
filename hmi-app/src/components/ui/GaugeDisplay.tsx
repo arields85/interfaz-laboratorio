@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { startTransition, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { KpiFixedTopCapBase, KpiFixedTopCapEffects, KpiTopCapShape, KpiTravelingTopCapEffects } from '../../domain/admin.types';
 import {
     DEFAULT_KPI_FIXED_TOP_CAP_EFFECTS,
@@ -201,6 +201,12 @@ export default function GaugeDisplay({
     const travelingTopCapCornerRadiusMultiplier = travelingTopCapShape.pill ? CIRCULAR_TOP_CAP_ROUNDED_CORNER_MULTIPLIER : 0;
     const staticTopCapPulseIntensity = clamp(staticTopCapEffects.pulseIntensity / KPI_FIXED_TOP_CAP_PULSE_INTENSITY_MAX, 0, 1);
     const staticTopCapPulseEnabled = topCapEnabled && !prefersReducedMotion && staticTopCapPulseIntensity > 0;
+    const {
+        mode: staticTopCapMode,
+        pulseIntensity: staticTopCapPulseIntensityValue,
+        pulseSpeed: staticTopCapPulseSpeed,
+        pulseIrregularity: staticTopCapPulseIrregularity,
+    } = staticTopCapEffects;
     const staticTopCapBlinkTrigger = circularTopCap?.staticBlinkTrigger ?? 'autonomous';
     const usesTravelCompletionBlink = staticTopCapBlinkTrigger === 'travel-completion';
     const staticTopCapBlinkDurationSeconds = usesTravelCompletionBlink
@@ -223,31 +229,25 @@ export default function GaugeDisplay({
         staticTopCapEffects.pulseStability,
         staticTopCapPulseStabilityMax,
     );
-    const travelCompletionBlinkProfile = useMemo(() => resolveKpiFixedTopCapBlinkProfile(
-        staticTopCapEffects.mode,
-        staticTopCapEffects.pulseIntensity,
-        staticTopCapEffects.pulseSpeed,
-        staticTopCapEffects.pulseIrregularity,
+    const travelCompletionBlinkProfile = resolveKpiFixedTopCapBlinkProfile(
+        staticTopCapMode,
+        staticTopCapPulseIntensityValue,
+        staticTopCapPulseSpeed,
+        staticTopCapPulseIrregularity,
         0,
         staticTopCapPulseStabilityMax,
-    ), [
-        staticTopCapEffects.mode,
-        staticTopCapEffects.pulseIntensity,
-        staticTopCapEffects.pulseIrregularity,
-        staticTopCapEffects.pulseSpeed,
-        staticTopCapPulseStabilityMax,
-    ]);
+    );
     const travelCompletionBlinkSequenceDurationSeconds = resolveKpiFixedTopCapBlinkDurationSeconds(
         staticTopCapEffects.pulseSpeed,
         staticTopCapEffects.pulseIrregularity,
         0,
         staticTopCapPulseStabilityMax,
     );
-    const triggeredStaticBlinkInactiveOpacity = useMemo(() => {
+    const triggeredStaticBlinkInactiveOpacity = (() => {
         const baseOpacity = Number.parseFloat(staticTopCapBlinkProfile.values.split(';')[0] ?? '1');
 
         return Number.isFinite(baseOpacity) ? baseOpacity : 1;
-    }, [staticTopCapBlinkProfile.values]);
+    })();
 
     useEffect(() => {
         if (mode !== 'circular') {
@@ -839,20 +839,11 @@ function useTriggeredBlinkBurst({
         key: 0,
         opacity: inactiveOpacity,
     }));
-
-    useEffect(() => {
-        setBurstState((current) => {
-            if (current.active || current.opacity !== inactiveOpacity) {
-                return {
-                    active: false,
-                    key: current.key,
-                    opacity: inactiveOpacity,
-                };
-            }
-
-            return current;
+    const updateBurstState = (nextState: Parameters<typeof setBurstState>[0]) => {
+        startTransition(() => {
+            setBurstState(nextState);
         });
-    }, [inactiveOpacity]);
+    };
 
     useEffect(() => {
         timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -879,7 +870,7 @@ function useTriggeredBlinkBurst({
                 burstWindowRef.current = null;
             }
 
-            setBurstState((current) => ({
+            updateBurstState((current) => ({
                 active: false,
                 key: enabled ? current.key : 0,
                 opacity: inactiveOpacity,
@@ -889,7 +880,7 @@ function useTriggeredBlinkBurst({
         }
 
         if (closedBurstRef.current?.triggerKey === triggerKey) {
-            setBurstState({
+            updateBurstState({
                 active: false,
                 key: triggerKey,
                 opacity: inactiveOpacity,
@@ -903,7 +894,7 @@ function useTriggeredBlinkBurst({
                 triggerKey,
                 token: (closedBurstRef.current?.token ?? 0) + 1,
             };
-            setBurstState({
+            updateBurstState({
                 active: false,
                 key: triggerKey,
                 opacity: inactiveOpacity,
@@ -926,7 +917,7 @@ function useTriggeredBlinkBurst({
                 triggerKey,
                 token: (closedBurstRef.current?.token ?? 0) + 1,
             };
-            setBurstState({
+            updateBurstState({
                 active: false,
                 key: triggerKey,
                 opacity: inactiveOpacity,
@@ -946,7 +937,7 @@ function useTriggeredBlinkBurst({
                 triggerKey,
                 token: (closedBurstRef.current?.token ?? 0) + 1,
             };
-            setBurstState({
+            updateBurstState({
                 active: false,
                 key: triggerKey,
                 opacity: inactiveOpacity,
@@ -962,7 +953,7 @@ function useTriggeredBlinkBurst({
             deadlineMs,
         };
 
-        setBurstState({
+        updateBurstState({
             active: true,
             key: triggerKey,
             opacity: parsedProfile.values[boundedInitialStepIndex] ?? inactiveOpacity,
