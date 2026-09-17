@@ -21,7 +21,7 @@ class AudioObservabilityTests(unittest.TestCase):
     def test_terminal_records_do_not_contain_content(self) -> None:
         sink = BoundedAudioSink(enabled=True)
         error = sink.emit("backend", "finalization", {"status": "error"})
-        cancel = sink.emit("browser", "cancel", {"status": "cancel"})
+        cancel = sink.emit("browser", "cancel", {"status": "cancel", "elapsed_ms": 0})
         self.assertNotIn("text", error)
         self.assertNotIn("audio", cancel)
 

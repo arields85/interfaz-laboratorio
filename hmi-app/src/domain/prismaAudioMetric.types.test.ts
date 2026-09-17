@@ -6,6 +6,17 @@ import {
 } from './prismaAudioMetric.types';
 
 describe('Prisma audio metric contract', () => {
+    const firstReadableAudio = {
+        schema_version: '1' as const,
+        run_id: 'prisma-0123456789abcdef',
+        layer: 'browser' as const,
+        record_type: 'first-readable-audio' as const,
+        sequence: 1,
+        monotonic_ms: 12,
+        elapsed_ms: 12,
+        payload: { elapsed_ms: 12, pcm_bytes: 48_000 },
+    };
+
     it('round-trips the canonical generated snake_case browser envelope', () => {
         const metric = {
             schema_version: '1' as const,
@@ -137,5 +148,53 @@ describe('Prisma audio metric contract', () => {
         ];
 
         expect(metrics.map((metric) => parsePrismaAudioMetric(metric))).toEqual(metrics);
+    });
+
+    it('rejects invalid IDs and each missing required browser payload field', () => {
+        expect(() => parsePrismaAudioMetric({
+            ...firstReadableAudio,
+            run_id: 'prisma-0123456789abcdef-',
+        })).toThrow('allowlist');
+
+        for (const payload of [{}, { elapsed_ms: 12 }, { pcm_bytes: 48_000 }]) {
+            expect(() => parsePrismaAudioMetric({ ...firstReadableAudio, payload })).toThrow('allowlist');
+        }
+    });
+
+    it('rejects booleans and non-finite numbers', () => {
+        const invalidValues: unknown[] = [true, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+        for (const pcmBytes of invalidValues) {
+            expect(() => parsePrismaAudioMetric({
+                ...firstReadableAudio,
+                payload: { ...firstReadableAudio.payload, pcm_bytes: pcmBytes },
+            })).toThrow('allowlist');
+        }
+    });
+
+    const safeBoundaryMetric = {
+        ...firstReadableAudio,
+        record_type: 'underflow' as const,
+        sequence: Number.MAX_SAFE_INTEGER,
+        payload: { underflow_count: Number.MAX_SAFE_INTEGER },
+    };
+
+    it('accepts safe integer boundaries', () => {
+        expect(parsePrismaAudioMetric(safeBoundaryMetric)).toEqual(safeBoundaryMetric);
+    });
+
+    it('rejects an unsafe sequence integer', () => {
+        expect(() => parsePrismaAudioMetric({
+            ...firstReadableAudio,
+            record_type: 'underflow' as const,
+            sequence: Number.MAX_SAFE_INTEGER + 1,
+            payload: { underflow_count: Number.MAX_SAFE_INTEGER },
+        })).toThrow('allowlist');
+    });
+
+    it('rejects an unsafe integer payload', () => {
+        expect(() => parsePrismaAudioMetric({
+            ...safeBoundaryMetric,
+            payload: { underflow_count: Number.MAX_SAFE_INTEGER + 1 },
+        })).toThrow('allowlist');
     });
 });
