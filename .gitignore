@@ -1,6 +1,7 @@
 hmi-app/coverage/
 __pycache__/
 *.py[cod]
+services/prisma-runtime/.venv/
 .atl/skill-registry.md
 .atl/.skill-registry.cache.json
 .codegraph/

@@ -4,9 +4,9 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$runtimeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$stateRoot = if ($env:PRISMA_RUNTIME_STATE_DIR) { [IO.Path]::GetFullPath($env:PRISMA_RUNTIME_STATE_DIR) } else { Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'CoreAnalytics\Prisma' }
-$python = if ($env:PRISMA_PYTHON) { $env:PRISMA_PYTHON } else { (Get-Command python.exe -ErrorAction Stop).Source }
+. (Join-Path $PSScriptRoot 'runtime-environment.ps1')
+$runtimeRoot = Get-PrismaRuntimeRoot
+$stateRoot = Get-PrismaStateRoot
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $manifestPath = Join-Path $stateRoot 'run\process-manifest.json'
 $logs = Join-Path $stateRoot 'logs'
@@ -96,6 +96,13 @@ New-Item -ItemType Directory -Path $run, $logs -Force | Out-Null
 Prune-PrismaProcessManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot
 Assert-PrismaLocalPortsAvailable -Ports @(5056, 5057)
 & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'bootstrap-local.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Prisma Local bootstrap failed; no service was started.' }
+
+# The interpreter is resolved only after bootstrap, and only from the owned
+# environment. The assertion below is the guard that keeps a foreign or PATH
+# interpreter from ever launching a service.
+$python = Resolve-PrismaPython -RuntimeRoot $runtimeRoot
+Assert-PrismaOwnedInterpreter -Interpreter $python -RuntimeRoot $runtimeRoot
 
 $stdout = Join-Path $logs 'prisma-voice-stdout.log'
 $stderr = Join-Path $logs 'prisma-voice-stderr.log'

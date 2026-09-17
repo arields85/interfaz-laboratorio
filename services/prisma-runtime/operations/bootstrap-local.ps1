@@ -4,25 +4,19 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$runtimeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$stateRoot = if ($env:PRISMA_RUNTIME_STATE_DIR) {
-    [IO.Path]::GetFullPath($env:PRISMA_RUNTIME_STATE_DIR)
-} else {
-    Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'CoreAnalytics\Prisma'
-}
-$template = Join-Path $runtimeRoot 'config\prisma_voice_config.example.json'
-$config = Join-Path $stateRoot 'prisma_voice_config.json'
+. (Join-Path $PSScriptRoot 'runtime-environment.ps1')
 
-if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {
-    throw "Missing secret-free configuration template: $template"
-}
+$runtimeRoot = Get-PrismaRuntimeRoot
+$stateRoot = Get-PrismaStateRoot
+$template = Get-PrismaConfigurationTemplate -RuntimeRoot $runtimeRoot
 
-New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $stateRoot 'logs') -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $stateRoot 'run') -Force | Out-Null
-if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
-    Copy-Item -LiteralPath $template -Destination $config
+$state = Initialize-PrismaRuntimeState -StateRoot $stateRoot -Template $template
+Write-Host "Prisma Local state is ready at $($state.StateRoot)." -ForegroundColor Green
+if (-not $state.Seeded) {
+    Write-Host 'An effective configuration already exists and was left untouched.'
 }
 
-Write-Host "Prisma Local state is ready at $stateRoot." -ForegroundColor Green
-Write-Host 'Dependencies are declared in requirements.txt; this bootstrap does not install them.'
+$environment = Initialize-PrismaVirtualEnvironment -RuntimeRoot $runtimeRoot
+$outcome = if ($environment.Created) { 'created' } else { 'reused' }
+Write-Host "Prisma Local $outcome the repository-owned Python $($environment.PythonVersion) environment at $($environment.VenvRoot)." -ForegroundColor Green
+Write-Host "Locked dependencies are installed for $($environment.Python)."

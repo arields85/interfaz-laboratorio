@@ -2,8 +2,9 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$runtimeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$stateRoot = if ($env:PRISMA_RUNTIME_STATE_DIR) { [IO.Path]::GetFullPath($env:PRISMA_RUNTIME_STATE_DIR) } else { Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'CoreAnalytics\Prisma' }
+. (Join-Path $PSScriptRoot 'runtime-environment.ps1')
+$runtimeRoot = Get-PrismaRuntimeRoot
+$stateRoot = Get-PrismaStateRoot
 $manifestPath = Join-Path $stateRoot 'run\process-manifest.json'
 . (Join-Path $PSScriptRoot 'process-ownership.ps1')
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
