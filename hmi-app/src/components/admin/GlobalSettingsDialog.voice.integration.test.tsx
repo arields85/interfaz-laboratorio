@@ -4,11 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-    PRISMA_RUNTIME_MODE_CHANGED_EVENT,
-    readPrismaRuntimeMode,
-    savePrismaRuntimeMode,
-} from '../../config/prismaRuntime.config';
+import { PRISMA_ORB_STORAGE_KEY } from '../../config/prismaOrb.config';
 import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
 import GlobalSettingsDialog from './GlobalSettingsDialog';
 
@@ -22,21 +18,15 @@ class MockLedaOrb extends HTMLElement {
     public level = 0;
     public setSpeaking(): void {}
 }
+if (!customElements.get('leda-orb')) customElements.define('leda-orb', MockLedaOrb);
 
-if (!customElements.get('leda-orb')) {
-    customElements.define('leda-orb', MockLedaOrb);
+function envelope(config = createDefaultPrismaVoiceConfig()): Response {
+    return { ok: true, status: 200, json: async () => ({ config, sync: { configured: false, verified: false } }) } as Response;
 }
 
 function renderDialog() {
-    const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-    });
-
-    return render(
-        <QueryClientProvider client={queryClient}>
-            <GlobalSettingsDialog open onClose={vi.fn()} />
-        </QueryClientProvider>,
-    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    return render(<QueryClientProvider client={client}><GlobalSettingsDialog open onClose={vi.fn()} /></QueryClientProvider>);
 }
 
 function DialogHarness() {
@@ -50,204 +40,90 @@ function DialogHarness() {
 }
 
 function renderDialogHarness() {
-    const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-    });
-    return render(
-        <QueryClientProvider client={queryClient}>
-            <DialogHarness />
-        </QueryClientProvider>,
-    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    return render(<QueryClientProvider client={client}><DialogHarness /></QueryClientProvider>);
 }
 
-function successfulConfigResponse(input?: RequestInfo | URL): Response {
-    const config = createDefaultPrismaVoiceConfig();
-    config.effectIntensity = 42;
-    const isLocal = String(input).startsWith('http://127.0.0.1:5057/');
-    return {
-        ok: true,
-        status: 200,
-        json: async () => isLocal
-            ? {
-                config,
-                sync: {
-                    centralUrlConfigured: false,
-                    lastSyncAt: null,
-                    lastSyncError: "RuntimeError('PRISMA_CONFIG_URL_MISSING')",
-                    source: 'local_fallback',
-                },
-            }
-            : config,
-    } as Response;
-}
-
-describe('GlobalSettingsDialog voice integration', () => {
+describe('GlobalSettingsDialog unified voice integration', () => {
     beforeEach(() => {
         localStorage.clear();
         localStorage.setItem('hmi-global-settings-tab', 'voice');
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
     });
+    afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); });
 
-    afterEach(() => {
-        localStorage.clear();
-        vi.unstubAllEnvs();
-        vi.unstubAllGlobals();
-    });
-
-    it.each([
-        ['Server', 'central', 'https://node-red.local/hmi/prisma-config'],
-        ['Local', 'local', 'http://127.0.0.1:5057/hmi/prisma-config'],
-    ] as const)('enables Save for an editable %s voice draft and disables it after persistence', async (_label, mode, expectedUrl) => {
-        if (mode === 'local') savePrismaRuntimeMode('local');
-        const fetchMock = vi.fn(async (input: RequestInfo | URL) => successfulConfigResponse(input));
+    it('enables shared Save for an effect edit and persists one fixed-route PUT', async () => {
+        const fetchMock = vi.fn(async () => envelope());
         vi.stubGlobal('fetch', fetchMock);
         renderDialog();
+        const save = screen.getByRole('button', { name: 'Guardar' });
+        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('100'));
+        expect(save).toBeDisabled();
 
-        const saveButton = screen.getByRole('button', { name: 'Guardar' });
-        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-            expectedUrl,
-            expect.objectContaining({ method: 'GET' }),
-        ));
-        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }))
-            .toHaveValue('42'));
-        expect(screen.queryByText(/No se pudo cargar la configuración .* de Prisma/i)).not.toBeInTheDocument();
-        expect(saveButton).toBeDisabled();
-
-        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
-            target: { value: '65' },
-        });
-
-        await waitFor(() => expect(saveButton).toBeEnabled());
-        fireEvent.click(saveButton);
-
-        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-            expectedUrl,
-            expect.objectContaining({ method: 'PUT' }),
-        ));
-        await waitFor(() => expect(saveButton).toBeDisabled());
-        expect(screen.getByText('Guardado')).toBeInTheDocument();
-    });
-
-    it('sends exactly one Local PUT for one Save click while the real dialog request is pending and after it resolves', async () => {
-        savePrismaRuntimeMode('local');
-        const loadedConfig = createDefaultPrismaVoiceConfig();
-        loadedConfig.effectIntensity = 42;
-        let resolvePut!: (response: Response) => void;
-        const pendingPut = new Promise<Response>((resolve) => {
-            resolvePut = resolve;
-        });
-        const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-            if (init?.method === 'PUT') return pendingPut;
-            return Promise.resolve(successfulConfigResponse(input));
-        });
-        vi.stubGlobal('fetch', fetchMock);
-        const user = userEvent.setup();
-        renderDialog();
-
-        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }))
-            .toHaveValue('42'));
-        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
-            target: { value: '81' },
-        });
-
-        await user.click(screen.getByRole('button', { name: 'Guardar' }));
-
-        const putCallsWhilePending = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
-        expect(putCallsWhilePending).toHaveLength(1);
-        expect(putCallsWhilePending[0]?.[0]).toBe('http://127.0.0.1:5057/hmi/prisma-config');
-        expect(JSON.parse(putCallsWhilePending[0]?.[1]?.body as string).effectIntensity).toBe(81);
-        expect(screen.getByText('Guardando...')).toBeInTheDocument();
-
-        const persistedConfig = createDefaultPrismaVoiceConfig();
-        persistedConfig.effectIntensity = 81;
-        await act(async () => resolvePut({
-            ok: true,
-            status: 200,
-            json: async () => ({
-                config: persistedConfig,
-                sync: {
-                    centralUrlConfigured: false,
-                    lastSyncAt: null,
-                    lastSyncError: null,
-                    source: 'local',
-                },
-            }),
-        } as Response));
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), { target: { value: '65' } });
+        await waitFor(() => expect(save).toBeEnabled());
+        await userEvent.click(save);
 
         await waitFor(() => expect(screen.getByText('Guardado')).toBeInTheDocument());
-        await waitFor(() => expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled());
-        expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+        const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+        expect(puts).toHaveLength(1);
+        expect(puts[0]?.[0]).toBe('/api/prisma/voice-config');
     });
 
-    it.each([
-        ['Server → Local', 'central', 'Server (Node-RED)', 'Local (presentations)'],
-        ['Local → Server', 'local', 'Local (presentations)', 'Server (Node-RED)'],
-    ] as const)('commits runtime mode transactionally for %s', async (_case, initialMode, initialLabel, nextLabel) => {
-        if (initialMode === 'local') savePrismaRuntimeMode('local');
-        const runtimeEventSpy = vi.fn();
-        window.addEventListener(PRISMA_RUNTIME_MODE_CHANGED_EVENT, runtimeEventSpy);
-        const fetchMock = vi.fn(async (input: RequestInfo | URL) => successfulConfigResponse(input));
+    it('keeps Save pending until the one PUT resolves', async () => {
+        let resolvePut!: (response: Response) => void;
+        const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => (
+            init?.method === 'PUT'
+                ? new Promise<Response>((resolve) => { resolvePut = resolve; })
+                : Promise.resolve(envelope())
+        ));
+        vi.stubGlobal('fetch', fetchMock);
+        renderDialog();
+        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('100'));
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), { target: { value: '81' } });
+
+        await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+        expect(screen.getByText('Guardando...')).toBeInTheDocument();
+        expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+
+        const persisted = createDefaultPrismaVoiceConfig();
+        persisted.effectIntensity = 81;
+        await act(async () => resolvePut(envelope(persisted)));
+        await waitFor(() => expect(screen.getByText('Guardado')).toBeInTheDocument());
+    });
+
+    it('does not render a replacement runtime or endpoint selector', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => envelope()));
+        renderDialog();
+        await waitFor(() => expect(screen.getByRole('heading', { name: 'Efectos de voz de Prisma' })).toBeInTheDocument());
+
+        expect(screen.queryByRole('button', { name: 'Modo de ejecución de Prisma' })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Endpoint Voz HMI')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Endpoint Configuración Prisma')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('URL Servicio Voz Prisma')).not.toBeInTheDocument();
+    });
+
+    it('discards unsaved effect, orb, and preview-only drafts when Close unmounts the tab', async () => {
+        const initial = createDefaultPrismaVoiceConfig();
+        initial.effectIntensity = 42;
+        const fetchMock = vi.fn(async () => envelope(initial));
         vi.stubGlobal('fetch', fetchMock);
         const user = userEvent.setup();
-        renderDialog();
-        const saveButton = screen.getByRole('button', { name: 'Guardar' });
-        const selector = screen.getByRole('button', { name: 'Modo de ejecución de Prisma' });
-        await waitFor(() => expect(selector).toHaveTextContent(initialLabel));
-        expect(saveButton).toBeDisabled();
-
-        await user.click(selector);
-        await user.click(screen.getByRole('button', { name: nextLabel }));
-
-        expect(selector).toHaveTextContent(nextLabel);
-        expect(saveButton).toBeEnabled();
-        expect(readPrismaRuntimeMode()).toBe(initialMode);
-        expect(runtimeEventSpy).not.toHaveBeenCalled();
-
-        await user.click(selector);
-        await user.click(screen.getByRole('button', { name: initialLabel }));
-
-        expect(saveButton).toBeDisabled();
-        expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
-        expect(readPrismaRuntimeMode()).toBe(initialMode);
-
-        await user.click(selector);
-        await user.click(screen.getByRole('button', { name: nextLabel }));
-        await user.click(saveButton);
-
-        await waitFor(() => expect(readPrismaRuntimeMode()).not.toBe(initialMode));
-        await waitFor(() => expect(saveButton).toBeDisabled());
-        expect(runtimeEventSpy).toHaveBeenCalledTimes(1);
-        expect(runtimeEventSpy.mock.calls[0]?.[0]).toMatchObject({
-            detail: expect.objectContaining({ mode: initialMode === 'central' ? 'local' : 'central' }),
-        });
-        expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
-        window.removeEventListener(PRISMA_RUNTIME_MODE_CHANGED_EVENT, runtimeEventSpy);
-    });
-
-    it.each([
-        ['Server → Local', 'central', 'Local (presentations)'],
-        ['Local → Server', 'local', 'Server (Node-RED)'],
-    ] as const)('discards an unsaved runtime mode draft on close for %s', async (_case, initialMode, nextLabel) => {
-        if (initialMode === 'local') savePrismaRuntimeMode('local');
-        const runtimeEventSpy = vi.fn();
-        window.addEventListener(PRISMA_RUNTIME_MODE_CHANGED_EVENT, runtimeEventSpy);
-        vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => successfulConfigResponse(input)));
-        const user = userEvent.setup();
         renderDialogHarness();
-        const selector = screen.getByRole('button', { name: 'Modo de ejecución de Prisma' });
+        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('42'));
 
-        await user.click(selector);
-        await user.click(screen.getByRole('button', { name: nextLabel }));
+        fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), { target: { value: '65' } });
+        fireEvent.change(screen.getByRole('slider', { name: 'Velocidad' }), { target: { value: '1.5' } });
+        await user.click(screen.getByRole('checkbox', { name: 'Mostrar deslizador' }));
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeEnabled();
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
 
-        expect(readPrismaRuntimeMode()).toBe(initialMode);
-        expect(runtimeEventSpy).not.toHaveBeenCalled();
-
+        expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+        expect(localStorage.getItem(PRISMA_ORB_STORAGE_KEY)).toBeNull();
         await user.click(screen.getByRole('button', { name: 'Reopen' }));
+
+        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('42'));
+        expect(screen.getByRole('slider', { name: 'Velocidad' })).toHaveValue('1');
+        expect(screen.getByRole('slider', { name: 'Penetración de haces' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Modo de ejecución de Prisma' }))
-            .toHaveTextContent(initialMode === 'central' ? 'Server (Node-RED)' : 'Local (presentations)');
-        window.removeEventListener(PRISMA_RUNTIME_MODE_CHANGED_EVENT, runtimeEventSpy);
     });
 });

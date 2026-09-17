@@ -102,33 +102,24 @@ describe('startVoiceEventListener', () => {
         stop();
     });
 
-    it.each([
-        ['missing', undefined],
-        ['empty', ''],
-        ['whitespace', '   '],
-        ['wrong type', 42],
-    ])('rejects a Local event with a %s modern id instead of presenting or replaying it', async (_case, id) => {
-        const invalidLocalEvent = { ...FIRST_EVENT, id };
-        const validBaseline = { ...FIRST_EVENT, id: 'local-1' };
-        const validNext = { ...FIRST_EVENT, id: ' local-2 ', text: 'Current Local response' };
+    it('keeps tolerant legacy id behavior without a runtime-mode branch', async () => {
+        const legacyBaseline = { ...FIRST_EVENT, id: undefined };
+        const nextEvent = { ...FIRST_EVENT, id: 'voice-2', text: 'Current response' };
         const fetchMock = vi.fn<typeof fetch>()
-            .mockResolvedValueOnce(jsonResponse(invalidLocalEvent))
-            .mockResolvedValueOnce(jsonResponse(validBaseline))
-            .mockResolvedValueOnce(jsonResponse(validNext));
+            .mockResolvedValueOnce(jsonResponse(legacyBaseline))
+            .mockResolvedValueOnce(jsonResponse(nextEvent));
         const onEvent = vi.fn();
 
         const stop = startVoiceEventListener({
-            mode: 'local',
-            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            url: '/api/prisma/events/latest',
             onEvent,
             fetchImpl: fetchMock,
             intervalMs: 1_000,
         });
 
-        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(1_000);
 
-        expect(onEvent).toHaveBeenCalledExactlyOnceWith(validNext);
-        expect(onEvent.mock.calls[0]?.[0].id).toBe(' local-2 ');
+        expect(onEvent).toHaveBeenCalledExactlyOnceWith(nextEvent);
         stop();
     });
 
@@ -286,7 +277,7 @@ describe('startVoiceEventListener', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it('cancels the previous profile listener before starting replacement polling', () => {
+    it('cancels the previous listener before starting replacement polling', () => {
         const signals: AbortSignal[] = [];
         const fetchMock = vi.fn<typeof fetch>((_input, init) => {
             if (init?.signal) signals.push(init.signal);
@@ -294,14 +285,12 @@ describe('startVoiceEventListener', () => {
         });
 
         const stopServer = startVoiceEventListener({
-            mode: 'central',
-            url: 'https://node-red.local/hmi/voice/latest',
+            url: '/api/prisma/events/latest',
             onEvent: vi.fn(),
             fetchImpl: fetchMock,
         });
         const stopLocal = startVoiceEventListener({
-            mode: 'local',
-            url: 'http://127.0.0.1:5057/hmi/voice/latest',
+            url: '/api/prisma/events/latest',
             onEvent: vi.fn(),
             fetchImpl: fetchMock,
         });

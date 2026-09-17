@@ -49,30 +49,21 @@ describe('ConnectionSettingsTab activity-series settings', () => {
         expect(onDirtyChange).toHaveBeenCalledWith(false);
     });
 
-    it('renders and saves the dashboard snapshot export controls alongside the other connection endpoints', () => {
-        const saveRef = { current: null as null | (() => void) };
+    it('retires Prisma snapshot export controls without changing industrial telemetry settings', () => {
+        localStorage.setItem('hmi:snapshot-export-enabled', 'true');
+        localStorage.setItem('hmi:snapshot-export-endpoint', '/legacy-prisma-snapshot');
+        localStorage.setItem('hmi:snapshot-export-interval-ms', '1234');
 
-        render(<ConnectionSettingsTab saveRef={saveRef} />);
+        render(<ConnectionSettingsTab />);
 
-        expect(screen.getByLabelText('Habilitar exportación automática del snapshot actual')).not.toBeChecked();
-        expect(screen.getByLabelText('Endpoint Export Snapshot Actual')).toHaveValue('');
-        expect(screen.getByLabelText('Intervalo Export Snapshot Actual (ms)')).toHaveValue(5000);
-        expect(screen.getByText('Deshabilitado')).toBeInTheDocument();
-
-        fireEvent.click(screen.getByLabelText('Habilitar exportación automática del snapshot actual'));
-
-        fireEvent.change(screen.getByLabelText('Endpoint Export Snapshot Actual'), {
-            target: { value: '/exports/dashboard-live' },
-        });
-        fireEvent.change(screen.getByLabelText('Intervalo Export Snapshot Actual (ms)'), {
-            target: { value: '250' },
-        });
-
-        saveRef.current?.();
-
+        expect(screen.queryByLabelText('Habilitar exportación automática del snapshot actual')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Endpoint Export Snapshot Actual')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Intervalo Export Snapshot Actual (ms)')).not.toBeInTheDocument();
+        expect(screen.getByLabelText('Endpoint Snapshot')).toBeInTheDocument();
+        expect(screen.getByLabelText('Endpoint Histórico')).toBeInTheDocument();
+        expect(screen.getByLabelText('Endpoint Activity-Series')).toBeInTheDocument();
         expect(localStorage.getItem('hmi:snapshot-export-enabled')).toBe('true');
-        expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('/exports/dashboard-live');
-        expect(localStorage.getItem('hmi:snapshot-export-interval-ms')).toBe('1000');
-        expect(screen.getByText('URL EXPORT SNAPSHOT ACTUAL')).toBeInTheDocument();
+        expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('/legacy-prisma-snapshot');
+        expect(localStorage.getItem('hmi:snapshot-export-interval-ms')).toBe('1234');
     });
 });

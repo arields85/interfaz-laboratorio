@@ -23,10 +23,7 @@ vi.mock('../services/HierarchyStorageService', () => ({
 vi.mock('../queries/useDataOverview', () => ({ useDataOverview: useDataOverviewMock }));
 
 vi.mock('../services/dashboardSnapshotExport.service', () => ({
-    cancelDashboardSnapshotExport: vi.fn(),
-    exportDashboardSnapshot: vi.fn(),
-    startPrismaLocalSnapshotExporter: startExporterMock,
-    stopPrismaLocalSnapshotExporter: vi.fn(),
+    startDashboardSnapshotExporter: startExporterMock,
 }));
 
 class ImmediateResizeObserver implements ResizeObserver {

@@ -1,265 +1,93 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    DATA_CONNECTION_CONFIG_CHANGED_EVENT,
     DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT,
-    DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT,
-    DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS,
-    DATA_DEFAULT_VOICE_ENDPOINT,
-    DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS,
+    DATA_DEFAULT_ENDPOINT,
+    DATA_DEFAULT_HISTORY_ENDPOINT,
     buildDataUrl,
     clearDataActivitySeriesEndpoint,
-    clearDataPrismaConfigEndpoint,
-    clearDataSnapshotExportEndpoint,
-    clearDataSnapshotExportEnabledSetting,
-    clearDataSnapshotExportIntervalMs,
-    clearDataVoiceEndpoint,
-    getDataActivitySeriesEndpoint,
+    clearDataBaseUrl,
+    clearDataEndpoint,
+    clearDataHistoryEndpoint,
     getDataActivitySeriesUrl,
-    getDataPrismaConfigEndpoint,
-    getDataPrismaConfigUrl,
-    getDataSnapshotExportEndpoint,
-    getDataSnapshotExportIntervalMs,
-    getDataSnapshotExportUrl,
-    getDataVoiceEndpoint,
-    getDataVoiceUrl,
-    getSavedDataVoiceEndpoint,
-    getSavedDataPrismaConfigEndpoint,
-    isDataActivitySeriesEnabled,
-    isDataSnapshotExportEnabled,
+    getDataBaseUrl,
+    getDataEndpoint,
+    getDataFullUrl,
+    getDataHistoryUrl,
     saveDataActivitySeriesEndpoint,
-    saveDataPrismaConfigEndpoint,
-    saveDataSnapshotExportEnabledSetting,
-    saveDataSnapshotExportEndpoint,
-    saveDataSnapshotExportIntervalMs,
-    saveDataVoiceEndpoint,
+    saveDataBaseUrl,
+    saveDataEndpoint,
+    saveDataHistoryEndpoint,
 } from './dataConnection.config';
 
-describe('dataConnection.config activity-series helpers', () => {
+describe('dataConnection.config industrial telemetry settings', () => {
+    beforeEach(() => {
+        localStorage.clear();
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://sample.example.invalid');
+    });
+
     afterEach(() => {
         localStorage.clear();
         vi.unstubAllEnvs();
     });
 
-    it('defaults the activity-series endpoint and composes the final GET url', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local///');
-
-        expect(getDataActivitySeriesEndpoint()).toBe(DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT);
-        expect(getDataActivitySeriesUrl()).toBe('https://node-red.local/api/hmi-data/activity-series');
-        expect(isDataActivitySeriesEnabled()).toBe(true);
+    it('retains overview, history, and activity defaults', () => {
+        expect(getDataBaseUrl()).toBe('https://sample.example.invalid');
+        expect(getDataEndpoint()).toBe(DATA_DEFAULT_ENDPOINT);
+        expect(getDataFullUrl()).toBe('https://sample.example.invalid/api/hmi-data');
+        expect(getDataHistoryUrl()).toBe('https://sample.example.invalid/api/hmi-data/history');
+        expect(getDataActivitySeriesUrl()).toBe('https://sample.example.invalid/api/hmi-data/activity-series');
     });
 
-    it('allows an empty saved activity-series endpoint to disable the feature intentionally', () => {
-        localStorage.setItem('hmi:activity-series-endpoint', '');
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
+    it('persists and clears industrial telemetry settings without touching legacy Prisma keys', () => {
+        localStorage.setItem('hmi:prisma-runtime-mode', 'local');
+        localStorage.setItem('hmi:voice-endpoint', 'https://legacy.invalid/voice');
+        localStorage.setItem('hmi:prisma-config-endpoint', 'https://legacy.invalid/config');
+        localStorage.setItem('hmi:snapshot-export-endpoint', '/legacy-snapshot');
+        localStorage.setItem('hmi:prisma-voice-tts-service-url', 'https://legacy.invalid/tts');
 
-        expect(getDataActivitySeriesEndpoint()).toBeNull();
-        expect(getDataActivitySeriesUrl()).toBeNull();
-        expect(isDataActivitySeriesEnabled()).toBe(false);
-    });
+        saveDataBaseUrl(' https://sample.example.invalid/root/ ');
+        saveDataEndpoint('/overview');
+        saveDataHistoryEndpoint('/history');
+        saveDataActivitySeriesEndpoint('/activity');
 
-    it('persists and clears a custom activity-series endpoint without affecting slash normalization', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local/');
+        expect(getDataFullUrl()).toBe('https://sample.example.invalid/root/overview');
+        expect(getDataHistoryUrl()).toBe('https://sample.example.invalid/root/history');
+        expect(getDataActivitySeriesUrl()).toBe('https://sample.example.invalid/root/activity');
 
-        saveDataActivitySeriesEndpoint('activity/custom-series');
-        expect(getDataActivitySeriesEndpoint()).toBe('/activity/custom-series');
-        expect(getDataActivitySeriesUrl()).toBe('https://node-red.local/activity/custom-series');
-
+        clearDataBaseUrl();
+        clearDataEndpoint();
+        clearDataHistoryEndpoint();
         clearDataActivitySeriesEndpoint();
-        expect(getDataActivitySeriesEndpoint()).toBe(DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT);
-    });
-});
 
-describe('dataConnection.config dashboard snapshot export helpers', () => {
-    afterEach(() => {
-        localStorage.clear();
-        vi.unstubAllEnvs();
+        expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('local');
+        expect(localStorage.getItem('hmi:voice-endpoint')).toBe('https://legacy.invalid/voice');
+        expect(localStorage.getItem('hmi:prisma-config-endpoint')).toBe('https://legacy.invalid/config');
+        expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('/legacy-snapshot');
+        expect(localStorage.getItem('hmi:prisma-voice-tts-service-url')).toBe('https://legacy.invalid/tts');
     });
 
-    it('keeps snapshot export opt-in by default until an admin explicitly enables it', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local///');
+    it('keeps the connection change event for the telemetry base URL', () => {
+        const listener = vi.fn();
+        window.addEventListener(DATA_CONNECTION_CONFIG_CHANGED_EVENT, listener);
 
-        expect(getDataSnapshotExportEndpoint()).toBeNull();
-        expect(getDataSnapshotExportIntervalMs()).toBe(DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS);
-        expect(getDataSnapshotExportUrl()).toBeNull();
-        expect(isDataSnapshotExportEnabled()).toBe(false);
+        saveDataBaseUrl('https://sample.example.invalid');
+        clearDataBaseUrl();
+
+        expect(listener).toHaveBeenCalledTimes(2);
+        window.removeEventListener(DATA_CONNECTION_CONFIG_CHANGED_EVENT, listener);
     });
 
-    it('supports disabling snapshot export without affecting the shared Node-RED base url', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
+    it('keeps generic URL composition and nullable activity behavior', () => {
+        expect(buildDataUrl(' https://sample.example.invalid/// ', ' ///custom '))
+            .toBe('https://sample.example.invalid/custom');
+        expect(buildDataUrl(null, '/custom')).toBeNull();
 
-        saveDataSnapshotExportEnabledSetting(false);
-        saveDataSnapshotExportEndpoint('');
-
-        expect(getDataSnapshotExportEndpoint()).toBeNull();
-        expect(getDataSnapshotExportUrl()).toBeNull();
-        expect(isDataSnapshotExportEnabled()).toBe(false);
-    });
-
-    it('persists custom snapshot export endpoint + interval and clears them back to the blank endpoint + default interval', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local/');
-
-        saveDataSnapshotExportEndpoint('exports/current-dashboard');
-        saveDataSnapshotExportIntervalMs(12_000);
-
-        expect(getDataSnapshotExportEndpoint()).toBe('/exports/current-dashboard');
-        expect(getDataSnapshotExportUrl()).toBe('https://node-red.local/exports/current-dashboard');
-        expect(getDataSnapshotExportIntervalMs()).toBe(12_000);
-
-        clearDataSnapshotExportEndpoint();
-        clearDataSnapshotExportIntervalMs();
-        clearDataSnapshotExportEnabledSetting();
-
-        expect(getDataSnapshotExportEndpoint()).toBeNull();
-        expect(getDataSnapshotExportIntervalMs()).toBe(DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS);
-        expect(isDataSnapshotExportEnabled()).toBe(false);
-    });
-
-    it('enables snapshot export only after the admin saves the opt-in toggle explicitly', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
-
-        saveDataSnapshotExportEnabledSetting(true);
-        saveDataSnapshotExportEndpoint('hmi/current-snapshot');
-
-        expect(isDataSnapshotExportEnabled()).toBe(true);
-    });
-
-    it('clamps too-small snapshot export intervals to the safer minimum', () => {
-        saveDataSnapshotExportIntervalMs(250);
-
-        expect(localStorage.getItem('hmi:snapshot-export-interval-ms')).toBe(String(DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS));
-        expect(getDataSnapshotExportIntervalMs()).toBe(DATA_MIN_SNAPSHOT_EXPORT_INTERVAL_MS);
-    });
-
-    it('falls back to the default snapshot export interval for invalid saved values', () => {
-        localStorage.setItem('hmi:snapshot-export-interval-ms', 'not-a-number');
-
-        expect(getDataSnapshotExportIntervalMs()).toBe(DATA_DEFAULT_SNAPSHOT_EXPORT_INTERVAL_MS);
-    });
-});
-
-describe('dataConnection.config voice helpers', () => {
-    afterEach(() => {
-        localStorage.clear();
-        vi.unstubAllEnvs();
-    });
-
-    it('defaults the voice endpoint and composes it with the normalized Node-RED base url', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local///');
-
-        expect(getSavedDataVoiceEndpoint()).toBeNull();
-        expect(getDataVoiceEndpoint()).toBe(DATA_DEFAULT_VOICE_ENDPOINT);
-        expect(getDataVoiceUrl()).toBe('https://node-red.local/hmi/voice/latest');
-    });
-
-    it('persists a custom endpoint and normalizes duplicate joining slashes', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local///');
-
-        saveDataVoiceEndpoint('///custom/voice');
-
-        expect(getSavedDataVoiceEndpoint()).toBe('///custom/voice');
-        expect(getDataVoiceEndpoint()).toBe('/custom/voice');
-        expect(getDataVoiceUrl()).toBe('https://node-red.local/custom/voice');
-    });
-
-    it('preserves an empty saved endpoint as an explicit disabled state', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
-
-        saveDataVoiceEndpoint('   ');
-
-        expect(getSavedDataVoiceEndpoint()).toBe('');
-        expect(getDataVoiceEndpoint()).toBeNull();
-        expect(getDataVoiceUrl()).toBeNull();
-    });
-
-    it('clears the saved override back to the canonical default', () => {
-        saveDataVoiceEndpoint('/custom/voice');
-
-        clearDataVoiceEndpoint();
-
-        expect(getSavedDataVoiceEndpoint()).toBeNull();
-        expect(getDataVoiceEndpoint()).toBe(DATA_DEFAULT_VOICE_ENDPOINT);
-    });
-});
-
-describe('dataConnection.config Prisma config endpoint helpers', () => {
-    afterEach(() => {
-        localStorage.clear();
-        vi.restoreAllMocks();
-    });
-
-    it('uses the canonical Prisma config endpoint when no browser override exists', () => {
-        expect(getSavedDataPrismaConfigEndpoint()).toBeNull();
-        expect(getDataPrismaConfigEndpoint()).toBe(DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT);
-    });
-
-    it('reads a saved Prisma config endpoint with canonical leading-slash normalization', () => {
-        localStorage.setItem('hmi:prisma-config-endpoint', '///custom/prisma-config');
-
-        expect(getSavedDataPrismaConfigEndpoint()).toBe('///custom/prisma-config');
-        expect(getDataPrismaConfigEndpoint()).toBe('/custom/prisma-config');
-    });
-
-    it.each([
-        ['https://node-red.local', '/hmi/prisma-config'],
-        ['https://node-red.local/', '/hmi/prisma-config'],
-        ['https://node-red.local', 'hmi/prisma-config'],
-        ['https://node-red.local/', 'hmi/prisma-config'],
-    ])('composes base %s and endpoint %s without duplicate joining slashes', (baseUrl, endpoint) => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', baseUrl);
-        localStorage.setItem('hmi:prisma-config-endpoint', endpoint);
-
-        expect(getDataPrismaConfigUrl()).toBe('https://node-red.local/hmi/prisma-config');
-    });
-
-    it('builds a URL from an explicit draft endpoint with canonical slash handling', () => {
-        expect(buildDataUrl(' https://node-red.local/// ', ' ///custom/prisma-config '))
-            .toBe('https://node-red.local/custom/prisma-config');
-        expect(buildDataUrl(null, '/custom/prisma-config')).toBeNull();
-        expect(buildDataUrl('https://node-red.local', '   ')).toBeNull();
-    });
-
-    it('does not compose a Prisma config URL without a base or with a disabled endpoint', () => {
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', '');
-        expect(getDataPrismaConfigUrl()).toBeNull();
-
-        vi.stubEnv('VITE_NODE_RED_BASE_URL', 'https://node-red.local');
-        localStorage.setItem('hmi:prisma-config-endpoint', '');
-        expect(getDataPrismaConfigUrl()).toBeNull();
-    });
-
-    it('preserves an empty saved Prisma config endpoint as an explicit disabled state', () => {
-        saveDataPrismaConfigEndpoint('   ');
-
-        expect(getSavedDataPrismaConfigEndpoint()).toBe('');
-        expect(getDataPrismaConfigEndpoint()).toBeNull();
-    });
-
-    it('persists and clears the Prisma config endpoint through its own storage key', () => {
-        saveDataPrismaConfigEndpoint('  /custom/prisma-config  ');
-
-        expect(localStorage.getItem('hmi:prisma-config-endpoint')).toBe('/custom/prisma-config');
-        expect(localStorage.getItem('hmi:voice-endpoint')).toBeNull();
-
-        clearDataPrismaConfigEndpoint();
-
-        expect(getSavedDataPrismaConfigEndpoint()).toBeNull();
-        expect(getDataPrismaConfigEndpoint()).toBe(DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT);
-    });
-
-    it('falls back safely when browser storage is blocked', () => {
-        vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-            throw new Error('storage blocked');
-        });
-        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-            throw new Error('storage blocked');
-        });
-        vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-            throw new Error('storage blocked');
-        });
-
-        expect(getSavedDataPrismaConfigEndpoint()).toBeNull();
-        expect(getDataPrismaConfigEndpoint()).toBe(DATA_DEFAULT_PRISMA_CONFIG_ENDPOINT);
-        expect(() => saveDataPrismaConfigEndpoint('/custom/prisma-config')).not.toThrow();
-        expect(() => clearDataPrismaConfigEndpoint()).not.toThrow();
+        saveDataActivitySeriesEndpoint('');
+        expect(getDataActivitySeriesUrl()).toBeNull();
+        clearDataActivitySeriesEndpoint();
+        expect(DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT).toBe('/api/hmi-data/activity-series');
+        expect(DATA_DEFAULT_HISTORY_ENDPOINT).toBe('/api/hmi-data/history');
     });
 });

@@ -9,7 +9,6 @@ import { AUTH_SESSION_STORAGE_KEY, useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
 import Topbar from './Topbar';
 import { SHIELD_REVEAL_REQUEST_EVENT } from '../../hooks/useBootShield';
-import { savePrismaRuntimeMode } from '../../config/prismaRuntime.config';
 
 const { hierarchyStorageMock, dashboardStorageMock } = vi.hoisted(() => ({
     hierarchyStorageMock: {
@@ -370,20 +369,12 @@ describe('Topbar', () => {
         document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 
-    it('shows the Prisma Local indicator only for the effective local profile', () => {
+    it('does not expose the retired Prisma Local indicator for legacy storage or query state', () => {
+        localStorage.setItem('hmi:prisma-runtime-mode', 'local');
         renderTopbar('/?prismaMode=local');
 
-        expect(screen.getByRole('status', { name: 'PRISMA LOCAL' })).toHaveTextContent('PRISMA LOCAL');
+        expect(screen.queryByRole('status', { name: 'PRISMA LOCAL' })).not.toBeInTheDocument();
+        expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('local');
     });
 
-    it('clears the Prisma Local indicator after central mode is restored without reload', async () => {
-        savePrismaRuntimeMode('local');
-
-        renderTopbar('/');
-        expect(screen.getByRole('status', { name: 'PRISMA LOCAL' })).toBeInTheDocument();
-
-        savePrismaRuntimeMode('central');
-
-        await waitFor(() => expect(screen.queryByRole('status', { name: 'PRISMA LOCAL' })).not.toBeInTheDocument());
-    });
 });

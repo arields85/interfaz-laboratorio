@@ -16,8 +16,8 @@ Este documento es la autoridad de descubrimiento sobre **qué** está pendiente 
 | ID | Estado | Área | Resumen | Engram topic | Agregado |
 |---|---|---|---|---|---|
 | PW-001 | pending | Configuración general | aplicar a CONEXIÓN, DISEÑO, OPCIONES y AJUSTES el patrón aprobado en VOZ para mostrar el estado de guardado en el footer a la izquierda de Guardar, con tonos semánticos. | `backlog/global-settings-save-status-all-tabs` | 2026-08-10 |
-| PW-002 | pending | Prisma Runtime | cerrar la migración ya iniciada del runtime del repositorio: launchers, ciclo de vida durable y recuperación; instalación reproducible; aceptación de operación y acceso; y retiro explícito del legado. | `backlog/prisma-runtime-monorepo-integration` | 2026-08-30 |
-| PW-003 | pending | Prisma Assistant | implementar configuración y diagnósticos protegidos, datos compartidos por instalación, voz y navegación HMI aisladas por sesión, y Telegram personal autónomo de texto con aislamiento multiusuario/multiinstalación. | `backlog/prisma-dual-channel-assistant` | 2026-09-17 |
+| PW-002 | pending | Prisma Runtime | aceptar arranque local, instalación limpia y operación reales; implementar forwarding/despliegue/supervisión administrados por IT, acceso backend protegido, recuperación durable y retiro explícito de la instalación legacy externa. | `backlog/prisma-runtime-monorepo-integration` | 2026-08-30 |
+| PW-003 | pending | Prisma Assistant | implementar primero almacenamiento/API de credenciales y acceso protegidos; después, campos y diagnósticos de Voz, datos compartidos por instalación, voz/navegación HMI por sesión y Telegram personal autónomo. | `backlog/prisma-dual-channel-assistant` | 2026-09-17 |
 
 ## Protocolo
 

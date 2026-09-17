@@ -2,13 +2,13 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.3
+> **Versión documental:** 2.0.7
 >
 > **Fecha:** 2026-09-17
 >
-> **Estado del producto:** runtime parcialmente integrado; objetivo de asistente de dos canales aprobado; implementación funcional y aceptación integral pendientes.
+> **Estado del producto:** runtime local y enrutamiento web same-origin unificado cerrados offline; acceso protegido, despliegue productivo y aceptación integral pendientes.
 >
-> **Alcance de esta versión:** registra el incremento implementado y verificado del contrato de audio; el producto ampliado, la operación durable y su aceptación integral continúan pendientes.
+> **Alcance de esta versión:** conserva el cierre offline de FND-1–FND-11 y cierra UNI-1–UNI-3 con cuatro rutas web same-origin, selector y configuración legacy retirados del flujo activo, y verificación independiente corregida; el acceso protegido, la aceptación real y el despliegue productivo continúan pendientes.
 
 ## 1. Objetivo y estado general
 
@@ -32,16 +32,16 @@ canales, aislamiento, despliegue remoto ni configuración protegida.
 
 | Área | Estado al 2026-09-17 | Conclusión |
 |---|---|---|
-| Runtime bajo propiedad del repositorio | Parcialmente implementado | Existe en [`../../services/prisma-runtime/`](../../services/prisma-runtime/), pero faltan cierre de migración, arranque durable, aceptación y retiro controlado del legado. |
+| Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Prisma antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos, acceso protegido y retiro controlado del legado. |
 | Voz HMI y orbe | Implementados con evidencia histórica parcial | Hubo aceptación manual exitosa; continuidad, audibilidad humana, cancelación y recuperación no están aceptadas de forma integral. |
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
 | Canal B — Telegram autónomo | Pendiente | El bot actual consulta el snapshot visible y publica un evento global de voz; no es el canal de texto aislado aprobado. |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
-| Configuración y diagnósticos | Parciales | Hay configuración de voz y variables de proceso, pero falta el flujo protegido en Configuración general → Voz y el modelo completo de estados. |
+| Configuración y diagnósticos | Parciales | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes; faltan almacenamiento/API protegidos, flujo en Configuración general → Voz y modelo completo de estados. |
 | Seguridad de acceso | Insuficiente para despliegue remoto | Loopback y CORS actuales no sustituyen autenticación, autorización, separación por instalación ni almacenamiento seguro de credenciales. |
-| Modo Prisma Server/Node-RED | Objetivo retirado | Puede existir como rollback heredado hasta una decisión explícita de limpieza; no es el producto objetivo. |
+| Enrutamiento web de Prisma | Cerrado offline con verificación independiente | El navegador usa cuatro rutas same-origin fijas. Node-RED continúa como fuente de telemetría industrial, no como runtime Prisma seleccionable. |
 
 La autoridad de descubrimiento del trabajo pendiente continúa en
 [`../PENDING_WORK.md`](../PENDING_WORK.md). El detalle se conserva en los topics
@@ -128,17 +128,18 @@ Los endpoints ya inspeccionados y relevantes para describir el presente son:
 | Presentación | `GET /hmi/voice/latest` | Devuelve un único último evento global. |
 | Presentación | `POST /local/ask` | Ejecuta el parser sin Telegram y publica un evento. |
 | Presentación | `GET/PUT /hmi/prisma-config` | Proxy de configuración de voz. |
-| Voz | `GET /health` | Liveness y metadata de configuración; no valida credencial ni disponibilidad del proveedor. |
+| Voz | `GET /health` | Liveness y metadata; `providerStatus` informa configuración y `verified:false` sin llamar al proveedor. |
 | Voz | `GET/PUT /prisma/config` | Lee o reemplaza configuración local de voz. |
 | Voz | `POST /prisma/speak-live` | Genera y transmite la locución. |
 
 Esta lista describe API existente; no es una instrucción para iniciar servicios ni
 autoriza pruebas contra proveedores.
 
-El health de voz declara el proceso listo sin comprobar la presencia de la clave ni
-hacer una solicitud al proveedor. El health de presentación confía en el `ok` devuelto
-por ese proceso. Por tanto, ambos endpoints prueban liveness y conectividad local del
-probe, no autenticación ni readiness genuina de Gemini.
+Los campos `ok` y `ready` del health de voz declaran readiness del proceso, no del
+proveedor. `providerStatus.configured` refleja solo presencia no vacía de la clave y
+`verified` permanece en `false`; health no solicita Gemini. El health de presentación
+confía en el `ok` del proceso local. Por tanto, prueban liveness y conectividad local,
+no autenticación ni readiness genuina del proveedor.
 
 ### 4.2 Flujo actual de preguntas
 
@@ -169,16 +170,28 @@ como una limitación pendiente, no como contrato objetivo.
 
 ### 4.3 Integración HMI actual
 
-La HMI contiene destinos de loopback fijos en
-[`prismaAssistant.config.ts`](../../hmi-app/src/config/prismaAssistant.config.ts) para
-snapshot, eventos, configuración y TTS. Este diseño protege el perfil local histórico,
-pero un navegador remoto resolvería `127.0.0.1` contra la máquina del usuario, no
-contra el servidor. Por eso no puede ser la arquitectura objetivo del despliegue web.
+La HMI consume Prisma exclusivamente mediante cuatro rutas same-origin fijas:
+`/api/prisma/snapshot`, `/api/prisma/events/latest`, `/api/prisma/voice-config` y
+`/api/prisma/tts/live`. El contrato completo se documenta en
+[`PRISMA_BROWSER_ROUTING.md`](./PRISMA_BROWSER_ROUTING.md). El navegador no conoce
+destinos de loopback, no selecciona runtimes y no acepta endpoints Prisma editables.
 
-El perfil `central/local` se guarda actualmente en `localStorage`, según
-[`prismaRuntime.config.ts`](../../hmi-app/src/config/prismaRuntime.config.ts). La
-configuración del frontend y el almacenamiento del navegador no constituyen
-autorización backend.
+Durante desarrollo, Vite reenvía únicamente esas rutas exactas a los servicios de
+loopback. En producción, el host administrado por IT deberá ofrecer forwarding
+equivalente, preservar headers y streaming progresivo de TTS, y excluir estas rutas del
+fallback de la SPA. El producto de proxy, autenticación, certificados y supervisión
+continúa pendiente; el proxy de desarrollo no constituye autorización backend.
+
+[`package.json`](../../hmi-app/package.json) enruta únicamente `dev` por un wrapper Node
+que intenta adquirir Prisma en Windows y luego ejecuta el CLI instalado de Vite sin
+modificar sus argumentos. `build`, `preview` y tests no adquieren Prisma. [`main.tsx`](../../hmi-app/src/main.tsx) y
+[`App.tsx`](../../hmi-app/src/App.tsx) inicializan exclusivamente el cliente del
+navegador: no existe allí un propietario del arranque del runtime ni el cierre de una
+pestaña invoca su detención. El router usa `createBrowserRouter`, por lo que el futuro
+host de producción también deberá resolver el fallback de la SPA. No se encontró en el
+repositorio un propietario del despliegue productivo, servicio del sistema operativo ni
+configuración de host: el pipeline administrado por IT sigue como objetivo y no debe
+confundirse con el servidor de desarrollo de Vite.
 
 La HMI ya puede consumir datos actuales mediante `/api/hmi-data`, resolviendo
 `unitId/machineId + variableKey`, y usa un contrato separado para histórico. El
@@ -192,20 +205,47 @@ Prisma todavía no la solicita ni recibe confirmación de finalización.
 
 ### 4.4 Configuración actual
 
-La configuración de efectos de voz puede leerse y escribirse localmente. El runtime
-también recibe configuración sensible mediante variables de proceso. El arranque
-actual no cumple aún el objetivo de una instalación inicialmente sin configurar y un
-flujo normal completamente administrado desde **Configuración general → Voz**.
+La configuración no sensible de efectos de voz se lee y escribe mediante la ruta fija
+same-origin `/api/prisma/voice-config` y se administra desde **Configuración general →
+Voz**. El runtime también recibe configuración sensible mediante variables de proceso.
+El backend ya inicia sin Gemini ni Telegram configurados, pero aún no existe
+almacenamiento/API protegido para secretos ni administración de credenciales desde la
+HMI.
 
 El runtime del repositorio mantiene estado mutable bajo el directorio local de la
 aplicación y un entorno virtual propio bajo el servicio. Esto coincide con la decisión
-histórica de separar estado de máquina y estado derivado del checkout. Sin embargo:
+histórica de separar estado de máquina y estado derivado del checkout. El bootstrap
+explícito conserva la creación del entorno y reconciliación del lock.
+[`start-local.ps1`](../../services/prisma-runtime/operations/start-local.ps1) ya no lo
+invoca: inicializa estado sin secretos, valida intérprete y dependencias propias, y falla
+antes de lanzar procesos con remedio hacia `bootstrap-local.ps1` cuando faltan. Bajo
+PowerShell 5.1, el stderr esperado de imports faltantes se normaliza sin ocultar
+excepciones no relacionadas. Aun así:
 
-- el bootstrap actual puede instalar dependencias durante el inicio;
-- una instalación limpia sin conectividad no está demostrada;
+- una instalación limpia reproducible no está aceptada en un entorno real;
 - el lock con hashes no implica eliminación exacta de paquetes extra ya presentes;
-- arranque, recuperación, detención y reinstalación durable siguen pendientes de
-  aceptación.
+- el arranque automático local está implementado y verificado offline, pero instalación
+  limpia, operación real, recuperación durable y despliegue productivo siguen pendientes
+  de aceptación.
+
+Sin clave Gemini o con una clave en blanco, ambos endpoints de voz devuelven HTTP 503
+con `GEMINI_API_KEY_MISSING` y remedio accionable, sin construir cliente ni llamar al
+proveedor. Telegram opt-in sin token se informa como habilitado pero no configurado; no
+construye ni inicia bot. No se implementó almacenamiento de secretos ni UI.
+
+El wrapper local reutiliza un runtime manual verificado sin asumir ownership ni
+detenerlo. Varias invocaciones de desarrollo comparten una generación y solo la última
+liberación normal detiene identidades exactas iniciadas por desarrollo. Ctrl+C converge
+en esa liberación; cerrar el navegador no detiene Prisma. No se afirma durabilidad ante
+cierre abrupto de consola o reinicio del sistema operativo. `npm run dev` conserva esta
+orquestación previa y Vite expone las cuatro rutas same-origin sin requerir una selección
+en el navegador.
+
+El selector Server/Local, el tipo y perfil de runtime, la rama de query y los endpoints
+Prisma editables ya no forman parte del flujo activo. Las claves de modo, parámetros de
+query y valores de endpoints anteriores pueden permanecer físicamente en el navegador,
+pero son inertes; no se migran ni se eliminan globalmente. La telemetría industrial y el
+resto de `localStorage` no fueron alterados por este retiro.
 
 No existe un requisito aprobado de bootstrap limpio completamente offline. Las
 dependencias de Internet continúan aplicando a Gemini y Telegram aun cuando la
@@ -282,6 +322,51 @@ paridad validada y discovery por defecto; no prueba todos los bordes numéricos 
 constituye aceptación real de runtime, audio, proveedor o acceso. La Entrega 1.1
 permanece abierta.
 
+#### Incremento de inicio seguro sin configurar
+
+FND-6/FND-7/FND-8 separó bootstrap e inicio normal, habilitó el backend sin secretos y
+agregó diagnósticos pasivos sin llamadas a proveedor. La primera evidencia del escritor
+y del verificador aprobó 92/92 pruebas, pero fue insuficiente: un probe real de imports
+faltantes bajo Windows PowerShell 5.1 y `$ErrorActionPreference = 'Stop'` descubrió que
+`NativeCommandError` evitaba el remedio previsto. Esa evidencia se conserva como hito
+intermedio, no como cierre correcto.
+
+La corrección agregó una regresión real con el intérprete propio y `-B -S`, normalizó
+solo el error nativo esperado a resultado falso y conservó el rethrow de excepciones no
+relacionadas. El escritor observó 31/31 pruebas focalizadas y 93/93 del runtime. El
+verificador fresco confirmó 31/31, 93/93 y un probe separado con estos resultados:
+dependencias ausentes → `false`; assertion → remedio `bootstrap-local.ps1`; dependencias
+presentes → `true`; excepción ajena → rethrown. ScriptBlock, AST y `git diff --check`
+aprobaron.
+
+La aprobación es exclusivamente offline. No prueba listeners reales, arranque de
+servicios, proveedor, audio, red, instalación limpia, despliegue productivo ni acceso.
+RDD estuvo desactivado y no existe receipt.
+
+#### Incremento de desarrollo local con `npm run dev`
+
+FND-9/FND-10/FND-11 cerró offline el arranque local Windows mediante un wrapper Node y
+ownership en el manifiesto canónico. La evidencia inicial del escritor —104 pruebas
+Python, 1976 HMI y 9 del wrapper— fue insuficiente: PowerShell 5.1 emitía un BOM en el
+receipt y Node rechazaba el JSON después de registrar al owner. La corrección abarcó la
+clase completa de fallas de escritura, lectura y entrega: UTF-8 sin BOM, registro y
+receipt bajo el mismo lock, rollback específico para adquisición fría o compartida,
+recuperación estrecha por token de invocación e identidad viva canónica, release normal
+todavía ligado a generación y limpieza temporal incapaz de reemplazar el resultado.
+
+El escritor corregido aprobó Vitest 13, Python 107, HMI 1980/1980 en 199 archivos,
+ambos typechecks, build y lint; el build transformó 2722 módulos en 7,86 s. El
+verificador independiente aprobó 13/13, 107/107, cuatro ScriptBlock/AST, whitespace,
+bytes reales PowerShell→Node y casos adicionales de ownership. El spotcheck final del
+padre aprobó 13/13 en 274 ms y Python 107/107 en 12,278 s; no hubo cambios de fuente
+posteriores. Solo persistieron warnings conocidos de `grid.svg`, tamaño de chunks,
+Canvas de jsdom y LF/CRLF.
+
+La aprobación es offline: no cubre Vite o Prisma reales, listeners, proveedor,
+instalación, producción, cierre abrupto ni reinicio del sistema. RDD permaneció
+desactivado; el rechazo del assessment nativo por tres archivos no rastreados se trató
+como riesgo HIGH y se compensó con verificación independiente, sin receipt RDD.
+
 ### 5.2 Evidencia manual histórica
 
 El usuario aceptó manualmente en sesiones anteriores el circuito HMI, audio, orbe y
@@ -289,6 +374,14 @@ Telegram. Esa evidencia demuestra valor de MVP y no debe descartarse. Tampoco de
 elevarse a aceptación universal: pruebas posteriores observaron ausencia de listeners
 en 5056/5057 y un manifiesto obsoleto. No se reprodujo en vivo la causa durante la
 auditoría de 2026-09-17.
+
+El usuario aclaró posteriormente que Prisma no se detuvo espontáneamente durante el
+uso: respondió en consultas posteriores mientras el launcher o su terminal no fueran
+cerrados. Por esa razón se retira del alcance activo la investigación propuesta sobre
+“por qué se detienen” los procesos. La observación de listeners ausentes y manifiesto
+obsoleto permanece como hecho histórico, pero no demuestra una caída espontánea, una
+causa ligada al terminal ni un bug corregido. Si aparece una falla real durante el uso,
+se registrará como un incidente nuevo con evidencia reproducible.
 
 La finalización del proceso iniciador bajo el ciclo de vida de un job de OpenCode es
 una hipótesis no probada. La terminación en el camino exitoso del wrapper ya fue
@@ -320,6 +413,13 @@ El producto objetivo tiene un único Prisma bajo propiedad del repositorio:
 
 - despliegue servidor para navegadores remotos;
 - notebook de presentación autónoma para demostraciones o uso local controlado.
+
+En ambos casos Prisma debe iniciar automáticamente y de forma invisible como parte de
+la operación del despliegue HMI, no como un proceso manual por pestaña o navegador. El
+cierre de un navegador no debe detener el runtime y Telegram debe conservar su
+autonomía. Esto no define arranque automático del sistema operativo ni selecciona un
+servicio, framework de escritorio o administrador de procesos: primero debe elegirse el
+propietario real del despliegue.
 
 El navegador no debe conocer puertos de loopback como arquitectura final. Se
 recomienda una frontera backend del mismo origen para el cliente web. Los mecanismos
@@ -487,22 +587,27 @@ en tres incrementos verificables, sin convertirlos en backlogs independientes.
 **Alcance:**
 
 - cerrar ownership y portabilidad del runtime del repositorio;
-- definir inicio, salud, recuperación, detención y reinstalación verificables;
+- integrar inicio automático en segundo plano con el propietario del despliegue HMI;
+- separar instalación reproducible de operación normal y definir salud, detención y
+  recuperación verificables;
 - corregir paridad y ownership de bindings generados;
 - establecer frontera de acceso antes de credenciales o navegadores remotos;
 - retirar el modo Prisma Server/Node-RED como objetivo sin borrar automáticamente el
   legado;
 - definir contratos por sesión e instalación.
 
-**Prueba de cierre:** instalación reproducible en entorno autorizado; salud con
-identidad de proceso; reinicio y recuperación; acceso no autorizado rechazado; schemas
+**Prueba de cierre:** instalación reproducible en entorno autorizado; inicio automático
+e invisible con el host HMI seleccionado, también sin configurar; salud con identidad
+de proceso; detención, reinicio y recuperación; acceso no autorizado rechazado; schemas
 y generados reproducibles; rollback o retiro explícitamente aceptado.
 
-**Progreso actual:** el subproblema de bindings de audio y generados quedó corregido y
-verificado de forma independiente en FND-1/FND-2/FND-3. Python conserva enteros
-arbitrarios para sus contadores y TypeScript limita sus enteros al rango seguro de
-JavaScript; esta diferencia no modifica el schema. No cierra la entrega: faltan
-durabilidad del ciclo de vida, instalación/operación reproducible y frontera de acceso.
+**Progreso actual:** los bindings de audio y generados quedaron corregidos en
+FND-1/FND-2/FND-3. FND-6–FND-11 cerró offline el inicio sin secretos, la separación
+bootstrap/inicio normal y la integración Windows con `npm run dev`, incluidas las
+correcciones PowerShell 5.1. No cierra la entrega: faltan aceptación real de instalación
+y operación, pipeline productivo administrado por IT, supervisión durable y frontera
+backend protegida antes de secretos. No se selecciona todavía sistema operativo o
+supervisor y no queda pendiente un experimento de caída espontánea.
 
 #### Entrega 1.2 — configuración, secretos y diagnósticos
 
@@ -579,7 +684,7 @@ eliminación.
 
 | Brecha o cierre verificado | Entrega | Evidencia requerida |
 |---|---:|---|
-| Inicio durable y listeners ausentes | 1.1 y 4 | identidad, health, reinicio y recuperación observados. |
+| Inicio automático integrado, operación/detención/recuperación e instalación reproducible | 1.1 y 4 | **Parcial:** `npm run dev` Windows, inicio sin configurar y ownership verificados offline; faltan aceptación real, pipeline IT, supervisión durable, reinicio/recuperación e instalación limpia. |
 | **Resuelto — bindings de audio: newline, cuerpo generado, campos requeridos y paridad** | 1.1 | checker 0; Python 83/83 y TypeScript 9/9 confirmados independientemente; TypeScript generado sin diff. |
 | CORS wildcard y autorización frontend insuficiente | 1.1 y 1.2 | acceso permitido/rechazado desde los despliegues reales. |
 | Secretos y configuración manual | 1.2 | almacenamiento backend, tránsito controlado, redacción, reemplazo y eliminación. |
@@ -630,12 +735,13 @@ Al actualizar este documento:
 
 ## 11. Cierre de etapa y reanudación
 
-El incremento acotado de contratos de audio FND-1/FND-2/FND-3 está completo y
-verificado. La Entrega 1.1 y los pendientes PW-002/PW-003 continúan abiertos: aún
-deben demostrarse el ciclo de vida durable, la instalación y operación reproducibles,
-la frontera de acceso y las decisiones sobre fuente real y autorización. No se debe
-repetir la corrección de schema y generados ya cerrada ni asumir una causa para la
-detención de procesos.
+Los once incrementos FND y los tres incrementos UNI están completos offline: contratos de audio, inicio seguro sin
+configurar, separación instalación/arranque e integración local Windows con
+`npm run dev`, además del enrutamiento same-origin y el retiro del selector legacy,
+cuentan con verificación independiente. La Entrega 1.1 y PW-002/PW-003
+continúan abiertos para aceptación real, instalación limpia, pipeline y supervisión
+administrados por IT, recuperación durable y acceso backend protegido. No se deben
+repetir las correcciones ya cerradas.
 
 ### Base de código registrada al cerrar esta etapa
 
@@ -652,16 +758,65 @@ modificaciones ajenas pendientes de resolver.
 El próximo trabajo debe partir de este maestro, de
 [`../../odd/tasks/prisma-runtime-foundations.md`](../../odd/tasks/prisma-runtime-foundations.md)
 y de los topics estables `backlog/prisma-runtime-monorepo-integration` y
-`backlog/prisma-dual-channel-assistant`. Antes de modificar launchers corresponde una
-prueba local controlada y sin proveedores, credenciales ni tráfico externo:
+`backlog/prisma-dual-channel-assistant`. La continuación vigente es acotada: implementar
+primero almacenamiento y API de credenciales en una frontera backend protegida;
+después, integrar sus campos y diagnósticos en **Configuración general → Voz**.
+El pipeline productivo administrado por IT sigue como objetivo posterior sin seleccionar
+todavía OS o supervisor. Cualquier readiness adicional del loader del navegador es UX
+opcional y no bloqueante, no un requisito obligatorio aprobado.
 
-> El siguiente paso es investigar el ciclo de vida de los procesos mediante una prueba controlada, sin proveedores ni credenciales, para identificar por qué se detienen antes de modificar los launchers.
-
-La instalación limpia, la aceptación de acceso y el resto del plan E1.1–E4 siguen
-visibles como trabajo posterior; esta reanudación no selecciona todavía la fuente real,
-el modelo de autenticación ni la política de autorización.
+No hay un experimento de caída pendiente. La aclaración del usuario retira la próxima
+investigación indicada en 2.0.3; no afirma una causa reproducida ni una corrección. La
+fuente real, el modelo de autenticación, la política de autorización y el mecanismo de
+despliegue continúan abiertos. La automaticidad e invisibilidad de la operación ya están
+decididas y no requieren nueva confirmación.
 
 ## 12. Changelog
+
+### 2.0.7 — 2026-09-17
+
+- Registro de la implementación UNI-1/UNI-2: cuatro rutas Prisma same-origin fijas,
+  proxy Vite exacto de desarrollo y retiro del selector y endpoints editables.
+- Node-RED continúa soportado como fuente de telemetría industrial; ya no es un runtime
+  Prisma seleccionable por el navegador.
+- Cierre offline UNI-3 tras corrección y verificación independiente: `140/140` pruebas
+  focalizadas en `19` archivos, Dashboard `22/22`, ambos chequeos TypeScript y whitespace
+  aprobados; confirmación final del padre `140/140` en `4.36s`.
+- La evidencia inicial `1818` completa y `129` focalizada se conserva como historial
+  insuficiente porque había perdido cobertura retenida; la corrección restauró `11`
+  casos significativos y reemplazó espera temporal de Dashboard por una espera semántica.
+- No se afirma aceptación real de Vite, backend, navegador, proveedores o forwarding
+  productivo. Python `107/107` continúa como evidencia histórica FND, no como evidencia UNI.
+
+### 2.0.6 — 2026-09-17
+
+- Cierre offline independiente de FND-9/FND-10/FND-11: `npm run dev` integra Prisma
+  local en Windows con ownership exacto, sin alterar build, preview ni tests.
+- Corrección del receipt PowerShell 5.1 y de toda la clase de pérdida de ownership tras
+  registro; evidencia final 13/13, 107/107 y spotchecks del padre aprobados.
+- PW-002/PW-003 permanecen abiertos para aceptación real, acceso protegido, Voice,
+  despliegue/supervisión administrados por IT y aceptación live; los cambios siguen sin
+  commit.
+
+### 2.0.5 — 2026-09-17
+
+- Cierre offline independiente de FND-6/FND-7/FND-8: runtime sin secretos y separación
+  entre bootstrap e inicio normal, sin aceptación live ni productiva.
+- Evidencia corregida: el primer 92/92 fue insuficiente; tras cubrir el borde
+  `NativeCommandError` de PowerShell 5.1, 31/31 focalizadas, 93/93 completas y probes
+  missing/present/rethrow aprobaron junto con ScriptBlock, AST y diff check.
+- PW-002 permanece abierto para instalación limpia, integración automática con
+  `npm run dev`/pipeline IT, operación, recuperación y acceso protegido. PW-003 continúa
+  abierto; no existe receipt RDD.
+
+### 2.0.4 — 2026-09-17
+
+- Retiro de la investigación de caída espontánea del alcance activo tras la aclaración
+  del usuario; no se afirma causa reproducida ni bug corregido.
+- Continuidad reorientada a inicio automático e invisible con el despliegue HMI,
+  instalación separada, operación/recuperación y configuración/diagnósticos protegidos.
+- Registro del único bloqueo de diseño vigente: elegir el propietario real del
+  despliegue sin inventar plataforma ni requisito de arranque del sistema operativo.
 
 ### 2.0.3 — 2026-09-17
 
@@ -669,6 +824,9 @@ el modelo de autenticación ni la política de autorización.
   todavía abierta.
 - Próxima investigación limitada a una prueba local controlada del ciclo de vida,
   previa a cualquier cambio de launchers y sin asumir causa raíz.
+
+La próxima investigación de esta entrada quedó supersedida por 2.0.4; se conserva solo
+como historia de la recomendación anterior.
 
 ### 2.0.2 — 2026-09-17
 

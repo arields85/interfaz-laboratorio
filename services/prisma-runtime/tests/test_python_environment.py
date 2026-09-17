@@ -293,6 +293,53 @@ class OwnedInterpreterPreflightTests(unittest.TestCase):
         self.assertLess(source.index("Assert-PrismaOwnedInterpreter"), source.index("Start-Process"))
 
 
+class RuntimeDependencyPreflightTests(unittest.TestCase):
+    def test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference(self) -> None:
+        interpreter = RUNTIME_ROOT / ".venv" / "Scripts" / "python.exe"
+        body = (
+            f". '{PREFLIGHT_LIBRARY}'\n"
+            f"function global:Invoke-PrismaPythonWithoutSite {{ & '{interpreter}' -B -S @args }}\n"
+            "try { Assert-PrismaRuntimeDependencies -Interpreter 'Invoke-PrismaPythonWithoutSite'; exit 11 }\n"
+            "catch { Emit \"ID=$($_.FullyQualifiedErrorId)|MESSAGE=$($_.Exception.Message)\"; exit 0 }\n"
+        )
+        result = run_powershell(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("operations\\bootstrap-local.ps1", result.stdout)
+        self.assertNotIn("NativeCommandError", result.stdout)
+        self.assertNotIn("ModuleNotFoundError", result.stdout + result.stderr)
+        self.assertNotIn("No module named", result.stdout + result.stderr)
+
+    def test_missing_runtime_dependencies_fail_with_exact_bootstrap_remedy(self) -> None:
+        body = (
+            f". '{PREFLIGHT_LIBRARY}'\n"
+            "function global:Test-PrismaRuntimeDependencies { param([string]$Interpreter) return $false }\n"
+            "try { Assert-PrismaRuntimeDependencies -Interpreter 'C:\\owned\\python.exe'; exit 11 }\n"
+            "catch { Emit $_.Exception.Message; exit 0 }\n"
+        )
+        result = run_powershell(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("operations\\bootstrap-local.ps1", result.stdout)
+        self.assertNotIn("pip install", result.stdout)
+
+    def test_present_runtime_dependencies_pass_without_installing(self) -> None:
+        body = (
+            f". '{PREFLIGHT_LIBRARY}'\n"
+            "function global:Test-PrismaRuntimeDependencies { param([string]$Interpreter) return $true }\n"
+            "Assert-PrismaRuntimeDependencies -Interpreter 'C:\\owned\\python.exe'\n"
+            "Emit 'READY'\n"
+        )
+        result = run_powershell(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("READY", result.stdout)
+
+    def test_bootstrap_remains_the_only_launcher_that_initializes_the_environment(self) -> None:
+        bootstrap = read_operation("bootstrap-local.ps1")
+        start = read_operation("start-local.ps1")
+        self.assertIn("Initialize-PrismaVirtualEnvironment", bootstrap)
+        self.assertNotIn("Initialize-PrismaVirtualEnvironment", start)
+        self.assertNotIn("Install-PrismaLockedDependencies", start)
+
+
 class DependencyDeclarationTests(unittest.TestCase):
     DIRECT = RUNTIME_ROOT / "requirements.in"
     LOCK = RUNTIME_ROOT / "requirements.lock.txt"

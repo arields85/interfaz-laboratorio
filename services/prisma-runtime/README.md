@@ -27,8 +27,17 @@ script location, never on the caller's current directory.
 2. creates the virtual environment when it is absent, and reuses it otherwise;
 3. installs the pinned, hash-verified dependency graph into it.
 
-`start-local.ps1` runs the bootstrap before launching anything, so a fresh
-checkout needs no separate preparation step.
+Run `bootstrap-local.ps1` explicitly after a fresh checkout or dependency-lock
+change. Normal `start-local.ps1` startup never creates an environment, runs
+pip, or reconciles dependencies. It initializes only the secret-free mutable
+state, validates the owned interpreter and required imports, and then launches
+the services. If the environment is absent or incomplete, startup stops before
+launching a service and directs the operator to `operations\bootstrap-local.ps1`.
+
+Provider credentials are not startup requirements. Both services remain live
+without Gemini or Telegram configuration so local diagnostics can report what
+is missing. An operation that actually needs Gemini returns an actionable
+`GEMINI_API_KEY_MISSING` response until the key is configured.
 
 ## The Python environment
 
@@ -72,9 +81,9 @@ unexpected binary is rejected without ever being run.
 
 | Variable | Role |
 |----------|------|
-| `GEMINI_API_KEY` | Required by `start-local.ps1`. |
+| `GEMINI_API_KEY` | Optional at startup. Required only for Gemini speech operations. Whitespace-only values are treated as missing. |
 | `PRISMA_LOCAL_TELEGRAM_ENABLED` | Set to `1` to opt in to Telegram. |
-| `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN` | Required when Telegram is enabled. |
+| `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN` | Required to construct the bot after Telegram opt-in. A missing token is reported without stopping the services or contacting Telegram. |
 | `PRISMA_RUNTIME_STATE_DIR` | Overrides the mutable state root. |
 | `PRISMA_BOOTSTRAP_PYTHON` | Bootstrap only. Explicit path to the base interpreter used **once**, to create the environment. Validated and logged; never consulted by a launcher. |
 
@@ -84,8 +93,82 @@ environment alive through the migration. Selecting an interpreter is now a
 bootstrap-time concern only, and it is loud.
 
 A token without the explicit opt-in does not construct the Telegram bot or make
-Telegram requests. Enabling Telegram without a token fails before either
-runtime service starts. Secrets are never stored by these launchers.
+Telegram requests. Enabling Telegram without a token leaves the integration
+enabled but unconfigured: no bot is constructed, no Telegram request is made,
+and runtime health remains available. Secrets are never stored by these
+launchers.
+
+## Health and integration status
+
+Runtime liveness and external-integration readiness are separate:
+
+- `ok`, `ready`, `service`, and `mode` keep their existing runtime-liveness
+  meaning;
+- Gemini `providerStatus.configured` reflects only nonblank key presence;
+- Telegram enabled, configured, and connected states are reported separately;
+- configured never means provider-verified. Passive health requests do not
+  contact Gemini or Telegram and do not expose credential values.
+
+Provider verification remains an explicit later operation. A future browser
+diagnostics experience may display these statuses, but browser-loader or
+mandatory readiness changes are not part of this runtime increment.
+
+## Local development boundary
+
+After one explicit bootstrap, the normal local development command is:
+
+```powershell
+cd hmi-app
+npm run dev
+```
+
+The command attempts a bounded Prisma Local acquisition first, then starts the
+installed Vite CLI with the exact supplied arguments. Missing credentials,
+an incomplete Python environment, occupied foreign ports, or another Prisma
+startup failure is reported in the terminal but does not prevent Vite from
+running. The wrapper never installs dependencies or invokes bootstrap.
+
+On Windows, helper and service windows are hidden while the existing npm/Vite
+terminal remains attached. Concurrent development commands share one verified
+development-owned runtime generation. Closing one command removes only its
+owner; the final owner stops only the exact process identities started by that
+generation. A complete canonical runtime started manually may be reused, but
+the development wrapper never stops it. Foreign, replaced, corrupt, or
+insufficiently proven process state is left untouched with a warning.
+
+Ownership registration and receipt delivery are one locked transaction. The
+PowerShell helper writes the receipt as BOM-less UTF-8 for Node interoperability;
+if delivery fails, it rolls back only that invocation's owner and stops a cold
+runtime only when the canonical generation and every live creation identity
+still match. If Node cannot read or parse a receipt, it requests recovery using
+only its unique invocation token. Recovery derives the generation from the
+canonical manifest under the same lock and applies the same identity checks;
+ordinary successful release still requires the generation from the receipt.
+If those proofs are unavailable, state is retained with a warning rather than
+claiming cleanup or stopping another process. Temporary handoff-file cleanup
+errors are reported but do not replace the established ownership outcome.
+
+`SIGINT`, `SIGTERM`, normal Vite exit, and Vite spawn failure converge on the
+same idempotent release path. Browser or tab closure has no backend lifecycle
+authority. This is bounded normal-development cleanup, not a claim of recovery
+after forced terminal termination, power loss, or an operating-system crash.
+Automatic Prisma orchestration is currently Windows-only; unsupported systems
+run Vite with an explicit warning rather than pretending the backend is owned.
+
+The browser consumes Prisma through the four fixed same-origin routes documented
+in [`docs/prisma/PRISMA_BROWSER_ROUTING.md`](../../docs/prisma/PRISMA_BROWSER_ROUTING.md).
+Vite forwards those exact routes to this runtime during development; there is no
+browser runtime selector or editable Prisma endpoint prerequisite. With no Gemini
+key, provider-dependent speech still returns the documented technical unavailable
+response and is never presented as spoken output.
+
+The unified browser-routing increment is closed offline. This does not provide
+protected credential storage or access, and it does not prove a live browser,
+provider, or production proxy deployment. Production static hosting still requires
+IT-managed forwarding for the same four routes, including progressive TTS streaming.
+
+Production host and supervisor selection remain deferred. This development
+wrapper is not a production deployment or operating-system service manager.
 
 ## Python version
 

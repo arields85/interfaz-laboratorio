@@ -1,11 +1,9 @@
 import type { VoiceEvent } from '../domain/voice.types';
 import { normalizeTelegramChatId } from '../domain/voice';
-import type { PrismaRuntimeMode } from '../domain/prismaRuntime.types';
 
 const DEFAULT_VOICE_POLL_INTERVAL_MS = 1_000;
 
 interface VoiceEventListenerOptions {
-    mode?: PrismaRuntimeMode;
     url: string | null;
     onEvent: (event: VoiceEvent) => void;
     intervalMs?: number;
@@ -15,7 +13,6 @@ interface VoiceEventListenerOptions {
 let activeVoiceEventListener: { stop: () => void } | null = null;
 
 export function startVoiceEventListener({
-    mode = 'central',
     url,
     onEvent,
     intervalMs = DEFAULT_VOICE_POLL_INTERVAL_MS,
@@ -47,7 +44,7 @@ export function startVoiceEventListener({
 
             const payload: unknown = await response.json();
 
-            const event = normalizeVoiceEvent(payload, mode);
+            const event = normalizeVoiceEvent(payload);
             if (stopped || !event) {
                 return;
             }
@@ -104,7 +101,7 @@ export function startVoiceEventListener({
     return stop;
 }
 
-function normalizeVoiceEvent(value: unknown, mode: PrismaRuntimeMode): VoiceEvent | null {
+function normalizeVoiceEvent(value: unknown): VoiceEvent | null {
     if (typeof value !== 'object'
         || value === null
         || !('timestamp' in value)
@@ -119,9 +116,6 @@ function normalizeVoiceEvent(value: unknown, mode: PrismaRuntimeMode): VoiceEven
     const id = 'id' in value && typeof value.id === 'string' && value.id.trim() !== ''
         ? value.id
         : undefined;
-    if (mode === 'local' && id === undefined) {
-        return null;
-    }
     const telegramChatId = 'telegramChatId' in value
         ? normalizeTelegramChatId(value.telegramChatId)
         : undefined;

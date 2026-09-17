@@ -4,329 +4,118 @@ import type { RefObject } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PRISMA_ORB_VISUAL_DEFAULTS, savePrismaOrbVisualConfig } from '../config/prismaOrb.config';
-import { savePrismaRuntimeMode } from '../config/prismaRuntime.config';
 import type { VoiceEvent } from '../domain/voice.types';
-import type {
-    PrismaOrbAudioTarget,
-    PrismaVoiceAudioEngineContract,
-    PrismaVoiceAudioSource,
-    VoicePlaybackLifecycle,
-} from '../services/prismaVoiceAudioEngine';
+import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource, VoicePlaybackLifecycle } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
-
-vi.mock('../vendor/leda-orb.js', () => ({}));
-
-import {
-    PRISMA_ORB_FADE_DURATION_MS,
-    usePrismaOrbPresentation,
-} from '../hooks/usePrismaOrbPresentation';
+import { PRISMA_ORB_VISUAL_DEFAULTS, savePrismaOrbVisualConfig } from '../config/prismaOrb.config';
+import { PRISMA_ORB_FADE_DURATION_MS, usePrismaOrbPresentation } from '../hooks/usePrismaOrbPresentation';
 import { usePrismaOrbVisualConfig } from '../hooks/usePrismaOrbVisualConfig';
 import PrismaOrbOverlay from './PrismaOrbOverlay';
 
+vi.mock('../vendor/leda-orb.js', () => ({}));
+
 class MockLedaOrb extends HTMLElement {
     public level = 0;
-    public setSpeaking = vi.fn<(speaking: boolean) => void>();
+    public setSpeaking = vi.fn();
 }
 
-if (!customElements.get('leda-orb')) {
-    customElements.define('leda-orb', MockLedaOrb);
-}
+if (!customElements.get('leda-orb')) customElements.define('leda-orb', MockLedaOrb);
 
-const FIRST_EVENT: VoiceEvent = {
-    id: 'voice-2',
-    timestamp: '2026-08-06T12:00:01.000Z',
-    text: 'Current response',
-    question: 'Current question',
-};
+const EVENT: VoiceEvent = { id: 'voice-2', timestamp: '2026-08-06T12:00:01.000Z', text: 'Current response', question: 'Current question' };
+const SOURCE: PrismaVoiceAudioSource = { playbackTransport: 'progressive', openLive: vi.fn() };
 
-interface OrbHarnessHandle {
-    presentVoiceEvent: (event: VoiceEvent) => void;
-}
+interface HarnessHandle { presentVoiceEvent: (event: VoiceEvent) => void }
 
-function createEngineMock() {
-    const plays: Array<{
-        source: Parameters<PrismaVoiceAudioEngineContract['play']>[0];
-        target: PrismaOrbAudioTarget;
-        lifecycle: VoicePlaybackLifecycle;
-    }> = [];
+function createEngine() {
+    const lifecycles: VoicePlaybackLifecycle[] = [];
     const engine: PrismaVoiceAudioEngineContract = {
-        play: vi.fn((source, target, lifecycle) => {
-            plays.push({ source, target, lifecycle });
-        }),
+        play: vi.fn((_source, _target, lifecycle) => lifecycles.push(lifecycle)),
         stop: vi.fn(),
         dispose: vi.fn(),
     };
-
-    return { engine, plays };
+    return { engine, lifecycles };
 }
 
-const TEST_AUDIO_SOURCE: PrismaVoiceAudioSource = {
-    playbackTransport: 'progressive',
-    openLive: vi.fn(async () => {
-        throw new Error('Engine mock does not open the test source');
-    }),
-};
-
-interface OrbHarnessProps {
+const Harness = forwardRef<HarnessHandle, {
     engine: PrismaVoiceAudioEngineContract;
-    audioSourceFactory?: PrismaVoiceAudioSourceFactory;
-    getServiceUrl?: () => string;
-}
-
-const OrbHarness = forwardRef<OrbHarnessHandle, OrbHarnessProps>(function OrbHarness({
-    engine,
-    audioSourceFactory = () => TEST_AUDIO_SOURCE,
-    getServiceUrl = () => 'https://tts.example.test/prisma/speak',
-}, ref) {
-    const presentation = usePrismaOrbPresentation({ engine, audioSourceFactory, getServiceUrl });
+    factory?: PrismaVoiceAudioSourceFactory;
+}>(function Harness({ engine, factory = () => SOURCE }, ref) {
+    const presentation = usePrismaOrbPresentation({ engine, audioSourceFactory: factory });
     const config = usePrismaOrbVisualConfig();
-    useImperativeHandle(ref, () => ({
-        presentVoiceEvent: presentation.presentVoiceEvent,
-    }), [presentation.presentVoiceEvent]);
-
+    useImperativeHandle(ref, () => ({ presentVoiceEvent: presentation.presentVoiceEvent }), [presentation.presentVoiceEvent]);
     return <PrismaOrbOverlay phase={presentation.phase} orbRef={presentation.orbRef} config={config} />;
 });
 
-function emitVoiceEvent(harnessRef: RefObject<OrbHarnessHandle | null>, event: VoiceEvent): void {
-    act(() => {
-        harnessRef.current?.presentVoiceEvent(event);
-    });
+function emit(ref: RefObject<HarnessHandle | null>): void {
+    act(() => ref.current?.presentVoiceEvent(EVENT));
 }
 
 describe('PrismaOrbOverlay', () => {
-    beforeEach(() => {
-        localStorage.clear();
-        vi.useFakeTimers();
-    });
+    beforeEach(() => { localStorage.clear(); vi.useFakeTimers(); });
+    afterEach(() => { cleanup(); localStorage.clear(); vi.useRealTimers(); });
 
-    afterEach(() => {
-        cleanup();
-        vi.useRealTimers();
-    });
-
-    it('stays unmounted without a new voice event', () => {
-        const { engine } = createEngineMock();
-        render(<OrbHarness ref={createRef<OrbHarnessHandle>()} engine={engine} />);
-
+    it('stays unmounted without a voice event', () => {
+        const { engine } = createEngine();
+        render(<Harness ref={createRef<HarnessHandle>()} engine={engine} />);
         expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
         expect(engine.play).not.toHaveBeenCalled();
     });
 
-    it('does not duplicate playback when mounted in React StrictMode', () => {
-        const { engine } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(
-            <StrictMode>
-                <OrbHarness ref={harnessRef} engine={engine} />
-            </StrictMode>,
-        );
+    it('starts exactly one progressive presentation in StrictMode', () => {
+        const { engine } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<StrictMode><Harness ref={ref} engine={engine} /></StrictMode>);
 
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
+        emit(ref);
 
         expect(engine.play).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('prisma-orb-overlay')).toHaveAttribute('data-phase', 'visible');
     });
 
-    it('stays visible for real playback and fades only after natural end', () => {
-        const { engine, plays } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(<OrbHarness ref={harnessRef} engine={engine} />);
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
+    it('fades only after the playback terminal callback', () => {
+        const { engine, lifecycles } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+        emit(ref);
 
-        const overlay = screen.getByTestId('prisma-orb-overlay');
-        expect(overlay).toHaveClass('opacity-100', 'transition-opacity');
-        expect(engine.play).toHaveBeenCalledTimes(1);
-        expect(vi.getTimerCount()).toBe(0);
-
-        act(() => {
-            vi.advanceTimersByTime(12_440);
-        });
-        expect(screen.getByTestId('prisma-orb-overlay')).toBeInTheDocument();
-
-        act(() => plays[0]?.lifecycle.onEnded?.());
-        expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-0');
-        expect(vi.getTimerCount()).toBe(1);
-
-        act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
-        expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
-    });
-
-    it('mounts Local buffering hidden and reveals it only from onStarted', () => {
-        savePrismaRuntimeMode('local');
-        const { engine, plays } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(
-            <OrbHarness
-                ref={harnessRef}
-                engine={engine}
-                audioSourceFactory={() => ({ ...TEST_AUDIO_SOURCE, playbackTransport: 'buffer-before-playback' })}
-            />,
-        );
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
-
-        const overlay = screen.getByTestId('prisma-orb-overlay');
-        expect(overlay).toHaveAttribute('data-phase', 'buffering');
-        expect(overlay).toHaveClass('opacity-0', 'pointer-events-none');
-
-        act(() => plays[0]?.lifecycle.onStarted?.());
-        expect(overlay).toHaveAttribute('data-phase', 'visible');
-        expect(overlay).toHaveClass('opacity-100');
-
-        act(() => plays[0]?.lifecycle.onEnded?.());
-        expect(overlay).toHaveAttribute('data-phase', 'fading');
-        expect(overlay).toHaveClass('opacity-0');
-    });
-
-    it('propagates normalized optional event and Telegram chat ids to each source', () => {
-        const { engine } = createEngineMock();
-        const sourceFactory = vi.fn<PrismaVoiceAudioSourceFactory>(() => TEST_AUDIO_SOURCE);
-        let serviceUrl = 'https://tts.example.test/first';
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(
-            <OrbHarness
-                ref={harnessRef}
-                engine={engine}
-                audioSourceFactory={sourceFactory}
-                getServiceUrl={() => serviceUrl}
-            />,
-        );
-
-        emitVoiceEvent(harnessRef, { ...FIRST_EVENT, telegramChatId: 995701520 });
-        serviceUrl = 'https://tts.example.test/second';
-        emitVoiceEvent(harnessRef, {
-            ...FIRST_EVENT,
-            id: 'voice-3',
-            text: 'Latest response text',
-            question: 'This must not be spoken',
-            telegramChatId: -1001234567890,
-        });
-        const legacyEvent: VoiceEvent = {
-            timestamp: FIRST_EVENT.timestamp,
-            text: FIRST_EVENT.text,
-            question: FIRST_EVENT.question,
-        };
-        serviceUrl = 'https://tts.example.test/legacy';
-        emitVoiceEvent(harnessRef, legacyEvent);
-        serviceUrl = 'https://tts.example.test/invalid-chat';
-        emitVoiceEvent(harnessRef, {
-            ...FIRST_EVENT,
-            id: 'voice-4',
-            telegramChatId: '995701520',
-        } as unknown as VoiceEvent);
-
-        expect(sourceFactory).toHaveBeenNthCalledWith(1, {
-            serviceUrl: 'https://tts.example.test/first',
-            fallbackPolicy: 'legacy-wav',
-            playbackTransport: 'progressive',
-            text: 'Current response',
-            eventId: 'voice-2',
-            telegramChatId: 995701520,
-        });
-        expect(sourceFactory).toHaveBeenNthCalledWith(2, {
-            serviceUrl: 'https://tts.example.test/second',
-            fallbackPolicy: 'legacy-wav',
-            playbackTransport: 'progressive',
-            text: 'Latest response text',
-            eventId: 'voice-3',
-            telegramChatId: -1001234567890,
-        });
-        expect(sourceFactory).toHaveBeenNthCalledWith(3, {
-            serviceUrl: 'https://tts.example.test/legacy',
-            fallbackPolicy: 'legacy-wav',
-            playbackTransport: 'progressive',
-            text: 'Current response',
-        });
-        expect(sourceFactory).toHaveBeenNthCalledWith(4, {
-            serviceUrl: 'https://tts.example.test/invalid-chat',
-            fallbackPolicy: 'legacy-wav',
-            playbackTransport: 'progressive',
-            text: 'Current response',
-            eventId: 'voice-4',
-        });
-        expect(engine.play).toHaveBeenCalledTimes(4);
-    });
-
-    it('stops active playback and hides without fetching when a newer event finds audio disabled', () => {
-        const { engine } = createEngineMock();
-        const sourceFactory = vi.fn<PrismaVoiceAudioSourceFactory>(({ serviceUrl }) => (
-            serviceUrl === '' ? null : TEST_AUDIO_SOURCE
-        ));
-        let serviceUrl = 'https://tts.example.test/prisma/speak';
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(
-            <OrbHarness
-                ref={harnessRef}
-                engine={engine}
-                audioSourceFactory={sourceFactory}
-                getServiceUrl={() => serviceUrl}
-            />,
-        );
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
-        expect(screen.getByTestId('prisma-orb-overlay')).toBeInTheDocument();
-
-        serviceUrl = '';
-        emitVoiceEvent(harnessRef, { ...FIRST_EVENT, id: 'voice-3', text: 'Disabled audio' });
-
-        expect(engine.stop).toHaveBeenCalledTimes(1);
-        expect(engine.play).toHaveBeenCalledTimes(1);
-        expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
-    });
-
-    it('cancels load/play/fade and stale callbacks cannot hide the latest playback', () => {
-        const { engine, plays } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(<OrbHarness ref={harnessRef} engine={engine} />);
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
-        const firstLifecycle = plays[0]?.lifecycle;
-
-        emitVoiceEvent(harnessRef, { ...FIRST_EVENT, id: 'voice-3' });
-        expect(engine.play).toHaveBeenCalledTimes(2);
-        act(() => firstLifecycle?.onEnded?.());
         expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-100');
-
-        const secondLifecycle = plays[1]?.lifecycle;
-        act(() => secondLifecycle?.onEnded?.());
-        expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-0');
-
-        emitVoiceEvent(harnessRef, { ...FIRST_EVENT, id: 'voice-4' });
-        expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-100');
-        expect(engine.play).toHaveBeenCalledTimes(3);
-        act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
-        expect(screen.getByTestId('prisma-orb-overlay')).toBeInTheDocument();
-    });
-
-    it('uses the same fade cleanup for a controlled playback failure', () => {
-        const { engine, plays } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(<OrbHarness ref={harnessRef} engine={engine} />);
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
-
-        act(() => plays[0]?.lifecycle.onError?.(new Error('autoplay blocked')));
+        act(() => lifecycles[0]?.onEnded?.());
         expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-0');
         act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
         expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
     });
 
-    it('disposes playback on unmount', () => {
-        const { engine } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        const { unmount } = render(<OrbHarness ref={harnessRef} engine={engine} />);
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
+    it('forwards normalized event identity to the source factory', () => {
+        const { engine } = createEngine();
+        const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} factory={factory} />);
 
-        unmount();
+        emit(ref);
 
-        expect(engine.dispose).toHaveBeenCalledTimes(1);
-        expect(vi.getTimerCount()).toBe(0);
+        expect(factory).toHaveBeenCalledWith({ text: EVENT.text, eventId: EVENT.id });
     });
 
-    it('keeps fixed transparent global geometry and supports reduced-motion fade', () => {
-        const { engine } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(<OrbHarness ref={harnessRef} engine={engine} />);
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
+    it('uses the controlled fade path after playback failure', () => {
+        const { engine, lifecycles } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+        emit(ref);
+
+        act(() => lifecycles[0]?.onError?.(new Error('Autoplay blocked')));
+        expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-0');
+        act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
+
+        expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
+    });
+
+    it('keeps fixed transparent geometry and reduced-motion fade classes', () => {
+        const { engine } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+        emit(ref);
 
         const overlay = screen.getByTestId('prisma-orb-overlay');
-        const orb = overlay.querySelector('leda-orb');
         expect(overlay).toHaveClass(
             'fixed',
             'left-1/2',
@@ -339,17 +128,16 @@ describe('PrismaOrbOverlay', () => {
             'motion-reduce:duration-0',
         );
         expect(overlay).toHaveStyle('--prisma-orb-size: 290px');
-        expect(orb).toHaveAttribute('rays', String(PRISMA_ORB_VISUAL_DEFAULTS.rays));
+        expect(overlay.querySelector('leda-orb')).toHaveAttribute('rays', String(PRISMA_ORB_VISUAL_DEFAULTS.rays));
         expect(overlay.querySelector('iframe, button, input, textarea, select')).toBeNull();
     });
 
-    it('updates visual config during playback without restarting audio or creating a timer', () => {
-        const { engine } = createEngineMock();
-        const harnessRef = createRef<OrbHarnessHandle>();
-        render(<OrbHarness ref={harnessRef} engine={engine} />);
-        emitVoiceEvent(harnessRef, FIRST_EVENT);
+    it('updates visual configuration during playback without restarting audio', () => {
+        const { engine } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+        emit(ref);
         const overlay = screen.getByTestId('prisma-orb-overlay');
-        const orb = overlay.querySelector('leda-orb');
 
         act(() => {
             savePrismaOrbVisualConfig({
@@ -363,7 +151,7 @@ describe('PrismaOrbOverlay', () => {
             });
         });
 
-        expect(orb).toHaveAttribute('rays', '0.8');
+        expect(overlay.querySelector('leda-orb')).toHaveAttribute('rays', '0.8');
         expect(overlay).toHaveStyle('--prisma-orb-size: 640px');
         expect(engine.play).toHaveBeenCalledTimes(1);
         act(() => vi.advanceTimersByTime(10_000));

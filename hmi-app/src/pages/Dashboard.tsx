@@ -14,14 +14,9 @@ import type { HierarchyContext } from '../widgets/resolvers/hierarchyResolver';
 import { resetShieldContentReady, signalShieldContentReady } from '../shield/shieldContentReadiness';
 import { useUIStore } from '../store/ui.store';
 import { getDefaultDashboardView, materializeDashboardView, normalizeDashboardViews } from '../utils/dashboardViews';
-import { getDataSnapshotExportIntervalMs, isDataSnapshotExportEnabled } from '../config/dataConnection.config';
 import { buildDashboardSnapshot } from '../services/dashboardSnapshotBuilder';
-import {
-    startDashboardSnapshotExporter,
-    startPrismaLocalSnapshotExporter,
-} from '../services/dashboardSnapshotExport.service';
+import { startDashboardSnapshotExporter } from '../services/dashboardSnapshotExport.service';
 import { DashboardPresentationFrameProvider, useDashboardPresentationFrame } from '../services/dashboardPresentationFrame.service';
-import { usePrismaRuntimeProfile } from '../hooks/usePrismaRuntimeProfile';
 
 type DashboardViewState = 'loading' | 'error' | 'empty' | 'viewer';
 
@@ -34,15 +29,11 @@ interface SnapshotExportRuntimeValues {
     machines?: ContractMachine[];
 }
 
-interface LocalSnapshotExportControllerProps extends SnapshotExportRuntimeValues {
-    enabled: boolean;
-    profileRevision: number;
+interface SnapshotExportControllerProps extends SnapshotExportRuntimeValues {
     children: ReactNode;
 }
 
-function LocalSnapshotExportController({
-    enabled,
-    profileRevision,
+function SnapshotExportController({
     activeDashboard,
     allNodes,
     connection,
@@ -50,7 +41,7 @@ function LocalSnapshotExportController({
     equipmentMap,
     machines,
     children,
-}: LocalSnapshotExportControllerProps) {
+}: SnapshotExportControllerProps) {
     const frame = useDashboardPresentationFrame();
     const latestValuesRef = useRef<SnapshotExportRuntimeValues & { frame: typeof frame }>({
         activeDashboard,
@@ -75,12 +66,7 @@ function LocalSnapshotExportController({
     }, [activeDashboard, allNodes, connection, dashboardViewState, equipmentMap, frame, machines]);
 
     useEffect(() => {
-        if (!enabled) {
-            return;
-        }
-
-        return startPrismaLocalSnapshotExporter({
-            revision: profileRevision,
+        return startDashboardSnapshotExporter({
             intervalMs: 5_000,
             getSnapshot: () => {
                 const current = latestValuesRef.current;
@@ -99,7 +85,7 @@ function LocalSnapshotExportController({
                 });
             },
         });
-    }, [enabled, profileRevision]);
+    }, []);
 
     return <>{children}</>;
 }
@@ -133,7 +119,6 @@ export default function Dashboard() {
         isError: hasOverviewError,
     } = useDataOverview();
     const setSelectedPlant = useUIStore((state) => state.setSelectedPlant);
-    const prismaRuntimeProfile = usePrismaRuntimeProfile(searchParams.toString());
 
     // Mapeo de equipos simulado (para resolver bindings)
     const equipmentMap = useMemo(() => {
@@ -321,28 +306,6 @@ export default function Dashboard() {
         currentNodeId: activeDashboard?.ownerNodeId,
     }), [allNodes, allDashboards, activeDashboard?.ownerNodeId]);
 
-    const isLocalRuntime = prismaRuntimeProfile.mode === 'local';
-    const snapshotExportEnabled = !isLocalRuntime && isDataSnapshotExportEnabled();
-    const snapshotExportIntervalMs = getDataSnapshotExportIntervalMs();
-    const latestSnapshotExportValuesRef = useRef<SnapshotExportRuntimeValues>({
-        activeDashboard: undefined,
-        allNodes: [],
-        connection: undefined,
-        dashboardViewState: 'loading',
-        equipmentMap,
-        machines: undefined,
-    });
-    useEffect(() => {
-        latestSnapshotExportValuesRef.current = {
-            activeDashboard,
-            allNodes,
-            connection,
-            dashboardViewState,
-            equipmentMap,
-            machines,
-        };
-    }, [activeDashboard, allNodes, connection, dashboardViewState, equipmentMap, machines]);
-
     useEffect(() => {
         if (!activeDashboard?.ownerNodeId) {
             setSelectedPlant(null);
@@ -363,43 +326,6 @@ export default function Dashboard() {
 
         setSelectedPlant(null);
     }, [activeDashboard?.ownerNodeId, allNodes, setSelectedPlant]);
-
-    useEffect(() => {
-        if (!snapshotExportEnabled) {
-            return;
-        }
-
-        return startDashboardSnapshotExporter({
-            revision: prismaRuntimeProfile.revision,
-            intervalMs: snapshotExportIntervalMs,
-            getSnapshot: () => {
-                if (document.visibilityState === 'hidden') {
-                    return null;
-                }
-
-                const {
-                    activeDashboard: latestDashboard,
-                    allNodes: latestAllNodes,
-                    connection: latestConnection,
-                    dashboardViewState: latestDashboardViewState,
-                    equipmentMap: latestEquipmentMap,
-                    machines: latestMachines,
-                } = latestSnapshotExportValuesRef.current;
-
-                if (!latestDashboard || latestDashboardViewState !== 'viewer') {
-                    return null;
-                }
-
-                return buildDashboardSnapshot({
-                    dashboard: latestDashboard,
-                    connection: latestConnection,
-                    machines: latestMachines,
-                    equipmentMap: latestEquipmentMap,
-                    hierarchyNodes: latestAllNodes,
-                });
-            },
-        });
-    }, [prismaRuntimeProfile.revision, snapshotExportEnabled, snapshotExportIntervalMs]);
 
     const handlePersistWidgetDisplayOptions = async (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => {
         if (!activeDashboard) {
@@ -493,12 +419,10 @@ export default function Dashboard() {
         <DashboardPresentationFrameProvider
             dashboardId={activeDashboard.id}
             viewId={activeDashboard.activeViewId ?? 'view-default'}
-            profileRevision={prismaRuntimeProfile.revision}
+            profileRevision={0}
             expectedWidgetIds={presentationWidgetIds}
         >
-        <LocalSnapshotExportController
-            enabled={isLocalRuntime}
-            profileRevision={prismaRuntimeProfile.revision}
+        <SnapshotExportController
             activeDashboard={activeDashboard}
             allNodes={allNodes}
             connection={connection}
@@ -539,7 +463,7 @@ export default function Dashboard() {
                   />
             </div>
         </div>
-        </LocalSnapshotExportController>
+        </SnapshotExportController>
         </DashboardPresentationFrameProvider>
     );
 }

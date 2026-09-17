@@ -407,17 +407,18 @@ class TelegramLocalBot:
         if self.thread and self.thread.is_alive(): self.thread.join(timeout=3)
 
 
-def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL):
-    config: TelegramConfig = read_telegram_config()
-    if not config.enabled:
+def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, config=None):
+    config: TelegramConfig = config or read_telegram_config()
+    if not config.configured:
         return None
     return TelegramLocalBot(config.token, snapshot_store, state_store, voice_events, api_base)
 
 
-def create_app(snapshot_store=None, voice_events=None, telegram_bot=None) -> Flask:
+def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None) -> Flask:
     paths = runtime_paths()
     snapshot_store = snapshot_store or JsonFileStore(paths.snapshot)
     voice_events = voice_events or VoiceEventStore()
+    telegram_configuration = telegram_configuration or read_telegram_config()
     voice_url = (os.environ.get("PRISMA_LOCAL_VOICE_URL") or DEFAULT_PRISMA_VOICE_URL).rstrip("/")
     local_http = requests.Session(); local_http.trust_env = False
     app = Flask(__name__); app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot)
@@ -431,7 +432,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None) -> Fla
     @app.route("/health", methods=["GET"])
     def health():
         snapshot = snapshot_store.read(); voice_ok, voice_probe = _probe_voice(local_http, voice_url)
-        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_bot is not None, "telegramConfigured": bool(telegram_bot and telegram_bot.token), "telegramConnected": bool(telegram_bot and telegram_bot.bot_username), "telegramLastError": telegram_bot.last_error if telegram_bot else None, "prismaVoiceReady": voice_ok, "voiceProbe": voice_probe})
+        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_configuration.enabled, "telegramConfigured": telegram_configuration.configured, "telegramConnected": bool(telegram_bot and telegram_bot.bot_username), "telegramVerified": False, "telegramConfigurationError": telegram_configuration.configuration_error, "telegramLastError": telegram_bot.last_error if telegram_bot else None, "prismaVoiceReady": voice_ok, "voiceProbe": voice_probe})
 
     @app.route("/hmi/current-snapshot", methods=["GET", "POST", "OPTIONS"])
     def current_snapshot():
@@ -465,9 +466,10 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None) -> Fla
 
 
 def main():
-    read_telegram_config()
-    paths = runtime_paths(); snapshot_store = JsonFileStore(paths.snapshot); state_store = JsonFileStore(paths.chat_state); events = VoiceEventStore(); bot = build_telegram_bot(snapshot_store, state_store, events)
-    app = create_app(snapshot_store, events, bot)
+    telegram_configuration = read_telegram_config()
+    paths = runtime_paths(); snapshot_store = JsonFileStore(paths.snapshot); state_store = JsonFileStore(paths.chat_state); events = VoiceEventStore()
+    bot = build_telegram_bot(snapshot_store, state_store, events, config=telegram_configuration)
+    app = create_app(snapshot_store, events, bot, telegram_configuration)
     if bot: bot.start()
     try: app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, threaded=True, use_reloader=False)
     finally:

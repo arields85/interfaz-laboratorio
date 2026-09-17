@@ -1,62 +1,28 @@
-import { resolvePrismaVoiceTtsServiceUrls } from '../config/prismaVoiceTts.config';
+import { PRISMA_TTS_LIVE_URL } from '../config/prismaAssistant.config';
 import { normalizeTelegramChatId } from '../domain/voice';
-import type {
-    PrismaVoiceAudioSource,
-    PrismaVoicePlaybackTransport,
-} from './prismaVoiceAudioEngine';
+import type { PrismaVoiceAudioSource } from './prismaVoiceAudioEngine';
 import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
 
 export interface PrismaVoiceTtsAudioRequest {
-    serviceUrl: string;
-    fallbackPolicy?: PrismaVoiceTtsFallbackPolicy;
-    playbackTransport?: PrismaVoicePlaybackTransport;
     text: string;
     eventId?: string;
     telegramChatId?: number;
 }
 
-export type PrismaVoiceTtsFallbackPolicy = 'none' | 'legacy-wav';
-
 export type PrismaVoiceAudioSourceFactory = (
     request: PrismaVoiceTtsAudioRequest,
-) => PrismaVoiceAudioSource | null;
+) => PrismaVoiceAudioSource;
 
-const WAV_CONTENT_TYPES = new Set(['audio/wav', 'audio/x-wav', 'audio/wave']);
 const LIVE_AUDIO_FORMAT = PRISMA_PCM_AUDIO_FORMAT.encoding;
 const LIVE_SAMPLE_RATE = PRISMA_PCM_AUDIO_FORMAT.sampleRate;
 const LIVE_CHANNELS = PRISMA_PCM_AUDIO_FORMAT.channels;
 
-function normalizeContentType(value: string | null): string {
-    return value?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-}
-
-function hasWavSignature(buffer: ArrayBuffer): boolean {
-    if (buffer.byteLength < 12) {
-        return false;
-    }
-
-    const bytes = new Uint8Array(buffer);
-    return bytes[0] === 0x52
-        && bytes[1] === 0x49
-        && bytes[2] === 0x46
-        && bytes[3] === 0x46
-        && bytes[8] === 0x57
-        && bytes[9] === 0x41
-        && bytes[10] === 0x56
-        && bytes[11] === 0x45;
-}
-
 export function createPrismaVoiceTtsAudioSource(
     request: PrismaVoiceTtsAudioRequest,
     fetchImpl: typeof fetch = (...args) => fetch(...args),
-): PrismaVoiceAudioSource | null {
-    const serviceUrls = resolvePrismaVoiceTtsServiceUrls(request.serviceUrl);
-    if (!serviceUrls?.liveUrl) {
-        return null;
-    }
-
-    const source: PrismaVoiceAudioSource = {
-        playbackTransport: request.playbackTransport ?? 'progressive',
+): PrismaVoiceAudioSource {
+    return {
+        playbackTransport: 'progressive',
         async openLive(signal) {
             const telegramChatId = normalizeTelegramChatId(request.telegramChatId);
             const body = {
@@ -64,7 +30,7 @@ export function createPrismaVoiceTtsAudioSource(
                 ...(request.eventId?.trim() ? { eventId: request.eventId } : {}),
                 ...(telegramChatId === undefined ? {} : { telegramChatId }),
             };
-            const response = await fetchImpl(serviceUrls.liveUrl, {
+            const response = await fetchImpl(PRISMA_TTS_LIVE_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
@@ -94,46 +60,4 @@ export function createPrismaVoiceTtsAudioSource(
             };
         },
     };
-
-    const fallbackPolicy = request.fallbackPolicy ?? 'legacy-wav';
-    if (fallbackPolicy === 'legacy-wav' && serviceUrls.fallbackUrl) {
-        source.loadWav = async (signal) => {
-            const response = await fetchImpl(serviceUrls.fallbackUrl as string, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: request.text }),
-                cache: 'no-store',
-                signal,
-            });
-            if (!response.ok) {
-                throw new Error(`Prisma voice TTS request failed with status ${response.status}`);
-            }
-            const responseContentType = normalizeContentType(response.headers.get('Content-Type'));
-            if (responseContentType !== '' && !WAV_CONTENT_TYPES.has(responseContentType)) {
-                throw new Error(`Prisma voice TTS response has invalid Content-Type: ${responseContentType}`);
-            }
-
-            const audioBlob = await response.blob();
-            if (audioBlob.size === 0) {
-                throw new Error('Prisma voice TTS response is empty');
-            }
-
-            const blobContentType = normalizeContentType(audioBlob.type);
-            if (responseContentType === '' && blobContentType !== '' && !WAV_CONTENT_TYPES.has(blobContentType)) {
-                throw new Error(`Prisma voice TTS Blob has invalid Content-Type: ${blobContentType}`);
-            }
-
-            const encodedAudio = await audioBlob.arrayBuffer();
-            if (encodedAudio.byteLength === 0) {
-                throw new Error('Prisma voice TTS response is empty');
-            }
-            if (responseContentType === '' && !hasWavSignature(encodedAudio)) {
-                throw new Error('Prisma voice TTS response without Content-Type is not a valid WAV Blob');
-            }
-
-            return encodedAudio;
-        };
-    }
-
-    return source;
 }

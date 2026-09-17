@@ -68,3 +68,32 @@ function Assert-PrismaOwnedInterpreter {
         throw "The interpreter $candidate reports sys.prefix '$boundary', which is outside the repository-owned environment $owned. Delete the environment and re-run operations\bootstrap-local.ps1."
     }
 }
+
+function Test-PrismaRuntimeDependencies {
+    <#
+    .SYNOPSIS
+        Checks required imports without installing packages or contacting providers.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Interpreter)
+
+    try {
+        & $Interpreter -c 'import flask, requests, google.genai, imageio_ffmpeg' 2>$null
+    }
+    catch {
+        if ($_.FullyQualifiedErrorId -eq 'NativeCommandError') {
+            return $false
+        }
+        throw
+    }
+    return $LASTEXITCODE -eq 0
+}
+
+function Assert-PrismaRuntimeDependencies {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Interpreter)
+
+    if (-not (Test-PrismaRuntimeDependencies -Interpreter $Interpreter)) {
+        throw 'The repository-owned Python environment is incomplete. Run operations\bootstrap-local.ps1 to install the locked dependencies before starting Prisma Local.'
+    }
+}

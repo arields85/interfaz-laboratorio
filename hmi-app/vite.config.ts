@@ -1,12 +1,16 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { createPrismaProxyConfig } from './vite.prismaProxy.config'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const enforceCoverageThresholds = mode !== 'coverage-focused'
 
   return {
+    server: {
+      proxy: createPrismaProxyConfig(),
+    },
     plugins: [
       tailwindcss(),
       react()

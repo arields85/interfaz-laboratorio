@@ -95,12 +95,47 @@ class VoiceServiceTests(unittest.TestCase):
         with wave.open(BytesIO(wav_upload), "rb") as wav_file:
             self.assertEqual(wav_file.readframes(wav_file.getnframes()), processed_pcm)
 
-    def test_local_health_is_ready_without_live_session(self):
-        response = service.app.test_client().get("/health")
+    def test_local_health_is_ready_but_provider_is_unconfigured_without_key(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(service, "get_gemini_client") as get_client:
+            response = service.app.test_client().get("/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["mode"], "local")
-        self.assertTrue(response.get_json()["ready"])
-        self.assertFalse(response.get_json()["liveReady"])
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["service"], "prisma-voice")
+        self.assertEqual(payload["mode"], "local")
+        self.assertTrue(payload["ready"])
+        self.assertFalse(payload["liveReady"])
+        self.assertEqual(payload["providerStatus"], {"configured": False, "verified": False, "error": "GEMINI_API_KEY_MISSING"})
+        self.assertNotIn("apiKey", str(payload))
+        get_client.assert_not_called()
+
+    def test_health_reports_key_presence_as_configured_but_never_verified(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "  configured-secret  "}, clear=True), patch.object(service, "get_gemini_client") as get_client:
+            payload = service.app.test_client().get("/health").get_json()
+        self.assertEqual(payload["providerStatus"], {"configured": True, "verified": False, "error": None})
+        self.assertNotIn("configured-secret", str(payload))
+        get_client.assert_not_called()
+
+    def test_whitespace_only_key_is_missing_for_both_speech_endpoints_without_client_construction(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "   "}, clear=True), patch.object(service, "get_gemini_client") as get_client, patch.object(service.prisma_audio_sink, "emit") as emit:
+            regular = service.app.test_client().post("/prisma/speak", json={"text": "Status"})
+            live = service.app.test_client().post("/prisma/speak-live", json={"text": "Status"})
+        for response in (regular, live):
+            with self.subTest(path=response.request.path):
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json(), {"ok": False, "error": "GEMINI_API_KEY_MISSING", "message": "Configure GEMINI_API_KEY before requesting speech."})
+        get_client.assert_not_called()
+        emit.assert_not_called()
+
+    def test_missing_key_does_not_change_empty_request_validation(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(service, "get_gemini_client") as get_client:
+            regular = service.app.test_client().post("/prisma/speak", json={})
+            live = service.app.test_client().post("/prisma/speak-live", json={})
+        self.assertEqual(regular.status_code, 400)
+        self.assertEqual(regular.get_json(), {"ok": False, "error": "TEXT_REQUIRED"})
+        self.assertEqual(live.status_code, 400)
+        self.assertEqual(live.get_json(), {"ok": False, "error": "TEXT_REQUIRED"})
+        get_client.assert_not_called()
 
     def test_tts_request_uses_streaming_interactions_contract(self):
         stream = FakeStream([])

@@ -1,5 +1,10 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$DevelopmentOwnerToken = '',
+    [string]$DevelopmentReceiptPath = '',
+    [string]$DevelopmentCancellationPath = '',
+    [int]$LockTimeoutMilliseconds = 10000
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -7,14 +12,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'runtime-environment.ps1')
 $runtimeRoot = Get-PrismaRuntimeRoot
 $stateRoot = Get-PrismaStateRoot
-$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $manifestPath = Join-Path $stateRoot 'run\process-manifest.json'
+$manifestLockPath = Join-Path $stateRoot 'run\process-manifest.lock'
 $logs = Join-Path $stateRoot 'logs'
-$run = Join-Path $stateRoot 'run'
 
 $telegramToken = if ($env:PRISMA_LOCAL_TELEGRAM_BOT_TOKEN) { $env:PRISMA_LOCAL_TELEGRAM_BOT_TOKEN.Trim() } else { '' }
-if (-not $env:GEMINI_API_KEY) { throw 'GEMINI_API_KEY must be provided in the process environment.' }
-if ($env:PRISMA_LOCAL_TELEGRAM_ENABLED -eq '1' -and [string]::IsNullOrWhiteSpace($telegramToken)) { throw 'PRISMA_LOCAL_TELEGRAM_BOT_TOKEN must be provided when PRISMA_LOCAL_TELEGRAM_ENABLED=1.' }
 
 $env:PRISMA_RUNTIME_STATE_DIR = $stateRoot
 $env:PRISMA_VOICE_CONFIG_FILE = Join-Path $stateRoot 'prisma_voice_config.json'
@@ -25,18 +27,17 @@ $env:PRISMA_VOICE_HOST = '127.0.0.1'
 $env:TELEGRAM_BOT_TOKEN = if ($env:PRISMA_LOCAL_TELEGRAM_ENABLED -eq '1') { $telegramToken } else { '' }
 $env:PYTHONPATH = "$runtimeRoot\src" + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { '' })
 
-$script:manifestProcesses = @()
 . (Join-Path $PSScriptRoot 'process-ownership.ps1')
 
-function Save-ProcessManifest {
-    $payload = [ordered]@{
-        schemaVersion = 1
-        repositoryRoot = $runtimeRoot
-        processes = @($script:manifestProcesses)
+function Test-PrismaDevelopmentCancellation {
+    if ([string]::IsNullOrWhiteSpace($DevelopmentCancellationPath)) { return $false }
+    return Test-Path -LiteralPath $DevelopmentCancellationPath -PathType Leaf
+}
+
+function Assert-PrismaDevelopmentNotCancelled {
+    if (Test-PrismaDevelopmentCancellation) {
+        throw 'Prisma Local development acquisition was cancelled.'
     }
-    $temporary = "$manifestPath.tmp"
-    $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $temporary -Encoding UTF8
-    Move-Item -LiteralPath $temporary -Destination $manifestPath -Force
 }
 
 function New-ProcessRecord {
@@ -48,12 +49,14 @@ function New-ProcessRecord {
         executable = [string]$Listener.executable
         module = [string]$Listener.module
         commandLine = [string]$Listener.commandLine
+        creationTimeUtc = ConvertTo-PrismaCreationIdentity -Value $Listener.creationTimeUtc
     }
 }
 
 function Wait-VoiceReady {
     param([System.Diagnostics.Process]$Process)
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        if (Test-PrismaDevelopmentCancellation) { return $false }
         Start-Sleep -Seconds 1
         try {
             $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5056/health' -TimeoutSec 2
@@ -68,6 +71,7 @@ function Wait-VoiceReady {
 function Wait-PresentationReady {
     param([System.Diagnostics.Process]$Process)
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        if (Test-PrismaDevelopmentCancellation) { return $false }
         Start-Sleep -Seconds 1
         try {
             $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5057/health' -TimeoutSec 2
@@ -91,56 +95,102 @@ function Stop-PrismaLaunchedProcess {
     }
 }
 
-New-Item -ItemType Directory -Path $run, $logs -Force | Out-Null
-. (Join-Path $PSScriptRoot 'startup-preflight.ps1')
-Prune-PrismaProcessManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot
-Assert-PrismaLocalPortsAvailable -Ports @(5056, 5057)
-& $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'bootstrap-local.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'Prisma Local bootstrap failed; no service was started.' }
+function Invoke-PrismaStartTransaction {
+    Assert-PrismaDevelopmentNotCancelled
+    $isDevelopment = -not [string]::IsNullOrWhiteSpace($DevelopmentOwnerToken)
+    $canonical = Get-PrismaCanonicalManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -RequireCompleteRuntime
+    if ($isDevelopment -and $canonical) {
+        $ownershipProperty = $canonical.PSObject.Properties['developmentOwnership']
+        if ($ownershipProperty) {
+            if (-not (Test-PrismaDevelopmentRuntimeIdentity -Manifest $canonical)) {
+                throw 'Prisma Local development runtime identity no longer matches its canonical manifest; it was not reused or stopped.'
+            }
+            $generation = [string]$ownershipProperty.Value.generation
+            Add-PrismaDevelopmentOwner -Manifest $canonical -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration $generation
+            Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $canonical
+            return [ordered]@{ registered = $true; generation = $generation; reused = $true }
+        }
+        return [ordered]@{ registered = $false; generation = ''; reused = $true }
+    }
 
-# The interpreter is resolved only after bootstrap, and only from the owned
-# environment. The assertion below is the guard that keeps a foreign or PATH
-# interpreter from ever launching a service.
-$python = Resolve-PrismaPython -RuntimeRoot $runtimeRoot
-Assert-PrismaOwnedInterpreter -Interpreter $python -RuntimeRoot $runtimeRoot
+    Prune-PrismaProcessManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot
+    Assert-PrismaLocalPortsAvailable -Ports @(5056, 5057)
+    $python = Resolve-PrismaPython -RuntimeRoot $runtimeRoot
+    Assert-PrismaOwnedInterpreter -Interpreter $python -RuntimeRoot $runtimeRoot
+    Assert-PrismaRuntimeDependencies -Interpreter $python
+    Assert-PrismaDevelopmentNotCancelled
 
-$stdout = Join-Path $logs 'prisma-voice-stdout.log'
-$stderr = Join-Path $logs 'prisma-voice-stderr.log'
-$presentationStdout = Join-Path $logs 'prisma-presentation-stdout.log'
-$presentationStderr = Join-Path $logs 'prisma-presentation-stderr.log'
-Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $presentationStdout, $presentationStderr -Force -ErrorAction SilentlyContinue
+    $stdout = Join-Path $logs 'prisma-voice-stdout.log'
+    $stderr = Join-Path $logs 'prisma-voice-stderr.log'
+    $presentationStdout = Join-Path $logs 'prisma-presentation-stdout.log'
+    $presentationStderr = Join-Path $logs 'prisma-presentation-stderr.log'
+    Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $presentationStdout, $presentationStderr -Force -ErrorAction SilentlyContinue
 
-$voiceArguments = @('-m', 'prisma_runtime.voice_service')
-$presentationArguments = @('-m', 'prisma_runtime.local_presentation')
-$voiceProcess = $null
-$presentationProcess = $null
-$voiceListener = $null
-$presentationListener = $null
-$startupComplete = $false
-try {
-    $voiceProcess = Start-Process -FilePath $python -ArgumentList $voiceArguments -WorkingDirectory $runtimeRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-    if (-not (Wait-VoiceReady -Process $voiceProcess)) { throw "Prisma voice did not become ready. See $stderr" }
-    $voiceListener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service'
-    if (-not $voiceListener) { throw "Prisma voice listener identity could not be verified. See $stderr" }
-    $script:manifestProcesses += New-ProcessRecord -Service 'prisma-voice' -Port 5056 -Listener $voiceListener
-    Save-ProcessManifest
-    Write-Host 'Prisma voice is ready at http://127.0.0.1:5056.' -ForegroundColor Green
-    $presentationProcess = Start-Process -FilePath $python -ArgumentList $presentationArguments -WorkingDirectory $runtimeRoot -WindowStyle Hidden -RedirectStandardOutput $presentationStdout -RedirectStandardError $presentationStderr -PassThru
-    if (-not (Wait-PresentationReady -Process $presentationProcess)) { throw "Prisma Local presentation did not become ready. See $presentationStderr" }
-    $presentationListener = Resolve-PrismaVerifiedListener -Port 5057 -ExpectedModule 'prisma_runtime.local_presentation'
-    if (-not $presentationListener) { throw "Prisma Local presentation listener identity could not be verified. See $presentationStderr" }
-    $script:manifestProcesses += New-ProcessRecord -Service 'prisma-local-presentation' -Port 5057 -Listener $presentationListener
-    Save-ProcessManifest
-    Write-Host 'Starting Prisma Local presentation at http://127.0.0.1:5057.' -ForegroundColor Green
-    $startupComplete = $true
-    Write-Host 'Prisma Local presentation is ready at http://127.0.0.1:5057.' -ForegroundColor Green
+    $voiceProcess = $null
+    $presentationProcess = $null
+    $manifestProcesses = @()
+    $startupComplete = $false
+    try {
+        $voiceProcess = Start-Process -FilePath $python -ArgumentList @('-m', 'prisma_runtime.voice_service') -WorkingDirectory $runtimeRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+        if (-not (Wait-VoiceReady -Process $voiceProcess)) { throw "Prisma voice did not become ready or acquisition was cancelled. See $stderr" }
+        $voiceListener = Resolve-PrismaVerifiedListener -Port 5056 -ExpectedModule 'prisma_runtime.voice_service'
+        if (-not $voiceListener) { throw "Prisma voice listener identity could not be verified. See $stderr" }
+        $manifestProcesses += New-ProcessRecord -Service 'prisma-voice' -Port 5056 -Listener $voiceListener
+        $partialManifest = [ordered]@{ schemaVersion = 2; repositoryRoot = $runtimeRoot; processes = @($manifestProcesses) }
+        Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $partialManifest
+        Write-Host 'Prisma voice is ready at http://127.0.0.1:5056.' -ForegroundColor Green
+
+        Assert-PrismaDevelopmentNotCancelled
+        $presentationProcess = Start-Process -FilePath $python -ArgumentList @('-m', 'prisma_runtime.local_presentation') -WorkingDirectory $runtimeRoot -WindowStyle Hidden -RedirectStandardOutput $presentationStdout -RedirectStandardError $presentationStderr -PassThru
+        if (-not (Wait-PresentationReady -Process $presentationProcess)) { throw "Prisma Local presentation did not become ready or acquisition was cancelled. See $presentationStderr" }
+        $presentationListener = Resolve-PrismaVerifiedListener -Port 5057 -ExpectedModule 'prisma_runtime.local_presentation'
+        if (-not $presentationListener) { throw "Prisma Local presentation listener identity could not be verified. See $presentationStderr" }
+        $manifestProcesses += New-ProcessRecord -Service 'prisma-local-presentation' -Port 5057 -Listener $presentationListener
+        Assert-PrismaDevelopmentNotCancelled
+
+        $manifest = [ordered]@{ schemaVersion = 2; repositoryRoot = $runtimeRoot; processes = @($manifestProcesses) }
+        $generation = ''
+        if ($isDevelopment) {
+            $generation = [guid]::NewGuid().ToString('D')
+            $manifest.developmentOwnership = [ordered]@{ generation = $generation; owners = @($DevelopmentOwnerToken) }
+        }
+        Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $manifest
+        $startupComplete = $true
+        Write-Host 'Prisma Local presentation is ready at http://127.0.0.1:5057.' -ForegroundColor Green
+        return [ordered]@{ registered = $isDevelopment; generation = $generation; reused = $false }
+    }
+    finally {
+        if (-not $startupComplete) {
+            Stop-PrismaLaunchedProcess -Process $presentationProcess
+            Stop-PrismaLaunchedProcess -Process $voiceProcess
+            & (Join-Path $PSScriptRoot 'stop-local.ps1') -SkipManifestLock
+            Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
-finally {
-    if (-not $startupComplete) {
-        Stop-PrismaLaunchedProcess -Process $presentationProcess
-        Stop-PrismaLaunchedProcess -Process $voiceProcess
-        & (Join-Path $PSScriptRoot 'stop-local.ps1')
-        Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
+
+function Save-PrismaDevelopmentReceipt {
+    param([object]$Receipt)
+
+    if ([string]::IsNullOrWhiteSpace($DevelopmentReceiptPath)) { return }
+    Save-PrismaJsonFile -Path $DevelopmentReceiptPath -Value $Receipt -Depth 4
+}
+
+$template = Get-PrismaConfigurationTemplate -RuntimeRoot $runtimeRoot
+Initialize-PrismaRuntimeState -StateRoot $stateRoot -Template $template | Out-Null
+. (Join-Path $PSScriptRoot 'startup-preflight.ps1')
+$script:developmentReceipt = $null
+Invoke-PrismaManifestLock -LockPath $manifestLockPath -TimeoutMilliseconds $LockTimeoutMilliseconds -Action {
+    $script:developmentReceipt = Invoke-PrismaStartTransaction
+    try {
+        Assert-PrismaDevelopmentNotCancelled
+        Save-PrismaDevelopmentReceipt -Receipt $script:developmentReceipt
+    }
+    catch {
+        if ($script:developmentReceipt.registered -eq $true) {
+            Invoke-PrismaDevelopmentReleaseTransaction -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration ([string]$script:developmentReceipt.generation)
+        }
+        throw
     }
 }

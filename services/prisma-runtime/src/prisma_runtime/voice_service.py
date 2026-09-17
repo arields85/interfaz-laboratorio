@@ -260,8 +260,18 @@ def prisma_config():
     return jsonify({"config": config, "sync": prisma_voice_config_store.status()})
 
 
+def gemini_configuration_status(environ=None):
+    values = environ if environ is not None else os.environ
+    configured = bool(values.get("GEMINI_API_KEY", "").strip())
+    return {"configured": configured, "verified": False, "error": None if configured else "GEMINI_API_KEY_MISSING"}
+
+
+def _gemini_unavailable_response():
+    return jsonify({"ok": False, "error": "GEMINI_API_KEY_MISSING", "message": "Configure GEMINI_API_KEY before requesting speech."}), 503
+
+
 def get_gemini_client():
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key: raise RuntimeError("GEMINI_API_KEY_MISSING")
     from google import genai
     return genai.Client(api_key=api_key)
@@ -453,6 +463,7 @@ def prisma_speak():
     if request.method == "OPTIONS": return Response(status=204)
     text = str((request.get_json(silent=True) or {}).get("text", "")).strip()
     if not text: return jsonify({"ok": False, "error": "TEXT_REQUIRED"}), 400
+    if not gemini_configuration_status()["configured"]: return _gemini_unavailable_response()
     try:
         prisma_audio_sink.emit("provider", "dispatch", {})
         client = get_gemini_client(); pcm = base64.b64decode(_create_tts_interaction(client, text).output_audio.data, validate=True); _close_gemini_client(client); return Response(pcm_to_wav(apply_prisma_dsp_full_pcm(pcm, prisma_voice_config_store.get())), mimetype="audio/wav", headers={"Cache-Control": "no-cache"})
@@ -462,7 +473,7 @@ def prisma_speak():
 @app.route("/health", methods=["GET"])
 def health():
     config = prisma_voice_config_store.get()
-    return jsonify({"ok": True, "ready": True, "mode": "local", "service": "prisma-voice", "assistant": "Prisma", "provider": "Google Gemini", "model": TTS_MODEL, "voice": VOICE, "streaming": True, "liveReady": False, "config": prisma_voice_config_store.status(), "voiceConfig": {"preset": config["preset"], "effectEnabled": config["effectEnabled"], "effectIntensity": config["effectIntensity"]}})
+    return jsonify({"ok": True, "ready": True, "mode": "local", "service": "prisma-voice", "assistant": "Prisma", "provider": "Google Gemini", "providerStatus": gemini_configuration_status(), "model": TTS_MODEL, "voice": VOICE, "streaming": True, "liveReady": False, "config": prisma_voice_config_store.status(), "voiceConfig": {"preset": config["preset"], "effectEnabled": config["effectEnabled"], "effectIntensity": config["effectIntensity"]}})
 
 
 def _pcm_stream_response(generate_audio):
@@ -474,7 +485,7 @@ def prisma_speak_live():
     if request.method == "OPTIONS": return Response(status=204)
     data = request.get_json(silent=True) or {}; text = str(data.get("text", "")).strip()
     if not text: return jsonify({"ok": False, "error": "TEXT_REQUIRED"}), 400
-    if not os.environ.get("GEMINI_API_KEY"): return jsonify({"ok": False, "error": "GEMINI_API_KEY_MISSING"}), 500
+    if not gemini_configuration_status()["configured"]: return _gemini_unavailable_response()
     job = _create_interactions_tts_job(text, data.get("eventId"), data.get("telegramChatId"))
     return _pcm_stream_response(lambda: (chunk for chunk in _generate_interactions_tts_audio(job)))
 

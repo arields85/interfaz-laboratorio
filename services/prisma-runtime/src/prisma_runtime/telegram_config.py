@@ -20,13 +20,17 @@ class TelegramConfig:
     def configured(self) -> bool:
         return self.enabled and bool(self.token)
 
+    @property
+    def configuration_error(self) -> str | None:
+        if self.enabled and not self.token:
+            return "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING"
+        return None
+
 
 def read_telegram_config(environ: Mapping[str, str] | None = None) -> TelegramConfig:
     values = environ if environ is not None else os.environ
     enabled = values.get(TELEGRAM_ENABLED_ENV, "").strip() == "1"
     token = values.get(TELEGRAM_TOKEN_ENV, "").strip()
-    if enabled and not token:
-        raise RuntimeError(f"{TELEGRAM_TOKEN_ENV} must be provided when {TELEGRAM_ENABLED_ENV}=1.")
     return TelegramConfig(enabled=enabled, token=token if enabled else "")
 
 

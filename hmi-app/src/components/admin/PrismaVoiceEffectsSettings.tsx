@@ -69,6 +69,12 @@ function isValidAdvancedValue(value: string, constraint: AdvancedFieldDefinition
     return constraint === 'positive' ? parsedValue > 0 : parsedValue >= 0;
 }
 
+function areAdvancedValuesValid(values: Record<keyof PrismaRoboticVoiceConfig, string>): boolean {
+    return ADVANCED_FIELDS.every(
+        ({ key, constraint }) => isValidAdvancedValue(values[key], constraint),
+    );
+}
+
 export default function PrismaVoiceEffectsSettings({
     config,
     onFieldChange,
@@ -90,8 +96,10 @@ export default function PrismaVoiceEffectsSettings({
     }, [invalidFields.length, onValidityChange]);
 
     const updateAdvancedValue = (definition: AdvancedFieldDefinition, value: string) => {
+        const nextAdvancedValues = { ...advancedValues, [definition.key]: value };
         onEdit();
-        setAdvancedValues((current) => ({ ...current, [definition.key]: value }));
+        setAdvancedValues(nextAdvancedValues);
+        onValidityChange(areAdvancedValuesValid(nextAdvancedValues));
         if (isValidAdvancedValue(value, definition.constraint)) {
             onRoboticFieldChange(definition.key, Number(value));
         }

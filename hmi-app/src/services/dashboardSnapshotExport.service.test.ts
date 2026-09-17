@@ -1,440 +1,121 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-    cancelDashboardSnapshotExport,
     exportDashboardSnapshot,
-    exportPrismaLocalSnapshot,
     resetDashboardSnapshotExportStateForTests,
     startDashboardSnapshotExporter,
-    startPrismaLocalSnapshotExporter,
-    stopPrismaLocalSnapshotExporter,
 } from './dashboardSnapshotExport.service';
 
-const {
-    getDataSnapshotExportUrlMock,
-    isDataSnapshotExportEnabledMock,
-} = vi.hoisted(() => ({
-    getDataSnapshotExportUrlMock: vi.fn(),
-    isDataSnapshotExportEnabledMock: vi.fn(),
-}));
-
-vi.mock('../config/dataConnection.config', () => ({
-    getDataSnapshotExportUrl: getDataSnapshotExportUrlMock,
-    isDataSnapshotExportEnabled: isDataSnapshotExportEnabledMock,
-}));
-
-describe('exportDashboardSnapshot', () => {
-    const fetchMock = vi.fn();
-    const failureEvents: CustomEvent[] = [];
-    const handleFailureEvent = (event: Event) => {
-        failureEvents.push(event as CustomEvent);
-    };
-
+describe('dashboardSnapshotExport.service', () => {
     beforeEach(() => {
         vi.useFakeTimers();
-        vi.stubGlobal('fetch', fetchMock);
-        isDataSnapshotExportEnabledMock.mockReturnValue(true);
-        getDataSnapshotExportUrlMock.mockReturnValue('https://node-red.local/hmi/current-snapshot');
-        failureEvents.length = 0;
-        window.addEventListener('hmi:snapshot-export-failed', handleFailureEvent as EventListener);
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     });
 
     afterEach(() => {
         resetDashboardSnapshotExportStateForTests();
-        window.removeEventListener('hmi:snapshot-export-failed', handleFailureEvent as EventListener);
         vi.useRealTimers();
-        vi.unstubAllGlobals();
         vi.restoreAllMocks();
-        fetchMock.mockReset();
-        getDataSnapshotExportUrlMock.mockReset();
-        isDataSnapshotExportEnabledMock.mockReset();
+        vi.unstubAllGlobals();
     });
 
-    it('posts the snapshot JSON to the configured Node-RED url', async () => {
-        fetchMock.mockResolvedValue({
-            ok: true,
-            status: 202,
-        });
-
+    it('posts snapshots only to the fixed same-origin route', async () => {
+        const fetchMock = vi.fn(async () => ({ ok: true, status: 202 } as Response));
+        vi.stubGlobal('fetch', fetchMock);
         const snapshot = { timestamp: '2026-07-07T10:00:00.000Z', widgets: [] };
 
         await expect(exportDashboardSnapshot(snapshot)).resolves.toBe(true);
 
-        expect(fetchMock).toHaveBeenCalledWith(
-            'https://node-red.local/hmi/current-snapshot',
-            expect.objectContaining({
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(snapshot),
-                signal: expect.any(AbortSignal),
-            }),
-        );
-    });
-
-    it('warns and skips the request when snapshot export is disabled or unconfigured', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-        isDataSnapshotExportEnabledMock.mockReturnValue(false);
-        getDataSnapshotExportUrlMock.mockReturnValue(null);
-
-        await expect(exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] })).resolves.toBe(false);
-
-        expect(fetchMock).not.toHaveBeenCalled();
-        expect(warnSpy).toHaveBeenCalledWith(
-            '[dashboard-snapshot-export] Snapshot export skipped: feature disabled or endpoint missing.',
-        );
-        expect(failureEvents).toHaveLength(1);
-        expect(failureEvents[0]).toMatchObject({
-            type: 'hmi:snapshot-export-failed',
-            detail: {
-                reason: 'disabled-missing-endpoint',
-                status: null,
-                url: null,
-            },
+        expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/prisma/snapshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(snapshot),
+            signal: expect.any(AbortSignal),
         });
     });
 
-    it('warns and swallows network failures so the viewer never breaks', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-        fetchMock.mockRejectedValue(new Error('network down'));
+    it('keeps HTTP and network failures nonfatal and observable', async () => {
+        const failures: CustomEvent[] = [];
+        window.addEventListener('hmi:snapshot-export-failed', (event) => failures.push(event as CustomEvent));
+        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 } as Response)));
 
-        await expect(exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] })).resolves.toBe(false);
+        await expect(exportDashboardSnapshot({ widgets: [] })).resolves.toBe(false);
 
-        expect(warnSpy).toHaveBeenCalledWith(
-            '[dashboard-snapshot-export] Snapshot export failed.',
-            expect.any(Error),
-        );
-        expect(failureEvents[0]).toMatchObject({
-            type: 'hmi:snapshot-export-failed',
-            detail: {
-                reason: 'request-failed',
-                status: null,
-                url: 'https://node-red.local/hmi/current-snapshot',
-            },
-        });
-    });
-
-    it('times out a slow export with a controlled warning and no throw', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-        fetchMock.mockImplementation((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
-            init?.signal?.addEventListener('abort', () => {
-                reject(new DOMException('Aborted', 'AbortError'));
-            });
-        }));
-
-        const exportPromise = exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
-
-        await vi.advanceTimersByTimeAsync(4_500);
-
-        await expect(exportPromise).resolves.toBe(false);
-        expect(warnSpy).toHaveBeenCalledWith(
-            '[dashboard-snapshot-export] Snapshot export timed out.',
-            expect.objectContaining({ name: 'AbortError' }),
-        );
-        expect(failureEvents[0]).toMatchObject({
-            type: 'hmi:snapshot-export-failed',
-            detail: {
-                reason: 'timeout',
-                status: null,
-                url: 'https://node-red.local/hmi/current-snapshot',
-            },
-        });
-    });
-
-    it('classifies custom abort reasons triggered by the timeout watchdog as timeouts', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-        fetchMock.mockImplementation((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
-            init?.signal?.addEventListener('abort', () => {
-                reject(init.signal?.reason ?? new Error('aborted'));
-            });
-        }));
-
-        const exportPromise = exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
-
-        await vi.advanceTimersByTimeAsync(4_500);
-
-        await expect(exportPromise).resolves.toBe(false);
-        expect(warnSpy).toHaveBeenCalledWith(
-            '[dashboard-snapshot-export] Snapshot export timed out.',
-            expect.any(Error),
-        );
-        expect(failureEvents[0]).toMatchObject({
-            type: 'hmi:snapshot-export-failed',
-            detail: {
-                reason: 'timeout',
-                status: null,
-                url: 'https://node-red.local/hmi/current-snapshot',
-            },
-        });
-    });
-
-    it('includes the HTTP status in the failure event when the export endpoint rejects the request', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-        fetchMock.mockResolvedValue({
-            ok: false,
+        expect(failures[0]?.detail).toEqual({
+            reason: 'request-failed',
             status: 503,
-        });
-
-        await expect(exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] })).resolves.toBe(false);
-
-        expect(warnSpy).toHaveBeenCalledWith(
-            '[dashboard-snapshot-export] Snapshot export failed.',
-            expect.objectContaining({ status: 503 }),
-        );
-        expect(failureEvents[0]).toMatchObject({
-            type: 'hmi:snapshot-export-failed',
-            detail: {
-                reason: 'request-failed',
-                status: 503,
-                url: 'https://node-red.local/hmi/current-snapshot',
-            },
+            url: '/api/prisma/snapshot',
         });
     });
 
-    it('keeps only one export request active until the first unresolved request finishes', async () => {
-        let resolveFetch: ((value: { ok: boolean; status: number }) => void) | null = null;
-        fetchMock.mockImplementation(() => new Promise((resolve) => {
-            resolveFetch = resolve;
-        }));
-
-        const firstExportPromise = exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
-
-        await Promise.resolve();
-
-        await expect(exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:01.000Z', widgets: [] })).resolves.toBe(false);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-
-        resolveFetch?.({ ok: true, status: 202 });
-        await expect(firstExportPromise).resolves.toBe(true);
-
-        fetchMock.mockResolvedValueOnce({ ok: true, status: 202 });
-        await expect(exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:02.000Z', widgets: [] })).resolves.toBe(true);
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
-
-    it('releases the in-flight guard after the timeout fallback even when fetch never settles', async () => {
-        const originalAbortController = globalThis.AbortController;
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-        vi.stubGlobal('AbortController', undefined);
-        fetchMock.mockImplementation(() => new Promise(() => undefined));
-
-        const firstExportPromise = exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
-
-        await vi.advanceTimersByTimeAsync(4_500);
-        await expect(firstExportPromise).resolves.toBe(false);
-
-        fetchMock.mockResolvedValueOnce({ ok: true, status: 202 });
-        await expect(exportDashboardSnapshot({ timestamp: '2026-07-07T10:00:01.000Z', widgets: [] })).resolves.toBe(true);
-
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(warnSpy).toHaveBeenCalledWith(
-            '[dashboard-snapshot-export] Snapshot export timed out.',
-            expect.any(Error),
-        );
-
-        vi.stubGlobal('AbortController', originalAbortController);
-    });
-
-    it('posts local snapshots to the exact loopback endpoint even when central export is disabled', async () => {
-        isDataSnapshotExportEnabledMock.mockReturnValue(false);
-        getDataSnapshotExportUrlMock.mockReturnValue(null);
-        fetchMock.mockResolvedValue({ ok: true, status: 202 });
-
-        const snapshot = { timestamp: '2026-07-07T10:00:00.000Z', widgets: [{ id: 'current-widget' }] };
-
-        await expect(exportPrismaLocalSnapshot(snapshot)).resolves.toBe(true);
-
-        expect(fetchMock).toHaveBeenCalledWith(
-            'http://127.0.0.1:5057/hmi/current-snapshot',
-            expect.objectContaining({
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(snapshot),
-                signal: expect.any(AbortSignal),
-            }),
-        );
-        expect(getDataSnapshotExportUrlMock).not.toHaveBeenCalled();
-    });
-
-    it('aborts a pending central POST before activating the Local exporter', async () => {
-        let centralSignal: AbortSignal | undefined;
-        fetchMock.mockImplementationOnce((_url: string, init?: RequestInit) => {
-            centralSignal = init?.signal;
-            return new Promise((_resolve, reject) => {
-                centralSignal?.addEventListener('abort', () => reject(centralSignal?.reason));
+    it('times out and aborts a hanging request', async () => {
+        let signal: AbortSignal | undefined;
+        vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+            signal = init?.signal;
+            return new Promise<Response>((_resolve, reject) => {
+                signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
             });
-        });
-
-        const centralRequest = exportDashboardSnapshot({ timestamp: 'central', widgets: [] });
-        await Promise.resolve();
-
-        const stopLocal = startPrismaLocalSnapshotExporter({
-            revision: 2,
-            getSnapshot: () => ({ timestamp: 'local', widgets: [] }),
-        });
-
-        expect(centralSignal?.aborted).toBe(true);
-        await expect(centralRequest).resolves.toBe(false);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        stopLocal();
-    });
-
-    it('keeps local non-202 responses non-fatal and retryable', async () => {
-        fetchMock.mockResolvedValue({ ok: false, status: 503 });
-
-        await expect(exportPrismaLocalSnapshot({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] })).resolves.toBe(false);
-
-        expect(failureEvents).toHaveLength(1);
-        expect(failureEvents[0]).toMatchObject({
-            type: 'hmi:snapshot-export-failed',
-            detail: {
-                reason: 'request-failed',
-                status: 503,
-                url: 'http://127.0.0.1:5057/hmi/current-snapshot',
-            },
-        });
-    });
-
-    it('times out a hanging local request without blocking the next scheduled retry', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-        fetchMock.mockImplementation((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
-            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
         }));
+        const request = exportDashboardSnapshot({ widgets: [] });
 
-        const stop = startPrismaLocalSnapshotExporter({
-            revision: 3,
-            getSnapshot: () => ({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] }),
-        });
-
-        await vi.advanceTimersByTimeAsync(5_000);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
         await vi.advanceTimersByTimeAsync(4_500);
 
-        expect(warnSpy).toHaveBeenCalledWith(
-            '[dashboard-snapshot-export] Snapshot export timed out.',
-            expect.objectContaining({ name: 'AbortError' }),
-        );
+        await expect(request).resolves.toBe(false);
+        expect(signal?.aborted).toBe(true);
+    });
 
-        await vi.advanceTimersByTimeAsync(5_000);
+    it('keeps one request in flight and retries on the next completed interval', async () => {
+        let resolveFirst!: (response: Response) => void;
+        const fetchMock = vi.fn()
+            .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveFirst = resolve; }))
+            .mockResolvedValue({ ok: true, status: 202 } as Response);
+        vi.stubGlobal('fetch', fetchMock);
+        const getSnapshot = vi.fn(() => ({ widgets: [] }));
+        const stop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot });
+
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        resolveFirst({ ok: true, status: 202 } as Response);
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1_000);
         expect(fetchMock).toHaveBeenCalledTimes(2);
         stop();
     });
 
-    it('owns one five-second schedule and aborts the previous request before replacement', async () => {
-        let resolveFetch: ((value: { ok: boolean; status: number }) => void) | null = null;
-        fetchMock.mockImplementation((_url: string, init?: RequestInit) => new Promise((resolve) => {
-            resolveFetch = resolve;
-            init?.signal?.addEventListener('abort', () => undefined);
-        }));
+    it('releases scheduled single-flight ownership after timeout and retries on the next interval', async () => {
+        const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => (
+            fetchMock.mock.calls.length === 1
+                ? new Promise<Response>((_resolve, reject) => {
+                    init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+                })
+                : Promise.resolve({ ok: true, status: 202 } as Response)
+        ));
+        vi.stubGlobal('fetch', fetchMock);
+        const stop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ widgets: [] }) });
 
-        const getFirstSnapshot = vi.fn(() => ({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [{ id: 'first' }] }));
-        const stopFirst = startPrismaLocalSnapshotExporter({ revision: 1, getSnapshot: getFirstSnapshot });
-
-        await vi.advanceTimersByTimeAsync(4_999);
-        expect(fetchMock).not.toHaveBeenCalled();
-
-        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(1_000);
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        const firstSignal = (fetchMock.mock.calls[0]?.[1] as RequestInit).signal;
+        await vi.advanceTimersByTimeAsync(4_500);
+        await vi.advanceTimersByTimeAsync(500);
 
-        const getSecondSnapshot = vi.fn(() => ({ timestamp: '2026-07-07T10:00:05.000Z', widgets: [{ id: 'second' }] }));
-        const stopSecond = startPrismaLocalSnapshotExporter({ revision: 2, getSnapshot: getSecondSnapshot });
-
-        expect(firstSignal?.aborted).toBe(true);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-
-        resolveFetch?.({ ok: true, status: 202 });
-        await Promise.resolve();
-
-        await vi.advanceTimersByTimeAsync(5_000);
         expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({
-            timestamp: '2026-07-07T10:00:05.000Z',
-            widgets: [{ id: 'second' }],
-        });
-
-        stopFirst();
-        stopSecond();
-        expect((fetchMock.mock.calls[1]?.[1] as RequestInit).signal?.aborted).toBe(true);
+        stop();
     });
 
-    it('removes Local timers and requests before restoring the Server exporter boundary', async () => {
-        let localSignal: AbortSignal | undefined;
-        fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
-            localSignal = init?.signal;
+    it('replaces the previous exporter and aborts its request', async () => {
+        const signals: AbortSignal[] = [];
+        vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+            signals.push(init?.signal as AbortSignal);
             return new Promise<Response>(() => undefined);
-        });
-        startPrismaLocalSnapshotExporter({
-            revision: 4,
-            intervalMs: 1_000,
-            getSnapshot: () => ({ timestamp: 'local', widgets: [] }),
-        });
+        }));
+        const firstStop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ first: true }) });
         await vi.advanceTimersByTimeAsync(1_000);
 
-        stopPrismaLocalSnapshotExporter();
-        cancelDashboardSnapshotExport();
+        const secondStop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ second: true }) });
 
-        expect(localSignal?.aborted).toBe(true);
-        expect(vi.getTimerCount()).toBe(0);
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    it('owns three complete Server → Local → Server cycles without stale schedules or requests', async () => {
-        const centralSignals: AbortSignal[] = [];
-        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-            if (url === 'http://127.0.0.1:5057/hmi/current-snapshot') {
-                return Promise.resolve({ ok: true, status: 202 });
-            }
-
-            const signal = init?.signal as AbortSignal;
-            centralSignals.push(signal);
-            return new Promise((_resolve, reject) => {
-                signal.addEventListener('abort', () => reject(signal.reason));
-            });
-        });
-
-        let stopServer = startDashboardSnapshotExporter({
-            revision: 1,
-            intervalMs: 5_000,
-            getSnapshot: () => ({ timestamp: 'server-1', widgets: [] }),
-        });
-        const staleStops: Array<() => void> = [];
-
-        for (let cycle = 1; cycle <= 3; cycle += 1) {
-            await vi.advanceTimersByTimeAsync(5_000);
-            const centralCallsBeforeLocal = fetchMock.mock.calls.filter(([url]) => String(url).includes('node-red.local')).length;
-            expect(centralSignals.at(-1)?.aborted).toBe(false);
-
-            staleStops.push(stopServer);
-            const stopLocal = startPrismaLocalSnapshotExporter({
-                revision: cycle * 2,
-                intervalMs: 5_000,
-                getSnapshot: () => ({ timestamp: `local-${cycle}`, widgets: [] }),
-            });
-            await Promise.resolve();
-
-            expect(centralSignals.at(-1)?.aborted).toBe(true);
-            expect(vi.getTimerCount()).toBe(1);
-
-            await vi.advanceTimersByTimeAsync(5_000);
-            expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('node-red.local'))).toHaveLength(centralCallsBeforeLocal);
-            expect(fetchMock.mock.calls.filter(([url]) => url === 'http://127.0.0.1:5057/hmi/current-snapshot')).toHaveLength(cycle);
-            expect(vi.getTimerCount()).toBe(1);
-
-            stopServer = startDashboardSnapshotExporter({
-                revision: cycle * 2 + 1,
-                intervalMs: 5_000,
-                getSnapshot: () => ({ timestamp: `server-${cycle + 1}`, widgets: [] }),
-            });
-            stopLocal();
-            for (const staleStop of staleStops) staleStop();
-            expect(vi.getTimerCount()).toBe(1);
-        }
-
-        stopServer();
-        expect(vi.getTimerCount()).toBe(0);
+        expect(signals[0]?.aborted).toBe(true);
+        firstStop();
+        secondStop();
     });
 });

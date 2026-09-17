@@ -1,32 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { resolvePrismaConfigUrl } from '../config/prismaAssistant.config';
 import { HttpPrismaVoiceConfigReader } from '../adapters/prismaVoiceConfig.adapter';
-import { usePrismaRuntimeProfile } from '../hooks/usePrismaRuntimeProfile';
+import { PRISMA_VOICE_CONFIG_URL } from '../config/prismaAssistant.config';
 
-export const PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX = ['prisma', 'voice-config'] as const;
+export const PRISMA_VOICE_CONFIG_QUERY_KEY = ['prisma', 'voice-config', PRISMA_VOICE_CONFIG_URL] as const;
 
-export function usePrismaVoiceConfig(url: string | null) {
-    const runtimeProfile = usePrismaRuntimeProfile();
-    const effectiveUrl = resolvePrismaConfigUrl(runtimeProfile.mode, url);
-    const responseContract = runtimeProfile.mode === 'local' ? 'local-envelope' : 'legacy-flat';
+export function usePrismaVoiceConfig() {
     const query = useQuery({
-        queryKey: [...PRISMA_VOICE_CONFIG_QUERY_KEY_PREFIX, effectiveUrl, responseContract],
-        queryFn: ({ signal }) => {
-            if (!effectiveUrl) {
-                throw new Error('Prisma voice config URL is required');
-            }
-            return new HttpPrismaVoiceConfigReader(effectiveUrl, responseContract).readConfig(signal);
-        },
-        enabled: effectiveUrl !== null,
+        queryKey: PRISMA_VOICE_CONFIG_QUERY_KEY,
+        queryFn: ({ signal }) => new HttpPrismaVoiceConfigReader(PRISMA_VOICE_CONFIG_URL).readConfig(signal),
         retry: false,
         refetchOnWindowFocus: false,
     });
 
     return {
         data: query.data ?? null,
-        error: effectiveUrl === null ? null : query.error,
-        isEnabled: effectiveUrl !== null,
-        isLoading: effectiveUrl !== null && query.isLoading,
+        error: query.error,
+        isEnabled: true,
+        isLoading: query.isLoading,
     };
 }

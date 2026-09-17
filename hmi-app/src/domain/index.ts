@@ -12,6 +12,5 @@ export * from './activityAnalytics.types';
 export * from './prodTrendDataMode.types';
 export * from './dataContract.types';
 export * from './eppi.types';
-export * from './prismaRuntime.types';
 export * from './auth';
 export type { CatalogVariable } from './variableCatalog.types';
