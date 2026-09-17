@@ -1,0 +1,699 @@
+# Prisma — documento maestro
+
+> **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
+>
+> **Versión documental:** 2.0.3
+>
+> **Fecha:** 2026-09-17
+>
+> **Estado del producto:** runtime parcialmente integrado; objetivo de asistente de dos canales aprobado; implementación funcional y aceptación integral pendientes.
+>
+> **Alcance de esta versión:** registra el incremento implementado y verificado del contrato de audio; el producto ampliado, la operación durable y su aceptación integral continúan pendientes.
+
+## 1. Objetivo y estado general
+
+Prisma debe convertirse en el asistente de consulta de solo lectura de la HMI. Debe
+consultar datos consistentes de instalaciones autorizadas y ofrecer dos experiencias
+separadas:
+
+- **Canal A — HMI:** conversación por voz, búsqueda de equipos o variables aunque no
+  estén en la vista actual, aclaración de ambigüedades, navegación de la sesión que
+  originó la consulta y respuesta audible.
+- **Canal B — Telegram personal:** consultas de texto sobre una instalación
+  autorizada, sin navegador, sin publicador de snapshots y sin producir audio ni
+  navegación global en la HMI.
+
+El objetivo está **aprobado pero no implementado**. El repositorio ya contiene un
+runtime de presentación y voz, integración HMI y contratos parciales, pero su flujo
+actual sigue dependiendo del último snapshot visible y no satisface el modelo de dos
+canales, aislamiento, despliegue remoto ni configuración protegida.
+
+### 1.1 Resumen de estado
+
+| Área | Estado al 2026-09-17 | Conclusión |
+|---|---|---|
+| Runtime bajo propiedad del repositorio | Parcialmente implementado | Existe en [`../../services/prisma-runtime/`](../../services/prisma-runtime/), pero faltan cierre de migración, arranque durable, aceptación y retiro controlado del legado. |
+| Voz HMI y orbe | Implementados con evidencia histórica parcial | Hubo aceptación manual exitosa; continuidad, audibilidad humana, cancelación y recuperación no están aceptadas de forma integral. |
+| Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
+| Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
+| Canal B — Telegram autónomo | Pendiente | El bot actual consulta el snapshot visible y publica un evento global de voz; no es el canal de texto aislado aprobado. |
+| Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
+| Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
+| Configuración y diagnósticos | Parciales | Hay configuración de voz y variables de proceso, pero falta el flujo protegido en Configuración general → Voz y el modelo completo de estados. |
+| Seguridad de acceso | Insuficiente para despliegue remoto | Loopback y CORS actuales no sustituyen autenticación, autorización, separación por instalación ni almacenamiento seguro de credenciales. |
+| Modo Prisma Server/Node-RED | Objetivo retirado | Puede existir como rollback heredado hasta una decisión explícita de limpieza; no es el producto objetivo. |
+
+La autoridad de descubrimiento del trabajo pendiente continúa en
+[`../PENDING_WORK.md`](../PENDING_WORK.md). El detalle se conserva en los topics
+estables `backlog/prisma-runtime-monorepo-integration` y
+`backlog/prisma-dual-channel-assistant`; este documento no crea un backlog paralelo.
+
+## 2. Cómo interpretar esta referencia
+
+Este documento separa cinco clases de información para evitar que una aspiración se
+lea como capacidad entregada:
+
+1. **Implementado:** existe en el repositorio y su comportamiento fue inspeccionado.
+2. **Verificado:** existe evidencia con fecha y alcance declarados.
+3. **Objetivo aprobado:** define el producto deseado, pero puede no existir aún.
+4. **Diseño propuesto:** recomendación pendiente de decisión o implementación.
+5. **Decisión abierta:** no debe cerrarse por inferencia.
+
+El código ordinario evidencia el comportamiento actual; no convierte un defecto en
+requisito correcto. Las pruebas aportan evidencia sobre los casos cubiertos; no
+reemplazan una aceptación de navegador, audio, proveedor o máquinas reales. El
+objetivo aprobado define hacia dónde debe evolucionar el producto.
+
+## 3. Límites invariantes
+
+### 3.1 Solo lectura industrial
+
+Prisma puede consultar telemetría y navegar la interfaz, pero nunca controlar la
+planta. Quedan prohibidos en ambos canales:
+
+- arranque o parada de equipos;
+- cambios de setpoints, recetas o parámetros industriales;
+- actuación sobre PLC, actuadores o procesos;
+- reconocimiento, reseteo o confirmación de alarmas;
+- escrituras a endpoints de control industrial.
+
+La navegación por dashboard, vista o filtro es una acción de interfaz de solo lectura,
+no una orden de planta. La configuración de la propia HMI y sus integraciones también
+queda fuera del plano de control industrial.
+
+### 3.2 Separación entre datos y asistente
+
+La HMI consume un contrato JSON estable; no consume una tecnología específica. El
+contrato vigente está en [`../DATA_CONTRACT.md`](../DATA_CONTRACT.md). Node-RED u otra
+tecnología puede seguir aportando telemetría detrás de ese contrato. Lo retirado como
+objetivo es el antiguo **producto Prisma Server/Node-RED**, no la posibilidad de usar
+Node-RED como fuente desacoplada de datos de solo lectura.
+
+### 3.3 Privacidad y credenciales
+
+Tokens, claves, identificadores privados de cuentas o chats, preguntas y contenido de
+audio no deben publicarse en documentación, logs ni exportaciones de diagnóstico. Los
+secretos tampoco pueden quedar en Git, `localStorage`, bundles del cliente, parámetros
+GET ni respuestas de lectura. El backend protegido puede conservar el estado operativo
+mínimo necesario para autenticación, pairing, autorización y revocación, con acceso y
+retención limitados. Las pruebas pagadas o que envían mensajes deben requerir una
+acción separada y explícita.
+
+## 4. Implementación actual observada
+
+### 4.1 Runtime del repositorio
+
+El runtime actual vive en
+[`../../services/prisma-runtime/`](../../services/prisma-runtime/). Sus componentes
+principales son:
+
+| Componente actual | Responsabilidad observada |
+|---|---|
+| [`local_presentation.py`](../../services/prisma-runtime/src/prisma_runtime/local_presentation.py) | Recibe y persiste un snapshot visible, aplica un parser determinístico, coordina el bot y expone el último evento global. |
+| [`voice_service.py`](../../services/prisma-runtime/src/prisma_runtime/voice_service.py) | Genera TTS con Gemini, aplica DSP, transmite PCM y puede derivar audio para Telegram. |
+| [`paths.py`](../../services/prisma-runtime/src/prisma_runtime/paths.py) | Resuelve estado mutable fuera del código del servicio. |
+| [`operations/`](../../services/prisma-runtime/operations/) | Bootstrap, inicio, preflight, detención y verificación locales. |
+
+La integración actual usa dos procesos locales:
+
+- presentación en `127.0.0.1:5057`;
+- voz en `127.0.0.1:5056`.
+
+Los endpoints ya inspeccionados y relevantes para describir el presente son:
+
+| Servicio | Método y ruta | Uso actual |
+|---|---|---|
+| Presentación | `GET /health` | Liveness y metadata del puente; su readiness de voz deriva del probe al proceso 5056. |
+| Presentación | `GET/POST /hmi/current-snapshot` | Lee o reemplaza el snapshot visible persistido. |
+| Presentación | `GET /hmi/voice/latest` | Devuelve un único último evento global. |
+| Presentación | `POST /local/ask` | Ejecuta el parser sin Telegram y publica un evento. |
+| Presentación | `GET/PUT /hmi/prisma-config` | Proxy de configuración de voz. |
+| Voz | `GET /health` | Liveness y metadata de configuración; no valida credencial ni disponibilidad del proveedor. |
+| Voz | `GET/PUT /prisma/config` | Lee o reemplaza configuración local de voz. |
+| Voz | `POST /prisma/speak-live` | Genera y transmite la locución. |
+
+Esta lista describe API existente; no es una instrucción para iniciar servicios ni
+autoriza pruebas contra proveedores.
+
+El health de voz declara el proceso listo sin comprobar la presencia de la clave ni
+hacer una solicitud al proveedor. El health de presentación confía en el `ok` devuelto
+por ese proceso. Por tanto, ambos endpoints prueban liveness y conectividad local del
+probe, no autenticación ni readiness genuina de Gemini.
+
+### 4.2 Flujo actual de preguntas
+
+El comportamiento actual es, de forma simplificada:
+
+```text
+dashboard visible
+  -> snapshot periódico al puente local
+  -> un archivo conserva el último snapshot
+  -> Telegram o /local/ask entrega texto
+  -> parser por palabras clave examina widgets[] visibles
+  -> se genera respuesta textual
+  -> se reemplaza un único evento de voz global
+  -> todos los navegadores que consultan el endpoint pueden observar ese evento
+  -> el navegador solicita TTS y presenta el orbe
+```
+
+[`answer_from_snapshot()`](../../services/prisma-runtime/src/prisma_runtime/local_presentation.py)
+reconoce intenciones específicas como producto, lote, OEE, estado, actividad,
+potencia, progreso, tiempo restante, alertas y resumen. No es un motor de consulta
+general, no usa Gemini para comprender la pregunta y no puede buscar por sí mismo
+equipos o variables fuera del snapshot visible.
+
+El snapshot persiste sin una caducidad obligatoria después de cerrar el navegador.
+Existe un único evento más reciente, también global. Esta combinación puede producir
+respuestas obsoletas, consumo duplicado o interferencia entre contextos. Debe tratarse
+como una limitación pendiente, no como contrato objetivo.
+
+### 4.3 Integración HMI actual
+
+La HMI contiene destinos de loopback fijos en
+[`prismaAssistant.config.ts`](../../hmi-app/src/config/prismaAssistant.config.ts) para
+snapshot, eventos, configuración y TTS. Este diseño protege el perfil local histórico,
+pero un navegador remoto resolvería `127.0.0.1` contra la máquina del usuario, no
+contra el servidor. Por eso no puede ser la arquitectura objetivo del despliegue web.
+
+El perfil `central/local` se guarda actualmente en `localStorage`, según
+[`prismaRuntime.config.ts`](../../hmi-app/src/config/prismaRuntime.config.ts). La
+configuración del frontend y el almacenamiento del navegador no constituyen
+autorización backend.
+
+La HMI ya puede consumir datos actuales mediante `/api/hmi-data`, resolviendo
+`unitId/machineId + variableKey`, y usa un contrato separado para histórico. El
+runtime Prisma no implementa esa fuente industrial. Dashboards, jerarquía y catálogo
+se conservan hoy en el navegador; `catalogVariableId` aporta identidad canónica, pero
+todavía no existe un mapeo backend completo de instalaciones, alias y permisos.
+
+Las rutas de dashboard admiten `dashboardId` y `viewId` y ya validan destinos
+publicados. Esa capacidad puede soportar una futura navegación declarativa, pero
+Prisma todavía no la solicita ni recibe confirmación de finalización.
+
+### 4.4 Configuración actual
+
+La configuración de efectos de voz puede leerse y escribirse localmente. El runtime
+también recibe configuración sensible mediante variables de proceso. El arranque
+actual no cumple aún el objetivo de una instalación inicialmente sin configurar y un
+flujo normal completamente administrado desde **Configuración general → Voz**.
+
+El runtime del repositorio mantiene estado mutable bajo el directorio local de la
+aplicación y un entorno virtual propio bajo el servicio. Esto coincide con la decisión
+histórica de separar estado de máquina y estado derivado del checkout. Sin embargo:
+
+- el bootstrap actual puede instalar dependencias durante el inicio;
+- una instalación limpia sin conectividad no está demostrada;
+- el lock con hashes no implica eliminación exacta de paquetes extra ya presentes;
+- arranque, recuperación, detención y reinstalación durable siguen pendientes de
+  aceptación.
+
+No existe un requisito aprobado de bootstrap limpio completamente offline. Las
+dependencias de Internet continúan aplicando a Gemini y Telegram aun cuando la
+telemetría sea simulada.
+
+### 4.5 Frontera de acceso actual
+
+El servicio de presentación limita orígenes de desarrollo conocidos. El servicio de
+voz responde actualmente con CORS wildcard para `GET`, `POST`, `PUT` y `OPTIONS`; esto
+fue confirmado mediante probes Flask simulados sobre código preexistente en Git.
+La explotabilidad desde un navegador depende del despliegue, pero la protección debe
+resolverse antes de exponer credenciales o clientes web remotos.
+
+La lista actual de chats permitidos y la vinculación del primer `/start` no equivalen
+a autenticación de cuenta, autorización por instalación ni aislamiento de sesión.
+Bot, cuenta personal y chat autorizado son identidades diferentes y deben modelarse
+por separado.
+
+## 5. Evidencia y limitaciones verificadas
+
+### 5.1 Auditoría de 2026-09-17
+
+Los siguientes resultados pertenecen a una auditoría anterior de la misma fecha. No
+fueron reejecutados por esta actualización documental:
+
+| Comprobación | Resultado informado |
+|---|---|
+| Python | 74/74; incluye 27 pruebas de entorno aún no rastreadas. |
+| Python desde directorio alternativo | 27/27. |
+| HMI focalizada | 72/72 en 7 archivos. |
+| TypeScript | `noEmit` aprobado para app y Node. |
+| PowerShell | 7/7 archivos aceptados por el parser AST. |
+| Python en memoria | 21 archivos compilaron. |
+| Whitespace | `git diff --check` aprobado. |
+
+En esa auditoría, el checker de bindings terminó con código 1. El hash del archivo con
+CRLF fue distinto del hash del contenido de Git con LF: esto demuestra sensibilidad a
+finales de línea, no un cambio semántico posterior a la generación. El render TypeScript
+coincidió tras normalizar LF. Los validadores del generador Python aceptan un payload requerido
+ausente y un ID terminado en guion que TypeScript y el schema rechazan. Los productores
+normales cumplían, pero en ese momento faltaban propiedad clara del generador, paridad
+y tests reproducibles del checker. El cierre actual de ese subproblema se documenta a
+continuación; este registro no modifica el schema canónico.
+
+#### Incremento actual del contrato de audio
+
+El incremento acotado FND-1/FND-2 corrigió ese subproblema sin modificar el schema
+canónico ni ampliar requisitos de producto. El digest normaliza únicamente finales de
+línea; el checker compara en memoria el cuerpo completo de ambas proyecciones; y el
+validador generado Python aplica el patrón exacto de `run_id`, campos requeridos y
+números finitos. Python conserva enteros arbitrarios para secuencias y contadores. La
+proyección TypeScript continúa limitada al navegador y conserva la misma API pública;
+allí las secuencias y payloads de tipo entero deben ser enteros seguros representables
+por JavaScript mediante `Number.isSafeInteger`. Esta seguridad de representación no
+modifica el schema canónico ni establece un máximo universal entre lenguajes.
+
+La primera ejecución observó 14/14 pruebas Python de audio, 82/82 pruebas Python del
+runtime, 6/6 pruebas TypeScript focalizadas y 1964/1964 pruebas HMI, además de ambos
+typechecks y el checker con código 0. Son pruebas locales con estado temporal aislado:
+no prueban audio real, proveedor, acceso remoto, durabilidad ni aceptación operativa.
+
+La revisión independiente detectó después una ampliación involuntaria: cambiar
+`Number.isSafeInteger` por `Number.isInteger` había debilitado la validación TypeScript
+sin ser necesario para corregir la divergencia Python. La corrección restauró el límite
+seguro y agregó al discovery Python una comprobación contra las proyecciones reales del
+repositorio. La ejecución posterior observó 15/15 pruebas Python de audio, 83/83 del
+runtime, 9/9 TypeScript focalizadas y 1967/1967 de la HMI en 198 archivos; ambos
+typechecks y el checker finalizaron con código 0. El padre confirmó de forma
+independiente 83/83 pruebas Python y 9/9 TypeScript focalizadas, además de checker y
+`git diff --check` con código 0, schema y TypeScript generado sin diferencias, y hashes
+sin cambios para Gauge/Kpi. La HMI completa 1967/1967 y ambos typechecks permanecen como
+evidencia del escritor. Este cierre cubre solo hash, cuerpo generado, campos requeridos,
+paridad validada y discovery por defecto; no prueba todos los bordes numéricos ni
+constituye aceptación real de runtime, audio, proveedor o acceso. La Entrega 1.1
+permanece abierta.
+
+### 5.2 Evidencia manual histórica
+
+El usuario aceptó manualmente en sesiones anteriores el circuito HMI, audio, orbe y
+Telegram. Esa evidencia demuestra valor de MVP y no debe descartarse. Tampoco debe
+elevarse a aceptación universal: pruebas posteriores observaron ausencia de listeners
+en 5056/5057 y un manifiesto obsoleto. No se reprodujo en vivo la causa durante la
+auditoría de 2026-09-17.
+
+La finalización del proceso iniciador bajo el ciclo de vida de un job de OpenCode es
+una hipótesis no probada. La terminación en el camino exitoso del wrapper ya fue
+corregida con pruebas en el commit `2bc7ff1`. La ausencia de identidad de creación del
+proceso es un borde de robustez acotado, no una causa demostrada. Comparar de forma
+exacta el binario del listener con el ejecutable del entorno virtual tampoco es seguro
+en Windows, donde puede existir handoff entre wrappers.
+
+### 5.3 Audio
+
+Una corrección histórica de la instalación externa evitó el corte reproducido en aquel
+escenario mediante buffering completo antes de reproducir, con el costo de aumentar el
+tiempo hasta el primer sonido. No demuestra continuidad universal. El navegador del
+repositorio actual usa transporte progresivo por defecto: encola PCM por chunks y
+comienza al alcanzar un umbral o al llegar EOF. Las muestras previas no forman un
+benchmark corto/medio/largo repetido; generación, decodificación y reproducción
+técnica tampoco prueban ausencia de cortes ni audibilidad humana.
+
+La autocalibración por dispositivo descrita en el documento externo fue una propuesta
+histórica. No es un prerrequisito automático para el nuevo Canal B de Telegram de
+texto, que no reproduce audio. Cualquier evolución futura de audio debe medirse y
+aprobarse por separado.
+
+## 6. Objetivo aprobado
+
+### 6.1 Un runtime y dos formas de despliegue
+
+El producto objetivo tiene un único Prisma bajo propiedad del repositorio:
+
+- despliegue servidor para navegadores remotos;
+- notebook de presentación autónoma para demostraciones o uso local controlado.
+
+El navegador no debe conocer puertos de loopback como arquitectura final. Se
+recomienda una frontera backend del mismo origen para el cliente web. Los mecanismos
+exactos de autenticación, almacenamiento de secretos, proxy o gateway y despliegue aún
+no están seleccionados.
+
+El modo Prisma Server/Node-RED anterior queda retirado como objetivo. Su requisito
+histórico de configuración administrada y respuesta 409 está **supersedido para el
+nuevo runtime**; no fue preservado ni corregido por esta documentación. El código o la
+instalación legado solo se eliminarán tras aceptación y decisión explícitas, nunca de
+forma automática.
+
+### 6.2 Canal A — HMI por voz
+
+El flujo objetivo es:
+
+```text
+usuario habla en una HMI
+  -> STT obtiene texto dentro de esa sesión
+  -> Prisma identifica instalación, equipo, variable y rango
+  -> si hay ambigüedad, pregunta antes de actuar
+  -> consulta la fuente compartida, incluso fuera de la pantalla visible
+  -> si corresponde, solicita navegación declarativa
+  -> la HMI valida un destino publicado y confirma la nueva vista
+  -> Prisma responde con datos frescos y procedencia
+  -> solo la sesión solicitante reproduce la respuesta
+```
+
+Reglas obligatorias:
+
+- la navegación solo afecta a la sesión que hizo la pregunta;
+- el destino debe estar publicado y validado mediante IDs estables;
+- no se responde desde el contexto anterior si falla o vence la navegación;
+- una nueva pregunta puede cancelar o reemplazar el trabajo anterior;
+- la respuesta conserva alcance, timestamp, frescura y procedencia;
+- no existe ningún comando industrial en el mismo canal.
+
+### 6.3 Canal B — Telegram personal autónomo
+
+El Canal B recibe texto y responde texto. Debe funcionar sin navegador, snapshot o
+publicador de pantalla. Consulta una instalación previamente autorizada mediante la
+misma frontera de datos que el Canal A.
+
+Reglas obligatorias:
+
+- no publica eventos globales de HMI;
+- no reproduce audio ni navega una HMI;
+- separa credencial del bot, cuenta personal y asociación de chat;
+- autoriza explícitamente qué instalación puede consultar cada identidad;
+- impide mezcla de datos entre usuarios, instalaciones y sesiones;
+- aplica límites, cancelación, auditoría redactada y revocación.
+
+Esta definición reemplaza la interpretación provisional anterior de “Telegram remoto
+vinculado al navegador activo”.
+
+### 6.4 Datos reales y presentación
+
+El usuario informa tres máquinas reales visualizables actualmente. La primera entrega
+de datos debe probar una máquina real y luego las tres, sin IDs especiales ni lógica
+hardcodeada por máquina. No se asume que todas las instalaciones ofrecen histórico o
+los mismos rangos de consulta.
+
+La presentación simulada debe seleccionar explícitamente un catálogo y dataset
+coherentes. HMI y Prisma deben observar los mismos valores, timestamps y procedencia.
+Una falla de datos reales debe mostrarse como falla; no puede activar simulación en
+silencio.
+
+La frontera compartida de datos deberá resolver como mínimo:
+
+- instalación y autorización;
+- equipos, alias y variables canónicas;
+- valor actual, unidad, timestamp, estado y fuente;
+- histórico disponible y rangos admitidos, cuando existan;
+- frescura y motivo de indisponibilidad.
+
+Se propone un catálogo compartido de instalaciones y una frontera de consulta común.
+Su modelo concreto está pendiente. Esto no autoriza reescribir toda la persistencia de
+la HMI ni crear un framework genérico de plugins.
+
+### 6.5 Configuración en la HMI
+
+**Configuración general → Voz** será propietaria de la experiencia de configuración
+de Gemini, Telegram opcional y las integraciones que realmente necesite el runtime.
+El flujo normal no debe pedir edición manual de `.env`.
+
+Requisitos:
+
+- el runtime inicia sin configurar y lo declara de forma segura;
+- secretos guardados y leídos exclusivamente por el backend protegido;
+- la UI puede recibir una credencial de forma transitoria para enviarla por un canal
+  protegido, pero no persistirla ni volver a mostrarla;
+- nunca se devuelven secretos en GET ni se almacenan en Git o `localStorage`;
+- reemplazar y eliminar una credencial son operaciones explícitas;
+- Guardar persiste; no afirma que el proveedor quedó verificado;
+- Aplicar o reconectar informa qué proceso o sesión adoptó la configuración;
+- una integración opcional deshabilitada no es un error;
+- los tests pagos de audio o mensajería se activan por separado de los checks pasivos.
+
+### 6.6 Diagnósticos honestos
+
+Cada integración debe distinguir, como mínimo:
+
+| Estado | Significado |
+|---|---|
+| `missing` | Falta configuración requerida. |
+| `configured` | Existe configuración, aún no verificada. |
+| `checking` | Hay una comprobación en curso. |
+| `verified` | Una comprobación definida tuvo éxito para un alcance y momento concretos. |
+| `failing` | La comprobación falló con razón y remedio. |
+| `disabled` | Integración opcional deshabilitada deliberadamente. |
+| `not-tested` | No se ejecutó la comprobación correspondiente. |
+| `stale` | La última verificación perdió vigencia. |
+
+El diagnóstico debe incluir timestamp, alcance, razón y acción correctiva. “Proceso
+listo” no prueba autenticación. “Guardado” no prueba conexión. “Audio generado”,
+“decodificado” o “reproducido” no prueba que una persona lo oyó.
+
+## 7. Diseño propuesto y decisiones abiertas
+
+### 7.1 Recomendaciones vigentes
+
+- Enrutar navegadores remotos hacia un backend del mismo origen.
+- Separar sesión HMI, identidad Telegram e instalación autorizada.
+- Compartir catálogo y consultas de datos, no el estado de presentación.
+- Correlacionar cada interacción con un ID opaco y conservar solo evidencia redactada.
+- Usar navegación declarativa validada por el router; nunca clics por coordenadas.
+- Aplicar TTL y procedencia a snapshots, valores actuales y resultados históricos.
+- Mantener telemetría real y simulada detrás del mismo contrato, con modo explícito.
+
+### 7.2 Decisiones aún abiertas
+
+- proveedor y política de STT del Canal A;
+- política, proveedor o modelo para interpretar lenguaje natural textual, como
+  decisión separada de STT y sin elegir todavía un framework;
+- autenticación y autorización del despliegue web;
+- almacenamiento seguro y rotación de credenciales;
+- modelo definitivo del catálogo de instalaciones, alias y permisos;
+- API de consulta actual/histórica y límites por fuente;
+- transporte de eventos por sesión y estrategia de cancelación;
+- proceso de servicio durable, recuperación y actualización;
+- criterios y momento de eliminación del legado externo;
+- estrategia de audio que cumpla latencia, continuidad y audibilidad.
+
+Ninguna decisión abierta debe presentarse como diseño final o estado SDD.
+
+## 8. Plan unificado de entrega
+
+La implementación funcional completa requiere autorización futura. El orden evita
+construir canales nuevos sobre una frontera de datos, acceso y operación inestable.
+
+### Entrega 0 — reconciliación documental y evidencia
+
+**Objetivo:** establecer una autoridad vigente y conservar historia útil sin importar
+requisitos obsoletos como presentes.
+
+**Salida:** este documento, el ledger histórico y el backlog sincronizado.
+
+### Entrega 1 — fundamentos, setup protegido y consulta textual independiente
+
+Esta entrega reúne la base necesaria antes de habilitar canales autónomos. Se divide
+en tres incrementos verificables, sin convertirlos en backlogs independientes.
+
+#### Entrega 1.1 — fundamentos de runtime, contratos y acceso
+
+**Alcance:**
+
+- cerrar ownership y portabilidad del runtime del repositorio;
+- definir inicio, salud, recuperación, detención y reinstalación verificables;
+- corregir paridad y ownership de bindings generados;
+- establecer frontera de acceso antes de credenciales o navegadores remotos;
+- retirar el modo Prisma Server/Node-RED como objetivo sin borrar automáticamente el
+  legado;
+- definir contratos por sesión e instalación.
+
+**Prueba de cierre:** instalación reproducible en entorno autorizado; salud con
+identidad de proceso; reinicio y recuperación; acceso no autorizado rechazado; schemas
+y generados reproducibles; rollback o retiro explícitamente aceptado.
+
+**Progreso actual:** el subproblema de bindings de audio y generados quedó corregido y
+verificado de forma independiente en FND-1/FND-2/FND-3. Python conserva enteros
+arbitrarios para sus contadores y TypeScript limita sus enteros al rango seguro de
+JavaScript; esta diferencia no modifica el schema. No cierra la entrega: faltan
+durabilidad del ciclo de vida, instalación/operación reproducible y frontera de acceso.
+
+#### Entrega 1.2 — configuración, secretos y diagnósticos
+
+**Alcance:**
+
+- UX en Configuración general → Voz;
+- almacenamiento backend seguro, reemplazo y eliminación de secretos;
+- estados `missing/configured/checking/verified/failing/disabled/not-tested/stale`;
+- checks pasivos separados de pruebas pagadas;
+- protección CORS, autenticación y autorización acorde al despliegue seleccionado.
+
+**Prueba de cierre:** runtime inicialmente sin configurar; una credencial puede
+transitar de forma controlada desde el campo de entrada al backend, pero no persiste en
+`localStorage`, bundle, GET, logs ni exportaciones de diagnóstico; estados con tiempo,
+alcance, razón y remedio; guardar no se confunde con verificar; una integración
+opcional deshabilitada permanece saludable.
+
+#### Entrega 1.3 — lenguaje natural textual y datos compartidos
+
+**Alcance:**
+
+- catálogo y frontera de datos comunes para HMI y Prisma;
+- pipeline de intención textual → consulta estructurada y validada, con instalación,
+  entidad, variable y rango explícitos;
+- resolución de entidades y alias, aclaración de ambigüedades y fallas determinísticas
+  antes de habilitar Telegram autónomo;
+- política de intérprete/proveedor/modelo aún abierta, separada de STT y obligada a
+  fundamentar cada respuesta en la consulta validada;
+- una máquina real primero y luego las tres reportadas, sin hardcode;
+- valores fuera de pantalla con procedencia y frescura;
+- histórico solo cuando la fuente declare disponibilidad y rango;
+- modo de presentación explícito y coherente, sin fallback silencioso.
+
+**Prueba de cierre:** lenguaje natural ambiguo se aclara o falla sin inventar; la
+consulta estructurada validada puede trazarse hasta la respuesta; la misma consulta
+devuelve datos consistentes en HMI y Prisma; el alcance de instalación se respeta;
+datos vencidos o no disponibles no se presentan como actuales; una máquina real y
+luego las tres reportadas pasan los mismos escenarios sin ramas especiales; el modo
+demo comparte un dataset coherente entre HMI y Prisma.
+
+### Entrega 2 — Telegram autónomo
+
+**Alcance:** Canal B de texto, sin navegador, snapshot, audio ni navegación global;
+pairing personal revocable; autorización por instalación; aislamiento multiusuario y
+multiinstalación.
+
+**Prueba de cierre:** consultas actuales autorizadas funcionan con el navegador
+cerrado; las históricas funcionan solo cuando la fuente anuncia capacidad y rango, y
+en caso contrario informan honestamente que no están soportadas; identidades no
+autorizadas no reciben datos; ningún mensaje crea un evento HMI; rotación o revocación
+corta acceso de forma verificable.
+
+### Entrega 3 — micrófono, navegación HMI y voz por sesión
+
+**Alcance:** STT, ambigüedad, resolución de catálogo, navegación a destino publicado,
+confirmación del nuevo contexto y TTS exclusivo de la sesión solicitante.
+
+**Prueba de cierre:** una consulta a equipo fuera de pantalla aclara si corresponde,
+navega solo la sesión solicitante y responde después de confirmar contexto fresco;
+timeout o cancelación nunca reutilizan contexto anterior; no hay acciones industriales.
+
+### Entrega 4 — cierre operacional y aceptación
+
+**Alcance:** despliegue servidor y notebook, concurrencia, reinicio, recuperación,
+errores sin Internet, cancelación, frescura, observabilidad y decisión de limpieza del
+legado.
+
+**Prueba de cierre:** matriz multiusuario/multiinstalación; reinicios y cierres
+inesperados; indisponibilidad de Gemini, Telegram y datos; aceptación humana de audio;
+evidencia de ausencia de writes industriales; decisión explícita sobre rollback y
+eliminación.
+
+### 8.1 Trazabilidad de brechas
+
+| Brecha o cierre verificado | Entrega | Evidencia requerida |
+|---|---:|---|
+| Inicio durable y listeners ausentes | 1.1 y 4 | identidad, health, reinicio y recuperación observados. |
+| **Resuelto — bindings de audio: newline, cuerpo generado, campos requeridos y paridad** | 1.1 | checker 0; Python 83/83 y TypeScript 9/9 confirmados independientemente; TypeScript generado sin diff. |
+| CORS wildcard y autorización frontend insuficiente | 1.1 y 1.2 | acceso permitido/rechazado desde los despliegues reales. |
+| Secretos y configuración manual | 1.2 | almacenamiento backend, tránsito controlado, redacción, reemplazo y eliminación. |
+| Diagnósticos que mezclan guardado, proceso y proveedor | 1.2 | estados y timestamps independientes. |
+| Snapshot visible único, persistente y sin TTL | 1.3 | consultas compartidas con frescura y procedencia. |
+| Falta de catálogo backend, alias y permisos | 1.3 | resolución uniforme de instalación/equipo/variable. |
+| Parser limitado a keywords, sin consulta estructurada | 1.3 | intent → query validada, ambigüedad y fallas trazables. |
+| Telegram ligado al snapshot y evento global | 2 | consulta con navegador cerrado y cero eventos HMI. |
+| Sin micrófono/STT | 3 | entrada de voz aceptada con política de privacidad. |
+| Sin navegación solicitada por Prisma | 3 | destino publicado, confirmación y aislamiento por sesión. |
+| Evento global consumido por todos los navegadores | 3 | transporte y deduplicación por sesión solicitante. |
+| Latencia y audibilidad de respuestas largas | 3 y 4 | corpus medido y aceptación humana, sin universalizar muestras. |
+| Tres máquinas reales no verificadas por esta auditoría | 1.3 y 4 | aceptación sobre una y luego las tres en entorno autorizado. |
+| Histórico no universal | 1.3 | capacidades y rangos declarados por fuente. |
+| Limpieza del legado | 4 | decisión explícita posterior a aceptación; nunca automática. |
+
+## 9. Criterios de aceptación transversales
+
+Toda entrega funcional futura debe demostrar:
+
+- solo lectura industrial mediante inventario y evidencia de red;
+- separación de usuarios, sesiones e instalaciones;
+- valores con timestamp, frescura y procedencia;
+- errores explícitos, sin simulación o fallback silencioso;
+- cancelación sin trabajo ni eventos tardíos;
+- reinicio sin estado obsoleto presentado como actual;
+- secretos ausentes de artefactos versionados y respuestas de lectura;
+- pruebas automáticas más aceptación real cuando intervengan navegador, proveedor,
+  Telegram, micrófono, audio o datos reales;
+- checks de diagnóstico que generan audio, envían mensajes o consumen cuota se ejecutan
+  solo mediante una acción de prueba explícita; la operación normal aprobada conserva
+  su consumo esperado del proveedor.
+
+## 10. Historia, fuentes y mantenimiento
+
+El resumen curado de decisiones y evidencia histórica está en
+[`PRISMA_HISTORIAL_CURADO.md`](PRISMA_HISTORIAL_CURADO.md). No es un segundo maestro.
+El documento externo 1.1.4 permanece como respaldo histórico sin modificar fuera del
+repositorio; no debe copiarse ciegamente ni mantenerse en paralelo.
+
+Al actualizar este documento:
+
+1. conservar la separación entre presente, evidencia, objetivo y propuesta;
+2. actualizar el backlog por sus topics estables, no por IDs numéricos de memoria;
+3. enlazar archivos existentes y marcar rutas futuras como planificadas;
+4. no afirmar aceptación real a partir de tests simulados;
+5. añadir una entrada breve al changelog y mover detalle histórico al ledger.
+
+## 11. Cierre de etapa y reanudación
+
+El incremento acotado de contratos de audio FND-1/FND-2/FND-3 está completo y
+verificado. La Entrega 1.1 y los pendientes PW-002/PW-003 continúan abiertos: aún
+deben demostrarse el ciclo de vida durable, la instalación y operación reproducibles,
+la frontera de acceso y las decisiones sobre fuente real y autorización. No se debe
+repetir la corrección de schema y generados ya cerrada ni asumir una causa para la
+detención de procesos.
+
+### Base de código registrada al cerrar esta etapa
+
+| Commit local | Alcance |
+|---|---|
+| `13f1822` | Cambios previos de Gauge/KPI revisados e incorporados; 63 pruebas focalizadas y ESLint correctos. |
+| `f8cc42e` | Corrección de generación, checker y validación del contrato de audio con sus regresiones. |
+| `43d8e02` | Entorno Python propio, dependencias bloqueadas y operaciones del runtime; 27 pruebas de entorno correctas en el cierre. |
+
+Estos commits registran trabajo local; no implican publicación remota ni aceptación
+del ciclo de vida de los servicios. Los cambios previos de Gauge/KPI no quedan como
+modificaciones ajenas pendientes de resolver.
+
+El próximo trabajo debe partir de este maestro, de
+[`../../odd/tasks/prisma-runtime-foundations.md`](../../odd/tasks/prisma-runtime-foundations.md)
+y de los topics estables `backlog/prisma-runtime-monorepo-integration` y
+`backlog/prisma-dual-channel-assistant`. Antes de modificar launchers corresponde una
+prueba local controlada y sin proveedores, credenciales ni tráfico externo:
+
+> El siguiente paso es investigar el ciclo de vida de los procesos mediante una prueba controlada, sin proveedores ni credenciales, para identificar por qué se detienen antes de modificar los launchers.
+
+La instalación limpia, la aceptación de acceso y el resto del plan E1.1–E4 siguen
+visibles como trabajo posterior; esta reanudación no selecciona todavía la fuente real,
+el modelo de autenticación ni la política de autorización.
+
+## 12. Changelog
+
+### 2.0.3 — 2026-09-17
+
+- Cierre de sesión con el incremento FND-1/FND-2/FND-3 completo y la Entrega 1.1
+  todavía abierta.
+- Próxima investigación limitada a una prueba local controlada del ciclo de vida,
+  previa a cualquier cambio de launchers y sin asumir causa raíz.
+
+### 2.0.2 — 2026-09-17
+
+- Corrección acotada de identidad, ownership y paridad de los bindings de audio, con
+  evidencia automatizada y verificación independiente confirmada.
+- La Entrega 1.1 permanece abierta; no se afirma aceptación real ni acceso remoto.
+
+### 2.0.1 — 2026-09-17
+
+- Corrección de semántica de health, procedencia de probes CORS y alcance histórico
+  del audio según la verificación independiente.
+- Precisión de privacidad: se permite estado operativo mínimo protegido y tránsito
+  controlado de credenciales, sin persistencia ni exposición en cliente o diagnósticos.
+- Reagrupación cosmética del plan en E0–E4 y agregado del pipeline textual validado
+  previo a Telegram, sin cambiar el backlog ni autorizar implementación.
+
+### 2.0.0 — 2026-09-17
+
+- Reconciliación documental del runtime actual, auditoría y dirección aprobada.
+- Definición de Canal A HMI por voz y Canal B Telegram de texto autónomo.
+- Retiro del antiguo Prisma Server/Node-RED como objetivo, sin eliminación automática
+  del legado ni de su valor histórico.
+- Incorporación de despliegue web remoto, notebook de presentación, configuración
+  protegida, diagnósticos honestos, aislamiento y fuente de datos compartida.
+- Sustitución de hojas de ruta competidoras por un único plan de entregas y pruebas.
+- Creación de un ledger histórico curado; el original externo 1.1.4 permanece intacto.
+- Cambio exclusivamente documental: toda implementación funcional continúa pendiente
+  de autorización.
