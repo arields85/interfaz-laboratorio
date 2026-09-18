@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AdminAuthClient, AdminAuthError } from './adminAuth.service';
 import {
@@ -37,6 +37,55 @@ describe('AdminAuthClient', () => {
             isAuthenticating: false,
             error: null,
         });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    function receiverSensitiveGlobalFetch(
+        this: Window & typeof globalThis,
+        path: RequestInfo | URL,
+    ): Promise<Response> {
+        if (this !== undefined && this !== globalThis && this !== window) {
+            throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+        }
+        if (path === '/api/prisma/admin/auth/session') return Promise.resolve(jsonResponse(SESSION));
+        if (path === '/api/prisma/admin/auth/login') return Promise.resolve(jsonResponse(FRESH_SESSION));
+        return Promise.reject(new Error(`Unexpected path: ${String(path)}`));
+    }
+
+    it('invokes the default global fetch with an acceptable receiver for session bootstrap and login', async () => {
+        const fetchSpy = vi.fn(receiverSensitiveGlobalFetch);
+        vi.stubGlobal('fetch', fetchSpy);
+        const client = new AdminAuthClient();
+
+        await expect(client.session()).resolves.toEqual({ username: 'admin', absoluteExpiresAt: 2_000_000_000 });
+        await expect(client.login('admin', 'password')).resolves.toEqual({
+            username: 'admin',
+            absoluteExpiresAt: FRESH_SESSION.absoluteExpiresAt,
+        });
+        expect(fetchSpy.mock.calls.map(([path]) => path)).toEqual([
+            '/api/prisma/admin/auth/session',
+            '/api/prisma/admin/auth/login',
+        ]);
+        for (const [, init] of fetchSpy.mock.calls) {
+            expect(init).toEqual(expect.objectContaining({
+                credentials: 'same-origin',
+                cache: 'no-store',
+                redirect: 'error',
+            }));
+        }
+    });
+
+    it('wraps a default-transport invocation failure as AUTH_TRANSPORT_UNAVAILABLE', async () => {
+        const rejectingFetch = function (this: unknown): Promise<Response> {
+            throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+        };
+        vi.stubGlobal('fetch', rejectingFetch);
+        const client = new AdminAuthClient();
+
+        await expect(client.session()).rejects.toMatchObject({ code: 'AUTH_TRANSPORT_UNAVAILABLE' });
     });
 
     it('preserves exact password bytes and uses bounded same-origin transport', async () => {

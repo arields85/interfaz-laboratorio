@@ -125,7 +125,9 @@ export class AdminAuthClient {
     private readonly now: () => number;
     private readonly protectedRequests = new Set<AbortController>();
 
-    constructor(fetcher: typeof fetch = fetch, now: () => number = Date.now) {
+    // Native fetch must be bound to the global receiver; a bare method call on this
+    // instance throws "Illegal invocation" in browsers. Injected fetchers are untouched.
+    constructor(fetcher: typeof fetch = fetch.bind(globalThis), now: () => number = Date.now) {
         this.fetcher = fetcher;
         this.now = now;
     }
