@@ -8,6 +8,7 @@ import { requestShieldReveal } from '../../hooks/useBootShield';
 import { useUIStore } from '../../store/ui.store';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { dashboardStorage } from '../../services/DashboardStorageService';
+import { adminSessionController } from '../../services/adminSession.controller';
 import { TOPBAR_ICON_BUTTON_ACTIVE_CLS, TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
 import EppiTopbarNavigation from '../viewer/eppi/EppiTopbarNavigation';
 import {
@@ -116,7 +117,9 @@ export default function Topbar() {
         });
     };
 
-    const handleAdminNavigation = () => {
+    const handleAdminNavigation = async () => {
+        await adminSessionController.refresh();
+        if (!useAuthStore.getState().hasPermission('admin:access')) return;
         requestShieldReveal({
             profileId: 'short',
             runner: 'short',
@@ -205,7 +208,7 @@ export default function Topbar() {
                         <button
                             title="Administracion"
                             className={TOPBAR_ICON_BUTTON_CLS}
-                            onClick={handleAdminNavigation}
+                            onClick={() => { void handleAdminNavigation(); }}
                         >
                             <Settings size={20} />
                         </button>

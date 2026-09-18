@@ -17,8 +17,18 @@ export interface AuthSession {
     user: AuthUser | null;
     isAuthenticated: boolean;
     loginTimestamp: string | null;
+    absoluteExpiresAt?: number | null;
 }
 
 export type AuthResult =
     | { ok: true; user: AuthUser }
     | { ok: false; error: string };
+
+export interface AdministratorIdentity {
+    username: string;
+    absoluteExpiresAt: number;
+}
+
+export interface AdminAuthStatus {
+    configured: boolean;
+}

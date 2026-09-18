@@ -15,6 +15,7 @@ TELEGRAM_TOKEN_ENV = "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN"
 class TelegramConfig:
     enabled: bool
     token: str
+    source: str = "environment"
 
     @property
     def configured(self) -> bool:
@@ -23,15 +24,16 @@ class TelegramConfig:
     @property
     def configuration_error(self) -> str | None:
         if self.enabled and not self.token:
-            return "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING"
+            return "TELEGRAM_CREDENTIAL_MISSING" if self.source == "protected" else "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING"
         return None
 
 
 def read_telegram_config(environ: Mapping[str, str] | None = None) -> TelegramConfig:
     values = environ if environ is not None else os.environ
     enabled = values.get(TELEGRAM_ENABLED_ENV, "").strip() == "1"
-    token = values.get(TELEGRAM_TOKEN_ENV, "").strip()
-    return TelegramConfig(enabled=enabled, token=token if enabled else "")
+    protected = bool(values.get("PRISMA_CREDENTIAL_MASTER_KEY_FILE", "").strip())
+    token = "" if protected else values.get(TELEGRAM_TOKEN_ENV, "").strip()
+    return TelegramConfig(enabled=enabled, token=token if enabled else "", source="protected" if protected else "environment")
 
 
 def telegram_token(environ: Mapping[str, str] | None = None) -> str:

@@ -29,6 +29,8 @@ from .hmi_sessions import CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionConte
 from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
+from .telegram_credentials import TelegramCredentialResolver
+from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, validate_telegram_state
 from .voice_events import VoiceEventCapacity, VoiceEventStore
 
 
@@ -334,43 +336,89 @@ class JsonFileStore:
 
 class TelegramLocalBot:
     def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL):
-        self.token, self.snapshot_store, self.state_store, self.voice_events = token.strip(), snapshot_store, state_store, voice_events
+        self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
         self.stop_event, self.thread = threading.Event(), None
-        self.last_error, self.bot_username = None, None
+        self.last_error, self.bot_username, self.bot_id = None, None, None
+        self._state = None
 
     @property
     def paired_chat_ids(self) -> set[int]:
-        values = [part.strip() for part in os.environ.get("PRISMA_LOCAL_ALLOWED_CHAT_IDS", "").split(",") if part.strip()]
-        result = {int(value) for value in values if value.lstrip("-").isdigit()}
-        state = self.state_store.read() or {}
-        result.update(value for value in state.get("allowedChatIds", []) if isinstance(value, int))
-        return result
+        if self.bot_id is None or self._state is None:
+            return set()
+        return set(self._record()["pairedPrivateChatIds"])
 
     def _call(self, method, *, timeout=35, **kwargs):
         response = self.session.post(f"{self.api_base}/bot{self.token}/{method}", timeout=timeout, **kwargs)
-        response.raise_for_status()
-        payload = response.json()
-        if not payload.get("ok"): raise RuntimeError(payload.get("description") or f"Telegram rejected {method}")
-        return payload
+        try:
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or not payload.get("ok"):
+                raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
+            return payload
+        finally:
+            response.close()
 
-    def send_message(self, chat_id, text): self._call("sendMessage", timeout=20, data={"chat_id": chat_id, "text": text})
+    def send_message(self, chat_id, text):
+        if self.stop_event.is_set():
+            raise RuntimeError("TELEGRAM_UPDATE_CANCELLED")
+        self._call("sendMessage", timeout=20, data={"chat_id": chat_id, "text": text})
+
+    def _load_state(self):
+        value = self.state_store.read()
+        if value is None or (isinstance(value, dict) and "schemaVersion" not in value):
+            self._state = empty_telegram_state()
+            return
+        self._state = validate_telegram_state(value)
+
+    def _record(self):
+        if self._state is None or self.bot_id is None:
+            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+        return self._state["bots"][str(self.bot_id)]
+
+    def _persist(self):
+        self.state_store.write(self._state)
+
+    def prepare(self):
+        self._call("deleteWebhook", timeout=20, data={"drop_pending_updates": "false"})
+        result = self._call("getMe", timeout=20).get("result")
+        bot_id = result.get("id") if isinstance(result, dict) else None
+        if isinstance(bot_id, bool) or not isinstance(bot_id, int) or bot_id <= 0:
+            raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
+        self.bot_id = bot_id
+        self.bot_username = result.get("username") if isinstance(result.get("username"), str) else None
+        self._load_state()
+        key = str(bot_id)
+        if key not in self._state["bots"]:
+            self._state["bots"][key] = {
+                "pairedPrivateChatIds": [],
+                "nextUpdateOffset": None,
+                "migrationActive": True,
+            }
+            self._persist()
 
     def _pair(self, chat_id):
-        state = self.state_store.read() or {}; allowed = [value for value in state.get("allowedChatIds", []) if isinstance(value, int)]
-        if chat_id not in allowed: allowed.append(chat_id)
-        state["allowedChatIds"] = allowed; self.state_store.write(state)
+        record = self._record()
+        if chat_id not in record["pairedPrivateChatIds"]:
+            record["pairedPrivateChatIds"].append(chat_id)
+            try:
+                self._persist()
+            except Exception:
+                record["pairedPrivateChatIds"].remove(chat_id)
+                raise
 
-    def _handle_message(self, message):
+    def _handle_message(self, message, *, migration_active=False):
         chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}; chat_id, text = chat.get("id"), message.get("text")
-        if not isinstance(chat_id, int) or not isinstance(text, str): return
+        if chat.get("type") != "private" or isinstance(chat_id, bool) or not isinstance(chat_id, int) or not isinstance(text, str): return
         command, paired = normalize(text.split()[0]) if text.strip() else "", self.paired_chat_ids
         if command.startswith("/start"):
-            if not paired: self._pair(chat_id); self.send_message(chat_id, "Prisma Local quedó vinculada a este chat. Abrí la HMI en modo presentación y ya podés consultar los datos visibles.")
+            if migration_active:
+                self.send_message(chat_id, "Send /start again after migration completes.")
+            elif not paired and self.bot_id is not None: self._pair(chat_id); self.send_message(chat_id, "Prisma Local quedó vinculada a este chat. Abrí la HMI en modo presentación y ya podés consultar los datos visibles.")
             elif chat_id in paired: self.send_message(chat_id, "Prisma Local está lista para responder sobre la HMI visible.")
             else: self.send_message(chat_id, "Este bot local ya está vinculado a otro chat.")
             return
-        if chat_id not in paired: self.send_message(chat_id, "Enviá /start para vincular este bot local."); return
+        if chat_id not in paired: self.send_message(chat_id, "Send /start to pair this local bot."); return
         if command.startswith("/status"):
             snapshot = self.snapshot_store.read(); self.send_message(chat_id, f"Prisma Local está activa. Último snapshot: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
         if command.startswith("/help"):
@@ -379,24 +427,68 @@ class TelegramLocalBot:
 
     def run(self):
         try:
-            self._call("deleteWebhook", timeout=20, data={"drop_pending_updates": "true"}); self.bot_username = self._call("getMe", timeout=20).get("result", {}).get("username")
-        except Exception as error: self.last_error = str(error)
-        offset = None
+            if self.bot_id is None:
+                self.prepare()
+        except Exception:
+            self.last_error = "TELEGRAM_PREPARATION_FAILED"
+            return
         while not self.stop_event.is_set():
             try:
-                payload = self._call("getUpdates", timeout=35, data={"timeout": 25, **({"offset": offset} if offset is not None else {})}); self.last_error = None
-                for update in payload.get("result", []):
-                    if isinstance(update.get("update_id"), int): offset = update["update_id"] + 1
-                    if isinstance(update.get("message"), dict): self._handle_message(update["message"])
-            except Exception as error:
-                self.last_error = str(error); self.stop_event.wait(5)
+                record = self._record()
+                migration_active = record["migrationActive"]
+                offset = record["nextUpdateOffset"]
+                request_data = {"timeout": 0 if migration_active else 25, **({"offset": offset} if offset is not None else {})}
+                payload = self._call("getUpdates", timeout=35, data=request_data)
+                updates = payload.get("result")
+                if not isinstance(updates, list):
+                    raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
+                if migration_active and not updates:
+                    record["migrationActive"] = False
+                    try:
+                        self._persist()
+                    except Exception:
+                        record["migrationActive"] = True
+                        raise
+                    self.last_error = None
+                    continue
+                validated_updates = []
+                for update in updates:
+                    if not isinstance(update, dict):
+                        raise RuntimeError("TELEGRAM_UPDATE_INVALID")
+                    update_id = update.get("update_id")
+                    if isinstance(update_id, bool) or not isinstance(update_id, int) or update_id < 0:
+                        raise RuntimeError("TELEGRAM_UPDATE_INVALID")
+                    validated_updates.append((update_id, update))
+                seen = set()
+                for update_id, update in sorted(validated_updates, key=lambda item: item[0]):
+                    if self.stop_event.is_set():
+                        break
+                    if update_id in seen or (record["nextUpdateOffset"] is not None and update_id < record["nextUpdateOffset"]):
+                        continue
+                    seen.add(update_id)
+                    message = update.get("message")
+                    if isinstance(message, dict):
+                        self._handle_message(message, migration_active=migration_active)
+                    previous_offset = record["nextUpdateOffset"]
+                    record["nextUpdateOffset"] = update_id + 1
+                    try:
+                        self._persist()
+                    except Exception:
+                        record["nextUpdateOffset"] = previous_offset
+                        raise
+                self.last_error = None
+            except Exception:
+                self.last_error = "TELEGRAM_POLL_FAILED"
+                self.stop_event.wait(5)
 
     def start(self):
         if not self.thread or not self.thread.is_alive(): self.thread = threading.Thread(target=self.run, name="prisma-local-telegram", daemon=True); self.thread.start()
 
     def stop(self):
         self.stop_event.set()
-        if self.thread and self.thread.is_alive(): self.thread.join(timeout=3)
+        self.session.close()
+        if self.thread and self.thread.is_alive(): self.thread.join(timeout=40)
+        return not self.thread or not self.thread.is_alive()
 
 
 def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, config=None):
@@ -406,7 +498,7 @@ def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAU
     return TelegramLocalBot(config.token, snapshot_store, state_store, voice_events, api_base)
 
 
-def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None) -> Flask:
+def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None, telegram_manager=None) -> Flask:
     paths = runtime_paths()
     snapshot_store = snapshot_store or JsonFileStore(paths.snapshot)
     voice_events = voice_events or VoiceEventStore()
@@ -414,7 +506,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     telegram_configuration = telegram_configuration or read_telegram_config()
     voice_url = (os.environ.get("PRISMA_LOCAL_VOICE_URL") or DEFAULT_PRISMA_VOICE_URL).rstrip("/")
     local_http = requests.Session(); local_http.trust_env = False
-    app = Flask(__name__); app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, session_registry=session_registry)
+    app = Flask(__name__)
     if admin_http is None:
         permissions = SecureStoragePermissions()
         repository = AdminAuthRepository(paths.auth_database, permission_checker=permissions.verify)
@@ -424,11 +516,22 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             paths.root,
             permissions.verify,
         )
+        if telegram_bot is None and telegram_manager is None:
+            resolver = TelegramCredentialResolver(os.environ, lambda: credentials)
+            state_store = TelegramStateRepository(paths.chat_state)
+            telegram_manager = TelegramLifecycleManager(
+                telegram_configuration,
+                resolver,
+                credentials,
+                lambda token: TelegramLocalBot(token, snapshot_store, state_store, voice_events),
+            )
         admin_http = AdminHttpBoundary(
             AdminAuthService(repository, ScryptPasswordHasher()),
             credential_service=credentials,
+            telegram_manager=telegram_manager,
             public_origin=os.environ.get("PRISMA_PUBLIC_ORIGIN"),
         )
+    app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry)
     admin_http.register(app)
 
     @app.after_request
@@ -492,7 +595,8 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     @app.route("/health", methods=["GET"])
     def health():
         snapshot = snapshot_store.read(); voice_ok, voice_probe = _probe_voice(local_http, voice_url)
-        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_configuration.enabled, "telegramConfigured": telegram_configuration.configured, "telegramConnected": bool(telegram_bot and telegram_bot.bot_username), "telegramVerified": False, "telegramConfigurationError": telegram_configuration.configuration_error, "telegramLastError": telegram_bot.last_error if telegram_bot else None, "prismaVoiceReady": voice_ok, "voiceProbe": voice_probe})
+        telegram_status = telegram_manager.status() if telegram_manager is not None else None
+        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_status["enabled"] if telegram_status else telegram_configuration.enabled, "telegramConfigured": telegram_status["configured"] if telegram_status else telegram_configuration.configured, "telegramConnected": telegram_status["running"] if telegram_status else bool(telegram_bot and telegram_bot.bot_username), "telegramVerified": telegram_status["verified"] if telegram_status else False, "telegramConfigurationError": telegram_status["lastError"] if telegram_status and not telegram_status["configured"] else telegram_configuration.configuration_error, "telegramLastError": telegram_status["lastError"] if telegram_status else (telegram_bot.last_error if telegram_bot else None), "telegramDesiredGeneration": telegram_status["desiredGeneration"] if telegram_status else None, "telegramAppliedGeneration": telegram_status["appliedGeneration"] if telegram_status else None, "telegramRestartRequired": telegram_status["restartRequired"] if telegram_status else False, "prismaVoiceReady": voice_ok, "voiceProbe": voice_probe})
 
     @app.route("/hmi/current-snapshot", methods=["GET", "POST", "OPTIONS"])
     def current_snapshot():
@@ -566,13 +670,13 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
 
 def main():
     telegram_configuration = read_telegram_config()
-    paths = runtime_paths(); snapshot_store = JsonFileStore(paths.snapshot); state_store = JsonFileStore(paths.chat_state); events = VoiceEventStore()
-    bot = build_telegram_bot(snapshot_store, state_store, events, config=telegram_configuration)
-    app = create_app(snapshot_store, events, bot, telegram_configuration)
-    if bot: bot.start()
+    paths = runtime_paths(); snapshot_store = JsonFileStore(paths.snapshot); events = VoiceEventStore()
+    app = create_app(snapshot_store, events, None, telegram_configuration)
+    manager = app.config.get("telegram_manager")
+    if manager: manager.startup_apply()
     try: app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, threaded=True, use_reloader=False)
     finally:
-        if bot: bot.stop()
+        if manager: manager.stop()
 
 
 if __name__ == "__main__": main()

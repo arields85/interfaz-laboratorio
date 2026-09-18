@@ -15,6 +15,7 @@ import OverviewPage from '../pages/OverviewPage';
 import DiagnosticsPage from '../pages/DiagnosticsPage';
 import LogsPage from '../pages/LogsPage';
 import EppiViewer from '../components/viewer/eppi/EppiViewer';
+import AdminSessionLifecycle from '../components/auth/AdminSessionLifecycle';
 
 // =============================================================================
 // APP ROUTER
@@ -23,7 +24,7 @@ import EppiViewer from '../components/viewer/eppi/EppiViewer';
 // Arquitectura Técnica v1.3 §7.1 y §10
 // =============================================================================
 
-const router = createBrowserRouter([
+const router = createBrowserRouter([{ element: <AdminSessionLifecycle />, children: [
     {
         path: '/',
         element: <MainLayout />,
@@ -54,7 +55,7 @@ const router = createBrowserRouter([
             { path: 'hierarchy', element: <HierarchyPage /> },
         ],
     },
-]);
+]}]);
 
 export default function AppRouter() {
     return <RouterProvider router={router} />;

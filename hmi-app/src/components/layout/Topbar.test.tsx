@@ -6,6 +6,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../../config/loaderOptions.config';
 import type { AuthSession } from '../../domain';
 import { AUTH_SESSION_STORAGE_KEY, useAuthStore } from '../../store/auth.store';
+
+const sessionControllerMock = vi.hoisted(() => ({
+    login: vi.fn(),
+    refresh: vi.fn(),
+    exit: vi.fn(),
+}));
+
+vi.mock('../../services/adminSession.controller', () => ({ adminSessionController: sessionControllerMock }));
 import { useUIStore } from '../../store/ui.store';
 import Topbar from './Topbar';
 import { SHIELD_REVEAL_REQUEST_EVENT } from '../../hooks/useBootShield';
@@ -106,6 +114,12 @@ describe('Topbar', () => {
             isAuthenticating: false,
             error: null,
         });
+        sessionControllerMock.login.mockImplementation(async () => {
+            useAuthStore.setState({ session: adminSession, isHydrated: true, isAuthenticating: false, error: null });
+            return { ok: true as const, user: adminSession.user! };
+        });
+        sessionControllerMock.refresh.mockResolvedValue(undefined);
+        sessionControllerMock.exit.mockResolvedValue(undefined);
     });
 
     it('hides admin-only actions until auth hydration completes', () => {
@@ -223,7 +237,6 @@ describe('Topbar', () => {
             isAuthenticating: false,
             error: null,
         });
-
         renderTopbar('/eppi/orders');
 
         expect(screen.queryByRole('button', { name: 'Notificaciones' })).not.toBeInTheDocument();
@@ -327,7 +340,9 @@ describe('Topbar', () => {
         await user.click(screen.getByTitle('Administracion'));
 
         expect(windowOpenSpy).not.toHaveBeenCalled();
-        expect(screen.getByTestId('current-path')).toHaveTextContent('/admin');
+        await waitFor(() => {
+            expect(screen.getByTestId('current-path')).toHaveTextContent('/admin');
+        });
         expect(revealRequestSpy).toHaveBeenCalledTimes(1);
         expect(revealRequestSpy.mock.calls[0]?.[0]).toMatchObject({
             detail: {

@@ -67,8 +67,17 @@ const authStoreMock = vi.hoisted(() => {
     return { store };
 });
 
+const sessionControllerMock = vi.hoisted(() => ({
+    login: vi.fn(),
+    exit: vi.fn(),
+}));
+
 vi.mock('../../store/auth.store', () => ({
     useAuthStore: authStoreMock.store,
+}));
+
+vi.mock('../../services/adminSession.controller', () => ({
+    adminSessionController: sessionControllerMock,
 }));
 
 function createTriggerRef() {
@@ -77,11 +86,16 @@ function createTriggerRef() {
 
 describe('LoginOverlay', () => {
     beforeEach(() => {
+        vi.clearAllMocks();
         authStoreMock.store.setState({
             session: unauthenticatedSession,
             login: vi.fn(async () => INVALID_AUTH_RESULT),
             logout: vi.fn(),
         });
+        sessionControllerMock.login.mockImplementation((username: string, password: string) => (
+            authStoreMock.store.getState().login(username, password)
+        ));
+        sessionControllerMock.exit.mockReset();
     });
 
     it('renders the login form when open and unauthenticated', () => {
@@ -158,7 +172,7 @@ describe('LoginOverlay', () => {
         expect(await screen.findByText('Credenciales inválidas')).toBeInTheDocument();
     });
 
-    it('trims credentials, closes the overlay, and clears the form on successful login', async () => {
+    it('preserves submitted username and password bytes', async () => {
         const user = userEvent.setup();
         const onClose = vi.fn();
         const loginResult: AuthResult = SUCCESS_AUTH_RESULT;
@@ -184,9 +198,21 @@ describe('LoginOverlay', () => {
         await user.type(passwordInput, ' 7trebol ');
         await user.click(screen.getByRole('button', { name: 'Ingresar' }));
 
-        expect(authStoreMock.store.getState().login).toHaveBeenCalledWith('admin', '7trebol');
+        expect(sessionControllerMock.login).toHaveBeenCalledWith(' admin ', ' 7trebol ');
         expect(onClose).toHaveBeenCalledTimes(1);
         expect(usernameInput).toHaveValue('');
         expect(passwordInput).toHaveValue('');
+    });
+
+    it('submits a nonempty all-space password without changing any byte', async () => {
+        const user = userEvent.setup();
+        sessionControllerMock.login.mockResolvedValue(SUCCESS_AUTH_RESULT);
+        render(<LoginOverlay triggerRef={createTriggerRef()} isOpen onClose={vi.fn()} />);
+
+        await user.type(screen.getByLabelText('Usuario'), 'admin');
+        await user.type(screen.getByLabelText('Contraseña'), '               ');
+        await user.click(screen.getByRole('button', { name: 'Ingresar' }));
+
+        expect(sessionControllerMock.login).toHaveBeenCalledWith('admin', '               ');
     });
 });

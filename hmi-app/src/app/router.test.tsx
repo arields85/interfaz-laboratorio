@@ -43,6 +43,10 @@ vi.mock('../pages/OverviewPage', () => ({ default: () => <div>Overview page</div
 vi.mock('../pages/DiagnosticsPage', () => ({ default: () => <div>Diagnostics page</div> }));
 vi.mock('../pages/LogsPage', () => ({ default: () => <div>Logs page</div> }));
 vi.mock('../components/viewer/eppi/EppiViewer', () => ({ default: () => <div>EPPI viewer</div> }));
+vi.mock('../components/auth/AdminSessionLifecycle', async () => {
+    const { Outlet } = await import('react-router-dom');
+    return { default: () => <Outlet /> };
+});
 vi.mock('../pages/admin/DashboardManagerPage', () => ({ default: () => <div>Admin dashboards</div> }));
 vi.mock('../pages/admin/DashboardBuilderPage', () => ({ default: () => <div>Admin builder</div> }));
 vi.mock('../pages/admin/HierarchyPage', () => ({ default: () => <div>Admin hierarchy</div> }));

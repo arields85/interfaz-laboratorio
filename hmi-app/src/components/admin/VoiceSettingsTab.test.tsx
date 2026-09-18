@@ -70,6 +70,21 @@ describe('VoiceSettingsTab', () => {
         expect(localStorage.getItem('hmi:prisma-voice-tts-service-url')).toBe('https://legacy.invalid/tts');
     });
 
+    it('renders credential administration without joining the shared Voice save draft', async () => {
+        const user = userEvent.setup();
+        vi.stubGlobal('fetch', vi.fn(async () => configEnvelope()));
+        const onDirtyChange = vi.fn();
+        render(<VoiceSettingsTab onDirtyChange={onDirtyChange} />);
+
+        expect(await screen.findByRole('heading', { name: 'Credenciales de proveedores' })).toBeInTheDocument();
+        onDirtyChange.mockClear();
+        await user.type(screen.getByLabelText('Credencial Gemini'), 'synthetic-canary-secret');
+
+        expect(onDirtyChange).not.toHaveBeenCalledWith(true);
+        expect(localStorage.getItem('synthetic-canary-secret')).toBeNull();
+        expect(sessionStorage.getItem('synthetic-canary-secret')).toBeNull();
+    });
+
     it('loads the runtime envelope into effect controls without dirtying the tab', async () => {
         const config = createDefaultPrismaVoiceConfig();
         config.effectIntensity = 42;

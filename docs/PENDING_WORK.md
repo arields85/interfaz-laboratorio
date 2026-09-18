@@ -16,8 +16,8 @@ Este documento es la autoridad de descubrimiento sobre **qué** está pendiente 
 | ID | Estado | Área | Resumen | Engram topic | Agregado |
 |---|---|---|---|---|---|
 | PW-001 | pending | Configuración general | aplicar a CONEXIÓN, DISEÑO, OPCIONES y AJUSTES el patrón aprobado en VOZ para mostrar el estado de guardado en el footer a la izquierda de Guardar, con tonos semánticos. | `backlog/global-settings-save-status-all-tabs` | 2026-08-10 |
-| PW-002 | pending | Prisma Runtime | Con la base backend, credenciales protegidas y adopción Gemini por sesión completas offline, aceptar arranque e instalación limpios reales; implementar forwarding, despliegue y supervisión administrados por IT, recuperación durable y retiro explícito de la instalación legacy externa. | `backlog/prisma-runtime-monorepo-integration` | 2026-08-30 |
-| PW-003 | pending | Prisma Assistant | Con almacenamiento/API protegidos y voz Gemini aislada por sesión completos offline, adoptar Telegram mediante token almacenado y estado deseado/aplicado con reinicio seguro; después integrar Voz/admin UI y continuar el pipeline de datos compartidos. | `backlog/prisma-dual-channel-assistant` | 2026-09-17 |
+| PW-002 | pending | Prisma Runtime | Con PAC-3 completo y aceptado offline, aceptar arranque e instalación limpios reales; corregir la carrera concurrente de inicialización de estado y completar forwarding, despliegue, supervisión, recuperación durable y retiro de la instalación legacy. | `backlog/prisma-runtime-monorepo-integration` | 2026-08-30 |
+| PW-003 | pending | Prisma Assistant | PAC-4 y PAC-4B están completos y aceptados offline. Quedan el cierre final del paquete PAC-5 y el trabajo posterior del asistente; se conserva la misma sesión administrativa y no existe un segundo login. | `backlog/prisma-dual-channel-assistant` | 2026-09-17 |
 
 ## Protocolo
 

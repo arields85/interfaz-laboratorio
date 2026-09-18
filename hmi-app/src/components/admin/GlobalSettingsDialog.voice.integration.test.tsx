@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PRISMA_ORB_STORAGE_KEY } from '../../config/prismaOrb.config';
 import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
+import { adminAuthClient } from '../../services/adminAuth.service';
+import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 import GlobalSettingsDialog from './GlobalSettingsDialog';
 
 vi.mock('./ConnectionSettingsTab', () => ({ default: () => null }));
@@ -49,7 +51,13 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         localStorage.clear();
         localStorage.setItem('hmi-global-settings-tab', 'voice');
     });
-    afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); });
+    afterEach(() => {
+        adminAuthClient.clearPrivateSession();
+        useAuthStore.setState({ session: UNAUTHENTICATED_SESSION, isHydrated: false, isAuthenticating: false, error: null });
+        localStorage.clear();
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
 
     it('enables shared Save for an effect edit and persists one fixed-route PUT', async () => {
         const fetchMock = vi.fn(async () => envelope());
@@ -125,5 +133,65 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(screen.getByRole('slider', { name: 'Velocidad' })).toHaveValue('1');
         expect(screen.getByRole('slider', { name: 'Penetración de haces' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+    });
+
+    it('keeps credential drafts outside global Save and clears them when the dialog closes', async () => {
+        useAuthStore.setState({
+            session: {
+                user: { id: 'administrator:admin', username: 'admin', displayName: 'admin', role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } },
+                isAuthenticated: true,
+                loginTimestamp: new Date().toISOString(),
+                absoluteExpiresAt: Math.floor(Date.now() / 1_000) + 600,
+            },
+            isHydrated: true,
+        });
+        vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
+            gemini: { configured: false }, telegram: { configured: false },
+        });
+        vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
+            enabled: true,
+            configured: false,
+            running: false,
+            verified: false,
+            configurationError: 'TELEGRAM_CREDENTIAL_MISSING',
+            lastError: null,
+            desiredGeneration: 1,
+            appliedGeneration: 1,
+            restartRequired: false,
+        });
+        vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+            if (input === '/api/prisma/admin/credentials') {
+                return new Response(JSON.stringify({
+                    ok: true,
+                    providers: { gemini: { configured: false }, telegram: { configured: false } },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+            if (input === '/api/prisma/health') {
+                return new Response(JSON.stringify({
+                    ok: true,
+                    telegramEnabled: true,
+                    telegramConfigured: false,
+                    telegramConnected: false,
+                    telegramVerified: false,
+                    telegramConfigurationError: 'TELEGRAM_CREDENTIAL_MISSING',
+                    telegramLastError: null,
+                    telegramDesiredGeneration: 1,
+                    telegramAppliedGeneration: 1,
+                    telegramRestartRequired: false,
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+            return envelope();
+        }));
+        const user = userEvent.setup();
+        renderDialogHarness();
+        const input = await screen.findByLabelText('Credencial Gemini');
+        await waitFor(() => expect(input).toBeEnabled());
+
+        await user.type(input, 'synthetic-secret');
+        expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(screen.getByRole('button', { name: 'Reopen' }));
+
+        expect(await screen.findByLabelText('Credencial Gemini')).toHaveValue('');
     });
 });

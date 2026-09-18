@@ -741,7 +741,7 @@ Windows con `npm run dev`, además del enrutamiento same-origin y el retiro del 
 legacy, cuentan con verificación independiente. Ese cierre corresponde a la etapa previa
 registrada en el commit local `36eeaa4`.
 
-Sobre esa base, `PAC-1`, `PAC-1a`, `PAC-2`, `PAC-3A` y `PAC-3A-S1` están completos y aceptados
+Sobre esa base, `PAC-1`, `PAC-1a`, `PAC-2`, `PAC-3A`, `PAC-3A-S1`, `PAC-3B` y `PAC-3` están completos y aceptados
 offline. Prisma dispone de autenticación backend propia, recuperación offline y almacenamiento
 cifrado AES-256-GCM para credenciales Gemini/Telegram, con clave de instalación separada y API
 administrativa protegida. La API solo expone estado configurado; no devuelve secretos ni afirma
@@ -782,27 +782,60 @@ modificaciones ajenas pendientes de resolver.
 El próximo trabajo debe partir de este maestro, de
 [`../../odd/tasks/prisma-runtime-foundations.md`](../../odd/tasks/prisma-runtime-foundations.md)
 y de los topics estables `backlog/prisma-runtime-monorepo-integration` y
-`backlog/prisma-dual-channel-assistant`. `PAC-3` permanece abierto porque `PAC-3B` está pendiente.
-La continuación exacta es adoptar el token Telegram desde el almacenamiento protegido, modelar
-estado deseado/aplicado y ofrecer aplicación o reinicio explícitos y autenticados. El reemplazo
-debe detener y esperar al poller anterior para impedir bots superpuestos, preservar pairing y
-updates pendientes, y evitar `drop_pending_updates`. Telegram continúa hoy con token de entorno,
-respuesta privada de texto y sin broadcast HMI ni audio pago automático.
+`backlog/prisma-dual-channel-assistant`. `PAC-3B` y `PAC-3` están completos y aceptados offline,
+con un commit local y cierre de sesión autorizados en `feat/prisma-telegram-credentials` sobre
+`b5fcaf2`. La identidad de entrega se registra en Git y en el checkpoint canónico de Engram una vez
+confirmado el commit, sin incrustar un SHA autorreferencial en este árbol. La verificación final aprobó
+27 pruebas Telegram focalizadas, 236 backend completas, `pip check`, diff y los escenarios de
+ownership, retry, DELETE, shutdown, thread bloqueado, migración, offsets y no pérdida.
 
-Después de verificar `PAC-3B` corresponde `PAC-4`: integrar campos y diagnósticos en
-**Configuración general → Voz**. No se añade UI de chat, historial persistido ni identidad de
-cuenta. La política existente de acceso a `/hmi/prisma-config` tampoco quedó protegida por estos
-cambios y requiere tratamiento separado.
+`PAC-4A` también está completo y aceptado offline. La autoridad administrativa proviene únicamente
+de la sesión backend validada. Cerrar **Configuración general** conserva esa sesión; salir del modo
+administrador elimina la autoridad local y mantiene una barrera durable hasta un nuevo login
+explícito validado. Un `204` de logout confirma solo la revocación de la cookie presentada: no afirma
+que un login anterior abortado haya dejado de ejecutarse en el servidor. La barrera impide que una
+cookie tardía restaure automáticamente el rol HMI.
+
+La aceptación final conservó **80 pruebas focalizadas en 9 archivos**, **1885 pruebas HMI en 199
+archivos**, build, lint y diff correctos, además de **40 pruebas parentales en 3 archivos**. El gate
+backend vigente aprobó **236 pruebas en 15,056 s**. Una ejecución anterior expuso una carrera
+preexistente de check-then-copy durante el sembrado concurrente de estado; el diagnóstico de solo
+lectura la dejó visible bajo PW-002 y no afirmó haberla corregido.
+
+`PAC-4B` y el paquete `PAC-4` están completos y aceptados offline tras una verificación independiente
+COMPLETE PASS que cerró los cuatro hallazgos sin regresiones. **Configuración general → Voz**
+incorpora campos transitorios para las credenciales Gemini y Telegram, metadatos y diagnósticos
+separados, y acciones explícitas de guardar, eliminar y aplicar que reutilizan la misma sesión
+administrativa. Los secretos no ingresan en
+TanStack Query, Zustand, almacenamiento del navegador ni el guardado global de efectos/orbe. Un
+DELETE Telegram con `409 TELEGRAM_STOP_TIMEOUT` conserva la ausencia confirmada, actualiza estado
+pasivo y ofrece un nuevo DELETE iniciado por el usuario; no aplica un token ausente ni repite acciones
+automáticamente.
+
+La prueba final aprobó **125 pruebas focalizadas en 10 archivos**, **1922 pruebas HMI en 202 archivos**,
+cobertura de **86,79 % statements, 80,11 % branches, 86,07 % functions y 87,66 % lines**, build, lint,
+diff y **236 pruebas backend**. El verificador externo añadió **6 pruebas** con cliente real, hook,
+QueryClient y RTL; el padre confirmó **51 pruebas en 3 archivos** y la lectura estructural del cliente
+y del hook. Se conservaron la barrera manual PAC-4A, R1/R2, proxies, Viewer/Voice, el guardado global
+solo para efectos y el cierre de Settings sin cerrar la sesión administrativa.
+
+Esto constituye aceptación offline, no prueba de navegador o captura real, proveedor, red, proxy
+productivo, seguridad de despliegue ni readiness de producción. No se añade un segundo login, UI de
+chat, historial persistido ni identidad de cuenta. La política existente de acceso a
+`/hmi/prisma-config` tampoco quedó protegida por estos cambios y requiere tratamiento separado.
+`PAC-5` permanece pendiente para el cierre final del paquete y no se ejecuta mediante esta actualización.
+La autorización del commit local no incluye push, merge, ejecución de PAC-5 ni acciones productivas.
 
 El pipeline productivo administrado por IT sigue como objetivo posterior sin seleccionar
 todavía OS o supervisor. Cualquier readiness adicional del loader del navegador es UX
 opcional y no bloqueante, no un requisito obligatorio aprobado.
 
-Esto no constituye aceptación de producción. PW-002 y PW-003 continúan activos para instalación
-limpia y arranque real, forwarding, despliegue y supervisión administrados por IT, recuperación
-durable, retiro explícito de la instalación legacy y la evolución funcional pendiente. La
-provisión de una clave real, permisos live de clave nueva en Windows, validación Linux real,
-reparse points nativos, backup/restore, TLS, proxy y entorno productivo también permanecen abiertos.
+Esto no constituye aceptación de producción. PW-002 y PW-003 continúan activos para la carrera de
+inicialización concurrente, instalación limpia y arranque real, forwarding, despliegue y supervisión
+administrados por IT, recuperación durable, retiro explícito de la instalación legacy y el cierre
+final PAC-5 junto con trabajo posterior del asistente. La
+provisión de una clave real, permisos live de clave nueva en Windows, validación Linux real, reparse
+points nativos, backup/restore, TLS, proxy y entorno productivo también permanecen abiertos.
 
 ## 12. Changelog
 

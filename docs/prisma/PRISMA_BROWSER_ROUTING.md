@@ -1,6 +1,6 @@
 # Prisma browser routing
 
-The HMI browser uses four fixed same-origin routes for Prisma. Browser code does not select a Prisma runtime, store upstream addresses, or connect to loopback services directly.
+The HMI browser uses fixed same-origin routes for Prisma. Browser code does not select a Prisma runtime, store upstream addresses, or connect to loopback services directly.
 
 UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verification. This guide does not claim live browser, backend, provider, or production forwarding acceptance.
 
@@ -8,16 +8,27 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 
 | Browser route | Method | Development upstream | Purpose |
 |---|---|---|---|
+| `/api/prisma/session` | `POST`, `DELETE` | `http://127.0.0.1:5057/hmi/session` | Document-session creation and revocation |
 | `/api/prisma/snapshot` | `POST` | `http://127.0.0.1:5057/hmi/current-snapshot` | Current valid dashboard presentation frame |
 | `/api/prisma/events/latest` | `GET` | `http://127.0.0.1:5057/hmi/voice/latest` | Latest voice event polling |
+| `/api/prisma/ask` | `POST` | `http://127.0.0.1:5057/local/ask` | Question within the current document session |
 | `/api/prisma/voice-config` | `GET`, `PUT` | `http://127.0.0.1:5057/hmi/prisma-config` | Voice-effect configuration envelope |
 | `/api/prisma/tts/live` | `POST` | `http://127.0.0.1:5056/prisma/speak-live` | Progressive PCM audio stream |
+| `/api/prisma/admin/auth/status` | `GET` | Same path on `http://127.0.0.1:5057` | Offline-provisioning status |
+| `/api/prisma/admin/auth/login` | `POST` | Same path on `http://127.0.0.1:5057` | Administrator login |
+| `/api/prisma/admin/auth/session` | `GET` | Same path on `http://127.0.0.1:5057` | Validated session bootstrap/revalidation |
+| `/api/prisma/admin/auth/logout` | `POST` | Same path on `http://127.0.0.1:5057` | Administrator revocation |
+| `/api/prisma/admin/credentials` | `GET` | Same path on `http://127.0.0.1:5057` | Metadata-only credential status |
+| `/api/prisma/admin/credentials/gemini` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Gemini credential save and deletion |
+| `/api/prisma/admin/credentials/telegram` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Telegram credential save and deletion |
+| `/api/prisma/admin/credentials/telegram/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Telegram apply and restart |
+| `/api/prisma/health` | `GET` | `http://127.0.0.1:5057/health` | Passive runtime diagnostics |
 
 Browser constants live in `hmi-app/src/config/prismaAssistant.config.ts`. Development-only targets and rewrite rules live in `hmi-app/vite.prismaProxy.config.ts` and must not be imported by browser modules.
 
 ## Development forwarding
 
-Vite forwards only the exact pathnames above, optionally followed by a query string. The rules:
+Vite forwards only the exact pathnames above, optionally followed by a query string, and only their listed methods. The rules:
 
 - preserve encoded query bytes during rewriting;
 - reject suffixes, trailing slashes, encoded-path lookalikes, and unrelated `/api/prisma/*` paths;
@@ -25,11 +36,19 @@ Vite forwards only the exact pathnames above, optionally followed by a query str
 - keep Vite host and CORS behavior unchanged; and
 - use normal proxy streaming without response buffering or header replacement.
 
+Admin and health routes strip `X-Prisma-Session-Capability`; administrator authority uses only the
+backend cookie and CSRF contract. Cookies, `Set-Cookie`, `Origin`, CSRF, response status, and
+`Cache-Control: no-store` otherwise pass through the development proxy unchanged.
+
+If auth status reports `configured: false`, provision the single administrator through the offline
+runtime procedure in `services/prisma-runtime/README.md` (`provision-admin`). The browser does not
+provision administrator credentials, configure the master key, create accounts, or provide recovery commands.
+
 `npm run dev` owns the development runtime lifecycle described by the Prisma foundation documentation. Browser routing itself has no startup side effects.
 
 ## Production forwarding contract
 
-The IT host must expose the same four browser routes and forward them to the corresponding upstream paths. The production boundary must preserve:
+The IT host must expose the same browser routes and forward them to the corresponding upstream paths. The production boundary must preserve:
 
 - HTTP methods, request bodies, status codes, and response headers;
 - query strings without decoding and re-encoding them;
@@ -40,6 +59,6 @@ The SPA fallback must never answer these API routes. A missing or unavailable up
 
 ## Security and deployment boundary
 
-This route contract does not define authentication, authorization, secret storage, certificates, process supervision, or a specific reverse-proxy product. Those production controls belong to the IT deployment design and must not be inferred from the Vite development proxy.
+The backend routes define administrator authentication and authorization, but this document does not implement production forwarding, certificates, process supervision, or a reverse-proxy product. Those production controls belong to the IT deployment design and must not be inferred from the Vite development proxy.
 
 Legacy runtime-mode, endpoint, snapshot-export, and TTS URL values may remain in browser storage, but they are inert and do not influence requests.

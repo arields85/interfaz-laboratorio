@@ -83,7 +83,7 @@ unexpected binary is rejected without ever being run.
 |----------|------|
 | `GEMINI_API_KEY` | Legacy Gemini source used only when protected mode is not selected. Optional at startup; whitespace-only values are missing. |
 | `PRISMA_LOCAL_TELEGRAM_ENABLED` | Set to `1` to opt in to Telegram. |
-| `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN` | Required to construct the bot after Telegram opt-in. A missing token is reported without stopping the services or contacting Telegram. |
+| `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN` | Legacy Telegram source used only when protected mode is not selected. Telegram still requires explicit opt-in. |
 | `PRISMA_RUNTIME_STATE_DIR` | Overrides the mutable state root. |
 | `PRISMA_CREDENTIAL_MASTER_KEY_FILE` | Absolute path to the separately protected raw 32-byte credential master-key file. It must be outside the runtime state root. |
 | `PRISMA_BOOTSTRAP_PYTHON` | Bootstrap only. Explicit path to the base interpreter used **once**, to create the environment. Validated and logged; never consulted by a launcher. |
@@ -94,21 +94,27 @@ environment alive through the migration. Selecting an interpreter is now a
 bootstrap-time concern only, and it is loud.
 
 A token without the explicit opt-in does not construct the Telegram bot or make
-Telegram requests. Enabling Telegram without a token leaves the integration
-enabled but unconfigured: no bot is constructed, no Telegram request is made,
-and runtime health remains available. Secrets are never stored by these
-launchers.
+Telegram requests. Enabling Telegram without a token in the selected source leaves the
+integration enabled but unconfigured: no bot is constructed, no Telegram request is made,
+and runtime health remains available. A nonblank master-key-file setting selects protected
+Telegram storage authoritatively; missing or corrupt protected state never falls back to the
+legacy environment token. Secrets are never stored by these launchers.
 
-## Backend credential administration
+## Credential administration
 
-Credential administration is currently a backend-only capability. It is not integrated into
-the HMI, and saving a credential does not verify it, apply it to a provider, or report that a
-provider is running. Gemini adoption is complete offline: a nonblank
+Credential administration is available in **Configuración general → Voz** through the same
+backend-validated administrator session used by the rest of the HMI. There is no second Voice login.
+The browser receives metadata only; secret input remains transient and is cleared when Settings
+closes without ending the administrator session. Global **Guardar** still saves only effects/orb
+settings. Saving a credential does not verify it, apply it to a provider, or report that a provider
+is running. Gemini adoption is complete offline: a nonblank
 `PRISMA_CREDENTIAL_MASTER_KEY_FILE` selects authoritative protected mode, and actual Gemini work
 reads the stored credential at dequeue immediately before client creation. Missing, deleted,
 unavailable, mismatched, or corrupt protected storage never falls back to `GEMINI_API_KEY`.
 The environment key remains a legacy source only when protected mode is not selected. Telegram
-still uses `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN`; protected-token adoption is the next work unit.
+uses the same authoritative source rule. Saving a Telegram replacement advances desired state
+without contacting Telegram or restarting the current poller. Startup may apply an enabled,
+configured source unattended; explicit runtime replacement uses the authenticated apply route.
 
 Provision the administrator and credential storage offline from the repository root, under
 the same OS identity that will run Prisma. Replace the placeholder with an absolute path in a
@@ -138,6 +144,7 @@ Authenticated administrators use these backend routes:
 | `GET /api/prisma/admin/credentials` | Configured booleans for `gemini` and `telegram`; never secret values. |
 | `PUT /api/prisma/admin/credentials/<provider>` | Stores one encrypted secret after Origin and CSRF validation. |
 | `DELETE /api/prisma/admin/credentials/<provider>` | Idempotently removes one stored credential. |
+| `POST /api/prisma/admin/credentials/telegram/apply` | Applies the current desired Telegram token from exact JSON `{}` after Origin, session, and CSRF validation. |
 
 Credential responses are non-cacheable. Stable failures include authentication `401`,
 transport or CSRF `403`, unsupported provider `404`, invalid JSON/value `400`, wrong content
@@ -147,6 +154,22 @@ readback or automatic key rotation. The installation owner must back up the key 
 from the ciphertext database and keep matching copies; losing the key makes encrypted
 credentials unrecoverable.
 
+Telegram PUT is desired-only. Telegram DELETE commits absence before requesting cooperative
+poller stop and returns `409 TELEGRAM_STOP_TIMEOUT` if the old poller remains alive; the deletion
+is retained and no replacement starts. Apply stops and physically joins the old poller before
+starting one replacement. Apply responses expose only source, enabled/configured,
+desired/applied generations, running, verified, restart-required, and sanitized error metadata.
+Provider success is not continuous connectivity or production verification.
+
+In the HMI, **Guardar credencial** stores a Gemini or Telegram secret and **Eliminar credencial**
+removes it. New Gemini work uses the selected stored credential, but saving does not perform live
+verification. Telegram save changes desired state only; **Aplicar cambio** explicitly reconciles the
+running bot. If Telegram deletion returns `409 TELEGRAM_STOP_TIMEOUT`, the token is already absent
+while stop remains uncertain, and only an explicit user retry issues another DELETE. Loading,
+unavailable, retained last-known, configured, desired/applied, running, and verified states remain
+distinct. These behaviors are independently accepted offline, not validated against live providers
+or a production proxy/deployment.
+
 ## Health and integration status
 
 Runtime liveness and external-integration readiness are separate:
@@ -155,13 +178,14 @@ Runtime liveness and external-integration readiness are separate:
   meaning;
 - Gemini status reports the selected protected or environment source and whether its credential
   is configured and available;
-- Telegram enabled, configured, and connected states are reported separately;
+- Telegram enabled, configured, connected, verified, desired/applied generation, and
+  restart-required states are reported separately;
 - configured never means provider-verified. Passive health requests do not
   contact Gemini or Telegram and do not expose credential values.
 
-Provider verification remains an explicit later operation. A future browser
-diagnostics experience may display these statuses, but browser-loader or
-mandatory readiness changes are not part of this runtime increment.
+Telegram `verified` means only that `getMe` succeeded during the current applied startup or
+explicit operation. Gemini verification remains a later operation. The HMI displays these statuses;
+browser-loader or mandatory readiness changes are not part of this runtime increment.
 
 ## HMI document sessions and event-bound voice
 
@@ -204,10 +228,15 @@ producer slot remains quarantined until physical return; the 45-second Gemini SD
 the bounded provider-unblock mechanism. This offline acceptance does not prove live Gemini,
 FFmpeg, native Windows/Linux permissions, TLS, proxying, supervisor behavior, or production use.
 
-Telegram remains an environment-token, private-text integration. It does not publish HMI voice
-events or receive automatic paid audio. The next unit adopts its stored token with explicit
-desired/applied state and safe apply/restart that stops and joins the previous poller, preserves
-pairing and pending updates, and prevents overlapping bots or `drop_pending_updates` data loss.
+Telegram remains a private-text installation-snapshot integration. It does not publish HMI voice
+events, bind a Telegram user to an HMI document, or receive automatic paid audio. Pairing and the
+acknowledged update offset are stored per numeric bot identity. Token rotation for the same bot
+retains that bot's state; a different bot requires pairing, and switching back restores only the
+known bot's own state. Legacy root allowlists and `PRISMA_LOCAL_ALLOWED_CHAT_IDS` are not imported.
+Migration drains the complete queued backlog in nonblocking batches before fresh `/start` pairing
+is allowed, without negative offsets or `drop_pending_updates`. Updates are acknowledged only
+after handling and state persistence. Delivery is at least once, so a crash after a successful
+send but before persistence can duplicate a response.
 
 ## Local development boundary
 
@@ -259,9 +288,11 @@ key, provider-dependent speech still returns the documented technical unavailabl
 response and is never presented as spoken output.
 
 The unified browser-routing increment, backend protected credential storage, Gemini adoption,
-and per-document HMI session isolation are complete offline. Credential administration is not
-yet exposed through the HMI, and Telegram has not adopted stored credentials. This does not prove
-a live provider or production proxy deployment. Production static hosting still requires
+per-document HMI session isolation, and protected Telegram lifecycle are implemented and
+independently verified offline. Telegram retains ownership when stop raises, reports only the
+stable stop failure, prevents replacement until a confirmed stop, and then permits one replacement.
+Credential administration is exposed through the HMI and independently accepted offline. This does
+not prove a live provider or production proxy deployment. Production static hosting still requires
 IT-managed forwarding for all exact routes, including progressive TTS streaming.
 
 Production host and supervisor selection remain deferred. This development

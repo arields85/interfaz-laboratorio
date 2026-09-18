@@ -2,316 +2,373 @@ Repository-relative file: odd/tasks/prisma-protected-credentials.md
 
 # Prisma protected administrator authentication and provider credentials
 
-## Current status
+## Current status — PAC-4 complete and accepted offline
 
-`PAC-1`, `PAC-1a`, `PAC-2`, `PAC-3A`, and `PAC-3A-S1` are complete and accepted
-offline. Delivery is recorded in Git and Engram; production acceptance remains separate.
+`PAC-1`, `PAC-1a`, `PAC-2`, `PAC-3A`, `PAC-3A-S1`, `PAC-3B`, `PAC-3`, and `PAC-4A`
+are complete and independently accepted offline. Independent verifier
+`ses_f4ab3eba7ffeF6KSertcHHo3LD` returned COMPLETE PASS after closing all four PAC-4B findings without
+correction regressions. The parent accepts PAC-4B and the PAC-4 umbrella offline. `PAC-5` remains
+pending for final package closure; production and deployment residuals remain separate.
 
-`PAC-3` remains open because `PAC-3B` has not started. The exact next unit is Telegram
-stored-token adoption with explicit desired/applied state, safe stop/join without overlapping
-pollers, preserved pairing and pending updates, and explicit apply/restart behavior. `PAC-4`
-then integrates credential fields and diagnostics into the HMI administrator experience.
+PAC-4A acceptance is based on independent authentication verifier
+`ses_f4b473e58ffeudIYvT20yFJNVZ`, the final parent spotcheck, and the current canonical backend gate.
+All known PAC-4A functional and security findings are closed offline.
 
-No provider, FFmpeg process, service, listener, real key, network, remote operation, native RDD,
-or production deployment was used for the offline acceptance. The externally modified
-`.gitignore` entries for local Pi runtime state and `.atl/` are unrelated and remain outside the
-intended feature commit.
+One pre-existing runtime setup race remains a visible warning: concurrent state seeding can reach a
+check-then-copy window before manifest locking and produce a temporary `Copy-Item` sharing violation.
+The authorized read-only diagnostic did not change source and did not claim the race fixed. Its
+isolated reproduction passed once, and the required canonical backend gate then passed completely.
+
+The accepted work is prepared on `feat/prisma-telegram-credentials`, based on `b5fcaf2`. The user
+authorized one local work-unit commit and session closure. Delivery identity is recorded through Git
+and the canonical Engram checkpoint after the parent confirms the commit, rather than embedded in
+this self-referential tree. Push, merge, PAC-5 execution, backend production work, dependency changes,
+provider actions, and production acceptance are not authorized by that commit request.
 
 ## Stable work packages
 
 - [x] **PAC-1 — Backend administrator authentication and offline recovery.**
   - [x] **PAC-1a — Validate login JSON shape and types before authentication.**
 - [x] **PAC-2 — Encrypted credential store and protected API.**
-- [ ] **PAC-3 — Adopt stored credentials at provider-consumption boundaries.**
+- [x] **PAC-3 — Adopt stored credentials at provider-consumption boundaries.**
   - [x] **PAC-3A — Adopt Gemini through the event-bound paid invocation path.**
     - [x] **PAC-3A-S1 — Establish server-owned HMI document-session isolation.**
-  - [ ] **PAC-3B — Adopt Telegram through explicit desired/applied lifecycle semantics.**
-- [ ] **PAC-4 — Integrate HMI administrator flow and Voice credential fields.**
+  - [x] **PAC-3B — Adopt Telegram through explicit desired/applied lifecycle semantics.**
+- [x] **PAC-4 — Integrate HMI administrator flow and Voice credential fields.**
+  - [x] **PAC-4A — Unified administrator authentication, transport, proxies, and tests.**
+    - [x] **PAC-4A-1 — Service/controller behavioral tests.**
+    - [x] **PAC-4A-2 — Backend-validated authority replaces local credential authority.**
+    - [x] **PAC-4A-3 — Bounded admin HTTP client and private CSRF handling.**
+    - [x] **PAC-4A-4 — Privileged rendering and lifecycle gates.**
+    - [x] **PAC-4A-5 — Central administrator exit and durable manual-login barrier.**
+    - [x] **PAC-4A-6 — Exact development proxies and integration tests.**
+  - [x] **PAC-4B — Credential UI, diagnostics, explicit actions, and tests.**
 - [ ] **PAC-5 — Independently verify and reconcile active documentation.**
 
-PAC-3A acceptance does not close the PAC-3 umbrella and does not authorize PAC-4 work.
+## Objective and fixed boundaries
 
-## Objective and boundaries
+Prisma owns backend administrator authentication, encrypted Gemini and Telegram credentials, and
+provider consumption without trusting browser roles or exposing secrets. Routine startup remains
+unattended. The HMI remains an observer: no industrial control or process writes.
 
-Prisma owns backend administrator authentication, encrypted Gemini and Telegram credential
-storage, and provider consumption without trusting browser roles or exposing secrets. Routine
-startup remains unattended: no password or terminal prompt is required on every launch.
+Included:
 
-Voice is available to viewers and administrators after installation configuration, but each
-browser document owns its own interaction. Shared infrastructure—backend processes, model
-account, configured key, catalogue, installation telemetry, and bounded worker pools—does not
-create shared conversation, view context, events, replay, cancellation, audio, or navigation.
-
-### Included
-
-- Application-owned administrator authentication for Windows and Linux.
-- A separately provisioned 32-byte installation master-key file protected by OS permissions.
+- Application-owned administrator authentication on Windows and Linux.
+- A separately provisioned 32-byte installation master key protected by OS permissions.
 - Encrypted provider credential storage and metadata-only administration.
-- Protected Gemini credential adoption with authoritative protected mode.
-- Anonymous server-issued browser-document authority and per-session Prisma state.
-- Event-bound TTS, bounded/fair shared execution, and strict offline verification.
+- Authoritative protected-mode Gemini and Telegram credential selection.
+- Anonymous, server-issued browser-document authority and per-session Prisma state.
+- Bot-scoped Telegram pairing, acknowledged offsets, and one managed local poller.
+- Event-bound TTS, bounded shared execution, and strict offline verification.
 
-### Excluded
+Excluded:
 
-- Viewer accounts, durable personal chat, cross-reload/tab identity, or account migration.
-- Cloud vaults, desktop keyrings, DPAPI-only storage, bundled keys, `.env` secret persistence,
-  or per-start prompts.
-- HMI credential UI, Telegram protected-token adoption, or automatic paid Telegram audio.
-- Industrial writes, control permissions, or claims that snapshot/question ingress proves a
-  user's real-world identity.
-- Live provider, FFmpeg, production TLS/proxy/supervisor, clean installation, backup/restore,
-  native Linux, or new-key Windows acceptance.
+- Viewer accounts, durable personal chat, identity across reloads/tabs, or account migration.
+- Cloud vaults, keyrings, bundled keys, `.env` secret persistence, or per-start prompts.
+- Telegram-to-HMI identity, chat UI, broadcast, or automatic paid audio.
+- Industrial writes or treating snapshot/question ingress as real-world identity proof.
+- Live-provider, FFmpeg, deployment, TLS/proxy/supervisor, backup/restore, native-Linux,
+  clean-installation, multi-process Telegram, or forced-thread-termination acceptance.
 
-## PAC-1 administrator authentication
+## Security and session constraints
 
-`prisma_runtime.local_presentation` owns `/api/prisma/admin/*`; the HMI auth store never
-authorizes this boundary.
+- `prisma_runtime.local_presentation` owns `/api/prisma/admin/*`; HMI role state never authorizes the
+  backend boundary.
+- Admin sessions use opaque random cookies, digest-only storage, strict Origin/CSRF checks, bounded
+  throttling, and `Cache-Control: no-store`.
+- The credential database contains AES-256-GCM ciphertext and metadata only. Unknown formats,
+  malformed rows, wrong keys, and corruption fail closed.
+- A nonblank `PRISMA_CREDENTIAL_MASTER_KEY_FILE` selects protected mode. Missing or unavailable
+  protected credentials never fall through to legacy environment values.
+- Browser document capabilities remain memory-only, digest-only server-side, owner-partitioned,
+  bounded, non-durable, and invalid after revocation, expiry, or process restart.
+- Capability failure precedes credential reads, paid work, queue admission, and provider I/O.
+- Telegram remains installation-snapshot, private-text-only, and separate from HMI sessions,
+  events, Gemini, TTS, FFmpeg, and audio.
 
-| Route | Contract |
+## PAC-3 accepted operating contract
+
+### Gemini and document sessions
+
+- Protected mode resolves only the stored Gemini secret and never falls through to
+  `GEMINI_API_KEY` after absence, deletion, unavailability, wrong key, or corruption.
+- Health, credential mutation, and startup do not contact Gemini.
+- Each HMI document receives an anonymous server capability retained only in memory.
+- Capabilities partition question state, view context, events, replay, audio, cancellation, and
+  navigation. They are not accounts, device identity, or protection against bearer theft.
+- Reload creates another document session. State is bounded, non-durable, and not multiworker.
+
+### Telegram state and polling
+
+- State schema v2 keys records by canonical decimal bot ID and stores only paired private chat IDs,
+  next acknowledged offset, and migration state.
+- Legacy root allowlists are never imported. A new bot remains migration-fenced until its initial
+  backlog drains; pairing then requires a fresh `/start`.
+- Same numeric bot identity retains pairing and offset across token rotation. Different bot IDs do
+  not share pairing or offsets.
+- Whole response batches are validated, ordered, deduplicated, and filtered before handling.
+- Offset advances only after handling and required sends. Delivery is at least once, not exactly
+  once, because a crash after accepted delivery but before persistence may repeat a response.
+- Only private text input is supported. Telegram remains separate from HMI identity and paid audio.
+
+### Telegram desired/applied lifecycle
+
+- `PRISMA_LOCAL_TELEGRAM_ENABLED=1` is the explicit opt-in. Disabled startup resolves no secret.
+- Protected mode resolves only the stored Telegram secret. Legacy environment input is available
+  only when protected mode was not selected.
+- One manager owns desired/applied generations, serialized transitions, cached status, and at most
+  one poller. Passive status uses a separate short-held state lock.
+- Save changes desired state without provider contact or restart. Apply stops and confirms the old
+  poller before constructing a replacement.
+- Failed apply remains unapplied and retryable. Public errors are stable, allowlisted, and sanitized.
+- Delete commits absence before stop/join. A timeout returns `TELEGRAM_STOP_TIMEOUT`, retains
+  ownership, remains restart-required, and never claims thread termination or starts a replacement.
+
+| Field | Meaning |
 |---|---|
-| `GET /api/prisma/admin/auth/status` | Public configured metadata only. |
-| `POST /api/prisma/admin/auth/login` | Exact accepted Origin and strict string credentials; issues an opaque session cookie and CSRF token. |
-| `GET /api/prisma/admin/auth/session` | Authenticated administrator and expiry metadata plus stable CSRF. |
-| `POST /api/prisma/admin/auth/logout` | Authenticated, CSRF-protected revocation and cookie clearing. |
+| `desiredGeneration` | Latest process-local generation after startup configuration or committed mutation. |
+| `appliedGeneration` | Generation that reached a complete running or confirmed-stopped outcome. |
+| `configured` | Selected source had a nonblank token when last resolved or mutated. |
+| `running` | Owned poller is observed alive without a stop request. |
+| `verified` | `getMe` succeeded during apply; not continuous connectivity proof. |
+| `restartRequired` | Desired and applied generations differ. |
+| `lastError` | Stable allowlisted sanitized code only. |
 
-The host-only cookie contains a random 256-bit session ID; SQLite stores only its SHA-256
-digest. It is `HttpOnly`, `SameSite=Strict`, scoped to `/api/prisma/admin`, and `Secure` for an
-HTTPS public origin. Idle and absolute defaults are 15 minutes and 8 hours. Responses are
-`Cache-Control: no-store`.
+### PAC-3 boundary and evidence
 
-Passwords use persisted, allowlisted `hashlib.scrypt` parameters (`n=2**15`, `r=8`, `p=3`,
-32-byte output, 16-byte random salt, 64 MiB `maxmem`). Input preserves Unicode and whitespace,
-requires at least 15 characters, supports at least 64, and rejects more than 1024 UTF-8 bytes.
-Unknown users take the configured dummy-hash path. A process-wide hashing semaphore and bounded
-persisted throttles run before verification. Offline reset revokes sessions and failures.
+- Existing generic credential routes remain the mutation boundary. Telegram PUT saves desired-only;
+  DELETE commits first and then reconciles stop/join.
+- Telegram apply accepts exact `{}` only after transport, authentication, Origin, and CSRF checks.
+- Startup, apply, mutation, shutdown, and health share one manager and credential service graph.
+- `/health` is passive: no credential read, bot construction, stop/join, or provider call.
+- Independent PAC-3B acceptance retained **27 focused Telegram tests** and **236 backend tests**, plus
+  `pip check`, diff, ownership/retry/DELETE/shutdown/thread/migration/offset/no-loss scenarios.
+- No provider, network, service, listener, FFmpeg process, real key, or production environment was
+  used for PAC-3 acceptance.
 
-Protected SQLite state uses connection-per-operation transactions. Linux requires current-UID
-ownership, `0700` directories, `0600` files, safe ancestors, and safe sidecars. Windows uses the
-bounded ACL operation and invariant SIDs for the current identity, SYSTEM, and Administrators.
-Unexpected inheritance/access, linked or reparse ancestors, and insecure sidecars fail closed;
-ordinary startup never repairs permissions.
+## PAC-4A accepted administrator contract
 
-## PAC-2 key custody and credential API
+### One backend-validated administrator flow
 
-`PRISMA_CREDENTIAL_MASTER_KEY_FILE` names an absolute raw 32-byte key outside runtime state.
-Its parent is protected independently; lexical and existing ancestors must be free of links or
-reparse points. Runtime never generates the key. Offline provisioning fails if the key or
-credential database already exists and never prints the key or path.
+The HMI exposes one visible administrator login. A validated backend login/session grants the fixed
+HMI `Admin` role and permits `/admin`. There is no second Voice login, corporate identity provider,
+account-management UI, browser credential fallback, or storage-hydrated privileged authority.
 
-The dedicated database is `credentials/provider-credentials.sqlite3` below runtime state.
-Stores are bound to the master-key fingerprint. Each Gemini or Telegram record contains only
-provider, format version, internal SHA-256 key ID, fresh 12-byte nonce, and AES-256-GCM
-ciphertext/tag. Canonical UTF-8 JSON AAD contains exactly `formatVersion`, `keyId`, and
-`provider`. Plaintext is encrypted before SQL receives values; writes use `BEGIN IMMEDIATE`.
+Viewer routes and individual Voice/conversation capabilities remain available without administrator
+authentication. Closing and reopening **Configuración general** preserves the active administrator
+session. Leaving administrator mode through **Ver viewer**, **Cerrar sesión**, browser history, or
+another `/admin` to non-admin transition ends local administrator authority through one central path.
 
-Secrets are strings of 1–4096 UTF-8 bytes. Empty or whitespace-only values are rejected; accepted
-content is not trimmed. Unknown formats/providers, bad types or sizes, wrong key/AAD, invalid tag,
-schema drift, malformed rows, and corruption fail closed without raw details.
+Bootstrap validates backend state before privileged rendering without blocking public viewer use.
+Missing, invalid, expired, revoked, or unreachable backend state leaves viewer behavior available and
+admin unavailable. Refresh occurs only on relevant user action, focus, or authorization failure; the
+client does not poll or heartbeat the backend idle lease.
 
-Authentication precedes provider validation and key/store access. PUT and DELETE also require an
-exact accepted Origin and ASCII CSRF value checked in constant time.
+### Durable manual-login barrier
 
-| Route | Contract |
-|---|---|
-| `GET /api/prisma/admin/credentials` | Configured booleans for Gemini and Telegram; never secret values. |
-| `PUT /api/prisma/admin/credentials/<provider>` | Exact `{"secret": string}`; stores after Origin and CSRF validation. |
-| `DELETE /api/prisma/admin/credentials/<provider>` | Idempotent removal; returns `204`. |
+Administrator exit immediately suspends local authority, clears private CSRF, publishes only a
+revocation notice, and persists a non-secret barrier. The barrier has two semantic states:
 
-The decoded limit is 4096 UTF-8 bytes; the independent wire limit is `4096 * 6 + 1024` bytes.
-Credential-route success, failures, OPTIONS, HEAD, and method errors are non-cacheable. Stable
-errors cover authentication `401`, transport/CSRF `403`, unsupported provider `404`, invalid
-request `400`, content type `415`, wire size `413`, and sanitized storage failure `503`.
-
-This protects ciphertext-only theft, accidental disclosure, and backups that omit the key. It
-does not protect against a compromised service identity, process, or host able to read both key
-and plaintext memory. Losing every key copy makes the ciphertext unrecoverable.
-
-## PAC-3A accepted Gemini and session boundary
-
-### Gemini credential selection
-
-A nonblank `PRISMA_CREDENTIAL_MASTER_KEY_FILE` selects authoritative protected mode. Gemini
-resolves the stored credential only when actual provider work dequeues. Missing, deleted,
-unavailable, mismatched, or corrupt protected storage never falls through to `GEMINI_API_KEY`.
-The environment key is a legacy source only when protected mode is not selected.
-
-Startup, credential save, health, and replay never contact Gemini. Health distinguishes source,
-configured, available, and verified; `verified` remains false without an explicit provider action.
-Replacement credentials apply to new provider work. Deleted credentials block new attachments
-and queued client construction; already attached subscribers and in-flight provider I/O may finish
-within existing bounds.
-
-### Anonymous document capability
-
-Presentation mints 32 random bytes and returns their canonical URL-safe value only in
-`X-Prisma-Session-Capability`. It stores only the SHA-256 digest plus an internal random UUID
-owner. The browser keeps the bearer capability in one document-level client in memory only—not
-in localStorage, sessionStorage, URLs, logs, domain objects, or UI state.
-
-The capability grants access to that anonymous document's owned context; it is not user account,
-device identity, theft-proof authentication, or authority to grant access to others. Browser role
-state cannot mint or transfer server ownership.
-
-One capability covers snapshot publication, ask, own-event polling, and event-bound TTS. A fresh
-document or reload gets a new capability. Explicit DELETE revokes it. `pagehide` close is best
-effort, so crash/reload orphans can survive until expiry. State is process-local and non-durable;
-restart invalidates capabilities. Default limits are 64 live sessions, 30-minute idle expiry,
-and 8-hour absolute expiry.
-
-### Exact session routes
-
-All exact session/TTS responses are `Cache-Control: no-store`. The capability header is
-allowlisted only for these paths and is never forwarded to admin, voice-config, health,
-telemetry, or another origin.
-
-| Browser route | Fixed upstream | Contract |
+| State | Meaning | Automatic behavior |
 |---|---|---|
-| `POST /api/prisma/session` | `POST /hmi/session` | Exact `{}` JSON, 128-byte wire cap; `201` plus public expiries and capability header. |
-| `DELETE /api/prisma/session` | `DELETE /hmi/session` | No body; capability required; revokes and returns bodyless `204`. |
-| `POST /api/prisma/snapshot` | `POST /hmi/current-snapshot` | Capability required; maximum 1 MiB; replaces only that owner's latest view. |
-| `GET /api/prisma/events/latest` | `GET /hmi/voice/latest` | Capability required; `204` when empty, otherwise only the owner's latest event. |
-| `POST /api/prisma/ask` | `POST /local/ask` | Exact `{"question": string}`, 1–4096 UTF-8 bytes, 32 KiB wire cap; no recipient. |
-| `POST /api/prisma/tts/live` | `POST /prisma/speak-live` | Exact `{"eventId": string}` plus capability; foreign events are nondisclosing `404`. |
+| Remote revocation pending | The current cookie has not been conclusively revoked. | Reconcile conservatively without granting authority. |
+| Manual login required | Exact logout `204` revoked the presented cookie. | Stay viewer-only; do not issue an automatic session GET. |
 
-Missing, expired, revoked, malformed, non-ASCII, wrong-type, or oversized capabilities produce
-controlled `401 PRISMA_SESSION_REQUIRED`. Malformed bodies return controlled `400`/`413`.
-Authority failure precedes credential reads, coordinator/cache admission, and provider work.
-Public responses never expose capability digests, owner IDs, keys, recipients, paths, or raw
-exceptions. Raw text TTS `/prisma/speak` returns `410 RAW_TTS_DISABLED`.
+Exact `204` does not prove an earlier locally aborted login POST stopped server-side. It therefore
+cannot remove the manual-login requirement. A late cookie may continue to exist until overwritten by
+fresh login or backend TTL, but it cannot automatically restore the HMI role. Only a fresh, explicit,
+successful backend login clears the barrier. That login also establishes a new private CSRF token and
+restores normal validated-session reload behavior.
 
-### Session-owned state and browser behavior
+This policy deliberately avoids heuristic delays, TTL guesses, JavaScript cookie inspection, new
+backend APIs, and false cancellation claims. A confirmed ordinary logout remains viewer-only across
+reload without displaying a false unconfirmed-revocation error.
 
-Each owner has one latest snapshot, at most 16 five-minute voice events, and one latest-event
-pointer; aggregate event retention is 256. HMI `/local/ask` has no fallback to the installation
-legacy JSON snapshot. Telegram can still use its installation snapshot for private text, but it
-does not publish HMI events, select a browser session, or receive automatic paid audio.
+### Concurrency and cross-tab guarantees
 
-Voice validates canonical owner/event data and keys coordinator state, PCM, tombstones, retry,
-subscribers, replay, and cancellation by `(owner_id, event_id)`. New attachment and dequeue both
-revalidate authority. The queued capability exists only transiently for that check and is cleared
-on completion, failure, timeout, capacity release, eviction, removal, retry replacement, and
-coordinator close.
+- Stale bootstrap, login, or session results cannot win after exit intent or a newer operation.
+- A pending exit GET cannot clear a newer identity or its private CSRF state.
+- Once logout POST starts, fresh login waits for mutation and cleanup before it can commit.
+- The original abort → `401` → repeated reload path keeps the barrier until safe reconciliation.
+- Cookie A → login B → local abort → logout A `204` → late cookie B remains viewer-only across
+  repeated reloads with `error=null` and no automatic session GET.
+- Explicit login C clears the barrier; a subsequent ordinary reload may restore validated C.
+- Cross-tab messages contain revocation intent only, never identity, role, CSRF, or secrets.
+- Marker removal is not authority and is ignored by other tabs. Revocation notifications use unique
+  IDs even under the same clock value.
 
-Browser bootstrap is single-flight. One cancelled waiter does not cancel shared bootstrap, but
-that caller cannot send work after cancellation. Every authorized request captures a session
-epoch; stale responses are rejected before UI, dedupe, or playback updates. A `401` fences the
-old epoch and starts a fresh bootstrap without replaying an old snapshot, question, or TTS POST.
-TTS abort wiring remains active through headers and body EOF, error, cancellation, or reset.
-Reset stops buffered playback locally. The first valid own event is delivered; same-epoch listener
-restart does not replay it. No chat UI or stored browser history was added.
+### HTTP client and development proxy
 
-### Bounded shared execution
+- Requests use fixed same-origin routes, `credentials: same-origin`, `Cache-Control: no-store`,
+  exact typed response validation, abort/epoch fences, and safe stable errors.
+- Password bytes are transmitted exactly; nonempty whitespace-only passwords are not trimmed,
+  normalized, logged, cached, persisted, broadcast, or placed in URLs.
+- CSRF remains private to the document and is sent only where required.
+- Logout accepts exact empty `204`; arbitrary 2xx responses, redirects, and SPA fallback are rejected.
+- Development proxies allow only the exact admin auth, credentials, apply, and health routes and
+  methods. They preserve Origin, cookie, `Set-Cookie`, CSRF, status, and no-store behavior and never
+  forward `X-Prisma-Session-Capability` as administrator authority.
 
-The supported topology is one voice-service process, one coordinator, and one provider worker,
-with the reloader disabled. Shared infrastructure is fair but conversation state stays isolated.
+## PAC-4A final offline acceptance evidence
 
-| Limit | Accepted default |
-|---|---:|
-| Eligible/admission records | 64 / five-minute event lifetime |
-| Queued jobs | 8 aggregate / 2 per owner, round-robin |
-| Provider workers / active jobs | 1 / 1 |
-| PCM | 16 MiB per event / 64 MiB aggregate, including active bytes |
-| Buffered chunks | 4096 aggregate |
-| Subscribers | 16 per event / 8 per owner / 32 aggregate |
-| Lookup / queue wait | 2 s / 30 s |
-| Provider SDK / stream idle / whole job | 45 s / 15 s / 60 s |
-| Idle subscriber | 15 s |
-| Failed retry | One after 30 s, only if zero PCM was published |
+Independent verifier `ses_f4b473e58ffeudIYvT20yFJNVZ` closed every known PAC-4A finding:
 
-Subscriber capacity is reserved before state creation, retry, enqueue, credential work, or
-generation and released idempotently on every close path. Admitted PCM is pinned through final
-detachment. Eviction never silently regenerates completed work; tombstones retain retry state.
-Only one provider/DSP/PCM generation runs per owned event, while subscribers and replay add no
-paid side effect.
+- final focused authentication verification: **9 files, 80 tests passed**;
+- full HMI verification: **199 files, 1885 tests passed**;
+- build, lint, and `git diff --check`: **PASS**;
+- parent spotcheck: **3 files, 40 tests passed**, plus CodeGraph readback of storage/controller;
+- six prior finding groups, actual RTL lifecycle integration, Settings close, route/history exit,
+  exact proxies, and public viewer/Voice independence remained passing.
 
-An independent deadline monitor marks logical timeout, releases subscribers, suppresses late
-chunks/success, and requests cooperative cleanup. Python cannot safely kill a non-cooperative
-provider iterator: its producer slot remains quarantined and replacement work is rejected until
-physical return. The 45-second SDK I/O timeout is the bounded provider-unblock mechanism. Multiple
-workers or horizontal replicas remain unsupported; arbitrary external WSGI topology cannot be
-detected reliably, and replay/attempt guarantees last only for one process lifetime.
+The auth proof is offline. It uses the actual client/controller/storage and an in-memory server-cookie
+scheduling model; it is not a live-browser cookie, native `StorageEvent`, production proxy, or
+production-security claim.
 
-## Implementation map
+### Backend gate and retained runtime warning
+
+The first canonical backend run reported **235 passed, 1 failed** in
+`RuntimeOwnershipTests.test_concurrent_acquisitions_join_one_owned_generation_without_manifest_corruption`.
+The failure was a temporary sharing violation while copying `prisma_voice_config.json`.
+
+Parent-authorized read-only diagnostic worker `ses_f4ae48996ffeTWUPE9gsX3vhcH` established:
+
+- `start-local.ps1` initializes state before acquiring the manifest lock;
+- `runtime-environment.ps1` performs `Test-Path` followed by `Copy-Item`;
+- four relevant file blobs exactly matched `b5fcaf2` by empty diff and hash;
+- the failure happens before changed backend Python is loaded;
+- the isolated failing test passed once in **0.621 seconds**;
+- one subsequent canonical `operations/verify-local.ps1` run passed **236 tests in 15.056 seconds**.
+
+This evidence identifies a pre-existing check-then-copy race window. It does not prove the exact
+failed interleaving, estimate frequency, or fix the race. The current required backend gate is PASS,
+while the runtime state-seeding correction remains tracked under PW-002.
+
+RDD was globally off. Native assessment was unassessable because the worktree contains untracked
+inventory, so ordinary independent verification applied. No consent-review workflow was used.
+
+## PAC-4B accepted credential workflow
+
+PAC-4B adds credential configuration to **Configuración general → Voz** using the same accepted
+administrator session. It does not introduce another login or change viewer/Voice access. All six
+leaves and the four-defect correction ledger are independently accepted offline.
+
+- [x] **PAC-4B-1 — Write client/query/component tests first.** Cover metadata-only reads, transient
+  secrets, independent actions, safe errors, dialog close, logout cleanup, Telegram status, and
+  DELETE `409` reconciliation.
+- [x] **PAC-4B-2 — Add typed metadata and mutation boundaries.** TanStack Query may cache public
+  metadata only; mutation clients require the current verified session and private CSRF.
+- [x] **PAC-4B-3 — Build the Voice credential section from shared admin primitives.** Use design
+  tokens, Lucide icons, and `hmi-scrollbar`; do not create local controls when primitives exist.
+- [x] **PAC-4B-4 — Keep secrets transient and actions independent.** Inputs remain local and clear
+  after completion, close, or logout. They never join global Save, Zustand, query cache, persistence,
+  logs, URLs, or broadcasts.
+- [x] **PAC-4B-5 — Render truthful diagnostics and safe errors.** Keep configured, desired/applied,
+  restart-required, running, and last verified distinct. Never echo raw backend detail.
+- [x] **PAC-4B-6 — Reconcile committed Telegram absence.** DELETE `409` means absence committed but
+  stop failed; refresh metadata/status and offer user-driven reconciliation without automatic replay.
+
+### Current UI use and limits
+
+- **Guardar credencial** stores the entered Gemini or Telegram secret; it does not join global
+  **Guardar**, contact a provider, or verify connectivity.
+- A saved Gemini credential is selected for new Gemini work. Saving does not perform a live Gemini
+  verification and does not alter already attached or in-flight work.
+- A saved Telegram credential changes desired state only. **Aplicar cambio** is the separate explicit
+  action that reconciles the running bot with that desired state.
+- **Eliminar credencial** removes the protected value. Telegram `409 TELEGRAM_STOP_TIMEOUT` means the
+  token is already absent but poller stop is uncertain; only an explicit user retry issues another
+  DELETE. The UI never auto-applies or loops.
+- `configured`, desired/applied generation, running, and last verified remain separate facts. Loading,
+  unavailable, and retained last-known data are labelled rather than rendered as negative facts.
+- Closing Settings clears credential drafts but preserves the administrator session. Leaving admin
+  mode ends that authority. Viewer Voice and per-document conversation sessions remain independent.
+
+### PAC-4B final correction ledger
+
+| ID | Final state | Independently reproduced defect | Accepted correction proof |
+|---|---|---|---|
+| PAC-4B-C1 | COMPLETE PASS | Arbitrary backend `error` text reached `AdminAuthError` and Query state. | Actual-client canaries were absent from code/message, Query error/data/mutations, UI, and browser storage. |
+| PAC-4B-C2 | COMPLETE PASS | Protected metadata survived permission-boundary unmount. | Route-guard logout removed the exact query; a late GET could not restore it, public Query data remained, and remount fetched fresh metadata. |
+| PAC-4B-C3 | COMPLETE PASS | Stale operations could overwrite newer panel state. | Same-byte and different-byte drafts survived old success/error; stale confirmation and apply outcomes could not commit. |
+| PAC-4B-C4 | COMPLETE PASS | Unknown or stale metadata appeared as current negative facts. | Loading, unavailable, last-known, and refresh-recovery states remained truthful while unsafe mutations stayed blocked. |
+
+### PAC-4 and PAC-4B final offline evidence
+
+- Independent external actual-client/hook/QueryClient/RTL probes passed **6 tests** covering all four
+  findings, cache secrecy, route-guard cleanup, fresh remount, stale outcomes, and truthful recovery.
+- Focused verification passed **125 tests in 10 files** covering the domain, actual admin client and
+  controller, metadata-only hook, credential component, Voice/global integration, retained auth
+  lifecycle, and exact proxy rules.
+- Full HMI coverage passed **1922 tests in 202 files** at **86.79% statements, 80.11% branches,
+  86.07% functions, and 87.66% lines**.
+- TypeScript/Vite build, ESLint, and `git diff --check` passed. The canonical offline backend gate
+  passed **236 tests in 16.103 seconds** without starting services or contacting providers.
+- The parent passed **51 tests in 3 files** and performed CodeGraph readback of the client and hook.
+- The same client/private CSRF/generation boundary, current `401` invalidation, one-time `403`
+  reconciliation without mutation replay, PAC-4A manual barrier/R1/R2, exact proxies, public
+  viewer/Voice behavior, global effects-only Save, and Settings-close behavior all remained passing.
+- The HMI stores only configured/runtime metadata in TanStack Query. Secret bytes remain in local
+  password-input state and imperative client calls; no TanStack mutation is used.
+- Save, confirmed delete, Telegram apply, and post-timeout stop reconciliation are separate explicit
+  actions. DELETE `409 TELEGRAM_STOP_TIMEOUT` refreshes passive truth and retries DELETE only after a
+  new user action; it never applies a missing token or loops automatically.
+- This is independent offline acceptance, not live-browser/screenshot, provider, network, production
+  proxy, security-deployment, clean-installation, or service-lifecycle acceptance. RDD was globally
+  off; native risk assessment was unavailable because the candidate contains untracked inventory, so
+  ordinary independent proof applied.
+
+Accepted source readback covered `adminAuth.service.ts`, `usePrismaCredentialAdministration.ts`, and
+`VoiceCredentialSettings.tsx`. The exact retained correction checks are co-located in
+`adminAuth.service.test.ts`, `usePrismaCredentialAdministration.test.tsx`,
+`VoiceCredentialSettings.test.tsx`, and `GlobalSettingsDialog.voice.integration.test.tsx`; the focused
+gate also retained domain, session-controller, Voice-tab, global-dialog, auth-lifecycle, and proxy
+tests. No source or test changed after the independently verified candidate.
+
+## Deployment and production residuals
+
+`configured: false` means the single backend administrator must be provisioned by the documented
+offline CLI. PAC-4 adds no browser provisioning or additional accounts.
+
+Production routing, TLS, process supervision, clean installation/startup, native Windows and Linux
+permission behavior, reparse points, backup/restore, durable recovery, state-seeding concurrency,
+and legacy-installation retirement remain under PW-002. Existing `/hmi/prisma-config` access policy
+also requires separate treatment. Development proxy acceptance is not production readiness.
+
+## Implementation and recovery map
 
 | Path | Responsibility |
 |---|---|
-| `services/prisma-runtime/src/prisma_runtime/admin_auth.py` | Administrator sessions, password verification, throttling, and reset. |
-| `services/prisma-runtime/src/prisma_runtime/admin_http.py` | Strict administrator HTTP boundary and CSRF. |
-| `services/prisma-runtime/src/prisma_runtime/credential_store.py` | Protected AES-256-GCM provider storage. |
-| `services/prisma-runtime/src/prisma_runtime/gemini_credentials.py` | Authoritative protected-mode Gemini resolution and legacy-source selection. |
-| `services/prisma-runtime/src/prisma_runtime/hmi_sessions.py` | Digest-only bounded document capabilities and context registry. |
-| `services/prisma-runtime/src/prisma_runtime/voice_events.py` | Immutable owner-partitioned event retention and latest pointers. |
-| `services/prisma-runtime/src/prisma_runtime/local_presentation.py` | Session bootstrap/close, snapshot, ask, own-event, and internal lookup routes. |
-| `services/prisma-runtime/src/prisma_runtime/voice_service.py` | Event-only TTS, credential consumption, fixed lookup, and no-store responses. |
-| `services/prisma-runtime/src/prisma_runtime/event_audio.py` | Owner/event admission, fair queueing, replay, resource accounting, and deadlines. |
-| `hmi-app/src/services/prismaSessionClient.ts` | Memory-only capability, bootstrap, epoch fencing, allowlisted fetch, close, and stream abort. |
-| `hmi-app/src/services/dashboardSnapshotExport.service.ts` | Session-owned current-view publication. |
-| `hmi-app/src/services/voiceEventListener.service.ts` | Own-event polling and per-epoch dedupe. |
-| `hmi-app/src/services/prismaVoiceTtsAudioSource.ts` | Session-authorized event-only progressive PCM source. |
-| `hmi-app/vite.prismaProxy.config.ts` | Exact same-origin development proxies. |
+| `hmi-app/src/services/adminAuth.service.ts` | Bounded admin HTTP transport and private CSRF. |
+| `hmi-app/src/services/adminAuth.storage.ts` | Durable exit barrier and cross-document storage boundary. |
+| `hmi-app/src/services/adminSession.controller.ts` | Bootstrap, login, refresh, expiry, exit, and ordering authority. |
+| `hmi-app/src/components/auth/AdminSessionLifecycle.tsx` | Application-level session lifecycle integration. |
+| `hmi-app/src/domain/adminCredential.types.ts` | Strict credential metadata, passive health, mutation, and secret-validation contracts. |
+| `hmi-app/src/hooks/usePrismaCredentialAdministration.ts` | Metadata-only Query ownership and imperative credential actions. |
+| `hmi-app/src/components/admin/VoiceCredentialSettings.tsx` | Transient credential inputs, diagnostics, confirmations, and explicit outcomes. |
+| `hmi-app/vite.prismaProxy.config.ts` | Exact development proxy allowlist and rewrites. |
+| `services/prisma-runtime/src/prisma_runtime/telegram_credentials.py` | Telegram credential source authority. |
+| `services/prisma-runtime/src/prisma_runtime/telegram_lifecycle.py` | Telegram generations and transitions. |
+| `services/prisma-runtime/src/prisma_runtime/local_presentation.py` | Polling, startup/shutdown, and health. |
+| `services/prisma-runtime/src/prisma_runtime/admin_http.py` | Protected auth/credential/apply boundary. |
 
-Tests are co-located in the corresponding backend and HMI test files, including
-`test_hmi_sessions.py`, `test_hmi_session_isolation.py`, `test_event_audio.py`,
-`test_local_presentation.py`, `test_voice_service.py`, and `prismaSessionClient.test.ts`.
+Rollback of PAC-4A removes the admin client/storage/controller/lifecycle integration and exact admin
+proxy routes without changing accepted PAC-1–PAC-3 behavior. That rollback would restore known unsafe
+local authority and is a mechanical boundary, not an approved operating state.
 
-## Acceptance evidence
+## Exact next-session resume point
 
-Independent session `ses_f4dfe1a75ffeB6xoyWsWbimrSF` returned final `PASS`:
+PAC-4 and PAC-4B are complete and accepted offline. Resume with these steps, in order:
 
-- Focused backend: 63 tests—sessions 9, presentation 14, audio coordinator 20, voice 20.
-- Focused HMI: 53 tests.
-- Full backend: 209 tests.
-- Full HMI: 1844 tests.
-- HMI coverage: 86.64% statements, 80.00% branches, 85.87% functions, 87.46% lines.
-- Static/tooling: 40 Python AST files, `pip check`, both TypeScript checks, production build,
-  lint, and `git diff --check` passed.
-- Parent spotcheck: 14 session-client tests plus source-boundary readback passed.
-- Actual two-client Flask/fake-bridge proof retained separate snapshots, equal-question but
-  distinct events/PCM, foreign-pair `404`, close-A isolation with B replay, and exactly one
-  provider job per owned event.
-- Prior deadline, quarantine, late-chunk, PCM ownership, capacity, unstarted-close, strict lookup,
-  and response-close correction remained passing.
-
-All five S1 correction groups passed: bootstrap caller cancellation, post-header stream abort,
-strict capability/metadata validation, exact bootstrap/ask/close contracts, and terminal authority
-cleanup plus TTS no-store policy. Backend numeric coverage was unavailable because `coverage.py`
-is absent; no installation was authorized.
-
-### RED and review history
-
-The first isolated backend invocation failed because `prisma_runtime` was not importable from that
-focused discovery path; that was not behavioral RED. Later meaningful RED proved missing session
-routes/first-event delivery, then deadline, admission/subscriber ownership, PCM retention, lookup
-closure, cancellation, strict transport, metadata, transient authority, and caching defects.
-Bounded corrections were independently rechecked before parent acceptance. Full historical
-snapshots remain in Engram revisions; this file keeps only the recovery-relevant ledger.
-
-## Rollback and limitations
-
-PAC-1 rollback removes administrator auth/recovery modules and wiring. PAC-2 rollback removes
-credential modules, API wiring, and direct dependency provenance while preserving PAC-1.
-PAC-3A/S1 rollback removes Gemini adoption, `hmi_sessions.py`, `prismaSessionClient.ts`, their
-tests/types, and session-owner/event/audio wiring. That rollback restores the known-unsafe global
-baseline and must not be described as acceptable isolation.
-
-Offline acceptance is not live provider or deployment acceptance. Open items include clean
-installation and real startup, new-key Windows permissions, native Linux/reparse behavior,
-backup/restore, TLS, proxy trust, production identity/supervisor, IT forwarding, durable recovery,
-and explicit retirement of the external legacy installation. Existing `/hmi/prisma-config`
-access policy was not secured by PAC-1–PAC-3A.
-
-## Exact next step
-
-Implement only `PAC-3B`:
-
-1. Read the Telegram token from protected storage under the same authoritative-source rules.
-2. Model desired and applied configuration generations explicitly.
-3. Apply/restart only through an authenticated explicit operation.
-4. Stop and join the current poller before replacement; never overlap bots.
-5. Preserve pairing and pending updates; do not introduce `drop_pending_updates` data loss.
-6. Keep Telegram private text-only unless a later unit explicitly adopts audio.
-
-Then independently verify PAC-3B before starting PAC-4. Do not invent chat UI, stored browser
-history, automatic paid Telegram audio, or broader account identity. Canonical backlog details are
-`backlog/prisma-runtime-monorepo-integration` and `backlog/prisma-dual-channel-assistant`; active
-rows remain `PW-002` and `PW-003` in `docs/PENDING_WORK.md`.
+1. Recover the canonical checkpoint and this feature tracker/full mirror (`#5384`), then reconcile
+   them with the confirmed local Git delivery on `feat/prisma-telegram-credentials`.
+2. Preserve the accepted PAC-3/PAC-4 proof and latest evidence: **125 focused tests**, **1922 HMI
+   tests**, **86.79/80.11/86.07/87.66** coverage, build, lint, **236 backend tests**, diff, **6 external
+   probes**, **51 parent tests**, and structural client/hook readback. Do not redo PAC-3 or PAC-4.
+3. Focus only on PAC-5 final integrated verification and documentation reconciliation after separate
+   authorization. PAC-5 has not run, and this local commit request does not authorize its execution.
+4. Retain PW-002's known pre-lock `Copy-Item` race as unfixed and PW-001 as unrelated. Preserve the
+   two external `.gitignore` entries for local Pi state and `.atl/` outside the intended commit; do
+   not infer or claim a clean worktree.
+5. Do not use real providers, keys, network, services, clean-installation flows, production proxies,
+   deployment, push, or merge unless separately authorized. Broader assistant data, intent, history,
+   personal context, chats, and identity remain separate future scope.

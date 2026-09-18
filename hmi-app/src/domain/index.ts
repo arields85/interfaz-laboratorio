@@ -13,4 +13,5 @@ export * from './prodTrendDataMode.types';
 export * from './dataContract.types';
 export * from './eppi.types';
 export * from './auth';
+export * from './adminCredential.types';
 export type { CatalogVariable } from './variableCatalog.types';

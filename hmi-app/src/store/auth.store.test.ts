@@ -13,7 +13,7 @@ describe('useAuthStore', () => {
         vi.resetModules();
     });
 
-    it('starts unauthenticated by default', async () => {
+    it('starts pending and unauthenticated without persistent middleware', async () => {
         const { useAuthStore } = await loadFreshAuthStore();
 
         expect(useAuthStore.getState().session).toEqual({
@@ -21,99 +21,56 @@ describe('useAuthStore', () => {
             isAuthenticated: false,
             loginTimestamp: null,
         });
-        expect(useAuthStore.getState().error).toBeNull();
-        expect(useAuthStore.getState().isAuthenticating).toBe(false);
+        expect(useAuthStore.getState().isHydrated).toBe(false);
+        expect('persist' in useAuthStore).toBe(false);
     });
 
-    it('logs in with valid credentials and persists only the session', async () => {
+    it('never hydrates unsafe legacy authority before lifecycle cleanup', async () => {
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ role: 'Admin' }));
+
         const { useAuthStore } = await loadFreshAuthStore();
 
-        const result = await useAuthStore.getState().login('admin', '7trebol');
-
-        expect(result.ok).toBe(true);
-        expect(useAuthStore.getState().session.user?.username).toBe('admin');
-        expect(useAuthStore.getState().session.isAuthenticated).toBe(true);
-        expect(useAuthStore.getState().error).toBeNull();
-
-        expect(localStorage.getItem(AUTH_STORAGE_KEY)).toMatch(
-            /^\{"state":\{"session":\{.*\}\},"version":0\}$/,
-        );
+        expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull();
+        expect(useAuthStore.getState().session.isAuthenticated).toBe(false);
     });
 
-    it('hydrates the persisted session but resets runtime-only flags on reload', async () => {
+    it('derives permissions only from current in-memory verified identity', async () => {
         const { useAuthStore } = await loadFreshAuthStore();
-
-        await useAuthStore.getState().login('usuario', 'usuario123');
-
-        const { useAuthStore: reloadedAuthStore } = await loadFreshAuthStore();
-        await reloadedAuthStore.persist.rehydrate();
-
-        expect(reloadedAuthStore.getState().session.user?.username).toBe('usuario');
-        expect(reloadedAuthStore.getState().session.isAuthenticated).toBe(true);
-        expect(reloadedAuthStore.getState().isHydrated).toBe(true);
-        expect(reloadedAuthStore.getState().error).toBeNull();
-        expect(reloadedAuthStore.getState().isAuthenticating).toBe(false);
-    });
-
-    it('stores the generic error when credentials are invalid', async () => {
-        const { useAuthStore } = await loadFreshAuthStore();
-
-        const result = await useAuthStore.getState().login('admin', 'wrong-password');
-
-        expect(result).toEqual({ ok: false, error: 'Credenciales inválidas' });
-        expect(useAuthStore.getState().error).toBe('Credenciales inválidas');
-        expect(useAuthStore.getState().session).toEqual({
-            user: null,
-            isAuthenticated: false,
-            loginTimestamp: null,
-        });
-    });
-
-    it('clears the session and persisted storage on logout', async () => {
-        const { useAuthStore } = await loadFreshAuthStore();
-
-        await useAuthStore.getState().login('admin', '7trebol');
-        useAuthStore.getState().logout();
-
-        expect(useAuthStore.getState().session).toEqual({
-            user: null,
-            isAuthenticated: false,
-            loginTimestamp: null,
-        });
-        expect(localStorage.getItem(AUTH_STORAGE_KEY)).toBe(
-            JSON.stringify({
-                state: {
-                    session: {
-                        user: null,
-                        isAuthenticated: false,
-                        loginTimestamp: null,
-                    },
+        useAuthStore.setState({
+            session: {
+                user: {
+                    id: 'administrator:admin',
+                    username: 'admin',
+                    displayName: 'admin',
+                    role: { id: 'role-admin', name: 'Admin', permissions: ['viewer:access', 'admin:access'] },
                 },
-                version: 0,
-            }),
-        );
-    });
-
-    it('evaluates permissions from the authenticated role', async () => {
-        const { useAuthStore } = await loadFreshAuthStore();
-
-        await useAuthStore.getState().login('usuario', 'usuario123');
-
-        expect(useAuthStore.getState().hasPermission('viewer:access')).toBe(true);
-        expect(useAuthStore.getState().hasPermission('admin:access')).toBe(false);
-
-        await useAuthStore.getState().login('admin', '7trebol');
+                isAuthenticated: true,
+                loginTimestamp: '2026-09-18T00:00:00.000Z',
+                absoluteExpiresAt: 2_000_000_000,
+            },
+        });
 
         expect(useAuthStore.getState().hasPermission('admin:access')).toBe(true);
+        expect(localStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
     });
 
-    it('uses the required persistence key', async () => {
+    it('never grants authority from storage events', async () => {
         const { useAuthStore } = await loadFreshAuthStore();
+        window.dispatchEvent(new StorageEvent('storage', {
+            key: AUTH_STORAGE_KEY,
+            newValue: JSON.stringify({ role: 'Admin', csrfToken: 'secret' }),
+        }));
 
-        await useAuthStore.getState().login('usuario', 'usuario123');
+        expect(useAuthStore.getState().session.isAuthenticated).toBe(false);
+    });
 
-        expect(useAuthStore.persist.getOptions().name).toBe(AUTH_STORAGE_KEY);
-        expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull();
-        expect(localStorage.getItem('interfaz-laboratorio-auth')).toBeNull();
+    it('does not break public viewer import when legacy storage cleanup throws', async () => {
+        vi.stubGlobal('localStorage', {
+            removeItem: () => { throw new Error('storage denied'); },
+        });
+
+        await expect(loadFreshAuthStore()).resolves.toBeDefined();
+
+        vi.unstubAllGlobals();
     });
 });

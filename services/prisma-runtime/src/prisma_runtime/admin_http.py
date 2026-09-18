@@ -12,6 +12,7 @@ from flask import Response, jsonify, request
 
 from .admin_auth import AuthNotConfigured, AuthUnavailable, LoginRateLimited
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
+from .telegram_lifecycle import TelegramLifecycleError
 
 
 COOKIE_NAME = "prisma_admin_session"
@@ -23,6 +24,8 @@ MAX_CREDENTIAL_JSON_OVERHEAD_BYTES = 1024
 MAX_CREDENTIAL_REQUEST_BYTES = (
     MAX_SECRET_BYTES * MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE + MAX_CREDENTIAL_JSON_OVERHEAD_BYTES
 )
+MAX_TELEGRAM_APPLY_REQUEST_BYTES = 128
+TELEGRAM_APPLY_ROUTE = "/api/prisma/admin/credentials/telegram/apply"
 
 
 @dataclass(frozen=True)
@@ -70,9 +73,10 @@ class TransportPolicy:
 
 
 class AdminHttpBoundary:
-    def __init__(self, auth_service, *, credential_service=None, public_origin: str | None = None):
+    def __init__(self, auth_service, *, credential_service=None, telegram_manager=None, public_origin: str | None = None):
         self.auth_service = auth_service
         self.credential_service = credential_service
+        self.telegram_manager = telegram_manager
         self.transport = TransportPolicy.build(public_origin)
 
     @staticmethod
@@ -142,7 +146,7 @@ class AdminHttpBoundary:
             provider_path = path.startswith(f"{CREDENTIAL_ROUTE_ROOT}/") and "/" not in path[
                 len(CREDENTIAL_ROUTE_ROOT) + 1 :
             ]
-            if path == CREDENTIAL_ROUTE_ROOT or provider_path:
+            if path == CREDENTIAL_ROUTE_ROOT or provider_path or path == TELEGRAM_APPLY_ROUTE:
                 response.headers["Cache-Control"] = "no-store"
             return response
 
@@ -263,7 +267,10 @@ class AdminHttpBoundary:
             try:
                 if self.credential_service is None:
                     raise CredentialUnavailable("CREDENTIAL_STORAGE_UNAVAILABLE")
-                self.credential_service.set_secret(provider, secret)
+                if provider == "telegram" and self.telegram_manager is not None:
+                    self.telegram_manager.set_secret(secret)
+                else:
+                    self.credential_service.set_secret(provider, secret)
                 response = jsonify({"ok": True, "provider": provider, "configured": True})
                 response.headers["Cache-Control"] = "no-store"
                 return response
@@ -285,12 +292,62 @@ class AdminHttpBoundary:
             try:
                 if self.credential_service is None:
                     raise CredentialUnavailable("CREDENTIAL_STORAGE_UNAVAILABLE")
-                self.credential_service.delete_secret(provider)
+                if provider == "telegram" and self.telegram_manager is not None:
+                    if not self.telegram_manager.delete_secret():
+                        return self._error("TELEGRAM_STOP_TIMEOUT", 409)
+                else:
+                    self.credential_service.delete_secret(provider)
                 response = Response(status=204)
                 response.headers["Cache-Control"] = "no-store"
                 return response
             except CredentialUnavailable:
                 return self._error("CREDENTIAL_STORAGE_UNAVAILABLE", 503)
+
+        @app.post(TELEGRAM_APPLY_ROUTE)
+        def admin_telegram_apply():
+            rejected = self._allow(require_origin=True)
+            if rejected:
+                return rejected
+            _, rejected = self._authorized_session(require_csrf=True)
+            if rejected:
+                return rejected
+            if not request.is_json:
+                return self._error("JSON_REQUIRED", 415)
+            if request.content_length is None or request.content_length > MAX_TELEGRAM_APPLY_REQUEST_BYTES:
+                return self._error("TELEGRAM_APPLY_REQUEST_TOO_LARGE", 413)
+            try:
+                payload = json.loads(request.get_data(cache=False).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return self._error("INVALID_TELEGRAM_APPLY_REQUEST", 400)
+            if not isinstance(payload, dict) or payload:
+                return self._error("INVALID_TELEGRAM_APPLY_REQUEST", 400)
+            if self.telegram_manager is None:
+                return self._error("TELEGRAM_PROVIDER_UNAVAILABLE", 502)
+            try:
+                status = self.telegram_manager.apply()
+                response = jsonify({"ok": True, "telegram": status})
+                response.headers["Cache-Control"] = "no-store"
+                return response
+            except TelegramLifecycleError as error:
+                code = error.args[0]
+                status_code = {
+                    "TELEGRAM_DISABLED": 409,
+                    "TELEGRAM_CREDENTIAL_MISSING": 409,
+                    "TELEGRAM_STOP_TIMEOUT": 409,
+                    "CREDENTIAL_STORAGE_UNAVAILABLE": 503,
+                    "TELEGRAM_PROVIDER_UNAVAILABLE": 502,
+                }.get(code, 502)
+                public_code = code if code in {
+                    "TELEGRAM_DISABLED",
+                    "TELEGRAM_CREDENTIAL_MISSING",
+                    "TELEGRAM_STOP_TIMEOUT",
+                    "CREDENTIAL_STORAGE_UNAVAILABLE",
+                    "TELEGRAM_PROVIDER_UNAVAILABLE",
+                } else "TELEGRAM_PROVIDER_UNAVAILABLE"
+                response = jsonify({"ok": False, "error": public_code, "telegram": self.telegram_manager.status()})
+                response.status_code = status_code
+                response.headers["Cache-Control"] = "no-store"
+                return response
 
     @staticmethod
     def _session_payload(session) -> dict:

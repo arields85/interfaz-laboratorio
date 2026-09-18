@@ -25,6 +25,22 @@ describe('Prisma Vite proxy configuration', () => {
     });
 
     it.each([
+        ['/api/prisma/admin/auth/status', '/api/prisma/admin/auth/status', ['GET']],
+        ['/api/prisma/admin/auth/login', '/api/prisma/admin/auth/login', ['POST']],
+        ['/api/prisma/admin/auth/session', '/api/prisma/admin/auth/session', ['GET']],
+        ['/api/prisma/admin/auth/logout', '/api/prisma/admin/auth/logout', ['POST']],
+        ['/api/prisma/admin/credentials', '/api/prisma/admin/credentials', ['GET']],
+        ['/api/prisma/admin/credentials/gemini', '/api/prisma/admin/credentials/gemini', ['PUT', 'DELETE']],
+        ['/api/prisma/admin/credentials/telegram', '/api/prisma/admin/credentials/telegram', ['PUT', 'DELETE']],
+        ['/api/prisma/admin/credentials/telegram/apply', '/api/prisma/admin/credentials/telegram/apply', ['POST']],
+        ['/api/prisma/health', '/health', ['GET']],
+    ])('declares the exact admin route %s with its method allowlist', (browserPath, upstreamPath, methods) => {
+        const route = PRISMA_PROXY_ROUTES.find((candidate) => candidate.browserPath === browserPath);
+
+        expect(route).toMatchObject({ upstreamPath, methods });
+    });
+
+    it.each([
         '/api/prisma/snapshot/',
         '/api/prisma/snapshot/extra',
         '/api/prisma/snapshot%2Fextra',

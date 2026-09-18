@@ -184,6 +184,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
 
                     <div hidden={activeTab !== 'voice'}>
                         <VoiceSettingsTab
+                            credentialControlsActive={open && activeTab === 'voice'}
                             onDirtyChange={setVoiceDirty}
                             onSaveStatusChange={setVoiceSaveStatus}
                             saveRef={voiceSaveRef}

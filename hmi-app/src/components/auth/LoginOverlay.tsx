@@ -2,6 +2,7 @@ import { useState, type FormEvent, type RefObject } from 'react';
 import AnchoredOverlay from '../ui/AnchoredOverlay';
 import { HmiButton } from '../ui';
 import { useAuthStore } from '../../store/auth.store';
+import { adminSessionController } from '../../services/adminSession.controller';
 
 interface LoginOverlayProps {
     triggerRef: RefObject<HTMLElement | null>;
@@ -17,7 +18,7 @@ const EMPTY_FORM_STATE = {
 
 export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverlayProps) {
     const session = useAuthStore((state) => state.session);
-    const logout = useAuthStore((state) => state.logout);
+    const sessionError = useAuthStore((state) => state.error);
     const [username, setUsername] = useState(EMPTY_FORM_STATE.username);
     const [password, setPassword] = useState(EMPTY_FORM_STATE.password);
     const [error, setError] = useState(EMPTY_FORM_STATE.error);
@@ -34,10 +35,7 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        const trimmedUsername = username.trim();
-        const trimmedPassword = password.trim();
-
-        if (!trimmedUsername || !trimmedPassword) {
+        if (!username.trim() || password.length === 0) {
             setError('Ingresá usuario y contraseña.');
             return;
         }
@@ -45,7 +43,7 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
         setError('');
         setIsSubmitting(true);
 
-        const result = await useAuthStore.getState().login(trimmedUsername, trimmedPassword);
+        const result = await adminSessionController.login(username, password);
 
         setIsSubmitting(false);
 
@@ -83,7 +81,7 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
                             variant="primary"
                             fullWidth
                             onClick={() => {
-                                logout();
+                                void adminSessionController.exit();
                                 handleClose();
                             }}
                         >
@@ -124,9 +122,9 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
                             />
                         </div>
 
-                        {error ? (
+                        {error || sessionError ? (
                             <p className="text-status-critical" role="alert">
-                                {error}
+                                {error || sessionError}
                             </p>
                         ) : null}
 

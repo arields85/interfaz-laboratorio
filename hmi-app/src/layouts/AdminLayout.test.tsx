@@ -34,11 +34,13 @@ vi.mock('../utils/adminNavigation', () => ({
 vi.mock('../store/auth.store', () => ({
     useAuthStore: (selector: (state: {
         session: { user?: { displayName?: string } };
-        logout: typeof logoutMock;
     }) => unknown) => selector({
         session: { user: { displayName: 'Admin Test' } },
-        logout: logoutMock,
     }),
+}));
+
+vi.mock('../services/adminSession.controller', () => ({
+    adminSessionController: { exit: logoutMock },
 }));
 
 function mountBootShield() {
@@ -102,13 +104,13 @@ describe('AdminLayout', () => {
         document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 
-    it('navigates back to the viewer without logging out the admin session', () => {
+    it('suspends the admin session before navigating back to the viewer', () => {
         render(<AdminLayout />);
 
         fireEvent.click(screen.getByRole('button', { name: /ver viewer/i }));
 
         expect(navigateMock).toHaveBeenCalledWith('/');
-        expect(logoutMock).not.toHaveBeenCalled();
+        expect(logoutMock).toHaveBeenCalledTimes(1);
     });
 
     it('opens the global settings dialog from the admin toolbar and renders inactive sections separately', () => {

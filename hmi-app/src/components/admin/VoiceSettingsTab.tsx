@@ -23,6 +23,7 @@ import DockInlineControlRow from './DockInlineControlRow';
 import DockSliderField from './DockSliderField';
 import DockToggleField from './DockToggleField';
 import PrismaVoiceEffectsSettings from './PrismaVoiceEffectsSettings';
+import VoiceCredentialSettings from './VoiceCredentialSettings';
 import {
     ADMIN_SIDEBAR_SECTION_CLS,
     ADMIN_SIDEBAR_SECTION_HEADER_CLS,
@@ -30,6 +31,7 @@ import {
 import type { VoiceSaveStatus } from './voiceSaveStatus';
 
 interface VoiceSettingsTabProps {
+    credentialControlsActive?: boolean;
     onDirtyChange?: (dirty: boolean) => void;
     onSaveStatusChange?: (status: VoiceSaveStatus) => void;
     saveRef?: { current: (() => void | Promise<void>) | null };
@@ -59,7 +61,12 @@ function visualConfigsEqual(left: PrismaOrbVisualConfig, right: PrismaOrbVisualC
         && left.glow === right.glow;
 }
 
-export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: VoiceSettingsTabProps) {
+export default function VoiceSettingsTab({
+    credentialControlsActive = true,
+    onDirtyChange,
+    onSaveStatusChange,
+    saveRef,
+}: VoiceSettingsTabProps) {
     const voiceConfigDraft = usePrismaVoiceConfigDraft();
     const updateVoiceConfig = useUpdatePrismaVoiceConfig();
     const [initialSettings] = useState(() => {
@@ -271,6 +278,8 @@ export default function VoiceSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
     return (
         <div className="space-y-4">
+            <VoiceCredentialSettings active={credentialControlsActive} />
+
             {remoteVoiceConfig.error ? (
                 <p className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4 text-xs text-industrial-muted`} aria-live="polite">
                     No se pudo cargar la configuración de Prisma. Se mantienen los valores actuales.

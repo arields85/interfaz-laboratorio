@@ -6,6 +6,7 @@ import { HmiButton } from '../components/ui';
 import { requestShieldReveal } from '../hooks/useBootShield';
 import { ADMIN_SECTIONS, getAdminSectionByPath } from '../utils/adminNavigation';
 import { useAuthStore } from '../store/auth.store';
+import { adminSessionController } from '../services/adminSession.controller';
 
 // =============================================================================
 // AdminLayout
@@ -16,13 +17,16 @@ import { useAuthStore } from '../store/auth.store';
 // Especificación Funcional Modo Admin §1
 // =============================================================================
 
-export default function AdminLayout() {
+interface AdminLayoutProps {
+    controller?: typeof adminSessionController;
+}
+
+export default function AdminLayout({ controller = adminSessionController }: AdminLayoutProps) {
     const location = useLocation();
     const navigate = useNavigate();
     const activeSectionKey = getAdminSectionByPath(location.pathname)?.key;
     const [isNodeRedSettingsOpen, setIsNodeRedSettingsOpen] = useState(false);
     const session = useAuthStore((state) => state.session);
-    const logout = useAuthStore((state) => state.logout);
 
     return (
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-industrial-bg text-industrial-text">
@@ -71,7 +75,10 @@ export default function AdminLayout() {
                     <HmiButton
                         variant="primary"
                         size="sm"
-                        onClick={() => navigate('/')}
+                        onClick={() => {
+                            void controller.exit();
+                            navigate('/');
+                        }}
                     >
                         Ver viewer
                         <Monitor size={14} />
@@ -86,7 +93,7 @@ export default function AdminLayout() {
                                 allowNoContentExtension: true,
                                 restartCycle: true,
                             });
-                            logout();
+                            void controller.exit();
                         }}
                     >
                         Cerrar sesion
