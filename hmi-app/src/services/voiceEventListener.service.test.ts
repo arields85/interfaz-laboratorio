@@ -34,7 +34,7 @@ describe('startVoiceEventListener', () => {
         vi.restoreAllMocks();
     });
 
-    it('keeps the first valid payload silent, ignores duplicates, and emits a new id once', async () => {
+    it('delivers the first owned payload, ignores duplicates, and emits a new id once', async () => {
         const fetchMock = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(FIRST_EVENT))
             .mockResolvedValueOnce(jsonResponse({ ...FIRST_EVENT, telegramChatId: 995701520 }))
@@ -42,21 +42,22 @@ describe('startVoiceEventListener', () => {
         const onEvent = vi.fn();
 
         const stop = startVoiceEventListener({
-            url: 'https://node-red.local/hmi/voice/latest',
+            url: '/api/prisma/events/latest',
             onEvent,
             fetchImpl: fetchMock,
             intervalMs: 1_000,
         });
 
         await vi.advanceTimersByTimeAsync(0);
-        expect(onEvent).not.toHaveBeenCalled();
+        expect(onEvent).toHaveBeenCalledOnce();
+        expect(onEvent).toHaveBeenLastCalledWith(FIRST_EVENT);
 
         await vi.advanceTimersByTimeAsync(1_000);
-        expect(onEvent).not.toHaveBeenCalled();
+        expect(onEvent).toHaveBeenCalledOnce();
 
         await vi.advanceTimersByTimeAsync(1_000);
-        expect(onEvent).toHaveBeenCalledTimes(1);
-        expect(onEvent).toHaveBeenCalledWith({ ...FIRST_EVENT, id: 'voice-2', text: 'Current response' });
+        expect(onEvent).toHaveBeenCalledTimes(2);
+        expect(onEvent).toHaveBeenLastCalledWith({ ...FIRST_EVENT, id: 'voice-2', text: 'Current response' });
 
         stop();
     });

@@ -23,6 +23,10 @@ class RuntimePaths:
     logs: Path
     run: Path
     process_manifest: Path
+    auth_directory: Path
+    auth_database: Path
+    credential_directory: Path
+    credential_database: Path
 
     @property
     def mutable_files(self) -> tuple[Path, ...]:
@@ -40,6 +44,10 @@ def runtime_paths() -> RuntimePaths:
         logs=root / "logs",
         run=root / "run",
         process_manifest=root / "run" / "process-manifest.json",
+        auth_directory=root / "auth",
+        auth_database=root / "auth" / "admin.sqlite3",
+        credential_directory=root / "credentials",
+        credential_database=root / "credentials" / "provider-credentials.sqlite3",
     )
 
 

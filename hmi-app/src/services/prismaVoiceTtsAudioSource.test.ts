@@ -21,9 +21,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
     it('opens progressive PCM only through the fixed same-origin route', async () => {
         const fetchMock = vi.fn(async () => liveResponse());
         const source = createPrismaVoiceTtsAudioSource({
-            text: 'Respuesta real de Leda',
             eventId: 'event-1',
-            telegramChatId: -100123,
         }, fetchMock as typeof fetch);
         const signal = new AbortController().signal;
 
@@ -34,20 +32,20 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/prisma/tts/live', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: 'Respuesta real de Leda', eventId: 'event-1', telegramChatId: -100123 }),
+            body: JSON.stringify({ eventId: 'event-1' }),
             cache: 'no-store',
             signal,
         });
         expect(live).toMatchObject({ sampleRate: 24000, channels: 1 });
     });
 
-    it('omits invalid optional identifiers without changing text', async () => {
+    it('rejects an invalid event id before transport', async () => {
         const fetchMock = vi.fn(async () => liveResponse());
-        const source = createPrismaVoiceTtsAudioSource({ text: 'Exact text', eventId: '   ', telegramChatId: Number.NaN }, fetchMock as typeof fetch);
+        const source = createPrismaVoiceTtsAudioSource({ eventId: '   ' }, fetchMock as typeof fetch);
 
-        await source.openLive(new AbortController().signal);
+        await expect(source.openLive(new AbortController().signal)).rejects.toThrow('event ID');
 
-        expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({ text: 'Exact text' });
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -56,7 +54,7 @@ describe('createPrismaVoiceTtsAudioSource', () => {
         ['channels', { 'X-Prisma-Audio-Format': 'pcm_s16le', 'X-Prisma-Sample-Rate': '24000', 'X-Prisma-Channels': '2' }],
     ])('rejects an invalid PCM %s header', async (_case, headers) => {
         const source = createPrismaVoiceTtsAudioSource(
-            { text: 'test' },
+            { eventId: 'event-1' },
             vi.fn(async () => liveResponse({ headers: new Headers(headers) })) as typeof fetch,
         );
 
@@ -65,11 +63,11 @@ describe('createPrismaVoiceTtsAudioSource', () => {
 
     it('rejects HTTP failure and missing stream bodies', async () => {
         const failed = createPrismaVoiceTtsAudioSource(
-            { text: 'test' },
+            { eventId: 'event-1' },
             vi.fn(async () => liveResponse({ ok: false, status: 503 })) as typeof fetch,
         );
         const empty = createPrismaVoiceTtsAudioSource(
-            { text: 'test' },
+            { eventId: 'event-1' },
             vi.fn(async () => liveResponse({ body: null })) as typeof fetch,
         );
 

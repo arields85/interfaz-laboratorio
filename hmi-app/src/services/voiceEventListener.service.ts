@@ -1,5 +1,7 @@
 import type { VoiceEvent } from '../domain/voice.types';
 import { normalizeTelegramChatId } from '../domain/voice';
+import { PRISMA_EVENTS_URL } from '../config/prismaAssistant.config';
+import { prismaSessionClient } from './prismaSessionClient';
 
 const DEFAULT_VOICE_POLL_INTERVAL_MS = 1_000;
 
@@ -16,7 +18,7 @@ export function startVoiceEventListener({
     url,
     onEvent,
     intervalMs = DEFAULT_VOICE_POLL_INTERVAL_MS,
-    fetchImpl = fetch,
+    fetchImpl,
 }: VoiceEventListenerOptions): () => void {
     activeVoiceEventListener?.stop();
 
@@ -33,7 +35,7 @@ export function startVoiceEventListener({
         activeController = typeof AbortController === 'function' ? new AbortController() : null;
 
         try {
-            const response = await fetchImpl(url, {
+            const response = await (fetchImpl ?? prismaSessionClient.fetch.bind(prismaSessionClient))(url, {
                 method: 'GET',
                 signal: activeController?.signal,
             });
@@ -43,6 +45,9 @@ export function startVoiceEventListener({
             }
 
             const payload: unknown = await response.json();
+            if (fetchImpl === undefined && !prismaSessionClient.isCurrentResponse(response)) {
+                return;
+            }
 
             const event = normalizeVoiceEvent(payload);
             if (stopped || !event) {
@@ -50,16 +55,18 @@ export function startVoiceEventListener({
             }
 
             const eventKey = getVoiceEventDedupeKey(event);
-            if (lastProcessedKey === null) {
+            if (lastProcessedKey === null && (url !== PRISMA_EVENTS_URL || event.id === undefined)) {
                 lastProcessedKey = eventKey;
                 return;
             }
-
             if (eventKey === lastProcessedKey) {
                 return;
             }
 
             lastProcessedKey = eventKey;
+            if (fetchImpl === undefined && !prismaSessionClient.acceptVoiceEvent(eventKey)) {
+                return;
+            }
             onEvent(event);
         } catch {
             // Voice channel failures must never interrupt the HMI.

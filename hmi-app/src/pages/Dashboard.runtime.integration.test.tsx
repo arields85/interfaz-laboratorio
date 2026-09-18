@@ -11,6 +11,10 @@ const { dashboardStorageMock, hierarchyStorageMock, useDataOverviewMock } = vi.h
     hierarchyStorageMock: { getNodes: vi.fn() },
     useDataOverviewMock: vi.fn(),
 }));
+const SESSION_CAPABILITY = btoa(String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index)))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/, '');
 
 vi.mock('../services/DashboardStorageService', () => ({ dashboardStorage: dashboardStorageMock }));
 vi.mock('../services/HierarchyStorageService', () => ({ hierarchyStorage: hierarchyStorageMock }));
@@ -48,7 +52,12 @@ describe('Dashboard unified Prisma exporter integration', () => {
     });
 
     it('exports one frame-ready snapshot to the fixed route while leaving legacy settings inert', async () => {
-        const fetchMock = vi.fn(async () => ({ ok: true, status: 202 } as Response));
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(new Response(
+                JSON.stringify({ ok: true, idleExpiresAt: 1, absoluteExpiresAt: 2 }),
+                { status: 201, headers: { 'Content-Type': 'application/json', 'X-Prisma-Session-Capability': SESSION_CAPABILITY } },
+            ))
+            .mockResolvedValueOnce(new Response(null, { status: 202 }));
         vi.stubGlobal('fetch', fetchMock);
         const view = render(
             <MemoryRouter initialEntries={['/?prismaMode=local']}>
@@ -60,8 +69,10 @@ describe('Dashboard unified Prisma exporter integration', () => {
 
         await act(async () => vi.advanceTimersByTimeAsync(5_000));
 
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/prisma/snapshot');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/prisma/session');
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/prisma/snapshot');
+        expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('X-Prisma-Session-Capability')).toBe(SESSION_CAPABILITY);
         expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('central');
         expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('https://legacy.invalid/snapshot');
         view.unmount();

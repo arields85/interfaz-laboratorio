@@ -37,7 +37,7 @@ launching a service and directs the operator to `operations\bootstrap-local.ps1`
 Provider credentials are not startup requirements. Both services remain live
 without Gemini or Telegram configuration so local diagnostics can report what
 is missing. An operation that actually needs Gemini returns an actionable
-`GEMINI_API_KEY_MISSING` response until the key is configured.
+`GEMINI_CREDENTIAL_UNAVAILABLE` response until an available source is configured.
 
 ## The Python environment
 
@@ -81,10 +81,11 @@ unexpected binary is rejected without ever being run.
 
 | Variable | Role |
 |----------|------|
-| `GEMINI_API_KEY` | Optional at startup. Required only for Gemini speech operations. Whitespace-only values are treated as missing. |
+| `GEMINI_API_KEY` | Legacy Gemini source used only when protected mode is not selected. Optional at startup; whitespace-only values are missing. |
 | `PRISMA_LOCAL_TELEGRAM_ENABLED` | Set to `1` to opt in to Telegram. |
 | `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN` | Required to construct the bot after Telegram opt-in. A missing token is reported without stopping the services or contacting Telegram. |
 | `PRISMA_RUNTIME_STATE_DIR` | Overrides the mutable state root. |
+| `PRISMA_CREDENTIAL_MASTER_KEY_FILE` | Absolute path to the separately protected raw 32-byte credential master-key file. It must be outside the runtime state root. |
 | `PRISMA_BOOTSTRAP_PYTHON` | Bootstrap only. Explicit path to the base interpreter used **once**, to create the environment. Validated and logged; never consulted by a launcher. |
 
 `PRISMA_PYTHON` has been **removed**. It was a silent interpreter override on
@@ -98,13 +99,62 @@ enabled but unconfigured: no bot is constructed, no Telegram request is made,
 and runtime health remains available. Secrets are never stored by these
 launchers.
 
+## Backend credential administration
+
+Credential administration is currently a backend-only capability. It is not integrated into
+the HMI, and saving a credential does not verify it, apply it to a provider, or report that a
+provider is running. Gemini adoption is complete offline: a nonblank
+`PRISMA_CREDENTIAL_MASTER_KEY_FILE` selects authoritative protected mode, and actual Gemini work
+reads the stored credential at dequeue immediately before client creation. Missing, deleted,
+unavailable, mismatched, or corrupt protected storage never falls back to `GEMINI_API_KEY`.
+The environment key remains a legacy source only when protected mode is not selected. Telegram
+still uses `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN`; protected-token adoption is the next work unit.
+
+Provision the administrator and credential storage offline from the repository root, under
+the same OS identity that will run Prisma. Replace the placeholder with an absolute path in a
+separately protected directory outside `PRISMA_RUNTIME_STATE_DIR`; do not place a real key or
+secret in source control or command arguments.
+
+```powershell
+$runtimeRoot = (Resolve-Path '.\services\prisma-runtime').Path
+$env:PYTHONPATH = "$runtimeRoot\src"
+$env:PRISMA_CREDENTIAL_MASTER_KEY_FILE = '<absolute-protected-key-path-outside-runtime-state>'
+
+& "$runtimeRoot\.venv\Scripts\python.exe" -B -m prisma_runtime.admin_cli provision-admin
+& "$runtimeRoot\.venv\Scripts\python.exe" -B -m prisma_runtime.credential_cli provision-key
+```
+
+`provision-admin` reads and confirms the password interactively; it accepts no password
+argument. `provision-key` accepts no path flag: it reads
+`PRISMA_CREDENTIAL_MASTER_KEY_FILE`, creates a raw 32-byte key, and initializes
+`<runtime-state>\credentials\provider-credentials.sqlite3`. It fails when the key or database
+already exists. Neither command runs during normal startup, so there is no per-launch password
+prompt or automatic key generation.
+
+Authenticated administrators use these backend routes:
+
+| Route | Result |
+|---|---|
+| `GET /api/prisma/admin/credentials` | Configured booleans for `gemini` and `telegram`; never secret values. |
+| `PUT /api/prisma/admin/credentials/<provider>` | Stores one encrypted secret after Origin and CSRF validation. |
+| `DELETE /api/prisma/admin/credentials/<provider>` | Idempotently removes one stored credential. |
+
+Credential responses are non-cacheable. Stable failures include authentication `401`,
+transport or CSRF `403`, unsupported provider `404`, invalid JSON/value `400`, wrong content
+type `415`, oversized wire body `413`, and sanitized `CREDENTIAL_STORAGE_UNAVAILABLE` `503`
+for missing, inaccessible, mismatched, or corrupt key/database state. There is no API secret
+readback or automatic key rotation. The installation owner must back up the key separately
+from the ciphertext database and keep matching copies; losing the key makes encrypted
+credentials unrecoverable.
+
 ## Health and integration status
 
 Runtime liveness and external-integration readiness are separate:
 
 - `ok`, `ready`, `service`, and `mode` keep their existing runtime-liveness
   meaning;
-- Gemini `providerStatus.configured` reflects only nonblank key presence;
+- Gemini status reports the selected protected or environment source and whether its credential
+  is configured and available;
 - Telegram enabled, configured, and connected states are reported separately;
 - configured never means provider-verified. Passive health requests do not
   contact Gemini or Telegram and do not expose credential values.
@@ -112,6 +162,52 @@ Runtime liveness and external-integration readiness are separate:
 Provider verification remains an explicit later operation. A future browser
 diagnostics experience may display these statuses, but browser-loader or
 mandatory readiness changes are not part of this runtime increment.
+
+## HMI document sessions and event-bound voice
+
+Each browser document automatically bootstraps one anonymous server-issued capability. The
+capability is returned only through `X-Prisma-Session-Capability`, retained only in browser
+memory, and stored server-side only as a SHA-256 digest associated with an internal owner UUID.
+It is bearer authority for that document's owned context, not user-account authentication,
+device identity, or theft-proof authorization. Viewer/admin UI roles cannot mint authority for
+another document, and playback does not require administrator login.
+
+The capability isolates current-view snapshots, questions, responses, voice events, TTS replay,
+cancellation, and presentation navigation. Shared backend processes, Gemini credentials,
+installation telemetry, and bounded worker pools do not create a shared conversation. HMI asks
+have no fallback to the installation legacy snapshot. No chat UI or stored browser history was
+added.
+
+| Browser route | Runtime route | Contract |
+|---|---|---|
+| `POST /api/prisma/session` | `POST /hmi/session` | Exact `{}`, 128-byte wire cap; returns `201`, expiry metadata, and capability header. |
+| `DELETE /api/prisma/session` | `DELETE /hmi/session` | No body; revokes the capability and returns bodyless `204`. |
+| `POST /api/prisma/snapshot` | `POST /hmi/current-snapshot` | Replaces only that session's latest view; maximum 1 MiB. |
+| `GET /api/prisma/events/latest` | `GET /hmi/voice/latest` | Returns only that session's latest event, or `204`. |
+| `POST /api/prisma/ask` | `POST /local/ask` | Exact question object, 1–4096 UTF-8 bytes and 32 KiB wire cap. |
+| `POST /api/prisma/tts/live` | `POST /prisma/speak-live` | Exact event ID plus capability; foreign events return nondisclosing `404`. |
+
+Every exact session/TTS response is `Cache-Control: no-store`. Missing, malformed, expired, or
+revoked capabilities fail before credential, coordinator, cache, or provider work. The capability
+header is forwarded only on the fixed session paths. Raw text TTS `/prisma/speak` is retired and
+returns `410 RAW_TTS_DISABLED`; browser playback uses event IDs and progressive PCM only.
+
+A fresh document or reload receives a new capability. Explicit close revokes it, while browser
+`pagehide` close is best effort; abandoned sessions remain bounded by 30-minute idle and 8-hour
+absolute expiry. State is process-local and non-durable, so restart invalidates every capability.
+The supported topology is one voice-service process, one coordinator, and one provider worker;
+multiple workers or replicas are not supported.
+
+The whole-job deadline is logical. Cooperative cancellation, subscriber release, and late-output
+suppression happen at timeout, but Python cannot safely kill a blocked provider iterator. Its
+producer slot remains quarantined until physical return; the 45-second Gemini SDK I/O timeout is
+the bounded provider-unblock mechanism. This offline acceptance does not prove live Gemini,
+FFmpeg, native Windows/Linux permissions, TLS, proxying, supervisor behavior, or production use.
+
+Telegram remains an environment-token, private-text integration. It does not publish HMI voice
+events or receive automatic paid audio. The next unit adopts its stored token with explicit
+desired/applied state and safe apply/restart that stops and joins the previous poller, preserves
+pairing and pending updates, and prevents overlapping bots or `drop_pending_updates` data loss.
 
 ## Local development boundary
 
@@ -155,17 +251,18 @@ after forced terminal termination, power loss, or an operating-system crash.
 Automatic Prisma orchestration is currently Windows-only; unsupported systems
 run Vite with an explicit warning rather than pretending the backend is owned.
 
-The browser consumes Prisma through the four fixed same-origin routes documented
+The browser consumes Prisma through the fixed same-origin routes documented
 in [`docs/prisma/PRISMA_BROWSER_ROUTING.md`](../../docs/prisma/PRISMA_BROWSER_ROUTING.md).
 Vite forwards those exact routes to this runtime during development; there is no
 browser runtime selector or editable Prisma endpoint prerequisite. With no Gemini
 key, provider-dependent speech still returns the documented technical unavailable
 response and is never presented as spoken output.
 
-The unified browser-routing increment is closed offline. This does not provide
-protected credential storage or access, and it does not prove a live browser,
-provider, or production proxy deployment. Production static hosting still requires
-IT-managed forwarding for the same four routes, including progressive TTS streaming.
+The unified browser-routing increment, backend protected credential storage, Gemini adoption,
+and per-document HMI session isolation are complete offline. Credential administration is not
+yet exposed through the HMI, and Telegram has not adopted stored credentials. This does not prove
+a live provider or production proxy deployment. Production static hosting still requires
+IT-managed forwarding for all exact routes, including progressive TTS streaming.
 
 Production host and supervisor selection remain deferred. This development
 wrapper is not a production deployment or operating-system service manager.

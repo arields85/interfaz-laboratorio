@@ -1,4 +1,5 @@
 import { PRISMA_SNAPSHOT_URL } from '../config/prismaAssistant.config';
+import { prismaSessionClient } from './prismaSessionClient';
 
 const SNAPSHOT_EXPORT_FAILED_MESSAGE = '[dashboard-snapshot-export] Snapshot export failed.';
 const SNAPSHOT_EXPORT_TIMEOUT_MESSAGE = '[dashboard-snapshot-export] Snapshot export timed out.';
@@ -16,6 +17,7 @@ interface SnapshotExportFailureDetail {
 export interface DashboardSnapshotExporterOptions {
     intervalMs?: number;
     getSnapshot: () => unknown | null;
+    fetchImpl?: typeof fetch;
 }
 
 let activeExporter: { stop: () => void } | null = null;
@@ -23,6 +25,7 @@ let activeExporter: { stop: () => void } | null = null;
 export async function exportDashboardSnapshot(
     snapshot: unknown,
     lifecycleSignal?: AbortSignal,
+    fetchImpl?: typeof fetch,
 ): Promise<boolean> {
     if (lifecycleSignal?.aborted) {
         return false;
@@ -38,12 +41,13 @@ export async function exportDashboardSnapshot(
     lifecycleSignal?.addEventListener('abort', cancel, { once: true });
 
     try {
-        const response = await fetch(PRISMA_SNAPSHOT_URL, {
+        const response = await (fetchImpl ?? prismaSessionClient.fetch.bind(prismaSessionClient))(PRISMA_SNAPSHOT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(snapshot),
             signal: controller.signal,
         });
+        if (fetchImpl === undefined && !prismaSessionClient.isCurrentResponse(response)) return false;
         if (!response.ok) {
             const error = new Error(`HTTP ${response.status}`) as Error & { status: number };
             error.status = response.status;
@@ -71,6 +75,7 @@ export async function exportDashboardSnapshot(
 export function startDashboardSnapshotExporter({
     intervalMs = 5_000,
     getSnapshot,
+    fetchImpl,
 }: DashboardSnapshotExporterOptions): () => void {
     activeExporter?.stop();
 
@@ -86,7 +91,7 @@ export function startDashboardSnapshotExporter({
         if (snapshot === null) {
             return;
         }
-        const request = exportDashboardSnapshot(snapshot, lifecycleController.signal).finally(() => {
+        const request = exportDashboardSnapshot(snapshot, lifecycleController.signal, fetchImpl).finally(() => {
             if (inFlight === request) {
                 inFlight = null;
             }

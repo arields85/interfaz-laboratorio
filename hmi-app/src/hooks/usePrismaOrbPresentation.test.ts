@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VoiceEvent } from '../domain/voice.types';
 import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource, VoicePlaybackLifecycle } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
+import { prismaSessionClient } from '../services/prismaSessionClient';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
 import { PRISMA_ORB_FADE_DURATION_MS, usePrismaOrbPresentation } from './usePrismaOrbPresentation';
 
@@ -32,17 +33,17 @@ describe('usePrismaOrbPresentation', () => {
 
         act(() => result.current.presentVoiceEvent(EVENT));
 
-        expect(factory).toHaveBeenCalledWith({ text: 'Unified response', eventId: 'voice-1' });
+        expect(factory).toHaveBeenCalledWith({ eventId: 'voice-1' });
         expect(result.current.phase).toBe('visible');
     });
 
-    it('preserves optional Telegram identity normalization', () => {
+    it('never forwards Telegram identity or transcript', () => {
         const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
         const { result } = renderHook(() => usePrismaOrbPresentation({ engine: createEngine(), audioSourceFactory: factory }));
 
         act(() => result.current.presentVoiceEvent({ ...EVENT, telegramChatId: -100123 }));
 
-        expect(factory).toHaveBeenCalledWith({ text: EVENT.text, eventId: EVENT.id, telegramChatId: -100123 });
+        expect(factory).toHaveBeenCalledWith({ eventId: EVENT.id });
     });
 
     it('fades once after progressive playback ends', () => {
@@ -109,5 +110,17 @@ describe('usePrismaOrbPresentation', () => {
         unmount();
 
         expect(engine.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops buffered playback when the local document session resets', () => {
+        const engine = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        act(() => prismaSessionClient.reset({ close: false }));
+
+        expect(engine.stop).toHaveBeenCalledTimes(1);
+        expect(result.current.phase).toBe('hidden');
     });
 });

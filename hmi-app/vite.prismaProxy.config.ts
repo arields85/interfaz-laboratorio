@@ -21,8 +21,10 @@ function createRoute(
 }
 
 export const PRISMA_PROXY_ROUTES: readonly PrismaProxyRoute[] = Object.freeze([
+    createRoute('/api/prisma/session', 'http://127.0.0.1:5057', '/hmi/session'),
     createRoute('/api/prisma/snapshot', 'http://127.0.0.1:5057', '/hmi/current-snapshot'),
     createRoute('/api/prisma/events/latest', 'http://127.0.0.1:5057', '/hmi/voice/latest'),
+    createRoute('/api/prisma/ask', 'http://127.0.0.1:5057', '/local/ask'),
     createRoute('/api/prisma/voice-config', 'http://127.0.0.1:5057', '/hmi/prisma-config'),
     createRoute('/api/prisma/tts/live', 'http://127.0.0.1:5056', '/prisma/speak-live'),
 ]);

@@ -12,7 +12,7 @@ import json
 import os
 import re
 import threading
-import time
+from pathlib import Path
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,14 +22,23 @@ from urllib.parse import urlsplit
 import requests
 from flask import Flask, Response, jsonify, request
 
+from .admin_auth import AdminAuthRepository, AdminAuthService, ScryptPasswordHasher
+from .admin_http import AdminHttpBoundary
+from .credential_store import CredentialService
+from .hmi_sessions import CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge, HmiSessionRegistry, HmiSessionUnauthorized
 from .paths import runtime_paths
+from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
+from .voice_events import VoiceEventCapacity, VoiceEventStore
 
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5057
 DEFAULT_PRISMA_VOICE_URL = "http://127.0.0.1:5056"
 DEFAULT_TELEGRAM_API_URL = "https://api.telegram.org"
+HMI_SESSION_BOOTSTRAP_MAX_BYTES = 128
+HMI_ASK_MAX_BYTES = 32 * 1024
+HMI_QUESTION_MAX_BYTES = 4096
 
 
 def utc_now_iso() -> str:
@@ -323,23 +332,6 @@ class JsonFileStore:
             os.replace(temporary, self.path)
 
 
-class VoiceEventStore:
-    def __init__(self):
-        self.lock = threading.RLock()
-        self._event = {"id": f"startup-{int(time.time() * 1000)}", "timestamp": utc_now_iso(), "text": "", "question": "inicio-local"}
-
-    def publish(self, question: str, answer_text: str, chat_id: int | None) -> dict[str, Any]:
-        with self.lock:
-            event = {"id": f"local-{int(time.time() * 1000)}", "timestamp": utc_now_iso(), "text": answer_text, "question": question}
-            if chat_id is not None: event["telegramChatId"] = chat_id
-            self._event = event
-            return dict(event)
-
-    def latest(self) -> dict[str, Any]:
-        with self.lock:
-            return dict(self._event)
-
-
 class TelegramLocalBot:
     def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token.strip(), snapshot_store, state_store, voice_events
@@ -383,7 +375,7 @@ class TelegramLocalBot:
             snapshot = self.snapshot_store.read(); self.send_message(chat_id, f"Prisma Local está activa. Último snapshot: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
         if command.startswith("/help"):
             self.send_message(chat_id, "Podés consultar lote, producto, orden, cliente, OEE, estado, actividad, potencia, progreso, tiempo restante, alertas o pedir un resumen."); return
-        answer = answer_from_snapshot(self.snapshot_store.read(), text); self.send_message(chat_id, answer.answer_text); self.voice_events.publish(text, answer.answer_text, chat_id)
+        answer = answer_from_snapshot(self.snapshot_store.read(), text); self.send_message(chat_id, answer.answer_text)
 
     def run(self):
         try:
@@ -414,20 +406,88 @@ def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAU
     return TelegramLocalBot(config.token, snapshot_store, state_store, voice_events, api_base)
 
 
-def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None) -> Flask:
+def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None) -> Flask:
     paths = runtime_paths()
     snapshot_store = snapshot_store or JsonFileStore(paths.snapshot)
     voice_events = voice_events or VoiceEventStore()
+    session_registry = session_registry or HmiSessionRegistry(on_remove=voice_events.remove_owner)
     telegram_configuration = telegram_configuration or read_telegram_config()
     voice_url = (os.environ.get("PRISMA_LOCAL_VOICE_URL") or DEFAULT_PRISMA_VOICE_URL).rstrip("/")
     local_http = requests.Session(); local_http.trust_env = False
-    app = Flask(__name__); app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot)
+    app = Flask(__name__); app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, session_registry=session_registry)
+    if admin_http is None:
+        permissions = SecureStoragePermissions()
+        repository = AdminAuthRepository(paths.auth_database, permission_checker=permissions.verify)
+        credentials = CredentialService(
+            paths.credential_database,
+            Path(os.environ.get("PRISMA_CREDENTIAL_MASTER_KEY_FILE", "")),
+            paths.root,
+            permissions.verify,
+        )
+        admin_http = AdminHttpBoundary(
+            AdminAuthService(repository, ScryptPasswordHasher()),
+            credential_service=credentials,
+            public_origin=os.environ.get("PRISMA_PUBLIC_ORIGIN"),
+        )
+    admin_http.register(app)
 
     @app.after_request
     def add_local_cors(response):
         origin = request.headers.get("Origin"); allowed = {"http://127.0.0.1:5173", "http://localhost:5173"}
         response.headers["Access-Control-Allow-Origin"] = origin if origin in allowed else "http://127.0.0.1:5173"; response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type"; response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"; return response
+        response.headers["Access-Control-Allow-Headers"] = f"Content-Type, X-CSRF-Token, {CAPABILITY_HEADER}"; response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        if request.path in {"/hmi/session", "/hmi/current-snapshot", "/hmi/voice/latest", "/local/ask"} or request.path.startswith("/internal/prisma/voice-events/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    def session_error():
+        return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
+
+    def session_owner():
+        try:
+            return session_registry.authorize(request.headers.get(CAPABILITY_HEADER, ""))
+        except HmiSessionUnauthorized:
+            return None
+
+    def request_bytes_within(limit):
+        if request.content_length is not None and request.content_length > limit:
+            return None
+        payload = request.stream.read(limit + 1)
+        return payload if len(payload) <= limit else None
+
+    def parse_json_bytes(payload):
+        try:
+            return json.loads(payload)
+        except (UnicodeDecodeError, ValueError, TypeError):
+            return None
+
+    @app.post("/hmi/session")
+    def create_hmi_session():
+        payload = request_bytes_within(HMI_SESSION_BOOTSTRAP_MAX_BYTES)
+        if payload is None or parse_json_bytes(payload) != {}:
+            return jsonify({"ok": False, "error": "INVALID_REQUEST"}), 400
+        try:
+            capability, metadata = session_registry.create()
+        except HmiSessionCapacity:
+            return jsonify({"ok": False, "error": "PRISMA_SESSION_CAPACITY"}), 503
+        response = jsonify(metadata); response.status_code = 201
+        response.headers[CAPABILITY_HEADER] = capability; response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.delete("/hmi/session")
+    def close_hmi_session():
+        try:
+            capability = request.headers.get(CAPABILITY_HEADER, "")
+            session_registry.authorize(capability)
+        except HmiSessionUnauthorized:
+            return session_error()
+        if request_bytes_within(0) != b"":
+            return jsonify({"ok": False, "error": "INVALID_REQUEST"}), 400
+        try:
+            session_registry.close(capability)
+        except HmiSessionUnauthorized:
+            return session_error()
+        return Response(status=204)
 
     @app.route("/health", methods=["GET"])
     def health():
@@ -437,23 +497,62 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     @app.route("/hmi/current-snapshot", methods=["GET", "POST", "OPTIONS"])
     def current_snapshot():
         if request.method == "OPTIONS": return Response(status=204)
+        capability = request.headers.get(CAPABILITY_HEADER, "")
+        if session_owner() is None: return session_error()
         if request.method == "GET":
-            snapshot = snapshot_store.read()
+            _owner_id, snapshot = session_registry.get_context(capability)
             return (jsonify({"ok": False, "error": "NO_SNAPSHOT"}), 404) if snapshot is None else jsonify(snapshot)
         snapshot = request.get_json(silent=True)
         if not isinstance(snapshot, dict) or not isinstance(snapshot.get("widgets"), list): return jsonify({"ok": False, "error": "INVALID_SNAPSHOT", "message": "widgets must be a list."}), 400
         if not snapshot.get("timestamp"): snapshot["timestamp"] = utc_now_iso()
-        snapshot_store.write(snapshot); return jsonify({"ok": True, "status": "accepted", "timestamp": snapshot["timestamp"]}), 202
+        try:
+            session_registry.set_context(capability, snapshot)
+        except HmiSessionContextTooLarge:
+            return jsonify({"ok": False, "error": "PRISMA_SESSION_CONTEXT_TOO_LARGE"}), 413
+        return jsonify({"ok": True, "status": "accepted", "timestamp": snapshot["timestamp"]}), 202
 
     @app.route("/hmi/voice/latest", methods=["GET", "OPTIONS"])
-    def latest_voice(): return Response(status=204) if request.method == "OPTIONS" else jsonify(voice_events.latest())
+    def latest_voice():
+        if request.method == "OPTIONS": return Response(status=204)
+        owner_id = session_owner()
+        if owner_id is None: return session_error()
+        event = voice_events.latest(owner_id)
+        return Response(status=204) if event is None else jsonify(event)
+
+    @app.route("/internal/prisma/voice-events/<event_id>", methods=["GET"])
+    def voice_event(event_id):
+        owner_id = session_owner()
+        if owner_id is None: return session_error()
+        event = voice_events.get_internal(event_id, owner_id)
+        return (jsonify({"ok": False, "error": "VOICE_EVENT_NOT_FOUND"}), 404) if event is None else jsonify(event)
 
     @app.route("/local/ask", methods=["POST", "OPTIONS"])
     def local_ask():
         if request.method == "OPTIONS": return Response(status=204)
-        data = request.get_json(silent=True) or {}; question = str(data.get("question") or "").strip()
-        if not question: return jsonify({"ok": False, "error": "QUESTION_REQUIRED"}), 400
-        chat_id = data.get("telegramChatId") if isinstance(data.get("telegramChatId"), int) else None; answer = answer_from_snapshot(snapshot_store.read(), question); event = voice_events.publish(question, answer.answer_text, chat_id)
+        payload = request_bytes_within(HMI_ASK_MAX_BYTES)
+        if payload is None:
+            return jsonify({"ok": False, "error": "INVALID_LOCAL_ASK_REQUEST"}), 400
+        capability = request.headers.get(CAPABILITY_HEADER, "")
+        owner_id = session_owner()
+        if owner_id is None: return session_error()
+        data = parse_json_bytes(payload)
+        if not isinstance(data, dict): return jsonify({"ok": False, "error": "INVALID_LOCAL_ASK_REQUEST"}), 400
+        if "telegramChatId" in data: return jsonify({"ok": False, "error": "TELEGRAM_RECIPIENT_NOT_ALLOWED"}), 400
+        if set(data) != {"question"} or not isinstance(data.get("question"), str):
+            return jsonify({"ok": False, "error": "INVALID_LOCAL_ASK_REQUEST"}), 400
+        question = data["question"].strip()
+        try:
+            question_bytes = len(question.encode("utf-8"))
+        except UnicodeEncodeError:
+            return jsonify({"ok": False, "error": "INVALID_LOCAL_ASK_REQUEST"}), 400
+        if not 1 <= question_bytes <= HMI_QUESTION_MAX_BYTES:
+            return jsonify({"ok": False, "error": "QUESTION_REQUIRED"}), 400
+        _owner_id, snapshot = session_registry.get_context(capability)
+        answer = answer_from_snapshot(snapshot, question)
+        try:
+            event = voice_events.publish(question, answer.answer_text, owner_id=owner_id)
+        except VoiceEventCapacity:
+            return jsonify({"ok": False, "error": "VOICE_EVENT_CAPACITY"}), 503
         return jsonify({**answer.as_dict(), "voiceEvent": event})
 
     @app.route("/hmi/prisma-config", methods=["GET", "PUT", "OPTIONS"])

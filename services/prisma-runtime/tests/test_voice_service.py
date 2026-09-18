@@ -1,14 +1,23 @@
 import base64
+import json
 import os
+import sys
 import tempfile
+import threading
+import uuid
 import unittest
 import wave
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+RUNTIME_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RUNTIME_ROOT / "src"))
+
 from prisma_runtime import voice_service as service
+from prisma_runtime.event_audio import GenerationControl
 
 
 class FakeStream:
@@ -70,6 +79,111 @@ def completed_event(status="completed"):
 
 
 class VoiceServiceTests(unittest.TestCase):
+    def test_raw_tts_is_retired_and_live_request_is_strictly_event_only(self):
+        raw = service.app.test_client().post("/prisma/speak", json={"text": "raw"})
+        self.assertEqual(raw.status_code, 410)
+        self.assertEqual(raw.get_json()["error"], "RAW_TTS_DISABLED")
+
+        for body in ({}, {"eventId": "not-a-uuid"}, {"eventId": str(uuid.uuid4()), "text": "override"}):
+            with self.subTest(body=body):
+                response = service.app.test_client().post("/prisma/speak-live", json=body)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "INVALID_VOICE_EVENT_REQUEST")
+
+    def test_event_lookup_is_fixed_proxy_disabled_bounded_and_no_redirect(self):
+        event_id = str(uuid.uuid4())
+        response = Mock(status_code=200)
+        owner_id = str(uuid.uuid4())
+        response.iter_content.return_value = [b'{"id":"' + event_id.encode() + b'","ownerId":"' + owner_id.encode() + b'","text":"answer","question":"q","timestamp":"2026-09-17T12:00:00Z","expiresAt":9999999999}']
+        http = Mock()
+        http.get.return_value = response
+
+        event = service.resolve_voice_event(event_id, "test-capability", http=http)
+
+        self.assertEqual(event["text"], "answer")
+        response.close.assert_called_once_with()
+        self.assertFalse(http.trust_env)
+        http.get.assert_called_once_with(
+            f"http://127.0.0.1:5057/internal/prisma/voice-events/{event_id}",
+            headers={"X-Prisma-Session-Capability": "test-capability"},
+            timeout=2,
+            allow_redirects=False,
+            stream=True,
+        )
+
+    def test_event_lookup_rejects_noncanonical_field_shapes_and_closes_response(self):
+        event_id = str(uuid.uuid4())
+        valid = {
+            "id": event_id,
+            "text": "answer",
+            "question": "q",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "expiresAt": 9999999999,
+        }
+        invalid_values = (
+            ("timestamp", []),
+            ("timestamp", "not-a-time"),
+            ("question", {}),
+            ("question", "\ud800"),
+            ("text", "\ud800"),
+            ("expiresAt", True),
+            ("expiresAt", float("nan")),
+            ("expiresAt", float("inf")),
+        )
+        for field, value in invalid_values:
+            with self.subTest(field=field, value=repr(value)):
+                response = Mock(status_code=200)
+                response.iter_content.return_value = [json.dumps({**valid, field: value}).encode("utf-8", "surrogatepass")]
+                http = Mock()
+                http.get.return_value = response
+                with self.assertRaisesRegex(RuntimeError, "LOOKUP_UNAVAILABLE"):
+                    service.resolve_voice_event(event_id, http=http)
+                response.close.assert_called_once_with()
+
+    def test_event_lookup_closes_response_on_not_found_redirect_and_oversize(self):
+        event_id = str(uuid.uuid4())
+        for status, chunks, expected in (
+            (404, [], LookupError),
+            (302, [], RuntimeError),
+            (200, [b"x" * (service._VOICE_EVENT_MAX_BYTES + 1)], RuntimeError),
+        ):
+            with self.subTest(status=status):
+                response = Mock(status_code=status)
+                response.iter_content.return_value = chunks
+                http = Mock()
+                http.get.return_value = response
+                with self.assertRaises(expected):
+                    service.resolve_voice_event(event_id, http=http)
+                response.close.assert_called_once_with()
+
+    def test_all_viewers_receive_pcm_without_admin_cookie_or_role(self):
+        event_id = str(uuid.uuid4())
+        event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999}
+        coordinator = Mock()
+        coordinator.subscribe.return_value = iter([b"\x12\x34"])
+        with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+            response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"\x12\x34")
+        coordinator.subscribe.assert_called_once()
+
+    def test_http_response_close_releases_unstarted_audio_subscription(self):
+        stream = Mock()
+        stream.__iter__ = Mock(return_value=iter(()))
+        response = service._pcm_stream_response(lambda: stream)
+
+        response.close()
+        response.close()
+
+        self.assertGreaterEqual(stream.close.call_count, 1)
+
+    def test_known_multiworker_and_reloader_modes_fail_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "SINGLE_PROCESS"):
+            service._validate_single_process_environment({"WEB_CONCURRENCY": "2"})
+        with self.assertRaisesRegex(RuntimeError, "RELOADER"):
+            service._validate_single_process_environment({"WERKZEUG_RUN_MAIN": "true"})
+        service._validate_single_process_environment({"WEB_CONCURRENCY": "1"})
+
     def test_telegram_falls_back_from_non_2xx_ogg_attempts_to_identical_pcm_wav(self):
         processed_pcm = b"\x10\x20\x30\x40\x50\x60"
         encoder = Mock()
@@ -105,25 +219,25 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "local")
         self.assertTrue(payload["ready"])
         self.assertFalse(payload["liveReady"])
-        self.assertEqual(payload["providerStatus"], {"configured": False, "verified": False, "error": "GEMINI_API_KEY_MISSING"})
+        self.assertEqual(payload["providerStatus"], {"source": "environment", "configured": False, "available": True, "verified": False})
         self.assertNotIn("apiKey", str(payload))
         get_client.assert_not_called()
 
     def test_health_reports_key_presence_as_configured_but_never_verified(self):
         with patch.dict(os.environ, {"GEMINI_API_KEY": "  configured-secret  "}, clear=True), patch.object(service, "get_gemini_client") as get_client:
             payload = service.app.test_client().get("/health").get_json()
-        self.assertEqual(payload["providerStatus"], {"configured": True, "verified": False, "error": None})
+        self.assertEqual(payload["providerStatus"], {"source": "environment", "configured": True, "available": True, "verified": False})
         self.assertNotIn("configured-secret", str(payload))
         get_client.assert_not_called()
 
-    def test_whitespace_only_key_is_missing_for_both_speech_endpoints_without_client_construction(self):
+    def test_raw_retirement_and_invalid_event_precede_credential_work(self):
         with patch.dict(os.environ, {"GEMINI_API_KEY": "   "}, clear=True), patch.object(service, "get_gemini_client") as get_client, patch.object(service.prisma_audio_sink, "emit") as emit:
             regular = service.app.test_client().post("/prisma/speak", json={"text": "Status"})
             live = service.app.test_client().post("/prisma/speak-live", json={"text": "Status"})
-        for response in (regular, live):
-            with self.subTest(path=response.request.path):
-                self.assertEqual(response.status_code, 503)
-                self.assertEqual(response.get_json(), {"ok": False, "error": "GEMINI_API_KEY_MISSING", "message": "Configure GEMINI_API_KEY before requesting speech."})
+        self.assertEqual(regular.status_code, 410)
+        self.assertEqual(regular.get_json()["error"], "RAW_TTS_DISABLED")
+        self.assertEqual(live.status_code, 400)
+        self.assertEqual(live.get_json()["error"], "INVALID_VOICE_EVENT_REQUEST")
         get_client.assert_not_called()
         emit.assert_not_called()
 
@@ -131,10 +245,10 @@ class VoiceServiceTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), patch.object(service, "get_gemini_client") as get_client:
             regular = service.app.test_client().post("/prisma/speak", json={})
             live = service.app.test_client().post("/prisma/speak-live", json={})
-        self.assertEqual(regular.status_code, 400)
-        self.assertEqual(regular.get_json(), {"ok": False, "error": "TEXT_REQUIRED"})
+        self.assertEqual(regular.status_code, 410)
+        self.assertEqual(regular.get_json(), {"ok": False, "error": "RAW_TTS_DISABLED"})
         self.assertEqual(live.status_code, 400)
-        self.assertEqual(live.get_json(), {"ok": False, "error": "TEXT_REQUIRED"})
+        self.assertEqual(live.get_json(), {"ok": False, "error": "INVALID_VOICE_EVENT_REQUEST"})
         get_client.assert_not_called()
 
     def test_tts_request_uses_streaming_interactions_contract(self):
@@ -156,6 +270,24 @@ class VoiceServiceTests(unittest.TestCase):
             self.assertEqual(list(output), [])
         self.assertEqual(stream.close_calls, 1)
         self.assertEqual(client.close_calls, 1)
+        self.assertFalse(any(thread.name == "PrismaProviderIdleGuard" for thread in threading.enumerate()))
+
+    def test_generation_control_runs_provider_and_job_cleanup_once(self):
+        stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
+        client = FakeClient([stream])
+        control = GenerationControl()
+        with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
+            job = service._create_interactions_tts_job("Cancelled transcript")
+            with patch.object(service, "_create_interactions_tts_job", return_value=job):
+                output = service._generate_event_audio({"id": str(uuid.uuid4()), "text": "Cancelled transcript"}, {}, "secret", control)
+                self.assertEqual(next(output), b"\x12\x34")
+                control.signal()
+                control.run_callbacks()
+                control.run_callbacks()
+                self.assertTrue(job["cancelled"].is_set())
+                self.assertEqual(stream.close_calls, 1)
+                self.assertEqual(client.close_calls, 1)
+                output.close()
 
     def test_stream_falls_back_once_before_any_audio(self):
         stream = FakeStream([], RuntimeError("provider unavailable"))
@@ -178,15 +310,37 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertEqual(len(client.interactions.calls), 1)
 
     def test_local_endpoint_returns_canonical_pcm_metadata_without_provider_connection(self):
-        stream = FakeStream([audio_event(b"\x12\x34", mime_type="audio/l16", sample_rate=24000, channels=1), completed_event()])
-        client = FakeClient([stream])
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-only"}), patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
-            response = service.app.test_client().post("/prisma/speak-live", json={"text": "Endpoint transcript"}, buffered=True)
+        event_id = str(uuid.uuid4())
+        coordinator = Mock()
+        coordinator.subscribe.return_value = iter([b"\x12\x34"])
+        with patch.object(service, "resolve_voice_event", return_value={"id": event_id, "text": "answer", "expiresAt": 9999999999}), patch.object(service, "audio_coordinator", coordinator):
+            response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, b"\x12\x34")
         self.assertEqual(response.headers["X-Prisma-Audio-Format"], "pcm_s16le")
         self.assertEqual(response.headers["X-Prisma-Sample-Rate"], "24000")
         self.assertEqual(response.headers["X-Prisma-Channels"], "1")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_session_tts_responses_are_no_store_without_changing_unrelated_health(self):
+        event_id = str(uuid.uuid4())
+        coordinator = Mock()
+        coordinator.subscribe.return_value = iter([b"\x12\x34"])
+        with patch.object(service, "resolve_voice_event", return_value={"id": event_id, "text": "answer", "expiresAt": 9999999999}), patch.object(service, "audio_coordinator", coordinator):
+            success = service.app.test_client().post(
+                "/prisma/speak-live",
+                json={"eventId": event_id},
+                headers={"X-Prisma-Session-Capability": "test-capability"},
+                buffered=True,
+            )
+        invalid = service.app.test_client().post("/prisma/speak-live", json={})
+        options = service.app.test_client().options("/prisma/speak-live")
+        method = service.app.test_client().get("/prisma/speak-live")
+        health = service.app.test_client().get("/health")
+
+        for response in (success, invalid, options, method):
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertNotEqual(health.headers.get("Cache-Control"), "no-store")
 
     def test_local_config_update_is_atomic_and_strict(self):
         with tempfile.TemporaryDirectory() as temporary:

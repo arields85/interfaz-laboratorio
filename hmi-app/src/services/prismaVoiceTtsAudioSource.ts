@@ -1,12 +1,10 @@
 import { PRISMA_TTS_LIVE_URL } from '../config/prismaAssistant.config';
-import { normalizeTelegramChatId } from '../domain/voice';
 import type { PrismaVoiceAudioSource } from './prismaVoiceAudioEngine';
 import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
+import { prismaSessionClient } from './prismaSessionClient';
 
 export interface PrismaVoiceTtsAudioRequest {
-    text: string;
-    eventId?: string;
-    telegramChatId?: number;
+    eventId: string;
 }
 
 export type PrismaVoiceAudioSourceFactory = (
@@ -19,26 +17,27 @@ const LIVE_CHANNELS = PRISMA_PCM_AUDIO_FORMAT.channels;
 
 export function createPrismaVoiceTtsAudioSource(
     request: PrismaVoiceTtsAudioRequest,
-    fetchImpl: typeof fetch = (...args) => fetch(...args),
+    fetchImpl?: typeof fetch,
 ): PrismaVoiceAudioSource {
     return {
         playbackTransport: 'progressive',
         async openLive(signal) {
-            const telegramChatId = normalizeTelegramChatId(request.telegramChatId);
-            const body = {
-                text: request.text,
-                ...(request.eventId?.trim() ? { eventId: request.eventId } : {}),
-                ...(telegramChatId === undefined ? {} : { telegramChatId }),
-            };
-            const response = await fetchImpl(PRISMA_TTS_LIVE_URL, {
+            const eventId = request.eventId.trim();
+            if (!eventId) {
+                throw new Error('Prisma voice event ID is required');
+            }
+            const response = await (fetchImpl ?? prismaSessionClient.fetch.bind(prismaSessionClient))(PRISMA_TTS_LIVE_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: JSON.stringify({ eventId }),
                 cache: 'no-store',
                 signal,
             });
             if (!response.ok) {
                 throw new Error(`Prisma Live request failed with status ${response.status}`);
+            }
+            if (fetchImpl === undefined && !prismaSessionClient.isCurrentResponse(response)) {
+                throw new Error('Prisma Live response belongs to a stale session');
             }
             if (response.headers.get('X-Prisma-Audio-Format')?.toLowerCase() !== LIVE_AUDIO_FORMAT) {
                 throw new Error('Prisma Live response has invalid audio format');

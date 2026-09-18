@@ -735,13 +735,37 @@ Al actualizar este documento:
 
 ## 11. Cierre de etapa y reanudación
 
-Los once incrementos FND y los tres incrementos UNI están completos offline: contratos de audio, inicio seguro sin
-configurar, separación instalación/arranque e integración local Windows con
-`npm run dev`, además del enrutamiento same-origin y el retiro del selector legacy,
-cuentan con verificación independiente. La Entrega 1.1 y PW-002/PW-003
-continúan abiertos para aceptación real, instalación limpia, pipeline y supervisión
-administrados por IT, recuperación durable y acceso backend protegido. No se deben
-repetir las correcciones ya cerradas.
+Los once incrementos FND y los tres incrementos UNI están completos offline: contratos de
+audio, inicio seguro sin configurar, separación instalación/arranque e integración local
+Windows con `npm run dev`, además del enrutamiento same-origin y el retiro del selector
+legacy, cuentan con verificación independiente. Ese cierre corresponde a la etapa previa
+registrada en el commit local `36eeaa4`.
+
+Sobre esa base, `PAC-1`, `PAC-1a`, `PAC-2`, `PAC-3A` y `PAC-3A-S1` están completos y aceptados
+offline. Prisma dispone de autenticación backend propia, recuperación offline y almacenamiento
+cifrado AES-256-GCM para credenciales Gemini/Telegram, con clave de instalación separada y API
+administrativa protegida. La API solo expone estado configurado; no devuelve secretos ni afirma
+que estén verificados, aplicados o en ejecución.
+
+Gemini ya consume la credencial almacenada cuando el modo protegido está seleccionado. Ese modo
+es autoritativo: una ausencia, eliminación, indisponibilidad o corrupción no vuelve a
+`GEMINI_API_KEY`. La variable de entorno permanece únicamente como fuente legacy cuando el modo
+protegido no fue seleccionado. Health, guardado y arranque no contactan al proveedor.
+
+Cada documento HMI recibe una capacidad anónima emitida por el servidor y conservada solo en
+memoria. Esa capacidad separa consultas, contexto de vista, respuestas, eventos, audio, replay,
+cancelación y navegación. Dos navegadores pueden compartir backend, clave, catálogo, telemetría y
+pools acotados sin compartir conversación. No existe fallback desde el contexto de una vista al
+snapshot global de instalación. La capacidad no es una cuenta de usuario, identidad de dispositivo
+ni protección frente al robo del bearer; una recarga obtiene otra sesión, el cierre es best effort
+y el estado expira y no es durable ni multiworker.
+
+La aceptación independiente final aprobó 63 pruebas backend focalizadas, 53 HMI focalizadas,
+209 backend completas y 1844 HMI completas. La cobertura HMI fue 86,64 % statements, 80,00 %
+branches, 85,87 % functions y 87,46 % lines. También aprobaron 40 archivos AST, `pip check`,
+dos verificaciones TypeScript, build, lint y diff. Se conservaron las pruebas reales offline de
+privacidad A/B mediante Flask y bridge/proveedor falsos, y las correcciones previas de recursos.
+No se ejecutaron proveedores, FFmpeg, servicios, red, claves reales ni validaciones productivas.
 
 ### Base de código registrada al cerrar esta etapa
 
@@ -758,18 +782,27 @@ modificaciones ajenas pendientes de resolver.
 El próximo trabajo debe partir de este maestro, de
 [`../../odd/tasks/prisma-runtime-foundations.md`](../../odd/tasks/prisma-runtime-foundations.md)
 y de los topics estables `backlog/prisma-runtime-monorepo-integration` y
-`backlog/prisma-dual-channel-assistant`. La continuación vigente es acotada: implementar
-primero almacenamiento y API de credenciales en una frontera backend protegida;
-después, integrar sus campos y diagnósticos en **Configuración general → Voz**.
+`backlog/prisma-dual-channel-assistant`. `PAC-3` permanece abierto porque `PAC-3B` está pendiente.
+La continuación exacta es adoptar el token Telegram desde el almacenamiento protegido, modelar
+estado deseado/aplicado y ofrecer aplicación o reinicio explícitos y autenticados. El reemplazo
+debe detener y esperar al poller anterior para impedir bots superpuestos, preservar pairing y
+updates pendientes, y evitar `drop_pending_updates`. Telegram continúa hoy con token de entorno,
+respuesta privada de texto y sin broadcast HMI ni audio pago automático.
+
+Después de verificar `PAC-3B` corresponde `PAC-4`: integrar campos y diagnósticos en
+**Configuración general → Voz**. No se añade UI de chat, historial persistido ni identidad de
+cuenta. La política existente de acceso a `/hmi/prisma-config` tampoco quedó protegida por estos
+cambios y requiere tratamiento separado.
+
 El pipeline productivo administrado por IT sigue como objetivo posterior sin seleccionar
 todavía OS o supervisor. Cualquier readiness adicional del loader del navegador es UX
 opcional y no bloqueante, no un requisito obligatorio aprobado.
 
-No hay un experimento de caída pendiente. La aclaración del usuario retira la próxima
-investigación indicada en 2.0.3; no afirma una causa reproducida ni una corrección. La
-fuente real, el modelo de autenticación, la política de autorización y el mecanismo de
-despliegue continúan abiertos. La automaticidad e invisibilidad de la operación ya están
-decididas y no requieren nueva confirmación.
+Esto no constituye aceptación de producción. PW-002 y PW-003 continúan activos para instalación
+limpia y arranque real, forwarding, despliegue y supervisión administrados por IT, recuperación
+durable, retiro explícito de la instalación legacy y la evolución funcional pendiente. La
+provisión de una clave real, permisos live de clave nueva en Windows, validación Linux real,
+reparse points nativos, backup/restore, TLS, proxy y entorno productivo también permanecen abiertos.
 
 ## 12. Changelog
 

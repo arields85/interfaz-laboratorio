@@ -93,7 +93,7 @@ describe('PrismaOrbOverlay', () => {
 
         emit(ref);
 
-        expect(factory).toHaveBeenCalledWith({ text: EVENT.text, eventId: EVENT.id });
+        expect(factory).toHaveBeenCalledWith({ eventId: EVENT.id });
     });
 
     it('uses the controlled fade path after playback failure', () => {

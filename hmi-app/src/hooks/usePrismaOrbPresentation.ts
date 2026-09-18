@@ -2,9 +2,9 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
 import type { VoiceEvent } from '../domain/voice.types';
-import { normalizeTelegramChatId } from '../domain/voice';
 import { PrismaVoiceAudioEngine } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource } from '../services/prismaVoiceAudioEngine';
+import { prismaSessionClient } from '../services/prismaSessionClient';
 import { createPrismaVoiceTtsAudioSource } from '../services/prismaVoiceTtsAudioSource';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
@@ -53,14 +53,11 @@ export function usePrismaOrbPresentation(
     };
 
     const presentVoiceEvent = (event: VoiceEvent): void => {
+        const eventId = event.id?.trim();
+        if (!eventId) return;
         generationRef.current += 1;
         clearFadeTimer();
-        const telegramChatId = normalizeTelegramChatId(event.telegramChatId);
-        const audioSource = audioSourceFactoryRef.current({
-            text: event.text,
-            ...(event.id === undefined ? {} : { eventId: event.id }),
-            ...(telegramChatId === undefined ? {} : { telegramChatId }),
-        });
+        const audioSource = audioSourceFactoryRef.current({ eventId });
         setPhase('visible');
         setRequest({ generation: generationRef.current, audioSource });
     };
@@ -96,6 +93,14 @@ export function usePrismaOrbPresentation(
         clearFadeTimer();
         engineRef.current?.dispose();
     }, []);
+
+    useLayoutEffect(() => prismaSessionClient.subscribeToReset(() => {
+        generationRef.current += 1;
+        clearFadeTimer();
+        engineRef.current?.stop();
+        setRequest(null);
+        setPhase('hidden');
+    }), []);
 
     return { phase, orbRef, presentVoiceEvent };
 }

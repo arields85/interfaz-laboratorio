@@ -24,7 +24,7 @@ describe('dashboardSnapshotExport.service', () => {
         vi.stubGlobal('fetch', fetchMock);
         const snapshot = { timestamp: '2026-07-07T10:00:00.000Z', widgets: [] };
 
-        await expect(exportDashboardSnapshot(snapshot)).resolves.toBe(true);
+        await expect(exportDashboardSnapshot(snapshot, undefined, fetchMock)).resolves.toBe(true);
 
         expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/prisma/snapshot', {
             method: 'POST',
@@ -37,9 +37,9 @@ describe('dashboardSnapshotExport.service', () => {
     it('keeps HTTP and network failures nonfatal and observable', async () => {
         const failures: CustomEvent[] = [];
         window.addEventListener('hmi:snapshot-export-failed', (event) => failures.push(event as CustomEvent));
-        vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 } as Response)));
+        const fetchMock = vi.fn(async () => ({ ok: false, status: 503 } as Response));
 
-        await expect(exportDashboardSnapshot({ widgets: [] })).resolves.toBe(false);
+        await expect(exportDashboardSnapshot({ widgets: [] }, undefined, fetchMock)).resolves.toBe(false);
 
         expect(failures[0]?.detail).toEqual({
             reason: 'request-failed',
@@ -50,13 +50,13 @@ describe('dashboardSnapshotExport.service', () => {
 
     it('times out and aborts a hanging request', async () => {
         let signal: AbortSignal | undefined;
-        vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
             signal = init?.signal;
             return new Promise<Response>((_resolve, reject) => {
                 signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
             });
-        }));
-        const request = exportDashboardSnapshot({ widgets: [] });
+        });
+        const request = exportDashboardSnapshot({ widgets: [] }, undefined, fetchMock);
 
         await vi.advanceTimersByTimeAsync(4_500);
 
@@ -71,7 +71,7 @@ describe('dashboardSnapshotExport.service', () => {
             .mockResolvedValue({ ok: true, status: 202 } as Response);
         vi.stubGlobal('fetch', fetchMock);
         const getSnapshot = vi.fn(() => ({ widgets: [] }));
-        const stop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot });
+        const stop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot, fetchImpl: fetchMock });
 
         await vi.advanceTimersByTimeAsync(2_000);
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -92,7 +92,7 @@ describe('dashboardSnapshotExport.service', () => {
                 : Promise.resolve({ ok: true, status: 202 } as Response)
         ));
         vi.stubGlobal('fetch', fetchMock);
-        const stop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ widgets: [] }) });
+        const stop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ widgets: [] }), fetchImpl: fetchMock });
 
         await vi.advanceTimersByTimeAsync(1_000);
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -105,14 +105,14 @@ describe('dashboardSnapshotExport.service', () => {
 
     it('replaces the previous exporter and aborts its request', async () => {
         const signals: AbortSignal[] = [];
-        vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
             signals.push(init?.signal as AbortSignal);
             return new Promise<Response>(() => undefined);
-        }));
-        const firstStop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ first: true }) });
+        });
+        const firstStop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ first: true }), fetchImpl: fetchMock });
         await vi.advanceTimersByTimeAsync(1_000);
 
-        const secondStop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ second: true }) });
+        const secondStop = startDashboardSnapshotExporter({ intervalMs: 1_000, getSnapshot: () => ({ second: true }), fetchImpl: fetchMock });
 
         expect(signals[0]?.aborted).toBe(true);
         firstStop();

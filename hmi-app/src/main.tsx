@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.tsx'
 import { applyThemeOverrides } from './components/admin/DesignSettingsTab'
 import { cleanupLegacyStorage } from './utils/legacyStorageCleanup'
+import { prismaSessionClient } from './services/prismaSessionClient'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,6 +19,8 @@ const queryClient = new QueryClient({
 
 cleanupLegacyStorage()
 applyThemeOverrides()
+void prismaSessionClient.bootstrap().catch(() => undefined)
+window.addEventListener('pagehide', () => prismaSessionClient.reset({ keepalive: true }), { once: true })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
