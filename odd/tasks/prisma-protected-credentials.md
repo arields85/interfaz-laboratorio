@@ -2,13 +2,15 @@ Repository-relative file: odd/tasks/prisma-protected-credentials.md
 
 # Prisma protected administrator authentication and provider credentials
 
-## Current status — PAC-4 complete and accepted offline
+## Current status — PAC-5 complete and accepted offline
 
-`PAC-1`, `PAC-1a`, `PAC-2`, `PAC-3A`, `PAC-3A-S1`, `PAC-3B`, `PAC-3`, and `PAC-4A`
-are complete and independently accepted offline. Independent verifier
-`ses_f4ab3eba7ffeF6KSertcHHo3LD` returned COMPLETE PASS after closing all four PAC-4B findings without
-correction regressions. The parent accepts PAC-4B and the PAC-4 umbrella offline. `PAC-5` remains
-pending for final package closure; production and deployment residuals remain separate.
+`PAC-1` through `PAC-4B`, the `PAC-4` umbrella, and now `PAC-5` are complete offline. Independent
+verifier `ses_f4ab3eba7ffeF6KSertcHHo3LD` returned COMPLETE PASS after closing all four PAC-4B
+findings without correction regressions, and the parent accepted PAC-4B and the PAC-4 umbrella
+offline. Independent verifier `mu7e3sey-q-bwyw` then passed all six integrated PAC-5 gates once,
+with Git status and `HEAD` unchanged before and after. Final independent documentary readback
+`mu7f1mcu-v-6et3` closed the remaining documentation findings; the parent accepts PAC-5 offline.
+No production readiness or full layer-coverage claim is made.
 
 PAC-4A acceptance is based on independent authentication verifier
 `ses_f4b473e58ffeudIYvT20yFJNVZ`, the final parent spotcheck, and the current canonical backend gate.
@@ -19,11 +21,67 @@ check-then-copy window before manifest locking and produce a temporary `Copy-Ite
 The authorized read-only diagnostic did not change source and did not claim the race fixed. Its
 isolated reproduction passed once, and the required canonical backend gate then passed completely.
 
-The accepted work is prepared on `feat/prisma-telegram-credentials`, based on `b5fcaf2`. The user
-authorized one local work-unit commit and session closure. Delivery identity is recorded through Git
-and the canonical Engram checkpoint after the parent confirms the commit, rather than embedded in
-this self-referential tree. Push, merge, PAC-5 execution, backend production work, dependency changes,
-provider actions, and production acceptance are not authorized by that commit request.
+### PAC-5 integrated offline evidence
+
+- Full HMI verification: **1924 tests in 202 files** in 61.17 s; coverage **86.79 % statements
+  (13472/15521), 80.12 % branches (10010/12493), 86.07 % functions (3189/3705), 87.66 % lines
+  (12724/14514)**; enforced global 70 thresholds all passed.
+- TypeScript/Vite build (**2734 modules** in 8.98 s), ESLint, and `git diff --check`: PASS.
+- Canonical backend gate `services/prisma-runtime/operations/verify-local.ps1`, invoked once with
+  the exact unchanged canonical PowerShell argv: **240 tests in 16.673 s**.
+- `repo.venv` Python `-B -m pip check`: no broken requirements.
+- Retained warnings: jsdom `canvas.getContext`, unresolved `/grid.svg`, large chunk `main
+  1592.99 kB`, and CRLF advisories. The `services` layer branch coverage is 80.92 % and does not
+  meet the 90 % `docs/TESTING.md` layer target; the enforced global pass does not claim every
+  layer target met.
+- The `PW-002` pre-lock `Copy-Item` race did not recur during PAC-5 but was **not** fixed and
+  remains active.
+
+### Backend ambient-safety caveat
+
+The ambient backend gate was **not** run. Source preflight found an inherited legacy provider key
+and an import-time real default voice configuration, so verification ran inside an approved
+child-only Python `TemporaryDirectory('prisma-pac5-')` supervisor that set child
+`PRISMA_RUNTIME_STATE_DIR` and cleared the exact ambient overrides (`PRISMA_VOICE_CONFIG_FILE`,
+`PRISMA_CREDENTIAL_MASTER_KEY_FILE`, `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`,
+`PRISMA_LOCAL_TELEGRAM_ENABLED`, `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN`, `PRISMA_LOCAL_SNAPSHOT_FILE`,
+`PRISMA_LOCAL_STATE_FILE`, `PRISMA_LOCAL_VOICE_URL`, `PRISMA_PUBLIC_ORIGIN`,
+`TELEGRAM_BOT_API_BASE`), then invoked the canonical PowerShell argv once. Fixtures used fake
+providers and listeners, and native ACL tests stayed temp-only. The parent/live environment was
+unchanged and owned temporary state was cleaned. The runtime README documents the reproducible
+offline-safe verification wrapper; an unsandboxed runner is not an isolation claim.
+
+### Separate limited local evidence (parent-confirmed, not independently repeated in PAC-5)
+
+- Windows ACL helper correction (DirectorySecurity Owner+Access reads with
+  `Directory.SetAccessControl` persistence, policy unchanged): 9 permission tests, 18 auth tests,
+  and 2 traceback probes PASS; the actual auth-directory repair and VerifyOnly passed
+  non-elevated. Tracked in [`windows-acl-helper-remediation.md`](windows-acl-helper-remediation.md).
+- Administrator fetch receiver correction (`fetch.bind(globalThis)` preserving injected
+  transport): receiver-sensitive RED, then 33 tests plus lint/build PASS; the user confirmed the
+  native local Chrome admin login. Tracked in
+  [`prisma-admin-fetch-receiver.md`](prisma-admin-fetch-receiver.md).
+- A fresh protected master key and empty ciphertext store were provisioned with separate explicit
+  user approval; independent metadata, 32-byte size, ACL, and key-database binding checks passed,
+  with both providers initially unconfigured.
+- The existing external `.bat` received one added setting for the key **path**, not its contents.
+  The user stopped the old dev session with Ctrl+C; a read-only snapshot confirmed ports
+  5173/5056/5057 free before the user relaunched the updated batch. The latest Voice screenshot
+  shows the red banner gone and both providers "Sin configurar". Telegram is enabled but stopped,
+  with no token and desired/applied generations `1/0`; this is not provider-connectivity evidence.
+  User paths, cookies, passwords, and secret bytes are deliberately absent from documentation.
+
+### Delivery state
+
+The accepted PAC-4 umbrella was delivered as local commit `46f3303` on
+`feat/prisma-telegram-credentials`, based on `b5fcaf2`. The subsequent ACL-helper and
+fetch-receiver source/test corrections were then delivered as observed local commits
+`41dc286` and `0cdf345` on the same branch with explicit user authorization; the
+pre-existing external `.gitignore` modification was excluded. Delivery identity for
+these reconciled documentation updates is recorded by the parent through Git and the
+canonical Engram checkpoint, rather than embedded in this self-referential tree; no new
+commit is invented here. Push, merge, backend production work,
+dependency changes, provider actions, and production acceptance remain separate parent decisions.
 
 ## Stable work packages
 
@@ -43,7 +101,7 @@ provider actions, and production acceptance are not authorized by that commit re
     - [x] **PAC-4A-5 — Central administrator exit and durable manual-login barrier.**
     - [x] **PAC-4A-6 — Exact development proxies and integration tests.**
   - [x] **PAC-4B — Credential UI, diagnostics, explicit actions, and tests.**
-- [ ] **PAC-5 — Independently verify and reconcile active documentation.**
+- [x] **PAC-5 — Independently verify and reconcile active documentation.**
 
 ## Objective and fixed boundaries
 
@@ -357,18 +415,24 @@ local authority and is a mechanical boundary, not an approved operating state.
 
 ## Exact next-session resume point
 
-PAC-4 and PAC-4B are complete and accepted offline. Resume with these steps, in order:
+PAC-5 offline closure and documentary reconciliation are accepted. Resume with:
 
-1. Recover the canonical checkpoint and this feature tracker/full mirror (`#5384`), then reconcile
-   them with the confirmed local Git delivery on `feat/prisma-telegram-credentials`.
-2. Preserve the accepted PAC-3/PAC-4 proof and latest evidence: **125 focused tests**, **1922 HMI
-   tests**, **86.79/80.11/86.07/87.66** coverage, build, lint, **236 backend tests**, diff, **6 external
-   probes**, **51 parent tests**, and structural client/hook readback. Do not redo PAC-3 or PAC-4.
-3. Focus only on PAC-5 final integrated verification and documentation reconciliation after separate
-   authorization. PAC-5 has not run, and this local commit request does not authorize its execution.
-4. Retain PW-002's known pre-lock `Copy-Item` race as unfixed and PW-001 as unrelated. Preserve the
-   two external `.gitignore` entries for local Pi state and `.atl/` outside the intended commit; do
-   not infer or claim a clean worktree.
-5. Do not use real providers, keys, network, services, clean-installation flows, production proxies,
-   deployment, push, or merge unless separately authorized. Broader assistant data, intent, history,
-   personal context, chats, and identity remain separate future scope.
+1. Recover this tracker/full Engram mirror, the latest canonical checkpoint, and
+   `docs/PENDING_WORK.md`; reconcile actual Git state.
+   Preserve the historical PAC-4 proof (**1922 HMI tests, 236 backend tests**) separately from the
+   integrated PAC-5 result (**1924 HMI tests, 240 isolated backend tests**). PAC-1 through PAC-5
+   are closed and accepted offline; do not repeat any of them.
+2. The ACL-helper and fetch-receiver fixes were delivered as observed local commits `41dc286`
+   and `0cdf345` with explicit user authorization; no push, PR, or merge was performed. The
+   canonical final documentation delivery hash is recorded by the parent in Git and the Engram
+   checkpoint; do not invent or embed it here.
+3. Recommended next bounded scope: the `PW-002` pre-lock `Copy-Item` initialization race. Read
+   the `backlog/prisma-runtime-monorepo-integration` Engram detail before proposing any
+   implementation; no new implementation was authorized in the closing session.
+4. Keep the broader assistant work active and separate under `PW-003`
+   (`backlog/prisma-dual-channel-assistant`), and keep `PW-001` preserved as tracked.
+5. Do not claim production readiness, full layer-coverage targets, Linux/deployment/SACL/reparse/
+   backup acceptance, or live-provider verification; those remain separate scope.
+6. Do not use real providers, keys, network, services, clean-installation flows, production
+   proxies, deployment, push, or merge unless separately authorized. Broader assistant data,
+   intent, history, personal context, chats, and identity remain separate future scope.

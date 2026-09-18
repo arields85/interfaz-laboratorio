@@ -39,6 +39,75 @@ without Gemini or Telegram configuration so local diagnostics can report what
 is missing. An operation that actually needs Gemini returns an actionable
 `GEMINI_CREDENTIAL_UNAVAILABLE` response until an available source is configured.
 
+## Offline-safe verification
+
+`operations\verify-local.ps1` runs the backend offline test gate, but a plain
+invocation inherits the caller's ambient environment. If your shell carries real
+provider keys or local override variables (`GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`,
+`PRISMA_CREDENTIAL_MASTER_KEY_FILE`, `PRISMA_VOICE_CONFIG_FILE`, `PRISMA_LOCAL_*`,
+`PRISMA_PUBLIC_ORIGIN`, `TELEGRAM_BOT_API_BASE`), those values can leak into the test
+run. The accepted PAC-5 verification therefore ran the canonical gate through the
+exact child-only Python supervisor reproduced below.
+
+Unlike the launchers in `operations/`, which run from any working directory because
+every path is anchored on the script location, this reproduction block must run from
+the **monorepo root** in **Bash or Git Bash** — not PowerShell, not the runtime root —
+because it invokes the Python interpreter and the verify script by their
+repository-relative paths.
+
+This block is a documented reproduction of the accepted PAC-5 run; it was **not**
+re-executed for this documentation change:
+
+```bash
+./services/prisma-runtime/.venv/Scripts/python.exe -B - <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+cleared = (
+    'PRISMA_VOICE_CONFIG_FILE',
+    'PRISMA_CREDENTIAL_MASTER_KEY_FILE',
+    'GEMINI_API_KEY',
+    'TELEGRAM_BOT_TOKEN',
+    'PRISMA_LOCAL_TELEGRAM_ENABLED',
+    'PRISMA_LOCAL_TELEGRAM_BOT_TOKEN',
+    'PRISMA_LOCAL_SNAPSHOT_FILE',
+    'PRISMA_LOCAL_STATE_FILE',
+    'PRISMA_LOCAL_VOICE_URL',
+    'PRISMA_PUBLIC_ORIGIN',
+    'TELEGRAM_BOT_API_BASE',
+)
+command = [
+    'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass', '-File',
+    'services/prisma-runtime/operations/verify-local.ps1',
+]
+with tempfile.TemporaryDirectory(prefix='prisma-pac5-') as temporary:
+    root = Path(temporary)
+    assert root.is_dir() and not any(root.iterdir()), 'Sandbox must exist and be fresh'
+    child_env = os.environ.copy()
+    child_env['PRISMA_RUNTIME_STATE_DIR'] = str(root)
+    for name in cleared:
+        child_env.pop(name, None)
+    assert all(name not in child_env for name in cleared), 'Sandbox override removal failed'
+    assert Path(child_env['PRISMA_RUNTIME_STATE_DIR']) == root, 'Sandbox root mismatch'
+    print('PAC5 sandbox fresh:true; sensitive/config overrides absent:true', flush=True)
+    result = subprocess.run(command, env=child_env, check=False)
+    print(f'PAC5 canonical backend exit:{result.returncode}', flush=True)
+exit(result.returncode)
+PY
+```
+
+The supervisor copies the parent environment and modifies only the copy handed to
+the child: it points `PRISMA_RUNTIME_STATE_DIR` at a fresh temporary directory and
+removes the eleven known sensitive or configuration overrides from the child copy.
+The parent shell environment is never mutated and needs no restoration. This
+prevents the specific identified ambient state and provider dependencies from
+entering the test run; it is **not** a security sandbox, and fixture inspection
+before trusting the run is still required. Normal runtime setup (`start-local.ps1`
+and friends) is **not** automatically isolated this way.
+
 ## The Python environment
 
 The virtual environment lives at `services/prisma-runtime/.venv` and is
@@ -93,6 +162,16 @@ the startup path and was the mechanism that kept the legacy `C:\hmi_tts`
 environment alive through the migration. Selecting an interpreter is now a
 bootstrap-time concern only, and it is loud.
 
+Startup settings are read once, when the backend process is constructed. They
+must therefore be present in the environment **before** startup; the runtime
+does not re-read a changed environment. When a setting changes — for example
+after setting `PRISMA_CREDENTIAL_MASTER_KEY_FILE` for the first time — a dev
+runtime still running under the old environment keeps serving until it is
+restarted gracefully: stop it through the terminal that owns it (`Ctrl+C`) or
+with `operations\stop-local.ps1`, confirm ports `5056` and `5057` are free, and
+start again. No `setx` or machine-level persistence is required; per-process
+environment is the supported mechanism.
+
 A token without the explicit opt-in does not construct the Telegram bot or make
 Telegram requests. Enabling Telegram without a token in the selected source leaves the
 integration enabled but unconfigured: no bot is constructed, no Telegram request is made,
@@ -104,6 +183,20 @@ legacy environment token. Secrets are never stored by these launchers.
 
 Credential administration is available in **Configuración general → Voz** through the same
 backend-validated administrator session used by the rest of the HMI. There is no second Voice login.
+
+### Three distinct credential concepts
+
+| Concept | What it is | How it is created |
+|---|---|---|
+| Administrator account | The single backend login that authorizes the HMI administrator session. | `admin_cli provision-admin`, run once by the installation owner with an interactive password. |
+| Master key and ciphertext store | The separately protected raw 32-byte key file plus `<runtime-state>\credentials\provider-credentials.sqlite3` that hold encrypted provider secrets. | `credential_cli provision-key`, which refuses to regenerate an existing key or database; an existing key must never be deleted or regenerated to re-provision. |
+| Provider secrets | The Gemini and Telegram values stored inside that store. | Saved by an authenticated administrator from **Configuración general → Voz**; provisioning never writes them. |
+
+Login, provider-store preparation, and provider-credential saving are three separate
+actions at three separate times. Provisioning prepares the key and store but stores no
+provider secret; saving a credential requires a validated administrator session and
+writes only into the already-provisioned store.
+
 The browser receives metadata only; secret input remains transient and is cleared when Settings
 closes without ending the administrator session. Global **Guardar** still saves only effects/orb
 settings. Saving a credential does not verify it, apply it to a provider, or report that a provider
@@ -297,6 +390,16 @@ IT-managed forwarding for all exact routes, including progressive TTS streaming.
 
 Production host and supervisor selection remain deferred. This development
 wrapper is not a production deployment or operating-system service manager.
+
+## Verified boundary
+
+The offline acceptance covers this Windows checkout: the full HMI suite, the canonical
+backend gate under the temporary-state wrapper above, build, lint, and dependency
+checks, plus a locally provisioned protected master key with a user-confirmed native
+Chrome administrator login. It does **not** cover native Linux permission behavior,
+deployment or supervised operation, SACL-auditing preservation, reparse points,
+backup/restore, TLS/proxying, or live providers. Those remain open residuals tracked in
+[`docs/PENDING_WORK.md`](../../docs/PENDING_WORK.md) under PW-002/PW-003.
 
 ## Python version
 

@@ -6,8 +6,9 @@ Direct non-SDD fix accepted; live auth-directory repair and independent read-onl
 verification passed. Backend status reports configured:true, and user confirmed native
 local Chrome login after the separate fetch-receiver correction. PAC-5 subsequently
 closed offline; the integrated closure record and its evidence live in
-[prisma-protected-credentials.md](prisma-protected-credentials.md). This correction
-remains uncommitted; no commit or push was performed.
+[prisma-protected-credentials.md](prisma-protected-credentials.md). This correction was
+delivered as observed local commit `41dc286` on `feat/prisma-telegram-credentials` with
+explicit user authorization; no push or PR was performed.
 
 ## Scope and boundaries
 
@@ -24,7 +25,8 @@ operations, service restarts or unrelated source changes. Preserve pre-existing 
 - Mandatory project TDD; delegated direct writer and independent verification.
 - Source scope: services/prisma-runtime/operations/protect-auth-state.ps1 and
   services/prisma-runtime/tests/test_storage_permissions.py only.
-- Delivery: ask-on-risk; no commit, push or PR authorized.
+- Delivery: ask-on-risk; local work-unit commit `41dc286` created with explicit user
+  authorization; no push or PR performed.
 
 ## Tasks
 

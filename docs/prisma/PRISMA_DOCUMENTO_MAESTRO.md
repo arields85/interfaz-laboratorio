@@ -2,13 +2,13 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.7
+> **Versión documental:** 2.0.8
 >
 > **Fecha:** 2026-09-17
 >
-> **Estado del producto:** runtime local y enrutamiento web same-origin unificado cerrados offline; acceso protegido, despliegue productivo y aceptación integral pendientes.
+> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; despliegue productivo, aceptación integral y el trabajo posterior del asistente siguen pendientes.
 >
-> **Alcance de esta versión:** conserva el cierre offline de FND-1–FND-11 y cierra UNI-1–UNI-3 con cuatro rutas web same-origin, selector y configuración legacy retirados del flujo activo, y verificación independiente corregida; el acceso protegido, la aceptación real y el despliegue productivo continúan pendientes.
+> **Alcance de esta versión:** conserva los cierres offline de FND-1–FND-11, UNI-1–UNI-3 y PAC-1–PAC-4, y registra el cierre offline integrado del paquete protegido mediante la verificación PAC-5; la aceptación real, el despliegue productivo y el alcance posterior del asistente continúan pendientes.
 
 ## 1. Objetivo y estado general
 
@@ -25,22 +25,23 @@ separadas:
 
 El objetivo está **aprobado pero no implementado**. El repositorio ya contiene un
 runtime de presentación y voz, integración HMI y contratos parciales, pero su flujo
-actual sigue dependiendo del último snapshot visible y no satisface el modelo de dos
-canales, aislamiento, despliegue remoto ni configuración protegida.
+actual sigue dependiendo del último snapshot visible y no satisface el modelo completo de dos
+canales ni el despliegue remoto. La configuración protegida está cerrada offline (PAC-1 a PAC-5),
+pero su validación productiva sigue pendiente.
 
 ### 1.1 Resumen de estado
 
 | Área | Estado al 2026-09-17 | Conclusión |
 |---|---|---|
-| Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Prisma antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos, acceso protegido y retiro controlado del legado. |
+| Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Prisma antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos, validación productiva del acceso protegido y retiro controlado del legado. |
 | Voz HMI y orbe | Implementados con evidencia histórica parcial | Hubo aceptación manual exitosa; continuidad, audibilidad humana, cancelación y recuperación no están aceptadas de forma integral. |
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
 | Canal B — Telegram autónomo | Pendiente | El bot actual consulta el snapshot visible y publica un evento global de voz; no es el canal de texto aislado aprobado. |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
-| Configuración y diagnósticos | Parciales | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes; faltan almacenamiento/API protegidos, flujo en Configuración general → Voz y modelo completo de estados. |
-| Seguridad de acceso | Insuficiente para despliegue remoto | Loopback y CORS actuales no sustituyen autenticación, autorización, separación por instalación ni almacenamiento seguro de credenciales. |
+| Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Voz y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
+| Seguridad de acceso | Protegida offline; insuficiente para despliegue remoto | La autenticación de administrador backend y el almacenamiento cifrado de credenciales se cerraron offline (PAC-1 a PAC-4, verificación PAC-5). El CORS wildcard histórico del servicio de voz y la autorización por instalación siguen sin resolver para un despliegue remoto productivo. |
 | Enrutamiento web de Prisma | Cerrado offline con verificación independiente | El navegador usa cuatro rutas same-origin fijas. Node-RED continúa como fuente de telemetría industrial, no como runtime Prisma seleccionable. |
 
 La autoridad de descubrimiento del trabajo pendiente continúa en
@@ -208,9 +209,10 @@ Prisma todavía no la solicita ni recibe confirmación de finalización.
 La configuración no sensible de efectos de voz se lee y escribe mediante la ruta fija
 same-origin `/api/prisma/voice-config` y se administra desde **Configuración general →
 Voz**. El runtime también recibe configuración sensible mediante variables de proceso.
-El backend ya inicia sin Gemini ni Telegram configurados, pero aún no existe
-almacenamiento/API protegido para secretos ni administración de credenciales desde la
-HMI.
+El backend ya inicia sin Gemini ni Telegram configurados. Desde PAC-2 a PAC-4 el
+almacenamiento cifrado, la API protegida y la administración de credenciales desde
+**Configuración general → Voz** existen y fueron aceptados offline (ver §11); la
+aceptación real y el despliegue productivo siguen pendientes.
 
 El runtime del repositorio mantiene estado mutable bajo el directorio local de la
 aplicación y un entorno virtual propio bajo el servicio. Esto coincide con la decisión
@@ -231,7 +233,9 @@ excepciones no relacionadas. Aun así:
 Sin clave Gemini o con una clave en blanco, ambos endpoints de voz devuelven HTTP 503
 con `GEMINI_API_KEY_MISSING` y remedio accionable, sin construir cliente ni llamar al
 proveedor. Telegram opt-in sin token se informa como habilitado pero no configurado; no
-construye ni inicia bot. No se implementó almacenamiento de secretos ni UI.
+construye ni inicia bot. Lo anterior describe la fuente legacy, vigente solo cuando el
+modo protegido no fue seleccionado; el almacenamiento cifrado de secretos y la UI de
+credenciales existen desde PAC-2–PAC-4 y se aceptaron offline (ver §11).
 
 El wrapper local reutiliza un runtime manual verificado sin asumir ownership ni
 detenerlo. Varias invocaciones de desarrollo comparten una generación y solo la última
@@ -823,21 +827,54 @@ Esto constituye aceptación offline, no prueba de navegador o captura real, prov
 productivo, seguridad de despliegue ni readiness de producción. No se añade un segundo login, UI de
 chat, historial persistido ni identidad de cuenta. La política existente de acceso a
 `/hmi/prisma-config` tampoco quedó protegida por estos cambios y requiere tratamiento separado.
-`PAC-5` permanece pendiente para el cierre final del paquete y no se ejecuta mediante esta actualización.
-La autorización del commit local no incluye push, merge, ejecución de PAC-5 ni acciones productivas.
+
+`PAC-5` cerró el paquete protegido offline. La verificación independiente integrada
+(`mu7e3sey-q-bwyw`) aprobó una vez los seis gates con Git y `HEAD` sin cambios: **1924 pruebas HMI
+en 202 archivos** con cobertura de **86,79 % statements, 80,12 % branches, 86,07 % functions y
+87,66 % lines** (umbral global exigido de 70, cumplido; la capa `services` queda en 80,92 %
+branches y no alcanza el objetivo del 90 % de `docs/TESTING.md`), build de **2734 módulos**, lint,
+`git diff --check`, el gate backend canónico con **240 pruebas en 16,673 s** y `pip check`. Se
+conservan las advertencias conocidas (`canvas.getContext` en jsdom, `/grid.svg` sin resolver,
+chunk `main 1592,99 kB`, avisos CRLF) y la carrera preexistente de `PW-002`, que no se repitió
+pero no fue corregida. El gate ambiente no se ejecutó: por una clave legacy heredada y una
+configuración de voz real en import, la verificación corrió en un supervisor hijo aislado
+(`TemporaryDirectory`) con variables ambiente sensibles limpiadas y el entorno del padre intacto;
+el README del runtime documenta el wrapper reproducible de verificación offline.
+
+Dos correcciones acotadas posteriores a `PAC-4`, aceptadas con evidencia local limitada confirmada
+por el padre y no repetidas en la verificación `PAC-5`, quedan registradas en
+[`../../odd/tasks/windows-acl-helper-remediation.md`](../../odd/tasks/windows-acl-helper-remediation.md)
+(helper ACL con lecturas Owner+Access y persistencia `Directory.SetAccessControl`, reparación real
+del directorio de autenticación sin elevación) y en
+[`../../odd/tasks/prisma-admin-fetch-receiver.md`](../../odd/tasks/prisma-admin-fetch-receiver.md)
+(`fetch.bind(globalThis)` conservando el transporte inyectado, login Chrome nativo confirmado por
+el usuario). Con aprobación explícita separada se aprovisionó una clave maestra protegida nueva
+con su almacén de cifrado vacío; ambos proveedores iniciaron «Sin configurar» y Telegram quedó
+habilitado pero detenido. Ninguna de estas evidencias afirma verificación de proveedor,
+despliegue ni readiness de producción.
 
 El pipeline productivo administrado por IT sigue como objetivo posterior sin seleccionar
 todavía OS o supervisor. Cualquier readiness adicional del loader del navegador es UX
 opcional y no bloqueante, no un requisito obligatorio aprobado.
 
 Esto no constituye aceptación de producción. PW-002 y PW-003 continúan activos para la carrera de
-inicialización concurrente, instalación limpia y arranque real, forwarding, despliegue y supervisión
-administrados por IT, recuperación durable, retiro explícito de la instalación legacy y el cierre
-final PAC-5 junto con trabajo posterior del asistente. La
-provisión de una clave real, permisos live de clave nueva en Windows, validación Linux real, reparse
-points nativos, backup/restore, TLS, proxy y entorno productivo también permanecen abiertos.
+inicialización concurrente, instalación limpia y arranque real, forwarding, despliegue y
+supervisión administrados por IT, recuperación durable, retiro explícito de la instalación legacy
+y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
+points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
 ## 12. Changelog
+
+### 2.0.8 — 2026-09-17
+
+- Cierre offline del paquete protegido: verificación independiente integrada `PAC-5` aprobada
+  (1924 pruebas HMI, 240 pruebas backend, build, lint, diff y `pip check`) y documentación
+  conciliada; el cierre fue aceptado offline por el padre tras el readback documental
+  `mu7f1mcu-v-6et3`.
+- Registro de las correcciones acotadas de helper ACL y receptor `fetch`, y del aprovisionamiento
+  controlado de la clave maestra protegida, como evidencia local limitada confirmada por el padre.
+- El gate ambiente no se ejecutó; la verificación usó un supervisor hijo aislado documentado en el
+  README del runtime. No se afirma aceptación de producción ni cobertura completa por capa.
 
 ### 2.0.7 — 2026-09-17
 

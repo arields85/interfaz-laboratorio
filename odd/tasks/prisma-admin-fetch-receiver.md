@@ -8,8 +8,9 @@ at adminAuth.service.ts:306 after this.fetcher at :298. No auth request appeared
 in Network. Backend direct/proxied status reports configured:true. Prior Windows
 ACL correction and live repair passed; do not repeat provisioning/reset/ACL changes.
 PAC-5 subsequently closed offline; the integrated closure record lives in
-[prisma-protected-credentials.md](prisma-protected-credentials.md). No commit or push
-authorized/performed.
+[prisma-protected-credentials.md](prisma-protected-credentials.md). This correction was
+delivered as observed local commit `0cdf345` on `feat/prisma-telegram-credentials` with
+explicit user authorization; no push or PR was performed.
 
 ## Scope and implementation
 
@@ -57,7 +58,8 @@ git diff --check -- hmi-app/src/services/adminAuth.service.ts hmi-app/src/servic
 
 Local login incident closed; PAC-5 subsequently closed offline and the package closure
 record is [prisma-protected-credentials.md](prisma-protected-credentials.md). This
-correction remains uncommitted; commit and push remain parent decisions. Deployment
+correction was delivered as local commit `0cdf345` with explicit user authorization;
+push and PR remain separate parent decisions and were not performed. Deployment
 requires updated frontend/runtime artifacts, same-origin API forwarding, configured
 HTTPS public origin and backend storage/admin setup. Other browser engines still need
 smoke tests; no browser-specific workaround was introduced. No password reset or ACL retry.
