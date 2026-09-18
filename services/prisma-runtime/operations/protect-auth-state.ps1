@@ -39,10 +39,20 @@ function Get-AllowedIdentitySids {
     return @($current, $system, $administrators)
 }
 
+function Get-PrismaDirectorySecurity {
+    # Read only the sections this policy uses (Owner + DACL). Windows PowerShell
+    # 5.1's full-descriptor Get-Acl/Set-Acl persistence touches audit (SACL)
+    # sections, which requires SeSecurityPrivilege and fails under the ordinary
+    # user token. Never request the Audit section here.
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $sections = [Security.AccessControl.AccessControlSections]'Owner, Access'
+    return New-Object Security.AccessControl.DirectorySecurity($LiteralPath, $sections)
+}
+
 function Set-PrismaAcl {
     param([string]$LiteralPath, [bool]$IsDirectory)
     $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    $acl = Get-Acl -LiteralPath $LiteralPath
+    $acl = Get-PrismaDirectorySecurity -LiteralPath $LiteralPath
     $owner = (New-Object Security.Principal.NTAccount($acl.Owner)).Translate(
         [Security.Principal.SecurityIdentifier]
     ).Value
@@ -68,7 +78,7 @@ function Set-PrismaAcl {
         )
         $acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $LiteralPath -AclObject $acl
+    [System.IO.Directory]::SetAccessControl($LiteralPath, $acl)
 }
 
 function Assert-PrismaAcl {
@@ -76,7 +86,7 @@ function Assert-PrismaAcl {
         [string]$LiteralPath,
         [ValidateSet('Directory', 'File', 'Sidecar')][string]$ObjectKind
     )
-    $acl = Get-Acl -LiteralPath $LiteralPath
+    $acl = Get-PrismaDirectorySecurity -LiteralPath $LiteralPath
     $current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $owner = (New-Object Security.Principal.NTAccount($acl.Owner)).Translate(
         [Security.Principal.SecurityIdentifier]
