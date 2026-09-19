@@ -128,9 +128,9 @@ Every unit ends with the canonical gates green and a Conventional Commit on
 - [x] U2 — CONEXIÓN projects the shared status. Commit `19afc71`.
 - [x] U2b — Reference tab renamed `Voz` → `Prisma` with the `Pyramid` icon (this commit).
 - [x] U3 — DISEÑO projects the shared status (this commit), including both branches of the typography-reset projection and the finding that both reset paths persist while the revert ref does not.
-- [ ] U4 — OPCIONES projects the shared status.
-- [ ] U5 — AJUSTES projects the shared status, keeping its validation alert.
-- [ ] U6 — Reconcile `docs/PENDING_WORK.md` and Engram at closure.
+- [x] U4 — OPCIONES projects the shared status. Commit `891bd6a`.
+- [x] U5 — AJUSTES projects the shared status, keeping its in-content validation alert. Commit `e3ec798`.
+- [x] U6 — Reconciled the index and Engram at closure (this commit).
 
 ## Evidence ledger
 
@@ -140,8 +140,32 @@ Every unit ends with the canonical gates green and a Conventional Commit on
 | U2 | focused 38 OK (3 new, RED captured); full 1927 OK; coverage 86.83/80.13/86.12/87.7 | `19afc71` |
 | U2b | focused 33 OK; full 1927 OK; tsc, lint, build clean; no stale label or icon left | `40306fe` |
 | U3 | focused 58 OK (6 new, RED captured); full 1935 OK; coverage 86.95/80.13/86.15/87.83 | this commit |
-| U4 | pending | pending |
-| U5 | pending | pending |
+| U4 | focused 68 OK (4 new, RED captured); full 1940 OK; tsc, lint clean | `891bd6a` |
+| U5 | focused 80 OK (5 new, RED captured); full 1945 OK; tsc, lint clean | `e3ec798` |
+| Closure | 202 files / 1945 tests OK; coverage 87.09 statements / 80.16 branches / 86.22 functions / 87.97 lines; build clean | this commit |
+
+## Closure
+
+PW-001 is complete. Every tab of Configuración general now projects the shared save status into
+the footer, immediately before `Guardar`: `Cambios sin guardar` in warning tone, `Guardado` in
+normal tone, `Error al guardar` in critical tone, never inside the tab content, hidden while
+another tab is active and restored on return, and cleared when the dialog closes. The reference
+tab additionally keeps `Guardando...` because it is the only tab that waits on a backend; the
+four migrating tabs persist synchronously and go straight from dirty to saved.
+
+Six commits: `17a9064` shared primitive and per-tab dialog state, `19afc71` CONEXIÓN,
+`40306fe` tab rename and prism icon, `67fc040` DISEÑO, `891bd6a` OPCIONES, `e3ec798` AJUSTES.
+
+Residuals carried forward, all recorded rather than hidden:
+
+1. The four migrated tabs still mark dirty one way — an edit sets it and only a save clears it —
+   so a field manually reverted to its stored value still reports `Cambios sin guardar`. Real
+   comparison against persisted values, like the reference tab has, was a cycle non-goal.
+2. The two DISEÑO reset paths persist but do not wrap their storage removal in `try/catch`.
+3. OPCIONES still normalizes an out-of-range duration silently on blur, so a normalized value
+   can be persisted while the footer says `Guardado`.
+4. The `Guardar` button is still enabled by the OR of every tab's dirty flag while it dispatches
+   only the active tab's save: that is PW-004, deliberately untouched here.
 
 ### Residual recorded during U3
 
