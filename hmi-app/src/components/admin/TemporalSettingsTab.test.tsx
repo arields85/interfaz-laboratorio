@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     TEMPORAL_SETTINGS_CHANGED_EVENT,
@@ -190,5 +190,120 @@ describe('TemporalSettingsTab', () => {
         expect(addShiftButton.className).not.toMatch(/text-white|border-white\/|bg-white\//);
         expect(removeShiftButton.className).not.toMatch(/hover:text-white/);
         expect(alert.className).not.toMatch(/text-red-300/);
+    });
+});
+
+describe('TemporalSettingsTab save status projection', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('projects dirty when an edit marks the tab dirty', async () => {
+        const user = userEvent.setup();
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+
+        render(
+            <TemporalSettingsTab
+                onDirtyChange={handleDirtyChange}
+                onSaveStatusChange={handleSaveStatusChange}
+            />,
+        );
+
+        await user.type(screen.getByLabelText('Timezone de planta'), 'UTC');
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+        expect(handleDirtyChange).toHaveBeenLastCalledWith(true);
+    });
+
+    it('projects saved after the storage write through the save ref succeeds', async () => {
+        const user = userEvent.setup();
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+        const saveRef = createSaveRef();
+
+        render(
+            <TemporalSettingsTab
+                onDirtyChange={handleDirtyChange}
+                onSaveStatusChange={handleSaveStatusChange}
+                saveRef={saveRef}
+            />,
+        );
+
+        await user.type(screen.getByLabelText('Timezone de planta'), 'UTC');
+
+        act(() => {
+            saveRef.current?.();
+        });
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('saved');
+        expect(handleDirtyChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('projects error and keeps the in-content alert when the storage write fails', async () => {
+        const user = userEvent.setup();
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+        const saveRef = createSaveRef();
+
+        render(
+            <TemporalSettingsTab
+                onDirtyChange={handleDirtyChange}
+                onSaveStatusChange={handleSaveStatusChange}
+                saveRef={saveRef}
+            />,
+        );
+
+        await user.type(screen.getByLabelText('Timezone de planta'), 'UTC');
+
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('quota exceeded');
+        });
+
+        act(() => {
+            saveRef.current?.();
+        });
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('error');
+        expect(handleDirtyChange).not.toHaveBeenCalledWith(false);
+        expect(screen.getByRole('alert')).toHaveTextContent('No se pudieron guardar los ajustes temporales.');
+    });
+
+    it('projects dirty, not error, when validation blocks the save with its specific message', async () => {
+        const user = userEvent.setup();
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+        const saveRef = createSaveRef();
+
+        render(
+            <TemporalSettingsTab
+                onDirtyChange={handleDirtyChange}
+                onSaveStatusChange={handleSaveStatusChange}
+                saveRef={saveRef}
+            />,
+        );
+
+        await user.click(screen.getByRole('button', { name: 'Agregar turno' }));
+        await user.type(screen.getByLabelText('Nombre del turno 1'), 'Turno A');
+        await user.click(screen.getByLabelText('Lunes turno 1'));
+        await user.click(screen.getByLabelText('Martes turno 1'));
+        await user.click(screen.getByLabelText('Miercoles turno 1'));
+        await user.click(screen.getByLabelText('Jueves turno 1'));
+        await user.click(screen.getByLabelText('Viernes turno 1'));
+        await user.click(screen.getByLabelText('Sabado turno 1'));
+        await user.click(screen.getByLabelText('Domingo turno 1'));
+
+        act(() => {
+            saveRef.current?.();
+        });
+
+        expect(screen.getByRole('alert')).toHaveTextContent('Selecciona al menos un dia para cada turno antes de guardar.');
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+        expect(handleSaveStatusChange).not.toHaveBeenCalledWith('error');
+        expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toBeNull();
     });
 });

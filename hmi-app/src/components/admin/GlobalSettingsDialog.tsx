@@ -66,6 +66,10 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         (status: SaveStatus) => updateTabSaveStatus('options', status),
         [updateTabSaveStatus],
     );
+    const setTemporalSaveStatus = useCallback(
+        (status: SaveStatus) => updateTabSaveStatus('temporal', status),
+        [updateTabSaveStatus],
+    );
     const setVoiceSaveStatus = useCallback(
         (status: SaveStatus) => updateTabSaveStatus('voice', status),
         [updateTabSaveStatus],
@@ -219,6 +223,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <div hidden={activeTab !== 'temporal'}>
                         <TemporalSettingsTab
                             onDirtyChange={setTemporalDirty}
+                            onSaveStatusChange={setTemporalSaveStatus}
                             saveRef={temporalSaveRef}
                         />
                     </div>

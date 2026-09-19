@@ -9,6 +9,7 @@ import {
 } from '../../config/temporalSettings.config';
 import { ALL_WEEKDAY_KEYS, normalizeWeekdays, validateWeeklyShiftSchedule } from '../../utils/weeklyShiftSchedule';
 import type { WeekdayKey } from '../../domain/admin.types';
+import type { SaveStatus } from './saveStatus';
 import {
     ADMIN_SIDEBAR_HINT_CLS,
     ADMIN_SIDEBAR_INPUT_CLS,
@@ -18,6 +19,7 @@ import {
 
 type TemporalSettingsTabProps = {
     onDirtyChange?: (dirty: boolean) => void;
+    onSaveStatusChange?: (status: SaveStatus) => void;
     saveRef?: { current: (() => void) | null };
 };
 
@@ -77,14 +79,20 @@ function createShiftDraft(index: number): ShiftDraft {
     };
 }
 
-export default function TemporalSettingsTab({ onDirtyChange, saveRef }: TemporalSettingsTabProps) {
+export default function TemporalSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: TemporalSettingsTabProps) {
     const [draft, setDraft] = useState<TemporalSettingsDraft>(() => toDraft(readTemporalSettingsConfig()));
     const [saveError, setSaveError] = useState<string | null>(null);
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
 
     const normalizedDraft = useMemo(() => toConfig(draft), [draft]);
 
+    useEffect(() => {
+        onSaveStatusChange?.(saveStatus);
+    }, [onSaveStatusChange, saveStatus]);
+
     const updateShift = (index: number, field: keyof ShiftDraft, value: string) => {
         setSaveError(null);
+        setSaveStatus('dirty');
         setDraft((currentDraft) => ({
             ...currentDraft,
             shifts: currentDraft.shifts.map((shift, currentIndex) => (
@@ -98,6 +106,7 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
 
     const handleAddShift = () => {
         setSaveError(null);
+        setSaveStatus('dirty');
         setDraft((currentDraft) => ({
             ...currentDraft,
             shifts: [...currentDraft.shifts, createShiftDraft(currentDraft.shifts.length + 1)],
@@ -107,6 +116,7 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
 
     const handleRemoveShift = (index: number) => {
         setSaveError(null);
+        setSaveStatus('dirty');
         setDraft((currentDraft) => ({
             ...currentDraft,
             shifts: currentDraft.shifts.filter((_, currentIndex) => currentIndex !== index),
@@ -116,6 +126,7 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
 
     const toggleWeekday = (index: number, weekday: WeekdayKey) => {
         setSaveError(null);
+        setSaveStatus('dirty');
         setDraft((currentDraft) => ({
             ...currentDraft,
             shifts: currentDraft.shifts.map((shift, currentIndex) => {
@@ -138,6 +149,7 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
         const nextIndex = index + direction;
 
         setSaveError(null);
+        setSaveStatus('dirty');
         setDraft((currentDraft) => {
             if (nextIndex < 0 || nextIndex >= currentDraft.shifts.length) {
                 return currentDraft;
@@ -166,6 +178,9 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
 
             if (validationError) {
                 setSaveError(validationError);
+                // A validation block never persists anything, so the footer
+                // keeps reporting the pending draft instead of an error.
+                setSaveStatus('dirty');
                 return;
             }
 
@@ -177,10 +192,12 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
                     : saved.error.message === 'Shift windows cannot overlap after weekly expansion.'
                         ? 'Los turnos configurados no pueden superponerse en la semana.'
                         : 'No se pudieron guardar los ajustes temporales.');
+                setSaveStatus('error');
                 return;
             }
 
             setSaveError(null);
+            setSaveStatus('saved');
             setDraft(toDraft(saved.config));
             onDirtyChange?.(false);
         };
@@ -213,6 +230,7 @@ export default function TemporalSettingsTab({ onDirtyChange, saveRef }: Temporal
                     value={draft.plantTimezone}
                     onChange={(event) => {
                         setSaveError(null);
+                        setSaveStatus('dirty');
                         setDraft((currentDraft) => ({
                             ...currentDraft,
                             plantTimezone: event.target.value,
