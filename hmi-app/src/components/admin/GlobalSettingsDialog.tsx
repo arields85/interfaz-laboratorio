@@ -62,6 +62,10 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         (status: SaveStatus) => updateTabSaveStatus('design', status),
         [updateTabSaveStatus],
     );
+    const setOptionsSaveStatus = useCallback(
+        (status: SaveStatus) => updateTabSaveStatus('options', status),
+        [updateTabSaveStatus],
+    );
     const setVoiceSaveStatus = useCallback(
         (status: SaveStatus) => updateTabSaveStatus('voice', status),
         [updateTabSaveStatus],
@@ -207,6 +211,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <div hidden={activeTab !== 'options'}>
                         <LoaderOptionsSettingsTab
                             onDirtyChange={setOptionsDirty}
+                            onSaveStatusChange={setOptionsSaveStatus}
                             saveRef={optionsSaveRef}
                         />
                     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import AdminActionButton from './AdminActionButton';
+import type { SaveStatus } from './saveStatus';
 import {
     ADMIN_SIDEBAR_HINT_CLS,
     ADMIN_SIDEBAR_INPUT_CLS,
@@ -17,6 +18,7 @@ import {
 
 type LoaderOptionsSettingsTabProps = {
     onDirtyChange?: (dirty: boolean) => void;
+    onSaveStatusChange?: (status: SaveStatus) => void;
     saveRef?: { current: (() => void) | null };
 };
 
@@ -56,10 +58,15 @@ function toConfig(draft: LoaderOptionsDraft): LoaderOptionsConfig {
     });
 }
 
-export default function LoaderOptionsSettingsTab({ onDirtyChange, saveRef }: LoaderOptionsSettingsTabProps) {
+export default function LoaderOptionsSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: LoaderOptionsSettingsTabProps) {
     const [draft, setDraft] = useState<LoaderOptionsDraft>(() => toDraft(readLoaderOptionsConfig()));
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
 
     const normalizedDraft = useMemo(() => toConfig(draft), [draft]);
+
+    useEffect(() => {
+        onSaveStatusChange?.(saveStatus);
+    }, [onSaveStatusChange, saveStatus]);
 
     const handleEnabledChange = (profileId: LoaderProfileId, enabled: boolean) => {
         setDraft((currentDraft) => ({
@@ -69,6 +76,7 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, saveRef }: Loa
                 enabled,
             },
         }));
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -80,6 +88,7 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, saveRef }: Loa
                 durationSeconds: nextValue,
             },
         }));
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -95,6 +104,11 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, saveRef }: Loa
 
     const handleRestoreDefaults = () => {
         setDraft(toDraft(LOADER_OPTIONS_DEFAULTS));
+        // The restore only replaces the draft: it does not touch storage here
+        // (the persisted write happens through the save ref), so it projects
+        // `dirty`, the same case as any other edit that marks dirty without
+        // persisting.
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -104,8 +118,16 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, saveRef }: Loa
         }
 
         saveRef.current = () => {
-            saveLoaderOptionsConfig(normalizedDraft);
-            onDirtyChange?.(false);
+            try {
+                saveLoaderOptionsConfig(normalizedDraft);
+                setSaveStatus('saved');
+                onDirtyChange?.(false);
+            } catch {
+                // The dialog's save-ref contract is fire-and-forget: report the
+                // persistence failure upward instead of rethrowing, keeping the
+                // tab dirty because nothing was persisted.
+                setSaveStatus('error');
+            }
         };
 
         return () => {
