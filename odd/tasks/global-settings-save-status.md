@@ -17,7 +17,13 @@ decisions:
 
 Reporting is in Spanish; this artifact stays in English per the repository language convention.
 
-## Approved pattern to replicate (already implemented for VOZ)
+## Approved pattern to replicate (already implemented for the reference tab)
+
+Naming note: this tab is the one whose visible label was renamed from `Voz` to `Prisma`
+mid-cycle at the user's request, because it now covers everything Prisma-related (voice,
+Telegram, credentials) and `Voz` predated the product name. Its internal id stays `voice` so
+the persisted tab preference and the per-tab status keys do not break, and its icon changed
+from `Mic2` to Lucide's `Pyramid`. References below to "VOZ" mean this tab.
 
 - `hmi-app/src/components/admin/voiceSaveStatus.ts` — the type and the label/tone map:
   `dirty` → `Cambios sin guardar` (`text-status-warning`), `saving` → `Guardando...`
@@ -84,6 +90,12 @@ Reporting is in Spanish; this artifact stays in English per the repository langu
 Every unit ends with the canonical gates green and a Conventional Commit on
 `feat/prisma-telegram-credentials`, staged narrowly (no `.gitignore`).
 
+- **U2b — tab rename (user-requested mid-cycle).** Rename the reference tab's visible label
+  from `Voz` to `Prisma` and switch its icon from `Mic2` to `Pyramid`, updating the test
+  references and the living master document's navigation paths. Internal id and feature names
+  stay as they are; historical task documents are left untouched because they record what was
+  true when they were written.
+
 ## Gates (from `hmi-app/package.json`)
 
 - `npm run test` (vitest run) plus the focused files while iterating.
@@ -112,8 +124,9 @@ Every unit ends with the canonical gates green and a Conventional Commit on
 
 ## Tasks
 
-- [ ] U1 — Shared primitive plus dialog generalization; VOZ unchanged and green.
-- [ ] U2 — CONEXIÓN projects the shared status.
+- [x] U1 — Shared primitive plus dialog generalization; the reference tab unchanged and green. Commit `17a9064`.
+- [x] U2 — CONEXIÓN projects the shared status. Commit `19afc71`.
+- [x] U2b — Reference tab renamed `Voz` → `Prisma` with the `Pyramid` icon (this commit).
 - [ ] U3 — DISEÑO projects the shared status.
 - [ ] U4 — OPCIONES projects the shared status.
 - [ ] U5 — AJUSTES projects the shared status, keeping its validation alert.
@@ -123,8 +136,9 @@ Every unit ends with the canonical gates green and a Conventional Commit on
 
 | Unit | Gates | Commit |
 |---|---|---|
-| U1 | pending | pending |
-| U2 | pending | pending |
+| U1 | focused 32 OK; full 1924 OK; coverage 86.8/80.12/86.08/87.67 | `17a9064` |
+| U2 | focused 38 OK (3 new, RED captured); full 1927 OK; coverage 86.83/80.13/86.12/87.7 | `19afc71` |
+| U2b | focused 33 OK; full 1927 OK; tsc, lint, build clean; no stale label or icon left | this commit |
 | U3 | pending | pending |
 | U4 | pending | pending |
 | U5 | pending | pending |

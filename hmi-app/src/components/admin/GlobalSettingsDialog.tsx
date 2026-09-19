@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { Clock3, Mic2, Palette, SlidersHorizontal, Wifi } from 'lucide-react';
+import { Clock3, Palette, Pyramid, SlidersHorizontal, Wifi } from 'lucide-react';
 import AdminDialog from './AdminDialog';
 import AdminActionButton from './AdminActionButton';
 import ConnectionSettingsTab from './ConnectionSettingsTab';
@@ -14,7 +14,7 @@ const TABS = [
     { id: 'design', label: 'Diseno', icon: Palette },
     { id: 'options', label: 'Opciones', icon: SlidersHorizontal },
     { id: 'temporal', label: 'Ajustes', icon: Clock3 },
-    { id: 'voice', label: 'Voz', icon: Mic2 },
+    { id: 'voice', label: 'Prisma', icon: Pyramid },
 ] as const;
 
 type GlobalSettingsDialogProps = {

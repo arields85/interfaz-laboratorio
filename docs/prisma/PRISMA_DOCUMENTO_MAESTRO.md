@@ -40,7 +40,7 @@ pero su validación productiva sigue pendiente.
 | Canal B — Telegram autónomo | Pendiente | El bot actual consulta el snapshot visible y publica un evento global de voz; no es el canal de texto aislado aprobado. |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
-| Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Voz y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
+| Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Prisma y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
 | Seguridad de acceso | Protegida offline; insuficiente para despliegue remoto | La autenticación de administrador backend y el almacenamiento cifrado de credenciales se cerraron offline (PAC-1 a PAC-4, verificación PAC-5). El CORS wildcard histórico del servicio de voz y la autorización por instalación siguen sin resolver para un despliegue remoto productivo. |
 | Enrutamiento web de Prisma | Cerrado offline con verificación independiente | El navegador usa cuatro rutas same-origin fijas. Node-RED continúa como fuente de telemetría industrial, no como runtime Prisma seleccionable. |
 
@@ -211,7 +211,7 @@ same-origin `/api/prisma/voice-config` y se administra desde **Configuración ge
 Voz**. El runtime también recibe configuración sensible mediante variables de proceso.
 El backend ya inicia sin Gemini ni Telegram configurados. Desde PAC-2 a PAC-4 el
 almacenamiento cifrado, la API protegida y la administración de credenciales desde
-**Configuración general → Voz** existen y fueron aceptados offline (ver §11); la
+**Configuración general → Prisma** existen y fueron aceptados offline (ver §11); la
 aceptación real y el despliegue productivo siguen pendientes.
 
 El runtime del repositorio mantiene estado mutable bajo el directorio local de la
@@ -505,7 +505,7 @@ la HMI ni crear un framework genérico de plugins.
 
 ### 6.5 Configuración en la HMI
 
-**Configuración general → Voz** será propietaria de la experiencia de configuración
+**Configuración general → Prisma** será propietaria de la experiencia de configuración
 de Gemini, Telegram opcional y las integraciones que realmente necesite el runtime.
 El flujo normal no debe pedir edición manual de `.env`.
 
@@ -617,7 +617,7 @@ supervisor y no queda pendiente un experimento de caída espontánea.
 
 **Alcance:**
 
-- UX en Configuración general → Voz;
+- UX en Configuración general → Prisma;
 - almacenamiento backend seguro, reemplazo y eliminación de secretos;
 - estados `missing/configured/checking/verified/failing/disabled/not-tested/stale`;
 - checks pasivos separados de pruebas pagadas;
@@ -807,7 +807,7 @@ preexistente de check-then-copy durante el sembrado concurrente de estado; el di
 lectura la dejó visible bajo PW-002 y no afirmó haberla corregido.
 
 `PAC-4B` y el paquete `PAC-4` están completos y aceptados offline tras una verificación independiente
-COMPLETE PASS que cerró los cuatro hallazgos sin regresiones. **Configuración general → Voz**
+COMPLETE PASS que cerró los cuatro hallazgos sin regresiones. **Configuración general → Prisma**
 incorpora campos transitorios para las credenciales Gemini y Telegram, metadatos y diagnósticos
 separados, y acciones explícitas de guardar, eliminar y aplicar que reutilizan la misma sesión
 administrativa. Los secretos no ingresan en
