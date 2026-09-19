@@ -280,9 +280,76 @@ function Initialize-PrismaRuntimeState {
 
     $config = Join-Path $resolvedRoot 'prisma_voice_config.json'
     $seeded = $false
-    if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
-        Copy-Item -LiteralPath $Template -Destination $config
-        $seeded = $true
+
+    # Publish-by-rename seeding: the template bytes are written to a unique
+    # temporary file in the destination directory (same volume) and published
+    # with a rename, so the destination name only ever exposes complete content.
+    # The rename still fails when the destination already exists, so an existing
+    # effective configuration is never overwritten, and a failed write leaves no
+    # destination at all instead of a truncated file that would permanently block
+    # future seeding.
+    $tempPath = Join-Path $resolvedRoot ("prisma_voice_config.json." + [Guid]::NewGuid().ToString("N") + ".tmp")
+    $published = $false
+    try {
+        $tempStream = [IO.File]::Open($tempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $closeError = $null
+        try {
+            $source = [IO.File]::Open($Template, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+                $source.CopyTo($tempStream)
+            }
+            finally {
+                # Disposal cleanup never replaces the error that caused it.
+                # The warning is guarded with -WarningAction Continue so a
+                # terminating warning preference (-WarningAction Stop or
+                # $WarningPreference = 'Stop') cannot itself interrupt the
+                # in-flight exception while unwinding.
+                try { $source.Dispose() } catch { try { Write-Warning ("Failed to dispose the template read handle for '{0}': {1}" -f $Template, $_.Exception.Message) -WarningAction Continue } catch { } }
+            }
+        }
+        finally {
+            # The write is complete only when this handle closes cleanly: no
+            # success flag is set before the close. The close failure is both
+            # recorded (it becomes the hard error when nothing else is in
+            # flight) and reported as a path-bearing warning, because when an
+            # earlier exception is already unwinding the recorded error is
+            # never rethrown here; the guarded warning is the only diagnostic
+            # that survives on that path.
+            try { $tempStream.Dispose() } catch {
+                $closeError = $_.Exception
+                try { Write-Warning ("Failed to close the seeding write handle for destination '{0}' (temporary file '{1}'): {2}" -f $config, $tempPath, $_.Exception.Message) -WarningAction Continue } catch { }
+            }
+        }
+        if ($null -ne $closeError) {
+            throw $closeError
+        }
+        try {
+            # Same-volume rename: atomic publication that still fails when the
+            # destination already exists.
+            [IO.File]::Move($tempPath, $config)
+            $published = $true
+            $seeded = $true
+        }
+        catch [IO.IOException] {
+            if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
+                throw
+            }
+            # The destination is now a leaf file: another concurrent caller won
+            # the rename, or an effective configuration already exists. No
+            # overwrite; this caller reports Seeded = false.
+        }
+    }
+    finally {
+        # A failed attempt must not leave temporary files behind, and a cleanup
+        # failure is surfaced separately without masking the original error.
+        if (-not $published -and (Test-Path -LiteralPath $tempPath -PathType Leaf)) {
+            try {
+                [IO.File]::Delete($tempPath)
+            }
+            catch {
+                try { Write-Warning ("Failed to remove the temporary seeding file '{0}': {1}" -f $tempPath, $_.Exception.Message) -WarningAction Continue } catch { }
+            }
+        }
     }
 
     return [pscustomobject]@{

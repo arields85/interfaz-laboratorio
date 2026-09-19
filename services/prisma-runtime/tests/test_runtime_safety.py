@@ -1,3 +1,5 @@
+import ctypes
+import ctypes.wintypes
 import json
 import os
 import subprocess
@@ -578,6 +580,118 @@ try {{
         self.assertIn("cancelled", result.stdout.lower())
         self.assertRegex(result.stdout, r"stopped=\d+")
         self.assertIn("receipt=False", result.stdout)
+
+
+class ConcurrentFreshStateSeedingTests(unittest.TestCase):
+    """PW-002: seeding the effective configuration happens before the manifest
+    lock, so two concurrent launchers on a fresh state root can both observe a
+    missing file. The seeding must be atomic: exactly one launcher creates the
+    configuration, the loser survives without overwriting, and the published
+    file always equals the template byte for byte."""
+
+    TEMPLATE_SIZE_BYTES = 64 * 1024 * 1024
+    TEMPLATE_BLOCK = b"prisma-seed-race-0123456789abcdef\n"  # exactly 32 bytes
+    ENVIRONMENT_LIBRARY = OPERATIONS_ROOT / "runtime-environment.ps1"
+
+    def _seeding_child_command(self, state: Path, template: Path, ready: Path, gate_name: str) -> str:
+        """Child body: signal readiness, wait on the shared named event (with the
+        child-side handle disposed after waiting), then run the real, unmodified
+        product function against the shared state root."""
+        return (
+            "$ErrorActionPreference = 'Stop'\n"
+            f". '{self.ENVIRONMENT_LIBRARY}'\n"
+            f"New-Item -ItemType File -Path '{ready}' -Force | Out-Null\n"
+            "$gate = [System.Threading.EventWaitHandle]::OpenExisting('" + gate_name + "')\n"
+            "try { $gate.WaitOne() | Out-Null } finally { $gate.Dispose() }\n"
+            f"$result = Initialize-PrismaRuntimeState -StateRoot '{state}' -Template '{template}'\n"
+            "[Console]::Out.WriteLine(('seeded=' + $result.Seeded))\n"
+        )
+
+    def _start_powershell(self, command: str) -> subprocess.Popen[str]:
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        return subprocess.Popen(
+            [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def test_concurrent_fresh_state_start_pairs_both_survive_seeding(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pw002-seed-race-") as temporary:
+            # Resolve the long path: %TEMP% can carry an 8.3 short name, and
+            # .NET Framework short-name expansion under concurrent directory
+            # creation can otherwise hand the two children different state
+            # roots (the same gotcha ``canonical`` documents in
+            # test_python_environment.py).
+            base = Path(temporary).resolve()
+            block = self.TEMPLATE_BLOCK * (self.TEMPLATE_SIZE_BYTES // len(self.TEMPLATE_BLOCK))
+            template = base / "prisma_voice_config.example.json"
+            template.write_bytes(block)
+            state = base / "state"
+            ready_a, ready_b = base / "ready-a", base / "ready-b"
+            gate_name = "pw002-seed-gate-" + os.urandom(6).hex()
+            # Explicit native signatures: the bare windll export table returns
+            # c_int for every call, which truncates HANDLE values and leaves
+            # CloseHandle/SetEvent results unchecked.
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateEventW.argtypes = (ctypes.wintypes.LPVOID, ctypes.wintypes.BOOL, ctypes.wintypes.BOOL, ctypes.wintypes.LPCWSTR)
+            kernel32.CreateEventW.restype = ctypes.wintypes.HANDLE
+            kernel32.SetEvent.argtypes = (ctypes.wintypes.HANDLE,)
+            kernel32.SetEvent.restype = ctypes.wintypes.BOOL
+            kernel32.CloseHandle.argtypes = (ctypes.wintypes.HANDLE,)
+            kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+            gate_handle = kernel32.CreateEventW(None, True, False, gate_name)
+            self.assertTrue(gate_handle, "the test barrier event must be creatable")
+
+            def _close_gate() -> None:
+                if not kernel32.CloseHandle(gate_handle):
+                    raise ctypes.WinError(ctypes.get_last_error())
+
+            def _terminate_child(child: subprocess.Popen[str]) -> None:
+                # Individually protected: a failure while terminating one child
+                # must never prevent the other child's cleanup from running.
+                try:
+                    if child.poll() is None:
+                        child.kill()
+                        child.communicate(timeout=10)
+                except Exception:
+                    pass
+
+            self.addCleanup(_close_gate)
+            # Each started child is registered immediately after start, so the
+            # registered cleanups terminate every started child on every path,
+            # including a partially completed launch sequence and a test-body
+            # error before any try block is entered.
+            first = self._start_powershell(self._seeding_child_command(state, template, ready_a, gate_name))
+            self.addCleanup(_terminate_child, first)
+            second = self._start_powershell(self._seeding_child_command(state, template, ready_b, gate_name))
+            self.addCleanup(_terminate_child, second)
+
+            deadline = time.time() + 30
+            while not (ready_a.exists() and ready_b.exists()) and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(
+                ready_a.exists() and ready_b.exists(),
+                "both launchers must signal readiness before the barrier is released",
+            )
+            self.assertTrue(kernel32.SetEvent(gate_handle), "the barrier SetEvent call must succeed")
+            first_out, first_err = first.communicate(timeout=60)
+            second_out, second_err = second.communicate(timeout=60)
+
+            config = state / "prisma_voice_config.json"
+            self.assertEqual(first.returncode, 0, f"first launcher failed: {first_err or first_out}")
+            self.assertEqual(second.returncode, 0, f"second launcher failed: {second_err or second_out}")
+            seeded_lines = sorted(line for line in (first_out + second_out).splitlines() if line.startswith("seeded="))
+            self.assertEqual(
+                seeded_lines,
+                ["seeded=False", "seeded=True"],
+                f"exactly one launcher must create the configuration; "
+                f"first(stderr)={first_err!r}; second(stderr)={second_err!r}",
+            )
+            self.assertTrue(config.is_file())
+            self.assertEqual(config.read_bytes(), block, "published configuration must equal the template byte for byte")
+            leftovers = sorted(str(path) for path in list(state.glob("*.tmp")) + list(base.glob("*.tmp")))
+            self.assertEqual(leftovers, [], "no temporary seeding file may remain in the state root or its parent")
 
 
 if __name__ == "__main__":
