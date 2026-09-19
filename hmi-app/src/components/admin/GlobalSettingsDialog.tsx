@@ -58,6 +58,10 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         (status: SaveStatus) => updateTabSaveStatus('connection', status),
         [updateTabSaveStatus],
     );
+    const setDesignSaveStatus = useCallback(
+        (status: SaveStatus) => updateTabSaveStatus('design', status),
+        [updateTabSaveStatus],
+    );
     const setVoiceSaveStatus = useCallback(
         (status: SaveStatus) => updateTabSaveStatus('voice', status),
         [updateTabSaveStatus],
@@ -194,6 +198,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <div hidden={activeTab !== 'design'}>
                         <DesignSettingsTab
                             onDirtyChange={setDesignDirty}
+                            onSaveStatusChange={setDesignSaveStatus}
                             saveRef={designSaveRef}
                             revertRef={designRevertRef}
                         />

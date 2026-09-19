@@ -50,7 +50,7 @@ vi.mock('./DesignSettingsTab', async () => {
     const React = await vi.importActual<typeof import('react')>('react');
 
     return {
-        default: function MockDesignSettingsTab({ onDirtyChange, saveRef, revertRef }: { onDirtyChange?: (dirty: boolean) => void; saveRef?: { current: (() => void) | null }; revertRef?: { current: (() => void) | null } }) {
+        default: function MockDesignSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef, revertRef }: { onDirtyChange?: (dirty: boolean) => void; onSaveStatusChange?: (status: 'dirty' | 'saving' | 'saved' | 'error' | null) => void; saveRef?: { current: (() => void) | null }; revertRef?: { current: (() => void) | null } }) {
             const persisted = () => localStorage.getItem(DESIGN_STORAGE_KEY) ?? 'Persisted design';
             const [value, setValue] = React.useState(persisted);
 
@@ -59,6 +59,7 @@ vi.mock('./DesignSettingsTab', async () => {
                     localStorage.setItem(DESIGN_STORAGE_KEY, value);
                     document.documentElement.dataset.designPreview = value;
                     onDirtyChange?.(false);
+                    onSaveStatusChange?.('saved');
                 };
             }
 
@@ -68,6 +69,7 @@ vi.mock('./DesignSettingsTab', async () => {
                     setValue(nextValue);
                     document.documentElement.dataset.designPreview = nextValue;
                     onDirtyChange?.(false);
+                    onSaveStatusChange?.(null);
                 };
             }
 
@@ -81,6 +83,7 @@ vi.mock('./DesignSettingsTab', async () => {
                             setValue(event.target.value);
                             document.documentElement.dataset.designPreview = event.target.value;
                             onDirtyChange?.(true);
+                            onSaveStatusChange?.('dirty');
                         }}
                     />
                 </div>
@@ -337,6 +340,35 @@ describe('GlobalSettingsDialog', () => {
         await user.click(screen.getByRole('button', { name: 'Diseno' }));
         expect(within(actions).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: 'Conexion' }));
+        expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
+
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
+
+        await waitFor(() => {
+            expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        });
+    });
+
+    it('projects the Diseno save status in the footer before Guardar, per tab, and clears it on close', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.click(screen.getByRole('button', { name: 'Diseno' }));
+        await user.type(screen.getByLabelText('Design draft'), 'X');
+
+        const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
+        const content = screen.getByRole('region', { name: 'Contenido de configuración general' });
+        const status = within(actions).getByText('Cambios sin guardar');
+        expect(status).toHaveClass('text-status-warning');
+        expect(status).toHaveAttribute('aria-live', 'polite');
+        expect(status).toHaveAttribute('aria-atomic', 'true');
+        expect(getSaveButton().previousElementSibling).toBe(status);
+        expect(within(content).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Conexion' }));
+        expect(within(actions).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Diseno' }));
         expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
 
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));

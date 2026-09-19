@@ -127,7 +127,7 @@ Every unit ends with the canonical gates green and a Conventional Commit on
 - [x] U1 — Shared primitive plus dialog generalization; the reference tab unchanged and green. Commit `17a9064`.
 - [x] U2 — CONEXIÓN projects the shared status. Commit `19afc71`.
 - [x] U2b — Reference tab renamed `Voz` → `Prisma` with the `Pyramid` icon (this commit).
-- [ ] U3 — DISEÑO projects the shared status.
+- [x] U3 — DISEÑO projects the shared status (this commit), including both branches of the typography-reset projection and the finding that both reset paths persist while the revert ref does not.
 - [ ] U4 — OPCIONES projects the shared status.
 - [ ] U5 — AJUSTES projects the shared status, keeping its validation alert.
 - [ ] U6 — Reconcile `docs/PENDING_WORK.md` and Engram at closure.
@@ -138,7 +138,15 @@ Every unit ends with the canonical gates green and a Conventional Commit on
 |---|---|---|
 | U1 | focused 32 OK; full 1924 OK; coverage 86.8/80.12/86.08/87.67 | `17a9064` |
 | U2 | focused 38 OK (3 new, RED captured); full 1927 OK; coverage 86.83/80.13/86.12/87.7 | `19afc71` |
-| U2b | focused 33 OK; full 1927 OK; tsc, lint, build clean; no stale label or icon left | this commit |
-| U3 | pending | pending |
+| U2b | focused 33 OK; full 1927 OK; tsc, lint, build clean; no stale label or icon left | `40306fe` |
+| U3 | focused 58 OK (6 new, RED captured); full 1935 OK; coverage 86.95/80.13/86.15/87.83 | this commit |
 | U4 | pending | pending |
 | U5 | pending | pending |
+
+### Residual recorded during U3
+
+The two reset paths (`handleResetFonts`, `handleReset`) persist by removing override keys
+and project `saved` accordingly, but neither wraps its storage removal in `try/catch`, so a
+throwing `removeItem` would still propagate instead of projecting `error`. That is pre-existing
+behaviour, not a regression introduced here, and it stays documented rather than silently
+accepted.

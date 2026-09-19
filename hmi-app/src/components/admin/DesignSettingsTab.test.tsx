@@ -358,3 +358,153 @@ describe('DesignSettingsTab typography controls', () => {
         expect(document.documentElement.style.getPropertyValue('--color-industrial-bg')).toBe('#123456');
     });
 });
+
+describe('DesignSettingsTab save status projection', () => {
+    const COLOR_LABEL = 'Elegir color para Fondo Principal';
+
+    function renderTab(overrides: {
+        onDirtyChange?: (dirty: boolean) => void;
+        onSaveStatusChange?: (status: 'dirty' | 'saving' | 'saved' | 'error' | null) => void;
+        saveRef?: { current: (() => void) | null };
+        revertRef?: { current: (() => void) | null };
+    } = {}) {
+        return render(
+            <DesignSettingsTab
+                onDirtyChange={overrides.onDirtyChange}
+                onSaveStatusChange={overrides.onSaveStatusChange}
+                saveRef={overrides.saveRef}
+                revertRef={overrides.revertRef}
+            />,
+        );
+    }
+
+    beforeEach(() => {
+        localStorage.clear();
+        document.documentElement.removeAttribute('style');
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('projects dirty when an edit is made', () => {
+        const handleSaveStatusChange = vi.fn();
+
+        renderTab({ onSaveStatusChange: handleSaveStatusChange });
+
+        fireEvent.change(screen.getByLabelText(COLOR_LABEL), { target: { value: '#123456' } });
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+    });
+
+    it('projects saved after a successful save through the save ref', async () => {
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+        const saveRef = { current: null as null | (() => void) };
+
+        renderTab({ onDirtyChange: handleDirtyChange, onSaveStatusChange: handleSaveStatusChange, saveRef });
+
+        fireEvent.change(screen.getByLabelText(COLOR_LABEL), { target: { value: '#123456' } });
+
+        await act(async () => {
+            saveRef.current?.();
+        });
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('saved');
+        expect(handleDirtyChange).toHaveBeenLastCalledWith(false);
+        expect(JSON.parse(localStorage.getItem('hmi-theme-colors') ?? '{}')).toMatchObject({
+            '--color-industrial-bg': '#123456',
+        });
+    });
+
+    it('projects error and leaves dirty true when a storage write throws during save', async () => {
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+        const saveRef = { current: null as null | (() => void) };
+
+        renderTab({ onDirtyChange: handleDirtyChange, onSaveStatusChange: handleSaveStatusChange, saveRef });
+
+        fireEvent.change(screen.getByLabelText(COLOR_LABEL), { target: { value: '#123456' } });
+
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('QuotaExceededError');
+        });
+
+        await act(async () => {
+            saveRef.current?.();
+        });
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('error');
+        expect(handleDirtyChange).toHaveBeenLastCalledWith(true);
+    });
+
+    it('projects no status when the revert ref clears dirty without persisting', async () => {
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+        const revertRef = { current: null as null | (() => void) };
+
+        localStorage.setItem('hmi-theme-colors', JSON.stringify({ '--color-industrial-bg': '#111111' }));
+
+        renderTab({ onDirtyChange: handleDirtyChange, onSaveStatusChange: handleSaveStatusChange, revertRef });
+
+        fireEvent.change(screen.getByLabelText(COLOR_LABEL), { target: { value: '#123456' } });
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+
+        await act(async () => {
+            revertRef.current?.();
+        });
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith(null);
+        expect(handleDirtyChange).toHaveBeenLastCalledWith(false);
+        expect(JSON.parse(localStorage.getItem('hmi-theme-colors') ?? '{}')).toMatchObject({
+            '--color-industrial-bg': '#111111',
+        });
+    });
+
+    it('projects saved after the reset because the reset persists the default state to storage', () => {
+        const handleSaveStatusChange = vi.fn();
+
+        localStorage.setItem('hmi-theme-colors', JSON.stringify({ '--color-industrial-bg': '#111111' }));
+
+        renderTab({ onSaveStatusChange: handleSaveStatusChange });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Restaurar paleta original' }));
+
+        expect(localStorage.getItem('hmi-theme-colors')).toBeNull();
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('saved');
+    });
+
+    it('projects saved when resetting typography with no pending colour edits', () => {
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+
+        renderTab({ onDirtyChange: handleDirtyChange, onSaveStatusChange: handleSaveStatusChange });
+
+        const [systemSizeInput] = within(getTypographyGroup('TEXTOS EN GENERAL')).getAllByRole('textbox');
+        fireEvent.change(systemSizeInput, { target: { value: '14' } });
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Restaurar tipografias' }));
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('saved');
+        expect(handleDirtyChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('projects dirty when resetting typography while a colour edit is still unsaved', () => {
+        const handleDirtyChange = vi.fn();
+        const handleSaveStatusChange = vi.fn();
+
+        renderTab({ onDirtyChange: handleDirtyChange, onSaveStatusChange: handleSaveStatusChange });
+
+        const [systemSizeInput] = within(getTypographyGroup('TEXTOS EN GENERAL')).getAllByRole('textbox');
+        fireEvent.change(systemSizeInput, { target: { value: '14' } });
+
+        fireEvent.change(screen.getByLabelText(COLOR_LABEL), { target: { value: '#123456' } });
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Restaurar tipografias' }));
+
+        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+        expect(handleDirtyChange).toHaveBeenLastCalledWith(true);
+    });
+});

@@ -11,6 +11,7 @@ import {
     ADMIN_SIDEBAR_SECTION_CLS,
     ADMIN_SIDEBAR_SECTION_HEADER_CLS,
 } from './adminSidebarStyles';
+import type { SaveStatus } from './saveStatus';
 import {
     ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_RANGE,
     AVAILABLE_FONTS,
@@ -696,11 +697,12 @@ export function applyThemeOverrides(): void {
 
 interface DesignSettingsTabProps {
     onDirtyChange?: (dirty: boolean) => void;
+    onSaveStatusChange?: (status: SaveStatus) => void;
     saveRef?: { current: (() => void) | null };
     revertRef?: { current: (() => void) | null };
 }
 
-export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }: DesignSettingsTabProps) {
+export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef, revertRef }: DesignSettingsTabProps) {
     const initialThemeState = useMemo(() => {
         const storedFonts = normalizeStoredFontOverrides(readStoredOverrides(FONT_STORAGE_KEY));
         const storedColors = readStoredOverrides(COLOR_STORAGE_KEY);
@@ -754,6 +756,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
     const [fontSizeValues, setFontSizeValues] = useState<Record<FontSizeTokenKey, string>>(initialThemeState.fontSizeValues);
     const [trackingValues, setTrackingValues] = useState<Record<TrackingTokenKey, string>>(initialThemeState.trackingValues);
     const [colorValues, setColorValues] = useState<Record<ColorTokenKey, string>>(initialThemeState.colorValues);
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     const paletteImportInputRef = useRef<HTMLInputElement | null>(null);
 
     const snapshotRef = useRef<ThemeState | null>({
@@ -769,6 +772,10 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             initialThemeState.trackingValues,
         ));
     }, [initialThemeState]);
+
+    useEffect(() => {
+        onSaveStatusChange?.(saveStatus);
+    }, [onSaveStatusChange, saveStatus]);
 
     const fontStorageOverrides = useMemo(() => {
         return buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues);
@@ -846,6 +853,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             }
         }
 
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -866,6 +874,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             document.documentElement.style.setProperty(colorKey, nextColor);
         }
 
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -913,6 +922,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             setColorValues(nextColorValues);
             applyColorStateToDocument(nextColorValues);
 
+            setSaveStatus('dirty');
             onDirtyChange?.(true);
         } catch {
             // Invalid or malformed files must not mutate the current palette.
@@ -935,6 +945,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             document.documentElement.style.setProperty(weightKey, resolvedWeight);
         }
 
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -957,6 +968,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
 
         setFontSizeValues(nextSizeValues);
         document.documentElement.style.setProperty(sizeKey, normalizedSize);
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -996,6 +1008,7 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
 
         setTrackingValues(nextTrackingValues);
         document.documentElement.style.setProperty(trackingKey, normalizedTracking);
+        setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
 
@@ -1047,6 +1060,9 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             const snapV = prevColorSnapshot[k as ColorTokenKey];
             return normalizeColorForInput(v) !== normalizeColorForInput(snapV);
         });
+        // The reset persists the font overrides' removal to storage, so it is
+        // treated as a save. Pending colour changes keep the status dirty.
+        setSaveStatus(colorsDirty ? 'dirty' : 'saved');
         onDirtyChange?.(colorsDirty);
     };
 
@@ -1086,6 +1102,9 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             trackingValues: DEFAULT_TRACKING_VALUES,
             colorValues: DEFAULT_COLOR_VALUES,
         };
+        // The reset persists the removal of both override keys to storage, so
+        // it is treated as a save rather than a silent dirty clear.
+        setSaveStatus('saved');
         onDirtyChange?.(false);
     };
 
@@ -1095,10 +1114,21 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
         }
 
         saveRef.current = () => {
-            writeStoredOverrides(FONT_STORAGE_KEY, buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues));
-            writeStoredOverrides(COLOR_STORAGE_KEY, colorStorageOverrides);
-            snapshotRef.current = { fontValues, weightValues, fontSizeValues, trackingValues, colorValues };
-            onDirtyChange?.(false);
+            // The two storage keys are written independently, so a mid-way
+            // failure can leave the font write persisted while the colour
+            // write did not happen.
+            try {
+                writeStoredOverrides(FONT_STORAGE_KEY, buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues));
+                writeStoredOverrides(COLOR_STORAGE_KEY, colorStorageOverrides);
+                snapshotRef.current = { fontValues, weightValues, fontSizeValues, trackingValues, colorValues };
+                setSaveStatus('saved');
+                onDirtyChange?.(false);
+            } catch {
+                // The dialog's save-ref contract is fire-and-forget: report the
+                // persistence failure upward instead of rethrowing, keeping the
+                // tab dirty because the state was not fully persisted.
+                setSaveStatus('error');
+            }
         };
 
         return () => {
@@ -1120,6 +1150,10 @@ export default function DesignSettingsTab({ onDirtyChange, saveRef, revertRef }:
             setTrackingValues(snap.trackingValues);
             setColorValues(snap.colorValues);
             applyThemeStateToDocument(snap);
+            // The revert only restores state and document styles without
+            // touching storage, so it reports no status: a persistence that
+            // did not happen must not be claimed as `Guardado`.
+            setSaveStatus(null);
             onDirtyChange?.(false);
         };
 
