@@ -54,6 +54,10 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     // connects that tab's prop (U2 CONEXIÓN, U3 DISEÑO, U4 OPCIONES, U5
     // AJUSTES add theirs one by one), so every setter is always read and
     // noUnusedLocals stays satisfied without any bypass or discard.
+    const setConnectionSaveStatus = useCallback(
+        (status: SaveStatus) => updateTabSaveStatus('connection', status),
+        [updateTabSaveStatus],
+    );
     const setVoiceSaveStatus = useCallback(
         (status: SaveStatus) => updateTabSaveStatus('voice', status),
         [updateTabSaveStatus],
@@ -182,6 +186,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <div hidden={activeTab !== 'connection'}>
                         <ConnectionSettingsTab
                             onDirtyChange={setConnectionDirty}
+                            onSaveStatusChange={setConnectionSaveStatus}
                             saveRef={connectionSaveRef}
                         />
                     </div>

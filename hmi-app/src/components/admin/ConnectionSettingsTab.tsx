@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import AdminActionButton from './AdminActionButton';
 import { ADMIN_SIDEBAR_LABEL_CLS, ADMIN_SIDEBAR_INPUT_CLS, ADMIN_SIDEBAR_HINT_CLS } from './adminSidebarStyles';
+import type { SaveStatus } from './saveStatus';
 import {
     DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT,
     DATA_DEFAULT_ENDPOINT,
@@ -30,13 +31,14 @@ import { DATA_HISTORY_QUERY_KEY_PREFIX } from '../../queries/useDataHistory';
 // =============================================================================
 
 interface ConnectionSettingsTabProps {
-    onStatusChange?: (saved: boolean) => void;
     onDirtyChange?: (dirty: boolean) => void;
+    onSaveStatusChange?: (status: SaveStatus) => void;
     saveRef?: { current: (() => void) | null };
 }
 
-export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, saveRef }: ConnectionSettingsTabProps) {
+export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: ConnectionSettingsTabProps) {
     const queryClient = useQueryClient();
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     const [draftUrl, setDraftUrl] = useState(() => getSavedDataBaseUrl() || (getDataBaseUrl() ?? ''));
     const [draftEndpoint, setDraftEndpoint] = useState(() => getSavedDataEndpoint() || DATA_DEFAULT_ENDPOINT);
     const [draftHistoryEndpoint, setDraftHistoryEndpoint] = useState(() => getSavedDataHistoryEndpoint() || DATA_DEFAULT_HISTORY_ENDPOINT);
@@ -83,38 +85,52 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
         return `${baseUrl}/${activitySeriesEndpoint}`;
     }, [draftActivitySeriesEndpoint, draftUrl]);
 
+    useEffect(() => {
+        onSaveStatusChange?.(saveStatus);
+    }, [onSaveStatusChange, saveStatus]);
+
     const handleSave = useCallback(() => {
         const trimmed = draftUrl.trim();
         const trimmedEndpoint = draftEndpoint.trim();
         const trimmedHistoryEndpoint = draftHistoryEndpoint.trim();
         const trimmedActivitySeriesEndpoint = draftActivitySeriesEndpoint.trim();
 
-        if (trimmed) {
-            saveDataBaseUrl(trimmed);
-        } else {
-            clearDataBaseUrl();
+        // The dialog's save-ref contract is fire-and-forget: the save status is
+        // the user-visible channel, so a thrown persistence failure is reported
+        // as `error` instead of being rethrown. Note that a mid-way failure is
+        // a partial save: some values may have persisted while the status
+        // reports the failure.
+        try {
+            if (trimmed) {
+                saveDataBaseUrl(trimmed);
+            } else {
+                clearDataBaseUrl();
+            }
+
+            if (trimmedEndpoint) {
+                saveDataEndpoint(trimmedEndpoint);
+            } else {
+                clearDataEndpoint();
+            }
+
+            if (trimmedHistoryEndpoint) {
+                saveDataHistoryEndpoint(trimmedHistoryEndpoint);
+            } else {
+                clearDataHistoryEndpoint();
+            }
+
+            saveDataActivitySeriesEndpoint(trimmedActivitySeriesEndpoint);
+
+            queryClient.invalidateQueries({ queryKey: DATA_OVERVIEW_QUERY_KEY });
+            queryClient.invalidateQueries({ queryKey: DATA_HISTORY_QUERY_KEY_PREFIX });
+            queryClient.invalidateQueries({ queryKey: ACTIVITY_SERIES_QUERY_KEY_PREFIX });
+
+            setSaveStatus('saved');
+            onDirtyChange?.(false);
+        } catch {
+            setSaveStatus('error');
         }
-
-        if (trimmedEndpoint) {
-            saveDataEndpoint(trimmedEndpoint);
-        } else {
-            clearDataEndpoint();
-        }
-
-        if (trimmedHistoryEndpoint) {
-            saveDataHistoryEndpoint(trimmedHistoryEndpoint);
-        } else {
-            clearDataHistoryEndpoint();
-        }
-
-        saveDataActivitySeriesEndpoint(trimmedActivitySeriesEndpoint);
-
-        queryClient.invalidateQueries({ queryKey: DATA_OVERVIEW_QUERY_KEY });
-        queryClient.invalidateQueries({ queryKey: DATA_HISTORY_QUERY_KEY_PREFIX });
-        queryClient.invalidateQueries({ queryKey: ACTIVITY_SERIES_QUERY_KEY_PREFIX });
-        onStatusChange?.(true);
-        onDirtyChange?.(false);
-    }, [draftActivitySeriesEndpoint, draftEndpoint, draftHistoryEndpoint, draftUrl, onDirtyChange, onStatusChange, queryClient]);
+    }, [draftActivitySeriesEndpoint, draftEndpoint, draftHistoryEndpoint, draftUrl, onDirtyChange, queryClient]);
 
     const handleClear = useCallback(() => {
         clearDataBaseUrl();
@@ -128,9 +144,8 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
         queryClient.invalidateQueries({ queryKey: DATA_OVERVIEW_QUERY_KEY });
         queryClient.invalidateQueries({ queryKey: DATA_HISTORY_QUERY_KEY_PREFIX });
         queryClient.invalidateQueries({ queryKey: ACTIVITY_SERIES_QUERY_KEY_PREFIX });
-        onStatusChange?.(true);
         onDirtyChange?.(false);
-    }, [onDirtyChange, onStatusChange, queryClient]);
+    }, [onDirtyChange, queryClient]);
 
     useEffect(() => {
         if (!saveRef) {
@@ -158,6 +173,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     onChange={(e) => {
                         setDraftUrl(e.target.value);
                         onDirtyChange?.(true);
+                        setSaveStatus('dirty');
                     }}
                     placeholder="https://node-red.example.local"
                     className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
@@ -177,6 +193,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     onChange={(e) => {
                         setDraftEndpoint(e.target.value);
                         onDirtyChange?.(true);
+                        setSaveStatus('dirty');
                     }}
                     placeholder="/api/hmi-data"
                     className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
@@ -196,6 +213,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     onChange={(e) => {
                         setDraftHistoryEndpoint(e.target.value);
                         onDirtyChange?.(true);
+                        setSaveStatus('dirty');
                     }}
                     placeholder="/api/hmi-data/history"
                     className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
@@ -215,6 +233,7 @@ export default function ConnectionSettingsTab({ onStatusChange, onDirtyChange, s
                     onChange={(e) => {
                         setDraftActivitySeriesEndpoint(e.target.value);
                         onDirtyChange?.(true);
+                        setSaveStatus('dirty');
                     }}
                     placeholder="/api/hmi-data/activity-series"
                     className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}

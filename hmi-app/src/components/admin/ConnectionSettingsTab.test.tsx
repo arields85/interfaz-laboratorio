@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConnectionSettingsTab from './ConnectionSettingsTab';
@@ -47,6 +47,62 @@ describe('ConnectionSettingsTab activity-series settings', () => {
         expect(localStorage.getItem('hmi:activity-series-endpoint')).toBe('');
         expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['data', 'activity-series'] });
         expect(onDirtyChange).toHaveBeenCalledWith(false);
+    });
+
+    it('projects dirty on edit and saved through the save ref after writes and invalidations complete', () => {
+        const onDirtyChange = vi.fn();
+        const onSaveStatusChange = vi.fn();
+        const saveRef = { current: null as null | (() => void) };
+
+        render(
+            <ConnectionSettingsTab
+                onDirtyChange={onDirtyChange}
+                onSaveStatusChange={onSaveStatusChange}
+                saveRef={saveRef}
+            />,
+        );
+
+        fireEvent.change(screen.getByLabelText('Endpoint Snapshot'), {
+            target: { value: '/api/custom' },
+        });
+
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+
+        act(() => {
+            saveRef.current?.();
+        });
+
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('saved');
+        expect(onDirtyChange).toHaveBeenCalledWith(false);
+    });
+
+    it('projects error and keeps the tab dirty when a persistence write throws', () => {
+        invalidateQueries.mockImplementation(() => {
+            throw new Error('storage unavailable');
+        });
+        const onDirtyChange = vi.fn();
+        const onSaveStatusChange = vi.fn();
+        const saveRef = { current: null as null | (() => void) };
+
+        render(
+            <ConnectionSettingsTab
+                onDirtyChange={onDirtyChange}
+                onSaveStatusChange={onSaveStatusChange}
+                saveRef={saveRef}
+            />,
+        );
+
+        fireEvent.change(screen.getByLabelText('URL Base de Node-RED'), {
+            target: { value: 'https://node-red.local' },
+        });
+
+        expect(() => {
+            act(() => {
+                saveRef.current?.();
+            });
+        }).not.toThrow();
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('error');
+        expect(onDirtyChange).not.toHaveBeenCalledWith(false);
     });
 
     it('retires Prisma snapshot export controls without changing industrial telemetry settings', () => {

@@ -17,13 +17,14 @@ vi.mock('./ConnectionSettingsTab', async () => {
     const React = await vi.importActual<typeof import('react')>('react');
 
     return {
-        default: function MockConnectionSettingsTab({ onDirtyChange, saveRef }: { onDirtyChange?: (dirty: boolean) => void; saveRef?: { current: (() => void) | null } }) {
+        default: function MockConnectionSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: { onDirtyChange?: (dirty: boolean) => void; onSaveStatusChange?: (status: 'dirty' | 'saving' | 'saved' | 'error' | null) => void; saveRef?: { current: (() => void) | null } }) {
             const [value, setValue] = React.useState(() => localStorage.getItem(CONNECTION_STORAGE_KEY) ?? 'Persisted connection');
 
             if (saveRef) {
                 saveRef.current = () => {
                     localStorage.setItem(CONNECTION_STORAGE_KEY, value);
                     onDirtyChange?.(false);
+                    onSaveStatusChange?.('saved');
                 };
             }
 
@@ -36,6 +37,7 @@ vi.mock('./ConnectionSettingsTab', async () => {
                         onChange={(event) => {
                             setValue(event.target.value);
                             onDirtyChange?.(true);
+                            onSaveStatusChange?.('dirty');
                         }}
                     />
                 </div>
@@ -315,6 +317,34 @@ describe('GlobalSettingsDialog', () => {
         expect(within(actions).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: 'Voz' }));
         expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
+    });
+
+    it('projects the Conexion save status in the footer before Guardar, per tab, and clears it on close', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.type(screen.getByLabelText('Connection draft'), 'X');
+
+        const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
+        const content = screen.getByRole('region', { name: 'Contenido de configuración general' });
+        const status = within(actions).getByText('Cambios sin guardar');
+        expect(status).toHaveClass('text-status-warning');
+        expect(status).toHaveAttribute('aria-live', 'polite');
+        expect(status).toHaveAttribute('aria-atomic', 'true');
+        expect(getSaveButton().previousElementSibling).toBe(status);
+        expect(within(content).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Diseno' }));
+        expect(within(actions).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Conexion' }));
+        expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
+
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
+
+        await waitFor(() => {
+            expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        });
     });
 
     it('projects saving and saved with their semantic tones in the same footer position', async () => {
