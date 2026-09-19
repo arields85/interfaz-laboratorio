@@ -2,7 +2,9 @@ import ctypes
 import ctypes.wintypes
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -616,83 +618,214 @@ class ConcurrentFreshStateSeedingTests(unittest.TestCase):
             text=True,
         )
 
+    def _seed(self, state: Path, template: Path) -> subprocess.CompletedProcess[str]:
+        """Run the real, unmodified product seeding function in a child
+        PowerShell against an isolated state root."""
+        command = (
+            "$ErrorActionPreference = 'Stop'\n"
+            f". '{self.ENVIRONMENT_LIBRARY}'\n"
+            f"$result = Initialize-PrismaRuntimeState -StateRoot '{state}' -Template '{template}'\n"
+            "[Console]::Out.WriteLine(('seeded=' + $result.Seeded))\n"
+        )
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        return subprocess.run(
+            [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _dead_owner_pid(self) -> int:
+        """Return the pid of a process that has already exited, so the sweep's
+        dead-owner rule has a definitively dead owner to work with."""
+        exited = subprocess.Popen([sys.executable, "-c", "pass"])
+        exited.wait()
+        return exited.pid
+
+    def test_directory_destination_raises_and_leaves_no_temporary(self) -> None:
+        """T1: a non-leaf destination must raise instead of being silently
+        treated as already seeded, and no temporary file may survive."""
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-dir-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        template = base / "prisma_voice_config.example.json"
+        template.write_bytes(b"prisma-seed-directory-destination\n")
+        state = base / "state"
+        state.mkdir()
+        destination = state / "prisma_voice_config.json"
+        destination.mkdir()
+        result = self._seed(state, template)
+        self.assertNotEqual(result.returncode, 0, f"seeding must fail on a non-leaf destination: {result.stdout or result.stderr}")
+        # The localized .NET IOException text does not name the destination
+        # path, so the failure is tied to its actual cause by proving it
+        # originates at the rename step as an IOException: that is exactly the
+        # publish-onto-a-directory failure, not an unrelated harness problem.
+        self.assertIn(
+            "[IO.File]::Move($tempPath, $config)",
+            result.stderr + result.stdout,
+            "the failure must originate at the rename step",
+        )
+        self.assertIn(
+            "IOException",
+            result.stderr + result.stdout,
+            "the failure must be the publish-time IOException of renaming onto an existing directory",
+        )
+        self.assertTrue(destination.is_dir(), "the destination directory must not be replaced by a file")
+        self.assertEqual(list(state.glob("*.tmp")), [], "no temporary seeding file may remain behind")
+
+    def test_stale_temporary_is_swept_and_fresh_temporary_survives(self) -> None:
+        """T2: a successful seeding removes an orphaned temporary that is BOTH
+        older than the sweep threshold AND owned by a dead process, while an
+        aged temporary with a live owner (the dispose-to-rename suspension
+        counterexample), an aged temporary whose name does not parse, an aged
+        temporary whose owner id is out of range, a freshly created one, and a
+        fresh one with a dead owner (age-guard coverage) are all left
+        untouched."""
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-sweep-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        template = base / "prisma_voice_config.example.json"
+        template.write_bytes(b"prisma-seed-sweep-template\n")
+        state = base / "state"
+        state.mkdir()
+        dead_pid = self._dead_owner_pid()
+        live_pid = os.getpid()  # the test process is definitively alive
+        stale = state / f"prisma_voice_config.json.{dead_pid}.0123456789abcdef0123456789abcdef.tmp"
+        stale.write_bytes(b"stale")
+        aged = time.time() - 7200  # two hours old: well past the one-hour threshold
+        os.utime(stale, (aged, aged))
+        stale_live_owner = state / f"prisma_voice_config.json.{live_pid}.fedcba9876543210fedcba9876543210.tmp"
+        stale_live_owner.write_bytes(b"stale-live-owner")
+        os.utime(stale_live_owner, (aged, aged))
+        unparseable = state / "prisma_voice_config.json.0123456789abcdef0123456789abcdef.tmp"
+        unparseable.write_bytes(b"unparseable")
+        os.utime(unparseable, (aged, aged))
+        fresh = state / f"prisma_voice_config.json.{live_pid}.00112233445566778899aabbccddeeff.tmp"
+        fresh.write_bytes(b"fresh")
+        fresh_dead_owner = state / f"prisma_voice_config.json.{dead_pid}.99887766554433221100ffeeddccbbaa.tmp"
+        fresh_dead_owner.write_bytes(b"fresh-dead-owner")
+        out_of_range = state / "prisma_voice_config.json.2147483648.0123456789abcdef0123456789abcdef.tmp"
+        out_of_range.write_bytes(b"out-of-range")
+        os.utime(out_of_range, (aged, aged))
+        result = self._seed(state, template)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertIn("seeded=True", result.stdout)
+        self.assertTrue((state / "prisma_voice_config.json").is_file())
+        self.assertFalse(stale.exists(), "the aged orphaned temporary with a dead owner must be swept")
+        self.assertTrue(stale_live_owner.exists(), "an aged temporary whose owner is still alive must survive the sweep")
+        self.assertTrue(unparseable.exists(), "a temporary whose name does not parse must never be deleted")
+        self.assertTrue(fresh.exists(), "a freshly created temporary must survive the sweep")
+        self.assertTrue(fresh_dead_owner.exists(), "a fresh temporary with a dead owner must survive because it is too young")
+        self.assertTrue(out_of_range.exists(), "a temporary whose owner id is out of range must be skipped without failing initialization")
+        self.assertTrue((state / "prisma_voice_config.json").is_file())
+        self.assertFalse(stale.exists(), "the aged orphaned temporary must be swept")
+        self.assertTrue(fresh.exists(), "a freshly created temporary must survive the sweep")
+
+    def test_stale_temporary_is_swept_even_when_configuration_already_exists(self) -> None:
+        """The stale-temporary sweep must run before the already-configured
+        early return, so an orphan left by a hard kill cannot persist forever
+        on a state root whose effective configuration already exists."""
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-sweep-live-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        template = base / "prisma_voice_config.example.json"
+        template.write_bytes(b"prisma-seed-sweep-existing-template\n")
+        state = base / "state"
+        state.mkdir()
+        config = state / "prisma_voice_config.json"
+        original = b"prisma-seed-effective-configuration\n"
+        config.write_bytes(original)
+        stale = state / f"prisma_voice_config.json.{self._dead_owner_pid()}.0123456789abcdef0123456789abcdef.tmp"
+        stale.write_bytes(b"stale")
+        aged = time.time() - 7200  # two hours old: well past the one-hour threshold
+        os.utime(stale, (aged, aged))
+        fresh = state / f"prisma_voice_config.json.{os.getpid()}.fedcba9876543210fedcba9876543210.tmp"
+        fresh.write_bytes(b"fresh")
+        result = self._seed(state, template)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertIn("seeded=False", result.stdout)
+        self.assertFalse(stale.exists(), "the aged orphaned temporary must be swept even when the configuration already exists")
+        self.assertTrue(fresh.exists(), "a freshly created temporary must survive the sweep")
+        self.assertEqual(config.read_bytes(), original, "the effective configuration must keep its original bytes")
+
     def test_concurrent_fresh_state_start_pairs_both_survive_seeding(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pw002-seed-race-") as temporary:
-            # Resolve the long path: %TEMP% can carry an 8.3 short name, and
-            # .NET Framework short-name expansion under concurrent directory
-            # creation can otherwise hand the two children different state
-            # roots (the same gotcha ``canonical`` documents in
-            # test_python_environment.py).
-            base = Path(temporary).resolve()
-            block = self.TEMPLATE_BLOCK * (self.TEMPLATE_SIZE_BYTES // len(self.TEMPLATE_BLOCK))
-            template = base / "prisma_voice_config.example.json"
-            template.write_bytes(block)
-            state = base / "state"
-            ready_a, ready_b = base / "ready-a", base / "ready-b"
-            gate_name = "pw002-seed-gate-" + os.urandom(6).hex()
-            # Explicit native signatures: the bare windll export table returns
-            # c_int for every call, which truncates HANDLE values and leaves
-            # CloseHandle/SetEvent results unchecked.
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.CreateEventW.argtypes = (ctypes.wintypes.LPVOID, ctypes.wintypes.BOOL, ctypes.wintypes.BOOL, ctypes.wintypes.LPCWSTR)
-            kernel32.CreateEventW.restype = ctypes.wintypes.HANDLE
-            kernel32.SetEvent.argtypes = (ctypes.wintypes.HANDLE,)
-            kernel32.SetEvent.restype = ctypes.wintypes.BOOL
-            kernel32.CloseHandle.argtypes = (ctypes.wintypes.HANDLE,)
-            kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
-            gate_handle = kernel32.CreateEventW(None, True, False, gate_name)
-            self.assertTrue(gate_handle, "the test barrier event must be creatable")
+        # Explicit mkdtemp with LIFO-ordered cleanup: the removal is registered
+        # FIRST, so it runs LAST, after both children have been terminated by
+        # their own cleanups. A Windows failure path must therefore never
+        # obscure the original failure message with a directory-deletion error
+        # from a still-live child.
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-race-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        # Resolve the long path: %TEMP% can carry an 8.3 short name, and
+        # .NET Framework short-name expansion under concurrent directory
+        # creation can otherwise hand the two children different state
+        # roots (the same gotcha ``canonical`` documents in
+        # test_python_environment.py).
+        block = self.TEMPLATE_BLOCK * (self.TEMPLATE_SIZE_BYTES // len(self.TEMPLATE_BLOCK))
+        template = base / "prisma_voice_config.example.json"
+        template.write_bytes(block)
+        state = base / "state"
+        ready_a, ready_b = base / "ready-a", base / "ready-b"
+        gate_name = "pw002-seed-gate-" + os.urandom(6).hex()
+        # Explicit native signatures: the bare windll export table returns
+        # c_int for every call, which truncates HANDLE values and leaves
+        # CloseHandle/SetEvent results unchecked.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateEventW.argtypes = (ctypes.wintypes.LPVOID, ctypes.wintypes.BOOL, ctypes.wintypes.BOOL, ctypes.wintypes.LPCWSTR)
+        kernel32.CreateEventW.restype = ctypes.wintypes.HANDLE
+        kernel32.SetEvent.argtypes = (ctypes.wintypes.HANDLE,)
+        kernel32.SetEvent.restype = ctypes.wintypes.BOOL
+        kernel32.CloseHandle.argtypes = (ctypes.wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+        gate_handle = kernel32.CreateEventW(None, True, False, gate_name)
+        self.assertTrue(gate_handle, "the test barrier event must be creatable")
 
-            def _close_gate() -> None:
-                if not kernel32.CloseHandle(gate_handle):
-                    raise ctypes.WinError(ctypes.get_last_error())
+        def _close_gate() -> None:
+            if not kernel32.CloseHandle(gate_handle):
+                raise ctypes.WinError(ctypes.get_last_error())
 
-            def _terminate_child(child: subprocess.Popen[str]) -> None:
-                # Individually protected: a failure while terminating one child
-                # must never prevent the other child's cleanup from running.
-                try:
-                    if child.poll() is None:
-                        child.kill()
-                        child.communicate(timeout=10)
-                except Exception:
-                    pass
+        def _terminate_child(child: subprocess.Popen[str]) -> None:
+            # Individually protected: a failure while terminating one child
+            # must never prevent the other child's cleanup from running.
+            try:
+                if child.poll() is None:
+                    child.kill()
+                    child.communicate(timeout=10)
+            except Exception:
+                pass
 
-            self.addCleanup(_close_gate)
-            # Each started child is registered immediately after start, so the
-            # registered cleanups terminate every started child on every path,
-            # including a partially completed launch sequence and a test-body
-            # error before any try block is entered.
-            first = self._start_powershell(self._seeding_child_command(state, template, ready_a, gate_name))
-            self.addCleanup(_terminate_child, first)
-            second = self._start_powershell(self._seeding_child_command(state, template, ready_b, gate_name))
-            self.addCleanup(_terminate_child, second)
+        self.addCleanup(_close_gate)
+        # Each started child is registered immediately after start, so the
+        # registered cleanups terminate every started child on every path,
+        # including a partially completed launch sequence and a test-body
+        # error before any try block is entered.
+        first = self._start_powershell(self._seeding_child_command(state, template, ready_a, gate_name))
+        self.addCleanup(_terminate_child, first)
+        second = self._start_powershell(self._seeding_child_command(state, template, ready_b, gate_name))
+        self.addCleanup(_terminate_child, second)
 
-            deadline = time.time() + 30
-            while not (ready_a.exists() and ready_b.exists()) and time.time() < deadline:
-                time.sleep(0.01)
-            self.assertTrue(
-                ready_a.exists() and ready_b.exists(),
-                "both launchers must signal readiness before the barrier is released",
-            )
-            self.assertTrue(kernel32.SetEvent(gate_handle), "the barrier SetEvent call must succeed")
-            first_out, first_err = first.communicate(timeout=60)
-            second_out, second_err = second.communicate(timeout=60)
+        deadline = time.time() + 30
+        while not (ready_a.exists() and ready_b.exists()) and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(
+            ready_a.exists() and ready_b.exists(),
+            "both launchers must signal readiness before the barrier is released",
+        )
+        self.assertTrue(kernel32.SetEvent(gate_handle), "the barrier SetEvent call must succeed")
+        first_out, first_err = first.communicate(timeout=60)
+        second_out, second_err = second.communicate(timeout=60)
 
-            config = state / "prisma_voice_config.json"
-            self.assertEqual(first.returncode, 0, f"first launcher failed: {first_err or first_out}")
-            self.assertEqual(second.returncode, 0, f"second launcher failed: {second_err or second_out}")
-            seeded_lines = sorted(line for line in (first_out + second_out).splitlines() if line.startswith("seeded="))
-            self.assertEqual(
-                seeded_lines,
-                ["seeded=False", "seeded=True"],
-                f"exactly one launcher must create the configuration; "
-                f"first(stderr)={first_err!r}; second(stderr)={second_err!r}",
-            )
-            self.assertTrue(config.is_file())
-            self.assertEqual(config.read_bytes(), block, "published configuration must equal the template byte for byte")
-            leftovers = sorted(str(path) for path in list(state.glob("*.tmp")) + list(base.glob("*.tmp")))
-            self.assertEqual(leftovers, [], "no temporary seeding file may remain in the state root or its parent")
-
+        config = state / "prisma_voice_config.json"
+        self.assertEqual(first.returncode, 0, f"first launcher failed: {first_err or first_out}")
+        self.assertEqual(second.returncode, 0, f"second launcher failed: {second_err or second_out}")
+        seeded_lines = sorted(line for line in (first_out + second_out).splitlines() if line.startswith("seeded="))
+        self.assertEqual(
+            seeded_lines,
+            ["seeded=False", "seeded=True"],
+            f"exactly one launcher must create the configuration; "
+            f"first(stderr)={first_err!r}; second(stderr)={second_err!r}",
+        )
+        self.assertTrue(config.is_file())
+        self.assertEqual(config.read_bytes(), block, "published configuration must equal the template byte for byte")
+        leftovers = sorted(str(path) for path in list(state.glob("*.tmp")) + list(base.glob("*.tmp")))
+        self.assertEqual(leftovers, [], "no temporary seeding file may remain in the state root or its parent")
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,12 @@
     regardless of the caller's current working directory.
 #>
 
+# Age past this threshold is an eligibility condition for sweeping a seeding
+# temporary, not proof that its owner is dead: deletion additionally requires
+# an attributable owner that is no longer running. See the stale-temporary
+# sweep inside Initialize-PrismaRuntimeState.
+$script:PrismaStaleSeedingTemporaryThreshold = [timespan]::FromHours(1)
+
 function Get-PrismaRuntimeRoot {
     <#
     .SYNOPSIS
@@ -281,6 +287,64 @@ function Initialize-PrismaRuntimeState {
     $config = Join-Path $resolvedRoot 'prisma_voice_config.json'
     $seeded = $false
 
+    # Sweep orphaned temporaries left behind by a hard process kill between the
+    # temporary write and the rename. This runs BEFORE the already-configured
+    # early return below, so an already-configured state root still sheds
+    # orphans on every start. The sweep is owner-aware, not unconditionally
+    # "safe by construction": every temporary name carries the owning process
+    # id, and a temporary is deleted only when it is BOTH older than the
+    # threshold AND its owner is no longer running. Age alone is not enough,
+    # because FileShare::None protects a temporary only while the handle is
+    # open: a live owner suspended past the threshold in the dispose-to-rename
+    # interval must never be disturbed. Residual: pid reuse can keep a
+    # genuinely orphaned temporary longer than the threshold, which errs
+    # toward never deleting a live owner's file. A name that does not parse,
+    # or whose owner id cannot be represented as a process id, is skipped
+    # entirely: never delete what cannot be attributed. The whole sweep is
+    # guarded: ANY unexpected error while enumerating, parsing, aging, looking
+    # up the owner or deleting warns and continues, so this opportunistic
+    # cleanup can never abort initialization or replace an in-flight exception
+    # from the seeding path itself, which stays unguarded. A temporary that
+    # vanishes mid-flight surfaces through the existing IOException handler as
+    # a genuine error, because the destination is not a leaf. A deletion
+    # failure only warns: it must never replace another error and must never
+    # turn a lost race into a failure.
+    $staleTemporaries = @()
+    try {
+        $staleTemporaries = @(Get-ChildItem -LiteralPath $resolvedRoot -File -Filter 'prisma_voice_config.json.*.tmp' -ErrorAction SilentlyContinue)
+    }
+    catch {
+        try { Write-Warning ("Failed to enumerate the stale seeding temporaries in '{0}': {1}" -f $resolvedRoot, $_.Exception.Message) -WarningAction Continue } catch { }
+    }
+    foreach ($staleTemporary in $staleTemporaries) {
+        try {
+            if ($null -eq $staleTemporary) { continue }
+            if ($staleTemporary.Name -notmatch '^prisma_voice_config\.json\.(\d+)\.[0-9a-f]{32}\.tmp$') { continue }
+            $ownerPid = 0
+            if (-not [int]::TryParse($Matches[1], [ref]$ownerPid)) { continue }
+            if ($staleTemporary.LastWriteTimeUtc -gt ([DateTime]::UtcNow - $script:PrismaStaleSeedingTemporaryThreshold)) { continue }
+            if (Get-Process -Id $ownerPid -ErrorAction SilentlyContinue) { continue }
+            $staleTemporary.Delete()
+        }
+        catch {
+            try { Write-Warning ("Failed to inspect or remove the stale seeding temporary '{0}': {1}" -f $staleTemporary.FullName, $_.Exception.Message) -WarningAction Continue } catch { }
+        }
+    }
+
+    # An already-configured state root needs no write access on this path:
+    # return immediately when the effective configuration is a leaf file. This
+    # is an optimization only - the rename below stays the authoritative
+    # publication step, so no check-then-act hazard is reintroduced, the
+    # directory creation above is never skipped, and the stale-temporary sweep
+    # above has already run.
+    if (Test-Path -LiteralPath $config -PathType Leaf) {
+        return [pscustomobject]@{
+            StateRoot     = $resolvedRoot
+            Configuration = $config
+            Seeded        = $false
+        }
+    }
+
     # Publish-by-rename seeding: the template bytes are written to a unique
     # temporary file in the destination directory (same volume) and published
     # with a rename, so the destination name only ever exposes complete content.
@@ -288,7 +352,9 @@ function Initialize-PrismaRuntimeState {
     # effective configuration is never overwritten, and a failed write leaves no
     # destination at all instead of a truncated file that would permanently block
     # future seeding.
-    $tempPath = Join-Path $resolvedRoot ("prisma_voice_config.json." + [Guid]::NewGuid().ToString("N") + ".tmp")
+    # The temporary name carries the owning process id so the sweep can
+    # attribute every temporary to its owner.
+    $tempPath = Join-Path $resolvedRoot ("prisma_voice_config.json." + $PID + "." + [Guid]::NewGuid().ToString("N") + ".tmp")
     $published = $false
     try {
         $tempStream = [IO.File]::Open($tempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
@@ -315,6 +381,20 @@ function Initialize-PrismaRuntimeState {
             # earlier exception is already unwinding the recorded error is
             # never rethrown here; the guarded warning is the only diagnostic
             # that survives on that path.
+            #
+            # The data must also reach the disk before the rename is issued:
+            # closing a FileStream flushes only to the operating system, while
+            # the rename is journaled metadata on NTFS, so a power cut in the
+            # window could persist the final name with absent or partial
+            # content. Flush($true) forces the file buffers to the disk. A
+            # flush failure is a failure to publish and propagates exactly
+            # like a failed close: hard error when nothing else is in flight,
+            # guarded path-bearing diagnostic when an exception is already
+            # unwinding.
+            try { $tempStream.Flush($true) } catch {
+                $closeError = $_.Exception
+                try { Write-Warning ("Failed to flush the seeding write handle for destination '{0}' (temporary file '{1}'): {2}" -f $config, $tempPath, $_.Exception.Message) -WarningAction Continue } catch { }
+            }
             try { $tempStream.Dispose() } catch {
                 $closeError = $_.Exception
                 try { Write-Warning ("Failed to close the seeding write handle for destination '{0}' (temporary file '{1}'): {2}" -f $config, $tempPath, $_.Exception.Message) -WarningAction Continue } catch { }

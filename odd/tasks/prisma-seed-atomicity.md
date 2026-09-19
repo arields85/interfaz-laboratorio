@@ -153,34 +153,48 @@ README's eleven overrides cleared from the child environment, and
 `PYTHONDONTWRITEBYTECODE=1` added to the child environment; the parent environment
 is never mutated and the canonical PowerShell argv is unchanged.
 
-## Residual risks (accepted, must survive review)
+## Residual risks
 
-1. A hard process kill between the temp write and the rename can leave an orphan
-   `prisma_voice_config.json.<guid>.tmp`. It is never published as the effective
-   configuration and does not block future seeding, but there is no sweeper.
-2. Every caller now writes a temporary copy even when the configuration already
-   exists, so a start performs one extra small write (441 bytes in production)
-   and requires a writable state root on that path.
-3. Atomic publication is not power-loss durability.
-4. Close/disposal/deletion failure paths and terminating warning preferences were
-   handled by construction and inspected statically, but were never
-   fault-injected.
-5. The concurrency test is timing-sensitive: the barrier aligns the callers but
-   does not force a particular interleaving. Final-state assertions cannot detect
-   transient partial visibility; repeated green runs are evidence, not proof.
-6. Cleanup of test children is best-effort: kill failures are swallowed and an
-   interpreter abort is not covered.
-7. Test ergonomics on failure paths only: `addCleanup` runs after the test method
-   returns, so `with tempfile.TemporaryDirectory(...)` deletes the tree before
-   `unittest` kills the children. On Windows a still-alive child holding files in
-   that tree can make the deletion raise and replace the original failure
-   message. It cannot affect product behaviour and cannot let a defective
-   implementation pass.
-8. Product, exotic: on the unwinding path the recorded close failure is
-   intentionally not rethrown, so the surviving diagnostic is the guarded
-   warning; if the warning stream itself were unusable that single diagnostic
-   would be lost, while the no-other-error path still raises a hard error.
-   Inspection-based, not fault-injected.
+This list was reconciled after the follow-up hardening cycle documented in
+`odd/tasks/prisma-seed-hardening.md`, which closed four of the eight items below.
+
+CLOSED by that cycle:
+
+1. ~~Orphan `prisma_voice_config.json.<guid>.tmp` after a hard kill, with no sweeper.~~
+   Now swept: the temporary name carries its owner pid, and an aged temporary whose owner
+   is no longer running is deleted on every start, including when the configuration already
+   exists. Retention is possible under pid reuse, which errs toward never deleting a live
+   owner's file.
+2. ~~Every caller writes a temporary copy even when the configuration already exists.~~
+   Now an already-configured state root returns early without creating a temporary, so that
+   path needs no write access again.
+3. ~~Atomic publication is not power-loss durability.~~
+   Partially closed: `Flush($true)` now forces the data to disk before the rename, which
+   removes the dangerous "rename persisted but data did not" ordering. Directory-entry
+   durability after the rename remains a filesystem matter and is still unproven by test.
+7. ~~Test ergonomics on failure paths: the temp tree was deleted before the children were
+   killed, which could obscure the original failure.~~
+   Now the tree removal is registered so it runs last among the cleanups.
+
+STILL ACCEPTED:
+
+4. Close/disposal/deletion failure paths and terminating warning preferences were handled by
+   construction and inspected statically, but were never fault-injected. The hardening cycle
+   added a non-leaf destination test, which is the only failure-path branch now covered.
+5. The concurrency test is timing-sensitive: the barrier aligns the callers but does not force
+   a particular interleaving. Final-state assertions cannot detect transient partial
+   visibility; repeated green runs are evidence, not proof.
+6. Cleanup of test children is best-effort: kill failures are swallowed and an interpreter
+   abort is not covered.
+8. Product, exotic: on the unwinding path the recorded close failure is intentionally not
+   rethrown, so the surviving diagnostic is the guarded warning; if the warning stream itself
+   were unusable that single diagnostic would be lost, while the no-other-error path still
+   raises an error. Inspection-based, not fault-injected.
+
+Additional residuals introduced and accepted by the hardening cycle (pid-reuse retention,
+permanently unswept unattributable or old-shape temporaries, eligibility-not-lifetime, and the
+suppressed-diagnostic wording) are enumerated with their severity in
+`odd/tasks/prisma-seed-hardening.md`.
 
 ## Decisions resolved and still open
 
