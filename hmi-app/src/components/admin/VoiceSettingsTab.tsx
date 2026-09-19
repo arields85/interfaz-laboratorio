@@ -28,12 +28,12 @@ import {
     ADMIN_SIDEBAR_SECTION_CLS,
     ADMIN_SIDEBAR_SECTION_HEADER_CLS,
 } from './adminSidebarStyles';
-import type { VoiceSaveStatus } from './voiceSaveStatus';
+import type { SaveStatus } from './saveStatus';
 
 interface VoiceSettingsTabProps {
     credentialControlsActive?: boolean;
     onDirtyChange?: (dirty: boolean) => void;
-    onSaveStatusChange?: (status: VoiceSaveStatus) => void;
+    onSaveStatusChange?: (status: SaveStatus) => void;
     saveRef?: { current: (() => void | Promise<void>) | null };
 }
 
@@ -87,7 +87,7 @@ export default function VoiceSettingsTab({
     const [demoSpeaking, setDemoSpeaking] = useState(false);
     const [backdrop, setBackdrop] = useState<PreviewBackdrop>('HMI preview');
     const [voiceConfigValid, setVoiceConfigValid] = useState(true);
-    const [saveStatus, setSaveStatus] = useState<VoiceSaveStatus>(null);
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     const autoDemoRef = useRef(autoDemo);
     const speakingRef = useRef(speaking);
     const demoSpeakingRef = useRef(demoSpeaking);

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Clock3, Mic2, Palette, SlidersHorizontal, Wifi } from 'lucide-react';
 import AdminDialog from './AdminDialog';
 import AdminActionButton from './AdminActionButton';
@@ -7,10 +7,7 @@ import DesignSettingsTab from './DesignSettingsTab';
 import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
 import TemporalSettingsTab from './TemporalSettingsTab';
 import VoiceSettingsTab from './VoiceSettingsTab';
-import {
-    VOICE_SAVE_STATUS_UI,
-    type VoiceSaveStatus,
-} from './voiceSaveStatus';
+import { SAVE_STATUS_UI, type SaveStatus } from './saveStatus';
 
 const TABS = [
     { id: 'connection', label: 'Conexion', icon: Wifi },
@@ -38,8 +35,31 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     const [optionsDirty, setOptionsDirty] = useState(false);
     const [temporalDirty, setTemporalDirty] = useState(false);
     const [voiceDirty, setVoiceDirty] = useState(false);
-    const [voiceSaveStatus, setVoiceSaveStatus] = useState<VoiceSaveStatus>(null);
+    const [saveStatusByTab, setSaveStatusByTab] = useState<Record<TabId, SaveStatus>>(() => ({
+        connection: null,
+        design: null,
+        options: null,
+        temporal: null,
+        voice: null,
+    }));
     const dirty = connectionDirty || designDirty || optionsDirty || temporalDirty || voiceDirty;
+
+    const updateTabSaveStatus = useCallback((tabId: TabId, status: SaveStatus) => {
+        setSaveStatusByTab((previous) => (
+            previous[tabId] === status ? previous : { ...previous, [tabId]: status }
+        ));
+    }, []);
+
+    // One stable setter per CONNECTED tab, added in the same work unit that
+    // connects that tab's prop (U2 CONEXIÓN, U3 DISEÑO, U4 OPCIONES, U5
+    // AJUSTES add theirs one by one), so every setter is always read and
+    // noUnusedLocals stays satisfied without any bypass or discard.
+    const setVoiceSaveStatus = useCallback(
+        (status: SaveStatus) => updateTabSaveStatus('voice', status),
+        [updateTabSaveStatus],
+    );
+
+    const activeSaveStatus = saveStatusByTab[activeTab];
 
     const connectionSaveRef = useRef<(() => void) | null>(null);
     const designSaveRef = useRef<(() => void) | null>(null);
@@ -81,7 +101,13 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         setOptionsDirty(false);
         setTemporalDirty(false);
         setVoiceDirty(false);
-        setVoiceSaveStatus(null);
+        setSaveStatusByTab({
+            connection: null,
+            design: null,
+            options: null,
+            temporal: null,
+            voice: null,
+        });
         onClose();
     };
 
@@ -97,13 +123,13 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     aria-label="Acciones de configuración general"
                     className="flex items-center gap-2"
                 >
-                    {activeTab === 'voice' && voiceSaveStatus ? (
+                    {activeSaveStatus ? (
                         <p
-                            className={`mr-2 text-sm ${VOICE_SAVE_STATUS_UI[voiceSaveStatus].className}`}
+                            className={`mr-2 text-sm ${SAVE_STATUS_UI[activeSaveStatus].className}`}
                             aria-live="polite"
                             aria-atomic="true"
                         >
-                            {VOICE_SAVE_STATUS_UI[voiceSaveStatus].label}
+                            {SAVE_STATUS_UI[activeSaveStatus].label}
                         </p>
                     ) : null}
                     <AdminActionButton

@@ -1,6 +1,6 @@
-export type VoiceSaveStatus = 'dirty' | 'saving' | 'saved' | 'error' | null;
+export type SaveStatus = 'dirty' | 'saving' | 'saved' | 'error' | null;
 
-export const VOICE_SAVE_STATUS_UI: Record<Exclude<VoiceSaveStatus, null>, { label: string; className: string }> = {
+export const SAVE_STATUS_UI: Record<Exclude<SaveStatus, null>, { label: string; className: string }> = {
     dirty: { label: 'Cambios sin guardar', className: 'text-status-warning' },
     saving: { label: 'Guardando...', className: 'text-admin-accent' },
     saved: { label: 'Guardado', className: 'text-status-normal' },
