@@ -2,13 +2,13 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.8
+> **Versión documental:** 2.0.9
 >
-> **Fecha:** 2026-09-17
+> **Fecha:** 2026-09-19
 >
-> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; despliegue productivo, aceptación integral y el trabajo posterior del asistente siguen pendientes.
+> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`); despliegue productivo, aceptación integral y el trabajo posterior del asistente siguen pendientes.
 >
-> **Alcance de esta versión:** conserva los cierres offline de FND-1–FND-11, UNI-1–UNI-3 y PAC-1–PAC-4, y registra el cierre offline integrado del paquete protegido mediante la verificación PAC-5; la aceptación real, el despliegue productivo y el alcance posterior del asistente continúan pendientes.
+> **Alcance de esta versión:** conciliación documental: la carrera de sembrado ya no está abierta, `PW-001` está cerrado en `f964113`, y `PW-002`, `PW-003` y `PW-004` permanecen pendientes o aplazados. El próximo paso vigente es la comprobación local de punta a punta (§11.1). Cambio exclusivamente documental: no ejecuta servicios, pruebas ni proveedores.
 
 ## 1. Objetivo y estado general
 
@@ -804,7 +804,8 @@ La aceptación final conservó **80 pruebas focalizadas en 9 archivos**, **1885 
 archivos**, build, lint y diff correctos, además de **40 pruebas parentales en 3 archivos**. El gate
 backend vigente aprobó **236 pruebas en 15,056 s**. Una ejecución anterior expuso una carrera
 preexistente de check-then-copy durante el sembrado concurrente de estado; el diagnóstico de solo
-lectura la dejó visible bajo PW-002 y no afirmó haberla corregido.
+lectura la dejó visible bajo PW-002 y no afirmó haberla corregido — cierre posterior registrado en
+la conciliación 2.0.9 de este mismo §11.
 
 `PAC-4B` y el paquete `PAC-4` están completos y aceptados offline tras una verificación independiente
 COMPLETE PASS que cerró los cuatro hallazgos sin regresiones. **Configuración general → Prisma**
@@ -841,6 +842,14 @@ configuración de voz real en import, la verificación corrió en un supervisor 
 (`TemporaryDirectory`) con variables ambiente sensibles limpiadas y el entorno del padre intacto;
 el README del runtime documenta el wrapper reproducible de verificación offline.
 
+**Conciliación 2.0.9:** el párrafo `PAC-5` anterior se conserva como evidencia histórica con fecha.
+La carrera de sembrado concurrente que registra ya no está abierta: los commits `f865e79`
+(sembrado atómico) y `855c26b` (endurecimiento ante temporarios huérfanos y pérdida de energía)
+la corrigieron y verificaron; la evidencia histórica se conserva en
+[`../../odd/tasks/prisma-seed-atomicity.md`](../../odd/tasks/prisma-seed-atomicity.md) y
+[`../../odd/tasks/prisma-seed-hardening.md`](../../odd/tasks/prisma-seed-hardening.md).
+`PW-001` está cerrado en `f964113`.
+
 Dos correcciones acotadas posteriores a `PAC-4`, aceptadas con evidencia local limitada confirmada
 por el padre y no repetidas en la verificación `PAC-5`, quedan registradas en
 [`../../odd/tasks/windows-acl-helper-remediation.md`](../../odd/tasks/windows-acl-helper-remediation.md)
@@ -857,13 +866,58 @@ El pipeline productivo administrado por IT sigue como objetivo posterior sin sel
 todavía OS o supervisor. Cualquier readiness adicional del loader del navegador es UX
 opcional y no bloqueante, no un requisito obligatorio aprobado.
 
-Esto no constituye aceptación de producción. PW-002 y PW-003 continúan activos para la carrera de
-inicialización concurrente, instalación limpia y arranque real, forwarding, despliegue y
+Esto no constituye aceptación de producción. PW-002 y PW-003 continúan activos para
+instalación limpia y arranque real, forwarding, despliegue y
 supervisión administrados por IT, recuperación durable, retiro explícito de la instalación legacy
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
+### 11.1 Próximo paso vigente (2026-09-19)
+
+**Comprobar el funcionamiento local de punta a punta, sin borrar la instalación vieja ni regenerar
+claves.** Este registro solo documenta el próximo paso acordado; no ejecuta servicios, pruebas ni
+proveedores y no afirma haber realizado la comprobación.
+
+Lo que la aceptación local futura debe observar:
+
+- arranque automático de HMI y Prisma desde el launcher del usuario en Windows (`hmi-app npm run
+  dev` → `scripts/dev.mjs` →
+  [`start-local.ps1`](../../services/prisma-runtime/operations/start-local.ps1) → `.venv` propio de
+  `services/prisma-runtime/`);
+- configuración protegida operada desde **Configuración general → Prisma**;
+- el camino implementado de snapshot, consulta y voz.
+
+Condiciones y límites ya establecidos:
+
+- la adquisición automática aplica a `npm run dev` en Windows; `build`, `preview`, tests y
+  plataformas no-Windows no adquieren Prisma;
+- no existe dependencia activa de fuente ni fallback a `C:\hmi_tts`; ese directorio queda como
+  referencia documentada de rollback, no como requisito de runtime (su existencia física no fue
+  reinspectada);
+- los secretos de proveedor se administran desde la HMI; la clave maestra protegida y su almacén
+  permanecen fuera de Git por diseño, y el aprovisionamiento inicial de clave y administrador ya
+  está hecho: no repetirlo ni resetearlo;
+- la aceptación offline `PAC-1`–`PAC-5` más el login local y la visibilidad del almacén no prueban
+  aceptación real de proveedor de punta a punta;
+- llamadas pagadas al proveedor y mensajes salientes requieren autorización explícita separada;
+- `PW-002`, `PW-003` y `PW-004` permanecen pendientes o aplazados;
+  [`../PENDING_WORK.md`](../PENDING_WORK.md) sigue siendo la autoridad de descubrimiento y sus tres
+  filas no cambian.
+
+La rama vigente es `feat/prisma-telegram-credentials` con `HEAD` `f964113` (cierre de `PW-001`).
+
 ## 12. Changelog
+
+### 2.0.9 — 2026-09-19
+
+- Conciliación documental de la carrera de sembrado concurrente: `f865e79` la corrigió y `855c26b`
+  la endureció; la evidencia histórica queda en `odd/tasks/prisma-seed-atomicity.md` y
+  `odd/tasks/prisma-seed-hardening.md`. `PW-001` está cerrado en `f964113`.
+- Registro del próximo paso vigente (§11.1): comprobación local de punta a punta, sin borrar la
+  instalación vieja ni regenerar claves; `PW-002`, `PW-003` y `PW-004` permanecen pendientes o
+  aplazados.
+- Cambio exclusivamente documental: no ejecuta servicios, pruebas ni proveedores y no afirma
+  aceptación real.
 
 ### 2.0.8 — 2026-09-17
 
