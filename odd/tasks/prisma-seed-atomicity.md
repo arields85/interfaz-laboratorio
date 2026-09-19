@@ -124,7 +124,7 @@ next correction:
 - [x] T2 — Atomic seeding implemented (final shape: publish-by-rename).
 - [x] T3 — GREEN plus regression: focused class 10/10 and 5/5 in separate rounds; canonical backend gate 241 tests, OK, exit 0.
 - [x] T4 — Two independent verification rounds and a final PASS round over the corrected revision.
-- [ ] T5 — User decision gate: branch and commit authorization (not yet granted).
+- [x] T5 — Commit gate resolved: committed on `feat/prisma-telegram-credentials` as `f865e798a1a5f9b975ef35ae437afefce69e19dc` (tree `554f18196112666be5a26ce2bc64de423d13ad52`); no push, merge, or PR.
 
 ## Evidence ledger
 
@@ -135,8 +135,16 @@ next correction:
 | GREEN | focused class, final revision | 10/10 (writer) and 5/5 (independent verifier) OK |
 | Regression | `verify-local.ps1` via the documented isolated supervisor | `Ran 241 tests in 17.147s` / OK / exit 0 |
 | Independent verification | three rounds, final verdict PASS | findings closed; see correction history |
-| Final revision | `runtime-environment.ps1` sha256 `2f1af8362e0b4f35bba68d6a8d438cd957477ff3675d5eb0d315e42527ed45c4` | — |
-| Final revision | `test_runtime_safety.py` sha256 `108271f712d0ed0a360b4e2461d27c43fa392292b7db6f51fc9eeeb0ced7b6bd` | — |
+| Commit | `f865e798a1a5f9b975ef35ae437afefce69e19dc` on `feat/prisma-telegram-credentials`, tree `554f18196112666be5a26ce2bc64de423d13ad52` | 3 files, +354/−3; no push |
+| Final revision | `runtime-environment.ps1` sha256 `2f1af8362e0b4f35bba68d6a8d438cd957477ff3675d5eb0d315e42527ed45c4` | identical as working bytes and as committed blob |
+| Final revision | `test_runtime_safety.py` committed blob `a0233f1c668f39f9b838a92c76ba698662675a1a607ebb131ca310dd48c7e996` | LF, canonical; the working copy is CRLF (`108271f712d0ed0a360b4e2461d27c43fa392292b7db6f51fc9eeeb0ced7b6bd`), because this clone uses `core.autocrlf=true` and the writer left that file in CRLF. Equivalence proven with `tr -d '\r'` |
+
+### Line-ending note (audit)
+
+The repository stores LF blobs. The two test-file hashes above describe the same
+content: the working-tree CRLF bytes that actually ran the tests, and the
+committed LF blob that Git produced by normalization at staging time. Any audit
+of this change must compare against the blob hashes, not the working-copy hashes.
 
 ### Evidence command (isolated supervisor)
 
@@ -162,9 +170,23 @@ is never mutated and the canonical PowerShell argv is unchanged.
    transient partial visibility; repeated green runs are evidence, not proof.
 6. Cleanup of test children is best-effort: kill failures are swallowed and an
    interpreter abort is not covered.
+7. Test ergonomics on failure paths only: `addCleanup` runs after the test method
+   returns, so `with tempfile.TemporaryDirectory(...)` deletes the tree before
+   `unittest` kills the children. On Windows a still-alive child holding files in
+   that tree can make the deletion raise and replace the original failure
+   message. It cannot affect product behaviour and cannot let a defective
+   implementation pass.
+8. Product, exotic: on the unwinding path the recorded close failure is
+   intentionally not rethrown, so the surviving diagnostic is the guarded
+   warning; if the warning stream itself were unusable that single diagnostic
+   would be lost, while the no-other-error path still raises a hard error.
+   Inspection-based, not fault-injected.
 
-## Open decisions for the user
+## Decisions resolved and still open
 
-- Commit gate: whether to commit at all, whether to include
-  `odd/tasks/prisma-seed-atomicity.md`, and whether this belongs on
-  `feat/prisma-telegram-credentials` or its own feature branch.
+- Commit gate: RESOLVED — committed on `feat/prisma-telegram-credentials` as
+  `f865e79` with the two implementation files and this document, excluding the
+  pre-existing user-owned `.gitignore` change. No push, merge, or PR.
+- Still open for PW-002 as a whole (unchanged by this work): real clean start
+  and clean-install acceptance, forwarding, deployment, supervision, durable
+  recovery, and legacy-installation retirement.
