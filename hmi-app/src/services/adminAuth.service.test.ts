@@ -302,6 +302,23 @@ describe('AdminAuthClient', () => {
         }));
     });
 
+    it('sends the channel A deletion to its exact credential route with the active private CSRF', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.deleteCredential('telegram_channel_a')).resolves.toBeUndefined();
+
+        expect(fetcher.mock.calls[1]?.[0]).toBe('/api/prisma/admin/credentials/telegram_channel_a');
+        expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers: expect.objectContaining({ 'X-CSRF-Token': SESSION.csrfToken }),
+        }));
+    });
+
     it('fails closed when metadata omits or renames the third provider', async () => {
         const missing = new AdminAuthClient(vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
             ok: true,

@@ -45,11 +45,22 @@ function ProviderStatus({ configured, loading }: { configured?: boolean; loading
     return <span>{configured ? 'Configurada' : 'Sin configurar'}</span>;
 }
 
+// Single presentation mapping for the credential providers, reused by the card
+// legends, the accessible input names and the deletion confirmation body.
+const PROVIDER_LABELS: Record<CredentialProvider, string> = {
+    gemini: 'Gemini',
+    telegram: 'Telegram',
+    telegram_channel_a: 'Telegram (Canal A)',
+};
+
+function emptySecretDrafts(): Record<CredentialProvider, string> {
+    return { gemini: '', telegram: '', telegram_channel_a: '' };
+}
+
 export default function VoiceCredentialSettings({ active, client, controller }: VoiceCredentialSettingsProps) {
     const authenticated = useAuthStore((state) => state.session.isAuthenticated);
     const administration = usePrismaCredentialAdministration({ client, controller, active });
-    const [geminiSecret, setGeminiSecret] = useState('');
-    const [telegramSecret, setTelegramSecret] = useState('');
+    const [secretDrafts, setSecretDrafts] = useState<Record<CredentialProvider, string>>(emptySecretDrafts);
     const [deleteProvider, setDeleteProvider] = useState<CredentialProvider | null>(null);
     const [feedback, setFeedback] = useState<Feedback>(null);
     const panelGenerationRef = useRef(0);
@@ -68,15 +79,31 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         panelGenerationRef.current += 1;
         secretRevisionRef.current.gemini += 1;
         secretRevisionRef.current.telegram += 1;
+        secretRevisionRef.current.telegram_channel_a += 1;
         dialogRevisionRef.current += 1;
-        setGeminiSecret('');
-        setTelegramSecret('');
+        setSecretDrafts(emptySecretDrafts());
         setDeleteProvider(null);
         setFeedback(null);
     }, [active, authenticated]);
 
+    // Clearing one provider draft must never resurrect another provider's stale
+    // value, so every reset goes through a functional update.
+    const setProviderDraft = (provider: CredentialProvider, value: string) => {
+        setSecretDrafts((previous) => ({ ...previous, [provider]: value }));
+    };
+
+    const clearProviderDraftIfUnchanged = (
+        provider: CredentialProvider,
+        secretRevision: number,
+        panelGeneration: number,
+    ) => {
+        if (panelGenerationRef.current !== panelGeneration) return;
+        if (secretRevisionRef.current[provider] !== secretRevision) return;
+        setSecretDrafts((previous) => (previous[provider] === '' ? previous : { ...previous, [provider]: '' }));
+    };
+
     const save = async (provider: CredentialProvider) => {
-        const secret = provider === 'gemini' ? geminiSecret : telegramSecret;
+        const secret = secretDrafts[provider];
         const panelGeneration = panelGenerationRef.current;
         const secretRevision = secretRevisionRef.current[provider];
         setFeedback(null);
@@ -91,11 +118,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 setFeedback({ kind: 'error', text: errorText(error) });
             }
         } finally {
-            if (panelGenerationRef.current === panelGeneration
-                && secretRevisionRef.current[provider] === secretRevision) {
-                if (provider === 'gemini') setGeminiSecret('');
-                else setTelegramSecret('');
-            }
+            clearProviderDraftIfUnchanged(provider, secretRevision, panelGeneration);
         }
     };
 
@@ -121,11 +144,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 dialogRevisionRef.current += 1;
                 setDeleteProvider(null);
             }
-            if (panelGenerationRef.current === panelGeneration
-                && secretRevisionRef.current[provider] === secretRevision) {
-                if (provider === 'gemini') setGeminiSecret('');
-                else setTelegramSecret('');
-            }
+            clearProviderDraftIfUnchanged(provider, secretRevision, panelGeneration);
         }
     };
 
@@ -168,70 +187,78 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         setDeleteProvider(provider);
     };
 
-    const renderProvider = (provider: CredentialProvider, label: string, value: string, setValue: (value: string) => void) => (
-        <fieldset aria-label={label} className="space-y-3 rounded border border-white/10 p-3">
-            <legend className="px-1 text-industrial-text">{label}</legend>
-            <div className="flex items-center justify-between gap-3 text-industrial-muted">
-                <span>Credencial</span>
-                <ProviderStatus configured={credentials?.[provider].configured} loading={administration.isLoading} />
-            </div>
-            {provider === 'gemini' && credentials ? <p className="text-industrial-muted">Verificación: no realizada</p> : null}
-            <label className="flex flex-col gap-1 text-industrial-muted">
-                Credencial {label}
-                <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={value}
-                    onChange={(event) => {
-                        secretRevisionRef.current[provider] += 1;
-                        setValue(event.target.value);
-                    }}
-                    className={ADMIN_SIDEBAR_INPUT_CLS}
-                    disabled={disabled}
-                />
-            </label>
-            <div className="flex flex-wrap gap-2">
-                <HmiButton size="sm" variant="primary" disabled={disabled || !value} onClick={() => void save(provider)}>
-                    <Save size={14} aria-hidden="true" />
-                    Guardar credencial
-                </HmiButton>
-                <HmiButton size="sm" variant="danger" disabled={disabled} onClick={() => updateDeleteProvider(provider)}>
-                    <Trash2 size={14} aria-hidden="true" />
-                    Eliminar credencial
-                </HmiButton>
-            </div>
-            {provider === 'telegram' && telegram ? (
-                <>
-                    <div className="grid grid-cols-2 gap-2 rounded border border-white/10 p-3 text-industrial-muted">
-                        <span>{telegram?.restartRequired ? 'Cambio pendiente de aplicar' : 'Sin cambios pendientes'}</span>
-                        <span>{telegram?.running ? 'Ejecución activa' : 'Ejecución detenida'}</span>
-                        <span>{telegram?.verified ? 'Última aplicación verificada' : 'Última aplicación sin verificar'}</span>
-                        <span>{telegram?.enabled ? 'Habilitada' : 'Deshabilitada'}</span>
-                        <span>
-                            Origen: {credentials?.telegram.configured ? 'almacén protegido' : telegram?.configured ? 'entorno local' : 'sin credencial'}
-                        </span>
-                        <span>
-                            Generación: {telegram?.desiredGeneration ?? '—'} / {telegram?.appliedGeneration ?? '—'}
-                        </span>
-                    </div>
-                    {telegram?.configurationError || telegram?.lastError ? (
-                        <p className="text-status-warning">
-                            {errorText(new AdminAuthError(telegram.lastError ?? telegram.configurationError ?? '', null))}
-                        </p>
-                    ) : null}
-                    <HmiButton
-                        size="sm"
-                        variant="primary"
-                        disabled={disabled || !credentials?.telegram.configured}
-                        onClick={() => void applyTelegram()}
-                    >
-                        <Play size={14} aria-hidden="true" />
-                        Aplicar cambio
+    const renderProvider = (provider: CredentialProvider) => {
+        const label = PROVIDER_LABELS[provider];
+        const value = secretDrafts[provider];
+        return (
+            <fieldset aria-label={label} className="space-y-3 rounded border border-white/10 p-3">
+                <legend className="px-1 text-industrial-text">{label}</legend>
+                <div className="flex items-center justify-between gap-3 text-industrial-muted">
+                    <span>Credencial</span>
+                    <ProviderStatus configured={credentials?.[provider].configured} loading={administration.isLoading} />
+                </div>
+                {provider === 'gemini' && credentials ? <p className="text-industrial-muted">Verificación: no realizada</p> : null}
+                {provider === 'telegram_channel_a' ? (
+                    <p className="text-industrial-muted">Bot dedicado para consultas remotas de la HMI. Guardar la credencial no inicia ni verifica el bot.</p>
+                ) : null}
+                <label className="flex flex-col gap-1 text-industrial-muted">
+                    Credencial {label}
+                    <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={value}
+                        onChange={(event) => {
+                            const nextValue = event.target.value;
+                            secretRevisionRef.current[provider] += 1;
+                            setProviderDraft(provider, nextValue);
+                        }}
+                        className={ADMIN_SIDEBAR_INPUT_CLS}
+                        disabled={disabled}
+                    />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                    <HmiButton size="sm" variant="primary" disabled={disabled || !value} onClick={() => void save(provider)}>
+                        <Save size={14} aria-hidden="true" />
+                        Guardar credencial
                     </HmiButton>
-                </>
-            ) : null}
-        </fieldset>
-    );
+                    <HmiButton size="sm" variant="danger" disabled={disabled} onClick={() => updateDeleteProvider(provider)}>
+                        <Trash2 size={14} aria-hidden="true" />
+                        Eliminar credencial
+                    </HmiButton>
+                </div>
+                {provider === 'telegram' && telegram ? (
+                    <>
+                        <div className="grid grid-cols-2 gap-2 rounded border border-white/10 p-3 text-industrial-muted">
+                            <span>{telegram?.restartRequired ? 'Cambio pendiente de aplicar' : 'Sin cambios pendientes'}</span>
+                            <span>{telegram?.running ? 'Ejecución activa' : 'Ejecución detenida'}</span>
+                            <span>{telegram?.verified ? 'Última aplicación verificada' : 'Última aplicación sin verificar'}</span>
+                            <span>{telegram?.enabled ? 'Habilitada' : 'Deshabilitada'}</span>
+                            <span>
+                                Origen: {credentials?.telegram.configured ? 'almacén protegido' : telegram?.configured ? 'entorno local' : 'sin credencial'}
+                            </span>
+                            <span>
+                                Generación: {telegram?.desiredGeneration ?? '—'} / {telegram?.appliedGeneration ?? '—'}
+                            </span>
+                        </div>
+                        {telegram?.configurationError || telegram?.lastError ? (
+                            <p className="text-status-warning">
+                                {errorText(new AdminAuthError(telegram.lastError ?? telegram.configurationError ?? '', null))}
+                            </p>
+                        ) : null}
+                        <HmiButton
+                            size="sm"
+                            variant="primary"
+                            disabled={disabled || !credentials?.telegram.configured}
+                            onClick={() => void applyTelegram()}
+                        >
+                            <Play size={14} aria-hidden="true" />
+                            Aplicar cambio
+                        </HmiButton>
+                    </>
+                ) : null}
+            </fieldset>
+        );
+    };
 
     return (
         <section className="rounded-lg border border-white/10 bg-black/10 p-4">
@@ -250,8 +277,9 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 Actualizar estado
             </HmiButton>
             <div className="grid gap-3 md:grid-cols-2">
-                {renderProvider('gemini', 'Gemini', geminiSecret, setGeminiSecret)}
-                {renderProvider('telegram', 'Telegram', telegramSecret, setTelegramSecret)}
+                {renderProvider('gemini')}
+                {renderProvider('telegram')}
+                {renderProvider('telegram_channel_a')}
             </div>
             {feedback ? (
                 <div
@@ -281,7 +309,9 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                     </>
                 )}
             >
-                <p>La credencial protegida se eliminará del servicio local. Esta acción no puede deshacerse.</p>
+                <p>{deleteProvider
+                    ? `La credencial protegida de ${PROVIDER_LABELS[deleteProvider]} se eliminará del servicio local. Esta acción no puede deshacerse.`
+                    : 'La credencial protegida se eliminará del servicio local. Esta acción no puede deshacerse.'}</p>
             </AdminDialog>
         </section>
     );

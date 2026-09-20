@@ -135,7 +135,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
     });
 
-    it('keeps credential drafts outside global Save and clears them when the dialog closes', async () => {
+    it('keeps per-provider credential drafts outside global Save and clears them when the dialog closes', async () => {
         useAuthStore.setState({
             session: {
                 user: { id: 'administrator:admin', username: 'admin', displayName: 'admin', role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } },
@@ -190,14 +190,17 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         }));
         const user = userEvent.setup();
         renderDialogHarness();
-        const input = await screen.findByLabelText('Credencial Gemini');
-        await waitFor(() => expect(input).toBeEnabled());
+        const geminiInput = await screen.findByLabelText('Credencial Gemini');
+        const channelAInput = screen.getByLabelText('Credencial Telegram (Canal A)');
+        await waitFor(() => expect(geminiInput).toBeEnabled());
 
-        await user.type(input, 'synthetic-secret');
+        await user.type(geminiInput, 'synthetic-secret');
+        await user.type(channelAInput, 'synthetic-channel-a-secret');
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
         await user.click(screen.getByRole('button', { name: 'Reopen' }));
 
         expect(await screen.findByLabelText('Credencial Gemini')).toHaveValue('');
+        expect(screen.getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
     });
 });

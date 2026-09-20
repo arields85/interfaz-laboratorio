@@ -130,6 +130,23 @@ describe('usePrismaCredentialAdministration', () => {
         expect(JSON.stringify(sessionStorage)).not.toContain(secret);
     });
 
+    it('forwards the channel A credential save and delete to the injected client without applying Telegram', async () => {
+        const secret = 'synthetic-channel-a-secret';
+        const saveCredential = vi.fn(async () => ({ provider: 'telegram_channel_a' as const, configured: true }));
+        const deleteCredential = vi.fn(async () => undefined);
+        const { result, client } = setup({ saveCredential, deleteCredential });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        await act(async () => { await result.current.saveCredential('telegram_channel_a', secret); });
+        await act(async () => { await result.current.deleteCredential('telegram_channel_a'); });
+
+        expect(saveCredential).toHaveBeenCalledWith('telegram_channel_a', secret, expect.any(AbortSignal));
+        expect(deleteCredential).toHaveBeenCalledWith('telegram_channel_a', expect.any(AbortSignal));
+        expect(client.applyTelegram).not.toHaveBeenCalled();
+        expect(JSON.stringify(localStorage)).not.toContain(secret);
+        expect(JSON.stringify(sessionStorage)).not.toContain(secret);
+    });
+
     it('blocks duplicate operations and aborts pending work when authority is revoked', async () => {
         let signal: AbortSignal | undefined;
         const pending = new Promise<unknown>(() => undefined);

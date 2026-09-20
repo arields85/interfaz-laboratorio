@@ -22,6 +22,7 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/prisma/admin/credentials/gemini` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Gemini credential save and deletion |
 | `/api/prisma/admin/credentials/telegram` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Telegram credential save and deletion |
 | `/api/prisma/admin/credentials/telegram/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Telegram apply and restart |
+| `/api/prisma/admin/credentials/telegram_channel_a` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Channel A credential save and deletion |
 | `/api/prisma/health` | `GET` | `http://127.0.0.1:5057/health` | Passive runtime diagnostics |
 
 Browser constants live in `hmi-app/src/config/prismaAssistant.config.ts`. Development-only targets and rewrite rules live in `hmi-app/vite.prismaProxy.config.ts` and must not be imported by browser modules.
@@ -39,6 +40,11 @@ Vite forwards only the exact pathnames above, optionally followed by a query str
 Admin and health routes strip `X-Prisma-Session-Capability`; administrator authority uses only the
 backend cookie and CSRF contract. Cookies, `Set-Cookie`, `Origin`, CSRF, response status, and
 `Cache-Control: no-store` otherwise pass through the development proxy unchanged.
+
+The Channel A credential route only writes or deletes a secret in the protected credential store. A
+`configured: true` metadata value means the store holds a Channel A credential; it does not mean the
+Channel A bot is running, verified, paired, or connected. Channel A runtime status, apply, pairing,
+and session routes are not part of this proxy yet.
 
 If auth status reports `configured: false`, provision the single administrator through the offline
 runtime procedure in `services/prisma-runtime/README.md` (`provision-admin`). The browser does not

@@ -89,6 +89,36 @@ function healthEnvelope(): Record<string, unknown> {
     };
 }
 
+async function createClientWithDeferredChannelAWrite(method: 'PUT' | 'DELETE') {
+    let releaseWrite!: () => void;
+    const pendingWrite = new Promise<Response>((resolve) => {
+        releaseWrite = () => resolve(method === 'PUT'
+            ? jsonResponse({ ok: true, provider: 'telegram_channel_a', configured: true })
+            : new Response(null, { status: 204 }));
+    });
+    const fetcher = vi.fn<typeof fetch>((path, init) => {
+        if (path === '/api/prisma/admin/auth/session') {
+            return Promise.resolve(jsonResponse({
+                ok: true,
+                administrator: { username: 'admin' },
+                csrfToken: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+                absoluteExpiresAt: 2_000_000_000,
+            }));
+        }
+        if (path === '/api/prisma/admin/credentials' && (init?.method ?? 'GET') === 'GET') {
+            return Promise.resolve(jsonResponse({ ok: true, providers: metadata }));
+        }
+        if (path === '/api/prisma/health') return Promise.resolve(jsonResponse(healthEnvelope()));
+        if (path === '/api/prisma/admin/credentials/telegram_channel_a' && init?.method === method) {
+            return pendingWrite;
+        }
+        throw new Error(`Unexpected request: ${String(path)} ${String(init?.method)}`);
+    });
+    const client = new AdminAuthClient(fetcher);
+    await client.session();
+    return { client, releaseWrite };
+}
+
 async function createClientWithDeferredRefresh() {
     let metadataRequests = 0;
     let releaseRefresh!: (response: Response) => void;
@@ -153,15 +183,19 @@ describe('VoiceCredentialSettings', () => {
         expect(client.deleteCredential).not.toHaveBeenCalled();
     });
 
-    it('clears secret inputs when hidden or when administrator authority is revoked', async () => {
+    it('clears every provider secret input when hidden or when administrator authority is revoked', async () => {
         const user = userEvent.setup();
         const { rerender, client, controller } = renderSettings();
         const input = await screen.findByLabelText('Credencial Gemini');
         await user.type(input, 'synthetic-secret');
+        await user.type(screen.getByLabelText('Credencial Telegram'), 'synthetic-telegram-secret');
+        await user.type(screen.getByLabelText('Credencial Telegram (Canal A)'), 'synthetic-channel-a-secret');
 
         rerender(<VoiceCredentialSettings active={false} client={client} controller={controller} />);
         rerender(<VoiceCredentialSettings active client={client} controller={controller} />);
         expect(await screen.findByLabelText('Credencial Gemini')).toHaveValue('');
+        expect(screen.getByLabelText('Credencial Telegram')).toHaveValue('');
+        expect(screen.getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
 
         await user.type(screen.getByLabelText('Credencial Gemini'), 'another-secret');
         useAuthStore.setState((state) => ({ session: { ...state.session, user: null, isAuthenticated: false } }));
@@ -207,8 +241,11 @@ describe('VoiceCredentialSettings', () => {
 
         expect(await screen.findByRole('alert')).toHaveTextContent(/almacén protegido no está disponible/i);
         expect(screen.queryByText('CREDENTIAL_STORAGE_UNAVAILABLE')).not.toBeInTheDocument();
-        expect(screen.getAllByRole('button', { name: 'Guardar credencial' })).toSatisfy((buttons: HTMLButtonElement[]) =>
+        const saveButtons = screen.getAllByRole('button', { name: 'Guardar credencial' });
+        expect(saveButtons).toHaveLength(3);
+        expect(saveButtons).toSatisfy((buttons: HTMLButtonElement[]) =>
             buttons.every((button) => button.disabled));
+        expect(screen.getAllByText('Estado no disponible')).toHaveLength(3);
     });
 
     it('applies Telegram only through its explicit action', async () => {
@@ -240,14 +277,136 @@ describe('VoiceCredentialSettings', () => {
         expect(screen.queryByText('raw-provider-detail')).not.toBeInTheDocument();
     });
 
-    it('keeps channel A metadata loaded without exposing a premature credential card', async () => {
+    it('renders the channel A card as a metadata-only credential field without runtime claims', async () => {
         renderSettings();
-        await waitFor(() => expect(screen.getByRole('group', { name: 'Gemini' })).toBeInTheDocument());
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const telegram = screen.getByRole('group', { name: 'Telegram' });
 
-        expect(screen.getAllByRole('group')).toHaveLength(2);
-        expect(screen.queryByRole('group', { name: /channel[ _-]?a/i })).not.toBeInTheDocument();
-        expect(screen.queryByLabelText(/channel[ _-]?a/i)).not.toBeInTheDocument();
-        expect(screen.getAllByRole('button', { name: 'Guardar credencial' })).toHaveLength(2);
+        expect(screen.getAllByRole('group')).toHaveLength(3);
+        expect(channelA).not.toBe(telegram);
+        expect(await within(channelA).findByText('Sin configurar')).toBeInTheDocument();
+        expect(within(channelA).getByText(
+            'Bot dedicado para consultas remotas de la HMI. Guardar la credencial no inicia ni verifica el bot.',
+        )).toBeInTheDocument();
+        const input = within(channelA).getByLabelText('Credencial Telegram (Canal A)');
+        expect(input).toHaveAttribute('type', 'password');
+        expect(input).toHaveAttribute('autocomplete', 'new-password');
+        expect(within(channelA).queryByRole('button', { name: 'Aplicar cambio' })).not.toBeInTheDocument();
+        expect(within(channelA).queryByText(/Ejecución|verificad|Habilitad|Generación|Origen/)).not.toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: 'Guardar credencial' })).toHaveLength(3);
+        expect(screen.getAllByRole('button', { name: 'Eliminar credencial' })).toHaveLength(3);
+        expect(screen.getAllByRole('button', { name: 'Aplicar cambio' })).toHaveLength(1);
+    });
+
+    it('saves and deletes the channel A credential on its exact provider without applying or cross-clearing', async () => {
+        const user = userEvent.setup();
+        const saveCredential = vi.fn(async () => ({ provider: 'telegram_channel_a' as const, configured: true }));
+        const deleteCredential = vi.fn(async () => undefined);
+        const { client } = renderSettings({ saveCredential, deleteCredential });
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const gemini = screen.getByRole('group', { name: 'Gemini' });
+        const geminiInput = within(gemini).getByLabelText('Credencial Gemini');
+        const telegramInput = within(telegram).getByLabelText('Credencial Telegram');
+        const channelAInput = within(channelA).getByLabelText('Credencial Telegram (Canal A)');
+        await waitFor(() => expect(channelAInput).toBeEnabled());
+        await user.type(geminiInput, 'gemini-draft');
+        await user.type(telegramInput, 'telegram-draft');
+        await user.type(channelAInput, 'channel-a-secret');
+
+        await user.click(within(channelA).getByRole('button', { name: 'Guardar credencial' }));
+
+        await waitFor(() => expect(saveCredential).toHaveBeenCalledWith(
+            'telegram_channel_a', 'channel-a-secret', expect.any(AbortSignal),
+        ));
+        expect(saveCredential).toHaveBeenCalledTimes(1);
+        expect(client.applyTelegram).not.toHaveBeenCalled();
+        expect(await screen.findByText('Credencial guardada. No se aplicaron cambios al proveedor.')).toBeInTheDocument();
+        expect(channelAInput).toHaveValue('');
+        expect(geminiInput).toHaveValue('gemini-draft');
+        expect(telegramInput).toHaveValue('telegram-draft');
+
+        await user.click(within(channelA).getByRole('button', { name: 'Eliminar credencial' }));
+        const dialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
+        expect(within(dialog).getByText(/Telegram \(Canal A\)/)).toBeInTheDocument();
+        expect(deleteCredential).not.toHaveBeenCalled();
+        await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
+
+        await waitFor(() => expect(deleteCredential).toHaveBeenCalledWith('telegram_channel_a', expect.any(AbortSignal)));
+        expect(client.applyTelegram).not.toHaveBeenCalled();
+        expect(await screen.findByText('Credencial eliminada.')).toBeInTheDocument();
+        expect(geminiInput).toHaveValue('gemini-draft');
+        expect(telegramInput).toHaveValue('telegram-draft');
+    });
+
+    it('never persists channel A credential bytes in browser storage or the metadata cache', async () => {
+        const user = userEvent.setup();
+        const secret = 'synthetic-channel-a-canary';
+        const { queryClient } = renderSettings();
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const input = within(channelA).getByLabelText('Credencial Telegram (Canal A)');
+        await waitFor(() => expect(input).toBeEnabled());
+        await user.type(input, secret);
+
+        await user.click(within(channelA).getByRole('button', { name: 'Guardar credencial' }));
+        await waitFor(() => expect(input).toHaveValue(''));
+
+        expect(JSON.stringify(localStorage)).not.toContain(secret);
+        expect(JSON.stringify(sessionStorage)).not.toContain(secret);
+        expect(JSON.stringify(queryClient.getQueryCache().getAll().map((query) => query.state.data))).not.toContain(secret);
+        expect(JSON.stringify(queryClient.getMutationCache().getAll())).not.toContain(secret);
+        expect(JSON.stringify(useAuthStore.getState())).not.toContain(secret);
+    });
+
+    it('does not let a late channel A save clear a newer draft or other provider drafts after reactivation', async () => {
+        const user = userEvent.setup();
+        const controlled = await createClientWithDeferredChannelAWrite('PUT');
+        const { rerender, controller } = renderSettingsWithClient(controlled.client);
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const input = within(channelA).getByLabelText('Credencial Telegram (Canal A)');
+        await waitFor(() => expect(input).toBeEnabled());
+        await user.type(input, 'old-channel-a-secret');
+        await user.click(within(channelA).getByRole('button', { name: 'Guardar credencial' }));
+
+        rerender(<VoiceCredentialSettings active={false} client={controlled.client} controller={controller} />);
+        rerender(<VoiceCredentialSettings active client={controlled.client} controller={controller} />);
+        const reopened = await screen.findByLabelText('Credencial Telegram (Canal A)');
+        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegramInput = within(telegram).getByLabelText('Credencial Telegram');
+        await user.type(reopened, 'newer-channel-a-draft');
+        await user.type(telegramInput, 'telegram-draft');
+        await user.type(screen.getByLabelText('Credencial Gemini'), 'gemini-draft');
+        await act(async () => { controlled.releaseWrite(); });
+
+        await waitFor(() => expect(reopened).toHaveValue('newer-channel-a-draft'));
+        expect(telegramInput).toHaveValue('telegram-draft');
+        expect(screen.getByLabelText('Credencial Gemini')).toHaveValue('gemini-draft');
+        expect(screen.queryByText('Credencial guardada. No se aplicaron cambios al proveedor.')).not.toBeInTheDocument();
+    });
+
+    it('does not let a stale channel A deletion close a fresh confirmation dialog or clear other drafts', async () => {
+        const user = userEvent.setup();
+        const controlled = await createClientWithDeferredChannelAWrite('DELETE');
+        const { rerender, controller } = renderSettingsWithClient(controlled.client);
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        await user.click(within(channelA).getByRole('button', { name: 'Eliminar credencial' }));
+        const channelADialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
+        expect(within(channelADialog).getByText(/Telegram \(Canal A\)/)).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
+
+        rerender(<VoiceCredentialSettings active={false} client={controlled.client} controller={controller} />);
+        rerender(<VoiceCredentialSettings active client={controlled.client} controller={controller} />);
+        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegramInput = within(telegram).getByLabelText('Credencial Telegram');
+        await user.type(telegramInput, 'telegram-draft');
+        await user.click(within(screen.getByRole('group', { name: 'Gemini' })).getByRole('button', { name: 'Eliminar credencial' }));
+        const freshDialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
+        expect(within(freshDialog).getByText(/Gemini/)).toBeInTheDocument();
+        await act(async () => { controlled.releaseWrite(); });
+
+        await waitFor(() => expect(screen.getByRole('dialog', { name: 'Eliminar credencial' })).toBeInTheDocument());
+        expect(screen.queryByText('Credencial eliminada.')).not.toBeInTheDocument();
+        expect(telegramInput).toHaveValue('telegram-draft');
     });
 
     it('renders loading as unknown instead of negative provider facts', async () => {
@@ -257,7 +416,7 @@ describe('VoiceCredentialSettings', () => {
             telegramHealth: vi.fn(() => new Promise<typeof health>(() => undefined)),
         });
 
-        expect(screen.getAllByText('Consultando estado')).toHaveLength(2);
+        expect(screen.getAllByText('Consultando estado')).toHaveLength(3);
         expect(screen.queryByText('Sin configurar')).not.toBeInTheDocument();
         expect(screen.queryByText('Ejecución detenida')).not.toBeInTheDocument();
         expect(screen.queryByText('Deshabilitada')).not.toBeInTheDocument();
@@ -271,7 +430,7 @@ describe('VoiceCredentialSettings', () => {
         renderSettingsWithClient(new AdminAuthClient(fetcher));
 
         expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo completar la operación con el servicio local.');
-        expect(screen.getAllByText('Estado no disponible')).toHaveLength(2);
+        expect(screen.getAllByText('Estado no disponible')).toHaveLength(3);
         expect(screen.queryByText('Sin configurar')).not.toBeInTheDocument();
         expect(screen.queryByText('Ejecución detenida')).not.toBeInTheDocument();
         expect(screen.queryByText('synthetic-secret-canary')).not.toBeInTheDocument();
