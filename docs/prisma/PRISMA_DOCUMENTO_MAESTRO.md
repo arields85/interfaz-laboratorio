@@ -2,21 +2,21 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.11
+> **Versión documental:** 2.0.12
 >
 > **Fecha:** 2026-09-20
 >
-> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`). Se suma una aceptación **acotada** del Canal A sobre un widget simulado (contexto → respuesta → voz) y el hallazgo de que el `/status` de Telegram lee un archivo de instalación obsoleto. Despliegue productivo, aceptación integral, máquinas reales y el trabajo posterior del asistente siguen pendientes.
+> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`). Se suma una aceptación **acotada** del Canal A sobre un widget simulado (contexto → respuesta → voz) y el hallazgo de que el `/status` de Telegram lee un archivo de instalación obsoleto. En esta versión se acuerda, **sin implementarlo**, el alcance del **acceso remoto del Canal A** (bot dedicado, emparejamiento por QR sin entrada local, reloj humano de inactividad y un único destino activo). Despliegue productivo, aceptación integral, máquinas reales y el trabajo posterior del asistente siguen pendientes.
 >
-> **Alcance de esta versión:** cierre de una sesión de validación acotada del Canal A y de
-> conciliación de implementación, no del recorrido local completo. Se registran la aceptación
-> acotada `contexto → respuesta → voz` sobre un widget simulado (voz reportada por el usuario, no
-> escuchada por el agente), la reconciliación de que el snapshot HMI vive en un registro en memoria
-> por documento mientras Telegram lee el archivo de instalación, y la decisión del usuario de
-> **aplazar el Canal B** y priorizar la validación del Canal A existente antes de planificar sus
-> mejoras. El próximo paso vigente (§11.1) pasa a **planificar** las mejoras completas del Canal A,
-> no a implementarlas. `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados. Cambio
-> exclusivamente documental: no ejecuta servicios, pruebas ni proveedores.
+> **Alcance de esta versión:** cierre de una sesión de **planificación** del acceso remoto del
+> Canal A, no de implementación. Se registran el alcance de producto acordado con el usuario (bot A
+> separado, emparejamiento por QR sin entrada en la HMI, inactividad humana, asociación exclusiva
+> temporal y primer incremento de consulta textual) y el camino exacto de reanudación por ODD. La
+> aceptación acotada 2.0.11 del Canal A se conserva como evidencia histórica válida. El Canal B sigue
+> aplazado y, en este alcance, no puede afectar la HMI. El próximo paso vigente (§11.1) es
+> **implementar por incrementos** el Canal A remoto en la próxima sesión, con ODD y no con SDD.
+> `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados. Cambio exclusivamente documental: no
+> ejecuta servicios, pruebas, proveedores ni red, y no afirma compilación ni suites aprobadas.
 
 ## 1. Objetivo y estado general
 
@@ -485,6 +485,21 @@ Reglas obligatorias:
 - la respuesta conserva alcance, timestamp, frescura y procedencia;
 - no existe ningún comando industrial en el mismo canal.
 
+**Entrada remota del Canal A (acuerdo 2.0.12, pendiente de implementación).** El Canal A admite
+además una entrada desde el teléfono del observador físico, sin mouse, teclado, touch ni clic en la
+HMI. La HMI muestra un QR cuando está libre y ese QR abre un **bot dedicado del Canal A** —nunca un
+modo ni un comando dentro del bot del Canal B— con un token opaco de un solo uso y vida corta. La
+activación del bot en Telegram es un paso propio del cliente (el usuario puede tener que tocar
+«Iniciar»/`Start`) y es independiente del emparejamiento de la aplicación: no se exige `/start`
+manual ni un comando escrito. La confirmación del destino ocurre **en el teléfono, nunca en la HMI**,
+y tocar `Start` por sí solo no prueba presencia física ni aprobación del usuario. La asociación es
+exclusiva y temporal: un controlador por sesión HMI, una HMI activa por teléfono, sin toma de
+control ni cambio automático de destino, y desvincular libera la HMI para el siguiente observador.
+Un reloj humano de inactividad de 10 minutos libera el vínculo y ningún snapshot ni sondeo de
+eventos lo renueva. El primer incremento responde por texto sobre el snapshot visible actual con el
+parser determinístico existente, y presenta la misma respuesta como texto y audio en la HMI. Esta
+entrada es de solo lectura y nunca habilita comandos industriales.
+
 ### 6.3 Canal B — Telegram personal autónomo
 
 El Canal B recibe texto y responde texto. Debe funcionar sin navegador, snapshot o
@@ -502,6 +517,12 @@ Reglas obligatorias:
 
 Esta definición reemplaza la interpretación provisional anterior de “Telegram remoto
 vinculado al navegador activo”.
+
+**Aclaración 2.0.12.** El Canal B conserva el bot existente, su limitación actual de un único chat
+emparejado y su fuente de archivo obsoleta: este acuerdo **no** habilita ampliar su admisión ni
+integrar su código. El bot dedicado del Canal A es un proveedor y una entrada separados; nunca es un
+modo, comando o bandera dentro del bot del Canal B, y el Canal B sigue sin poder afectar el
+contexto, la voz ni la navegación de la HMI.
 
 ### 6.4 Datos reales y presentación
 
@@ -896,9 +917,119 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (2026-09-19, conciliado 2026-09-20; checkpoint vigente 2.0.11)
+### 11.1 Próximo paso vigente (checkpoint vigente 2.0.12, 2026-09-20; bloques anteriores históricos)
 
-**Checkpoint vigente 2.0.11 (2026-09-20).** Sesión de validación acotada del Canal A y de
+**Checkpoint vigente 2.0.12 (2026-09-20).** Sesión de **planificación documental** del acceso remoto
+del Canal A. Este cierre es **solo documental**: no ejecuta código, servicios, pruebas, proveedores,
+Telegram, Gemini ni instalaciones, y **no** afirma compilación ni suites aprobadas. El alcance se
+acordó con el usuario y la implementación queda diferida a la próxima sesión. Durante la
+planificación sí se realizó **una lectura pública** de la documentación oficial de Telegram en
+<https://core.telegram.org/bots/features#deep-linking> para confirmar el comportamiento de los deep
+links y de `Start`; eso **no** fue uso del proveedor, de credenciales ni de red operativa, y el
+parche de cierre en sí no hizo ninguna llamada de red. La aceptación acotada 2.0.11 registrada más
+abajo se conserva como evidencia histórica válida.
+
+Alcance de producto acordado (autoriza planificar; no autoriza escrituras de fuente por sí solo: la
+implementación empieza solo cuando el usuario pide avanzar):
+
+1. **Canal B.** Sigue siendo el bot existente de Telegram, autónomo y sin HMI abierta para usuarios
+   admitidos. Se preservan su limitación actual de **un único chat emparejado** y su `JsonFileStore`
+   obsoleto; este incremento no corrige, integra ni amplía la admisión del Canal B.
+2. **Canal A remoto.** Usa un **bot y una entrada separados** (bot A dedicado), nunca un modo o
+   comando dentro del bot del Canal B. El observador físico está frente a la HMI y su **único
+   dispositivo de entrada es el teléfono**: no hay mouse, teclado, touch ni clic de confirmación en
+   la HMI. El QR se muestra automáticamente cuando la HMI está libre; no hace falta un botón local
+   «Vincular».
+3. **Emparejamiento.** El QR es de un solo uso y vida corta (60 s) y **rota automáticamente** mientras
+   la HMI está libre. Abre un enlace profundo del bot A con un token opaco —nunca la capacidad
+   anónima de sesión HMI (bearer de sesión), ni la credencial de administrador, ni el secreto del
+   bot—. El QR transporta el código de emparejamiento y no exige escribir `/start`; la activación del
+   bot en Telegram es un paso propio del cliente (puede requerir tocar «Iniciar»/`Start`) y no es el
+   emparejamiento de la aplicación. La confirmación del destino ocurre **en el teléfono, nunca en la
+   HMI**, y tocar `Start` por sí solo no prueba presencia física ni aprobación. La posesión del QR
+   **no** prueba presencia física: una foto o su reenvío son un riesgo conocido que debe contemplarse
+   en el diseño.
+4. **Asociación exclusiva temporal.** Un controlador por sesión HMI y una HMI activa por teléfono, con
+   muchos pares independientes en paralelo. Sin toma de control ni cambio automático de destino:
+   cambiar de objetivo exige desvincular y escanear de nuevo. El QR se oculta mientras la HMI está
+   ocupada y se muestra el estado vinculado. «Desvincular» desde el teléfono libera la HMI. Recarga,
+   reinicio o vencimiento exigen re-vincular: no hay identidad de dispositivo persistente.
+5. **Reloj humano de inactividad.** 10 minutos de inactividad humana liberan el vínculo. Los
+   snapshots y el sondeo de eventos **no** renuevan el reloj. Aviso previo en Telegram con «Seguir
+   conectado» aceptado explícitamente por el usuario, con anticipación configurable (no fija). El
+   reloj de 60 s del QR y el de 10 min son independientes; la desvinculación manual sigue disponible.
+6. **Primer incremento.** Consulta de texto desde el teléfono vinculado sobre el snapshot visible
+   actual, con el parser determinístico existente. La HMI renderiza la respuesta como **texto** más el
+   audio existente, y el teléfono recibe el mismo texto. Sin audio de respuesta por Telegram y sin
+   revivir el camino latente basado en destinatario. El render de texto es UI nueva: hoy solo hay
+   audio y log. Se conservan el audio acotado existente y la separación del Canal B.
+7. **Incrementos posteriores.** Nota de voz/STT, comprensión de lenguaje natural, datos semánticos
+   ampliados fuera de pantalla o históricos y navegación declarativa de vistas publicadas, siempre
+   acotada a la misma HMI. Nunca comandos industriales. La distinción entre el **Canal A remoto vinculado** y el
+   **Canal B autónomo** no difiere la navegación legítima posterior del Canal A, que es una acción de
+   solo UI.
+8. **Proveedores.** No se seleccionan proveedores de STT ni de LLM más allá del TTS existente; las
+   notas de voz no se implementan ahora. El TTS puede generar gasto de Gemini o fallback con más de
+   una llamada por consulta. No hay permiso nuevo de pago y las pruebas en vivo requieren
+   autorización explícita; los checks de desarrollo son offline o simulados.
+
+Mapa técnico y cautelas para la próxima sesión:
+
+- El token del bot A debe reutilizar el almacén protegido y la sesión administrativa única existente,
+  **no** un segundo login. La forma nueva de proveedor atraviesa el almacén
+  [`credential_store.py`](../../services/prisma-runtime/src/prisma_runtime/credential_store.py)
+  (`ALLOWED_PROVIDERS`), [`admin_http.py`](../../services/prisma-runtime/src/prisma_runtime/admin_http.py),
+  el parser exacto de [`adminCredential.types.ts`](../../hmi-app/src/domain/adminCredential.types.ts)
+  y la UI de administración.
+- El Canal A necesita resolver, ciclo de vida y estado **independientes**. Un registro de vínculos
+  separado puede evitar una migración de esquema del Canal B: no afirmar un aumento de esquema
+  forzado.
+- `HmiSessionRegistry` y el `VoiceEventStore` por propietario son reutilizables, pero el Canal A
+  necesita una búsqueda de propietario interna autorizada sin entregar esa capacidad a Telegram.
+- El `pagehide` de [`main.tsx`](../../hmi-app/src/main.tsx) →
+  `prismaSessionClient.reset` ([`prismaSessionClient.ts`](../../hmi-app/src/services/prismaSessionClient.ts))
+  con DELETE keepalive es **best effort**; `on_remove` por sí solo no garantiza un cierre puntual ante
+  pérdida de red. Se requieren presencia
+  y frescura de contexto acotadas: rechazar contexto no disponible o vencido, sin fallback global,
+  obsoleto ni de otra HMI.
+- El reloj de inactividad humana es nuevo y separado de la actividad técnica de sesión. La generación
+  y correlación del vínculo deben proteger resultados y audio tardíos tras desvincular y re-vincular
+  (el mismo propietario puede sobrevivir). Los offsets de Telegram, por sí solos, no garantizan
+  exactamente-una-vez.
+- El primer incremento es una funcionalidad sustancial de varias unidades, **no** un parche pequeño.
+  Las estimaciones son provisionales; no canonizar pronósticos de líneas de código.
+
+Camino rápido para la próxima sesión:
+
+1. `mem_context` → búsqueda de memoria acotada al proyecto y recuperación de registros completos →
+   leer este checkpoint vigente del maestro → `git status`.
+2. Reanudar con **ODD**, no con SDD: no repetir el cuestionario de producto, ni la prueba pagada del
+   65 %, ni reabrir el diagnóstico de credenciales de Telegram.
+3. Una petición vaga de «seguir» **no** autoriza por sí sola escrituras de fuente: primero se
+   recupera el checkpoint y se prepara la tarea ODD; la implementación comienza cuando el usuario pide
+   explícitamente avanzar con ella, sin repetir el cuestionario de producto. Al implementar: derivar
+   tareas y estrategia de entrega acotadas, crear `odd/tasks/<feature>.md` y su espejo completo en
+   Engram **antes** de la primera escritura de fuente, y delegar un escritor por vez. TDD estricto
+   para lógica y bugs según `AGENTS.md` y la configuración; `npm run test` en `hmi-app` para frontend
+   y el runner exacto `unittest` del backend, a revalidar. No hace falta `sdd-init`: el usuario
+   rechazó SDD.
+
+Localizadores de memoria para reanudar:
+`decision/prisma-channel-a-channel-separation`, `decision/prisma-channel-a-inputless-pairing`,
+`decision/prisma-channel-a-link-inactivity`, `decision/prisma-channel-a-one-active-target`,
+`architecture/prisma-channel-a-separate-bot-map` y `decision/prisma-channel-a-workflow`. El
+checkpoint `checkpoint/prisma-channel-a-remote-odd` lo crea el padre.
+
+Cierre de esta sesión: **un solo commit local de documentación**, sin push ni PR, sobre
+`feat/prisma-telegram-credentials`; el único archivo autorizado es este documento. Base observada al
+planificar: `39c7712` (`chore(harness): ignore local Pi runtime state`), que solo agrega líneas de
+`.gitignore`. Este parche de cierre no ejecuta red, servicios ni proveedores. El hash del commit de
+este cierre se registra en Engram **después** de confirmarlo; su
+localizador es `git log -1 --format=%H -- docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` y esta versión no
+incrusta un SHA autorreferencial ni afirma que el commit ya exista.
+
+**Checkpoint 2.0.11 (histórico, se conserva con su fecha; sustituido para próximas acciones por el
+checkpoint 2.0.12).** Sesión de validación acotada del Canal A y de
 conciliación de implementación. Este cierre es exclusivamente documental: no hay cambios de código
 fuente. La sesión de validación sí se ejecutó: dos GET pasivos de salud y una prueba de voz manual
 autorizada por el usuario; no se reejecutaron suites automatizadas ni builds.
@@ -952,9 +1083,10 @@ Alcance de la aceptación — lo que sí cierra y lo que no:
   Las cifras previas de **285 backend / 38 frontend** pertenecen al commit anterior y no se
   volvieron a correr aquí.
 
-Próximo paso vigente (2.0.11): **planificar, no implementar**.
+Próximo paso 2.0.11 (histórico, sustituido para próximas acciones por el checkpoint 2.0.12):
+**planificar, no implementar**.
 
-1. Leer este §11.1 vigente 2.0.11 y los topics de Engram
+1. Leer el bloque 2.0.11 de este §11.1 y los topics de Engram
    `checkpoint/prisma-channel-a-acceptance`, `decision/prisma-channel-a-first` y
    `architecture/prisma-shared-data-semantics`; inspeccionar Git.
 2. Planificar las mejoras completas del Canal A: mapear lo entregado y lo faltante, y acordar un
@@ -966,17 +1098,22 @@ Próximo paso vigente (2.0.11): **planificar, no implementar**.
 
 No hace falta repetir el `/status` ni la prueba pagada para reanudar.
 
-Cierre de esta sesión: **un solo commit local de documentación**, sin push ni PR, sobre
-`feat/prisma-telegram-credentials`. Base previa al cierre: `6f7ae5f` (único archivo sucio:
-`.gitignore`, propiedad del usuario y excluido). El único archivo autorizado en este cierre es
-este documento. El hash observado del commit se registra en Engram **después** de confirmarlo, y
-su localizador en el repositorio es
+Cierre de esa sesión: **un solo commit local de documentación**, sin push ni PR, sobre
+`feat/prisma-telegram-credentials`. Base previa al cierre 2.0.11: `6f7ae5f`. El único archivo
+autorizado en ese cierre fue este documento. El hash observado del commit se registra en Engram
+**después** de confirmarlo, y su localizador en el repositorio es
 `git log -1 --format=%H -- docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md`; esta versión documental no
 incrusta un SHA autorreferencial ni afirma que el commit ya exista.
 
-**Nota de vigencia 2.0.11:** los bloques 2.0.10 rotulados «histórico» que aparecen más abajo
-—próximo paso 2.0.10, límites del registro y cierre acordado— se conservan con su fecha, pero
-quedan **sustituidos para próximas acciones** por el checkpoint 2.0.11 de arriba.
+**Corrección 2.0.12:** la atribución previa de `.gitignore` «propiedad del usuario y excluido» se
+conserva solo como histórica y queda corregida. Esas líneas de `.gitignore` las agrega
+**automáticamente** el skill-registry instalado de gentle-pi; no son una edición del usuario. El
+commit `39c7712` (`chore(harness): ignore local Pi runtime state`) las registra.
+
+**Nota de vigencia 2.0.12:** el bloque 2.0.11 de arriba y los bloques 2.0.10 rotulados «histórico»
+que aparecen más abajo —próximo paso, límites del registro y cierre acordado— se conservan con su
+fecha como evidencia histórica válida, pero quedan **sustituidos para próximas acciones** por el
+checkpoint 2.0.12, ubicado al inicio de este §11.1.
 
 **Registro 2.0.9 (histórico, se conserva con su fecha):** comprobar el funcionamiento local de punta
 a punta, sin borrar la instalación vieja ni regenerar claves. Este registro solo documenta el próximo
@@ -1080,6 +1217,39 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.12 — 2026-09-20
+
+- Checkpoint de planificación del **acceso remoto del Canal A**
+  (`checkpoint/prisma-channel-a-remote-odd`), con alcance de producto acordado y sin implementación:
+  bot A dedicado y separado del bot del Canal B, emparejamiento por QR de un solo uso y 60 s sin
+  entrada ni confirmación en la HMI (la activación del bot en Telegram puede requerir tocar
+  «Iniciar»/`Start` y es distinta de la confirmación del vínculo, que ocurre en el teléfono, nunca en
+  la HMI), token opaco que nunca expone ni la capacidad anónima de sesión HMI (bearer de sesión) ni
+  la credencial administrativa ni el secreto del bot, asociación exclusiva temporal de un controlador
+  por sesión HMI, reloj humano de inactividad de 10 min que no renueva ningún snapshot ni sondeo, y
+  primer incremento de consulta textual sobre el snapshot visible con la respuesta como **texto y el
+  audio existente en la HMI**, y el mismo texto en el teléfono.
+- Canal B sin cambios: conserva el bot existente, su limitación de un único chat emparejado, su
+  `JsonFileStore` obsoleto y su imposibilidad de afectar la HMI. El bot del Canal A no es un modo ni
+  un comando dentro del bot del Canal B; no se amplía la admisión ni se integra código del Canal B.
+- Mapa técnico y cautelas registrados para la próxima sesión: reutilizar el almacén protegido y la
+  sesión administrativa única, atravesar `ALLOWED_PROVIDERS`/`admin_http`/parser de credenciales/UI
+  admin con una forma de proveedor nueva, resolver y estado independientes, registro de vínculos
+  separado sin afirmar migración de esquema, búsqueda de propietario interna autorizada, presencia y
+  frescura de contexto acotadas sin fallback global, y correlación del vínculo ante desvincular y
+  re-vincular.
+- Próximo paso vigente actualizado (§11.1): reanudar por **ODD** —no SDD—, sin repetir el
+  cuestionario de producto, ni la prueba pagada del 65 %, ni reabrir el diagnóstico de credenciales;
+  crear `odd/tasks/<feature>.md` y su espejo en Engram antes de la primera escritura de fuente.
+  `PW-002`, `PW-003` y `PW-004` siguen abiertos.
+- Cierre exclusivamente documental, con implementación diferida a la próxima sesión: no ejecuta
+  servicios, pruebas, proveedores, Telegram ni Gemini, y no afirma compilación ni suites aprobadas. La
+  planificación sí incluyó **una lectura pública** de la documentación oficial de Telegram
+  (deep links/`Start`), sin uso de proveedor ni red operativa. Cierre: un solo commit local de
+  documentación, sin push ni PR; base
+  observada `39c7712`. Se corrige como histórica la atribución previa de `.gitignore` al usuario: esas
+  líneas las agrega automáticamente el skill-registry de gentle-pi.
 
 ### 2.0.11 — 2026-09-20
 
