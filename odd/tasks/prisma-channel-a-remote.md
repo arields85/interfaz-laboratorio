@@ -1,219 +1,271 @@
 # Prisma Channel A remote — ODD tasks
 
-## Status and next action
+## Current state and next action
 
-RESUMED from documentary checkpoint `c4116873284e19bf5d1d22fe6109042cc136e16f`, branch `feat/prisma-telegram-credentials`; parent observed clean Git before this update. RCA-1–4 are accepted OFFLINE and committed; RCA-5 remains in progress; RCA-5a standalone transport and RCA-5b cooperative exclusion are accepted OFFLINE after independent verification and parent spotchecks. RCA-6–8 have not started. Full remote Channel A remains unwired.
+**RCA-1–4 and RCA-5a–5c are accepted OFFLINE. Continue the remaining RCA-5 units; pause and notify BEFORE starting RCA-6.** Do not close the session at RCA-5c.
 
-RCA-5a committed locally as `6301e9797081d2fbed84e37271f4ac1f9114eb7e`; parent observed clean Git. RCA-5b is accepted OFFLINE; next is its authorized local work-unit commit, then mapping/freezing the remaining RCA-5 units. Record the actual commit in the checkpoint after success. Known-visible-view invalidation and remaining A lifecycle/HTTP integration are still pending. Do not jump to RCA-6.
+- Branch: `feat/prisma-telegram-credentials`.
+- Previous committed boundary: `7fb7edc23715e07062778dc5913a3eb1fbdf015c` — cooperative bot identity exclusion. RCA-5c's actual commit hash/count is recorded afterward in the progress checkpoint, not self-inserted into its commit.
+- RCA-5c accepted by parent after independent516 focused/825 backend PASS, parent95 lifecycle PASS, source/scope/hash/whitespace checks. No source writer active; next freeze a coherent remaining RCA-5 unit.
+- Full remote A remains unwired. A credentials, domain, transport and B's shared-reservation integration do not establish operational A/B exclusion or full-product acceptance.
 
-Latest session boundary (supersedes earlier stops): finish and verify RCA-5b, then CONTINUE the remaining RCA-5 units without pausing or closing the session. PAUSE and notify BEFORE starting RCA-6. Prior local work-unit commit authorization remains; no push/PR or new live/runtime permissions. If blocked, report honest partial status, never claim completion. Freeze each remaining RCA-5 writer scope separately; acceptance alone does not authorize additional source edits.
+### Authority and workflow
 
-Recovery mirror: `odd/prisma-channel-a-remote/tasks` (full document plus repository path). Parent owns this tracker, mirror, acceptance and local commits. ODD, not SDD; one delegated source writer at a time. Route is delegated because implementation spans source/tests and preparation requires multiple files.
+User authorized ODD implementation and local work-unit commits. The latest instruction supersedes prior RCA-5b pause/closure requests: finish all RCA-5, then pause BEFORE RCA-6. No push, PR, branch creation, paid/live Telegram/Gemini tests, deployment or runtime restart is authorized.
 
-### Authority and recent decisions
+User approved distinct A/B bots operating concurrently: the incumbent observed-identity reservation wins and a conflicting activation is rejected. No automatic takeover or permanent cross-channel stop. Development-only channel stopping is permitted if necessary, but does not authorize credential deletion, state reset, restart or provider calls. No operational stop has occurred.
 
-- User previously authorized implementation with ODD, maintained local QR dependency/install and local work-unit commits after verification. No push, PR creation, paid/live Telegram/Gemini tests or runtime restarts authorized.
-- User now authorized coordinated A/B validation: distinct bots run simultaneously; existing reservation wins; reject a second activation of the same observed bot identity. No bot sharing, automatic takeover or stopping the other channel in permanent product behavior.
-- User separately permits stopping channels ONLY during development if necessary; states neither is currently used (not independently checked). This is not authorization to delete credentials, reset state, restart services or make provider calls. No stop has been executed; offline tests remain sufficient for the current unit.
-- Source of product intent: `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` v2.0.12 §11.1 plus subsequent accepted decisions. PW-002/PW-003/PW-004 remain active; read their full Engram detail before unrelated work.
+Parent owns this tracker, its full Engram mirror, acceptance and commits. Delegate source implementation/testing/verification; one writer at a time. Freeze each unit's exact paths, behavior, TDD and commands before launch. About 400 authored lines is advisory, not permission to omit tests, minify or split incoherently. Native assessment unavailable/unassessable means independent verification, never invented approval.
 
-### Historical recovery
+## Recovery and historical evidence
 
-This consolidation prevents the full Engram mirror from exceeding its observed approximately 50k readback limit; it is not a diff-budget reduction. Full earlier contracts, RED/correction histories and detailed acceptance evidence remain losslessly available at `c411687:odd/tasks/prisma-channel-a-remote.md`. Earlier full RCA-2/3 contracts are also at `f3ac2cb`, RCA-4 contracts at `713f7ae`. Preserve those references and never replace the full current mirror with a short worker summary. Last accepted source commit is `713f7ae1bd9fece599b0281c4a1e7adb105c1b86`. No historical suite count is fresh evidence.
+Full recovery mirror: `odd/prisma-channel-a-remote/tasks` (the complete current document plus repository path). Current progress/commit/task identity: `checkpoint/prisma-channel-a-implementation-progress`. User boundary: `decision/prisma-channel-a-session-boundary`.
 
-## Objective and invariants
+This consolidation keeps the mirror below its observed approximately 50k readback limit. It is not a diff-budget reduction. RCA-5c correction chronology through writer16/independent17 launch is preserved verbatim in verified Engram topic `evidence/prisma-rca5c-correction-chronology`; final completion/acceptance is below. Earlier lossless accepted contracts, failed rounds and command evidence remain in Git:
 
-A person viewing an inputless industrial HMI uses their phone to ask about that document's current visible snapshot. The HMI is strictly read-only toward the industrial process.
+| History | Canonical repository snapshot |
+|---|---|
+| RCA-1–4 and initial RCA-5 planning | `c411687:odd/tasks/prisma-channel-a-remote.md` |
+| RCA-5a full transport contract and correction history | `6301e97:odd/tasks/prisma-channel-a-remote.md` |
+| RCA-5b full registry/B/409 contract, containment incidents and correction history | `7fb7edc:odd/tasks/prisma-channel-a-remote.md` |
 
-- Dedicated protected bot A and independent lifecycle. Preserve B admission, conversations, JsonFileStore, offsets and nine-field admin wire status except explicitly authorized collision rejection. Same protected credential store/admin session; no second login or B/environment token fallback for A.
-- Automatic single-use opaque QR rotates every60s while free; never exposes HMI capability/admin/token secrets. Phone confirms destination; Telegram Start alone is not pairing. No HMI keyboard/click/touch required. Forwarded QR-photo risk remains a limitation, not proof of proximity.
-- One phone per HMI document and one HMI per phone, multiple independent pairs; no implicit transfer/takeover. Hide QR while linked; phone unlink. Reload, restart or expiry requires re-linking; no durable device identity.
-- Human inactivity600s. Technical polling never renews it. Warning default60s before expiry, configurable15–300s in existing admin and persisted runtime. Presence-loss cutoff30s; explicit close/revoke immediate. Freshness15s is a fail-closed server-receipt age limit, not delivery/visibility assurance.
-- Viewer publishes every5s nominal,4.5s timeout, single-flight skipped ticks; hidden/offline/navigation gaps unbounded. Voice poll1s renews presence only. Known-invalid prior view must be invalidated immediately, never reused until TTL; no new heartbeat interval approved.
-- Existing deterministic visible-snapshot parser; same answer text on phone/HMI plus existing HMI audio. No Telegram answer audio, STT, general NLU, history, offscreen/global fallback or requested navigation in this increment. No latent recipient path.
-- Generation/correlation fences late answers/audio after unlink/relink, even same owner. Fresh adapter epoch on restart/reconfiguration/week-idle update-ID discontinuity; no B offset reuse or exactly-once claim. Uncertainty alone cannot erase live authority.
-- Frontend domain types in `domain/`; tokens, Lucide, `hmi-scrollbar`, admin conventions. No edits under `Directrices/`.
+`docs/PENDING_WORK.md` is the discovery authority. PW-002/PW-003/PW-004 remain active; use each row's full Engram topic before unrelated work. PW-003 is `backlog/prisma-dual-channel-assistant`. Product source is `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §11.1 plus subsequently accepted decisions. Do not infer broader assistant authorization from the backlog.
 
-## Tasks and boundaries
+## Product invariants
 
-All source work uses bounded delegation. About400 authored lines is advisory only; never omit tests, minify, remove formatting or split artificially to fit. Keep tests/code together.
+A person viewing an inputless industrial HMI uses a phone to ask about that document's current visible snapshot. The HMI remains strictly read-only toward the industrial process.
 
-- [x] **RCA-1 — Fresh internal HMI context:** accepted offline, `e32bef1`.
-- [x] **RCA-2 — Pairing domain:** accepted offline, `0fdfe0f`.
-- [x] **RCA-3 — Dedicated bot adapter:** private dialogue `51ecd70`, captured queries `d2fc349`, warnings `42edf8b`, accepted offline.
-- [x] **RCA-4 — Protected A credentials/admin contract:** registry/parser `465321b`, protected resolver `f3ac2cb`, credential card/exact proxy `713f7ae`, accepted offline. Configuration only, no A runtime readiness claim.
-- [ ] **RCA-5 — HTTP/runtime integration:** in progress; transport, cooperative exclusion, lifecycle, capability-scoped endpoints, admin status/apply/policy, proxy, scheduling, owner/view invalidation and negative integration tests. Original400–750 estimate is obsolete; reforecast each coherent unit.
-  - [x] **RCA-5a — Standalone transport:** accepted offline; independent56focused/681full PASS, parent56focused PASS. Two new files1278 authored lines; local commit boundary recorded in checkpoint after commit. Forecast450–750 exceeded without trimming tests.
-  - [x] **RCA-5b — Cooperative bot identity exclusion:** accepted offline; independent172focused/730backend,81frontendfocused/1973full,coverage/build/lint PASS; parent38lifecycle PASS. Candidate2393authoredlines; local commit next, actual identity in checkpoint.
-  - [ ] **RCA-5c onward — Remaining runtime units:** freeze coherent policy/lifecycle/HTTP/admin/proxy/scheduler/bootstrap units and known-view invalidation after maps; do not infer full integration from pure-domain tests.
-- [ ] **RCA-6 — Automatic HMI QR/link presentation:** maintained local QR encoder, typed client/hook/UI, expiry/error/multi-HMI tests. Depends RCA-5. Forecast350–650 excluding generated lockfile.
-- [ ] **RCA-7 — HMI text/audio correlation:** revalidate generation/freshness at publication, cancel stale work, matching phone text. Resolve automatic transcript placement/lifetime before UI. Depends RCA-5/6. Forecast250–500.
-- [ ] **RCA-8 — Integrated verification/docs:** backend and frontend full gates, coverage/build/lint, independent risk-based verification; reconcile README/master and keep pending backlog active. Forecast100–200.
+### Authority and pairing
 
-## RCA-5a frozen writer contract
+- Dedicated protected bot A and independent lifecycle; same protected credential store and backend administrative session. No second login, B/environment token fallback or token-prefix identity comparison.
+- Preserve B admission, conversations, `JsonFileStore`, offsets, migration, diagnostics and exact nine-field admin status except the accepted collision rejection.
+- Automatic single-use opaque QR rotates every 60 seconds while free. Never expose HMI capability, admin secrets or bot token. Phone confirmation is required; Telegram Start alone is not pairing.
+- One phone per HMI document and one HMI per phone; multiple independent pairs. No implicit transfer or takeover. Hide QR while linked; unlink on the phone. Reload, restart or expiry requires relinking. No durable device identity.
+- A forwarded QR photograph remains a limitation, not proof of proximity.
 
-Exact authorized NEW paths only:
+### Time and visible context
 
-- `services/prisma-runtime/src/prisma_runtime/channel_a_transport.py`
-- `services/prisma-runtime/tests/test_channel_a_transport.py`
+- Human inactivity: 600 seconds. Only admitted human interaction renews it; technical polling never does.
+- Warning lead: default 60 seconds, configurable 15–300 in existing admin mode and persisted runtime policy. An absent implementation field is not an undecided product requirement.
+- Presence-loss cutoff: 30 seconds. Explicit close/revoke: immediate.
+- Freshness: 15-second fail-closed server-receipt age bound, not proof of delivery or visibility.
+- Existing viewer export: nominal 5 seconds, 4.5-second timeout, single-flight/skipped ticks. Hidden/offline/navigation gaps are unbounded. Existing voice polling every second renews presence only. No new heartbeat interval is approved.
+- A known-invalid prior view must be invalidated immediately, not reused until TTL. Delivered invalidations and publications need ordering; captured view identity must be revalidated before phone and HMI output. The backend cannot instantly know navigation that never arrived.
 
-Both absent at read-only revalidation. `requests==2.34.2` already declared/locked; no dependency/install changes. No adapter, B, lifecycle, route, tracker or other file changes by the writer.
+### Answers and epochs
 
-### API and transport
+- Existing deterministic visible-snapshot parser only. Same answer text on phone/HMI plus existing HMI audio in the later correlation unit.
+- No Telegram answer audio, microphone/STT, general NLU, history, offscreen/global fallback, requested navigation or latent recipient path in this increment.
+- Generation/correlation fences suppress late answers/audio after unlink/relink, including the same owner.
+- Fresh adapter and fresh empty link epoch on restart, reconfiguration and Telegram's week-idle update-ID discontinuity. No B offset reuse or exactly-once claim. An old high poll offset can hide lower new IDs; discontinuity is not harmless merely because IDs are non-contiguous.
+- Uncertainty alone cannot erase live authority. Release only exact owned reservations after confirmed quiescence.
 
-- `ChannelATransportError(RuntimeError)` with fixed `PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE`, raised from None for validation/dependency/response failures, never raw provider exceptions.
-- Frozen `ChannelABotIdentity(id: int, username: str)`.
-- `ChannelATransport(token, *, request_timeout, session_factory=None)`: required positive finite nonbool timeout; explicit None selects lazy default factory. Validate token before I/O: untrimmed nonempty ASCII `[A-Za-z0-9_:-]`, bounded by existing `MAX_SECRET_BYTES`; token prefix is not identity. No construction/import I/O or default product timing.
-- Fresh OWNED session for each method call, including sends concurrent with polling. Default `requests.Session()` has `trust_env=False`, default TLS verification; fixed `https://api.telegram.org`. No shared session/global lock, custom host, environment fallback, retries, redirects, webhook mutation, offset state, polling loop or lifecycle wiring. Factory is a trusted callable returning a new owned session each time.
-- All calls use one `session.post` with `json=` payload and `allow_redirects=False`. send/ack/getMe use scalar request_timeout; getUpdates MUST use `(request_timeout, read_timeout)` connect/read tuple with its validated read_timeout (not a discarded declaration). JSON preserves markup/list structure; omit optional None values. No parse_mode. Default requests adapter has no retries; do not add any.
-- `send_message(*, chat_id: int, text: str, reply_markup: object=None)` and `answer_callback_query(*, callback_query_id: str, text: str=None)` match existing keyword-only raw-body Protocol. Chat positive nonbool <=existing MAX_TELEGRAM_ID; send text1–4096 characters, not `/start`128 bound or question UTF8-byte bound. Callback ID1–MAX_CALLBACK_ID_CHARS; optional acknowledgement text0–MAX_ACK_TEXT_CHARS, no truncation/strip.
-- For send/ack, 2xx Mapping bodies pass through unchanged for adapter classification (including explicit ok:false); 4xx only with explicit `ok is False` passes through. Contradictory 4xx success, 3xx/5xx, malformed status/body/JSON and dependency exceptions normalize to fixed error. Do not adopt mapper's narrowing to only 2xx ok:true or B's raise_for_status-before-parse pattern. Adapter retains responsibility for delivered/rejected/unknown receipts.
-- `get_me()` requires successful2xx with `ok is True`; validates result Mapping, positive nonbool id<=existing MAX_TELEGRAM_ID, `is_bot is True`, ASCII username `[A-Za-z0-9_]{5,32}` with no suffix assertion. Prior public BotFather docs support the bounds; no live query authorized.
-- `get_updates(*, poll_timeout: int, read_timeout: float, offset: int|None=None)` validates nonnegative nonbool integer poll timeout, finite positive nonbool read timeout strictly greater, offset absent or nonbool integer0..MAX_TELEGRAM_ID+1. JSON fields: timeout, limit100, allowed_updates exactly `["message","callback_query"]`, optional offset. Successful2xx `ok is True`, result list with each item Mapping; return ordered tuple unchanged, reject non-Mapping items, no update-id filtering/sorting or offset advancement.
-- Independently attempt response/session close exactly once if obtained; cleanup exceptions never mask result/primary failure. Session creation/post/JSON/accessor exceptions sanitize. No token/URL/body logging or repr exposure; object repr must not include token.
+Frontend domain types stay in `domain/`; use design tokens, Lucide, `hmi-scrollbar` and admin conventions. Do not edit `Directrices/`.
 
-### Acceptance tests
+## Tasks and acceptance boundaries
 
-Strict observed RED before source implementation. Fake sessions/responses only; monkeypatch default requests construction to prove trust_env and prevent actual requests. Cover pre-I/O invalid inputs including bool/nonfinite/huge integers, laziness/explicit-None/falsy callable, exact JSON/timeouts/None omission, raw2xx and explicit4xx classification, malformed status/results, identity limits, updates ordering and no offset ownership, sanitizer canaries, resource closure and cleanup failures, no redirects/retries/webhooks/env host, and deterministic event-driven concurrent poll/send without shared lock. No sleeps as race proof. No raw secret/store/provider tests. Forecast is advisory, not permission to trim coverage.
-
-## RCA-5a accepted evidence and recovery
-
-Full transport execution history/corrections remain at `6301e97:odd/tasks/prisma-channel-a-remote.md`; this consolidation keeps the current full mirror below its readback limit. Initial independent48/673 PASS did not waive four defects (polling timeout, same-class error leak, Mapping access, setup cleanup). Correction observed RED55/17failures+6errors then55/680 PASS; independent source closure still required targeted result-extraction coverage. Test-only19additions honestly passed corrected source without inventedRED. Final independent `mu9rptbf-9-acg8`56focused/681full PASS, parent56spotcheck/readback/hash/scope/whitespace PASS. Source359lines SHA256 `103ebc44adfb9b057c6ab2aa3854025b546d886c4aa0e7982b11dbecb44c66ef`; test919lines `b7586bb96601e8f0d11fcf434b378581fc4303724fb71a58bd0ed59e48450123`. Accepted offline/committed6301e97,1278source/test authoredlines; commit1470 includingtracker, cumulative10738 since6e05e38. No nativeapproval/live/runtime/fullfeature claim. FuturePR slicing remains unresolved.
-
-Known-view mapper `mu9qq5gm-4-nrxb`: exporter abort does not invalidate server context; no sequence rejects late old-view POST resetting freshness; session removal only cleansvoice. Do not implement mapper verbatim: g<=last rejection conflicts with same-generation invalidation/publish; in-flight answers require captured-view revision revalidation before phone/HMIoutput. Remote navigation cannot be instantly known under lostdelivery; local suppression plus delivered invalidation/order and freshness bound. Detail `architecture/prisma-channel-a-visible-context-invalidation`, no newheartbeat/timing decision.
-
-## RCA-5b map and unresolved technical work
-
-Read-only mapper `mu9qcj8g-1-f4y3` confirms `TelegramLocalBot.prepare()` currently calls deleteWebhook BEFORE getMe and then loads/persists B state. Split identity observation from effects; shared process-local reservation keyed by observed getMe id must happen before webhook/state effects. B operation_lock does not serialize A; nine-field wire status contains no authoritative bot identity. No token-prefix, private-state or historical-ID comparison can substitute for cooperative ownership.
-
-Candidate surfaces (NOT yet a frozen writer scope): new `bot_identity_reservation.py`/test; B `telegram_lifecycle.py`, `local_presentation.py`, order-sensitive lifecycle/diagnostics tests, coherent admin conflict projection if required. A lifecycle will consume the same instance later. No claim of operational exclusion until BOTH production paths are wired.
-
-Parent review rejects same-owner string as permission to overwrite a live epoch: exact manager/activation ownership is required; different epochs must not steal reservations even with identical channel labels. Confirmed stop releases only its matching reservation; uncertain stop/cleanup retains it. Registry lock is leaf-only with no I/O/callbacks. B already stops its own candidate before replacement; do not conflate own reapply with cross-channel incumbent. A collision must not mutate the other channel's bot or credential/state. Scope permission never authorizes deleting real credentials as a development convenience.
-
-Opaque epochs independent of credential generations are technical design, not a new user choice. Bounds, distinct safe conflict error/public projection and deterministic cold-start ordering need a coherent integration decision. Known-view invalidation still unresolved; transport can proceed independently. Mappers: transport `mu9qcy1e-2-hdok` confirms two-file scope/source compatibility; its assumptions are pinned above. No mapper executed tests or operational calls.
-
-## RCA-5b frozen coherent writer contract
-
-Baseline `6301e97`, clean Git before parent contract update. Route delegated:19 exact source/test paths, coordinated backend/frontend strict error contract, one writer. Forecast700–1300 authored lines advisory; preserve tests/readability. No A lifecycle/transport edits or operational exclusion claim until A later consumes the same registry. Mapper `mu9rwv1c-a-ilnb` scope is accepted with lifecycle hardening below, not its word 'pinned' as independent authority.
-
-### Exact allowed edit paths
-
-```text
-services/prisma-runtime/src/prisma_runtime/bot_identity_reservation.py
-services/prisma-runtime/src/prisma_runtime/local_presentation.py
-services/prisma-runtime/src/prisma_runtime/telegram_lifecycle.py
-services/prisma-runtime/src/prisma_runtime/admin_http.py
-services/prisma-runtime/tests/test_bot_identity_reservation.py
-services/prisma-runtime/tests/test_telegram_lifecycle.py
-services/prisma-runtime/tests/test_telegram_diagnostics.py
-services/prisma-runtime/tests/test_telegram_credentials.py
-services/prisma-runtime/tests/test_telegram_http.py
-services/prisma-runtime/tests/test_local_presentation.py
-services/prisma-runtime/tests/test_runtime_safety.py
-hmi-app/src/domain/adminCredential.types.ts
-hmi-app/src/services/adminAuth.service.ts
-hmi-app/src/components/admin/VoiceCredentialSettings.tsx
-hmi-app/src/domain/adminCredential.types.test.ts
-hmi-app/src/services/adminAuth.service.test.ts
-hmi-app/src/components/admin/VoiceCredentialSettings.test.tsx
-hmi-app/src/hooks/usePrismaCredentialAdministration.test.tsx
-hmi-app/src/components/admin/GlobalSettingsDialog.voice.integration.test.tsx
-```
-
-Only reservation source/test are new. Parent owns tracker/mirror. Existing test files may need only recheck rather than edits; do not add gratuitous changes to fill scope. No production hook/proxy/dependency/transport changes. Admin UI change is error copy only, no new shell/control/login.
-
-### Ownership and lifecycle invariants
-
-- Fixed public `TELEGRAM_BOT_IDENTITY_RESERVED`, HTTP409 on protected apply; exact nine-field status unchanged. Add to backend projection, frontend runtime union/allowlist, service public-code allowlist and existing errorText mapping. Spanish copy: 'Este bot ya está en uso por el otro canal. Configurá un bot distinto.' Conflict must not become AUTH_REQUEST_FAILED/provider502 or a committed mutation. Keep current credentials/drafts and desired/applied semantics except normal existing own-reapply stop.
-- New process-local thread-safe `BotIdentityReservation`, opaque lease and fixed sanitized reservation error. Key observed positive nonbool bot id<=existing MAX_TELEGRAM_ID, never token/persisted/historical IDs. Failed acquisition adds nothing. Same exact owner+epoch may re-enter; a different epoch, even same label, cannot overwrite live authority. Release requires matching lease identity/epoch and owner; stale release is no-op. Use identity comparisons for opaque epochs, not arbitrary equality callbacks. No token/storage/network. Leaf registry lock covers bounded state only, never callbacks/I/O/stop/join. Process accessor initializes a single shared registry thread-safely; tests inject fresh instances.
-- Bot owns its lease so manager, standalone run and build_telegram_bot activation cannot bypass it. Constructor optional reservation=None selects process registry (explicit None only), NEVER disables guard. Existing positional api_base compatibility preserved. create_app/build_telegram_bot explicitly share process accessor; future A uses same instance. Do not introduce different implicit registries per manager. Avoid import cycle when reusing ID bound; do not edit A modules to solve unrelated architecture.
-- observe_identity performs getMe only and validates id before any effect; no state write/reservation. Identity observation is NOT readiness. prepare: observe -> acquire -> deleteWebhook -> load/persist own B state -> prepared. Repeated prepare must not mint another epoch while retaining a lease or silently re-observe a new identity under an old lease. Stable per-bot activation epoch, new lifecycle object for reapply. Normal repeated prepare after readiness is idempotent; closed/stopping instance cannot re-activate. Preserve diagnostics and migration/admission/state semantics.
-- Harden prepare/start/run/stop ordering: stop while identity/preparation/start is in progress must NOT release lease and let that same object later perform effects/poll. Physical thread termination alone is insufficient if preparation/start is still in flight. Serialize/fence bot lifecycle transitions safely; do not hold a lock while joining a thread that needs it. No network/foreign callbacks under shared registry lock. Deterministic event-driven races, not sleeps, must prove no early release/reactivation and no deadlock. run uses prepared state, not bot_id alone; direct observed-but-unprepared run cannot poll without successful guarded preparation. Do not retire supported unmanaged construction/run paths.
-- Confirmed quiescent stop closes/releases only its own exact lease. Uncertain stop/cleanup retains authority and manager candidate for retry; no cross-channel stop or credential/state deletion. If no lease acquired, cleanup cannot release incumbent. Failed standalone preparation/run must have a safe owned cleanup path; do not leave a known-quiescent unreachable lease forever, and never free uncertain in-flight work. Existing manager generic errors normalize; reservation error maps fixed409 with the same cleanup/retention discipline, not a special-case leak. Factory/setup failures produce safe status and never retain an unowned lease. Existing startup B ordering remains; future A follows B on cold start, no takeover.
-
-### RED and regression matrix
-
-Observe meaningful RED for each changed behavior before its source edits, not only a blanket missing-module error hiding B/frontend regressions. Registry: exact-epoch reentry, same-label different-epoch rejection, foreign/stale release, failed acquire no mutation, atomic two-thread winner. Bot/manager: getMe before reservation before webhook/state effects, malformed identity no effects, conflict leaves incumbent untouched, observed!=prepared, own reapply rotation same/new identity releases only after confirmed stop, stopped objects cannot restart, concurrent prepare/stop and start/stop fences, failed prepare/start/cleanup paths, uncertain stop retains vs confirmed stop releases, disabled/missing no provider/lease, process accessor shared and fresh-test injection. Preserve B state/offset/migration/admission and diagnostic tests; do not weaken fixtures or bypass real guarded bot with dummy-only tests. HTTP: protected409 fixedcode and exactly nine fields, auth/CSRF unchanged, no credential delete or committed flag. Frontend: strict status/passive-health/error parser accepts only new fixedcode, service preserves409 error/status (not committed), Spanish UI message, hook/integration keep failure distinct from successful apply. A credential writes remain unable to invoke B manager (existing test_credential_http recheck).
-
-### Exact verification commands
-
-Backend focused: use the EXISTING focused owned-Python supervisor above verbatim, changing ONLY discovery pattern for each of `test_bot_identity_reservation.py`, `test_telegram_lifecycle.py`, `test_telegram_diagnostics.py`, `test_telegram_credentials.py`, `test_telegram_http.py`, `test_local_presentation.py`, `test_runtime_safety.py`, `test_credential_http.py`. RED/GREEN may target relevant patterns at each implementation stage; final all eight pass. Full backend exact README Offline-safe supervisor unchanged. Inspect mocks/fixtures first; no unisolated Python/gate/probes/launcher.
-
-Frontend focused from root:
-
-```bash
-npm --prefix hmi-app test -- src/domain/adminCredential.types.test.ts src/services/adminAuth.service.test.ts src/components/admin/VoiceCredentialSettings.test.tsx src/hooks/usePrismaCredentialAdministration.test.tsx src/components/admin/GlobalSettingsDialog.voice.integration.test.tsx
-npm --prefix hmi-app run test:coverage
-npm --prefix hmi-app run build
-npm --prefix hmi-app run lint
-```
-
-Run focused RED/GREEN then final coverage/build/lint. All70 thresholds enforced. Read-only Git scope/whitespace/numstat/diff/hash checks authorized, including exact two new reservation files not shown by tracked diff. No runtime harness because tests use synthetic bot sessions/stores and mocked frontend API; real Telegram/runtime acceptance remains pending. No service stop/start/restart, network/provider/env-values/secrets/persisted state inspection, installs, Git mutation or commits by writer. Parent assessment and independent verification after writer; unavailable native assessment is high-risk fallback.
-
-## RCA-5b candidate and test-execution incident — NOT accepted
-
-Writer `mu9s65sg-b-09io` reports registryRED missingmodule, B/diagnosticsRED mostly new-constructor errors plus behavioral failures, HTTP502vs409 RED, frontend5fail/75pass RED; final focusedbackend151 across8patterns/full709 PASS, frontend80focused/5files, coverage/build/lint PASS. Full frontend test count not stated, do not infer it. Reported coverage S87.17%(13589/15588),B80.26%(10028/12493),F86.32%(3213/3722),L88.05%(12837/14578), all70 thresholds. Parent Git confirmed16 actual candidate paths (14modified+2new), NOT19changed; unchanged allowed tests rechecked. Candidate1184authored lines (1099add85delete), tracker excluded. No source acceptance/commit. Native assess again empty/unassessable,RDDoff; independent verifier required AFTER incident diagnosis.
-
-INCIDENT: writer reports a real official Telegram getMe request attempt with synthetic token during diagnostics RED due to missing _call mock; reportedly no response. This violated offline-only authority. No-response does NOT establish that no bytes left or no server effect occurred. Writer also reports frontend singleton fetch attempt failed relativeURL parsing injsdom. Final fixtures reportedly fixed and latergates green, but do not describe the entire task as fully offline. Parent disclosed incident to user and paused further tests/acceptance/commit, launching READ-ONLY `mu9t2fx2-c-i187` to inspect final fixtures and derive durable no-network guards. No live reproduction or credential inspection authorized. Parent observed only expectedcandidate+tracker changes and emptyindex. User session boundary still finishRCA5b/verifiedlocalcommit/checkpoint/STOP; if blocked record honestpartial instead.
-
-Separate source review remains pending, including writer-admitted known-quiescent standalone prepare failure retaining a lease until callers explicitly stop, contrary to frozen cleanup intent. Do not accept this as harmless merely because current suites pass. No A lifecycle wiring yet.
-
-### Incident containment correction — tests only
-
-Read-only `mu9t2fx2-c-i187` confirms final Python fixtures now mock _call before prepare, but no durable guard prevents a future omission; broad run exception handling can swallow assertion guards. Frontend singleton binds fetch at module import, so later global stubs do not intercept it. No live reproduction occurred. Ignore mapper's unrelated `prisma-telegram-poll-diagnostics.md` tracker comparison: current authority is THIS tracker and actual16within19 scope, not that old document.
-
-Authorize one bounded writer only these existing files: runtime `tests/test_telegram_diagnostics.py`, `tests/test_telegram_lifecycle.py`, frontend `hmi-app/src/components/admin/GlobalSettingsDialog.voice.integration.test.tsx`. Before ANY test execution, install per-test requests.Session.request interception covering every relevant class/case: record and refuse unexpected dispatch, assert empty attempt list OUTSIDE production catches during cleanup, always restore patch even on failure. Do not format/log URLs/tokens; use fixed guard errors. Preserve deliberate fake lower-level HTTP diagnostics. Frontend bind a controllable mocked singleton before consumers import, keeping real AdminAuthClient available for injected-fetch contract tests; replace ineffective global-only assumptions without weakening assertions. Unexpected singletonfetch must be recorded/refused and checked externally. No production edits or package/global-network harness refactor.
-
-Containment-first: do not rerun a known unguarded path to manufacture RED. If proving guard discrimination with a nested test fixture, patch an inert lower-level dispatcher FIRST so no version can access network; no source mutation or live probes. Report coverage-only GREEN honestly where source already correct. After reading all three final safeguards, ONLY canonical focused supervisors for test_telegram_diagnostics.py and test_telegram_lifecycle.py, plus `npm --prefix hmi-app test -- src/components/admin/GlobalSettingsDialog.voice.integration.test.tsx`, and read-only Git/hash/whitespace checks are authorized for this correction. No full backend/frontend gate yet, no live services/providers/network. Return exact guard evidence and counts; parent then assesses and delegates independent whole-candidate verification. Forecast60–160 authored lines advisory. Session still closes after accepted RCA5b/commit/checkpoint, no later unit.
-
-Containment task `mu9t7vhl-d-0rjg` failed with generic assistant error and no usable handoff/cause. Parent read-only recovery confirms HEAD6301e97/indexempty, same16candidatepaths+tracker, all seven production hashes unchanged. Only the two Python tests gained guard code; frontend test remains prior hash `e5e6d109362fea196702bd2bca5bad6727970dd6a4b0282e48ec30cb49ec0e1e`. Current diagnostics hash `09b31ded0e850fb7803d8e31437b92808d56674cc56673f7f15166ba104a5ede`, lifecycle test `a1b033541b82f242ef835b0e760343ec443ba818dcea7274f3212632f4677260`. File presence proves neither execution nor success. Same-writer recovery must recover actual command outcomes without inventing/replaying uncertain executions, complete frontend containment before any further test, then only authorized focused gates. No acceptance/commit.
-
-Containment recovery `mu9tdjqn-e-fubv` completed: reports prior failed turn ran read/edit plus py_compile (initial indentation error repaired), NO test suite, no unfinished command. Those compile commands were outside the enumerated gate list; do not repeat or fabricate approval. Final focused diagnostics37/lifecycle26/frontendintegration6 PASS reported after all3guards inspected. Python fixturewide request-funnel refusal/cleanup assertions plus nested inertfloor probes; frontend hoisted real-client/fakefetch singleton and externalrefusal assertion. Diagnostics/lifecycle hashes same as parentrecovery; frontend now `b544a3e4b6e8542802d6e1f3fb308529d0da3c7b78edaee1f6969f43d8065c9c`. Seven production hashes unchanged, NOT accepted merely because writer calls them accepted. Original external-attempt incident remains. Full gates not rerun during containment. Parent read frontendguard/currentBsource, checked actualscope/whitespace; nativeassess still unassessable/RDDoff. Fresh whole-candidate verifier `mu9tjfy5-f-4n3e` now authorized: inspect safeguards first, exact8backendfocused/fullREADMEgate/frontend5focused+coverage/build/lint, no extra probes. Lifecycle quiescence/directrun/failedprepare and leaseauthority concerns explicitly referred. User boundary finishRCA5b then commit/checkpoint/STOP unchanged.
-
-### RCA-5b independent FAIL and six-path correction
-
-Verifier `mu9tjfy5-f-4n3e` stopped before ALL gates: frontend configured handler throws on unknown route without recording refusals, so production catches can hide it. Read-only review also finds direct run not registered (stop treats thread=None as quiescent; duplicate direct/start execution possible), standalone prepare/run failure leaking known-quiescent lease, mutable/releasable inspection lease, and int-subclass callbacks under leaf lock. Same-thread stop reentry during preparation is an internal edge needing a fence. Evidence SOURCE READ, no probes or fresh gates. Actualcandidate1444 authoredlines (1354add90delete),16paths+parenttracker; all suppliedhashes matched one observed pass, not a before/after execution proof.
-
-Authorize correction only: `services/prisma-runtime/src/prisma_runtime/bot_identity_reservation.py`, `services/prisma-runtime/tests/test_bot_identity_reservation.py`, `services/prisma-runtime/src/prisma_runtime/local_presentation.py`, `services/prisma-runtime/tests/test_telegram_lifecycle.py`, `services/prisma-runtime/tests/test_telegram_diagnostics.py`, `hmi-app/src/components/admin/GlobalSettingsDialog.voice.integration.test.tsx`. No manager/HTTP/frontendproduction/A edits. First fix frontend fake refusal accounting and prove it catches configured-handler rejection externally without realfetch; Python guard/floors stay intact. Then genuine RED-first backend regressions and fixes: track actual direct/managed runner activity, no duplicate or mixed run/start, no release while effects pending, stop fences late migration persist/handling, safe same-thread stop (no selfjoin/deadlock), owned quiescent preparation/run failure cleanup while uncertain cleanup retains. Preserve diagnostics/failure classification and existing B semantics. Immutable lease, non-releasable inspection snapshot, exact built-in int keys (reject subclasses BEFORE any callback/lock); tests for mutation/stale release/hostilekeys. No speculative hostile externalprovider claim: this is the internal API contract.
-
-Forecast200–500 incremental authoredlines advisory, preserve coverage. Gates resume ONLY after frontend containment fixed/proven and fixtureguard review. Same exact8backendfocused/fullREADMEisolatedgate plus frontend5focused/coverage/build/lint authorized from frozencontract; no extra probes, py_compile, bare tests, runtime/provider calls or source mutations to fabricateRED. Report actualRED/GREEN per finding, fullcounts/coverage, hashes and additions+deletions. Fresh parentassess/independent verification afterward. Latest user boundary supersedes the earlier stop: finish verified RCA-5b, continue remaining RCA-5, and PAUSE/notify BEFORE RCA-6. Current writer scope remains these six paths only.
-
-### Six-path correction returned; source recheck before execution
-
-Writer `mu9ttzzu-g-5az6` six-path correction RED: frontend1failed6passed, registry16/8failures, lifecycle33/7failures1error then outer300sTIMEOUT. Follow-up `mu9us1ky-h-bb3e`: no retainedPID/exit/termination proof; non-daemon-thread cause speculative, laterGREEN not proof of death. GREEN reported164focused(16/33/37/10/13/14/32/9),722backend;81frontend/5files,7integration; coverage87.17/80.26/86.32/88.05 buildlintPASS. Fullfrontend totals lost via tail35. Candidate claimed1864authored vs1444:420growth not round-authored count. Scope14tracked+2new+parenttracker17,indexempty. No independent acceptance; original networkincident remains.
-
-Parent source read/nativeunassessable led to source-only `mu9ut5d0-i-ehsn`. Passive metadata2026-09-20T13:31:25Z: Python16660/23968/18768/22060 created00:59:47–49Z,venv/base pairs/root11356absent. Server-side lifecycle-unittest pattern query returned no match; projectedPID/PPID/time/path only, no fullcommandline/envvalues. No process attribution/intervention or historictermination proof. Current frontend sentinel handlers close actualrefusalhole; nonsentinelfuturelimit notcurrentblocker. Residual concrete findings and correction below.
-
-### Residual source FAIL — four-path correction
-
-Independent `mu9ut5d0-i-ehsn` and retained-detail followup close prior frontend/directrunner/successful-failurecleanup/reentrantstop/immutability/acquire-key findings BY SOURCE ONLY. Four residual findings: HIGH lifecycle threaded tests lack guaranteed teardown; assertions before release/stop/join and swallowed callback wait assertions can leave workers retrying (NOT proof of historical timeoutcause). MEDIUM failed standalone preparation/directrun cleanup does not fence activation when close fails; lease retained but effects may restart. MEDIUM completed finalization closes again, so laterclose fault reports falseuncertainty after release. MEDIUM release admits forged-key/lease-subclass callbacks underleaflock before identityreject.
-
-Authorize ONLY `services/prisma-runtime/src/prisma_runtime/local_presentation.py`, `services/prisma-runtime/tests/test_telegram_lifecycle.py`, `services/prisma-runtime/src/prisma_runtime/bot_identity_reservation.py`, `services/prisma-runtime/tests/test_bot_identity_reservation.py`. First install unconditional test cancellation/release/join and external threadoutcome assertions BEFORE any gate; keep network guard through teardown, no daemon-only workaround. Add safe failing-path teardown proof with inert fakes; do not replay original unsafeRED. Then RED-first regressions/fixes: failedactivation fences beforecleanup; uncertainclose retains lease but blocks prepare/run/start; stop retriescleanup; terminal success shortcircuits repeatedclose; reject malformed exact-lease keys/lease subclasses beforecallback/lock with incumbent unchanged. Existing guards/frontend/all otherproduction unchanged. Forecast100–300 correction authoredlines advisory.
-
-After source inspection confirms safe teardown, exact existing focused supervisors (registry/lifecycle RED then all8 GREEN), fullREADMEisolatedgate, frontend5focused/fullcoverage/build/lint authorized. Preserve full stdout (no tail/filter hiding counts), exact test/file totals and failed/succeeded exit evidence. No extra probes or processintervention; prior passive metadata does not prove historictermination. Fresh independent source/gate verification required. Continue remainingRCA5 only after accepted unit; pause beforeRCA6.
-
-Phase A `mu9v0ruj-k-2ddd`: only lifecycle test edited, hash `dcf3ce9bc12322d371962dc3604880344b331a1973bcbd2030491c5e2a1283ba`. No execution. Parent read helper/four races/inert failure proof; cancellation/release precede joins and external assertions. Phase B four-path RED/fix/exact gates now authorized; no historic timeout closure inferred.
-
-Phase B `mu9v6bfe-l-5url` returned exactly4paths. ReportedRED registry19/2fail, lifecycle38/4fail exit1; GREEN172focused(19/38/37/10/13/14/32/9),730backend,81frontend/5files,1973full/202files,coverage87.17/80.26/86.32/88.05 buildlintPASS. Initial34test fixture-only gate not separately evidenced; later38testRED had34green, do not infer an earlier run. Sticky activation-failure fence, terminal finalization shortcircuit, exact foreignrelease type/key prevalidation. Approx351PhaseBauthored; per-file nettable growth is not necessarily exactrounddiff. Parent source spotread/nativeassess stillunassessable; independent `mu9vwj2e-m-g4d4` now inspects allguards then runs exactfullgates. No acceptance yet. Historical timeout/networkincident unchanged.
-
-### Final RCA-5b acceptance — OFFLINE
-
-Verifier `mu9vwj2e-m-g4d4` returned PASS: all four residual findings closed; fresh172focused/730fullbackend,81frontend/5files and1973full/202files,coverage87.17/80.26/86.32/88.05%,build/lint PASS. All16candidate hashes stable before/after gates; tracker mutation parent-owned. Parent independently ran exact isolated lifecycle supervisor38PASS, read corrected boundaries and checked scope/hashes/whitespace/indexempty. Accepted candidate2393authoredlines, plus tracker; no native approval or live-provider/full-A integration claim. Earlier network incident and historical timeout uncertainty remain recorded. Local commit authorized; do not self-edit its hash into that same commit. Continue remaining RCA-5 after commit; pause BEFORE RCA-6.
+- [x] **RCA-1 — Fresh internal HMI context:** `e32bef1`, accepted offline.
+- [x] **RCA-2 — Pairing domain:** `0fdfe0f`, accepted offline.
+- [x] **RCA-3 — Dedicated bot adapter:** dialogue `51ecd70`, queries `d2fc349`, warnings `42edf8b`, accepted offline.
+- [x] **RCA-4 — Protected A credentials/admin configuration:** provider/parser `465321b`, resolver `f3ac2cb`, card/proxy `713f7ae`, accepted offline. Saving A credentials NEVER starts or verifies runtime.
+- [ ] **RCA-5 — HTTP/runtime integration:** in progress; freeze the remaining coherent units separately.
+  - [x] **RCA-5a — Standalone transport:** `6301e97`, independent 56 focused/681 backend and parent 56 focused PASS.
+  - [x] **RCA-5b — Cooperative identity exclusion:** `7fb7edc`, independent 172 focused/730 backend, 81 focused/1,973 frontend, coverage/build/lint PASS; parent 38 lifecycle PASS.
+  - [x] **RCA-5c — Standalone A activation runner:** accepted offline; independent516 focused/825 backend and parent95 PASS. Initial TDD deviation remains recorded. Commit identity/count recorded in progress checkpoint.
+  - [ ] **Remaining RCA-5 units:** query/context glue, ordered view invalidation, capability-scoped pairing projection, A policy/admin status/apply, scheduler, exact proxy and bootstrap. Names/order below are proposals, not frozen implementation contracts.
+- [ ] **RCA-6 — Automatic HMI QR/link presentation:** maintained local QR encoder, typed client/hook/UI and expiry/error/multi-HMI tests. PAUSE and notify before starting. Original 350–650 estimate must be revalidated.
+- [ ] **RCA-7 — HMI text/audio correlation:** generation/freshness checks and cancellation; decide automatic transcript placement/lifetime before UI. Original 250–500 estimate must be revalidated.
+- [ ] **RCA-8 — Integrated verification/docs:** full gates, independent verification, README/master reconciliation; keep active backlog honest. Original 100–200 estimate must be revalidated.
 
 ## Accepted integration contracts to preserve
 
-- **RCA-1:** server context receipt time and caller-supplied positive finite age bound; owner-scoped internal lookup returns no capability, never renews activity, isolates deep copies, rejects stale/missing/expired/closed owners. Existing caller routes unchanged.
-- **RCA-2:** bounded locked in-memory pairing with injected monotonic clock/entropy and immutable snapshots. Single60s challenge, confirmation deadline no later than challenge, exclusive pending/live owner-phone associations, opaque action/generation tickets. Confirm starts600s human idle; only admitted human activity renews. Sample clock under lock, regression watermark, finite arithmetic, equality expiry. No unbounded tombstones/storage.
-- **RCA-3a:** validated private actor/chat/bot identity, strict start/callback grammar,64byte callback payload, separate confirm/cancel, process-local nonce. Exact displayed fresh destination label revalidated at confirmation; reserve bounded adapter capacity before claim, never evict live authority for unauthenticated replacements. Update high-water/confirmation fences and adapter epoch; no durable B offsets. Serialize ingress/effects without domain lock across I/O; generation recheck before effects, acknowledging network non-atomicity. Sanitize receipts and classify delivered/rejected/unknown; never retry uncertainty. Uncertain registry/clock failure preserves tickets/buttons; authoritative expiry/release removes them.
-- **RCA-3b:** startup-only one-shot enable_queries; capture immutable owner/phone/generation/update/adapter epoch. Inject existing parser and owner context, no fallback/duplicate parser. Question4096UTF8bytes distinct from `/start`128chars. Captured receipt-age/monotonic deadline cannot be extended by new snapshots. Effectful validators precede authoritative registry check; resample freshness immediately before send. Human touch only on admission. Invalid/throwing parser/property access normalizes, no truncation. Envelope only after observed phone delivery plus post-send validity; future HMI publisher must revalidate again.
-- **RCA-3c:** atomic warning reservation once per human activity window; explicit adapter sweep revalidates each recipient's owner/generation/activity/deadline and nonce, including changes by prior sends. Reuse Spanish Seguir conectado/Desvincular. Rejected/unknown/skipped warning does not retry/rearm until human activity; no answer envelope. Scheduler not yet wired.
-- **RCA-4:** three protected provider keys with exact frontend metadata parser; no schema migration. Existing older binaries reject stored A rows, so rollback must account for that. A resolver reads only protected telegram_channel_a every call; lazy explicit-None factory, no cache/fallback, fixed MISSING vs UNAVAILABLE including missing-master rejection before I/O. Existing admin session and metadata-only store; A save never starts/verifies runtime. Provider-keyed secret drafts, revision/session/panel/dialog fences, functional clearing on completion/logout/deactivation. Exact A PUT/DELETE proxy preserves cookies/query/CSRF, strips HMI capability; no A runtime/pairing routes yet.
+| Unit | Load-bearing contract |
+|---|---|
+| RCA-1 | Owner-scoped internal context with server receipt time and caller-supplied finite positive age bound; immutable/deep-copy isolation, no capability in result, no activity renewal, stale/missing/expired/closed owners rejected. |
+| RCA-2 | Bounded locked in-memory authority, injected monotonic clock/entropy, immutable snapshots. One 60-second challenge; confirmation deadline no later than challenge. Exclusive pending/live associations. Opaque actions/generations; 600-second human idle begins at confirmation. Clock sampled under lock; rollback/overflow/equality expiry handled; no unbounded tombstones. |
+| RCA-3a | Strict private actor/chat/bot validation, start/callback grammar and 64-byte callbacks. Displayed destination revalidated at confirmation; reserve capacity before claim, never evict live authority for unauthenticated replacements. Per-epoch high-water/confirmation fences, nonce protection, no durable B offset. Serialize ingress/effects without holding the domain lock over I/O. Delivered/rejected/unknown receipts sanitized; never replay uncertain sends. |
+| RCA-3b | One-shot startup-only query attachment. Capture owner/phone/generation/update/adapter epoch; inject existing parser/context. Question limit 4,096 UTF-8 bytes differs from 128-character start grammar. Captured receipt-age deadline cannot be extended by newer snapshots. Effectful validators precede authoritative checks, freshness resampled before send. Human touch only on admission. Envelope only after observed phone delivery and post-send validity; future HMI publisher must revalidate again. |
+| RCA-3c | Atomic warning reservation once per human-activity window. Sweep revalidates owner/generation/activity/deadline/nonce for each recipient, including prior-send changes. Spanish Seguir conectado/Desvincular controls. Rejected/unknown/skipped warning does not rearm until human activity; no answer envelope. Scheduler remains unwired. |
+| RCA-4 | Three exact protected provider keys and strict metadata parsing. Older binaries reject A rows; rollback must account for this. A resolver reads only protected `telegram_channel_a`, lazy explicit-None factory, no cache/fallback; fixed missing/unavailable errors and missing-master rejection before I/O. Same admin session, metadata-only store. Provider-keyed secret drafts plus revision/session/panel/dialog fences. Exact A PUT/DELETE proxy preserves cookies/query/CSRF and strips HMI capability. Save never activates. |
+| RCA-5a | Fixed-host text transport with mandatory timeout and injected fresh owned session per call; default `trust_env=False`, TLS verification, no redirects/retries/shared session/offset/lifecycle/webhook mutation. Poll connect/read tuple preserves distinct timeouts. Strict input/result bounds and sanitized errors, independent close attempts, no raw secret exposure. Adapter owns raw receipt classification. Full API/edge-case contract at commit `6301e97`. |
+| RCA-5b | Shared process registry with immutable exact owner/epoch lease, callback-free key/handle validation and non-authoritative occupancy snapshot. B observes identity before reservation and effects. All direct/managed activity participates in quiescence; stop/failure fences prohibit reactivation. Known-quiescent cleanup releases, uncertainty retains; successful finalization is idempotent. Fixed `TELEGRAM_BOT_IDENTITY_RESERVED` HTTP409/frontend projection; B wire shape/auth/CSRF preserved. A must still consume the same registry. |
 
-## TDD and verification
+## Remaining RCA-5 design: accepted directions and unresolved contracts
 
-TDD ON by `AGENTS.md` §8–9 and `docs/TESTING.md`: observed RED before source, then GREEN/refactor. No fabricated RED or treating previously green coverage as RED. Writer reports commands, results/counts, exact paths, authored lines and limitations. Parent calls native `gentle_review assess` after writer; unavailable/failed/unassessable is high and needs independent verification. No native verdict invented. Historical RDD was off; follow actual current assessment, not cached setting. Parent spotchecks a reported command before delivery.
+Read-only maps: `mu9w9m0p-n-ee7w`, corrected follow-up `mu9wghxk-o-91g0`. Parent rejected unsupported assumptions; neither report is an implementation specification. Focused contract review `mu9wolyp-p-ta2n` informed the now offline-accepted RCA-5c contract. Remaining production wiring is not implemented.
 
-Focused RCA-5a from repository root Bash/Git Bash (repeat RED/GREEN):
+### RCA-5c frozen contract — one standalone activation
+
+Exact authorized NEW paths only; writer must confirm both absent before creation:
+
+- `services/prisma-runtime/src/prisma_runtime/channel_a_lifecycle.py`
+- `services/prisma-runtime/tests/test_channel_a_lifecycle.py`
+
+No other source/test edits, persistence, `paths.py`, B refactor, transport method, HTTP/admin, scheduler, bootstrap or production wiring. Forecast **650–1,200 authored lines** including substantive tests; advisory, never trim coverage/readability. Automatic replacement and operational acceptance are deferred.
+
+#### Construction and preparation
+
+`ChannelARunner` takes keyword dependencies `transport`, `dialogue_factory`, required `clock`, `poll_timeout`, `read_timeout`, `join_timeout`, `poll_pause`, `on_outcome`, and `reservation=None` (only explicit None selects `process_bot_identity_reservation()`). No constructor/import I/O or credential lookup. Validate callable seams and finite nonbool timing values before I/O; poll timeout is a nonnegative exact int, read exceeds poll, join/pause are positive and within platform wait bounds. Validate the transport's connect timeout and finite connect-plus-read budget; reject a budget reaching the seven-day horizon. The pause is interruptible pacing after successful polls, not retry backoff after terminal failure.
+
+Preparation registers ownership, samples the clock, observes `get_me`, validates `ChannelABotIdentity`/exact positive bounded ID/ASCII username using accepted transport bounds, checks the fence, acquires a lease with private owner/activation objects, then invokes the factory once. Validate a `ChannelAPairingDialogue` with matching bot ID, a `ChannelAPairingRegistry` and the identical transport before marking prepared. Never hold lifecycle locks over foreign calls, registry callbacks or joins.
+
+The trusted factory must create a NEW dialogue, NEW empty pairing registry and fresh adapter epoch; it may attach queries before returning. No I/O, spawned work or use of retained references to bypass runner ownership. Freshness is a construction obligation tested through real factories, not private-map introspection. Identity/prepared state is not proof of successful polling. Do not add webhook inspection/mutation or an invented transport `close()`.
+
+#### Public boundary and failure
+
+Expose `prepare`, `poll_once`, `run`, `start`, `stop -> bool` and immutable sanitized internal status. `prepare` is idempotent after success; a concurrent preparation can refuse without mutating the incumbent activity. `run`/`start` do not spawn duplicate activity. External `poll_once` returns a fixed busy disposition while a runner/preparation owns admission, without changing its state. The loop uses its already-owned poll path rather than recursively contending with itself.
+
+Use fixed `PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE` for invalid configuration/dependency failures, with `ChannelALifecycleError` raised from None where an API raises. Only a real reservation conflict preserves canonical `TELEGRAM_BOT_IDENTITY_RESERVED`; never blindly rethrow a dependency's same-class exception or raw message. Terminal idle retirement has distinct `PRISMA_CHANNEL_A_RESTART_REQUIRED`. Internal status contains only a closed phase, fixed reason, quiescent and restart-required flags; no raw exceptions, updates, dialogue, lease, owner, tokens or answer text. No admin wire contract is introduced here.
+
+Track preparation, managed-start reservation and all poll/handler/consumer activity, not merely `self.thread`. Reserve startup before launching; cover launch failure and stop-before-entry. Stop sets a sticky fence immediately and rechecks after foreign calls/before further work. Same-thread stop never joins itself and returns False while owned work remains. Bounded join timeout retains authority. Last owned activity settles terminal failure automatically; repeated successful finalization is idempotent. Release uncertainty retains the exact handle for a later stop retry. No failed/stopped/retired instance can reactivate.
+
+#### Cursor and outcome handoff
+
+- Cursor starts None and is activation-local/in-memory; no durable or B cursor.
+- Validate the WHOLE bounded tuple before handlers: at most `GET_UPDATES_LIMIT`, mapping entries, exact int IDs in `0..MAX_TELEGRAM_ID`, nondecreasing order. Accessor failures, bad suffix or decreasing order terminally fail without processing/advancing that batch; never sort it.
+- Skip stale IDs below the cursor and equal-ID duplicates; the first occurrence owns a duplicate. Gaps are valid.
+- Immediately before a new handler, reserve local cursor `id+1`, matching the adapter's pre-handler high-water. A valid-ID ignored/malformed-payload outcome is consumed. Delivered/rejected/unknown sends all consume the ID; unknown is NEVER retried.
+- Validate the returned `IngressOutcome` ID and acceptance consistency; `accepted` is not delivery. Handler exception or malformed/mismatched outcome is terminal: retain the attempted local cursor, never advance over the untouched suffix or poll again. Stop before the next handler leaves that suffix untouched.
+- Invoke required synchronous `on_outcome` once per completed valid handler, including completion after a concurrent stop. Consumer execution remains owned; future publication must itself revalidate lifecycle/correlation/freshness. Consumer failure is terminal, never replayed, and HMI delivery is unconfirmed.
+- `poll_once` returns an immutable bounded result: tuple of completed outcomes, closed disposition (`completed`, `busy`, `stopped`, `failed`, `restart_required`) and fixed reason if any. Include a completed prefix on later failure; returned outcomes are observational, NOT another publication instruction. No unbounded queue.
+
+#### Local idle retirement, not lossless recovery
+
+Use the documented seven-day protocol horizon, not human idle600. Track nondecreasing finite monotonic samples and an idle anchor initialized during preparation. Refresh the anchor only for a newly admitted valid update, using that poll's start sample conservatively; empty/stale-only batches do not renew it. Invalid/throwing/nonfinite/regressing clocks and arithmetic overflow terminally fail closed.
+
+Check before polling, after return and between updates. Before polling, retire if the connect-plus-read budget reaches the remaining horizon. At/equality beyond the horizon, fence further polls/dispatch, report restart-required and release only after settlement. Never reset the cursor while preserving old adapter/link authority.
+
+This is LOCAL retirement, not guaranteed lossless Telegram discontinuity handling: receipt time differs from generation time, and scheduling suspension/backlog may let an old-offset request already acknowledge a lower reset ID. State that limitation. A later manager must await quiescence, detach old authority and create an entirely fresh activation/empty pairing registry with cursor None; no automatic replacement in RCA-5c.
+
+#### Tests, execution and deferred work
+
+Safety checkpoint `mu9xcf1n-q-zji5` returned221 test-only lines, no execution or production module. Parent rejected URL-bearing refusal messages, teardown without guaranteed restoration/unstarted-thread handling, cancellation disconnected from actual workers, and proofs that cleared evidence instead of demonstrating external cleanup failure. Read-only source/test access is approved; continuation `mu9xhtlw-r-958g` may edit ONLY the new test scaffold and must return for another parent readback before any test/source implementation. Expired parent query granted no execution authority.
+
+Corrected scaffold `mu9xhtlw-r-958g`:415 lines, Git blob `15491c9fcce23f0a5a0ea89c0a9f7fcbd647faa5`. Parent read all guards/fixtures/proofs and ran the exact isolated lifecycle supervisor: **3 tests PASS in0.003s**, exit0. This proves the harness, not runner behavior. Continuation `mu9xlqa1-s-28wt` now has the two-file source/test scope and staged RED/GREEN plus frozen backend gates. Guard restoration/teardown must remain effective. An unconfirmed release (False or exception) retains the handle for later stop retry.
+
+First install per-test request record/refuse guards with external cleanup assertions, inert fake sessions and failure-safe owned-thread teardown before any test can dispatch. Prove guard discrimination only over an inert lower floor. No imported unsafe thread helper or daemon-only escape. Strict RED-first staged behaviors; distinguish initial missing-module RED from later behavioral failures.
+
+Cover constructor laziness/validation/bounds, identity-reservation-factory order/collision, real fresh factories and no old-link transfer, entire-batch validation/gaps/duplicates/cursor maximum, ignored/unknown/error outcomes, consumer prefix/handoff/no replay, clock/idle boundaries and stalled requests, direct/managed/poll exclusion, all stop/reentry/startup races, release uncertainty/retry/idempotence and sanitizer canaries. Register cancellation/release/join before launch; external outcomes cannot be swallowed by production catches.
+
+Authorized gates: exact focused supervisor below for `test_channel_a_lifecycle.py` (RED/GREEN), then `test_channel_a_transport.py`, `test_channel_a_bot.py`, `test_channel_a_pairing.py`, `test_channel_a_query.py`, `test_bot_identity_reservation.py`, `test_telegram_lifecycle.py`; exact README full backend supervisor. No frontend change or frontend rerun needed. Read-only Git/scope/hash/line/whitespace checks allowed, including new files; no extra probes, py_compile or process commands. Stop on unexpected dispatch/timeout/worker survival. Parent fresh assessment, independent verification and spotcheck precede acceptance/commit.
+
+Deferred: actual credentials/manager/bootstrap, automatic replacement, warning scheduler, persisted policy/admin, safe HTTP projections, ordered view invalidation and HMI publication. A later warning seam must acquire this same owned-operation admission; do not expose arbitrary raw-dialogue operations now.
+
+#### RCA-5c candidate and confirmed TDD deviation
+
+Writer `mu9xlqa1-s-28wt` returned new source922 lines (Git blob `105e799e615e66a4968f354ecf05459459fa620d`) and tests1749 (blob `10900b2273fd8e1f328f1f35a9180d86fba452a5`). **Candidate total is2671 authored lines**, including the415-line scaffold; subtracting it to report2256 for this unit was incorrect. Forecast exceeded; preserve substantive coverage/readability.
+
+Retained chronology explicitly confirmed: COMPLETE SOURCE first, then behavior tests, then the first focused run (71tests/15failures/3errors). There were ZERO earlier behavioral or missing-module RED runs. The parent authorized staged RED-first, NOT one-pass implementation before tests. Two subsequent genuine defect fixes (failed-prepare settlement and last-batch prefix on stop), plus test corrections, led to71GREEN; that is post-implementation RED/fix evidence, not initial TDD compliance. Do not recreate or retroactively claim the missing history.
+
+Writer reports all7focused492 (71/56/180/54/74/19/38) and801fullbackend PASS; no frontend changes/gates. These are not independent acceptance. Parent native assessment remains unassessable/RDDoff. After explicit disclosure, user selected **Verificar el candidato**: independently review/test it and record the deviation; this does not waive future TDD, confer native approval or accept current bytes. Verifier `mu9yyuxx-u-viby` checks guards first, then frozen backend gates, with technical disposition separate from the permanent process finding. Future corrections must use test-only authority until RED is observed before source-edit authority is granted.
+
+#### RCA-5c independent FAIL — staged correction
+
+Verifier `mu9yyuxx-u-viby` stopped before ALL gates: later managed-worker integration bypasses safe ownership despite passing scaffold proofs. Source/test hashes stable: `f51102b4d470daeda8067d97d8a0f78fc9f3e7188858169744a4dd9d7ede8f30` / `0c533930c23425f87e01ce278bcf7f33653611067ec71ae1bfe290d8ed36682a`. Source922/tests1749=2671 authored. Writer492/801 remains unverified. No new probes or runtime actions.
+
+| Finding | Required correction evidence |
+|---|---|
+| HIGH managed workers discovered after start by enumeration/name; failures swallowed internally | Capture exact managed Thread before launch, register teardown and external escaped/unexpected-terminal errors; include immediate finish and launch failure. |
+| HIGH missing fences after clock/acquire callbacks and per-update clock | Reentrant stop permits no subsequent getMe/factory/handler/cursor effects. |
+| HIGH concurrent/reentrant release has no in-progress exclusion | At most one release call; reentrant stop cannot recurse; uncertainty retains handle and later retry is serialized. |
+| HIGH attribute/conversion/same-class/outcome faults leak raw errors | Fixed sanitized errors/status and terminal cleanup across constructor, prepare and direct poll. |
+| MEDIUM outcome ID equality accepts bool/float | Exact integer ID validated before consumer/prefix. |
+| MEDIUM poll during preparation reports failed instead of busy | Busy disposition without incumbent mutation or additional effects. |
+
+Correction Phase A `mu9z65px-v-28ma`: ONLY `services/prisma-runtime/tests/test_channel_a_lifecycle.py`; source bytes frozen. Repair fixture capture first, add bounded deterministic regressions, then return for parent source-read checkpoint without any execution. Parent then runs/authorizes exact focused RED; only afterward may source-edit authority be granted separately. No counter clearing, recursive/hanging proof, daemon-only workaround or test weakening. Forecast200–450 correction authored lines advisory. Further verification remains incomplete; these fixes will not imply automatic acceptance or erase the initial TDD deviation.
+
+Recovery checkpoint: parent observed unchanged922-line production SHA256 `f51102b4d470daeda8067d97d8a0f78fc9f3e7188858169744a4dd9d7ede8f30`; partial tests now2501 lines SHA256 `9ca05962734f2a6c6201c9742019ebd2187805224894d5fa2bd40bfbb6db31f0`. Same2new paths plus parent tracker, index empty. Generic task failure supplies no execution/completion evidence. Recovery `mua06om1-w-qr0z` may finish existing test-only work only after confirming no uncertain execution/in-flight command; otherwise stop and report. File presence does not prove RED or completion; do not replay commands blindly.
+
+Recovery `mua06om1-w-qr0z` reports no test/compile/probe or unfinished command; source/test hashes match the parent checkpoint. It disclosed cat/sed/head source reads and external Python/venv inspection outside the enumerated shell scope; these are tool-discipline deviations, not evidence of network activity. Parent reiterated read tools and narrow metadata commands. Source read found two residual harness flaws: nested captures wrap the enclosing facade and double-register threads; `launch` installs result checks after start/assertions and before actual activity teardown. Test-only continuation `mua0cipp-x-v18a` must separate real thread construction from prior-facade restoration, register expectations before launch, and validate every outcome after joins but before guard restoration, with a failure-before-release proof. No RED/GREEN inferred; +752 test lines is net growth, not measured correction-authored count.
+
+Corrected harness `mua0cipp-x-v18a` returned without execution: tests2649 SHA256 `1a6cb5526f0ade25678b4f0e22bf614103ebeb1da4ddd242926ec4e50731a641`, frozen source922 unchanged; total3571 new candidate lines. Parent read guard/activity/setup, capture/expectations/launch and all four managed proofs: real constructor/prior facade separated, expectations registered pre-start, checks run after activity joins and before restoration, including body-failure/deferred-terminal-failure proof. Bare expected-refusal start sites remain for independent review. Fresh native assessment again empty/unassessable. Independent `mua0kcka-y-dj32` has read-only authority and, only if execution safety passes, ONE exact tracker supervisor for `test_channel_a_lifecycle.py`; no other gates/reruns/probes/writes. Return observed source RED versus fixture faults and complete execution evidence before any production grant. This is not harness execution acceptance or a technical PASS yet.
+
+Independent checkpoint `mua0kcka-y-dj32`: safety PASS; exact isolated lifecycle supervisor executed ONCE, **89 tests in0.021s,10 failures/8 errors, exit1**. All3originalguard+4managedproofs passed; no unexpected dispatch/timeout/survivor/cleanup failure reported. All18 records are genuine production defects: three callback fences, reentrant/concurrent release, five constructor getter/conversion errors, same-class preparation sanitization (two assertions), two outcome getter errors, pre-poll clock conversion, bool/float IDs, and busy-during-prepare. Source/test hashes unchanged; full stdout retained without truncation. This establishes correction RED only, never initial TDD compliance or production acceptance.
+
+Verifier also found an unreached fixture error: pre-poll invalid clock must expect ZERO get_updates calls, not one. Misnamed consumer BaseException test actually exercises the handler; bare refusal start sites are owned/cancelled but lack explicit no-new-thread evidence. Test-only continuation `mua0pyy0-z-e0a0` may correct that assertion, accurately rename/retain handler coverage, add a real managed consumer exception test with observations asserted outside the swallowing callback, and require no captured-thread growth on refusal. Core harness stays unchanged. Only after static safety preservation, run exact lifecycle supervisor ONCE; report source RED and any new findings. No production edits, other gates or reruns. Parent then grants source-only authority separately.
+
+Refinement `mua0pyy0-z-e0a0` executed one authorized lifecycle gate: **90 tests in0.022s,10 failures/8 errors, exit1**. Same genuine source RED; seven harness proofs, corrected refusal sites and new actual consumer BaseException case passed. Source unchanged922/f51102b4…; tests2730 SHA256 `6059268928c5d2296897718d87acc61324741bf74502d3803167a0f8fa9b4a42`; total3652 new candidate lines. Parent read the three bounded changes. Handoff condensed traceback boilerplate despite earlier complete-output wording; original retained output availability must be distinguished from the condensed report, never reconstructed or rerun as historical evidence.
+
+SOURCE-ONLY authority `mua0xdxu-10-3bb1`: edit only `services/prisma-runtime/src/prisma_runtime/channel_a_lifecycle.py` against the observed18 records; tests and all other source frozen. Preserve acquired leases across stop fences, serialize release without foreign calls under locks, sanitize dependency faults without trusting same-class codes, validate exact outcome IDs and return busy during occupied preparation. Forecast100–300 correction diff lines advisory. Lifecycle GREEN first, then six remaining frozen focused suites and exact README full backend; no frontend/probes/py_compile/alternate launchers/process actions. Stop on safety/uncertain execution; test changes or new product decisions require a new parent grant. Fresh independent verification and parent acceptance remain mandatory before a local work-unit commit.
+
+Source-only writer `mua0xdxu-10-3bb1` returned GREEN on frozen tests: lifecycle90/0.016s, remaining56/180/54/74/19/38 = **511 focused PASS**; README backend **820/22.684s PASS**, exits0 reported. Source now1013 SHA256 `1636af1b2817ba679436f0495e8d83b6ff3ed631e14692d0d59b94c788d9c029`; tests2730/605926… unchanged; **3743 total new candidate lines**. Parent read release serialization and preparation fences. No reported dispatch/timeout/survivor/cleanup failure. Writer's nine-invocation prose conflicts with eight listed gates; read-only `mua19f0n-12-m8q9` must reconcile retained evidence without commands. +91 source net growth is NOT correction-authored diff and cannot establish compliance with the100–300 forecast.
+
+Fresh assessment again empty/unassessable/RDDoff. Full independent `mua18xaq-11-lmbr` first revalidates safety/current full contract, then may execute seven exact focused supervisors and README backend once each, stopping on failure/safety/uncertainty. Both candidate files frozen, no edits/probes/retries/front-end/operational actions. Check complete raw evidence versus condensed handoff honestly and hashes before/after; parent tracker changes separate. Writer PASS does not close findings or authorize acceptance; independent disposition and parent spotcheck still required.
+
+Read-only audit `mua19f0n-12-m8q9` reconciled retained records without commands: exactly EIGHT writer invocations, seven focused then one README backend, each once; no hidden retry/pre-GREEN failure. Nine was a prose error. +91 net-growth/forecast comparison withdrawn; correction add/delete unknown, full candidate3743 known. Raw eight GREEN outputs and previous90-test RED remain in the writer transcript; only the handoff was condensed. Audit separately disclosed a post-gate Bash grep symbol sweep outside the prescribed read-tool/metadata-only boundary; read-only, no new provider/runtime evidence. Independent verifier informed; authority unchanged.
+
+Independent interim source findings from `mua18xaq-11-lmbr` (not executed reproductions): `_validated_read_timeout` still calls unguarded `float(poll_timeout)`, so a huge exact-int poll timeout can leak OverflowError; `_settle` can apply an older refusal after another settlement finalized and overwrite STOPPED with STOPPING. Harness remains safe for the already-authorized gates. No source changes or probes; await full handoff, then test-only regressions before any source correction. Passing existing gates will not close these residual contract defects.
+
+#### RCA-5c final residual correction and acceptance
+
+Complete intermediate chronology is preserved in verified Engram topic `evidence/prisma-rca5c-correction-chronology`; compaction removes no evidence. Independent11 found atomic cursor-admission, stale settlement and huge-int conversion defects despite511/820 GREEN. Parent rejected fixture counter collisions/unrecorded waits before execution; corrected tests then produced independent95-test RED (2 failures/1 error,0.087s). Subsequent source-only correction preserved frozen tests and reached all prefix/cursor/idempotence assertions. Initial TDD noncompliance and tool-discipline deviations remain permanent.
+
+- Writer16:516 focused/825 backend PASS, eight invocations once each.
+- Independent17: source/full-contract review and seven focused suites (95/56/180/54/74/19/38=516) PASS. Its malformed full supervisor had an extra `]`: parse-time SyntaxError, no supervisor body/backend child executed; stopped without retry.
+- Explicitly reauthorized independent18: exact README backend825/24.211s PASS, canonical exit0. Combined technical PASS; nine attempts total (seven focused, one failed prelaunch, one successful backend). No unexplained retry or provider claim.
+- Parent: exact isolated lifecycle95/0.084s PASS; actual final source readback, matching hashes, expected scope/empty index and explicit untracked whitespace checks. No unexpected dispatch/timeout/surviving worker/cleanup failure.
+
+**Parent accepts RCA-5c OFFLINE only.** Source1031 SHA256 `bbb84bb7b915b2fac10a485f23992ed0a5219d52d7330f73791f02bba4d6a3ae`; tests3107 SHA256 `b55ab76039610e05fb29375e4ff20465fc7557174e478ca90ba16a907c66144e`; total4138 new/authored lines. +18 net source growth is not an authored correction diff. Native assessment remained unavailable/unassessable; no native approval. Commit identity/count follows in the progress checkpoint. Remaining RCA-5 wiring and all RCA-6 work remain incomplete.
+
+### Later coherent units — provisional order
+
+| Boundary | Work and dependencies |
+|---|---|
+| Query/context composition | Attach `enable_queries` once with owner context, existing parser and accepted bounds; preserve returned envelopes for the later publication seam. |
+| Ordered view invalidation | Add precise client intent/order and server context identity, reject late old publications, compose session removal, revalidate captured identity before phone/HMI effects. Must finish in RCA-5, not be skipped because QR could otherwise render. |
+| A policy and administration | Persist warning lead in a small A-specific policy, not DSP-only voice configuration. Use existing A admin section and backend session/CSRF. Explicit Apply/status, never auto-start on credential save. Preserve B's exact wire shape. |
+| Viewer pairing projection | Capability-scoped DTOs, no second login. Do not expose raw `as_dict()` owner/phone/generation authority fields. QR token is intentionally required for its deep link, unlike HMI capability or bot credentials. No inputless-HMI manual release control; compose internal owner removal and retain phone unlink. Freeze HTTP method/cache/idempotence details separately. |
+| Scheduler/proxy/bootstrap | Own polling/warnings and cleanup; deterministic cold-start behavior with shared A/B registry. Exact route/method proxy allowlist, origin/host checks, no-store policy and browser-routing docs. No actual service restart or provider validation in offline implementation. |
+
+### View ordering: rejected shortcuts
+
+Exporter abort/single-flight and session-client response fences do not prove server arrival order. A prior `g <= last` rejection cannot also support invalidation then publication at the same generation. The corrected mapper is still insufficient: clearing context on invalidation without advancing an ordering watermark allows a late older publication to resurrect it; same-generation publications also need explicit ordering semantics.
+
+Required design traces include old publish after newer invalidation, invalidation then replacement publish, replacement publish before delayed invalidation, same-view publication reordering, StrictMode/reset and undelivered navigation. Distinguish pairing generation, adapter epoch, client view intent/order and server captured context revision. A phone answer already delivered cannot be retracted; HMI publication still must fail closed. No new heartbeat. Detailed prior topic: `architecture/prisma-channel-a-visible-context-invalidation`.
+
+## RCA-5b acceptance and incident record
+
+Final independent verifier `mu9vwj2e-m-g4d4`: PASS, no remaining blocker. Fresh evidence:
+
+| Gate | Result |
+|---|---|
+| Backend focused | 172: registry19, lifecycle38, diagnostics37, credentials10, Telegram HTTP13, local presentation14, runtime safety32, credential HTTP9 |
+| Backend full | 730 PASS |
+| Frontend focused | 81 tests / 5 files PASS |
+| Frontend full | 1,973 tests / 202 files PASS |
+| Coverage | Statements87.17%, branches80.26%, functions86.32%, lines88.05%; all >=70 |
+| Build/lint | PASS; known canvas/grid/chunk advisories are not test failures |
+| Integrity | All 16 candidate hashes stable before/after gates; tracker changes parent-attributed |
+| Parent corroboration | Exact isolated lifecycle supervisor: 38 PASS in0.024s; source, scope, hashes, whitespace and empty-index checks |
+
+Candidate: 2,393 authored lines. Commit `7fb7edc`: 17 files, 2,413 additions +112 deletions =2,525 authored lines including tracker. Native assessment returned empty/unassessable with RDD off; independent verification was used, not native approval. Acceptance is OFFLINE only.
+
+### Historical limitations remain open as facts
+
+- Initial RCA-5b RED made an actual official Telegram `getMe` attempt using a synthetic token because `_call` was unmocked. No response does NOT prove no bytes were sent. Parent disclosed it, suspended tests and required containment. Topic: `incident/prisma-rca5b-test-network-attempt`.
+- The import-time frontend singleton also attempted a relative-URL fetch that reportedly failed in jsdom. The current singleton uses an injected inert transport before consumers import it; configured unexpected-route sentinel refusals are externally asserted.
+- Earlier lifecycle RED printed 33 tests /7 failures /1 error, then the outer tool timed out after300s. No retained PID, exit or termination proof. Non-daemon-worker causation was a hypothesis, not established fact. Later passing tests do not prove that earlier process died.
+- Parent's passive process metadata and empty lifecycle-test pattern query did not establish historical termination or attribute existing Python processes to tests. No process was stopped, signalled or restarted.
+- Failure-safe thread fixtures now cancel, release barriers, join and assert outcomes externally while the network guard remains installed. The concrete missing-teardown defect is corrected; historical uncertainty is not erased.
+- Phase A was source-only. Its requested initial34-test-only gate was not separately evidenced; later RED38 included34 pre-existing passes and final gates exercise the proof. Do not invent a missing run.
+
+### Correction provenance
+
+Initial independent source findings covered frontend refusal accounting, untracked direct runners, failed-prepare lease retention, mutable/inspection authority and key callbacks. Six-path correction was followed by a source-only FAIL on unsafe test teardown, activation after uncertain cleanup, repeated finalization and forged-handle callbacks in release.
+
+Phase A `mu9v0ruj-k-2ddd` installed guarded thread fixtures and an inert nested failure proof; parent readback preceded Phase B authorization. Phase B `mu9v6bfe-l-5url` observed registry19/2 failures and lifecycle38/4 failures with exit1 before source changes. Sticky activation-failure fencing, idempotent completed cleanup and exact release validation then passed all final gates. Writer reports remain attributed; independent final evidence is above. Full hashes, earlier containment recovery and all round details remain in Git `7fb7edc`.
+
+## TDD, containment and authorized verification patterns
+
+TDD is ON by `AGENTS.md` §8–9 and `docs/TESTING.md`: meaningful observed RED before source, then GREEN/refactor. Coverage-only additions may honestly pass already-correct source; never mutate production to fabricate RED. Preserve coverage/readability when forecasts are exceeded.
+
+New runtime tests must inject inert transports/stores. Install a per-test `requests.Session.request` record/refuse guard and assert no unexpected attempts outside production catches; always restore it. A deliberate guard proof must first install an inert lower transport floor. Track every test-owned thread before launch, register failure-safe cancellation/barrier release/join/termination assertions, and keep the guard through teardown. No sleeps as race proof, daemon-only workaround or swallowed callback assertions.
+
+Use foreground commands and preserve full stdout/exit evidence, including frontend test/file counts. Stop on unexpected dispatch, timeout or surviving worker; do not cascade gates, blindly rerun uncertain commands or infer process termination. No live probes, environment-value/secret inspection, real persisted-state access, bare unittest/pytest/launcher, extra py_compile or process intervention is implicitly authorized.
+
+### Focused backend supervisor
+
+From repository root Bash/Git Bash, use this exact owned-Python supervisor, changing only the authorized discovery pattern. Fresh copied environment and sandbox; this is environment isolation, NOT a network sandbox.
 
 ```bash
 ./services/prisma-runtime/.venv/Scripts/python.exe -B - <<'PY'
@@ -237,27 +289,32 @@ raise SystemExit(result.returncode)
 PY
 ```
 
-Full backend: exact child-only owned-Python supervisor under **Offline-safe verification** in `services/prisma-runtime/README.md`, fresh temporary state, eleven override names removed, invokes `operations/verify-local.ps1`. Parent read the exact block this session. Inspect fixtures before running; no bare unittest/pytest/gate/production launcher. This is environment isolation, NOT a network sandbox. Stop unexpected live access. Incidental ignored test caches authorized. No environment values/secrets/real persisted state inspection. No runtime harness needed for this standalone mocked transport; operational acceptance remains pending.
+Full backend: exact child-only owned-Python supervisor under **Offline-safe verification** in `services/prisma-runtime/README.md`; fresh temporary state, eleven override names removed, invoking `operations/verify-local.ps1`. Read the exact block before running. Incidental ignored test/build caches are allowed; no runtime harness with actual bots is required or authorized for mocked boundaries.
 
-Frontend when its units change: `npm --prefix hmi-app test -- <focused paths>`, `npm --prefix hmi-app run test:coverage`, `npm --prefix hmi-app run build`, `npm --prefix hmi-app run lint`. All coverage thresholds70 enforced. `git diff --check` plus readback/whitespace checks on NEW untracked files. No frontend rerun required for transport-only unit.
+Frontend when its unit changes: `npm --prefix hmi-app test -- <frozen focused paths>`, `npm --prefix hmi-app run test:coverage`, `npm --prefix hmi-app run build`, `npm --prefix hmi-app run lint`. All four coverage thresholds70 enforced. No frontend rerun is required for a backend-only standalone unit unless the frozen verification contract says otherwise.
 
-## Historical acceptance evidence (not rerun this session)
+Parent assesses every returned writer diff, uses the returned plan (unassessable treated as high risk), obtains independent verification where required, and spotchecks a reported command before delivery. Check Git scope/index/whitespace and new untracked-file contents explicitly. Never treat a child's PASS as parent acceptance or native review authority.
 
-Full failed rounds, corrections and exact commands retained in Git `c411687:odd/tasks/prisma-channel-a-remote.md`; table records final disposition without erasing limitations.
+## Earlier acceptance evidence — historical, not fresh gates
 
-| Unit | Accepted evidence and boundary |
+| Unit | Final evidence |
 |---|---|
-| RCA-1 e32bef1 | Final focused21 independently passed; full298 writer-observed (prior294 independent). Overflow/expiry/deep-copy owner safety corrected;333 source/test lines. |
-| RCA-2 0fdfe0f | Independent43focused/341full and deterministic race/rollback/overflow probes PASS after correction;1508 source/test lines. |
-| RCA-3a 51ecd70 | Independent136focused/477full and residual probes PASS after three correction rounds;3059 source/test lines. Display-label, capacity, ID bounds, uncertain controls, expiry and nonce/ack ordering closed. |
-| RCA-3b d2fc349 | Independent74query/159bot/574full and14 probe groups PASS after corrections;2218 source/test lines. Validator ordering/freshness, one-shot attachment and property exception findings closed. |
-| RCA-3c 42edf8b | Independent54pairing/180bot/606full and12 probe groups PASS;619 source/test lines. Single-attempt warning reservation, no scheduler. |
-| RCA-4a 465321b | Independent store10/HTTP9/backend611/frontend68focused/full1950in202files plus coverage/build/lint PASS after durable guard correction. Mutation probes caught both B calls;320 source/test lines. Coverage L87.97/B80.17/S87.09/F86.22%. |
-| RCA-4b f3ac2cb | Independent14focused/625full PASS;318 source/test lines. Missing-master real empty-path rejection tested with external I/O guards; failed initial task had no reliable completion evidence until recovered. |
-| RCA-4c 713f7ae | Independent102focused/6files twice, frontend1966/202files, coverage/build/lint PASS;518 source/test lines across8paths. L88.05%(12836/14578),B80.23%(10024/12493),F86.32%(3213/3722),S87.16%(13588/15588). Root proxy executed by Vitest/ESLint, outside tsc scope. |
+| RCA-1 `e32bef1` | Focused21 independent, full298 writer-observed; owner/age/overflow safety corrected. |
+| RCA-2 `0fdfe0f` | Independent43focused/341full plus race/rollback/overflow probes. |
+| RCA-3a `51ecd70` | Independent136focused/477full after three correction rounds;3059 source/test lines. |
+| RCA-3b `d2fc349` | Independent74query/159bot/574full and14 probe groups;2218 source/test lines. |
+| RCA-3c `42edf8b` | Independent54pairing/180bot/606full and12 probe groups;619 source/test lines. |
+| RCA-4a `465321b` | Store10/HTTP9/backend611, frontend68focused/1950full202files, coverage/build/lint;320 source/test lines. |
+| RCA-4b `f3ac2cb` | Independent14focused/625full;318 source/test lines, missing-master rejection before I/O. |
+| RCA-4c `713f7ae` | Independent102focused/6files twice, frontend1966/202, coverage/build/lint;518 source/test lines. Root proxy tested/linted outside tsc scope. |
+| RCA-5a `6301e97` | Independent56focused/681full and parent56. Four source defects plus result-extraction coverage closed;359 source+919 test lines. |
 
-Prior native assessments sometimes failed/schema-incompatible; independent verification used, no native approval invented. Prior frontend advisories: canvas getContext, unresolved grid.svg and >500kB bundle. None of these counts proves live Telegram/Gemini, runtime forwarding, production or full remote-A acceptance.
+None of these counts proves live provider, production, runtime forwarding or complete remote-A acceptance.
 
-## Delivery
+## Delivery accounting
 
-Strategy `ask-on-risk`, user-selected chain `feature-branch-chain`; local work-unit commits authorized, no branch/push/PR authorization. Original2270–4300 forecast exceeded. Baseline `6e05e38`; eight code units total9206 authored lines including tracker; documentary closure c411687 adds62 =>9268 before this session. Breakdown408/1534/3091/2244/641/354/340/594. Update actual running count from commits, not guesses. Coherent oversized units retain tests/readability; future PR size exception/slicing remains unresolved and no PR opened. Proposed slices: freshness, pairing, bot, protected credentials, wiring, QR, transcript, final integration. This tracker consolidation creates additional documentary diff and is not counted as size savings.
+Strategy: `ask-on-risk`, user-selected `feature-branch-chain`. Local work-unit commits authorized; no branch/push/PR authorization. Original2270–4300 total forecast is obsolete; reforecast coherent remaining units and preserve tests/readability.
+
+Fresh cumulative commit accounting from `6e05e38` through `7fb7edc`: **12,798 additions +465 deletions =13,263 authored lines**, including documentary work. RCA-5a commit contributed1,470; RCA-5b contributed2,525. Current planning consolidation is subsequent uncommitted documentary work, not counted yet and not a size saving.
+
+Future PR size exception/slicing remains unresolved. Do not open a giant PR or trim coverage to meet a budget. Proposed review boundaries remain freshness, pairing, dialogue, protected credentials, transport/exclusion/runtime wiring, QR, transcript and final integration. Close each accepted ODD unit with its coherent local commit; record the actual hash/count afterward in the checkpoint rather than self-editing that commit.
