@@ -2,18 +2,20 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.10
+> **Versión documental:** 2.0.11
 >
 > **Fecha:** 2026-09-20
 >
-> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`); despliegue productivo, aceptación integral y el trabajo posterior del asistente siguen pendientes.
+> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`). Se suma una aceptación **acotada** del Canal A sobre un widget simulado (contexto → respuesta → voz) y el hallazgo de que el `/status` de Telegram lee un archivo de instalación obsoleto. Despliegue productivo, aceptación integral, máquinas reales y el trabajo posterior del asistente siguen pendientes.
 >
-> **Alcance de esta versión:** cierre de la sesión de diagnóstico del sondeo de Telegram, no del
-> recorrido local completo. Se registran el diagnóstico saneado de salud, la corrección del esquema
-> estricto administrativo, la recuperación del sondeo tras la corrección del token por parte del
-> usuario y la aceptación real de UI del `Apply`. El próximo paso vigente (§11.1) deja de ser solo
-> launcher y credenciales sin probar: pasa a la prueba de mensaje propiedad del usuario y a la
-> verificación fresca observable. `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados. Cambio
+> **Alcance de esta versión:** cierre de una sesión de validación acotada del Canal A y de
+> conciliación de implementación, no del recorrido local completo. Se registran la aceptación
+> acotada `contexto → respuesta → voz` sobre un widget simulado (voz reportada por el usuario, no
+> escuchada por el agente), la reconciliación de que el snapshot HMI vive en un registro en memoria
+> por documento mientras Telegram lee el archivo de instalación, y la decisión del usuario de
+> **aplazar el Canal B** y priorizar la validación del Canal A existente antes de planificar sus
+> mejoras. El próximo paso vigente (§11.1) pasa a **planificar** las mejoras completas del Canal A,
+> no a implementarlas. `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados. Cambio
 > exclusivamente documental: no ejecuta servicios, pruebas ni proveedores.
 
 ## 1. Objetivo y estado general
@@ -43,7 +45,7 @@ pero su validación productiva sigue pendiente.
 | Voz HMI y orbe | Implementados con evidencia histórica parcial | Hubo aceptación manual exitosa; continuidad, audibilidad humana, cancelación y recuperación no están aceptadas de forma integral. |
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
-| Canal B — Telegram autónomo | Pendiente | El bot actual consulta el snapshot visible y publica un evento global de voz; no es el canal de texto aislado aprobado. |
+| Canal B — Telegram autónomo | Pendiente y aplazado por el usuario el 2026-09-20 | Lee el archivo de instalación y responde **solo texto privado** por chat; **no** publica eventos de voz en la HMI y su fuente de datos autónoma sigue pendiente (conciliación de fuentes: §4.2; checkpoint vigente: §11.1). |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
 | Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Prisma y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
@@ -174,6 +176,22 @@ El snapshot persiste sin una caducidad obligatoria después de cerrar el navegad
 Existe un único evento más reciente, también global. Esta combinación puede producir
 respuestas obsoletas, consumo duplicado o interferencia entre contextos. Debe tratarse
 como una limitación pendiente, no como contrato objetivo.
+
+**Conciliación de implementación 2.0.11 (2026-09-20).** El flujo anterior se conserva como
+evidencia histórica. La inspección de esta sesión precisa dos hechos que cambian cómo se lee
+el estado actual:
+
+- El `POST` de snapshot de la HMI persiste **por documento** en un registro en memoria del
+  backend (`HmiSessionRegistry`), mientras que el `/status` de Telegram y sus respuestas leen el
+  archivo de instalación (`JsonFileStore`), para el que no se localizó ningún escritor de runtime
+  vigente. En consecuencia, un `health.snapshotTimestamp` o un `/status` de Telegram obsoleto
+  **no** son evidencia del contexto HMI de la sesión.
+- La HMI **no** tiene UI de pregunta ni micrófono: el orbe es presentación hasta que llega un
+  evento. `/local/ask` (parser determinístico) publica un evento de voz por propietario y el
+  listener de la aplicación inicia el TTS automáticamente. Telegram, en cambio, responde **solo
+  texto** desde el archivo de instalación separado y **no** publica eventos de voz en la HMI.
+
+El detalle y la evidencia están en §11.1; el Canal B queda aplazado por decisión del usuario.
 
 ### 4.3 Integración HMI actual
 
@@ -878,7 +896,87 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (2026-09-19, conciliado 2026-09-20)
+### 11.1 Próximo paso vigente (2026-09-19, conciliado 2026-09-20; checkpoint vigente 2.0.11)
+
+**Checkpoint vigente 2.0.11 (2026-09-20).** Sesión de validación acotada del Canal A y de
+conciliación de implementación. Este cierre es exclusivamente documental: no hay cambios de código
+fuente. La sesión de validación sí se ejecutó: dos GET pasivos de salud y una prueba de voz manual
+autorizada por el usuario; no se reejecutaron suites automatizadas ni builds.
+
+Decisiones del usuario:
+
+- **Canal B aplazado.** Se difiere tras comprobar que el procesamiento y la semántica de los
+  widgets hacen insuficiente el consumo directo de endpoints crudos. La secuencia preferida pasa
+  a validar el Canal A existente y, solo después del éxito, **planificar** sus mejoras completas.
+  Una futura frontera semántica compartida debe preservar la interpretación y la configuración de
+  cada widget; no debe duplicar reglas arbitrarias ni copiar globalmente snapshots de sesión.
+- **Una sola consulta técnica autorizada** desde la sesión HMI existente, con posible TTS pagado
+  de Gemini. Esa autorización de prueba ya está consumida: cualquier llamada pagada adicional
+  requiere aprobación explícita nueva.
+
+Evidencia observada en esta sesión:
+
+- Dos GET pasivos locales respondieron accesibles: presentación `127.0.0.1:5057` con `ok` y
+  `ready:true`; voz `127.0.0.1:5056` con `ok` y `ready:true`, `providerStatus.configured:true` y
+  `verified:false` **antes** de la prueba de voz.
+- El usuario emparejó el bot con `/status` → `/start` y luego `/status` respondió
+  `2026-09-01T01:35:47.423Z`, desactualizado. Junto con el mapeo de fuentes de §4.2, esto confirma
+  que ese `/status` y `health.snapshotTimestamp` **no** son evidencia del contexto HMI.
+- El usuario confirmó el dashboard visible. Capturas de navegador mostraron `snapshot` 202
+  recurrente y `latest` `204` sin eventos **antes** de la consulta; después se recibió el evento de
+  voz. Marcas de tiempo de request `2026-09-20T02:54:03.107Z` y `2026-09-20T03:02:38.106Z`.
+- El widget de snapshot mostró lote 65 %, `unit` en %, y `dataSummary.source` `simulated`,
+  coherente con el 65 % visible. Una marca de generación fresca **no** equivale a frescura
+  industrial real: la fuente declarada es simulada.
+- La HMI no tiene UI de pregunta ni micrófono; el orbe es presentación hasta que llega un evento.
+  `/local/ask` ejecuta el parser determinístico y produce un evento de voz por propietario; el
+  listener de la aplicación inicia el TTS automáticamente.
+- Consulta autorizada: se usó temporalmente el singleton exacto del módulo Vite ya cargado desde
+  DevTools, con guarda y sin reenvío, sin cambios de código fuente ni extracción de tokens. La
+  revisión de fuente advirtió que el fallback de audio del backend puede producir más de una
+  llamada al proveedor; el conteo y la facturación **no** fueron inspeccionados. El usuario ejecutó
+  la consulta: la captura muestra respuesta 65 %, `source` `prisma_local_snapshot_parser`, evento
+  de voz de la HMI con la misma respuesta y orbe activo, y el usuario reporta «funcionó perfecto».
+  El éxito de audio es **reportado por el usuario, no escuchado por el agente**.
+
+Alcance de la aceptación — lo que sí cierra y lo que no:
+
+- Cierra una aceptación **acotada** de `contexto → respuesta → voz` sobre **un widget simulado**
+  desde una sesión HMI existente.
+- **No** cierra paridad completa, E2E completo, máquinas reales, aislamiento multi-sesión, todos
+  los widgets, cancelación, recuperación, micrófono, navegación ni producción.
+- La fuente industrial fue identificada en la UI, pero el `GET` se canceló sin consentimiento:
+  **no** se probó ningún endpoint industrial y no se documentan direcciones de red privada ni
+  credenciales. Sigue siendo trabajo futuro y **no** es una corrección del Canal B.
+- No hubo cambios de código, configuración ni credenciales; no se reejecutaron pruebas ni builds.
+  Las cifras previas de **285 backend / 38 frontend** pertenecen al commit anterior y no se
+  volvieron a correr aquí.
+
+Próximo paso vigente (2.0.11): **planificar, no implementar**.
+
+1. Leer este §11.1 vigente 2.0.11 y los topics de Engram
+   `checkpoint/prisma-channel-a-acceptance`, `decision/prisma-channel-a-first` y
+   `architecture/prisma-shared-data-semantics`; inspeccionar Git.
+2. Planificar las mejoras completas del Canal A: mapear lo entregado y lo faltante, y acordar un
+   siguiente incremento acotado. La planificación **no** es permiso de implementación general.
+3. No resetear administrador, clave ni almacén; no reaplicar las correcciones cerradas del
+   diagnóstico de Telegram; no hacer llamadas pagadas nuevas. El Canal B queda aplazado,
+   `PW-002`, `PW-003` y `PW-004` siguen abiertos, y el `PW-003` amplio del asistente no se cierra.
+   No actualizar ahora los estados del índice de [`../PENDING_WORK.md`](../PENDING_WORK.md).
+
+No hace falta repetir el `/status` ni la prueba pagada para reanudar.
+
+Cierre de esta sesión: **un solo commit local de documentación**, sin push ni PR, sobre
+`feat/prisma-telegram-credentials`. Base previa al cierre: `6f7ae5f` (único archivo sucio:
+`.gitignore`, propiedad del usuario y excluido). El único archivo autorizado en este cierre es
+este documento. El hash observado del commit se registra en Engram **después** de confirmarlo, y
+su localizador en el repositorio es
+`git log -1 --format=%H -- docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md`; esta versión documental no
+incrusta un SHA autorreferencial ni afirma que el commit ya exista.
+
+**Nota de vigencia 2.0.11:** los bloques 2.0.10 rotulados «histórico» que aparecen más abajo
+—próximo paso 2.0.10, límites del registro y cierre acordado— se conservan con su fecha, pero
+quedan **sustituidos para próximas acciones** por el checkpoint 2.0.11 de arriba.
 
 **Registro 2.0.9 (histórico, se conserva con su fecha):** comprobar el funcionamiento local de punta
 a punta, sin borrar la instalación vieja ni regenerar claves. Este registro solo documenta el próximo
@@ -951,11 +1049,12 @@ Cerrado en esta sesión (incidente de sondeo de Telegram, sobre `feat/prisma-tel
   con salud 1/1 y éxito registrado el 2026-09-20T01:03:07.752649Z. Ningún agente envió mensajes
   salientes: las acciones de proveedor las inició el usuario desde la UI o Telegram.
 
-Lo que **no** está cerrado: la comprobación local de punta a punta. El próximo paso vigente ya no es
-launcher y credenciales sin probar, sino la prueba de mensaje propiedad del usuario y la verificación
-fresca observable.
+**Registro 2.0.10 (histórico):** lo que **no** estaba cerrado era la comprobación local de punta a
+punta. En ese registro, el próximo paso vigente ya no era launcher y credenciales sin probar, sino la
+prueba de mensaje propiedad del usuario y la verificación fresca observable.
 
-Próximo paso vigente (2026-09-20):
+**Próximo paso vigente 2.0.10 (histórico, sustituido para próximas acciones; se conserva con su
+fecha):**
 
 1. Recuperar este maestro, el tracker
    [`../../odd/tasks/prisma-telegram-poll-diagnostics.md`](../../odd/tasks/prisma-telegram-poll-diagnostics.md)
@@ -965,14 +1064,14 @@ Próximo paso vigente (2026-09-20):
    emparejamiento). Esta prueba de mensaje **no fue ejecutada ni observada** todavía.
 3. Verificar después una captura fresca del dashboard visible, la consulta y la voz.
 
-Límites vigentes: la última captura observada del dashboard (1 de septiembre) está vencida y no prueba
+**Límites del registro 2.0.10 (histórico):** la última captura observada del dashboard (1 de septiembre) está vencida y no prueba
 una sesión nueva; Gemini está configurado pero su verificación no se realizó, y las llamadas pagadas
 siguen requiriendo autorización explícita separada. El usuario permite reinicios necesarios y pruebas
 mínimas contra su propio bot, no contacto arbitrario ni reinicio de claves. Los refinamientos de UI
 pedidos ahora esperan a la primera aceptación local; `PW-002`, `PW-003` y `PW-004` continúan aplazados
 y [`../PENDING_WORK.md`](../PENDING_WORK.md) sigue siendo la autoridad de descubrimiento, sin cambios.
 
-El cierre acordado de esta sesión es **un commit local completo** con código, pruebas y documentación
+**Registro 2.0.10 (histórico, no aplica a este cierre):** el cierre acordado de esa sesión fue **un commit local completo** con código, pruebas y documentación
 juntos, con excepción de tamaño aceptada explícitamente por el usuario (~1300+ líneas, en su mayoría
 la matriz de regresión); sin push ni PR. La línea 2.0.9 de arriba, con `HEAD` `f964113`, se conserva
 como historia. El `HEAD` previo al cierre 2.0.10 es `fe39ffe`; el hash observado del commit que
@@ -981,6 +1080,30 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.11 — 2026-09-20
+
+- Aceptación acotada del Canal A sobre un widget simulado: `contexto → respuesta → voz` desde una
+  sesión HMI existente. Respuesta 65 % (`source` `prisma_local_snapshot_parser`), evento de voz con
+  la misma respuesta y orbe activo; el éxito de audio es reportado por el usuario, no escuchado por
+  el agente. **No** cierra paridad, E2E completo, máquinas reales, multi-sesión, todos los widgets,
+  cancelación, recuperación, micrófono ni navegación.
+- Reconciliación de implementación: el `POST` de snapshot HMI persiste por documento en un registro
+  en memoria (`HmiSessionRegistry`), mientras que el `/status` de Telegram y sus respuestas leen el
+  archivo de instalación (`JsonFileStore`) sin escritor de runtime vigente localizado. Un `/status`
+  obsoleto (`2026-09-01T01:35:47.423Z`) o un `health.snapshotTimestamp` no son evidencia del
+  contexto HMI (ver §4.2).
+- Canal B aplazado por decisión del usuario: el consumo directo de endpoints crudos no alcanza por
+  el procesamiento y la semántica de los widgets. Se prioriza validar el Canal A existente y
+  **planificar** sus mejoras completas después del éxito; la planificación no es permiso de
+  implementación.
+- Prueba industrial no realizada: la fuente se identificó en la UI pero el `GET` se canceló sin
+  consentimiento; no se documentan direcciones privadas ni credenciales. Sin cambios de código,
+  configuración ni credenciales y sin reejecutar pruebas ni builds.
+- Próximo paso vigente actualizado (§11.1): planificar las mejoras del Canal A; no resetear
+  administrador, clave ni almacén, no reaplicar correcciones cerradas de Telegram y no emitir
+  llamadas pagadas nuevas. `PW-002`, `PW-003` y `PW-004` siguen abiertos.
+- Cierre: un solo commit local de documentación, sin push ni PR; base previa `6f7ae5f`.
 
 ### 2.0.10 — 2026-09-20
 
