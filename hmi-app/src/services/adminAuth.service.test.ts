@@ -179,7 +179,11 @@ describe('AdminAuthClient', () => {
             .mockResolvedValueOnce(jsonResponse(SESSION))
             .mockResolvedValueOnce(jsonResponse({
                 ok: true,
-                providers: { gemini: { configured: false }, telegram: { configured: true } },
+                providers: {
+                    gemini: { configured: false },
+                    telegram: { configured: true },
+                    telegram_channel_a: { configured: false },
+                },
             }))
             .mockResolvedValueOnce(jsonResponse({ ok: true, provider: 'gemini', configured: true }))
             .mockResolvedValueOnce(new Response(null, { status: 204 }))
@@ -195,7 +199,7 @@ describe('AdminAuthClient', () => {
         await client.session();
 
         await expect(client.credentialMetadata()).resolves.toMatchObject({
-            gemini: { configured: false }, telegram: { configured: true },
+            gemini: { configured: false }, telegram: { configured: true }, telegram_channel_a: { configured: false },
         });
         await client.saveCredential('gemini', secret);
         await client.deleteCredential('gemini');
@@ -229,7 +233,11 @@ describe('AdminAuthClient', () => {
         client.clearPrivateSession();
         releaseMetadata(jsonResponse({
             ok: true,
-            providers: { gemini: { configured: true }, telegram: { configured: true } },
+            providers: {
+                gemini: { configured: true },
+                telegram: { configured: true },
+                telegram_channel_a: { configured: false },
+            },
         }));
 
         await expect(metadata).rejects.toMatchObject({ name: 'AbortError' });
@@ -257,6 +265,64 @@ describe('AdminAuthClient', () => {
         expect(fetcher).toHaveBeenCalledWith('/api/prisma/health', expect.objectContaining({
             method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
         }));
+    });
+
+    it('accepts the exact three-provider metadata and channel A mutation on generic routes', async () => {
+        const secret = '  synthetic-channel-a\n';
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({
+                ok: true,
+                providers: {
+                    gemini: { configured: false },
+                    telegram: { configured: true },
+                    telegram_channel_a: { configured: false },
+                },
+            }))
+            .mockResolvedValueOnce(jsonResponse({ ok: true, provider: 'telegram_channel_a', configured: true }));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.credentialMetadata()).resolves.toEqual({
+            gemini: { configured: false },
+            telegram: { configured: true },
+            telegram_channel_a: { configured: false },
+        });
+        await expect(client.saveCredential('telegram_channel_a', secret)).resolves.toEqual({
+            provider: 'telegram_channel_a', configured: true,
+        });
+        expect(fetcher.mock.calls[2]?.[0]).toBe('/api/prisma/admin/credentials/telegram_channel_a');
+        expect(fetcher.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
+            method: 'PUT',
+            body: JSON.stringify({ secret }),
+            headers: expect.objectContaining({
+                'X-CSRF-Token': SESSION.csrfToken,
+                'Content-Type': 'application/json',
+            }),
+        }));
+    });
+
+    it('fails closed when metadata omits or renames the third provider', async () => {
+        const missing = new AdminAuthClient(vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+            ok: true,
+            providers: { gemini: { configured: false }, telegram: { configured: true } },
+        })));
+        await expect(missing.credentialMetadata()).rejects.toMatchObject({
+            code: 'ADMIN_CREDENTIAL_RESPONSE_INVALID',
+        });
+
+        const extra = new AdminAuthClient(vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+            ok: true,
+            providers: {
+                gemini: { configured: false },
+                telegram: { configured: true },
+                telegram_channel_a: { configured: false },
+                telegram_channel_b: { configured: false },
+            },
+        })));
+        await expect(extra.credentialMetadata()).rejects.toMatchObject({
+            code: 'ADMIN_CREDENTIAL_RESPONSE_INVALID',
+        });
     });
 
     it('marks Telegram stop timeout as a committed deletion without replaying it', async () => {

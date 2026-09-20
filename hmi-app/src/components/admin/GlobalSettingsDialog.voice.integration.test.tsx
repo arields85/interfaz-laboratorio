@@ -146,7 +146,9 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             isHydrated: true,
         });
         vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
-            gemini: { configured: false }, telegram: { configured: false },
+            gemini: { configured: false },
+            telegram: { configured: false },
+            telegram_channel_a: { configured: false },
         });
         vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
             enabled: true,
@@ -163,7 +165,11 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             if (input === '/api/prisma/admin/credentials') {
                 return new Response(JSON.stringify({
                     ok: true,
-                    providers: { gemini: { configured: false }, telegram: { configured: false } },
+                    providers: {
+                        gemini: { configured: false },
+                        telegram: { configured: false },
+                        telegram_channel_a: { configured: false },
+                    },
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
             if (input === '/api/prisma/health') {

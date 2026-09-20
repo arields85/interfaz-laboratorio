@@ -25,7 +25,10 @@ class CredentialHttpTests(unittest.TestCase):
         self.credentials = Mock()
         self.session = SimpleNamespace(csrf_token="csrf-token", username="admin")
         self.auth.read_session.return_value = self.session
-        boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
+        self.telegram_manager = Mock()
+        boundary = AdminHttpBoundary(
+            self.auth, credential_service=self.credentials, telegram_manager=self.telegram_manager
+        )
         self.client = create_app(
             JsonFileStore(self.root / "snapshot.json"),
             VoiceEventStore(),
@@ -75,11 +78,18 @@ class CredentialHttpTests(unittest.TestCase):
         self.credentials.assert_not_called()
 
     def test_metadata_only_get_and_committed_put_delete_never_echo_secret_or_set_cookie(self) -> None:
-        self.credentials.status.return_value = {"gemini": True, "telegram": False}
+        self.credentials.status.return_value = {"gemini": True, "telegram": False, "telegram_channel_a": False}
         response = self.client.get("/api/prisma/admin/credentials", environ_overrides=self.environ)
         self.assertEqual(
             response.get_json(),
-            {"ok": True, "providers": {"gemini": {"configured": True}, "telegram": {"configured": False}}},
+            {
+                "ok": True,
+                "providers": {
+                    "gemini": {"configured": True},
+                    "telegram": {"configured": False},
+                    "telegram_channel_a": {"configured": False},
+                },
+            },
         )
         self.assertNotIn("Set-Cookie", response.headers)
         self.assertNotIn(SECRET, response.get_data(as_text=True))
@@ -169,6 +179,46 @@ class CredentialHttpTests(unittest.TestCase):
             "/api/prisma/admin/credentials-lookalike", environ_overrides=self.environ
         )
         self.assertNotEqual(lookalike.headers.get("Cache-Control"), "no-store")
+
+    def test_channel_a_writes_use_the_generic_store_and_never_invoke_telegram_manager(self) -> None:
+        saved = self.client.put(
+            "/api/prisma/admin/credentials/telegram_channel_a",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.get_json(), {"ok": True, "provider": "telegram_channel_a", "configured": True})
+        self.credentials.set_secret.assert_called_once_with("telegram_channel_a", SECRET)
+        self.assertNotIn(SECRET, saved.get_data(as_text=True))
+        self.assertEqual(self.telegram_manager.mock_calls, [])
+        deleted = self.client.delete(
+            "/api/prisma/admin/credentials/telegram_channel_a",
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(deleted.status_code, 204)
+        self.credentials.delete_secret.assert_called_once_with("telegram_channel_a")
+        self.assertEqual(self.telegram_manager.mock_calls, [])
+
+    def test_telegram_provider_keeps_the_manager_special_case(self) -> None:
+        self.telegram_manager.delete_secret.return_value = True
+        saved = self.client.put(
+            "/api/prisma/admin/credentials/telegram",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.get_json(), {"ok": True, "provider": "telegram", "configured": True})
+        self.telegram_manager.set_secret.assert_called_once_with(SECRET)
+        self.credentials.set_secret.assert_not_called()
+        deleted = self.client.delete(
+            "/api/prisma/admin/credentials/telegram",
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(deleted.status_code, 204)
+        self.telegram_manager.delete_secret.assert_called_once_with()
+        self.credentials.delete_secret.assert_not_called()
 
     def test_storage_failures_are_sanitized_and_do_not_leak_secret(self) -> None:
         self.credentials.set_secret.side_effect = CredentialUnavailable("sensitive path and key detail")

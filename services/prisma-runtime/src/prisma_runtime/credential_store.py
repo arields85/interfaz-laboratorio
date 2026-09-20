@@ -14,7 +14,7 @@ from typing import Callable, NamedTuple
 
 
 FORMAT_VERSION = 1
-ALLOWED_PROVIDERS = ("gemini", "telegram")
+ALLOWED_PROVIDERS = ("gemini", "telegram", "telegram_channel_a")
 MAX_SECRET_BYTES = 4096
 NONCE_BYTES = 12
 TAG_BYTES = 16

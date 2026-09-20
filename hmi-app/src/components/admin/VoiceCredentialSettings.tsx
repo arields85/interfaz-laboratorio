@@ -53,7 +53,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     const [deleteProvider, setDeleteProvider] = useState<CredentialProvider | null>(null);
     const [feedback, setFeedback] = useState<Feedback>(null);
     const panelGenerationRef = useRef(0);
-    const secretRevisionRef = useRef<Record<CredentialProvider, number>>({ gemini: 0, telegram: 0 });
+    const secretRevisionRef = useRef<Record<CredentialProvider, number>>({ gemini: 0, telegram: 0, telegram_channel_a: 0 });
     const dialogRevisionRef = useRef(0);
     const unavailable = Boolean(administration.error);
     const disabled = !authenticated || !administration.data || unavailable || administration.pendingAction !== null;

@@ -9,22 +9,47 @@ import {
 } from './adminCredential.types';
 
 describe('admin credential domain', () => {
-    it('parses exact metadata and mutation envelopes', () => {
-        expect(parseCredentialMetadata({
-            ok: true,
-            providers: { gemini: { configured: false }, telegram: { configured: true } },
-        })).toEqual({ gemini: { configured: false }, telegram: { configured: true } });
+    const exactProviders = {
+        gemini: { configured: false },
+        telegram: { configured: true },
+        telegram_channel_a: { configured: false },
+    };
+
+    it('parses exact three-provider metadata and mutation envelopes', () => {
+        expect(parseCredentialMetadata({ ok: true, providers: exactProviders })).toEqual(exactProviders);
         expect(parseCredentialMutation({ ok: true, provider: 'telegram', configured: true })).toEqual({
             provider: 'telegram', configured: true,
+        });
+        expect(parseCredentialMutation({ ok: true, provider: 'telegram_channel_a', configured: false })).toEqual({
+            provider: 'telegram_channel_a', configured: false,
         });
     });
 
     it('rejects malformed or unknown metadata instead of coercing it', () => {
         expect(() => parseCredentialMetadata({
             ok: true,
-            providers: { gemini: { configured: 'yes' }, telegram: { configured: true } },
+            providers: { ...exactProviders, gemini: { configured: 'yes' } },
         })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
         expect(() => parseCredentialMutation({ ok: true, provider: 'unknown', configured: true }))
+            .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    });
+
+    it('fails closed on missing, extra, or nonboolean channel A metadata', () => {
+        const malformed = [
+            { gemini: exactProviders.gemini, telegram: exactProviders.telegram },
+            { ...exactProviders, telegram_channel_b: { configured: false } },
+            { ...exactProviders, telegram_channel_a: { configured: 'yes' } },
+        ];
+        for (const providers of malformed) {
+            expect(() => parseCredentialMetadata({ ok: true, providers }))
+                .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+        }
+    });
+
+    it('rejects dishonest channel A mutation envelopes', () => {
+        expect(() => parseCredentialMutation({ ok: true, provider: 'telegram_channel_b', configured: false }))
+            .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+        expect(() => parseCredentialMutation({ ok: true, provider: 'telegram_channel_a', configured: 'yes' }))
             .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     });
 

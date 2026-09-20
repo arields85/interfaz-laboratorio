@@ -9,7 +9,11 @@ import { AdminAuthClient, AdminAuthError } from '../../services/adminAuth.servic
 import { useAuthStore } from '../../store/auth.store';
 import VoiceCredentialSettings from './VoiceCredentialSettings';
 
-const metadata = { gemini: { configured: false }, telegram: { configured: true } };
+const metadata = {
+    gemini: { configured: false },
+    telegram: { configured: true },
+    telegram_channel_a: { configured: false },
+};
 const health = {
     enabled: true, configured: true, running: true, verified: false,
     desiredGeneration: 2, appliedGeneration: 1, restartRequired: true,
@@ -170,7 +174,11 @@ describe('VoiceCredentialSettings', () => {
             throw new AdminAuthError('TELEGRAM_STOP_TIMEOUT', 409, true);
         });
         const credentialMetadata = vi.fn()
-            .mockResolvedValueOnce({ gemini: { configured: false }, telegram: { configured: false } })
+            .mockResolvedValueOnce({
+                gemini: { configured: false },
+                telegram: { configured: false },
+                telegram_channel_a: { configured: false },
+            })
             .mockRejectedValue(new AdminAuthError('CREDENTIAL_STORAGE_UNAVAILABLE', 503));
         const { client } = renderSettings({
             credentialMetadata,
@@ -230,6 +238,16 @@ describe('VoiceCredentialSettings', () => {
         await waitFor(() => expect(input).toHaveValue(''));
         expect(screen.getByRole('alert')).toHaveTextContent('No se pudo completar la operación con el servicio local.');
         expect(screen.queryByText('raw-provider-detail')).not.toBeInTheDocument();
+    });
+
+    it('keeps channel A metadata loaded without exposing a premature credential card', async () => {
+        renderSettings();
+        await waitFor(() => expect(screen.getByRole('group', { name: 'Gemini' })).toBeInTheDocument());
+
+        expect(screen.getAllByRole('group')).toHaveLength(2);
+        expect(screen.queryByRole('group', { name: /channel[ _-]?a/i })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(/channel[ _-]?a/i)).not.toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: 'Guardar credencial' })).toHaveLength(2);
     });
 
     it('renders loading as unknown instead of negative provider facts', async () => {

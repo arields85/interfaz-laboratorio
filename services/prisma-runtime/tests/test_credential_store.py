@@ -10,6 +10,7 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from prisma_runtime.credential_store import (
+    SCHEMA_VERSION,
     CredentialCipher,
     CredentialService,
     CredentialUnavailable,
@@ -67,7 +68,7 @@ class CredentialStoreTests(unittest.TestCase):
             CredentialCipher(OTHER_KEY).decrypt(first)
 
     def test_empty_store_is_bound_to_master_key_and_metadata_is_boolean_only(self) -> None:
-        self.assertEqual(self.service().status(), {"gemini": False, "telegram": False})
+        self.assertEqual(self.service().status(), {"gemini": False, "telegram": False, "telegram_channel_a": False})
         wrong_key = self.root / "keys" / "wrong.key"
         wrong_key.write_bytes(OTHER_KEY)
         with self.assertRaises(CredentialUnavailable):
@@ -77,12 +78,12 @@ class CredentialStoreTests(unittest.TestCase):
         service = self.service()
         service.set_secret("gemini", SECRET)
         self.assertEqual(service.get_secret("gemini"), SECRET)
-        self.assertEqual(service.status(), {"gemini": True, "telegram": False})
+        self.assertEqual(service.status(), {"gemini": True, "telegram": False, "telegram_channel_a": False})
         service.set_secret("gemini", "replacement")
         self.assertEqual(service.get_secret("gemini"), "replacement")
         service.delete_secret("gemini")
         service.delete_secret("gemini")
-        self.assertEqual(service.status(), {"gemini": False, "telegram": False})
+        self.assertEqual(service.status(), {"gemini": False, "telegram": False, "telegram_channel_a": False})
 
         for invalid in ("", " \t\n", "x" * 4097, "\ud800"):
             with self.subTest(value=repr(invalid)), self.assertRaises(InvalidCredential):
@@ -131,11 +132,80 @@ class CredentialStoreTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
         reopened = self.service()
-        self.assertEqual(reopened.status(), {"gemini": True, "telegram": True})
+        self.assertEqual(reopened.status(), {"gemini": True, "telegram": True, "telegram_channel_a": False})
         self.assertEqual(reopened.get_secret("gemini"), SECRET)
         for path in self.database.parent.glob("provider-credentials.sqlite3*"):
             self.assertNotIn(SECRET.encode("utf-8"), path.read_bytes())
             self.assertNotIn(b"synthetic-telegram-token", path.read_bytes())
+
+    def test_channel_a_crud_reuses_validation_and_never_persists_plaintext(self) -> None:
+        service = self.service()
+        channel_a = "synthetic-channel-a-token"
+        service.set_secret("telegram_channel_a", channel_a)
+        self.assertEqual(service.get_secret("telegram_channel_a"), channel_a)
+        self.assertEqual(service.status(), {"gemini": False, "telegram": False, "telegram_channel_a": True})
+        for path in self.database.parent.glob("provider-credentials.sqlite3*"):
+            self.assertNotIn(channel_a.encode("utf-8"), path.read_bytes())
+
+        service.set_secret("telegram_channel_a", "replacement-a")
+        self.assertEqual(service.get_secret("telegram_channel_a"), "replacement-a")
+        for invalid in ("", " \t\n", "x" * 4097, "\ud800"):
+            with self.subTest(value=repr(invalid)), self.assertRaises(InvalidCredential):
+                service.set_secret("telegram_channel_a", invalid)
+
+        service.delete_secret("telegram_channel_a")
+        service.delete_secret("telegram_channel_a")
+        self.assertEqual(service.status(), {"gemini": False, "telegram": False, "telegram_channel_a": False})
+        self.assertIsNone(service.get_secret("telegram_channel_a"))
+
+    def test_channel_a_and_telegram_are_independent_and_provider_bound(self) -> None:
+        service = self.service()
+        service.set_secret("telegram", "synthetic-telegram-b")
+        service.set_secret("telegram_channel_a", "synthetic-telegram-a")
+        self.assertEqual(service.status(), {"gemini": False, "telegram": True, "telegram_channel_a": True})
+
+        service.set_secret("telegram_channel_a", "replacement-a")
+        self.assertEqual(service.get_secret("telegram"), "synthetic-telegram-b")
+        service.delete_secret("telegram")
+        self.assertEqual(service.status(), {"gemini": False, "telegram": False, "telegram_channel_a": True})
+        self.assertEqual(service.get_secret("telegram_channel_a"), "replacement-a")
+        service.delete_secret("telegram_channel_a")
+        self.assertEqual(service.status(), {"gemini": False, "telegram": False, "telegram_channel_a": False})
+
+        cipher = CredentialCipher(KEY, nonce_source=lambda size: b"z" * size)
+        channel_a_record = cipher.encrypt("telegram_channel_a", "synthetic-telegram-a")
+        self.assertEqual(cipher.decrypt(channel_a_record), "synthetic-telegram-a")
+        for swapped in (
+            channel_a_record._replace(provider="telegram"),
+            cipher.encrypt("telegram", "synthetic-telegram-b")._replace(provider="telegram_channel_a"),
+        ):
+            with self.subTest(swapped_provider=swapped.provider), self.assertRaises(CredentialUnavailable):
+                cipher.decrypt(swapped)
+
+    def test_existing_two_provider_database_reopens_under_extended_registry_without_migration(self) -> None:
+        service = self.service()
+        service.set_secret("gemini", SECRET)
+        service.set_secret("telegram", "synthetic-telegram-b")
+        connection = sqlite3.connect(self.database)
+        try:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            columns = [row[1] for row in connection.execute("PRAGMA table_info(credentials)")]
+            providers = sorted(row[0] for row in connection.execute("SELECT provider FROM credentials"))
+        finally:
+            connection.close()
+        self.assertEqual(version, SCHEMA_VERSION)
+        self.assertEqual(tables, {"store_binding", "credentials"})
+        self.assertEqual(columns, ["provider", "format_version", "key_id", "nonce", "ciphertext"])
+        self.assertEqual(providers, ["gemini", "telegram"])
+
+        reopened = self.service()
+        self.assertEqual(reopened.status(), {"gemini": True, "telegram": True, "telegram_channel_a": False})
+        self.assertEqual(reopened.get_secret("gemini"), SECRET)
+        self.assertEqual(reopened.get_secret("telegram"), "synthetic-telegram-b")
+        self.assertIsNone(reopened.get_secret("telegram_channel_a"))
+        reopened.set_secret("telegram_channel_a", "synthetic-telegram-a")
+        self.assertEqual(reopened.status(), {"gemini": True, "telegram": True, "telegram_channel_a": True})
 
     def test_failed_transaction_rolls_back_without_replacing_valid_ciphertext(self) -> None:
         service = self.service()

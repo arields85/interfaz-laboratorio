@@ -11,7 +11,11 @@ import { AdminAuthClient, AdminAuthError } from '../services/adminAuth.service';
 import { useAuthStore } from '../store/auth.store';
 import RequirePermission from '../components/auth/RequirePermission';
 
-const metadata = { gemini: { configured: false }, telegram: { configured: true } };
+const metadata = {
+    gemini: { configured: false },
+    telegram: { configured: true },
+    telegram_channel_a: { configured: false },
+};
 const health = {
     enabled: true, configured: true, running: true, verified: false,
     desiredGeneration: 2, appliedGeneration: 1, restartRequired: true,
@@ -241,13 +245,21 @@ describe('usePrismaCredentialAdministration', () => {
                 if (metadataRequest === 1) {
                     return Promise.resolve(jsonResponse({
                         ok: true,
-                        providers: { gemini: { configured: false }, telegram: { configured: true } },
+                        providers: {
+                            gemini: { configured: false },
+                            telegram: { configured: true },
+                            telegram_channel_a: { configured: false },
+                        },
                     }));
                 }
                 if (metadataRequest === 2) return lateMetadata;
                 return Promise.resolve(jsonResponse({
                     ok: true,
-                    providers: { gemini: { configured: true }, telegram: { configured: true } },
+                    providers: {
+                        gemini: { configured: true },
+                        telegram: { configured: true },
+                        telegram_channel_a: { configured: false },
+                    },
                 }));
             }
             throw new Error(`Unexpected path: ${String(path)}`);
@@ -281,7 +293,11 @@ describe('usePrismaCredentialAdministration', () => {
         await act(async () => {
             releaseLate(jsonResponse({
                 ok: true,
-                providers: { gemini: { configured: false }, telegram: { configured: true } },
+                providers: {
+                    gemini: { configured: false },
+                    telegram: { configured: true },
+                    telegram_channel_a: { configured: false },
+                },
             }));
             await lateMetadata;
         });

@@ -1,4 +1,4 @@
-export type CredentialProvider = 'gemini' | 'telegram';
+export type CredentialProvider = 'gemini' | 'telegram' | 'telegram_channel_a';
 
 export interface CredentialProviderMetadata {
     configured: boolean;
@@ -7,6 +7,7 @@ export interface CredentialProviderMetadata {
 export interface CredentialMetadata {
     gemini: CredentialProviderMetadata;
     telegram: CredentialProviderMetadata;
+    telegram_channel_a: CredentialProviderMetadata;
 }
 
 export type TelegramCredentialSource = 'protected' | 'environment' | null;
@@ -75,7 +76,7 @@ function isProviderMetadata(value: unknown): value is CredentialProviderMetadata
 }
 
 function isProvider(value: unknown): value is CredentialProvider {
-    return value === 'gemini' || value === 'telegram';
+    return value === 'gemini' || value === 'telegram' || value === 'telegram_channel_a';
 }
 
 function isGeneration(value: unknown): value is number {
@@ -92,11 +93,17 @@ function parseTelegramError(value: unknown): TelegramRuntimeError {
 
 export function parseCredentialMetadata(value: unknown): CredentialMetadata {
     if (!isObject(value) || !hasExactKeys(value, ['ok', 'providers']) || value.ok !== true
-        || !isObject(value.providers) || !hasExactKeys(value.providers, ['gemini', 'telegram'])
-        || !isProviderMetadata(value.providers.gemini) || !isProviderMetadata(value.providers.telegram)) {
+        || !isObject(value.providers)
+        || !hasExactKeys(value.providers, ['gemini', 'telegram', 'telegram_channel_a'])
+        || !isProviderMetadata(value.providers.gemini) || !isProviderMetadata(value.providers.telegram)
+        || !isProviderMetadata(value.providers.telegram_channel_a)) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
-    return { gemini: value.providers.gemini, telegram: value.providers.telegram };
+    return {
+        gemini: value.providers.gemini,
+        telegram: value.providers.telegram,
+        telegram_channel_a: value.providers.telegram_channel_a,
+    };
 }
 
 export function parseCredentialMutation(value: unknown): CredentialMutationResult {
