@@ -29,6 +29,7 @@ from prisma_runtime.channel_a_pairing import (
     ChannelAPairingRegistry,
     ChannelAPairingStaleGeneration,
     ChannelAPairingUnauthorized,
+    PairingLink,
 )
 
 OWNER = "00000000-0000-4000-8000-00000000000a"
@@ -871,6 +872,7 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
             ("validate_result", lambda: registry.validate_result(PHONE, link.generation)),
             ("human_touch", lambda: registry.human_touch(PHONE, link.generation)),
             ("warning_due", lambda: registry.warning_due(PHONE, link.generation)),
+            ("due_warnings", lambda: registry.due_warnings()),
             ("unlink_phone", lambda: registry.unlink_phone(PHONE, link.generation)),
             ("invalidate_owner", lambda: registry.invalidate_owner(OWNER)),
         )
@@ -895,6 +897,159 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
         registry.issue_qr(OWNER)
         state["value"] = 10 ** 1000
         self.assert_error(ChannelAPairingConfigInvalid, PRISMA_CHANNEL_A_CLOCK_INVALID, registry.issue_qr, OWNER2)
+
+
+class ChannelAPairingWarningSweepTests(ChannelAPairingTestCase):
+    """The public atomic sweep reserves each warning once per activity window."""
+
+    def test_due_warnings_reserves_each_link_once_at_the_lead_boundary(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 61.0
+        self.assertEqual(registry.due_warnings(), ())
+        self.now[0] = link.idle_expires_at - 60.0
+        due = registry.due_warnings()
+        self.assertIsInstance(due, tuple)
+        self.assertEqual(len(due), 1)
+        warning = due[0]
+        self.assertIsInstance(warning, PairingLink)
+        self.assertEqual(warning.owner_id, OWNER)
+        self.assertEqual(warning.phone_id, PHONE)
+        self.assertEqual(warning.generation, link.generation)
+        self.assertEqual(warning.last_human_activity_at, link.last_human_activity_at)
+        self.assertEqual(warning.idle_expires_at, link.idle_expires_at)
+        self.assertTrue(warning.warning_issued)
+        with self.assertRaises(FrozenInstanceError):
+            warning.generation = 0
+        # The reservation is shared with the individual predicate: neither path
+        # can spend the same warning window twice.
+        self.assertEqual(registry.due_warnings(), ())
+        self.assertFalse(registry.warning_due(PHONE, link.generation))
+
+    def test_due_warnings_never_renews_the_human_activity_window(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 60.0
+        self.assertEqual(len(registry.due_warnings()), 1)
+        current = registry.phone_link(PHONE)
+        self.assertEqual(current.last_human_activity_at, link.last_human_activity_at)
+        self.assertEqual(current.idle_expires_at, link.idle_expires_at)
+        self.assertTrue(current.warning_issued)
+
+    def test_due_warnings_is_empty_at_expiry_and_purges_the_link(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at
+        self.assertEqual(registry.due_warnings(), ())
+        self.assertIsNone(registry.owner_link(OWNER))
+        self.assertIsNone(registry.phone_link(PHONE))
+        self.assertEqual(registry._links, {})
+
+    def test_due_warnings_marks_only_the_links_whose_window_is_due(self):
+        registry = self.registry()
+        first = self.pair(registry)
+        second = self.pair(registry, owner=OWNER2, phone=PHONE2)
+        self.now[0] = 1500.0
+        registry.human_touch(PHONE2, second.generation)
+        self.now[0] = first.idle_expires_at - 60.0
+        due = registry.due_warnings()
+        self.assertEqual([item.owner_id for item in due], [OWNER])
+        self.assertEqual(registry.due_warnings(), ())
+        self.assertTrue(registry.phone_link(PHONE).warning_issued)
+        self.assertFalse(registry.phone_link(PHONE2).warning_issued)
+
+    def test_due_warnings_covers_independent_pairs_once(self):
+        registry = self.registry()
+        first = self.pair(registry)
+        self.pair(registry, owner=OWNER2, phone=PHONE2)
+        self.now[0] = first.idle_expires_at - 60.0
+        due = registry.due_warnings()
+        self.assertEqual({item.owner_id for item in due}, {OWNER, OWNER2})
+        self.assertEqual(len(due), 2)
+        self.assertEqual(registry.due_warnings(), ())
+
+    def test_individual_warning_due_reserves_before_the_batch_sweep(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 60.0
+        self.assertTrue(registry.warning_due(PHONE, link.generation))
+        self.assertEqual(registry.due_warnings(), ())
+
+    def test_a_human_touch_opens_a_new_warnable_window_for_the_sweep(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 60.0
+        self.assertEqual(len(registry.due_warnings()), 1)
+        touched = registry.human_touch(PHONE, link.generation)
+        self.assertFalse(touched.warning_issued)
+        self.now[0] = touched.idle_expires_at - 60.0
+        again = registry.due_warnings()
+        self.assertEqual(len(again), 1)
+        self.assertEqual(again[0].last_human_activity_at, touched.last_human_activity_at)
+        self.assertEqual(again[0].idle_expires_at, touched.idle_expires_at)
+        self.assertEqual(registry.due_warnings(), ())
+
+    def _race(self, first, second):
+        barrier = threading.Barrier(3)
+        results = []
+
+        def run(call):
+            barrier.wait(5)
+            try:
+                results.append(call())
+            except ChannelAPairingError as error:
+                results.append(str(error))
+
+        threads = [threading.Thread(target=run, args=(call,)) for call in (first, second)]
+        for thread in threads:
+            thread.start()
+        barrier.wait(5)
+        for thread in threads:
+            thread.join(5)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        return results
+
+    def test_concurrent_batch_and_individual_reserve_once(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 60.0
+        results = self._race(
+            lambda: len(registry.due_warnings()),
+            lambda: 1 if registry.warning_due(PHONE, link.generation) else 0,
+        )
+        self.assertEqual(sorted(results), [0, 1])
+        self.assertEqual(registry.due_warnings(), ())
+
+    def test_concurrent_batch_sweeps_reserve_once(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 60.0
+        results = self._race(
+            lambda: len(registry.due_warnings()),
+            lambda: len(registry.due_warnings()),
+        )
+        self.assertEqual(sorted(results), [0, 1])
+        self.assertEqual(registry.due_warnings(), ())
+
+    def test_due_warnings_rejects_a_regressing_clock_without_reserving(self):
+        registry = self.registry()
+        self.pair(registry)
+        self.pair(registry, owner=OWNER2, phone=PHONE2)
+        self.now[0] = 1500.0
+        self.assertEqual(registry.due_warnings(), ())
+        self.now[0] = 1499.0
+        self.assert_error(ChannelAPairingConfigInvalid, PRISMA_CHANNEL_A_CLOCK_INVALID, registry.due_warnings)
+        self.assertEqual(len(registry._links), 2)
+        self.assertFalse(registry._links[OWNER].warning_issued)
+        self.assertFalse(registry._links[OWNER2].warning_issued)
+
+    def test_due_warnings_fails_closed_on_an_unusable_clock(self):
+        registry = self.registry()
+        self.pair(registry)
+        registry.clock = lambda: float("nan")
+        self.assert_error(ChannelAPairingConfigInvalid, PRISMA_CHANNEL_A_CLOCK_INVALID, registry.due_warnings)
+        self.assertEqual(len(registry._links), 1)
+        self.assertFalse(registry._links[OWNER].warning_issued)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """Channel A private pairing dialogue: one authenticated Telegram update in, one outcome out.
 
-Scope (RCA-3a)
+Scope (RCA-3a–3c)
 --------------
 
 This module implements the *private pairing dialogue* of Channel A and nothing
@@ -11,18 +11,27 @@ prompt with its confirm/cancel ticket buttons, the authenticated confirmation
 that creates the link, the confirmed-link welcome with its keep-connected and
 unlink buttons, and cancellation.
 
-Deliberately absent from this stage: text answer parsing, snapshot capture,
-freshness checks, HMI events, the proactive idle-warning sweep, offset/offset
-bookkeeping, batching, and any real HTTP client. The polling loop that owns
-``getUpdates`` offsets, the long-poll cadence and the per-bot transport wiring
-belongs to the later runtime integration stage. This module never imports an
-HTTP, socket, subprocess, lifecycle or operator-secret module.
+Deliberately absent from this stage: answer parsing, snapshot capture and
+freshness checks (all injected through the RCA-3b coordinator), HMI/audio
+publication, the scheduler that invokes the warning sweep, offset bookkeeping,
+batching, and any real HTTP client. The polling loop that owns ``getUpdates``
+offsets, the long-poll cadence and the per-bot transport wiring belongs to the
+later runtime integration stage. This module never imports an HTTP, socket,
+subprocess, lifecycle or operator-secret module.
 
 Unknown ordinary text is ignored by default. When the optional correlated
 query coordinator (RCA-3b) is attached through ``enable_queries``, ordinary text
 from a currently linked phone is answered through it under a captured owner,
 generation, confirmation fence and adapter epoch; without that attachment the
 accepted RCA-3a behavior is unchanged and ordinary text is never routed.
+
+The proactive inactivity warning (RCA-3c) is an explicit, synchronous sweep, not
+a background loop: ``send_inactivity_warnings`` uses only the public registry
+sweep and this adapter's own admitted action records, re-reads the authoritative
+link immediately before each send, and returns a bounded tuple of
+delivered/rejected/unknown/skipped attempts. A reservation is one attempt per
+human-activity window; a skipped, rejected or unknown attempt is never retried
+or re-armed, and a warning that already reached the phone cannot be retracted.
 
 Authority model
 ---------------
@@ -166,6 +175,14 @@ COPY_UNLINKED = "Este teléfono quedó desvinculado."
 COPY_ACTION_REFUSED = (
     "Ese botón ya no es válido. Genera un código nuevo desde la pantalla del HMI."
 )
+COPY_INACTIVITY_WARNING = (
+    "La vinculación con este documento se va a cerrar por inactividad.\n"
+    "Usa los botones para seguir conectado o desvincular este teléfono."
+)
+
+# One warning reservation is one *attempt*. A skipped, rejected or unknown
+# attempt is reported honestly and is never automatically retried or re-armed.
+WARNING_SKIPPED = "skipped"
 
 # Every other update kind Telegram may deliver alongside a supported variant.
 # Presence of any of them turns the update into an ambiguous envelope that is
@@ -233,6 +250,7 @@ __all__ = [
     "COPY_CANCELLED",
     "COPY_CONFIRMED",
     "COPY_DESTINATION_UNAVAILABLE",
+    "COPY_INACTIVITY_WARNING",
     "COPY_KEEP_CONNECTED",
     "COPY_REFUSED",
     "COPY_UNLINKED",
@@ -245,6 +263,7 @@ __all__ = [
     "INGRESS_IGNORED_STALE",
     "INGRESS_IGNORED_UNRELATED",
     "INGRESS_IGNORED_UNSUPPORTED",
+    "InactivityWarningOutcome",
     "IngressOutcome",
     "KEEP_CONNECTED",
     "MAX_ACK_TEXT_CHARS",
@@ -276,6 +295,7 @@ __all__ = [
     "VARIANT_CALLBACK",
     "VARIANT_MESSAGE",
     "VARIANT_UNKNOWN",
+    "WARNING_SKIPPED",
     "WELCOME_TEMPLATE",
     "phone_identity",
 ]
@@ -339,6 +359,31 @@ class IngressOutcome:
             # the serialized shape; every RCA-3a caller keeps the original keys.
             data["answerEnvelope"] = self.answer_envelope.as_dict()
         return data
+
+
+@dataclass(frozen=True)
+class InactivityWarningOutcome:
+    """One declared inactivity-warning attempt for one live link.
+
+    ``status`` is the existing ``delivered``/``rejected``/``unknown`` send
+    classification, or ``skipped`` when the reserved window could no longer be
+    honored. No token, nonce or envelope is carried, so the bounded tuple is
+    safe to report verbatim. A reservation is a single attempt: a failure or an
+    unknown outcome is never retried or re-armed automatically.
+    """
+
+    owner_id: str
+    phone_id: str
+    generation: int
+    status: str
+
+    def as_dict(self) -> dict:
+        return {
+            "ownerId": self.owner_id,
+            "phoneId": self.phone_id,
+            "generation": self.generation,
+            "status": self.status,
+        }
 
 
 @dataclass
@@ -1212,3 +1257,89 @@ class ChannelAPairingDialogue:
 
     def _refuse_action(self, update_id, callback_id) -> IngressOutcome:
         return self._acknowledge(update_id, callback_id, COPY_ACTION_REFUSED, ACTION_REFUSED)
+
+    # -- proactive inactivity warnings (RCA-3c) ----------------------------
+
+    def send_inactivity_warnings(self) -> tuple[InactivityWarningOutcome, ...]:
+        """Attempt one reserved inactivity warning per due link, and no more.
+
+        Synchronous and serialized: a future RCA-5 scheduler calls this
+        explicitly; this adapter starts no loop, thread, timer or ``getUpdates``.
+        The public registry sweep runs under the serial adapter lock -- never
+        under the domain lock across I/O -- and its per-window reservation is one
+        attempt, not a guaranteed delivery. A rejected or unknown send is never
+        retried or re-armed, and an uncertain registry read never deletes a live
+        local control. The returned tuple is bounded by the live links and
+        carries no secret.
+        """
+        with self._lock:
+            try:
+                due = self.registry.due_warnings()
+            except Exception:
+                # A whole-sweep registry failure is reported as a controlled
+                # error: nothing is claimed delivered and no live action record
+                # is lost.
+                raise ChannelABotError(PRISMA_CHANNEL_A_BOT_UNAVAILABLE) from None
+            return tuple(self._warn_one(snapshot) for snapshot in due)
+
+    def _warn_one(self, snapshot) -> InactivityWarningOutcome:
+        """Attempt one reserved snapshot, or skip it without deleting authority.
+
+        The authoritative link is re-read immediately before the effect and
+        after any earlier warning send in this same sweep, so a prior recipient's
+        transport hook may invalidate, replace or touch a later recipient
+        without this attempt trusting a stale capture.
+        """
+        record = self._action_for(snapshot.phone_id, snapshot.owner_id, snapshot.generation)
+        if record is None:
+            # A registry link alone is not authority: without this adapter's own
+            # admitted action record the captured warning is skipped.
+            return self._skipped_warning(snapshot)
+        chat_id = self._chat_from_phone(snapshot.phone_id)
+        if chat_id is None:
+            return self._skipped_warning(snapshot)
+        link, read_ok = self._read_link(snapshot.phone_id)
+        if not read_ok or not self._same_warning_window(link, snapshot):
+            # An uncertain read never erases the live control; a stale, replaced
+            # or human-refreshed window is simply no longer due.
+            return self._skipped_warning(snapshot)
+        delivery = self._send(
+            chat_id,
+            COPY_INACTIVITY_WARNING,
+            _keyboard(
+                (BUTTON_KEEP_CONNECTED, CALLBACK_KEEP_CONNECTED + ":" + record.nonce),
+                (BUTTON_UNLINK, CALLBACK_UNLINK + ":" + record.nonce),
+            ),
+        )
+        return InactivityWarningOutcome(
+            snapshot.owner_id, snapshot.phone_id, snapshot.generation, delivery
+        )
+
+    def _action_for(self, phone_id, owner_id, generation):
+        """Return this adapter's admitted action record for the exact link."""
+        for record in self._actions.values():
+            if (
+                record.phone_id == phone_id
+                and record.owner_id == owner_id
+                and record.generation == generation
+            ):
+                return record
+        return None
+
+    @staticmethod
+    def _same_warning_window(link, snapshot) -> bool:
+        """Report whether the live link still carries the reserved warning window."""
+        return (
+            link is not None
+            and link.owner_id == snapshot.owner_id
+            and link.generation == snapshot.generation
+            and link.last_human_activity_at == snapshot.last_human_activity_at
+            and link.idle_expires_at == snapshot.idle_expires_at
+            and link.warning_issued
+        )
+
+    @staticmethod
+    def _skipped_warning(snapshot) -> InactivityWarningOutcome:
+        return InactivityWarningOutcome(
+            snapshot.owner_id, snapshot.phone_id, snapshot.generation, WARNING_SKIPPED
+        )

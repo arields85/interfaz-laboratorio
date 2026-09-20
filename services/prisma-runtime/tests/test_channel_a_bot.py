@@ -34,6 +34,7 @@ from prisma_runtime.channel_a_bot import (
     COPY_CANCELLED,
     COPY_CONFIRMED,
     COPY_DESTINATION_UNAVAILABLE,
+    COPY_INACTIVITY_WARNING,
     COPY_KEEP_CONNECTED,
     COPY_REFUSED,
     COPY_UNLINKED,
@@ -68,11 +69,13 @@ from prisma_runtime.channel_a_bot import (
     VARIANT_CALLBACK,
     VARIANT_MESSAGE,
     VARIANT_UNKNOWN,
+    WARNING_SKIPPED,
     WELCOME_TEMPLATE,
     ChannelABotConfigInvalid,
     ChannelABotError,
     ChannelAPairingDialogue,
     ChannelATextTransport,
+    InactivityWarningOutcome,
     IngressOutcome,
     phone_identity,
 )
@@ -2415,6 +2418,291 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         rendered = repr(outcome) + repr(outcome.answer_envelope) + str(outcome.as_dict())
         self.assertNotIn(nonce, rendered)
         self.assertNotIn("¿cuál es el oee?", rendered)
+
+
+class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
+    """The explicit warning sweep reserves once and reports bounded truthful outcomes."""
+
+    def warning_nonce(self):
+        return self.button_data(0).split(":", 1)[1]
+
+    def test_sweep_sends_one_plain_warning_with_the_existing_action_buttons(self):
+        nonce = self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertIsInstance(outcomes, tuple)
+        self.assertEqual(len(outcomes), 1)
+        outcome = outcomes[0]
+        self.assertIsInstance(outcome, InactivityWarningOutcome)
+        self.assertEqual(outcome.status, SEND_DELIVERED)
+        self.assertEqual(outcome.owner_id, OWNER)
+        self.assertEqual(outcome.phone_id, PHONE)
+        self.assertEqual(outcome.generation, self.registry.phone_link(PHONE).generation)
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+        payload = self.transport.sent[-1]
+        self.assertEqual(payload["text"], COPY_INACTIVITY_WARNING)
+        keyboard = payload["reply_markup"]["inline_keyboard"]
+        self.assertEqual(keyboard[0][0]["text"], BUTTON_KEEP_CONNECTED)
+        self.assertEqual(keyboard[0][0]["callback_data"], CALLBACK_KEEP_CONNECTED + ":" + nonce)
+        self.assertEqual(keyboard[1][0]["text"], BUTTON_UNLINK)
+        self.assertEqual(keyboard[1][0]["callback_data"], CALLBACK_UNLINK + ":" + nonce)
+        self.assertTrue(self.registry.phone_link(PHONE).warning_issued)
+        # The reservation is one attempt per window: a second sweep is empty.
+        self.assertEqual(self.dialogue.send_inactivity_warnings(), ())
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+
+    def test_the_warning_copy_states_inactivity_and_near_release(self):
+        self.pair_up(4, 5)
+        self.now[0] = 1540.0
+        self.dialogue.send_inactivity_warnings()
+        text = self.transport.sent[-1]["text"]
+        self.assertEqual(text, COPY_INACTIVITY_WARNING)
+        self.assertIn("inactividad", text)
+
+    def test_sweep_waits_for_the_exact_lead_boundary(self):
+        self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1539.0
+        self.assertEqual(self.dialogue.send_inactivity_warnings(), ())
+        self.assertEqual(len(self.transport.sent), sent_before)
+        self.assertFalse(self.registry.phone_link(PHONE).warning_issued)
+        self.now[0] = 1540.0
+        self.assertEqual(len(self.dialogue.send_inactivity_warnings()), 1)
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+
+    def test_sweep_at_expiry_sends_nothing_and_releases_the_link(self):
+        self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1600.0
+        self.assertEqual(self.dialogue.send_inactivity_warnings(), ())
+        self.assertEqual(len(self.transport.sent), sent_before)
+        self.assertIsNone(self.registry.phone_link(PHONE))
+
+    def test_sweep_never_renews_the_human_activity_window(self):
+        self.pair_up(4, 5)
+        link = self.registry.phone_link(PHONE)
+        self.now[0] = 1540.0
+        self.dialogue.send_inactivity_warnings()
+        current = self.registry.phone_link(PHONE)
+        self.assertEqual(current.last_human_activity_at, link.last_human_activity_at)
+        self.assertEqual(current.idle_expires_at, link.idle_expires_at)
+        self.assertTrue(current.warning_issued)
+
+    def test_the_sweep_mints_no_new_nonce_or_entropy(self):
+        nonce = self.pair_up(4, 5)
+
+        def exploding(size):
+            raise OSError("entropy unavailable")
+
+        self.dialogue.entropy = exploding
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [SEND_DELIVERED])
+        self.assertEqual(self.warning_nonce(), nonce)
+
+    def test_delivered_warning_buttons_still_renew_the_link_on_a_human_press(self):
+        self.pair_up(4, 5)
+        self.now[0] = 1540.0
+        self.dialogue.send_inactivity_warnings()
+        nonce = self.warning_nonce()
+        self.now[0] = 1550.0
+        outcome = self.handle(callback_update(6, CALLBACK_KEEP_CONNECTED + ":" + nonce))
+        self.assert_outcome(outcome, KEEP_CONNECTED, update_id=6, acknowledged=True)
+        current = self.registry.phone_link(PHONE)
+        self.assertEqual(current.idle_expires_at, 1550.0 + 600.0)
+        self.assertFalse(current.warning_issued)
+
+    def test_delivered_warning_unlink_button_releases_the_link(self):
+        self.pair_up(4, 5)
+        self.now[0] = 1540.0
+        self.dialogue.send_inactivity_warnings()
+        nonce = self.warning_nonce()
+        outcome = self.handle(callback_update(6, CALLBACK_UNLINK + ":" + nonce))
+        self.assert_outcome(outcome, UNLINKED, update_id=6, acknowledged=True)
+        self.assertIsNone(self.registry.phone_link(PHONE))
+
+    def test_sweep_skips_a_link_the_adapter_never_admitted(self):
+        self.pair_up(4, 5)
+        restarted = self.build()
+        self.assertEqual(restarted._actions, {})
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        outcomes = restarted.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [WARNING_SKIPPED])
+        self.assertEqual(len(self.transport.sent), sent_before)
+        # The reserved window is spent: the registry still holds the live link.
+        self.assertTrue(self.registry.phone_link(PHONE).warning_issued)
+
+    def test_sweep_skips_an_action_record_with_a_stale_generation(self):
+        self.pair_up(4, 5)
+        digest = next(iter(self.dialogue._actions))
+        record = self.dialogue._actions[digest]
+        self.dialogue._actions[digest] = dataclasses.replace(
+            record, generation=record.generation + 1
+        )
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [WARNING_SKIPPED])
+        self.assertEqual(len(self.transport.sent), sent_before)
+
+    def test_a_prior_warning_send_that_touches_a_later_recipient_skips_that_warning(self):
+        self.pair_up(4, 5)
+        self.pair_up(6, 7, owner=OWNER2, chat=CHAT_ID_2)
+        second_generation = self.registry.phone_link(PHONE2).generation
+        calls = []
+
+        def hook(payload):
+            calls.append(payload["chat_id"])
+            if len(calls) == 1:
+                self.registry.human_touch(PHONE2, second_generation)
+
+        self.transport.on_send = hook
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [SEND_DELIVERED, WARNING_SKIPPED])
+        self.assertEqual(calls, [CHAT_ID])
+        renewed = self.registry.phone_link(PHONE2)
+        self.assertEqual(renewed.last_human_activity_at, 1540.0)
+        self.assertFalse(renewed.warning_issued)
+
+    def test_a_prior_warning_send_that_invalidates_a_later_recipient_skips_it(self):
+        self.pair_up(4, 5)
+        self.pair_up(6, 7, owner=OWNER2, chat=CHAT_ID_2)
+        calls = []
+
+        def hook(payload):
+            calls.append(payload["chat_id"])
+            if len(calls) == 1:
+                self.registry.invalidate_owner(OWNER2)
+
+        self.transport.on_send = hook
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [SEND_DELIVERED, WARNING_SKIPPED])
+        self.assertEqual(calls, [CHAT_ID])
+        self.assertIsNone(self.registry.phone_link(PHONE2))
+
+    def test_a_rejected_warning_send_is_reported_and_never_retried(self):
+        self.pair_up(4, 5)
+        self.transport.send_responses.append(self.transport.rejected())
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [SEND_REJECTED])
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+        self.assertIsNotNone(self.registry.phone_link(PHONE))
+        self.assertEqual(self.dialogue.send_inactivity_warnings(), ())
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+
+    def test_an_unknown_warning_send_is_reported_and_never_retried(self):
+        self.pair_up(4, 5)
+        self.transport.send_responses.append({"ok": True})
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [SEND_UNKNOWN])
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+        self.assertIsNotNone(self.registry.phone_link(PHONE))
+        self.assertEqual(self.dialogue.send_inactivity_warnings(), ())
+
+    def test_one_sweep_delivers_each_independent_pair_once(self):
+        self.pair_up(4, 5)
+        self.pair_up(6, 7, owner=OWNER2, chat=CHAT_ID_2)
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [SEND_DELIVERED, SEND_DELIVERED])
+        self.assertEqual([item.phone_id for item in outcomes], [PHONE, PHONE2])
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual(len(self.transport.sent), sent_before + 2)
+
+    def test_a_broken_registry_clock_is_reported_without_losing_action_records(self):
+        self.pair_up(4, 5)
+        records = dict(self.dialogue._actions)
+        sent_before = len(self.transport.sent)
+        self.registry.clock = lambda: float("nan")
+        with self.assertRaises(ChannelABotError) as captured:
+            self.dialogue.send_inactivity_warnings()
+        self.assertEqual(str(captured.exception), PRISMA_CHANNEL_A_BOT_UNAVAILABLE)
+        self.assertEqual(self.dialogue._actions, records)
+        self.assertEqual(len(self.transport.sent), sent_before)
+
+    def test_a_registry_sweep_failure_is_controlled_and_loses_no_action_records(self):
+        self.pair_up(4, 5)
+        records = dict(self.dialogue._actions)
+        sent_before = len(self.transport.sent)
+
+        def broken():
+            raise OSError("registry unavailable")
+
+        self.registry.due_warnings = broken
+        with self.assertRaises(ChannelABotError) as captured:
+            self.dialogue.send_inactivity_warnings()
+        self.assertEqual(str(captured.exception), PRISMA_CHANNEL_A_BOT_UNAVAILABLE)
+        self.assertEqual(self.dialogue._actions, records)
+        self.assertEqual(len(self.transport.sent), sent_before)
+        self.assertIsNotNone(self.registry.phone_link(PHONE))
+
+    def test_an_uncertain_link_read_skips_without_deleting_live_controls(self):
+        self.pair_up(4, 5)
+        records = dict(self.dialogue._actions)
+
+        def broken(phone):
+            raise OSError("registry unavailable")
+
+        self.registry.phone_link = broken
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertEqual([item.status for item in outcomes], [WARNING_SKIPPED])
+        self.assertEqual(len(self.transport.sent), sent_before)
+        self.assertEqual(self.dialogue._actions, records)
+
+    def test_the_sweep_result_carries_no_hmi_envelope(self):
+        self.pair_up(4, 5)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        for outcome in outcomes:
+            self.assertEqual(
+                set(outcome.as_dict()),
+                {"ownerId", "phoneId", "generation", "status"},
+            )
+            self.assertFalse(hasattr(outcome, "answer_envelope"))
+
+    def test_the_sweep_never_exposes_the_action_nonce(self):
+        nonce = self.pair_up(4, 5)
+        self.now[0] = 1540.0
+        outcomes = self.dialogue.send_inactivity_warnings()
+        self.assertNotIn(nonce, repr(outcomes))
+        for outcome in outcomes:
+            self.assertNotIn(nonce, repr(outcome.as_dict()))
+        self.assertNotIn(nonce, self.transport.sent[-1]["text"])
+
+    def test_concurrent_sweeps_reserve_and_send_at_most_once(self):
+        self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1540.0
+        barrier = threading.Barrier(3)
+        results = []
+
+        def run():
+            barrier.wait(5)
+            try:
+                results.append(len(self.dialogue.send_inactivity_warnings()))
+            except Exception as error:  # pragma: no cover - reported through failures
+                results.append(repr(error))
+
+        threads = [threading.Thread(target=run) for _index in range(2)]
+        for thread in threads:
+            thread.start()
+        barrier.wait(5)
+        for thread in threads:
+            thread.join(5)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(sorted(results), [0, 1])
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
 
 
 if __name__ == "__main__":

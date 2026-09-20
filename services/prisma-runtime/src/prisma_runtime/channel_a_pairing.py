@@ -488,10 +488,35 @@ class ChannelAPairingRegistry:
             now = self._now()
             self._purge_locked(now)
             link = self._require_link_locked(phone, generation)
-            if link.warning_issued or link.idle_expires_at - now > self.warning_lead:
+            if not self._warning_due_locked(link, now):
                 return False
             link.warning_issued = True
             return True
+
+    def due_warnings(self) -> tuple[PairingLink, ...]:
+        """Reserve, at most once per human-activity window, every due live link.
+
+        Public and atomic: under the registry lock it samples the validated
+        monotonic clock, purges expirations, marks each eligible warning and
+        returns an immutable, bounded tuple of existing snapshots. The shared
+        predicate with :meth:`warning_due` means a concurrent individual
+        reservation and a batch sweep can never spend the same window twice.
+        The reservation is one *attempt*, not a delivery: a caller that fails to
+        notify gets no second reservation for that window. A technical sweep
+        never renews ``last_human_activity_at`` or ``idle_expires_at``, and no
+        callback runs under this lock.
+        """
+        with self.lock:
+            now = self._now()
+            self._purge_locked(now)
+            due = []
+            for owner_id in list(self._links):
+                link = self._links.get(owner_id)
+                if link is None or not self._warning_due_locked(link, now):
+                    continue
+                link.warning_issued = True
+                due.append(_link_snapshot(link))
+            return tuple(due)
 
     def unlink_phone(self, phone_id: str, generation: int) -> PairingLink:
         """Release one phone's link. A stale generation can never touch a replacement."""
@@ -602,6 +627,10 @@ class ChannelAPairingRegistry:
         if link.generation != generation:
             raise ChannelAPairingStaleGeneration(PRISMA_CHANNEL_A_STALE_GENERATION)
         return link
+
+    def _warning_due_locked(self, link: _Link, now: float) -> bool:
+        """Shared warning predicate: never reserved and inside the warning lead."""
+        return not link.warning_issued and link.idle_expires_at - now <= self.warning_lead
 
     def _snapshot_locked(self, owner_id: str) -> PairingLink:
         return _link_snapshot(self._links[owner_id])
