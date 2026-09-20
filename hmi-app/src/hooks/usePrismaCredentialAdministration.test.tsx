@@ -187,6 +187,26 @@ describe('usePrismaCredentialAdministration', () => {
         expect(controller.handleProtectedRequestError).not.toHaveBeenCalled();
     });
 
+    it('keeps a channel identity collision as an uncommitted apply failure without refreshing metadata', async () => {
+        const collision = new AdminAuthError('TELEGRAM_BOT_IDENTITY_RESERVED', 409, false);
+        const applyTelegram = vi.fn(async () => { throw collision; });
+        const { result, client, controller } = setup({ applyTelegram });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        await act(async () => {
+            await expect(result.current.applyTelegram()).rejects.toBe(collision);
+        });
+
+        expect(applyTelegram).toHaveBeenCalledTimes(1);
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(1);
+        expect(client.telegramHealth).toHaveBeenCalledTimes(1);
+        expect(client.deleteCredential).not.toHaveBeenCalled();
+        expect(client.saveCredential).not.toHaveBeenCalled();
+        expect(controller.handleProtectedRequestError).toHaveBeenCalledWith(collision);
+        expect(result.current.pendingAction).toBeNull();
+        expect(result.current.error).toBeNull();
+    });
+
     it('forwards current authorization errors for centralized reconciliation without replaying mutations', async () => {
         const error = new AdminAuthError('CSRF_VALIDATION_FAILED', 403);
         const saveCredential = vi.fn(async () => { throw error; });

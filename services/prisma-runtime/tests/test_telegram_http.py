@@ -206,6 +206,50 @@ class TelegramHttpTests(unittest.TestCase):
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(set(status), ADMIN_TELEGRAM_FIELDS | {"telegramDiagnostic", "internalFutureField"})
 
+    def test_apply_identity_conflict_maps_to_fixed_409_with_exact_nine_fields(self):
+        client, credentials, manager = self.authenticated_client()
+        status = canonical_admin_status(
+            appliedGeneration=0,
+            running=False,
+            verified=False,
+            restartRequired=True,
+            lastError="TELEGRAM_BOT_IDENTITY_RESERVED",
+            telegramDiagnostic={
+                "stage": "prepare",
+                "category": "unexpected",
+                "httpStatus": None,
+                "failureAt": "2026-09-19T22:08:41Z",
+                "lastSuccessAt": None,
+            },
+        )
+        manager.apply.side_effect = TelegramLifecycleError("TELEGRAM_BOT_IDENTITY_RESERVED")
+        manager.status.return_value = status
+
+        response = client.post(
+            "/api/prisma/admin/credentials/telegram/apply",
+            json={},
+            headers={"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf"},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"},
+        )
+
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "TELEGRAM_BOT_IDENTITY_RESERVED")
+        self.assertEqual(set(payload["telegram"]), ADMIN_TELEGRAM_FIELDS)
+        for field in ADMIN_TELEGRAM_FIELDS:
+            self.assertEqual(payload["telegram"][field], status[field])
+        self.assertNotIn("telegramDiagnostic", payload["telegram"])
+        self.assertNotIn("committed", payload)
+        self.assertNotIn(INTERNAL_STATUS_CANARY, response.get_data(as_text=True))
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        # A refused activation never becomes a credential mutation.
+        credentials.set_secret.assert_not_called()
+        credentials.delete_secret.assert_not_called()
+        manager.set_secret.assert_not_called()
+        manager.delete_secret.assert_not_called()
+        self.assertEqual(set(status), ADMIN_TELEGRAM_FIELDS | {"telegramDiagnostic", "internalFutureField"})
+
     def test_put_is_desired_only_and_delete_timeout_reports_committed_outcome(self):
         client, credentials, manager = self.authenticated_client()
         manager.delete_secret.return_value = False

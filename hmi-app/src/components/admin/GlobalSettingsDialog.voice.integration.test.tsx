@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PRISMA_ORB_STORAGE_KEY } from '../../config/prismaOrb.config';
 import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
-import { adminAuthClient } from '../../services/adminAuth.service';
+import { adminAuthClient, AdminAuthClient } from '../../services/adminAuth.service';
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 import GlobalSettingsDialog from './GlobalSettingsDialog';
 
@@ -15,6 +15,61 @@ vi.mock('./DesignSettingsTab', () => ({ default: () => null }));
 vi.mock('./LoaderOptionsSettingsTab', () => ({ default: () => null }));
 vi.mock('./TemporalSettingsTab', () => ({ default: () => null }));
 vi.mock('../../vendor/leda-orb.js', () => ({}));
+
+// adminAuth.service binds `fetch` while the module is being imported, so a later
+// `vi.stubGlobal('fetch', ...)` can never intercept the module singleton. Bind the
+// singleton to a controllable dispatcher instead: it records every call, answers
+// only the paths a test wires on purpose, and refuses anything else without
+// touching the network. Every refusal -- whether there is no handler at all or a
+// configured handler rejects an unexpected path -- is recorded here, before the
+// rejection propagates, so production catches cannot hide it. Refusals are
+// asserted in afterEach, outside every component and provider catch, so an
+// unexpected dispatch cannot pass silently.
+const singletonNetwork = vi.hoisted(() => {
+    const refusableError = 'TEST_SINGLETON_FETCH_REFUSED';
+    const requests: string[] = [];
+    const refusals: string[] = [];
+    let handler: ((path: string, init?: RequestInit) => Promise<Response>) | null = null;
+    const fetcher = (async (path: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const key = `${init?.method ?? 'GET'} ${String(path)}`;
+        requests.push(key);
+        if (!handler) {
+            refusals.push(key);
+            throw new Error(refusableError);
+        }
+        try {
+            return await handler(String(path), init);
+        } catch (error) {
+            // A configured handler refuses an unwired route by rejecting with the
+            // fixed refusal error. Record it here, once, before it reaches the
+            // production catch that would otherwise swallow it.
+            if (error instanceof Error && error.message === refusableError) refusals.push(key);
+            throw error;
+        }
+    }) as typeof fetch;
+    return {
+        requests,
+        refusals,
+        fetcher,
+        setHandler(next: ((path: string, init?: RequestInit) => Promise<Response>) | null): void {
+            handler = next;
+        },
+        reset(): void {
+            requests.length = 0;
+            refusals.length = 0;
+            handler = null;
+        },
+    };
+});
+
+vi.mock('../../services/adminAuth.service', async () => {
+    const actual = await vi.importActual<typeof import('../../services/adminAuth.service')>('../../services/adminAuth.service');
+    return {
+        ...actual,
+        // Real client class and real service path, fed by an injected fake transport.
+        adminAuthClient: new actual.AdminAuthClient(singletonNetwork.fetcher),
+    };
+});
 
 class MockLedaOrb extends HTMLElement {
     public level = 0;
@@ -52,11 +107,18 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         localStorage.setItem('hmi-global-settings-tab', 'voice');
     });
     afterEach(() => {
-        adminAuthClient.clearPrivateSession();
-        useAuthStore.setState({ session: UNAUTHENTICATED_SESSION, isHydrated: false, isAuthenticating: false, error: null });
-        localStorage.clear();
-        vi.unstubAllGlobals();
-        vi.restoreAllMocks();
+        try {
+            // External assertion: an unexpected singleton dispatch is a hard failure
+            // instead of a silently swallowed request.
+            expect(singletonNetwork.refusals).toEqual([]);
+        } finally {
+            adminAuthClient.clearPrivateSession();
+            singletonNetwork.reset();
+            useAuthStore.setState({ session: UNAUTHENTICATED_SESSION, isHydrated: false, isAuthenticating: false, error: null });
+            localStorage.clear();
+            vi.unstubAllGlobals();
+            vi.restoreAllMocks();
+        }
     });
 
     it('enables shared Save for an effect edit and persists one fixed-route PUT', async () => {
@@ -135,6 +197,94 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
     });
 
+    it('surfaces the real client channel identity collision as the exact usage message', async () => {
+        useAuthStore.setState({
+            session: {
+                user: { id: 'administrator:admin', username: 'admin', displayName: 'admin', role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } },
+                isAuthenticated: true,
+                loginTimestamp: new Date().toISOString(),
+                absoluteExpiresAt: Math.floor(Date.now() / 1_000) + 600,
+            },
+            isHydrated: true,
+        });
+        const json = (body: unknown, status: number) => new Response(JSON.stringify(body), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+        });
+        const csrfToken = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+        // The real client class is still exercised through an injected fake fetch,
+        // so the parser/allowlist/route contract is asserted on real service code.
+        const contractTransport = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(json({
+                ok: true,
+                administrator: { username: 'admin' },
+                csrfToken,
+                absoluteExpiresAt: 2_000_000_000,
+            }, 200))
+            .mockResolvedValueOnce(json({ ok: false, error: 'TELEGRAM_BOT_IDENTITY_RESERVED' }, 409));
+        const contractClient = new AdminAuthClient(contractTransport);
+        await contractClient.session();
+        await expect(contractClient.applyTelegram()).rejects.toMatchObject({
+            code: 'TELEGRAM_BOT_IDENTITY_RESERVED', status: 409, committed: false,
+        });
+        expect(adminAuthClient).toBeInstanceOf(AdminAuthClient);
+
+        singletonNetwork.setHandler(async (path, init) => {
+            if (path === '/api/prisma/admin/auth/session') {
+                return json({ ok: true, administrator: { username: 'admin' }, csrfToken, absoluteExpiresAt: 2_000_000_000 }, 200);
+            }
+            if (path === '/api/prisma/admin/credentials') {
+                return json({
+                    ok: true,
+                    providers: {
+                        gemini: { configured: false },
+                        telegram: { configured: true },
+                        telegram_channel_a: { configured: false },
+                    },
+                }, 200);
+            }
+            if (path === '/api/prisma/health') {
+                return json({
+                    ok: true,
+                    telegramEnabled: true,
+                    telegramConfigured: true,
+                    telegramConnected: false,
+                    telegramVerified: false,
+                    telegramConfigurationError: null,
+                    telegramLastError: null,
+                    telegramDesiredGeneration: 2,
+                    telegramAppliedGeneration: 0,
+                    telegramRestartRequired: true,
+                }, 200);
+            }
+            if (path === '/api/prisma/admin/credentials/telegram/apply' && init?.method === 'POST') {
+                return json({ ok: false, error: 'TELEGRAM_BOT_IDENTITY_RESERVED' }, 409);
+            }
+            // Any other path stays refused and is asserted in afterEach.
+            throw new Error('TEST_SINGLETON_FETCH_REFUSED');
+        });
+        await adminAuthClient.session();
+        vi.stubGlobal('fetch', vi.fn(async () => envelope()));
+        renderDialog();
+        const apply = await screen.findByRole('button', { name: 'Aplicar cambio' });
+        await waitFor(() => expect(apply).toBeEnabled());
+
+        await userEvent.click(apply);
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+            'Este bot ya está en uso por el otro canal. Configurá un bot distinto.',
+        );
+        expect(screen.queryByText('Cambio de Telegram aplicado y estado actualizado.')).not.toBeInTheDocument();
+        // A collision is a plain failure, not a committed deletion awaiting a retry.
+        expect(screen.queryByRole('button', { name: 'Reintentar detención' })).not.toBeInTheDocument();
+        expect(singletonNetwork.requests).toContain('GET /api/prisma/admin/auth/session');
+        expect(singletonNetwork.requests).toContain('GET /api/prisma/admin/credentials');
+        expect(singletonNetwork.requests).toContain('GET /api/prisma/health');
+        expect(singletonNetwork.requests).toContain('POST /api/prisma/admin/credentials/telegram/apply');
+        expect(singletonNetwork.refusals).toEqual([]);
+    });
+
     it('keeps per-provider credential drafts outside global Save and clears them when the dialog closes', async () => {
         useAuthStore.setState({
             session: {
@@ -202,5 +352,34 @@ describe('GlobalSettingsDialog unified voice integration', () => {
 
         expect(await screen.findByLabelText('Credencial Gemini')).toHaveValue('');
         expect(screen.getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
+    });
+
+    it('records every refused singleton dispatch exactly once, including a configured handler refusal', async () => {
+        // No handler: the missing-handler branch refuses and records without ever
+        // consulting the network.
+        await singletonNetwork.fetcher('/api/prisma/admin/unmapped').catch(() => undefined);
+        expect(singletonNetwork.requests).toEqual(['GET /api/prisma/admin/unmapped']);
+        expect(singletonNetwork.refusals).toEqual(['GET /api/prisma/admin/unmapped']);
+
+        // A configured handler that refuses an unexpected route must be recorded
+        // too: production code swallows the rejection, so only the injected
+        // transport can report the unexpected dispatch to the external afterEach
+        // assertion.
+        singletonNetwork.setHandler(async () => {
+            throw new Error('TEST_SINGLETON_FETCH_REFUSED');
+        });
+        await singletonNetwork.fetcher('/api/prisma/admin/unmapped/configured', { method: 'POST' }).catch(() => undefined);
+
+        expect(singletonNetwork.requests).toEqual([
+            'GET /api/prisma/admin/unmapped',
+            'POST /api/prisma/admin/unmapped/configured',
+        ]);
+        expect(singletonNetwork.refusals).toEqual([
+            'GET /api/prisma/admin/unmapped',
+            'POST /api/prisma/admin/unmapped/configured',
+        ]);
+        // The deliberate refusals are consumed here; the shared afterEach keeps
+        // guarding every other test with its empty expectation.
+        singletonNetwork.reset();
     });
 });

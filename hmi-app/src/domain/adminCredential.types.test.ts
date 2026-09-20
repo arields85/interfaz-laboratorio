@@ -65,6 +65,30 @@ describe('admin credential domain', () => {
         })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     });
 
+    it('accepts only the fixed cooperative-identity code as a Telegram error', () => {
+        const status = {
+            source: 'protected', enabled: true, configured: true,
+            desiredGeneration: 2, appliedGeneration: 0, running: false,
+            verified: false, restartRequired: true, lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED',
+        } as const;
+        expect(parseTelegramAdministrationStatus({ ok: true, telegram: status })).toEqual(status);
+        expect(parseTelegramPassiveHealth({
+            ok: true,
+            telegramEnabled: true,
+            telegramConfigured: true,
+            telegramConnected: false,
+            telegramVerified: false,
+            telegramConfigurationError: null,
+            telegramLastError: 'TELEGRAM_BOT_IDENTITY_RESERVED',
+            telegramDesiredGeneration: 2,
+            telegramAppliedGeneration: 0,
+            telegramRestartRequired: true,
+        })).toMatchObject({ lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED' });
+        expect(() => parseTelegramAdministrationStatus({
+            ok: true, telegram: { ...status, lastError: 'TELEGRAM_BOT_IDENTITY_RELEASED' },
+        })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    });
+
     it('selects only safe passive Telegram health metadata from the public health envelope', () => {
         expect(parseTelegramPassiveHealth({
             ok: true,

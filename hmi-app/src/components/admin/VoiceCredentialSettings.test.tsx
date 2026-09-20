@@ -261,6 +261,26 @@ describe('VoiceCredentialSettings', () => {
         expect(client.deleteCredential).not.toHaveBeenCalled();
     });
 
+    it('translates a channel identity collision into the exact usage message without success', async () => {
+        const user = userEvent.setup();
+        const applyTelegram = vi.fn(async () => {
+            throw new AdminAuthError('TELEGRAM_BOT_IDENTITY_RESERVED', 409, false);
+        });
+        const { client } = renderSettings({ applyTelegram });
+        const apply = await screen.findByRole('button', { name: 'Aplicar cambio' });
+        await waitFor(() => expect(apply).toBeEnabled());
+
+        await user.click(apply);
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+            'Este bot ya está en uso por el otro canal. Configurá un bot distinto.',
+        );
+        expect(screen.queryByText('Cambio de Telegram aplicado y estado actualizado.')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Aplicar cambio' })).toBeEnabled();
+        expect(client.saveCredential).not.toHaveBeenCalled();
+        expect(client.deleteCredential).not.toHaveBeenCalled();
+    });
+
     it('clears the secret and hides unknown backend detail after a failed completed request', async () => {
         const user = userEvent.setup();
         const saveCredential = vi.fn(async () => { throw new Error('raw-provider-detail'); });

@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from flask import Response, jsonify, request
 
 from .admin_auth import AuthNotConfigured, AuthUnavailable, LoginRateLimited
+from .bot_identity_reservation import TELEGRAM_BOT_IDENTITY_RESERVED
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
 from .telegram_lifecycle import TelegramLifecycleError
 
@@ -357,6 +358,7 @@ class AdminHttpBoundary:
                     "TELEGRAM_DISABLED": 409,
                     "TELEGRAM_CREDENTIAL_MISSING": 409,
                     "TELEGRAM_STOP_TIMEOUT": 409,
+                    TELEGRAM_BOT_IDENTITY_RESERVED: 409,
                     "CREDENTIAL_STORAGE_UNAVAILABLE": 503,
                     "TELEGRAM_PROVIDER_UNAVAILABLE": 502,
                 }.get(code, 502)
@@ -364,6 +366,7 @@ class AdminHttpBoundary:
                     "TELEGRAM_DISABLED",
                     "TELEGRAM_CREDENTIAL_MISSING",
                     "TELEGRAM_STOP_TIMEOUT",
+                    TELEGRAM_BOT_IDENTITY_RESERVED,
                     "CREDENTIAL_STORAGE_UNAVAILABLE",
                     "TELEGRAM_PROVIDER_UNAVAILABLE",
                 } else "TELEGRAM_PROVIDER_UNAVAILABLE"

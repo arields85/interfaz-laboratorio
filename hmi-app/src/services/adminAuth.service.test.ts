@@ -165,12 +165,32 @@ describe('AdminAuthClient', () => {
         ['CSRF_VALIDATION_FAILED', 403],
         ['CREDENTIAL_STORAGE_UNAVAILABLE', 503],
         ['TELEGRAM_STOP_TIMEOUT', 409],
+        ['TELEGRAM_BOT_IDENTITY_RESERVED', 409],
     ])('preserves allowlisted public backend code %s with status %s', async (code, status) => {
         const client = new AdminAuthClient(
             vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: false, error: code }, status)),
         );
 
         await expect(client.credentialMetadata()).rejects.toMatchObject({ code, status });
+    });
+
+    it('keeps a channel identity collision as an uncommitted apply failure on its exact route', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: 'TELEGRAM_BOT_IDENTITY_RESERVED' }, 409));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.applyTelegram()).rejects.toMatchObject({
+            code: 'TELEGRAM_BOT_IDENTITY_RESERVED', status: 409, committed: false,
+        });
+        expect(fetcher.mock.calls[1]?.[0]).toBe('/api/prisma/admin/credentials/telegram/apply');
+        expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: expect.objectContaining({ 'X-CSRF-Token': SESSION.csrfToken }),
+        }));
+        expect(fetcher).toHaveBeenCalledTimes(2);
     });
 
     it('uses the active private CSRF for exact credential routes without changing secret bytes', async () => {

@@ -5,6 +5,7 @@ type-derived categories, genuine HTTP status validation, polling-only success
 timestamps, privacy canaries, safe projection for mocks, and coherent snapshots.
 """
 
+import io
 import json
 import sys
 import tempfile
@@ -22,6 +23,10 @@ sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from prisma_runtime import local_presentation
 from prisma_runtime.admin_http import AdminHttpBoundary
+from prisma_runtime.bot_identity_reservation import (
+    TELEGRAM_BOT_IDENTITY_RESERVED,
+    BotIdentityReservation,
+)
 from prisma_runtime.local_presentation import JsonFileStore, TelegramLocalBot, VoiceEventStore, create_app, utc_now_iso
 from prisma_runtime.telegram_config import TelegramConfig
 from prisma_runtime.telegram_lifecycle import (
@@ -122,16 +127,84 @@ def prepared_state(paired=None, offset=None):
     }
 
 
+TELEGRAM_OFFLINE_DISPATCH_REFUSED = "TELEGRAM_OFFLINE_DISPATCH_REFUSED"
+
+
+class OfflineDispatchRefused(RuntimeError):
+    """Fixed guard error: an offline test case must never dispatch a real request."""
+
+    def __init__(self) -> None:
+        super().__init__(TELEGRAM_OFFLINE_DISPATCH_REFUSED)
+
+
+def install_offline_dispatch_guard(case) -> list[int]:
+    """Refuse every real outbound dispatch for the lifetime of one test case.
+
+    ``requests.Session.request`` is the single funnel behind both ``get`` and
+    ``post``, so one class-level patch covers every bot call regardless of the
+    verb a path uses. Attempts are counted without any URL, method or token
+    detail. The assertion is registered as a cleanup so a broad
+    ``except Exception`` inside the code under test cannot swallow it, and the
+    original funnel is always restored, including when the test fails.
+    """
+    attempts: list[int] = []
+    original = requests.Session.request
+
+    def guarded_request(self, method, url, *args, **kwargs):
+        attempts.append(1)
+        raise OfflineDispatchRefused()
+
+    requests.Session.request = guarded_request
+    case.addCleanup(lambda: setattr(requests.Session, "request", original))
+    case.addCleanup(lambda: case.assertEqual(attempts, [], "an unexpected real HTTP dispatch was attempted"))
+    return attempts
+
+
+def install_inert_transport_floor(case) -> list[int]:
+    """Install a second inert dispatcher below ``Session.request``.
+
+    It answers nothing and only counts an attempt; it never builds a socket.
+    Probes install this first so no version of the code under test can reach the
+    network even if the primary funnel guard were absent.
+    """
+    attempted: list[int] = []
+    original = requests.adapters.HTTPAdapter.send
+
+    def inert_send(self, request, *args, **kwargs):
+        attempted.append(1)
+        raise OfflineDispatchRefused()
+
+    requests.adapters.HTTPAdapter.send = inert_send
+    case.addCleanup(lambda: setattr(requests.adapters.HTTPAdapter, "send", original))
+    return attempted
+
+
 class TelegramDiagnosticsTests(unittest.TestCase):
-    def build_bot(self, state=None, state_store=None):
-        bot = TelegramLocalBot("secret-token", Mock(), state_store or MemoryStateStore(state), Mock())
+    def setUp(self):
+        install_offline_dispatch_guard(self)
+
+    def build_bot(self, state=None, state_store=None, *, reservation=None):
+        bot = TelegramLocalBot(
+            "secret-token",
+            Mock(),
+            state_store if state_store is not None else MemoryStateStore(state),
+            Mock(),
+            reservation=reservation if reservation is not None else BotIdentityReservation(),
+        )
         bot.stop_event = ImmediateStopEvent()
         return bot
 
-    def prepared_bot(self, paired=None, offset=None, state_store=None):
+    def prepared_bot(self, paired=None, offset=None, state_store=None, *, reservation=None):
+        """A real bot that completed the guarded preparation path."""
         state = prepared_state(paired, offset)
-        bot = self.build_bot(state, state_store=state_store)
-        bot.bot_id, bot._state = 123, state
+        if state_store is None:
+            state_store = MemoryStateStore(state)
+        bot = self.build_bot(state, state_store=state_store, reservation=reservation)
+        bot._call = Mock(side_effect=[
+            {"ok": True, "result": {"id": 123, "username": "prisma_bot"}},
+            {"ok": True, "result": True},
+        ])
+        bot.prepare()
         return bot
 
     def bot_diagnostic(self, bot):
@@ -328,9 +401,9 @@ class TelegramDiagnosticsTests(unittest.TestCase):
             self.assert_public_json_hides_canaries(diagnostic)
 
     def test_state_read_failure_maps_storage_error_to_state(self):
-        bot = self.build_bot()
+        bot = self.prepared_bot()
         bot.stop_event = FirstFailureStopEvent()
-        bot.bot_id, bot._state = 123, None
+        bot._state = None
 
         bot.run()
 
@@ -372,7 +445,7 @@ class TelegramDiagnosticsTests(unittest.TestCase):
         self.assert_public_json_hides_canaries(diagnostic)
 
     def test_persist_failure_maps_storage_error_to_state_and_rolls_back(self):
-        bot = self.prepared_bot(paired=[7], state_store=FailingWriteStateStore())
+        bot = self.prepared_bot(paired=[7], state_store=FailingWriteStateStore(prepared_state(paired=[7])))
         bot.stop_event = FirstFailureStopEvent()
         bot.send_message = Mock()
 
@@ -752,9 +825,13 @@ class TelegramDiagnosticsTests(unittest.TestCase):
         state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [], "nextUpdateOffset": None, "migrationActive": True}}}
         store = MemoryStateStore(state)
         bot = self.build_bot(state, state_store=store)
-        bot.bot_id, bot._state = 123, state
         bot.stop_event = RecordingStopEvent()
         bot.session = Mock()
+        bot._call = Mock(side_effect=[
+            {"ok": True, "result": {"id": 123, "username": "prisma_bot"}},
+            {"ok": True, "result": True},
+        ])
+        bot.prepare()
         calls = []
 
         def call(_method, **_kwargs):
@@ -896,8 +973,8 @@ class TelegramDiagnosticsTests(unittest.TestCase):
         healthy_bot.stop = Mock(return_value=True)
         healthy_bot._call = Mock(
             side_effect=[
-                {"ok": True, "result": True},
                 {"ok": True, "result": {"id": 123, "username": "prisma_bot"}},
+                {"ok": True, "result": True},
             ]
         )
         holder["bot"] = healthy_bot
@@ -931,6 +1008,87 @@ class TelegramDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(manager.bot)
         self.assertIsNone(status["telegramDiagnostic"])
         self.assertIsNone(status["lastError"])
+
+    # --- P4: cooperative identity conflict through the real manager ---------
+
+    def test_identity_conflict_reports_fixed_status_with_the_same_cleanup_discipline(self):
+        reservation = BotIdentityReservation()
+        incumbent = TelegramLocalBot(
+            "incumbent-token", Mock(), MemoryStateStore(None), Mock(), reservation=reservation
+        )
+        incumbent._call = Mock(side_effect=[
+            {"ok": True, "result": {"id": 123, "username": "prisma_bot"}},
+            {"ok": True, "result": True},
+        ])
+        incumbent.prepare()
+        config = TelegramConfig(enabled=True, token="secret-token")
+        resolver = SimpleNamespace(source="environment", resolve=lambda: "secret-token")
+
+        def factory(_token):
+            candidate = TelegramLocalBot(
+                "candidate-token", Mock(), MemoryStateStore(None), Mock(), reservation=reservation
+            )
+            candidate._call = Mock(side_effect=[
+                {"ok": True, "result": {"id": 123, "username": "prisma_bot"}},
+                {"ok": True, "result": True},
+            ])
+            return candidate
+
+        manager = TelegramLifecycleManager(config, resolver, Mock(), factory)
+
+        with self.assertRaises(TelegramLifecycleError) as raised:
+            manager.apply()
+
+        self.assertEqual(raised.exception.args[0], TELEGRAM_BOT_IDENTITY_RESERVED)
+        self.assertIsNone(manager.bot)
+        status = manager.status()
+        self.assertEqual(status["lastError"], TELEGRAM_BOT_IDENTITY_RESERVED)
+        self.assertFalse(status["running"])
+        self.assertFalse(status["verified"])
+        diagnostic = status["telegramDiagnostic"]
+        self.assertEqual(diagnostic["stage"], "prepare")
+        self.assertEqual(diagnostic["category"], "unexpected")
+        self.assertIsNotNone(parse_utc_timestamp(diagnostic["failureAt"]))
+        self.assert_public_json_hides_canaries(status)
+        # The winning channel keeps its lease, state, diagnostics and stop event.
+        winner = reservation.held_by(123)
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner.bot_id, 123)
+        self.assertEqual(len(incumbent.state_store.writes), 1)
+        self.assertIsNone(incumbent.last_error)
+        self.assertFalse(incumbent.stop_event.is_set())
+
+    # --- P5: the offline dispatch guard itself ------------------------------
+
+    def test_offline_guard_fails_an_unmocked_poll_that_would_hide_as_a_poll_error(self):
+        """Prove the guard discriminates when production code swallows the cause.
+
+        An unmocked bot whose only symptom is ``TELEGRAM_POLL_FAILED`` would let a
+        silently network-reaching test pass. The guard must record and refuse the
+        attempt, and the cleanup assertion must fail the run from outside the
+        production ``except Exception`` block.
+        """
+        recorded = {}
+
+        class GuardProbe(unittest.TestCase):
+            def runTest(inner):
+                # Inert floor first: no version of the code can reach the network.
+                recorded["floor"] = install_inert_transport_floor(inner)
+                recorded["guard"] = install_offline_dispatch_guard(inner)
+                probe_bot = TelegramLocalBot(
+                    "token", Mock(), MemoryStateStore(None), Mock(), reservation=BotIdentityReservation()
+                )
+                recorded["bot"] = probe_bot
+                probe_bot.run()
+
+        result = unittest.TestResult(stream=io.StringIO())
+        GuardProbe().run(result)
+
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(len(result.errors) + len(result.failures), 1)
+        self.assertEqual(recorded["guard"], [1])
+        self.assertEqual(recorded["floor"], [])
+        self.assertEqual(recorded["bot"].last_error, "TELEGRAM_PREPARATION_FAILED")
 
 
 if __name__ == "__main__":

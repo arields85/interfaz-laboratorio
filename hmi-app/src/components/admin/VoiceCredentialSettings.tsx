@@ -31,6 +31,7 @@ function errorText(error: unknown): string {
         AUTHENTICATION_REQUIRED: 'La sesión de administrador ya no está disponible.',
         CSRF_VALIDATION_FAILED: 'La sesión cambió. Vuelva a intentar la acción de forma explícita.',
         TELEGRAM_CREDENTIAL_MISSING: 'Telegram no tiene una credencial protegida para aplicar.',
+        TELEGRAM_BOT_IDENTITY_RESERVED: 'Este bot ya está en uso por el otro canal. Configurá un bot distinto.',
         TELEGRAM_DISABLED: 'Telegram está deshabilitado en la configuración local.',
         TELEGRAM_PROVIDER_UNAVAILABLE: 'El proveedor de Telegram no está disponible.',
         TELEGRAM_STOP_TIMEOUT: 'No se pudo confirmar la detención de Telegram.',

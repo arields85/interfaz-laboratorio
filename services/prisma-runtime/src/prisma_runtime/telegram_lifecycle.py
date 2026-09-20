@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .bot_identity_reservation import BotIdentityReservationError, TELEGRAM_BOT_IDENTITY_RESERVED
 from .telegram_credentials import TelegramCredentialError
 
 
@@ -236,11 +237,22 @@ class TelegramLifecycleManager:
                 code = error.args[0]
                 self._update(running=False, configured=False, verified=False, lastError=code)
                 raise TelegramLifecycleError(code) from None
-            candidate = self.bot_factory(token)
+            try:
+                candidate = self.bot_factory(token)
+            except Exception:
+                # A factory/setup failure must surface as a safe provider status and
+                # must never leave an unowned candidate behind.
+                self._update(
+                    running=False,
+                    verified=False,
+                    lastError="TELEGRAM_PROVIDER_UNAVAILABLE",
+                    telegramDiagnostic=None,
+                )
+                raise TelegramLifecycleError("TELEGRAM_PROVIDER_UNAVAILABLE") from None
             try:
                 candidate.prepare()
                 candidate.start()
-            except Exception:
+            except Exception as error:
                 cleanup_safe = False
                 try:
                     cleanup_safe = candidate.stop()
@@ -249,13 +261,20 @@ class TelegramLifecycleManager:
                 if not cleanup_safe:
                     self.bot = candidate
                 failed_diagnostic = _bot_telegram_diagnostic(candidate) if cleanup_safe else None
+                # A cooperative identity conflict uses the same cleanup and retention
+                # discipline as any other failed preparation; only the fixed code differs.
+                failure_code = (
+                    TELEGRAM_BOT_IDENTITY_RESERVED
+                    if isinstance(error, BotIdentityReservationError)
+                    else "TELEGRAM_PROVIDER_UNAVAILABLE"
+                )
                 self._update(
                     running=False,
                     verified=False,
-                    lastError="TELEGRAM_PROVIDER_UNAVAILABLE",
+                    lastError=failure_code,
                     telegramDiagnostic=failed_diagnostic if failed_diagnostic and failed_diagnostic["failureAt"] is not None else None,
                 )
-                raise TelegramLifecycleError("TELEGRAM_PROVIDER_UNAVAILABLE") from None
+                raise TelegramLifecycleError(failure_code) from None
             self.bot = candidate
             self._update(
                 configured=True,

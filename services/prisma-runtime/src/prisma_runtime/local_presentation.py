@@ -24,6 +24,7 @@ from flask import Flask, Response, jsonify, request
 
 from .admin_auth import AdminAuthRepository, AdminAuthService, ScryptPasswordHasher
 from .admin_http import AdminHttpBoundary
+from .bot_identity_reservation import process_bot_identity_reservation
 from .credential_store import CredentialService
 from .hmi_sessions import CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge, HmiSessionRegistry, HmiSessionUnauthorized
 from .paths import runtime_paths
@@ -41,6 +42,7 @@ DEFAULT_TELEGRAM_API_URL = "https://api.telegram.org"
 HMI_SESSION_BOOTSTRAP_MAX_BYTES = 128
 HMI_ASK_MAX_BYTES = 32 * 1024
 HMI_QUESTION_MAX_BYTES = 4096
+TELEGRAM_STOPPING = "TELEGRAM_STOPPING"
 
 
 def utc_now_iso() -> str:
@@ -352,8 +354,26 @@ class JsonFileStore:
             os.replace(temporary, self.path)
 
 
+@dataclass(frozen=True)
+class TelegramBotIdentity:
+    """The identity Telegram reports for this token; an observation, not authority."""
+
+    bot_id: int
+    username: str | None
+
+
 class TelegramLocalBot:
-    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL):
+    """One guarded Telegram channel-B bot lifecycle object.
+
+    Channel B is the autonomous local text channel. The object owns its own
+    cooperative lease on the observed bot identity, so neither the manager, the
+    standalone build/run path nor the intended future channel A consumer of the
+    same process-local registry can start a second live bot for an identity that
+    is already taken. A replacement object is a new activation epoch that can
+    never overwrite a live lease.
+    """
+
+    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
         self.stop_event, self.thread = threading.Event(), None
@@ -362,6 +382,28 @@ class TelegramLocalBot:
         self._diagnostic_lock = threading.Lock()
         self._diagnostic = {"stage": None, "category": None, "httpStatus": None, "failureAt": None, "lastSuccessAt": None}
         self._diagnostic_stage = None
+        # An explicit None selects the shared process registry; the guard is
+        # never disabled. Tests inject a fresh registry instance instead.
+        self._reservation = reservation if reservation is not None else process_bot_identity_reservation()
+        self._activation_epoch = object()
+        self._lifecycle_lock = threading.RLock()
+        self._lease = None
+        self._prepared = False
+        self._stopping = False
+        self._stopped = False
+        # A failed activation is terminal: cleanup may have been uncertain, so
+        # no later prepare, run or start may revive this exact object.
+        self._activation_failed = False
+        # Owned activity, not a thread handle, decides quiescence: a direct
+        # ``run()`` never publishes ``self.thread``, so release must wait for the
+        # real preparation/runner work instead of a field a caller can skip.
+        self._preparation_active = 0
+        self._runner_active = False
+
+    @property
+    def prepared(self) -> bool:
+        """True only while a guarded preparation is complete and not stopped."""
+        return self._prepared
 
     def telegram_diagnostic(self) -> dict[str, Any]:
         with self._diagnostic_lock:
@@ -433,30 +475,126 @@ class TelegramLocalBot:
     def _persist(self):
         self.state_store.write(self._state)
 
-    def prepare(self):
-        self._note_stage("prepare")
+    def observe_identity(self) -> TelegramBotIdentity:
+        """Return the identity Telegram reports for this token, with no effect.
+
+        Observation validates the identifier shape before anything else happens,
+        but it is neither readiness nor ownership: only a complete guarded
+        preparation claims the observed bot.
+        """
+        result = self._call("getMe", timeout=20).get("result")
+        bot_id = result.get("id") if isinstance(result, dict) else None
+        if isinstance(bot_id, bool) or not isinstance(bot_id, int) or bot_id <= 0:
+            raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
+        username = result.get("username") if isinstance(result.get("username"), str) else None
+        return TelegramBotIdentity(bot_id, username)
+
+    def _activity_quiescent_locked(self) -> bool:
+        """No preparation and no runner can still use this object."""
+        return not self._preparation_active and not self._runner_active
+
+    def _quiescent_locked(self, thread) -> bool:
+        """Full stop quiescence: no owned activity and no live managed thread."""
+        if not self._activity_quiescent_locked():
+            return False
+        return thread is None or not thread.is_alive()
+
+    def _finalize_owned_quiescent_locked(self) -> bool:
+        """Close resources and release our exact lease after quiescence is proven.
+
+        Finalization is terminal and idempotent: once a stop has completed, a
+        repeated stop or a runner that settles later reports the same clean
+        outcome instead of tearing the object down a second time. A teardown
+        fault is uncertain cleanup, so ``_stopped`` is only set after a
+        successful close and release, which keeps a retry possible. Caller holds
+        the lifecycle lock and has already confirmed quiescence.
+        """
+        if self._stopped:
+            return True
         try:
-            self._call("deleteWebhook", timeout=20, data={"drop_pending_updates": "false"})
-            result = self._call("getMe", timeout=20).get("result")
-            bot_id = result.get("id") if isinstance(result, dict) else None
-            if isinstance(bot_id, bool) or not isinstance(bot_id, int) or bot_id <= 0:
-                raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
-            self.bot_id = bot_id
-            self.bot_username = result.get("username") if isinstance(result.get("username"), str) else None
-            self._load_state()
-            key = str(bot_id)
-            if key not in self._state["bots"]:
-                self._state["bots"][key] = {
-                    "pairedPrivateChatIds": [],
-                    "nextUpdateOffset": None,
-                    "migrationActive": True,
-                }
-                self._persist()
-        except Exception as error:
-            # Record before re-raising so preparation failures are observable even
-            # when prepare() runs outside the poll loop (manager startup/apply).
-            self._record_failure(error)
-            raise
+            self.session.close()
+        except Exception:
+            return False
+        lease = self._lease
+        if lease is not None:
+            try:
+                self._reservation.release(lease)
+            except Exception:
+                return False
+            if self._lease is lease:
+                self._lease = None
+        self._prepared = False
+        self._stopped = True
+        return True
+
+    def _settle_locked(self) -> bool:
+        """Owned cleanup after the last activity leaves a fenced object."""
+        if not self._activity_quiescent_locked():
+            return False
+        return self._finalize_owned_quiescent_locked()
+
+    def _check_active_locked(self) -> None:
+        """Abort an in-flight effect once a stop or a failed activation fenced us."""
+        if self._stopping or self._stopped or self._activation_failed:
+            raise RuntimeError(TELEGRAM_STOPPING)
+
+    def prepare(self):
+        """Observe the identity, reserve it, then apply the preparation effects.
+
+        A successful preparation keeps its lease until a stop fences the object.
+        A failed preparation is known-quiescent, so it settles immediately: when
+        the cleanup succeeds it releases its own lease and closes its resources
+        instead of stranding a live identity until some later caller remembers to
+        stop it, and when that cleanup faults the lease is retained for a later
+        stop to confirm. Either way the failure is terminal for this object, and
+        the fence is revalidated after every foreign call, so a stop that lands
+        mid-preparation can never be followed by later effects.
+        """
+        with self._lifecycle_lock:
+            if self._stopping or self._stopped or self._activation_failed:
+                raise RuntimeError(TELEGRAM_STOPPING)
+            if self._prepared:
+                return
+            self._note_stage("prepare")
+            self._preparation_active += 1
+            failed = False
+            try:
+                if self._lease is None:
+                    identity = self.observe_identity()
+                    self._check_active_locked()
+                    self._lease = self._reservation.acquire(
+                        identity.bot_id, owner=self, epoch=self._activation_epoch
+                    )
+                    self.bot_id, self.bot_username = identity.bot_id, identity.username
+                self._call("deleteWebhook", timeout=20, data={"drop_pending_updates": "false"})
+                self._check_active_locked()
+                self._load_state()
+                key = str(self.bot_id)
+                if key not in self._state["bots"]:
+                    self._check_active_locked()
+                    self._state["bots"][key] = {
+                        "pairedPrivateChatIds": [],
+                        "nextUpdateOffset": None,
+                        "migrationActive": True,
+                    }
+                    self._check_active_locked()
+                    self._persist()
+                self._check_active_locked()
+                self._prepared = True
+            except Exception as error:
+                failed = True
+                # Record before re-raising so preparation failures are observable even
+                # when prepare() runs outside the poll loop (manager startup/apply).
+                self._record_failure(error)
+                raise
+            finally:
+                self._preparation_active -= 1
+                if failed:
+                    # Sticky before the settle attempt: a cleanup that faults
+                    # retains the lease, and nothing may revive this object.
+                    self._activation_failed = True
+                if failed or self._stopping or self._stopped:
+                    self._settle_locked()
 
     def _pair(self, chat_id):
         record = self._record()
@@ -487,13 +625,43 @@ class TelegramLocalBot:
         answer = answer_from_snapshot(self.snapshot_store.read(), text); self.send_message(chat_id, answer.answer_text)
 
     def run(self):
+        """Claim the single runner slot, then poll under owned activity.
+
+        Direct and managed callers share one slot, so a duplicate or mixed call
+        can never become a second poll loop for the same identity.
+        """
+        with self._lifecycle_lock:
+            if self._stopping or self._stopped or self._activation_failed:
+                return
+            if self._runner_active:
+                return
+            self._runner_active = True
+        failed = False
         try:
-            if self.bot_id is None:
+            failed = self._run_claimed()
+        finally:
+            with self._lifecycle_lock:
+                self._runner_active = False
+                if failed or self._stopping or self._stopped:
+                    self._settle_locked()
+
+    def _run_claimed(self) -> bool:
+        """Run the guarded preparation and poll loop; True when preparation failed."""
+        if not self._prepared:
+            # An observed but unprepared bot must not poll: the guarded
+            # preparation has to succeed before any update is fetched.
+            try:
                 self.prepare()
-        except Exception as error:
-            self.last_error = "TELEGRAM_PREPARATION_FAILED"
-            self._record_failure(error)
-            return
+            except Exception as error:
+                if self._stopping:
+                    # A stop owns the release decision for a fenced object.
+                    return False
+                self.last_error = "TELEGRAM_PREPARATION_FAILED"
+                self._record_failure(error)
+                return True
+        with self._lifecycle_lock:
+            if self._stopping or self._stopped or self._activation_failed or not self._prepared:
+                return False
         while not self.stop_event.is_set():
             try:
                 self._note_stage("state_read")
@@ -508,6 +676,10 @@ class TelegramLocalBot:
                 if not isinstance(updates, list):
                     raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
                 if migration_active and not updates:
+                    if self.stop_event.is_set():
+                        # A fence that lands while the long poll is in flight must
+                        # not let a late empty payload complete the migration.
+                        break
                     self._note_stage("persist")
                     record["migrationActive"] = False
                     try:
@@ -551,22 +723,58 @@ class TelegramLocalBot:
                 self.last_error = "TELEGRAM_POLL_FAILED"
                 self._record_failure(error)
                 self.stop_event.wait(5)
+        return False
 
     def start(self):
-        if not self.thread or not self.thread.is_alive(): self.thread = threading.Thread(target=self.run, name="prisma-local-telegram", daemon=True); self.thread.start()
+        """Start polling once; a fenced or already active runner is never duplicated."""
+        with self._lifecycle_lock:
+            if self._stopping or self._stopped or self._activation_failed:
+                return
+            if self._runner_active or (self.thread is not None and self.thread.is_alive()):
+                return
+            self.thread = threading.Thread(target=self.run, name="prisma-local-telegram", daemon=True)
+            self.thread.start()
 
     def stop(self):
-        self.stop_event.set()
-        self.session.close()
-        if self.thread and self.thread.is_alive(): self.thread.join(timeout=40)
-        return not self.thread or not self.thread.is_alive()
+        """Fence the object, then release its lease only once it is quiescent.
+
+        A managed runner is joined under the existing bounded timeout, but the
+        calling thread is never joined to itself. While any preparation or runner
+        is still active the lease is retained and this reports False; the owner
+        that finishes last performs the same idempotent cleanup. A teardown fault
+        keeps the lease so a later stop can retry.
+        """
+        current = threading.current_thread()
+        with self._lifecycle_lock:
+            self._stopping = True
+            self.stop_event.set()
+            thread = self.thread
+        if thread is not None and thread is not current and thread.is_alive():
+            thread.join(timeout=40)
+        with self._lifecycle_lock:
+            if not self._quiescent_locked(thread):
+                return False
+            return self._finalize_owned_quiescent_locked()
 
 
-def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, config=None):
+def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, config=None, reservation=None):
+    """Build the standalone opt-in bot bound to the shared identity registry.
+
+    ``api_base`` remains the fifth positional parameter. The reservation stays
+    keyword-only and always resolves to the process-wide registry unless a test
+    injects a fresh one, so no construction path can create a disjoint guard.
+    """
     config: TelegramConfig = config or read_telegram_config()
     if not config.configured:
         return None
-    return TelegramLocalBot(config.token, snapshot_store, state_store, voice_events, api_base)
+    return TelegramLocalBot(
+        config.token,
+        snapshot_store,
+        state_store,
+        voice_events,
+        api_base,
+        reservation=reservation if reservation is not None else process_bot_identity_reservation(),
+    )
 
 
 def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None, telegram_manager=None) -> Flask:
@@ -578,6 +786,9 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     voice_url = (os.environ.get("PRISMA_LOCAL_VOICE_URL") or DEFAULT_PRISMA_VOICE_URL).rstrip("/")
     local_http = requests.Session(); local_http.trust_env = False
     app = Flask(__name__)
+    # One process-local identity registry, shared by the manager factory, the
+    # standalone bot builder and any later channel A wiring.
+    identity_reservation = process_bot_identity_reservation()
     if admin_http is None:
         permissions = SecureStoragePermissions()
         repository = AdminAuthRepository(paths.auth_database, permission_checker=permissions.verify)
@@ -594,7 +805,9 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 telegram_configuration,
                 resolver,
                 credentials,
-                lambda token: TelegramLocalBot(token, snapshot_store, state_store, voice_events),
+                lambda token: TelegramLocalBot(
+                    token, snapshot_store, state_store, voice_events, reservation=identity_reservation
+                ),
             )
         admin_http = AdminHttpBoundary(
             AdminAuthService(repository, ScryptPasswordHasher()),
