@@ -58,6 +58,7 @@ from prisma_runtime.channel_a_bot import (
     PHONE_ID_PREFIX,
     PRISMA_CHANNEL_A_BOT_CONFIG_INVALID,
     PRISMA_CHANNEL_A_BOT_UNAVAILABLE,
+    QUERY_IGNORED_UNBOUND,
     SEND_DELIVERED,
     SEND_NONE,
     SEND_REJECTED,
@@ -76,6 +77,23 @@ from prisma_runtime.channel_a_bot import (
     phone_identity,
 )
 from prisma_runtime.channel_a_pairing import ChannelAPairingRegistry
+from prisma_runtime.channel_a_query import (
+    COPY_QUERY_UNAVAILABLE,
+    QUERY_ANSWER_DELIVERED,
+    QUERY_ANSWER_REJECTED,
+    QUERY_ANSWER_UNKNOWN,
+    QUERY_ANSWER_UNPUBLISHED,
+    QUERY_IGNORED_BLANK,
+    QUERY_IGNORED_COMMAND,
+    QUERY_IGNORED_MALFORMED,
+    QUERY_IGNORED_OVERSIZE,
+    QUERY_IGNORED_STALE,
+    QUERY_UNAVAILABLE,
+    ChannelAQueryConfigInvalid,
+    ChannelAQueryCoordinator,
+)
+from prisma_runtime.hmi_sessions import HmiSessionRegistry
+from prisma_runtime.local_presentation import answer_from_snapshot
 
 BOT_ID = 700100
 OTHER_BOT_ID = 700101
@@ -1160,7 +1178,12 @@ class ChannelAConfirmTests(ChannelABotTestCase):
         self.assertEqual(len(self.dialogue._actions), 1)
         record = next(iter(self.dialogue._actions.values()))
         names = {field.name for field in dataclasses.fields(record)}
-        self.assertEqual(names, {"phone_id", "owner_id", "generation", "nonce"})
+        self.assertEqual(
+            names,
+            {"phone_id", "owner_id", "generation", "nonce", "confirmed_update_id"},
+        )
+        # Additive RCA-3b fence: the update that confirmed this link.
+        self.assertEqual(record.confirmed_update_id, 5)
         self.assertEqual(record.phone_id, PHONE)
         self.assertEqual(record.owner_id, OWNER)
         self.assertEqual(record.generation, self.registry.phone_link(PHONE).generation)
@@ -2023,6 +2046,375 @@ class ChannelABoundaryTests(ChannelABotTestCase):
                 self.assertIsInstance(outcome.kind, str)
                 self.assertIn(outcome.variant, (VARIANT_MESSAGE, VARIANT_CALLBACK, VARIANT_UNKNOWN))
                 self.assertIsInstance(outcome.accepted, bool)
+
+
+SNAPSHOT = {"widgets": [{"id": "oee", "title": "OEE", "data": {"value": 88.5}, "unit": "%"}]}
+SNAPSHOT2 = {"widgets": [{"id": "oee", "title": "OEE", "data": {"value": 12.5}, "unit": "%"}]}
+
+
+class ChannelAQueryIntegrationTests(ChannelABotTestCase):
+    """RCA-3b: ordinary text queries routed through the adapter's own send."""
+
+    def setUp(self):
+        super().setUp()
+        self.wall = [1000.0]
+        self.sessions = HmiSessionRegistry(
+            clock=lambda: self.wall[0],
+            owner_factory=lambda: OWNER,
+            entropy=sequential_entropy(),
+        )
+        self.parses = []
+        self.touches = []
+        self.parse_hook = None
+        original = self.registry.human_touch
+
+        def recorded(phone_id, generation):
+            self.touches.append((phone_id, generation))
+            return original(phone_id, generation)
+
+        self.registry.human_touch = recorded
+        self.open_session(OWNER, SNAPSHOT)
+        self.coordinator = self.enable_queries()
+
+    # -- wiring helpers ----------------------------------------------------
+
+    def open_session(self, owner, snapshot=SNAPSHOT):
+        original = self.sessions.owner_factory
+        self.sessions.owner_factory = lambda owner=owner: owner
+        try:
+            capability, _info = self.sessions.create()
+        finally:
+            self.sessions.owner_factory = original
+        if snapshot is not None:
+            self.sessions.set_context(capability, snapshot)
+        return capability
+
+    def parse(self, snapshot, question):
+        self.parses.append((snapshot, question))
+        if self.parse_hook is not None:
+            self.parse_hook()
+        return answer_from_snapshot(snapshot, question)
+
+    def enable_queries(self, **overrides):
+        options = {
+            "read_context": self.sessions.get_owner_context,
+            "parse": self.parse,
+            "freshness_bound": 30.0,
+            "max_question_bytes": 4096,
+            "max_answer_chars": 4096,
+        }
+        options.update(overrides)
+        return self.dialogue.enable_queries(**options)
+
+    def query(self, question, *, owner=OWNER, chat=CHAT_ID, claim_id=4, confirm_id=5, query_id=6):
+        self.pair_up(claim_id, confirm_id, owner=owner, chat=chat)
+        return self.handle(message_update(query_id, question, chat=chat))
+
+    # -- wiring contract ---------------------------------------------------
+
+    def test_enable_queries_builds_and_stores_the_coordinator(self):
+        coordinator = self.coordinator
+        self.assertIsInstance(coordinator, ChannelAQueryCoordinator)
+        self.assertIs(self.dialogue.query, coordinator)
+        self.assertTrue(callable(self.dialogue.binding_admitted))
+        self.assertTrue(callable(self.dialogue.send_query))
+
+    def test_enable_queries_rejects_unusable_injected_dependencies_without_attaching(self):
+        for overrides in (
+            {"parse": None},
+            {"read_context": None},
+            {"freshness_bound": 0},
+            {"max_question_bytes": 0},
+            {"max_answer_chars": -1},
+        ):
+            with self.subTest(overrides=overrides):
+                dialogue = self.build()
+                options = {
+                    "read_context": self.sessions.get_owner_context,
+                    "parse": self.parse,
+                    "freshness_bound": 30.0,
+                    "max_question_bytes": 4096,
+                    "max_answer_chars": 4096,
+                }
+                options.update(overrides)
+                with self.assertRaises(ChannelAQueryConfigInvalid):
+                    dialogue.enable_queries(**options)
+                self.assertIsNone(dialogue.query)
+
+    def test_a_second_attachment_is_rejected_before_state_change(self):
+        original = self.dialogue.query
+        self.assertIsNotNone(original)
+        with self.assertRaises(ChannelABotConfigInvalid) as captured:
+            self.enable_queries(max_question_bytes=1, max_answer_chars=1)
+        self.assertEqual(str(captured.exception), PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+        self.assertIs(self.dialogue.query, original)
+        # The rejected attempt did not install the 1-character policy.
+        outcome = self.query("¿cuál es el oee?")
+        self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED)
+        self.assertIsNotNone(outcome.answer_envelope)
+        self.assertGreater(len(self.transport.sent[-1]["text"]), 1)
+
+    def test_concurrent_attachments_leave_exactly_one_coordinator(self):
+        dialogue = self.build()
+        results = []
+        barrier = threading.Barrier(4)
+
+        def attach(_index):
+            try:
+                barrier.wait(timeout=5)
+                coordinator = dialogue.enable_queries(
+                    read_context=self.sessions.get_owner_context,
+                    parse=self.parse,
+                    freshness_bound=30.0,
+                    max_question_bytes=4096,
+                    max_answer_chars=4096,
+                )
+            except ChannelABotConfigInvalid as error:
+                results.append(("rejected", str(error)))
+            else:
+                results.append(("attached", coordinator))
+
+        threads = [threading.Thread(target=attach, args=(index,)) for index in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        attached = [value for status, value in results if status == "attached"]
+        rejected = [value for status, value in results if status == "rejected"]
+        self.assertEqual(len(attached), 1)
+        self.assertEqual(rejected, [PRISMA_CHANNEL_A_BOT_CONFIG_INVALID] * 3)
+        self.assertIs(dialogue.query, attached[0])
+
+    def test_epoch_factory_must_produce_a_bounded_opaque_value(self):
+        for value in (5, "epoch", lambda: "", lambda: None, lambda: "x" * 200):
+            with self.subTest(value=value):
+                with self.assertRaises(ChannelABotConfigInvalid):
+                    ChannelAPairingDialogue(
+                        bot_id=BOT_ID,
+                        registry=self.registry,
+                        transport=self.transport,
+                        destination_label=self.label,
+                        epoch_factory=value,
+                    )
+
+    def test_without_the_coordinator_ordinary_text_stays_ignored(self):
+        plain = self.build()
+        self.assertIsNone(plain.query)
+        outcome = plain.handle_update(message_update(4, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, INGRESS_IGNORED_UNRELATED, update_id=4)
+        self.assertIsNone(outcome.answer_envelope)
+
+    # -- happy path --------------------------------------------------------
+
+    def test_a_linked_phone_query_is_answered_and_enveloped(self):
+        outcome = self.query("¿cuál es el oee?")
+        self.assert_outcome(
+            outcome,
+            QUERY_ANSWER_DELIVERED,
+            variant=VARIANT_MESSAGE,
+            delivery=SEND_DELIVERED,
+            update_id=6,
+        )
+        self.assertEqual(len(self.parses), 1)
+        self.assertEqual(self.parses[0][1], "¿cuál es el oee?")
+        self.assertEqual(self.parses[0][0], SNAPSHOT)
+        sent = self.transport.sent[-1]
+        self.assertEqual(sent["chat_id"], CHAT_ID)
+        self.assertIn("88", sent["text"])
+        envelope = outcome.answer_envelope
+        self.assertIsNotNone(envelope)
+        self.assertEqual(envelope.owner_id, OWNER)
+        self.assertEqual(envelope.answer_text, sent["text"])
+        self.assertEqual(envelope.update_id, 6)
+        link = self.registry.phone_link(PHONE)
+        self.assertEqual(envelope.generation, link.generation)
+        self.assertEqual(self.touches, [(PHONE, link.generation)])
+
+    def test_the_serialized_outcome_exposes_the_envelope_only_when_present(self):
+        outcome = self.query("¿cuál es el oee?")
+        data = outcome.as_dict()
+        self.assertIn("answerEnvelope", data)
+        self.assertEqual(data["answerEnvelope"]["answerText"], self.transport.sent[-1]["text"])
+        self.assertEqual(data["kind"], QUERY_ANSWER_DELIVERED)
+        self.assertEqual(data["delivery"], SEND_DELIVERED)
+
+    def test_ordinary_text_longer_than_the_command_cap_is_still_answerable(self):
+        question = "consulta " * 40
+        self.assertTrue(len(question) > 128)
+        outcome = self.query(question)
+        self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED)
+        self.assertEqual(self.parses[0][1], question.strip())
+
+    def test_the_start_command_cap_is_unchanged_when_queries_are_enabled(self):
+        outcome = self.handle(message_update(4, "/start " + "A" * 200, chat=CHAT_ID))
+        self.assert_outcome(outcome, INGRESS_IGNORED_MALFORMED, update_id=4)
+        self.assertIsNone(outcome.answer_envelope)
+
+    def test_two_independent_pairs_never_cross_answers(self):
+        self.open_session(OWNER2, SNAPSHOT2)
+        first = self.query("¿cuál es el oee?", claim_id=4, confirm_id=5, query_id=6)
+        second = self.query(
+            "¿cuál es el oee?",
+            owner=OWNER2,
+            chat=CHAT_ID_2,
+            claim_id=10,
+            confirm_id=11,
+            query_id=12,
+        )
+        self.assertEqual(first.answer_envelope.owner_id, OWNER)
+        self.assertEqual(second.answer_envelope.owner_id, OWNER2)
+        self.assertEqual(self.parses[0][0], SNAPSHOT)
+        self.assertEqual(self.parses[1][0], SNAPSHOT2)
+        self.assertEqual(self.transport.sent[-1]["chat_id"], CHAT_ID_2)
+
+    # -- ignored input -----------------------------------------------------
+
+    def test_blank_commands_and_oversize_text_never_route_or_touch(self):
+        self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        cases = (
+            ("", QUERY_IGNORED_BLANK),
+            ("   ", QUERY_IGNORED_BLANK),
+            ("/help", INGRESS_IGNORED_UNRELATED),
+            ("  /unlink  ", QUERY_IGNORED_COMMAND),
+            ("x" * 5000, QUERY_IGNORED_OVERSIZE),
+            ("hola \ud800 mundo", QUERY_IGNORED_MALFORMED),
+        )
+        for question, kind in cases:
+            with self.subTest(question=question):
+                update_id = self.tick()
+                outcome = self.handle(message_update(update_id, question, chat=CHAT_ID))
+                self.assert_outcome(
+                    outcome, kind, variant=VARIANT_MESSAGE, update_id=update_id
+                )
+                self.assertIsNone(outcome.answer_envelope)
+        self.assertEqual(len(self.transport.sent), sent_before)
+        self.assertEqual(self.touches, [])
+        self.assertEqual(self.parses, [])
+
+    def test_an_unlinked_phone_is_never_routed(self):
+        outcome = self.handle(message_update(4, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_IGNORED_UNBOUND, update_id=4)
+        self.assert_quiet()
+        self.assertEqual(self.touches, [])
+        self.assertEqual(self.parses, [])
+
+    def test_input_at_or_below_the_confirmation_fence_is_stale(self):
+        self.pair_up(4, 5)
+        digest = next(iter(self.dialogue._actions))
+        self.dialogue._actions[digest].confirmed_update_id = 99
+        self.dialogue._last_update_id = 0
+        outcome = self.handle(message_update(50, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_IGNORED_STALE, update_id=50)
+        self.assertIsNone(outcome.answer_envelope)
+        self.assertEqual(self.touches, [])
+        self.assertEqual(self.parses, [])
+
+    def test_a_foreign_owner_query_cannot_borrow_the_binding(self):
+        self.pair_up(4, 5)
+        digest = next(iter(self.dialogue._actions))
+        self.dialogue._actions[digest].owner_id = OWNER2
+        outcome = self.handle(message_update(6, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_IGNORED_STALE)
+        self.assertEqual(self.parses, [])
+        self.assertEqual(self.touches, [])
+
+    # -- failure and delivery ---------------------------------------------
+
+    def test_a_rejected_answer_send_exposes_no_envelope_and_is_not_retried(self):
+        self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        self.transport.send_responses = [FakeTransport.rejected()]
+        outcome = self.handle(message_update(6, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_ANSWER_REJECTED, delivery=SEND_REJECTED)
+        self.assertIsNone(outcome.answer_envelope)
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+
+    def test_an_unknown_answer_send_exposes_no_envelope_and_is_not_retried(self):
+        self.pair_up(4, 5)
+        self.transport.send_responses = [{"ok": True, "result": "not-a-message"}]
+        outcome = self.handle(message_update(6, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_ANSWER_UNKNOWN, delivery=SEND_UNKNOWN)
+        self.assertIsNone(outcome.answer_envelope)
+        self.assertEqual(len(self.parses), 1)
+
+    def test_a_post_send_relink_withholds_the_hmi_envelope(self):
+        self.pair_up(4, 5)
+
+        def relink(_payload):
+            link = self.registry.phone_link(PHONE)
+            self.registry.unlink_phone(PHONE, link.generation)
+
+        self.transport.on_send = relink
+        outcome = self.handle(message_update(6, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_ANSWER_UNPUBLISHED, delivery=SEND_DELIVERED)
+        self.assertIsNone(outcome.answer_envelope)
+
+    def test_a_parser_invalidation_discards_the_query_before_sending(self):
+        self.pair_up(4, 5)
+        self.parse_hook = lambda: self.registry.invalidate_owner(OWNER)
+        sent_before = len(self.transport.sent)
+        outcome = self.handle(message_update(6, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_IGNORED_STALE)
+        self.assertIsNone(outcome.answer_envelope)
+        self.assertEqual(len(self.transport.sent), sent_before)
+
+    def test_reconfiguration_during_parse_cannot_swap_authority(self):
+        self.pair_up(4, 5)
+        attempts = []
+        original = self.dialogue.query
+
+        def reconfigure():
+            try:
+                self.enable_queries(max_answer_chars=1)
+            except ChannelABotConfigInvalid as error:
+                attempts.append(str(error))
+            else:
+                attempts.append("attached")
+
+        self.parse_hook = reconfigure
+        sent_before = len(self.transport.sent)
+        outcome = self.handle(message_update(6, "¿cuál es el oee?", chat=CHAT_ID))
+        self.assertEqual(attempts, [PRISMA_CHANNEL_A_BOT_CONFIG_INVALID])
+        self.assertIs(self.dialogue.query, original)
+        # The rejected swap never installs the 1-character policy: the original
+        # policy answers with the real, longer text and its envelope.
+        self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED, delivery=SEND_DELIVERED)
+        self.assertIsNotNone(outcome.answer_envelope)
+        self.assertGreater(len(self.transport.sent[-1]["text"]), 1)
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+
+    def test_an_uncontained_reconfiguration_failure_cannot_emit_an_answer(self):
+        self.pair_up(4, 5)
+
+        def reconfigure():
+            self.enable_queries(max_answer_chars=1)
+
+        self.parse_hook = reconfigure
+        sent_before = len(self.transport.sent)
+        outcome = self.handle(message_update(6, "¿cuál es el oee?", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=SEND_DELIVERED)
+        self.assertIsNone(outcome.answer_envelope)
+        self.assertEqual(self.transport.sent[-1]["text"], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+
+    def test_a_stale_context_fails_closed_with_a_generic_notice(self):
+        self.pair_up(4, 5)
+        self.wall[0] += 1000.0
+        outcome = self.handle(message_update(6, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=SEND_DELIVERED)
+        self.assertIsNone(outcome.answer_envelope)
+        self.assertEqual(self.transport.sent[-1]["text"], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(self.parses, [])
+
+    def test_the_envelope_repr_never_carries_the_nonce_or_the_question(self):
+        self.pair_up(4, 5)
+        digest = next(iter(self.dialogue._actions))
+        nonce = self.dialogue._actions[digest].nonce
+        outcome = self.handle(message_update(6, "¿cuál es el oee?", chat=CHAT_ID))
+        rendered = repr(outcome) + repr(outcome.answer_envelope) + str(outcome.as_dict())
+        self.assertNotIn(nonce, rendered)
+        self.assertNotIn("¿cuál es el oee?", rendered)
 
 
 if __name__ == "__main__":

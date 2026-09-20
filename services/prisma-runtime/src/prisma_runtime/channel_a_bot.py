@@ -18,9 +18,11 @@ bookkeeping, batching, and any real HTTP client. The polling loop that owns
 belongs to the later runtime integration stage. This module never imports an
 HTTP, socket, subprocess, lifecycle or operator-secret module.
 
-Unknown ordinary text is ignored on purpose: it is never routed to a currently
-linked HMI, because a text answer channel protected by a captured generation
-does not exist yet in this stage.
+Unknown ordinary text is ignored by default. When the optional correlated
+query coordinator (RCA-3b) is attached through ``enable_queries``, ordinary text
+from a currently linked phone is answered through it under a captured owner,
+generation, confirmation fence and adapter epoch; without that attachment the
+accepted RCA-3a behavior is unchanged and ordinary text is never routed.
 
 Authority model
 ---------------
@@ -76,6 +78,12 @@ from .channel_a_pairing import (
     ChannelAPairingStaleGeneration,
     ChannelAPairingUnauthorized,
 )
+from .channel_a_query import (
+    QUERY_IGNORED_STALE,
+    QUERY_IGNORED_UNBOUND,
+    ChannelAQueryCoordinator,
+    QueryBinding,
+)
 
 PRISMA_CHANNEL_A_BOT_CONFIG_INVALID = "PRISMA_CHANNEL_A_BOT_CONFIG_INVALID"
 PRISMA_CHANNEL_A_BOT_UNAVAILABLE = "PRISMA_CHANNEL_A_BOT_UNAVAILABLE"
@@ -91,6 +99,7 @@ MAX_DESCRIPTION_CHARS = 512
 MAX_CALLBACK_ID_CHARS = 64
 MAX_ACK_TEXT_CHARS = 200
 MAX_NONCE_ATTEMPTS = 8
+MAX_EPOCH_CHARS = 128
 
 URLSAFE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
@@ -257,6 +266,7 @@ __all__ = [
     "PHONE_ID_PREFIX",
     "PRISMA_CHANNEL_A_BOT_CONFIG_INVALID",
     "PRISMA_CHANNEL_A_BOT_UNAVAILABLE",
+    "QUERY_IGNORED_UNBOUND",
     "SEND_DELIVERED",
     "SEND_NONE",
     "SEND_REJECTED",
@@ -302,6 +312,9 @@ class IngressOutcome:
     reserved as the new high-water mark, or when the body was not a mapping at
     all. ``update_id`` is ``None`` when the body had no usable identifier.
     ``acknowledged`` is ``None`` when no callback acknowledgement was attempted.
+    ``answer_envelope`` is the correlated answer for a future HMI publisher, and
+    is ``None`` for every outcome that did not deliver a still-current answer;
+    it is redacted from ``repr`` and only grows ``as_dict`` when present.
     """
 
     update_id: int | None
@@ -310,9 +323,10 @@ class IngressOutcome:
     accepted: bool
     delivery: str = SEND_NONE
     acknowledged: bool | None = None
+    answer_envelope: object | None = field(default=None, repr=False)
 
     def as_dict(self) -> dict:
-        return {
+        data = {
             "updateId": self.update_id,
             "variant": self.variant,
             "kind": self.kind,
@@ -320,6 +334,11 @@ class IngressOutcome:
             "delivery": self.delivery,
             "acknowledged": self.acknowledged,
         }
+        if self.answer_envelope is not None:
+            # Only an outcome that actually carries the correlated answer grows
+            # the serialized shape; every RCA-3a caller keeps the original keys.
+            data["answerEnvelope"] = self.answer_envelope.as_dict()
+        return data
 
 
 @dataclass
@@ -345,6 +364,7 @@ class _Action:
     owner_id: str
     generation: int
     nonce: str = field(repr=False)
+    confirmed_update_id: int = 0
 
 
 def phone_identity(actor_id: int) -> str:
@@ -385,6 +405,19 @@ def _bounded_update_id(value) -> int | None:
 def _digest(value: str) -> bytes:
     """Digest one ASCII secret so no local index ever stores it in clear."""
     return hashlib.sha256(value.encode("ascii")).digest()
+
+
+def _read_epoch(factory) -> str:
+    """Mint one opaque, bounded process-local adapter epoch, or fail closed."""
+    try:
+        value = factory()
+    except Exception:
+        raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID) from None
+    if not isinstance(value, str) or not value or len(value) > MAX_EPOCH_CHARS:
+        raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+    if not value.isascii() or not value.isprintable():
+        raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+    return value
 
 
 def _safe_label(value, *, limit: int = MAX_LABEL_CHARS) -> str | None:
@@ -428,6 +461,7 @@ class ChannelAPairingDialogue:
         destination_label,
         entropy=secrets.token_bytes,
         clock=None,
+        epoch_factory=None,
         max_link_actions=64,
         max_pending_claims=64,
     ):
@@ -453,6 +487,10 @@ class ChannelAPairingDialogue:
         bounded_claims = _bounded_count(max_pending_claims)
         if bounded_claims is None:
             raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+        resolved_epoch_factory = secrets.token_hex if epoch_factory is None else epoch_factory
+        if not callable(resolved_epoch_factory):
+            raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+        epoch = _read_epoch(resolved_epoch_factory)
 
         self.bot_id = bounded_bot
         self.registry = registry
@@ -466,6 +504,10 @@ class ChannelAPairingDialogue:
         self._last_update_id = -1
         self._pending_claims: dict = {}
         self._actions: dict = {}
+        self._epoch = epoch
+        # Optional: attaching a query coordinator is what turns on ordinary
+        # text queries. Left unset, the accepted RCA-3a behavior is untouched.
+        self.query = None
 
     # -- ingress -----------------------------------------------------------
 
@@ -581,21 +623,157 @@ class ChannelAPairingDialogue:
         text = message.get("text")
         if text is None:
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True)
-        if not isinstance(text, str) or len(text) > MAX_MESSAGE_TEXT_CHARS:
+        if not isinstance(text, str):
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True)
-        matched = _START_PATTERN.match(text)
-        if matched is None:
-            # Ordinary text and every other command stay ignored in this stage.
-            return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True)
-        rest = matched.group("rest")
-        payload = "" if rest is None else rest.strip()
-        if not payload:
-            return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True)
-        if _URLSAFE_TOKEN_PATTERN.match(payload) is None:
-            return self._notice(
-                update_id, VARIANT_MESSAGE, PAIRING_REFUSED, chat_id, COPY_REFUSED
+        if self.query is None or text.startswith("/"):
+            # The command path keeps the historical 128-character bound. Only an
+            # ordinary query, when the correlated coordinator is attached, is
+            # bounded by the injected byte policy instead.
+            if len(text) > MAX_MESSAGE_TEXT_CHARS:
+                return IngressOutcome(
+                    update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True
+                )
+            matched = _START_PATTERN.match(text)
+            if matched is None:
+                # Ordinary text and every other command stay ignored on this path.
+                return IngressOutcome(
+                    update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True
+                )
+            rest = matched.group("rest")
+            payload = "" if rest is None else rest.strip()
+            if not payload:
+                return IngressOutcome(
+                    update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True
+                )
+            if _URLSAFE_TOKEN_PATTERN.match(payload) is None:
+                return self._notice(
+                    update_id, VARIANT_MESSAGE, PAIRING_REFUSED, chat_id, COPY_REFUSED
+                )
+            return self._claim(update_id, chat_id, actor_id, payload)
+        return self._handle_query(update_id, actor_id, text)
+
+    # -- correlated text queries (RCA-3b, optional) ------------------------
+
+    def enable_queries(
+        self,
+        *,
+        read_context,
+        parse,
+        freshness_bound,
+        max_question_bytes,
+        max_answer_chars,
+    ) -> ChannelAQueryCoordinator:
+        """Attach the correlated query coordinator around this adapter's seams.
+
+        Optional and startup-only. Without this call ordinary text keeps the
+        accepted RCA-3a behavior. The coordinator receives only the foreign
+        dependencies -- the owner-scoped context reader, the visible-snapshot
+        parser and the injected bounds -- while admission validation and
+        delivery reuse this adapter's live action record and its existing text
+        send classification. No second transport path and no raw action nonce
+        leave this adapter.
+
+        Exactly one attachment is allowed. A repeated attempt is rejected with a
+        sanitized configuration error before any state changes, so a live
+        coordinator is never hot-swapped and an in-flight query keeps the policy
+        it started under. Construction runs under the serial adapter lock, so
+        concurrent attempts leave exactly one coordinator attached and a failed
+        construction never partially attaches.
+        """
+        with self._lock:
+            if self.query is not None:
+                raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+            coordinator = ChannelAQueryCoordinator(
+                registry=self.registry,
+                validate=self.binding_admitted,
+                read_context=read_context,
+                parse=parse,
+                deliver=self.send_query,
+                freshness_bound=freshness_bound,
+                max_question_bytes=max_question_bytes,
+                max_answer_chars=max_answer_chars,
+                delivered_label=SEND_DELIVERED,
+                rejected_label=SEND_REJECTED,
+                unknown_label=SEND_UNKNOWN,
             )
-        return self._claim(update_id, chat_id, actor_id, payload)
+            self.query = coordinator
+            return coordinator
+
+    def binding_admitted(self, binding) -> bool:
+        """Prove the captured binding still matches this adapter's live record.
+
+        The coordinator also revalidates the registry link; this seam adds the
+        adapter epoch and the local admission record without ever exporting the
+        raw action nonce. It runs under the serial adapter lock with its caller.
+        """
+        if not isinstance(binding, QueryBinding):
+            return False
+        if binding.epoch != self._epoch:
+            return False
+        for record in self._actions.values():
+            if (
+                record.phone_id == binding.phone_id
+                and record.owner_id == binding.owner_id
+                and record.generation == binding.generation
+                and record.confirmed_update_id == binding.confirmed_update_id
+            ):
+                return True
+        return False
+
+    def send_query(self, binding, text) -> str:
+        """Send one answer text through the existing text-only classification."""
+        chat_id = self._chat_from_phone(binding.phone_id)
+        if chat_id is None:
+            return SEND_UNKNOWN
+        return self._send(chat_id, text)
+
+    def _handle_query(self, update_id, actor_id, text) -> IngressOutcome:
+        """Route one ordinary text from a linked phone through the coordinator."""
+        phone_id = phone_identity(actor_id)
+        record = self._record_for_phone(phone_id)
+        if record is None:
+            # No adapter-admitted record exists for this phone, so nothing is
+            # bound: a registry link alone never authorizes an answer.
+            return IngressOutcome(update_id, VARIANT_MESSAGE, QUERY_IGNORED_UNBOUND, True)
+        if update_id <= record.confirmed_update_id:
+            # Queued before this link was confirmed: it can never bind to it.
+            return IngressOutcome(update_id, VARIANT_MESSAGE, QUERY_IGNORED_STALE, True)
+        binding = QueryBinding(
+            phone_id,
+            record.owner_id,
+            record.generation,
+            update_id,
+            record.confirmed_update_id,
+            self._epoch,
+        )
+        outcome = self.query.handle_query(binding, text)
+        delivery = SEND_NONE if outcome.delivery is None else outcome.delivery
+        return IngressOutcome(
+            update_id,
+            VARIANT_MESSAGE,
+            outcome.kind,
+            True,
+            delivery,
+            None,
+            outcome.envelope,
+        )
+
+    def _record_for_phone(self, phone_id):
+        """Return the single bounded local action record for one phone, or ``None``."""
+        for record in self._actions.values():
+            if record.phone_id == phone_id:
+                return record
+        return None
+
+    @staticmethod
+    def _chat_from_phone(phone_id):
+        """Recover the bounded private chat id from a canonical phone identity."""
+        if not isinstance(phone_id, str) or not phone_id.startswith(PHONE_ID_PREFIX):
+            return None
+        suffix = phone_id[len(PHONE_ID_PREFIX):]
+        if not suffix.isdigit() or len(suffix) > 16:
+            return None
+        return _bounded_id(int(suffix))
 
     def _claim(self, update_id, chat_id, actor_id, token) -> IngressOutcome:
         phone_id = phone_identity(actor_id)
@@ -756,7 +934,9 @@ class ChannelAPairingDialogue:
             return IngressOutcome(
                 update_id, VARIANT_CALLBACK, PAIRING_REFUSED, True, delivery, acknowledged
             )
-        self._remember_action(nonce, phone_id, link.owner_id, link.generation)
+        self._remember_action(
+            nonce, phone_id, link.owner_id, link.generation, update_id
+        )
         acknowledged = self._answer(callback_id, COPY_CONFIRMED)
         if not self._link_matches(phone_id, link.owner_id, link.generation):
             # The acknowledgement hook may have replaced the captured link: never
@@ -875,11 +1055,15 @@ class ChannelAPairingDialogue:
             ):
                 self._actions.pop(digest, None)
 
-    def _remember_action(self, nonce, phone_id, owner_id, generation) -> None:
+    def _remember_action(
+        self, nonce, phone_id, owner_id, generation, confirmed_update_id
+    ) -> None:
         for digest, record in list(self._actions.items()):
             if record.phone_id == phone_id and record.generation == generation:
                 self._actions.pop(digest, None)
-        self._actions[_digest(nonce)] = _Action(phone_id, owner_id, generation, nonce)
+        self._actions[_digest(nonce)] = _Action(
+            phone_id, owner_id, generation, nonce, confirmed_update_id
+        )
 
     def _forget_claim(self, ticket) -> None:
         self._pending_claims.pop(_digest(ticket), None)
