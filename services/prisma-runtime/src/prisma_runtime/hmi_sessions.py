@@ -6,6 +6,7 @@ import base64
 import copy
 import hashlib
 import json
+import math
 import secrets
 import threading
 import time
@@ -32,12 +33,29 @@ class HmiSessionContextTooLarge(HmiSessionError):
     pass
 
 
+class HmiSessionOwnerUnavailable(HmiSessionError):
+    pass
+
+
+class HmiSessionContextUnavailable(HmiSessionError):
+    pass
+
+
+class HmiSessionContextStale(HmiSessionError):
+    pass
+
+
+class HmiSessionFreshnessInvalid(HmiSessionError):
+    pass
+
+
 @dataclass
 class _Session:
     owner_id: str
     created_at: float
     last_seen_at: float
     context: dict | None = None
+    context_received_at: float | None = None
 
 
 class HmiSessionRegistry:
@@ -130,6 +148,7 @@ class HmiSessionRegistry:
                 raise HmiSessionUnauthorized("PRISMA_SESSION_REQUIRED")
             session.last_seen_at = now
             session.context = copy.deepcopy(context)
+            session.context_received_at = now
             return session.owner_id
 
     def get_context(self, capability: str) -> tuple[str, dict | None]:
@@ -142,6 +161,52 @@ class HmiSessionRegistry:
                 raise HmiSessionUnauthorized("PRISMA_SESSION_REQUIRED")
             session.last_seen_at = now
             return session.owner_id, copy.deepcopy(session.context)
+
+    def get_owner_context(self, owner_id: str, *, max_age_seconds: float) -> tuple[float, dict]:
+        """Return one owner's server-received context and its observed receipt age.
+
+        Trusted in-process lookup for internal collaborators -- the remote pairing
+        channel -- that already know the owner id and must not hold the bearer
+        capability. It is not authorization: it never returns, stores or accepts
+        the capability, and it must never be reachable from an HTTP caller.
+        A successful read never renews session activity, so observable presence
+        stays bounded by the caller's freshness bound plus the existing idle and
+        absolute expiry.
+
+        ``max_age_seconds`` is required and must be a positive finite number; the
+        registry defines no product default. Freshness is derived only from the
+        server receipt time recorded by a successful ``set_context``, never from
+        anything supplied inside the context. Missing, closed, expired, absent or
+        stale contexts are rejected without any global or cross-owner fallback.
+        """
+        if isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, (int, float)):
+            raise HmiSessionFreshnessInvalid("PRISMA_SESSION_FRESHNESS_BOUND_INVALID")
+        try:
+            bound = float(max_age_seconds)
+        except OverflowError:
+            bound = math.inf
+        if not math.isfinite(bound) or bound <= 0:
+            raise HmiSessionFreshnessInvalid("PRISMA_SESSION_FRESHNESS_BOUND_INVALID")
+        now = self.clock()
+        with self.lock:
+            self._purge_locked(now)
+            session = None
+            for candidate in self._sessions.values():
+                if candidate.owner_id == owner_id:
+                    session = candidate
+                    break
+            if session is None:
+                raise HmiSessionOwnerUnavailable("PRISMA_SESSION_OWNER_UNAVAILABLE")
+            if session.context is None:
+                raise HmiSessionContextUnavailable("PRISMA_SESSION_CONTEXT_UNAVAILABLE")
+            if session.context_received_at is None:
+                raise HmiSessionFreshnessInvalid("PRISMA_SESSION_RECEIPT_TIME_INVALID")
+            age = now - session.context_received_at
+            if not math.isfinite(age) or age < 0:
+                raise HmiSessionFreshnessInvalid("PRISMA_SESSION_RECEIPT_TIME_INVALID")
+            if age > bound:
+                raise HmiSessionContextStale("PRISMA_SESSION_CONTEXT_STALE")
+            return age, copy.deepcopy(session.context)
 
     def _purge_locked(self, now):
         expired = [
