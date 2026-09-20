@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +63,47 @@ def validate_telegram_state(value: object) -> dict[str, Any]:
             "migrationActive": migration_active,
         }
     return {"schemaVersion": STATE_SCHEMA_VERSION, "bots": validated}
+
+
+TELEGRAM_DIAGNOSTIC_FIELDS = frozenset({"stage", "category", "httpStatus", "failureAt", "lastSuccessAt"})
+TELEGRAM_DIAGNOSTIC_STAGES = frozenset({"prepare", "poll", "state_read", "validate", "persist", "handle"})
+TELEGRAM_DIAGNOSTIC_CATEGORIES = frozenset({"transport", "http", "response_json", "state", "unexpected"})
+UTC_TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z")
+
+
+def _is_utc_timestamp(value: Any) -> bool:
+    """Accept only locally generated UTC ISO timestamps ("...Z"); any other text is rejected."""
+    if not isinstance(value, str) or UTC_TIMESTAMP_PATTERN.fullmatch(value) is None:
+        return False
+    for shape in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ"):
+        try:
+            datetime.strptime(value, shape)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def project_telegram_diagnostic(raw: Any) -> dict[str, Any] | None:
+    """Restrict a raw diagnostic record to the public safe schema; invalid values become null."""
+    if not isinstance(raw, dict) or set(raw) != TELEGRAM_DIAGNOSTIC_FIELDS:
+        return None
+    stage = raw["stage"] if isinstance(raw["stage"], str) and raw["stage"] in TELEGRAM_DIAGNOSTIC_STAGES else None
+    category = raw["category"] if isinstance(raw["category"], str) and raw["category"] in TELEGRAM_DIAGNOSTIC_CATEGORIES else None
+    status_code = raw["httpStatus"]
+    http_status = status_code if isinstance(status_code, int) and not isinstance(status_code, bool) and 100 <= status_code <= 599 else None
+    failure_at = raw["failureAt"] if _is_utc_timestamp(raw["failureAt"]) else None
+    last_success_at = raw["lastSuccessAt"] if _is_utc_timestamp(raw["lastSuccessAt"]) else None
+    return {"stage": stage, "category": category, "httpStatus": http_status, "failureAt": failure_at, "lastSuccessAt": last_success_at}
+
+
+def _bot_telegram_diagnostic(bot: Any) -> dict[str, Any] | None:
+    """Read a bot diagnostic defensively so mocks, broken bots, or absent getters never leak into status."""
+    try:
+        getter = getattr(bot, "telegram_diagnostic", None)
+        return project_telegram_diagnostic(getter()) if callable(getter) else None
+    except Exception:
+        return None
 
 
 class TelegramStateRepository:
@@ -120,6 +163,7 @@ class TelegramLifecycleManager:
             "verified": False,
             "restartRequired": True,
             "lastError": config.configuration_error,
+            "telegramDiagnostic": None,
         }
         if not config.enabled:
             self._status.update({"appliedGeneration": 1, "restartRequired": False, "lastError": None})
@@ -132,6 +176,10 @@ class TelegramLifecycleManager:
     def status(self):
         with self.state_lock:
             result = dict(self._status)
+            live_diagnostic = _bot_telegram_diagnostic(self.bot)
+            stored_diagnostic = result.get("telegramDiagnostic")
+            diagnostic = live_diagnostic if live_diagnostic is not None else stored_diagnostic
+            result["telegramDiagnostic"] = dict(diagnostic) if diagnostic is not None else None
             bot = self.bot
             if bot is not None and bot.thread is not None:
                 result["running"] = bot.thread.is_alive() and not bot.stop_event.is_set()
@@ -167,7 +215,7 @@ class TelegramLifecycleManager:
                 self._update(lastError="TELEGRAM_STOP_TIMEOUT")
                 return False
             self.bot = None
-            self._update(appliedGeneration=generation, running=False, verified=False, lastError=None)
+            self._update(appliedGeneration=generation, running=False, verified=False, lastError=None, telegramDiagnostic=None)
             return True
 
     def apply(self):
@@ -200,7 +248,13 @@ class TelegramLifecycleManager:
                     cleanup_safe = False
                 if not cleanup_safe:
                     self.bot = candidate
-                self._update(running=False, verified=False, lastError="TELEGRAM_PROVIDER_UNAVAILABLE")
+                failed_diagnostic = _bot_telegram_diagnostic(candidate) if cleanup_safe else None
+                self._update(
+                    running=False,
+                    verified=False,
+                    lastError="TELEGRAM_PROVIDER_UNAVAILABLE",
+                    telegramDiagnostic=failed_diagnostic if failed_diagnostic and failed_diagnostic["failureAt"] is not None else None,
+                )
                 raise TelegramLifecycleError("TELEGRAM_PROVIDER_UNAVAILABLE") from None
             self.bot = candidate
             self._update(
@@ -209,6 +263,7 @@ class TelegramLifecycleManager:
                 running=True,
                 verified=True,
                 lastError=None,
+                telegramDiagnostic=None,
             )
             return self.status()
 

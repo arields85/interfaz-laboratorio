@@ -30,7 +30,7 @@ from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
 from .telegram_credentials import TelegramCredentialResolver
-from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, validate_telegram_state
+from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, project_telegram_diagnostic, validate_telegram_state
 from .voice_events import VoiceEventCapacity, VoiceEventStore
 
 
@@ -50,6 +50,24 @@ def utc_now_iso() -> str:
 def _safe_response_status(response: Any) -> int | None:
     status = getattr(response, "status_code", None)
     return status if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599 else None
+
+
+TELEGRAM_DIAGNOSTIC_STATE_STAGES = ("state_read", "persist")
+
+
+def _telegram_failure_category(error: BaseException, stage: str | None) -> tuple[str, int | None]:
+    """Type-derived category from a fixed allowlist; JSON must be tested before the
+    broad RequestException branch because requests.exceptions.JSONDecodeError
+    inherits from both json.JSONDecodeError and requests.RequestException."""
+    if isinstance(error, (requests.exceptions.JSONDecodeError, json.JSONDecodeError)):
+        return "response_json", None
+    if isinstance(error, requests.HTTPError):
+        return "http", _safe_response_status(getattr(error, "response", None))
+    if isinstance(error, requests.RequestException):
+        return "transport", None
+    if isinstance(error, TelegramStateUnavailable) or stage in TELEGRAM_DIAGNOSTIC_STATE_STAGES:
+        return "state", None
+    return "unexpected", None
 
 
 def _safe_voice_target(voice_url: str) -> dict[str, Any]:
@@ -341,6 +359,42 @@ class TelegramLocalBot:
         self.stop_event, self.thread = threading.Event(), None
         self.last_error, self.bot_username, self.bot_id = None, None, None
         self._state = None
+        self._diagnostic_lock = threading.Lock()
+        self._diagnostic = {"stage": None, "category": None, "httpStatus": None, "failureAt": None, "lastSuccessAt": None}
+        self._diagnostic_stage = None
+
+    def telegram_diagnostic(self) -> dict[str, Any]:
+        with self._diagnostic_lock:
+            return dict(self._diagnostic)
+
+    def _note_stage(self, stage: str) -> None:
+        self._diagnostic_stage = stage
+
+    def _record_failure(self, error: BaseException) -> None:
+        # Defensive totality: instrumentation must never alter the original
+        # exception handling, so any unexpected failure here is swallowed.
+        try:
+            stage = self._diagnostic_stage
+            category, http_status = _telegram_failure_category(error, stage)
+            with self._diagnostic_lock:
+                self._diagnostic = {
+                    "stage": stage,
+                    "category": category,
+                    "httpStatus": http_status,
+                    "failureAt": utc_now_iso(),
+                    "lastSuccessAt": self._diagnostic["lastSuccessAt"],
+                }
+        except Exception:
+            return
+
+    def _note_poll_success(self) -> None:
+        # A clock or timestamp fault must never turn a successful poll into a failure.
+        try:
+            succeeded_at = utc_now_iso()
+        except Exception:
+            return
+        with self._diagnostic_lock:
+            self._diagnostic = {"stage": None, "category": None, "httpStatus": None, "failureAt": None, "lastSuccessAt": succeeded_at}
 
     @property
     def paired_chat_ids(self) -> set[int]:
@@ -380,22 +434,29 @@ class TelegramLocalBot:
         self.state_store.write(self._state)
 
     def prepare(self):
-        self._call("deleteWebhook", timeout=20, data={"drop_pending_updates": "false"})
-        result = self._call("getMe", timeout=20).get("result")
-        bot_id = result.get("id") if isinstance(result, dict) else None
-        if isinstance(bot_id, bool) or not isinstance(bot_id, int) or bot_id <= 0:
-            raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
-        self.bot_id = bot_id
-        self.bot_username = result.get("username") if isinstance(result.get("username"), str) else None
-        self._load_state()
-        key = str(bot_id)
-        if key not in self._state["bots"]:
-            self._state["bots"][key] = {
-                "pairedPrivateChatIds": [],
-                "nextUpdateOffset": None,
-                "migrationActive": True,
-            }
-            self._persist()
+        self._note_stage("prepare")
+        try:
+            self._call("deleteWebhook", timeout=20, data={"drop_pending_updates": "false"})
+            result = self._call("getMe", timeout=20).get("result")
+            bot_id = result.get("id") if isinstance(result, dict) else None
+            if isinstance(bot_id, bool) or not isinstance(bot_id, int) or bot_id <= 0:
+                raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
+            self.bot_id = bot_id
+            self.bot_username = result.get("username") if isinstance(result.get("username"), str) else None
+            self._load_state()
+            key = str(bot_id)
+            if key not in self._state["bots"]:
+                self._state["bots"][key] = {
+                    "pairedPrivateChatIds": [],
+                    "nextUpdateOffset": None,
+                    "migrationActive": True,
+                }
+                self._persist()
+        except Exception as error:
+            # Record before re-raising so preparation failures are observable even
+            # when prepare() runs outside the poll loop (manager startup/apply).
+            self._record_failure(error)
+            raise
 
     def _pair(self, chat_id):
         record = self._record()
@@ -429,20 +490,25 @@ class TelegramLocalBot:
         try:
             if self.bot_id is None:
                 self.prepare()
-        except Exception:
+        except Exception as error:
             self.last_error = "TELEGRAM_PREPARATION_FAILED"
+            self._record_failure(error)
             return
         while not self.stop_event.is_set():
             try:
+                self._note_stage("state_read")
                 record = self._record()
                 migration_active = record["migrationActive"]
                 offset = record["nextUpdateOffset"]
                 request_data = {"timeout": 0 if migration_active else 25, **({"offset": offset} if offset is not None else {})}
+                self._note_stage("poll")
                 payload = self._call("getUpdates", timeout=35, data=request_data)
+                self._note_stage("validate")
                 updates = payload.get("result")
                 if not isinstance(updates, list):
                     raise RuntimeError("TELEGRAM_PROVIDER_UNAVAILABLE")
                 if migration_active and not updates:
+                    self._note_stage("persist")
                     record["migrationActive"] = False
                     try:
                         self._persist()
@@ -450,6 +516,7 @@ class TelegramLocalBot:
                         record["migrationActive"] = True
                         raise
                     self.last_error = None
+                    self._note_poll_success()
                     continue
                 validated_updates = []
                 for update in updates:
@@ -468,7 +535,9 @@ class TelegramLocalBot:
                     seen.add(update_id)
                     message = update.get("message")
                     if isinstance(message, dict):
+                        self._note_stage("handle")
                         self._handle_message(message, migration_active=migration_active)
+                    self._note_stage("persist")
                     previous_offset = record["nextUpdateOffset"]
                     record["nextUpdateOffset"] = update_id + 1
                     try:
@@ -477,8 +546,10 @@ class TelegramLocalBot:
                         record["nextUpdateOffset"] = previous_offset
                         raise
                 self.last_error = None
-            except Exception:
+                self._note_poll_success()
+            except Exception as error:
                 self.last_error = "TELEGRAM_POLL_FAILED"
+                self._record_failure(error)
                 self.stop_event.wait(5)
 
     def start(self):
@@ -596,7 +667,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     def health():
         snapshot = snapshot_store.read(); voice_ok, voice_probe = _probe_voice(local_http, voice_url)
         telegram_status = telegram_manager.status() if telegram_manager is not None else None
-        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_status["enabled"] if telegram_status else telegram_configuration.enabled, "telegramConfigured": telegram_status["configured"] if telegram_status else telegram_configuration.configured, "telegramConnected": telegram_status["running"] if telegram_status else bool(telegram_bot and telegram_bot.bot_username), "telegramVerified": telegram_status["verified"] if telegram_status else False, "telegramConfigurationError": telegram_status["lastError"] if telegram_status and not telegram_status["configured"] else telegram_configuration.configuration_error, "telegramLastError": telegram_status["lastError"] if telegram_status else (telegram_bot.last_error if telegram_bot else None), "telegramDesiredGeneration": telegram_status["desiredGeneration"] if telegram_status else None, "telegramAppliedGeneration": telegram_status["appliedGeneration"] if telegram_status else None, "telegramRestartRequired": telegram_status["restartRequired"] if telegram_status else False, "prismaVoiceReady": voice_ok, "voiceProbe": voice_probe})
+        return jsonify({"ok": True, "ready": voice_ok, "service": "prisma-local-presentation", "mode": "local", "snapshotReady": snapshot is not None, "snapshotTimestamp": snapshot.get("timestamp") if snapshot else None, "telegramEnabled": telegram_status["enabled"] if telegram_status else telegram_configuration.enabled, "telegramConfigured": telegram_status["configured"] if telegram_status else telegram_configuration.configured, "telegramConnected": telegram_status["running"] if telegram_status else bool(telegram_bot and telegram_bot.bot_username), "telegramVerified": telegram_status["verified"] if telegram_status else False, "telegramConfigurationError": telegram_status["lastError"] if telegram_status and not telegram_status["configured"] else (None if telegram_status else telegram_configuration.configuration_error), "telegramLastError": telegram_status["lastError"] if telegram_status else (telegram_bot.last_error if telegram_bot else None), "telegramDesiredGeneration": telegram_status["desiredGeneration"] if telegram_status else None, "telegramAppliedGeneration": telegram_status["appliedGeneration"] if telegram_status else None, "telegramRestartRequired": telegram_status["restartRequired"] if telegram_status else False, "telegramDiagnostic": project_telegram_diagnostic(telegram_status.get("telegramDiagnostic")) if isinstance(telegram_status, dict) else None, "prismaVoiceReady": voice_ok, "voiceProbe": voice_probe})
 
     @app.route("/hmi/current-snapshot", methods=["GET", "POST", "OPTIONS"])
     def current_snapshot():

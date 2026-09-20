@@ -26,6 +26,29 @@ MAX_CREDENTIAL_REQUEST_BYTES = (
 )
 MAX_TELEGRAM_APPLY_REQUEST_BYTES = 128
 TELEGRAM_APPLY_ROUTE = "/api/prisma/admin/credentials/telegram/apply"
+# Frozen admin wire contract, mirrored by hmi-app/src/domain/adminCredential.types.ts,
+# which rejects a response carrying any additional key.
+ADMIN_TELEGRAM_STATUS_FIELDS = (
+    "source",
+    "enabled",
+    "configured",
+    "desiredGeneration",
+    "appliedGeneration",
+    "running",
+    "verified",
+    "restartRequired",
+    "lastError",
+)
+
+
+def project_admin_telegram_status(status: dict) -> dict:
+    """Copy only the nine admin contract fields out of lifecycle status.
+
+    Manager status also carries internal telemetry (``telegramDiagnostic``)
+    consumed by public health; the admin route must not widen its contract with
+    it. Copying keeps the manager-owned status object untouched.
+    """
+    return {field: status[field] for field in ADMIN_TELEGRAM_STATUS_FIELDS}
 
 
 @dataclass(frozen=True)
@@ -325,7 +348,7 @@ class AdminHttpBoundary:
                 return self._error("TELEGRAM_PROVIDER_UNAVAILABLE", 502)
             try:
                 status = self.telegram_manager.apply()
-                response = jsonify({"ok": True, "telegram": status})
+                response = jsonify({"ok": True, "telegram": project_admin_telegram_status(status)})
                 response.headers["Cache-Control"] = "no-store"
                 return response
             except TelegramLifecycleError as error:
@@ -344,7 +367,7 @@ class AdminHttpBoundary:
                     "CREDENTIAL_STORAGE_UNAVAILABLE",
                     "TELEGRAM_PROVIDER_UNAVAILABLE",
                 } else "TELEGRAM_PROVIDER_UNAVAILABLE"
-                response = jsonify({"ok": False, "error": public_code, "telegram": self.telegram_manager.status()})
+                response = jsonify({"ok": False, "error": public_code, "telegram": project_admin_telegram_status(self.telegram_manager.status())})
                 response.status_code = status_code
                 response.headers["Cache-Control"] = "no-store"
                 return response

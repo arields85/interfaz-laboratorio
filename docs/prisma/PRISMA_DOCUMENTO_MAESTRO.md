@@ -2,13 +2,19 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.9
+> **Versión documental:** 2.0.10
 >
-> **Fecha:** 2026-09-19
+> **Fecha:** 2026-09-20
 >
 > **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`); despliegue productivo, aceptación integral y el trabajo posterior del asistente siguen pendientes.
 >
-> **Alcance de esta versión:** conciliación documental: la carrera de sembrado ya no está abierta, `PW-001` está cerrado en `f964113`, y `PW-002`, `PW-003` y `PW-004` permanecen pendientes o aplazados. El próximo paso vigente es la comprobación local de punta a punta (§11.1). Cambio exclusivamente documental: no ejecuta servicios, pruebas ni proveedores.
+> **Alcance de esta versión:** cierre de la sesión de diagnóstico del sondeo de Telegram, no del
+> recorrido local completo. Se registran el diagnóstico saneado de salud, la corrección del esquema
+> estricto administrativo, la recuperación del sondeo tras la corrección del token por parte del
+> usuario y la aceptación real de UI del `Apply`. El próximo paso vigente (§11.1) deja de ser solo
+> launcher y credenciales sin probar: pasa a la prueba de mensaje propiedad del usuario y a la
+> verificación fresca observable. `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados. Cambio
+> exclusivamente documental: no ejecuta servicios, pruebas ni proveedores.
 
 ## 1. Objetivo y estado general
 
@@ -872,11 +878,12 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (2026-09-19)
+### 11.1 Próximo paso vigente (2026-09-19, conciliado 2026-09-20)
 
-**Comprobar el funcionamiento local de punta a punta, sin borrar la instalación vieja ni regenerar
-claves.** Este registro solo documenta el próximo paso acordado; no ejecuta servicios, pruebas ni
-proveedores y no afirma haber realizado la comprobación.
+**Registro 2.0.9 (histórico, se conserva con su fecha):** comprobar el funcionamiento local de punta
+a punta, sin borrar la instalación vieja ni regenerar claves. Este registro solo documenta el próximo
+paso acordado; no ejecuta servicios, pruebas ni proveedores y no afirma haber realizado la
+comprobación.
 
 Lo que la aceptación local futura debe observar:
 
@@ -906,7 +913,92 @@ Condiciones y límites ya establecidos:
 
 La rama vigente es `feat/prisma-telegram-credentials` con `HEAD` `f964113` (cierre de `PW-001`).
 
+**Conciliación 2.0.10 (2026-09-20):** el registro 2.0.9 anterior se conserva como evidencia histórica
+con fecha. La comprobación local sigue incompleta, pero avanzó y ya no depende solo del launcher y de
+credenciales sin probar. El detalle canónico está en
+[`../../odd/tasks/prisma-telegram-poll-diagnostics.md`](../../odd/tasks/prisma-telegram-poll-diagnostics.md).
+
+Cerrado en esta sesión (incidente de sondeo de Telegram, sobre `feat/prisma-telegram-credentials`):
+
+- Diagnóstico y corrección del falso aviso de credencial protegida ausente cuando el estado ya estaba
+  configurado.
+- Telemetría de salud saneada y solo en memoria (`stage`, `category`, `httpStatus`, `failureAt`,
+  `lastSuccessAt`, enums fijos, enteros 100..599, fechas UTC ISO-Z o `null`), sin excepciones, URLs,
+  cuerpos, tokens, IDs ni rutas.
+- El sondeo recurrente `getUpdates`/HTTP 409 quedó identificado; el usuario corrigió el token del bot
+  correcto y lo revocó/regeneró personalmente, tras lo cual el sondeo se recuperó. El consumidor
+  competidor anterior exacto **no** fue identificado; solo se descartó una segunda familia de runtime
+  local duplicada.
+- Regresión introducida por nuestro propio diagnóstico en el esquema estricto de la respuesta
+  administrativa: `apply` de éxito y de error vuelven a proyectar exactamente los nueve campos
+  existentes (`source`, `enabled`, `configured`, `desiredGeneration`, `appliedGeneration`, `running`,
+  `verified`, `restartRequired`, `lastError`), sin exponer campos internos ni mutar el estado; la
+  telemetría de salud permanece disponible por su vía propia.
+- Verificación final independiente: 114 pruebas backend focalizadas, 285 backend completas y 38
+  frontend aprobadas. Una respuesta Flask 200 simulada fue aceptada por el parser TypeScript real y
+  los esquemas anidados 409/502 se comprobaron como esquema, no como trazas de respuesta viva. Las
+  pruebas corrieron en un hijo aislado con directorio temporal nuevo y once variables de entorno
+  anuladas según el README del runtime, sin credenciales reales ni llamadas a proveedores. Las
+  revisiones anteriores fallidas quedaron corregidas.
+- **Aceptación real de UI (D7):** la captura `pi-clipboard-80477efc-dfea-4fd2-9aca-70e3ac0190af.png`
+  muestra «Cambio de Telegram aplicado y estado actualizado.», generación 1/1, activo, habilitado y
+  verificado, sin cambios pendientes ni errores después del `Apply` solicitado. Resuelve el pie
+  administrativo falso para la operación observada.
+- Evidencia de proceso (histórica, no valores esperados permanentes): los reintentos de relanzamiento
+  reutilizaron `PID 24560`; el padre ejecutó el `stop-local.ps1` oficial validado por identidad
+  (autorizado) y, tras el relanzamiento del usuario, el nuevo proceso de presentación `PID 22060`
+  arrancó el 2026-09-20T00:59:49Z, posterior a la edición de `admin_http.py` del 2026-09-20T00:21:06Z,
+  con salud 1/1 y éxito registrado el 2026-09-20T01:03:07.752649Z. Ningún agente envió mensajes
+  salientes: las acciones de proveedor las inició el usuario desde la UI o Telegram.
+
+Lo que **no** está cerrado: la comprobación local de punta a punta. El próximo paso vigente ya no es
+launcher y credenciales sin probar, sino la prueba de mensaje propiedad del usuario y la verificación
+fresca observable.
+
+Próximo paso vigente (2026-09-20):
+
+1. Recuperar este maestro, el tracker
+   [`../../odd/tasks/prisma-telegram-poll-diagnostics.md`](../../odd/tasks/prisma-telegram-poll-diagnostics.md)
+   y el checkpoint de Engram, e inspeccionar Git. No repetir aprovisionamiento de credenciales ni de
+   administrador, ni las correcciones ya completadas.
+2. El usuario envía `/status` desde su propio chat al bot corregido (`/start` primero solo si se pide
+   emparejamiento). Esta prueba de mensaje **no fue ejecutada ni observada** todavía.
+3. Verificar después una captura fresca del dashboard visible, la consulta y la voz.
+
+Límites vigentes: la última captura observada del dashboard (1 de septiembre) está vencida y no prueba
+una sesión nueva; Gemini está configurado pero su verificación no se realizó, y las llamadas pagadas
+siguen requiriendo autorización explícita separada. El usuario permite reinicios necesarios y pruebas
+mínimas contra su propio bot, no contacto arbitrario ni reinicio de claves. Los refinamientos de UI
+pedidos ahora esperan a la primera aceptación local; `PW-002`, `PW-003` y `PW-004` continúan aplazados
+y [`../PENDING_WORK.md`](../PENDING_WORK.md) sigue siendo la autoridad de descubrimiento, sin cambios.
+
+El cierre acordado de esta sesión es **un commit local completo** con código, pruebas y documentación
+juntos, con excepción de tamaño aceptada explícitamente por el usuario (~1300+ líneas, en su mayoría
+la matriz de regresión); sin push ni PR. La línea 2.0.9 de arriba, con `HEAD` `f964113`, se conserva
+como historia. El `HEAD` previo al cierre 2.0.10 es `fe39ffe`; el hash observado del commit que
+contiene este checkpoint se registra en Engram después de confirmarlo, y su localizador en el
+repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnostics.md`, para no
+incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
+
 ## 12. Changelog
+
+### 2.0.10 — 2026-09-20
+
+- Cierre de la sesión de diagnóstico del sondeo de Telegram en `feat/prisma-telegram-credentials`:
+  falso aviso de credencial protegida ausente corregido, telemetría de salud saneada y solo en memoria,
+  y sondeo `getUpdates`/HTTP 409 recuperado tras la corrección del token del bot por parte del usuario.
+  El consumidor competidor anterior exacto no fue identificado.
+- Regresión propia del esquema estricto administrativo corregida: `apply` de éxito y de error vuelven a
+  proyectar exactamente los nueve campos existentes; verificación final de 114 pruebas backend
+  focalizadas, 285 backend completas y 38 frontend, con parser TypeScript real y esquema anidado 409/502.
+- Aceptación real de UI registrada (D7): `Apply` de Telegram aplicado y estado actualizado, generación
+  1/1, activo, habilitado y verificado, sin pendientes ni errores.
+- Próximo paso vigente actualizado (§11.1): ya no es solo launcher y credenciales sin probar; pasa a la
+  prueba de mensaje propiedad del usuario (`/status`), todavía no ejecutada, y a la verificación fresca
+  de dashboard, consulta y voz. `PW-002`, `PW-003` y `PW-004` siguen aplazados.
+- Cierre acordado: un commit local completo con código, pruebas y documentación, con excepción de tamaño
+  aceptada; sin push ni PR. Cambio exclusivamente documental: no ejecuta servicios, pruebas ni
+  proveedores y no afirma aceptación local completa.
 
 ### 2.0.9 — 2026-09-19
 
