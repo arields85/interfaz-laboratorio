@@ -77,7 +77,20 @@ class VoiceEventStore:
         self._latest = {}
         self._empty_event = {"id": str(uuid.uuid4()), "timestamp": _timestamp(), "text": "", "question": "inicio-local"}
 
-    def publish(self, question, answer_text, chat_id=None, *, paired_bot_producer=False, owner_id="legacy"):
+    @staticmethod
+    def _is_current(guard):
+        if guard is None:
+            return True
+        try:
+            return guard() is True
+        except Exception:
+            return False
+
+    def publish(self, question, answer_text, chat_id=None, *, paired_bot_producer=False, owner_id="legacy", is_current=None):
+        if is_current is not None and not callable(is_current):
+            raise ValueError("VOICE_EVENT_GUARD_INVALID")
+        if not self._is_current(is_current):
+            return None
         now = self.clock()
         event = {
             "id": str(uuid.uuid4()),
@@ -90,12 +103,12 @@ class VoiceEventStore:
             event["telegramChatId"] = chat_id
         with self.lock:
             self._purge(now)
-            owner_events = [key for key, (owner, _event) in self._events.items() if owner == str(owner_id)]
+            owner_events = [key for key, (owner, _event, _guard) in self._events.items() if owner == str(owner_id)]
             for event_id in owner_events[:max(0, len(owner_events) - self.max_events + 1)]:
                 self._events.pop(event_id, None)
             if len(self._events) >= self.max_total_events:
                 raise VoiceEventCapacity("VOICE_EVENT_CAPACITY")
-            self._events[event["id"]] = (str(owner_id), copy.deepcopy(event))
+            self._events[event["id"]] = (str(owner_id), copy.deepcopy(event), is_current)
             self._latest[str(owner_id)] = event["id"]
         return copy.deepcopy(event)
 
@@ -109,16 +122,35 @@ class VoiceEventStore:
             stored = self._events.get(canonical)
             if stored is None or (owner_id is not None and stored[0] != str(owner_id)):
                 return None
-            return copy.deepcopy(stored[1])
+        return self._read_candidate(canonical, stored)
 
     def latest(self, owner_id=None):
         with self.lock:
             self._purge(self.clock())
             key = "legacy" if owner_id is None else str(owner_id)
-            stored = self._events.get(self._latest.get(key))
-            if stored is None and owner_id is None:
-                return copy.deepcopy(self._empty_event)
-            return copy.deepcopy(stored[1]) if stored is not None else None
+            event_id = self._latest.get(key)
+            stored = self._events.get(event_id)
+            if stored is None:
+                return copy.deepcopy(self._empty_event) if owner_id is None else None
+        return self._read_candidate(event_id, stored)
+
+    def _read_candidate(self, event_id, stored):
+        # Foreign guards may reenter the store; never call them under its lock.
+        current = self._is_current(stored[2])
+        with self.lock:
+            if self._events.get(event_id) is not stored:
+                return None
+            if not current:
+                self._events.pop(event_id)
+                owner_id = stored[0]
+                if self._latest.get(owner_id) == event_id:
+                    # Refusal must not promote an older response on later reads.
+                    self._latest.pop(owner_id)
+                return None
+            self._purge(self.clock())
+            if self._events.get(event_id) is not stored:
+                return None
+            return copy.deepcopy(stored[1])
 
     def get_internal(self, event_id, owner_id):
         event = self.get(event_id, owner_id)
@@ -133,13 +165,13 @@ class VoiceEventStore:
             self._latest.pop(owner_id, None)
 
     def _purge(self, now):
-        expired = [event_id for event_id, (_owner, event) in self._events.items() if event["expiresAt"] <= now]
+        expired = [event_id for event_id, (_owner, event, _guard) in self._events.items() if event["expiresAt"] <= now]
         for event_id in expired:
             self._events.pop(event_id, None)
         for owner_id, event_id in list(self._latest.items()):
             if event_id not in self._events:
                 replacement = next(
-                    (candidate for candidate, (owner, _event) in reversed(self._events.items()) if owner == owner_id),
+                    (candidate for candidate, (owner, _event, _guard) in reversed(self._events.items()) if owner == owner_id),
                     None,
                 )
                 if replacement is None:

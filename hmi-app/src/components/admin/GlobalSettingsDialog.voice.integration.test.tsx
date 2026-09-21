@@ -1,14 +1,32 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PRISMA_ORB_STORAGE_KEY } from '../../config/prismaOrb.config';
 import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
 import { adminAuthClient, AdminAuthClient } from '../../services/adminAuth.service';
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 import GlobalSettingsDialog from './GlobalSettingsDialog';
+
+const nameBoundary = vi.hoisted(() => {
+    const storage = (): Storage => {
+        const bytes = new Map<string, string>();
+        return {
+            get length() { return bytes.size; }, clear: () => bytes.clear(),
+            key: (index) => [...bytes.keys()][index] ?? null,
+            getItem: (key) => bytes.get(key) ?? null,
+            setItem: (key, value) => { bytes.set(key, value); },
+            removeItem: (key) => { bytes.delete(key); },
+        };
+    };
+    vi.stubGlobal('localStorage', storage());
+    vi.stubGlobal('sessionStorage', storage());
+    return { refused: [] as string[] };
+});
+
+afterAll(() => vi.unstubAllGlobals());
 
 vi.mock('./ConnectionSettingsTab', () => ({ default: () => null }));
 vi.mock('./DesignSettingsTab', () => ({ default: () => null }));
@@ -81,7 +99,21 @@ function envelope(config = createDefaultPrismaVoiceConfig()): Response {
     return { ok: true, status: 200, json: async () => ({ config, sync: { configured: false, verified: false } }) } as Response;
 }
 
+function guardInjectedFetch() {
+    const injected = fetch;
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (path, init) => {
+        const route = `${init?.method ?? 'GET'} ${String(path)}`;
+        if (!['GET /api/prisma/voice-config', 'PUT /api/prisma/voice-config',
+            'GET /api/prisma/admin/credentials', 'GET /api/prisma/health'].includes(route)) {
+            nameBoundary.refused.push(route);
+            throw new Error('TEST_NETWORK_REFUSED');
+        }
+        return injected(path, init);
+    }));
+}
+
 function renderDialog() {
+    guardInjectedFetch();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return render(<QueryClientProvider client={client}><GlobalSettingsDialog open onClose={vi.fn()} /></QueryClientProvider>);
 }
@@ -97,6 +129,7 @@ function DialogHarness() {
 }
 
 function renderDialogHarness() {
+    guardInjectedFetch();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     return render(<QueryClientProvider client={client}><DialogHarness /></QueryClientProvider>);
 }
@@ -107,7 +140,14 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         localStorage.setItem('hmi-global-settings-tab', 'voice');
     });
     afterEach(() => {
+        cleanup();
         try {
+            expect(nameBoundary.refused).toEqual([]);
+            if (vi.isMockFunction(fetch)) {
+                expect(vi.mocked(fetch).mock.calls.filter(([path]) => ![
+                    '/api/prisma/voice-config', '/api/prisma/admin/credentials', '/api/prisma/health',
+                ].includes(String(path)))).toEqual([]);
+            }
             // External assertion: an unexpected singleton dispatch is a hard failure
             // instead of a silently swallowed request.
             expect(singletonNetwork.refusals).toEqual([]);
@@ -116,9 +156,51 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             singletonNetwork.reset();
             useAuthStore.setState({ session: UNAUTHENTICATED_SESSION, isHydrated: false, isAuthenticating: false, error: null });
             localStorage.clear();
-            vi.unstubAllGlobals();
+            // Injected storage remains installed until this isolated file ends.
             vi.restoreAllMocks();
         }
+    });
+
+    it('saves the HMI name from Prisma independently of DSP, credentials and the footer', async () => {
+        useAuthStore.setState({
+            isHydrated: true,
+            session: { isAuthenticated: true, loginTimestamp: '2026-01-01T00:00:00Z',
+                user: { id: 'test-admin', username: 'admin', displayName: 'Admin',
+                    role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } } },
+        });
+        vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
+            gemini: { configured: false }, telegram: { configured: false }, telegram_channel_a: { configured: false },
+        });
+        vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
+            enabled: true, configured: false, running: false, verified: false,
+            configurationError: 'TELEGRAM_CREDENTIAL_MISSING', lastError: null,
+            desiredGeneration: 1, appliedGeneration: 1, restartRequired: false,
+        });
+        const fetchMock = vi.fn(async () => envelope());
+        vi.stubGlobal('fetch', fetchMock);
+        localStorage.setItem('hmi-global-settings-tab', 'connection');
+        renderDialogHarness();
+        fireEvent.click(screen.getByRole('button', { name: 'Prisma' }));
+        const input = await screen.findByLabelText('Nombre de esta HMI');
+        expect(input).toBeEnabled();
+        fireEvent.change(input, { target: { value: 'Panel recepción' } });
+        expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Guardar nombre' }));
+        expect(await screen.findByText('Nombre guardado en este navegador')).toBeInTheDocument();
+        expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+        expect(singletonNetwork.requests).toEqual([]);
+        expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+        // Preserve B's existing Apply; naming must not add another Apply.
+        expect(screen.getAllByRole('button', { name: /^Aplicar/ })).toHaveLength(1);
+        expect(screen.getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        expect(localStorage.getItem('hmi:prisma-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
+        fireEvent.change(input, { target: { value: 'Discard on tab switch' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Conexion' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Prisma' }));
+        expect(screen.getByLabelText('Nombre de esta HMI')).toHaveValue('Panel recepción');
+        fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
+        expect(await screen.findByLabelText('Nombre de esta HMI')).toHaveValue('Panel recepción');
     });
 
     it('enables shared Save for an effect edit and persists one fixed-route PUT', async () => {

@@ -24,6 +24,7 @@ import DockSliderField from './DockSliderField';
 import DockToggleField from './DockToggleField';
 import PrismaVoiceEffectsSettings from './PrismaVoiceEffectsSettings';
 import VoiceCredentialSettings from './VoiceCredentialSettings';
+import HmiNameSettings from './HmiNameSettings';
 import {
     ADMIN_SIDEBAR_SECTION_CLS,
     ADMIN_SIDEBAR_SECTION_HEADER_CLS,
@@ -278,6 +279,7 @@ export default function VoiceSettingsTab({
 
     return (
         <div className="space-y-4">
+            <HmiNameSettings active={credentialControlsActive} />
             <VoiceCredentialSettings active={credentialControlsActive} />
 
             {remoteVoiceConfig.error ? (

@@ -92,6 +92,7 @@ from .channel_a_query import (
     QUERY_IGNORED_UNBOUND,
     ChannelAQueryCoordinator,
     QueryBinding,
+    is_query_envelope_well_formed,
 )
 
 PRISMA_CHANNEL_A_BOT_CONFIG_INVALID = "PRISMA_CHANNEL_A_BOT_CONFIG_INVALID"
@@ -462,7 +463,8 @@ def _read_epoch(factory) -> str:
         raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
     if not value.isascii() or not value.isprintable():
         raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
-    return value
+    # Preserve the accepted string value, including subclasses overriding __str__.
+    return str.__str__(value)
 
 
 def _safe_label(value, *, limit: int = MAX_LABEL_CHARS) -> str | None:
@@ -771,6 +773,96 @@ class ChannelAPairingDialogue:
             ):
                 return True
         return False
+
+    def _capture_delivery_witness(self, envelope):
+        """Capture admission references without clocks or a liveness assertion."""
+        if not is_query_envelope_well_formed(envelope):
+            return None
+        try:
+            with self._lock:
+                epoch = self._epoch
+                if epoch != envelope.epoch:
+                    return None
+                registry = self.registry
+                action = None
+                for key, record in self._actions.items():
+                    if (record.owner_id == envelope.owner_id
+                            and record.generation == envelope.generation
+                            and envelope.update_id > record.confirmed_update_id):
+                        action = (key, record, record.owner_id, record.generation,
+                                  record.confirmed_update_id)
+                        break
+            if action is None:
+                return None
+            link = registry._capture_link_witness(envelope.owner_id, envelope.generation)
+            if link is None:
+                return None
+            witness = (self, epoch, action, registry, link)
+            return witness if self._delivery_witness_matches(witness) is True else None
+        except Exception:
+            return None
+
+    def _delivery_witness_matches(self, witness) -> bool:
+        """Compare pairing and action under separate locks, without foreign checks."""
+        try:
+            if type(witness) is not tuple or len(witness) != 5:
+                return False
+            dialogue, epoch, action, registry, link = witness
+            if (dialogue is not self or type(epoch) is not str
+                    or type(action) is not tuple or len(action) != 5
+                    or registry is not self.registry):
+                return False
+            key, record, owner, generation, fence = action
+            if (type(key) is not bytes or type(record) is not _Action
+                    or type(owner) is not str or type(generation) is not int
+                    or type(fence) is not int):
+                return False
+            if registry._link_witness_matches(link) is not True:
+                return False
+            with self._lock:
+                return (
+                    self.registry is registry and self._epoch == epoch
+                    and self._actions.get(key) is record
+                    and record.owner_id == owner and record.generation == generation
+                    and record.confirmed_update_id == fence
+                )
+        except Exception:
+            return False
+
+    def is_query_envelope_admitted(self, envelope) -> bool:
+        """Check trusted delivery eligibility without renewing the admitted link."""
+        if not is_query_envelope_well_formed(envelope):
+            return False
+        try:
+            with self._lock:
+                epoch = self._epoch
+                if envelope.epoch != epoch:
+                    return False
+                action_key = None
+                action = None
+                for key, record in self._actions.items():
+                    if (
+                        record.owner_id == envelope.owner_id
+                        and record.generation == envelope.generation
+                        and envelope.update_id > record.confirmed_update_id
+                    ):
+                        action_key, action = key, record
+                        break
+                if action is None:
+                    return False
+            # Registry calls may reenter ingress. Never hold the dialogue lock.
+            if self.registry.is_owner_link_current(envelope.owner_id, envelope.generation) is not True:
+                return False
+            with self._lock:
+                return (
+                    self._epoch == epoch
+                    and self._actions.get(action_key) is action
+                    and action.owner_id == envelope.owner_id
+                    and action.generation == envelope.generation
+                    and envelope.update_id > action.confirmed_update_id
+                )
+        except Exception:
+            return False
 
     def send_query(self, binding, text) -> str:
         """Send one answer text through the existing text-only classification."""

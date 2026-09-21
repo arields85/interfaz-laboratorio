@@ -1,6 +1,148 @@
 # Prisma Channel A remote — ODD tasks
 
-## Session close — RCA-5f accepted; resume remaining RCA-5
+## Current phase — SESSION CLOSE; RCA-5h.2 accepted OFFLINE ONLY; QR → A → existing Prisma circuit next
+
+**Session close — documentation only, zero commands/tests/probes.** The user stopped implementation and authorized this local checkpoint only: this tracker and the PW-003 row. Base `5b89837` on `feat/prisma-telegram-credentials`; the closing commit hash is recorded by the parent in Engram once the commit exists and is never embedded here. The only new permission is a local checkpoint commit made by the parent: no push, PR, provider/state/process action, new test or operational step follows, and no prior grant carries forward. The prior frontend mapping boundary is superseded — frontend writer `mubje6mk` wrote nothing and stopped on an assumed missing frame seam, and the cancelled root-test author `mubk9pqj-1e-l8e6` added no `test_channel_a_root.py` and no paths implementation. Nothing here claims a commit, an executed test or a run build.
+
+**Product status: the end-to-end QR → Channel A → existing Prisma circuit connection is STILL INCOMPLETE.** The accepted RCA-5g/5h.1/5h.2 units remain offline seams: no application composition, admin wiring, QR/status endpoint, proxy/client route or HMI text/audio integration is accepted, and there is no native or full-product acceptance. No tests or builds were rerun during this documentation-only closing step; earlier session evidence is preserved below.
+
+### Mandatory scope — master v2.0.13 §3.4/§11.1
+
+- Finish the connection **QR → Channel A → existing Prisma circuit**, changing pairing and query entry while reusing the existing processing, response and audio. Add no response or audio behavior change now.
+- §3.4 rule: explain the proposal, reason, impact and alternatives, then **ASK AND WAIT** for explicit approval before any unrequested feature, improvement, refactor or behavior change. A detected limitation or future improvement does not become a requirement of the current increment by inertia.
+- The extra frontend availability/cancellation plan (same-session frame/hidden state, delayed-async fences, active-audio cancellation) is **superseded by the user**: optional and unapproved, not a prerequisite for the QR connection. Existing work is preserved and is not reverted automatically.
+
+### Exact next-session point
+
+Recover the actual closing commit and Git status, master §3.4/§11.1, and this checkpoint. Do not redo existing components, mass regression rounds, the past provider test or the §4.4 startup question.
+
+1. **First pending implementation — A composition in the existing root.** Compose `ChannelAManager` and the default Channel A activation factory in `services/prisma-runtime/src/prisma_runtime/local_presentation.py`, using the SAME protected credential store, the shared A+B reservation, `HmiSessionRegistry.get_owner_name(owner_id, max_age_seconds=15)` and the existing `answer_from_snapshot`; route `on_outcome` to the existing `VoiceEventStore` for the exact owner with the already-implemented eligibility guard. No parser, engine or audio rewrite. Add a persistent policy path in `paths.py` only if genuinely needed. Today `create_app` constructs only B, and root `main` shutdown must stop A without a startup Apply of A. **This unit has authored no new test, no source and no RED yet**: focused TDD is next session's work when the user resumes, not this closing grant.
+2. **Then the existing admin auth/CSRF boundary:** route A credential save/delete and the explicit Apply/status through the manager/generation, with no direct secret writes while A is active.
+3. **Then capability-scoped QR/status endpoints and the exact proxy/client routes (currently absent), plus the manual `Pyramid` immediately right of Logs whose QR panel opens ONLY on click.** Reuse the existing HMI event listener and TTS. Do not invent Channel B frame correlation or a new transcript UX now.
+
+`QueryEnvelope` today carries no original question and `VoiceEventStore` permits an empty question, so future wiring can use the empty value rather than inventing a question or changing `QueryEnvelope`. Individual factory APIs are implementation-unit detail, not checkpoint content.
+
+### Accepted offline units and evidence (preserved)
+
+- [x] **RCA-5g — Simple per-HMI name setting:** parent accepted the minimal implementation after independent **118 unique tests PASS**, build/lint PASS, a separate **6-test repeat PASS** and source/test readback.
+- [ ] **RCA-5 overall:** real application composition and integration remain pending. Preserve accepted RCA-5a–f; do not recreate them or resume paused auxiliary harnesses.
+
+- [x] **RCA-5h.1 — Preparatory store delivery guard:** parent accepted after independent **13 methods PASS**, a separate **13-method repeat PASS** and source/test/diff readback; real predicate integration remains pending.
+
+- [x] **RCA-5h.2 — Actual delivery eligibility predicate:** parent accepted OFFLINE ONLY after source/test readbacks, independent focused 35 PASS and 171 baseline methods PASS: **206 distinct methods across five patterns**, not 206 new tests. Store/publisher/root wiring and application integration remain pending; the extra frontend availability/cancellation work is not authorized as a prerequisite (master v2.0.13 §3.4).
+
+This current summary and the stable task table reflect the same accepted offline RCA-5g, RCA-5h.1 and RCA-5h.2 units; only older continuation instructions and grants in the preserved historical sections below are superseded. Checkpoint `5b89837`, branch `feat/prisma-telegram-credentials`, and user decisions #5660/#5661/#5662 are parent-provided context, not new Git or memory observations by this documentation author.
+
+### Minimal accepted contract
+
+- One fixed browser-local HMI name, independent of dashboard/view, configured in General Settings → Prisma with its own save, authenticated/active-panel gate and closed storage errors. Same-origin/profile tabs share storage, **not session authority**. The label is shown **on the phone at confirmation**; it is never global runtime identity or routing authority.
+- Optional `hmiName` is added to a copied **scheduled** snapshot through the existing ordered context publication. Direct export is unchanged. Local persistence is not remote acknowledgement.
+- Trusted owner-name lookup requires the exact **live owner**, both idle and absolute lifetime validity, and fresh server-receipt context. It performs no purge, activity touch or callback. The offline fake phone's public prompt/confirmation flow proved this seam; default manager/root wiring is not implemented.
+- No separate name PUT, bootstrap extension, name-order protocol, synchronization framework, global name, new backend label module or QR UI was added.
+
+Source-only writer `mubesiye-e-w73h` changed exactly six production paths, with static readback and zero commands: new `hmi-app/src/domain/hmiName.ts`, `hmi-app/src/services/hmiName.service.ts`, `hmi-app/src/components/admin/HmiNameSettings.tsx`; existing `hmi-app/src/components/admin/VoiceSettingsTab.tsx`, `hmi-app/src/services/dashboardSnapshotExport.service.ts`, and `services/prisma-runtime/src/prisma_runtime/hmi_sessions.py`.
+
+### Accepted evidence — parent-reported, not rerun here
+
+| Gate | Observed evidence |
+|---|---|
+| Fresh focused RED `mubeo7ro-d-p6pq` | Frontend: 36 PASS / 3 FAIL / 3 collection errors, 4.80s; 19 new cases unexecuted. Backend name suite: 6 methods / 1 failure / 7 error events, 0.063s; missing getter errors include subtests, not seven extra methods. |
+| Independent GREEN `mubexfw9-f-866b` | All five authorized commands ran once, foreground with 180-second bounds, and returned successfully: frontend 7 files / 77 PASS / 4.30s; backend name 6 PASS / 0.064s; sessions 35 PASS / 0.080s; TypeScript + Vite build PASS, 2,737 modules / 6.99s; lint silent PASS. **118 unique tests**. No numeric exit was separately printed. |
+| Final parent-requested spotcheck `mubf2ilc-g-ghkn` | Exact backend name supervisor once: 6 PASS / 0.077s, tool success; no numeric exit separately printed. Adds **no unique tests**. No additional commands, edits, warnings, timeouts or cleanup failures reported. |
+| Static/scope acceptance | Independent full read of all 6 production + 9 test paths found no remaining concrete blocker. Parent read three new production files plus three diffs and key tests in full. Latest parent post-GREEN status showed only the expected 17 paths (6 production, 9 tests, 2 docs); tracked whitespace check PASS with LF/CRLF advisories. Proxy restored unchanged; no source/test drift observed. No full-new-file line count asserted. |
+
+**Superseded proposal and corrective RED history:** the oversized 133-test proposal, separate name protocol and detailed matrix are obsolete and removed from the active tracker. Its old run reported frontend 75 PASS / 14 FAIL / 3 collection-error suites (25.25s), backend name import failure with 25 methods uncollected, and sessions 35 PASS (0.087s); this was not minimal-contract acceptance. Reduction attempt `mubdvqc6-8-0jpn` returned only static mapping; documentation attempt `mube00ro-9-v566` timed out after a read with no edits confirmed by the parent. The later reduced candidate received the fresh RED above before source authoring. Its corrected expiry test isolates context age 5 for idle expiry and age 1 for absolute expiry; actual expiry behavior was not established until GREEN. No unexpected dispatch, command timeout or cleanup failure was reported for the fresh RED/GREEN gates.
+
+**Limits:** unresolved `/grid.svg` and chunk-size-over-500-kB build warnings remain historically seen with unknown provenance. No full suite, coverage, live providers, real credentials or actual QR/bootstrap acceptance. Native assessment was unavailable (empty/schema-incompatible), with RDD off: high-risk independent verification, **not native approval**. No commit, push or PR occurred.
+
+### RCA-5h.1 — Preparatory store delivery guard
+
+**ACCEPTED OFFLINE ONLY.** Parent accepted after full source/test/diff readback, independent GREEN and final repeat. Revision-only publish closures remain insufficient after unlink/relink or changed frames; this private store seam does not integrate the real predicate.
+
+Source-only writer `mubfxtre-o-860c` changed ONLY `services/prisma-runtime/src/prisma_runtime/voice_events.py`. The 13 pure unittest methods in `services/prisma-runtime/tests/test_voice_event_delivery.py` stayed frozen from author `mubfnu7i-m-ki08`; validator remained exactly unchanged. Parent observed expected scope and whitespace PASS with LF/CRLF advisories. This documentation author changed neither source nor tests.
+
+**Accepted minimal contract**
+
+- Existing `VoiceEventStore.publish` accepts optional keyword-only `is_current=None`: trusted process-local callable, never admin input or a serialized field. Future A composition captures owner/link generation/adapter epoch/context revision/freshness in this private callable; actual predicate integration is NOT this unit.
+- `None` preserves legacy/local/B behavior and event JSON exactly: `id`, `timestamp`, `expiresAt`, `text`, `question`, optional `telegramChatId`; only existing internal retrieval adds `ownerId`. Keep `validate_voice_event` compatible.
+- Provided noncallables raise closed `ValueError` before event mutation. Evaluate guards before admission: only strict `True` admits; any other return or exception yields `None`, with no event/latest/capacity admission. Suppression is ineligible/unverifiable publication, NOT successful delivery. Never log or retain raw guard exceptions or expose callbacks in JSON.
+- Retain guards privately with stored entries, bounded by existing per-owner/global limits, TTL and `remove_owner`. Use a private tuple/small entry, not an unbounded parallel map/history, framework, new module/network request or public domain protocol.
+- `latest`, `get`, `get_internal` ALL reevaluate before exposure. Non-True/exception suppresses and retires the exact candidate; clear its latest pointer if it was latest, without older-response fallback/replay on refusal or subsequent reads. Preserve unrelated owners and existing unguarded TTL/capacity/removal semantics. Internal getter delegates guarded `get`, then adds owner only after eligibility.
+- NEVER hold the store lock over a foreign guard call. Capture under lock, release for eligibility, then recheck SAME entry, live presence and expiry under lock before return. Reentrant removal/replacement cannot resurrect/return retired candidates or delete newer events/latest; clock expiry advancing during evaluation fails closed.
+- No atomicity claim across independent pairing-manager clock domains; their last-mile checks remain future integration responsibility. This seam is neither live activation nor full delivery/cancellation fencing. Final dropped/no-op `on_outcome` remains unacceptable.
+
+**Observed TDD and acceptance — parent-reported, not rerun here**
+
+TDD ON by explicit user contract and `docs/TESTING.md`: test authoring → independent RED → separately authorized source-only implementation → independent GREEN → final repeat. Each verifier used the exact unchanged isolated supervisor pattern `test_voice_event_delivery.py` once, foreground, with a 180-second bound.
+
+| Gate | Observed evidence |
+|---|---|
+| RED `mubfuyfe-n-7w72` | 13 methods, 0 PASS, 0 assertion failures/skips; 45 missing-keyword error events (38 subtest + 7 ordinary), 0.020s, exit 1. Guard assertions unreached; only initial legacy-shape/latest assertions executed. |
+| GREEN `mubg0vii-p-zjej` | 13 PASS, 0 failures/errors/skips, 0.011s, OK/tool success; numeric exit not printed. All guard oracles reached; 38 subtest iterations are NOT extra methods. |
+| Final repeat `mubg3cjn-q-edsa` | Same pattern repeated ONCE: 13 PASS, 0.016s, OK/tool success; numeric exit not printed. Adds NO unique tests. |
+
+No unexpected dispatch, timeout, cleanup failure, extra commands or edits reported. Tests cover strict refusals/exceptions, all three reads, isolation/no replay, bounded retention, reentrant removal/replacement, evaluation-time expiry, explicit lock-depth checks and legacy wire/owner/TTL behavior. No frontend/build/lint rerun for this Python-only unit; RCA-5g's 118 unique tests + build/lint + separate 6-test repeat remain separate historical acceptance.
+
+**Limits:** native assessment unavailable/empty with RDD off; high-risk independent verification, NOT native approval. No legacy HTTP suite, full backend, coverage, real predicate integration, frontend cancellation or root A activation verified. This is a preparatory seam only, not a real-pairing delivery-safety claim. Completed grants are exhausted.
+
+### RCA-5h.2 — Accepted actual eligibility predicate (OFFLINE ONLY)
+
+**Parent acceptance:** bounded backend unit accepted after source/test readbacks and independent GREEN/baselines. All original 27 focused methods/assertions plus eight regressions remain (35 total). RCA-5g/5h.1 acceptance is unchanged. The chronology below is parent-reported evidence, not execution by this documentation author or permission to replay completed grants.
+
+**Historical RED and correction**
+
+- Initial missing-API RED: 27 methods, 84 AttributeError events (60 subtest / 24 ordinary), 0.157s, exit 1; 17 public-flow prefixes passed. Failed verifier recovery was proven `not_started` (reads only); the later fresh grant was not a blind rerun.
+- Initial six-source candidate was statically BLOCKED by reentrant inner revocation and epoch compatibility. Test correction preserved 27 methods and added eight; test authors ran zero commands.
+- Behavioral RED `mubi7xcv-13-7nm9`: 35 methods, 29 PASS, six failed methods / seven assertion events (six unsafe True, one epoch False), zero errors/skips, 0.152s, exit 1. All original 27 and both early-status controls passed. Public unlink/relink, final-status unlink/invalidate/close and manager inner unlink after successful eligibility with unchanged publication reached ALL late branches; no absent-branch, fixture or missing-API errors.
+- Source correction `mubiavck-14-obg3` changed only manager/activation/bot/pairing/hmi_sessions (five modules), with zero commands. Parent-approved sixth `channel_a_query.py` shared validator remained unchanged in correction but belongs to the six-source unit. Focused 35/name/store-guard tests stayed unchanged. Parent read all six initial diffs and five correction diffs; reported 25 expected Git paths and whitespace PASS with CRLF advisories.
+
+**Independent acceptance gates**
+
+- Focused GREEN `mubighpk-15-687o`: exact supervisor once, 180-second bound; 35 PASS, zero failures/errors/skips, 0.159s, OK/tool success (numeric exit not printed). New regressions and early controls passed. Late branches still reach according to inspected source order and assertions, not runtime branch markers. This batch correctly stopped before baseline 2 under the blanket local-presentation/probe exclusion; the remaining four commands did NOT run then. No unauthorized dispatch.
+- Read-only preflight `mubikh47-16-te0v` clarified definition imports/offline fixtures: no voice_service, .env, real credentials, network or native workers. A fresh parent grant covered existing presentation/parser imports and query-source reading; activation's scripted synchronous prepare/poll/stop and already-written blocked Session.request self-test; HMI injected create_app.test_client, scrubbed environment, inert sessions and existing fixture TemporaryDirectories. This was not a new harness/probe or live-operation grant.
+- Fresh baseline batch `mubiom3n-17-2xwe`: four exact supervisors ONCE in order, each bounded at 180 seconds: manager 31 PASS / 0.034s; query 90 PASS / 0.011s; activation 15 PASS / 0.026s; sessions 35 PASS / 0.087s. **171 distinct methods**, zero failures/errors/skips, OK/tool success; numeric exits not printed. Expected activation guard upper-attempt 1 / lower 0 and restoration passed; no unexpected dispatch, timeout or cleanup failure. Focused 35 was NOT rerun.
+
+**Accounting and limits:** 206 distinct methods across these five patterns (35 + 171), not 206 new tests or an aggregate unique count across earlier accepted units. Native assessment unavailable/empty, RDD off: high-risk independent fallback, NOT native approval. No frontend build/lint, full backend, coverage or live integration claim; name-unit build warnings remain separate historical evidence. No extra final repeat required or granted. All completed command grants are exhausted. At offline acceptance, parent reported all work uncommitted against `5b89837` on `feat/prisma-telegram-credentials`, with no commit/push/PR grant. That restriction is historical: the current session-close request supersedes it only for the parent's local checkpoint commit; push and PR remain forbidden. Parent owns Engram updates and mirror reconciliation.
+
+**Accepted production scope — five boolean APIs in six existing modules**, including parent-approved sixth `channel_a_query.py` shared validation, under `services/prisma-runtime/src/prisma_runtime/`:
+
+| Module / boolean API | Frozen responsibility |
+|---|---|
+| `channel_a_query.py`: shared envelope validator | Parent-approved sixth source; preserve producer compatibility and strict trusted-envelope validation. |
+| `channel_a_manager.py`: `ChannelAManager.is_query_envelope_current(envelope)` | Snapshot the actually applied current instance and published activation epoch under lock; call status/predicate outside the lock, then recheck the same instance/epoch. Require actual `PHASE_RUNNING` and `restart_required is False`. Never call metadata-reading `manager.status()`, resolve credentials, read configuration, construct/poll/start/stop or retain envelopes. Passive policy/credential saves may leave desired/applied generations different while the old running activation remains valid until Apply/stop; no generation-equality eligibility gate. |
+| `channel_a_activation.py`: `ChannelAActivation.is_query_envelope_current(envelope)` | Retain only the current live dialogue beside the registry, created by the existing fresh prepare factory; constructor remains inert. Withdraw dialogue BEFORE runner stop. Require running/not-restart-required, delegate admission and fresh context, then recheck current dialogue and running status after foreign callbacks. |
+| `channel_a_bot.py`: `ChannelAPairingDialogue.is_query_envelope_admitted(envelope)` | Exact `QueryEnvelope` with well-formed correlation fields; match adapter epoch and current admitted action owner/generation; update must exceed that action's confirmation fence. Snapshot action/epoch, call registry outside dialogue lock, recheck same action/epoch afterward. Never renew human activity. |
+| `channel_a_pairing.py`: `ChannelAPairingRegistry.is_owner_link_current(owner_id, generation)` | Pure locked exact-generation read with existing presence/human-idle/clock validity rules. No touch, purge, fallback or call to purging `owner_link`; no new clock policy. |
+| `hmi_sessions.py`: `HmiSessionRegistry.is_owner_context_fresh_current(owner_id, revision, *, max_age_seconds)` | Exact LIVE owner, present context, exact revision, finite nonnegative receipt age at most a positive finite bound; activation uses existing 15 seconds. No touch/purge/copy/removal callback. Invalid inputs/bounds return False here; existing API errors remain unchanged. Name presence is not authority. |
+
+Only strict True admits; malformed inputs, dependency exceptions and non-True results fail closed without logging/retaining raw details. Actual envelope fields are `owner_id`, `generation`, `update_id`, `epoch`, `answer_text`, `context_revision`; epoch is the ADAPTER epoch, not the manager attempt counter. This trusted process-local check is not proof that an untrusted client authored an answer, and makes no cross-domain atomicity claim. No framework, DTO, cache, HTTP/proxy/UI/new production module or store wiring belongs to this slice.
+
+**Test boundary:** public QR → private confirmation → real dialogue query yields the envelope; actual activation predicate checks real session/pairing authority with an injected inert runner. Manager-only fakes isolate publication identity, lock-depth, passive dirty configuration and no-I/O behavior. Cases cover stale generation/epoch/confirmation, changed/invalidated/stale context, separate live-session idle and absolute expiry without freshness masking, stop/replacement/reentrant callbacks, strict refusal and no-touch/no-purge. Read-only table observations distinguish refusal from deletion; pairing tables are never mutated by tests. No native runner worker is started. No existing test module, `voice_service`, application root or local-presentation fixture is imported. Request/adapter/thread-start refusal guards precede lazy production imports. The focused run passed its containment assertions; this is not a general third-party import-safety guarantee.
+
+**Accepted private witness contract:** activation privately exposes `_capture_delivery_witness(envelope)` and `_delivery_witness_matches(witness)`. Capture returns an opaque ephemeral canonical tuple or None, never authorization. Dialogue helpers capture current identity/epoch/action key and object/owner/generation/confirmation fence; pairing helpers capture exact link identity/generation; sessions helpers capture map key/session identity/context revision/context identity/receipt timestamp. Capture/match use each domain's OWN lock separately, never simultaneous domain locks. Matchers compare only current references/values: no clocks, status, injected callbacks, touch, purge or copy. Never retain witness/envelope on an instance. Ordinary admission, freshness and status remain necessary; witnesses prove neither elapsed time after the last clock sample nor atomic cross-domain authority.
+
+Activation captures BEFORE foreign checks, performs ordinary validation, then clock/callback-free witness matching. Manager captures activation's opaque witness BEFORE first foreign status, preserves the strict-True public predicate, then after final status requires private witness match followed by manager identity/epoch/generation match. Missing/throwing support, None capture or non-True matching fails closed; no boolean-only fallback and no manager inspection of child-owned representation. Final status work is retained. The epoch constructor canonicalizes accepted string subclasses to builtin str, preserving value without weakening the shared validator. No lifecycle.py, new module/framework/DTO/serialized fields/cache/check loop or multidomain locking.
+
+**Regression oracles:** real successful freshness followed by public unlink, with/without same-dialogue new-generation relink; semantically armed final runner status unlink/context invalidation/owner close; final manager status public inner unlink with unchanged publication and delegated real activation eligibility. Separate first-status public revocation controls require a reached boundary. Late callback absence is explicitly recorded, not reported as verified revocation. Epoch construction uses the real dialogue and public pairing/query, asserting preserved value and successful eligibility. Fake candidate additions are only an opaque sentinel and identity capture/match; real delegation uses late proxies so absent future APIs cannot cause setup errors on the frozen boolean implementation.
+
+**Completed phase sequence:** test-only correction → observed behavioral RED → separately authorized source-only correction → independent focused GREEN → read-only baseline preflight → fresh baseline grant and GREEN → parent offline acceptance. The earlier pending-RED/source-grant proposal is superseded; no completed grant carries forward. This closure performs static documentation readback only.
+
+### Remaining sequence and authority
+
+**Superseded optional plan, not a gate:** the earlier mandatory frontend same-session frame/hidden-state cancellation with delayed-async fences and active-audio cancellation is **user-superseded** by master v2.0.13 §3.4/§11.1. It is an optional, unapproved proposal here, not a prerequisite for the QR connection, and existing work is preserved rather than reverted. The already-implemented delivery eligibility guard and predicate stay; only composition and wiring are pending. Deferring the orb until `onStarted` remains an unproven audio-cancellation idea, not a requirement.
+
+1. **First unit (remaining RCA-5):** compose the A manager/factory in `local_presentation.py` and wire root/admin status and Apply; route every A secret/policy write through generation accounting, use the same protected A store and shared reservation, complete scheduler/exact proxy integration and wire the owner-name getter. Preserve the accepted manager, configuration and predicate; offline seams are not running-application activation.
+2. **Second unit (RCA-6 boundary):** capability-scoped QR/status projection and the exact client/proxy routes (currently absent), then the manual `Pyramid` immediately right of Logs, opening only on click. Finish the first unit first; this is unit order, not a restored stage pause.
+3. **Third unit (RCA-7):** the existing question/response/audio circuit for the exact paired HMI's text plus existing audio, fenced by owner/pairing generation/context revision and freshness. Telegram-only replies or a dropped/no-op `on_outcome` are not completion. Transcript placement/duration remains a later, separately approved UI decision.
+4. **RCA-8:** integration verification and documentation, with honest full-product acceptance. Startup is already documented in master §4.4; do not ask again.
+
+Next boundary: begin the first unit above with focused TDD **when the user resumes**. This documentation close grants no implementation, mapping or test-execution authority. Predicate eligibility alone never cancels already-playing audio; any cancellation design would require separate approval under §3.4. No fake Apply, global name or synchronization framework.
+
+This documentation-only closure edits only this tracker and PW-003 in `docs/PENDING_WORK.md`, with static readback only. It records a local checkpoint commit made by the parent; no push, PR, new test or operational action follows. Prior test-write permission is revoked. It grants no commands/tests, source edits, probes, temporary directories, provider/state/process operations or delivery. Preserve cached `ask-on-risk` / `feature-branch-chain`; historical execution/delivery grants are exhausted. Parent owns Engram updates and full-mirror reconciliation; neither is claimed complete here. Everything from the historical heading below is preserved as provenance, not current execution authority.
+
+## Historical session close — RCA-5f accepted; superseded continuation instructions
+
+Everything from this historical close through the earlier provenance sections retains its original evidence. Its pause-before-RCA-6, old next-unit order, phase-local approvals/grants and old delivery instructions are superseded by the current authority above; they are not active instructions.
 
 **User-requested close:** the user explicitly requested a local commit, session close and a durable continuation point. Commit the six related implementation/test/tracking paths, then stop; no push, PR, new implementation or additional test execution is authorized by this close. Record the actual resulting commit hash and post-commit Git status in Engram `checkpoint/prisma-channel-a-manager-resume`, without creating a self-referential follow-up edit. Next session: recover HEAD/status and this accepted evidence, then map the smallest remaining A admin HTTP/status/Apply integration unit; future A credential writes must use the manager's generation accounting. Do not recreate the accepted manager/configuration or reopen auxiliary harness work. The remaining RCA-5 units and pause before RCA-6 are listed below.
 
@@ -42,7 +184,7 @@ Static limits remain: a reentrant fake cannot prove absence of a held `RLock`; p
 
 **Prior user stop boundary — fulfilled:** RED was recorded, then the requested local checkpoint and SESSION CLOSE were completed before implementation. Confirmed commit `4c7a12eccd29d884b63d8e7985fc6f1d6b4ba06a` contains accepted RCA-5e plus RCA-5f RED tests/contract: 25 files, 2,511 additions and 94 deletions, post-commit Git clean. Final independent activation spotcheck repeated 15 methods / 13 PASS / 3 missing-API errors (0.030s, exit 1); these add no unique cases. The resumed session's narrow source authority is recorded above; previous execution grants remain exhausted. Preserve cached `ask-on-risk` / `feature-branch-chain`, with no size-only trimming and no push/PR or operational actions. Full historical Engram mirror reconciliation remains pending.
 
-### Current next boundary — remaining RCA-5, no new grant
+### Historical next boundary — superseded by RCA-5g and removed RCA-6 pause
 
 Recover this accepted evidence and frozen contract; do not recreate RCA-5f or replay exhausted gates. Freeze the next remaining RCA-5 unit separately: HTTP/API and A admin status/Apply wiring, capability-scoped pairing projection, warning scheduler, exact proxy/bootstrap and broader identity-handoff acceptance remain pending. Existing exact APIs/error codes stay frozen. Warning default 60/range 15–300 is already decided. Finish RCA-5, then pause before RCA-6: manual `Pyramid` immediately right of Logs, no automatic QR opening. User startup is already documented in the master document §4.4; do not ask again. This documentation closure authorizes no new implementation, verification or delivery.
 
@@ -294,9 +436,12 @@ Frontend domain types stay in `domain/`; use design tokens, Lucide, `hmi-scrollb
     - [x] **RCA-5f.1 — Configuration:** immutable strict version-1 policy/generation snapshots, idempotent policy changes and owned atomic persistence; independent configuration 11 PASS / 0.059s / exit 0 plus parent readback.
     - [x] **RCA-5f.2 — Manager and activation forwards:** generation-accounted mutations, explicit prepare/start, honest status and exact-instance uncertain-stop retention; public runner start/status forwards only. Independent manager 31 and activation 15 PASS; all nine regressions and both controls pass after source-only closed-error correction, with parent readback.
     - [x] **RCA-5f.3 — Focused offline verification:** independent three-pattern 57 unique methods PASS and separate final manager 31 repeat / 0.023s / exit 0; zero failures/errors/skips, fake boundaries, no live application or native approval.
-  - [ ] **Remaining RCA-5 units:** capability-scoped pairing projection, A policy/admin status/apply wiring, scheduler, exact proxy and bootstrap; broader identity-handoff acceptance remains pending. Other names/order below remain proposals, not frozen implementation contracts.
-- [ ] **RCA-6 — Click-open HMI QR/link presentation:** QR rotates while the panel is visible, never an automatic popup; maintained local QR encoder, typed client/hook/UI and expiry/error/multi-HMI tests. PAUSE and notify before starting. Original 350–650 estimate must be revalidated.
-- [ ] **RCA-7 — HMI text/audio correlation:** generation/freshness checks and cancellation; decide automatic transcript placement/lifetime before UI. Original 250–500 estimate must be revalidated.
+  - [x] **RCA-5g — Simple per-HMI name setting:** parent accepted the minimal unit OFFLINE ONLY after 118 unique tests PASS, build/lint PASS, a separate 6-test repeat PASS and source/test readback. Local configuration/save in General Settings → Prisma carries `hmiName` through existing ordered scheduled snapshots; owner-name lookup requires a live owner and fresh context. No real root/QR integration is accepted.
+  - [x] **RCA-5h.1 — Preparatory guarded VoiceEventStore delivery:** accepted OFFLINE ONLY after missing-keyword RED, independent 13-method GREEN, separate 13-method repeat and parent source/test/diff readback. Optional private guard preserves legacy wire behavior; real manager predicate integration remains pending before enabling A, while the extra frontend active-audio/delayed-async cancellation is not authorized as a prerequisite (master §3.4).
+  - [x] **RCA-5h.2 — Actual delivery eligibility predicate:** parent accepted OFFLINE ONLY after behavioral RED, six-source unit/five-source correction readbacks, independent 35 focused + 171 baseline PASS (206 distinct methods across five patterns). Five boolean APIs plus shared validator and call-local private witnesses; no store/publisher/root wiring or application integration acceptance. Next boundary is the A composition unit above, with focused TDD only when the user resumes; the extra frontend cancellation mapping is not authorized.
+  - [ ] **Remaining RCA-5 units:** after A composition and store/publisher wiring, real admin/root manager composition and status/Apply, all A writes through generation manager, owner-name lookup wiring, warning scheduler, exact proxy/bootstrap and broader integration acceptance. Preserve RCA-5a–f OFFLINE acceptance; do not recreate accepted work. Historical broader identity-handoff limitations remain provenance, not a reason to resume auxiliary harnesses automatically.
+- [ ] **RCA-6 — Click-open HMI QR/link presentation:** capability projection and QR rotation while the manually opened panel is visible; `Pyramid` immediately right of Logs, never automatic. User REMOVED the pause before RCA-6. Typed client/hook/UI and expiry/error/multi-HMI tests remain pending; revalidate original 350–650 forecast.
+- [ ] **RCA-7 — Exact-paired-HMI response delivery:** connect the existing response/audio circuit to the linked HMI; no drop/no-op final outcome consumer. Do not add audio cancellation or other response behavior without approval under master §3.4. Transcript placement/lifetime remain a later, separately approved UI decision. Telegram-only is not completion; the original forecast is historical, not current scope.
 - [ ] **RCA-8 — Integrated verification/docs:** full gates, independent verification, README/master reconciliation; keep active backlog honest. Original 100–200 estimate must be revalidated.
 
 ## Accepted integration contracts to preserve
@@ -402,7 +547,7 @@ Historical clock-proof scope, now PAUSED with no execution authority: author `mu
 
 Composition is a separate later contract: one identity source (factory argument), fresh registry/dialogue, owner context and real parser. Proposed additive `enable_queries(clock=None)` DI must be separately authorized; HMI context uses wall clock, pairing/query deadlines monotonic. Never assume negligible elapsed time. Derive answer bound from accepted `MESSAGE_MAX_CHARS=4096`; warning default60/range15–300 already decided, label remains injected. No RCA-6 work begins here.
 
-### Later coherent units — provisional order
+### Historical later-unit proposals — order superseded by current sequence
 
 | Boundary | Work and dependencies |
 |---|---|
@@ -498,7 +643,7 @@ None of these counts proves live provider, production, runtime forwarding or com
 
 ## Delivery accounting
 
-Strategy: `ask-on-risk`, user-selected `feature-branch-chain`. Local work-unit commits authorized; no branch/push/PR authorization. Original2270–4300 total forecast is obsolete; reforecast coherent remaining units and preserve tests/readability.
+Strategy: `ask-on-risk`, user-selected `feature-branch-chain`. Historical grants are exhausted. The current user request authorizes the parent to make the local closing commit only; the documentation writer has no commit authority. No push or PR is authorized. Original2270–4300 total forecast is obsolete; reforecast coherent remaining units and preserve tests/readability.
 
 Fresh Git range `6e05e38..43ca265`: **16,740 additions +212 deletions =16,952 diff lines**, including documentation. This range diff is not the sum of per-unit authored counts. RCA-5c's own commit is4351 additions+156 deletions=4507 authored lines. Remeasuring `6e05e38..7fb7edc` gives12,545 additions+212 deletions=12,757; the earlier12,798/465 report was not reproduced and is superseded, without inventing a cause or altering history. Current post-commit planning changes are not included. Compaction is not a review-budget saving.
 

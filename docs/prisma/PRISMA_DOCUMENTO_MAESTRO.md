@@ -2,9 +2,14 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.12
+> **Versión documental:** 2.0.13
 >
-> **Fecha:** 2026-09-20
+> **Fecha:** 2026-09-21
+>
+> **Prioridad vigente:** terminar **QR → Canal A → circuito Prisma existente**, sin agregar
+> cambios al comportamiento de respuesta ni audio. Antes de implementar algo no solicitado,
+> consultar al usuario y esperar su aprobación explícita (§3.4 y §11.1).
+> El resumen 2.0.12 siguiente se conserva como contexto histórico, no como una nueva autorización.
 >
 > **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`). Se suma una aceptación **acotada** del Canal A sobre un widget simulado (contexto → respuesta → voz) y el hallazgo de que el `/status` de Telegram lee un archivo de instalación obsoleto. En esta versión se acuerda, **sin implementarlo**, el alcance del **acceso remoto del Canal A** (bot dedicado, emparejamiento por QR sin entrada local, reloj humano de inactividad y un único destino activo). Despliegue productivo, aceptación integral, máquinas reales y el trabajo posterior del asistente siguen pendientes.
 >
@@ -107,6 +112,30 @@ GET ni respuestas de lectura. El backend protegido puede conservar el estado ope
 mínimo necesario para autenticación, pairing, autorización y revocación, con acceso y
 retención limitados. Las pruebas pagadas o que envían mensajes deben requerir una
 acción separada y explícita.
+
+### 3.4 Control de alcance y aprobación previa
+
+**Decisión explícita del usuario:** antes de implementar funcionalidades, mejoras, refactors o
+cambios de comportamiento no solicitados, el agente debe explicar qué propone, por qué, su impacto
+sobre el alcance y las alternativas, y **preguntar y esperar aprobación explícita**. No alcanza con
+anunciar que los va a implementar ni con considerarlos técnicamente convenientes.
+
+- Seguir las etapas y decisiones acordadas de este documento; una mejora futura o una limitación
+  detectada no se convierte automáticamente en requisito del incremento actual.
+- El alcance inmediato es terminar la **conexión QR → Canal A → circuito existente**: cambiar la
+  vinculación y entrada de la consulta, reutilizando el procesamiento, la respuesta y el audio.
+- No agregar ahora nuevas políticas de descarte de respuestas, cancelación de audio por cambio de
+  vista u ocultamiento, ni infraestructura de disponibilidad/sincronización como prerrequisito.
+  Cualquier propuesta en ese sentido requiere consulta y aprobación separadas.
+- Verificar la conexión, el destino vinculado y las regresiones directamente relacionadas. Las
+  pruebas no autorizan ampliar la funcionalidad ni rediseñar componentes que ya funcionan.
+- Si aparece un impedimento técnico o de seguridad que exige salir del alcance, detener esa parte,
+  explicar el caso concreto y consultar antes de cambiar el comportamiento. No ignorarlo ni
+  resolverlo unilateralmente ampliando el trabajo.
+
+Esta regla prevalece sobre planes derivados que hayan incorporado requisitos no pedidos. No
+ordena borrar ni revertir automáticamente trabajo existente; cualquier ajuste necesario debe
+respetar el alcance autorizado.
 
 ## 4. Implementación actual observada
 
@@ -941,9 +970,26 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (checkpoint vigente 2.0.12, 2026-09-20; bloques anteriores históricos)
+### 11.1 Próximo paso vigente (checkpoint 2.0.13; registros anteriores históricos)
 
-**Checkpoint vigente 2.0.12 (2026-09-20).** Sesión de **planificación documental** del acceso remoto
+**Checkpoint vigente 2.0.13 (2026-09-21).** El usuario pide terminar la conexión
+**QR → Canal A → circuito Prisma existente**, siguiendo las etapas acordadas, sin sumar por ahora
+cambios al comportamiento de respuesta o audio. Rige la aprobación previa de §3.4.
+
+Reutilizar los componentes ya implementados y localizar únicamente el cableado pendiente:
+vinculación QR con la HMI, entrada por el bot A y entrega al circuito existente de consulta y
+respuesta de esa HMI. No continuar por inercia el plan adicional RCA-5h.3 de disponibilidad y
+cancelación frontend. La apertura del QR sigue la decisión posterior ya registrada: **manual**, con
+`Pyramid` inmediatamente a la derecha de Logs; no la apertura automática del registro 2.0.12.
+
+El detalle de avances y evidencia offline está en
+[`../../odd/tasks/prisma-channel-a-remote.md`](../../odd/tasks/prisma-channel-a-remote.md) y el
+pendiente activo en `PW-003`. Esa evidencia no significa que la conexión de punta a punta esté
+terminada. Esta actualización documental no ejecuta pruebas ni servicios y no autoriza commits,
+proveedores o acciones operativas. Las instrucciones de cierre y permisos antiguos que siguen son
+históricos y no se renuevan.
+
+**Checkpoint histórico 2.0.12 (2026-09-20).** Sesión de **planificación documental** del acceso remoto
 del Canal A. Este cierre es **solo documental**: no ejecuta código, servicios, pruebas, proveedores,
 Telegram, Gemini ni instalaciones, y **no** afirma compilación ni suites aprobadas. El alcance se
 acordó con el usuario y la implementación queda diferida a la próxima sesión. Durante la
@@ -1241,6 +1287,16 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.13 — 2026-09-21
+
+- Regla explícita de aprobación previa (§3.4): preguntar y esperar autorización antes de implementar
+  funcionalidades, mejoras o cambios no solicitados; no convertirlos en prerrequisitos por cuenta
+  del agente.
+- Prioridad vigente (§11.1): terminar QR → Canal A → circuito existente, reutilizando respuesta y
+  audio sin agregar cambios de comportamiento. El plan adicional de disponibilidad/cancelación
+  frontend no continúa sin aprobación. Se distingue la apertura manual del QR del acuerdo histórico.
+- Actualización documental únicamente; no afirma integración terminada ni nuevas pruebas ejecutadas.
 
 ### 2.0.12 — 2026-09-20
 

@@ -1,16 +1,40 @@
-import { act, fireEvent, render as renderTestingLibrary, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as renderTestingLibrary, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PRISMA_ORB_STORAGE_KEY, readPrismaOrbVisualConfig } from '../../config/prismaOrb.config';
 import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
 import VoiceSettingsTab from './VoiceSettingsTab';
+import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
+import { adminAuthClient } from '../../services/adminAuth.service';
 
-const { setSpeakingMock } = vi.hoisted(() => ({
-    setSpeakingMock: vi.fn<(speaking: boolean) => void>(),
-}));
+const { setSpeakingMock, refused } = vi.hoisted(() => {
+    const storage = (): Storage => {
+        const bytes = new Map<string, string>();
+        return {
+            get length() { return bytes.size; }, clear: () => bytes.clear(),
+            key: (index) => [...bytes.keys()][index] ?? null,
+            getItem: (key) => bytes.get(key) ?? null,
+            setItem: (key, value) => { bytes.set(key, value); },
+            removeItem: (key) => { bytes.delete(key); },
+        };
+    };
+    vi.stubGlobal('localStorage', storage());
+    vi.stubGlobal('sessionStorage', storage());
+    return { setSpeakingMock: vi.fn<(speaking: boolean) => void>(), refused: [] as string[] };
+});
+// Prevent captured module singletons from escaping the per-test fake fetch.
+vi.mock('../../services/adminAuth.service', async () => {
+    const actual = await vi.importActual<typeof import('../../services/adminAuth.service')>('../../services/adminAuth.service');
+    return { ...actual, adminAuthClient: new actual.AdminAuthClient(async (path) => {
+        refused.push(String(path));
+        throw new Error('TEST_NETWORK_REFUSED');
+    }) };
+});
+
+afterAll(() => vi.unstubAllGlobals());
 
 vi.mock('../../vendor/leda-orb.js', () => ({}));
 
@@ -24,6 +48,14 @@ class MockLedaOrb extends HTMLElement {
 if (!customElements.get('leda-orb')) customElements.define('leda-orb', MockLedaOrb);
 
 function render(element: ReactElement, strictMode = false) {
+    const injected = fetch;
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (path, init) => {
+        if (path !== '/api/prisma/voice-config' || !['GET', 'PUT'].includes(init?.method ?? 'GET')) {
+            refused.push(`${init?.method ?? 'GET'} ${String(path)}`);
+            throw new Error('TEST_NETWORK_REFUSED');
+        }
+        return injected(path, init);
+    }));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
     const view = <QueryClientProvider client={client}>{element}</QueryClientProvider>;
     return renderTestingLibrary(strictMode ? <StrictMode>{view}</StrictMode> : view);
@@ -45,9 +77,54 @@ describe('VoiceSettingsTab', () => {
     });
 
     afterEach(() => {
+        cleanup();
+        expect(refused).toEqual([]);
+        const unexpected = vi.mocked(fetch).mock.calls.filter(([path]) => path !== '/api/prisma/voice-config');
+        expect(unexpected).toEqual([]);
         localStorage.clear();
         vi.useRealTimers();
-        vi.unstubAllGlobals();
+        // Keep the injected storage installed throughout this file.
+    });
+
+    it('mounts the real name section before credentials and saves locally when active', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => configEnvelope()));
+        useAuthStore.setState({
+            isHydrated: true,
+            session: { isAuthenticated: true, loginTimestamp: '2026-01-01T00:00:00Z',
+                user: { id: 'test-admin', username: 'admin', displayName: 'Admin',
+                    role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } } },
+        });
+        const metadata = vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
+            gemini: { configured: false }, telegram: { configured: false }, telegram_channel_a: { configured: false },
+        });
+        const health = vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
+            enabled: true, configured: false, running: false, verified: false,
+            configurationError: 'TELEGRAM_CREDENTIAL_MISSING', lastError: null,
+            desiredGeneration: 1, appliedGeneration: 1, restartRequired: false,
+        });
+        try {
+            const onDirtyChange = vi.fn();
+            const view = render(<VoiceSettingsTab credentialControlsActive={false} onDirtyChange={onDirtyChange} />);
+            const name = screen.getByLabelText('Nombre de esta HMI');
+            const credential = screen.getByLabelText('Credencial Gemini');
+            expect(name).toBeDisabled();
+            expect(screen.getByRole('button', { name: 'Guardar nombre' })).toBeDisabled();
+            expect(name.compareDocumentPosition(credential) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            view.unmount();
+            render(<VoiceSettingsTab credentialControlsActive onDirtyChange={onDirtyChange} />);
+            onDirtyChange.mockClear();
+            fireEvent.change(screen.getByLabelText('Nombre de esta HMI'), { target: { value: 'Panel recepción' } });
+            fireEvent.click(screen.getByRole('button', { name: 'Guardar nombre' }));
+            expect(await screen.findByText('Nombre guardado en este navegador')).toBeInTheDocument();
+            expect(localStorage.getItem('hmi:prisma-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
+            expect(onDirtyChange).not.toHaveBeenCalledWith(true);
+            expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+        } finally {
+            cleanup();
+            useAuthStore.setState({ session: UNAUTHENTICATED_SESSION, isHydrated: false });
+            metadata.mockRestore();
+            health.mockRestore();
+        }
     });
 
     it('ignores legacy routing preferences and renders only retained effect and orb settings', () => {

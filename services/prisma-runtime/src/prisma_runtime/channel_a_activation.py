@@ -17,6 +17,7 @@ from .channel_a_lifecycle import (
     ChannelAStatus,
 )
 from .channel_a_pairing import ChannelAPairingRegistry, QrChallenge
+from .channel_a_query import is_query_envelope_well_formed
 from .channel_a_transport import MESSAGE_MAX_CHARS, ChannelABotIdentity
 
 __all__ = ["ChannelAActivation"]
@@ -47,6 +48,8 @@ class ChannelAActivation:
         reservation=None,
     ) -> None:
         self._registry: ChannelAPairingRegistry | None = None
+        self._dialogue: ChannelAPairingDialogue | None = None
+        self._sessions = sessions
 
         def dialogue_factory(identity: ChannelABotIdentity) -> ChannelAPairingDialogue:
             registry = ChannelAPairingRegistry(
@@ -71,6 +74,7 @@ class ChannelAActivation:
             # Publication here is not issuance permission: only the runner's
             # successful preparation can open the public status gate below.
             self._registry = registry
+            self._dialogue = dialogue
             return dialogue
 
         self._runner = ChannelARunner(
@@ -104,8 +108,89 @@ class ChannelAActivation:
     def stop(self) -> bool:
         """Request the runner's sticky stop, even when settlement is uncertain."""
         # Withdraw issuance before settlement can call a foreign reservation.
+        self._dialogue = None
         self._registry = None
         return self._runner.stop()
+
+    def _capture_delivery_witness(self, envelope):
+        """Capture ephemeral references before callbacks; this is not admission."""
+        if not is_query_envelope_well_formed(envelope):
+            return None
+        dialogue = self._dialogue
+        sessions = self._sessions
+        if dialogue is None:
+            return None
+        try:
+            admission = dialogue._capture_delivery_witness(envelope)
+            if admission is None or self._dialogue is not dialogue:
+                return None
+            context = sessions._capture_context_witness(
+                envelope.owner_id, envelope.context_revision,
+            )
+            if context is None:
+                return None
+            witness = (self, dialogue, sessions, admission, context)
+            return witness if self._delivery_witness_matches(witness) is True else None
+        except Exception:
+            return None
+
+    def _delivery_witness_matches(self, witness) -> bool:
+        """Compare current references only, with no status or clock callbacks.
+
+        Separate domain locks do not establish cross-domain atomicity or prove
+        elapsed-time validity after the last ordinary freshness observation.
+        """
+        try:
+            if type(witness) is not tuple or len(witness) != 5:
+                return False
+            activation, dialogue, sessions, admission, context = witness
+            if (activation is not self or dialogue is None
+                    or self._dialogue is not dialogue or self._sessions is not sessions):
+                return False
+            return (
+                dialogue._delivery_witness_matches(admission) is True
+                and sessions._context_witness_matches(context) is True
+                and self._dialogue is dialogue and self._sessions is sessions
+            )
+        except Exception:
+            return False
+
+    def is_query_envelope_current(self, envelope) -> bool:
+        """Observe current admission and live context, never cache the envelope."""
+        if not is_query_envelope_well_formed(envelope):
+            return False
+        witness = self._capture_delivery_witness(envelope)
+        if witness is None:
+            return False
+        dialogue = self._dialogue
+        try:
+            observed = self._runner.status()
+            if (
+                type(observed) is not ChannelAStatus
+                or type(observed.phase) is not str or observed.phase != PHASE_RUNNING
+                or observed.restart_required is not False
+                or type(observed.quiescent) is not bool or observed.reason is not None
+                or self._dialogue is not dialogue
+            ):
+                return False
+            if dialogue.is_query_envelope_admitted(envelope) is not True:
+                return False
+            if self._sessions.is_owner_context_fresh_current(
+                envelope.owner_id, envelope.context_revision,
+                max_age_seconds=_CONTEXT_FRESHNESS_SECONDS,
+            ) is not True:
+                return False
+            observed = self._runner.status()
+            return (
+                type(observed) is ChannelAStatus
+                and type(observed.phase) is str and observed.phase == PHASE_RUNNING
+                and observed.restart_required is False
+                and type(observed.quiescent) is bool and observed.reason is None
+                and self._dialogue is dialogue
+                and self._delivery_witness_matches(witness) is True
+            )
+        except Exception:
+            return False
 
     def issue_pairing_challenge(self, owner_id: str) -> QrChallenge | None:
         """Issue only while prepared; domain refusals retain their native errors."""

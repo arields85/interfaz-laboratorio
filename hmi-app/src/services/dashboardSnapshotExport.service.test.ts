@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const nameBoundary = vi.hoisted(() => {
+    const refused: string[] = [];
+    const refuseFetch: typeof fetch = async (path) => {
+        refused.push(String(path));
+        throw new Error('TEST_NETWORK_REFUSED');
+    };
+    vi.stubGlobal('fetch', refuseFetch);
+    return { refused, refuseFetch, read: vi.fn(() => ({ ok: true as const, name: null as string | null })) };
+});
+// Keep local storage outside exporter tests; capture uses the real exporter and client.
+vi.mock('./hmiName.service', () => ({ readHmiName: nameBoundary.read }));
+
 import { prismaSessionClient } from './prismaSessionClient';
 
 import {
@@ -10,6 +22,8 @@ import {
 
 describe('dashboardSnapshotExport.service', () => {
     beforeEach(() => {
+        nameBoundary.read.mockReset().mockReturnValue({ ok: true, name: null });
+        vi.stubGlobal('fetch', nameBoundary.refuseFetch);
         vi.useFakeTimers();
         prismaSessionClient.reset({ close: false });
         vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
@@ -19,9 +33,37 @@ describe('dashboardSnapshotExport.service', () => {
 
     afterEach(() => {
         resetDashboardSnapshotExportStateForTests();
+        expect(nameBoundary.refused).toEqual([]);
         vi.useRealTimers();
         vi.restoreAllMocks();
         vi.unstubAllGlobals();
+    });
+
+    it('attaches the current local name to a copied snapshot at each capture', async () => {
+        const snapshot = Object.freeze({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
+        const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
+        const publish = vi.spyOn(prismaSessionClient, 'publishContext');
+        const getSnapshot = vi.fn(() => snapshot);
+        nameBoundary.read.mockReturnValue({ ok: true, name: 'Panel recepción' });
+        const stop = startDashboardSnapshotExporter({ getSnapshot, fetchImpl: fetchMock });
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        expect(first).toEqual({
+            version: 1, command: 'publish', order: expect.any(Number),
+            snapshot: { ...snapshot, hmiName: 'Panel recepción' },
+        });
+        expect(publish.mock.calls[0]?.[1]).not.toBe(snapshot);
+        expect(snapshot).not.toHaveProperty('hmiName');
+
+        nameBoundary.read.mockReturnValue({ ok: true, name: null });
+        await vi.advanceTimersByTimeAsync(5_000);
+        const cleared = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+        expect(cleared.snapshot).toEqual({ ...snapshot, hmiName: null });
+        expect(cleared.order).toBeGreaterThan(first.order);
+        expect(getSnapshot).toHaveBeenCalledTimes(2);
+        expect(snapshot).not.toHaveProperty('hmiName');
+        stop();
     });
 
     it('posts snapshots only to the fixed same-origin route', async () => {

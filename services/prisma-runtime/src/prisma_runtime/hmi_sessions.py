@@ -262,6 +262,35 @@ class HmiSessionRegistry:
                 raise HmiSessionContextStale("PRISMA_SESSION_CONTEXT_STALE")
             return age, copy.deepcopy(session.context), session.context_revision
 
+    def get_owner_name(self, owner_id: str, *, max_age_seconds: float) -> str | None:
+        """Read a display-only label from an exact live owner's fresh context.
+
+        Unlike context capture, this lookup never purges, touches activity or
+        invokes removal callbacks. Phone confirmation validates the label.
+        """
+        if isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, (int, float)):
+            raise HmiSessionFreshnessInvalid("PRISMA_SESSION_FRESHNESS_BOUND_INVALID")
+        try:
+            bound = float(max_age_seconds)
+        except OverflowError:
+            bound = math.inf
+        if not math.isfinite(bound) or bound <= 0:
+            raise HmiSessionFreshnessInvalid("PRISMA_SESSION_FRESHNESS_BOUND_INVALID")
+        with self.lock:
+            now = self.clock()
+            for session in self._sessions.values():
+                if session.owner_id != owner_id:
+                    continue
+                if (self._expired(session, now) or session.context is None
+                        or session.context_received_at is None):
+                    return None
+                age = now - session.context_received_at
+                if not math.isfinite(age) or age < 0 or age > bound:
+                    return None
+                name = session.context.get("hmiName")
+                return name if isinstance(name, str) else None
+            return None
+
     def _expired(self, session: _Session, now: float) -> bool:
         idle_age = now - session.last_seen_at
         absolute_age = now - session.created_at
@@ -287,6 +316,70 @@ class HmiSessionRegistry:
                         and now >= session.context_received_at
                         and session.context_revision == revision
                     )
+            return False
+
+    def _capture_context_witness(self, owner_id, revision):
+        """Capture current references only, not freshness or owner liveness."""
+        if type(owner_id) is not str or type(revision) is not int or revision <= 0:
+            return None
+        with self.lock:
+            for key, session in self._sessions.items():
+                if session.owner_id == owner_id:
+                    if (session.context_revision != revision or session.context is None
+                            or session.context_received_at is None):
+                        return None
+                    return (key, session, owner_id, revision, session.context,
+                            session.context_received_at)
+            return None
+
+    def _context_witness_matches(self, witness) -> bool:
+        """Clock-free identity comparison; never inspect or copy context contents."""
+        if type(witness) is not tuple or len(witness) != 6:
+            return False
+        key, session, owner, revision, context, received_at = witness
+        if (type(key) is not bytes or type(session) is not _Session
+                or type(owner) is not str or type(revision) is not int
+                or type(received_at) not in (int, float) or context is None):
+            return False
+        with self.lock:
+            return (
+                self._sessions.get(key) is session
+                and session.owner_id == owner
+                and session.context_revision == revision
+                and session.context is context
+                and session.context_received_at == received_at
+            )
+
+    def is_owner_context_fresh_current(
+        self, owner_id: str, revision: int, *, max_age_seconds: float
+    ) -> bool:
+        """Observe a live exact revision and receipt age without copying or renewal."""
+        try:
+            if type(owner_id) is not str or type(revision) is not int or revision <= 0:
+                return False
+            if type(max_age_seconds) not in (int, float):
+                return False
+            bound = float(max_age_seconds)
+            if not math.isfinite(bound) or bound <= 0:
+                return False
+            with self.lock:
+                now = self.clock()
+                if type(now) not in (int, float) or not math.isfinite(now):
+                    return False
+                for session in self._sessions.values():
+                    if session.owner_id != owner_id:
+                        continue
+                    if (
+                        self._expired(session, now)
+                        or session.context is None
+                        or session.context_received_at is None
+                        or session.context_revision != revision
+                    ):
+                        return False
+                    age = now - session.context_received_at
+                    return math.isfinite(age) and 0 <= age <= bound
+                return False
+        except Exception:
             return False
 
     def _purge_locked(self, now):

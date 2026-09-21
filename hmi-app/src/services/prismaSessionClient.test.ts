@@ -1,4 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+
+const external = vi.hoisted(() => {
+    const refused: string[] = [];
+    vi.stubGlobal('fetch', async (path: RequestInfo | URL) => {
+        refused.push(String(path));
+        throw new Error('TEST_NETWORK_REFUSED');
+    });
+    return { refused };
+});
+afterEach(() => { expect(external.refused).toEqual([]); });
+afterAll(() => vi.unstubAllGlobals());
 
 import { PrismaSessionClient, PrismaStaleSessionResponse } from './prismaSessionClient';
 

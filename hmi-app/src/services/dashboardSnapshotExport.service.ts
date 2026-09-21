@@ -1,6 +1,7 @@
 import { PRISMA_SNAPSHOT_URL } from '../config/prismaAssistant.config';
 import type { PrismaContextIntent } from '../domain/prismaSession.types';
 import { prismaSessionClient } from './prismaSessionClient';
+import { readHmiName } from './hmiName.service';
 
 const SNAPSHOT_EXPORT_FAILED_MESSAGE = '[dashboard-snapshot-export] Snapshot export failed.';
 const SNAPSHOT_EXPORT_TIMEOUT_MESSAGE = '[dashboard-snapshot-export] Snapshot export timed out.';
@@ -118,6 +119,9 @@ export function startDashboardSnapshotExporter({
         try {
             intent = prismaSessionClient.createContextIntent();
             snapshot = getSnapshot();
+            if (typeof snapshot === 'object' && snapshot !== null && !Array.isArray(snapshot)) {
+                snapshot = { ...snapshot, hmiName: readHmiName().name };
+            }
         } catch (error: unknown) {
             void sendContextCommand(() => Promise.reject(error));
             return;

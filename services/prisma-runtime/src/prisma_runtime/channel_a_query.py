@@ -55,6 +55,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 
 from .channel_a_pairing import ChannelAPairingError, ChannelAPairingRegistry
@@ -105,6 +106,7 @@ __all__ = [
     "QueryBinding",
     "QueryEnvelope",
     "QueryOutcome",
+    "is_query_envelope_well_formed",
 ]
 
 
@@ -158,6 +160,28 @@ class QueryEnvelope:
             "answerText": self.answer_text,
             "contextRevision": self.context_revision,
         }
+
+
+def is_query_envelope_well_formed(envelope) -> bool:
+    """Validate internal correlation shape, not client authority or delivery."""
+    try:
+        if type(envelope) is not QueryEnvelope:
+            return False
+        if type(envelope.owner_id) is not str or len(envelope.owner_id) != 36:
+            return False
+        if str(uuid.UUID(envelope.owner_id)) != envelope.owner_id:
+            return False
+        return (
+            type(envelope.generation) is int and envelope.generation > 0
+            and type(envelope.update_id) is int
+            and 0 <= envelope.update_id <= 2**53 - 1
+            and type(envelope.context_revision) is int and envelope.context_revision > 0
+            and type(envelope.epoch) is str and 0 < len(envelope.epoch) <= 128
+            and envelope.epoch.isascii() and envelope.epoch.isprintable()
+            and type(envelope.answer_text) is str and bool(envelope.answer_text.strip())
+        )
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)

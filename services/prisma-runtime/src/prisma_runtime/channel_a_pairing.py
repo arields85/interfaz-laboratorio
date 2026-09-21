@@ -444,6 +444,52 @@ class ChannelAPairingRegistry:
                 return None
             return self._snapshot_locked(owner)
 
+    def _capture_link_witness(self, owner_id, generation):
+        """Capture identity only; no clock sample or liveness assertion."""
+        if type(owner_id) is not str or type(generation) is not int or generation <= 0:
+            return None
+        with self.lock:
+            link = self._links.get(owner_id)
+            if link is None or link.generation != generation:
+                return None
+            return owner_id, link, generation
+
+    def _link_witness_matches(self, witness) -> bool:
+        """Compare owned link identity without callbacks, renewal or expiry work."""
+        if type(witness) is not tuple or len(witness) != 3:
+            return False
+        owner, link, generation = witness
+        if type(owner) is not str or type(link) is not _Link or type(generation) is not int:
+            return False
+        with self.lock:
+            return (
+                self._links.get(owner) is link
+                and link.owner_id == owner
+                and link.generation == generation
+            )
+
+    def is_owner_link_current(self, owner_id: str, generation: int) -> bool:
+        """Observe live generation without purging, touching or advancing the clock."""
+        try:
+            if type(owner_id) is not str or type(generation) is not int:
+                return False
+            owner = _identity(owner_id, owner=True)
+            generation = _generation(generation)
+            with self.lock:
+                # _now updates the watermark; this read only compares against it.
+                now = _clock_sample(self.clock())
+                if self._last_observed is not None and now < self._last_observed:
+                    return False
+                link = self._links.get(owner)
+                return (
+                    link is not None
+                    and link.generation == generation
+                    and now >= link.last_human_activity_at
+                    and now < link.idle_expires_at
+                )
+        except Exception:
+            return False
+
     def phone_link(self, phone_id: str) -> PairingLink | None:
         """Current link for a phone, or ``None``. A technical read, never a refresh."""
         phone = _identity(phone_id, owner=False)

@@ -64,33 +64,33 @@ class SessionRegistryTests(unittest.TestCase):
 
 
 class HmiSessionHttpRedTests(unittest.TestCase):
+    def setUp(self):
+        # The separate discovery process owns its own guard. Cleanup assertions
+        # run after fixtures are released and outside all application catches.
+        guard = patch("requests.Session.request", side_effect=AssertionError("offline HTTP only"))
+        dispatch = guard.start()
+        self.addCleanup(guard.stop)
+        self.addCleanup(dispatch.assert_not_called)
+
     @staticmethod
     def make_client(temporary, *, session_registry=None, voice_events=None):
         return create_app(
-            snapshot_store=JsonFileStore(Path(temporary) / "snapshot.json"),
-            voice_events=voice_events,
+            snapshot_store=Mock(read=Mock(return_value=None)),
+            voice_events=voice_events if voice_events is not None else Mock(latest=Mock(return_value=None)),
+            telegram_bot=Mock(bot_username=None, last_error=None),
+            telegram_manager=Mock(),
             telegram_configuration=type("Config", (), {
                 "enabled": False,
                 "configured": False,
                 "configuration_error": None,
             })(),
             admin_http=type("Admin", (), {"register": lambda _self, _app: None})(),
-            session_registry=session_registry,
+            session_registry=session_registry if session_registry is not None else OwnerContextFreshnessTests.make_registry([10.0]),
         ).test_client()
 
     def test_bootstrap_exists_and_unscoped_snapshot_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            app = create_app(
-                snapshot_store=JsonFileStore(root / "snapshot.json"),
-                telegram_configuration=type("Config", (), {
-                    "enabled": False,
-                    "configured": False,
-                    "configuration_error": None,
-                })(),
-                admin_http=type("Admin", (), {"register": lambda _self, _app: None})(),
-            )
-            client = app.test_client()
+            client = self.make_client(temporary)
 
             bootstrap = client.post("/hmi/session", json={})
             self.assertEqual(bootstrap.status_code, 201)

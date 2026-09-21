@@ -37,6 +37,7 @@ from .channel_a_lifecycle import (
     PRISMA_CHANNEL_A_RESTART_REQUIRED,
     TELEGRAM_BOT_IDENTITY_RESERVED,
 )
+from .channel_a_query import is_query_envelope_well_formed
 from .credential_store import InvalidCredential, validate_secret
 
 PRISMA_CHANNEL_A_MANAGER_BUSY = "PRISMA_CHANNEL_A_MANAGER_BUSY"
@@ -221,6 +222,49 @@ class ChannelAManager:
             code = _error_code(error, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
         self._record_error(code)
         _raise_closed(code)
+
+    def is_query_envelope_current(self, envelope) -> bool:
+        """Read published running authority without configuration or credential I/O."""
+        if not is_query_envelope_well_formed(envelope):
+            return False
+        with self._lock:
+            activation = self._activation
+            epoch = self._activation_epoch
+            generation = self._applied_generation
+        if activation is None or epoch is None or generation is None:
+            return False
+        try:
+            # Child-owned representation stays opaque; capture alone grants nothing.
+            witness = activation._capture_delivery_witness(envelope)
+            if witness is None or not self._publication_matches(activation, epoch, generation):
+                return False
+            observed = self._observe(activation)
+            if (observed.phase != PHASE_RUNNING or observed.restart_required is not False
+                    or not self._publication_matches(activation, epoch, generation)):
+                return False
+            if activation.is_query_envelope_current(envelope) is not True:
+                return False
+            if not self._publication_matches(activation, epoch, generation):
+                return False
+            # A final status callback can revoke inner authority without changing
+            # manager publication. The callback-free child comparison fences it.
+            observed = self._observe(activation)
+            if (observed.phase != PHASE_RUNNING or observed.restart_required is not False
+                    or not self._publication_matches(activation, epoch, generation)):
+                return False
+            if activation._delivery_witness_matches(witness) is not True:
+                return False
+            return self._publication_matches(activation, epoch, generation)
+        except Exception:
+            return False
+
+    def _publication_matches(self, activation, epoch, generation) -> bool:
+        with self._lock:
+            return (
+                self._activation is activation
+                and self._activation_epoch == epoch
+                and self._applied_generation == generation
+            )
 
     def _success(self):
         self._record_error(None)
