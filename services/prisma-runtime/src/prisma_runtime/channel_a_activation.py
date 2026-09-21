@@ -14,6 +14,7 @@ from .channel_a_lifecycle import (
     PHASE_RUNNING,
     ChannelAPollResult,
     ChannelARunner,
+    ChannelAStatus,
 )
 from .channel_a_pairing import ChannelAPairingRegistry, QrChallenge
 from .channel_a_transport import MESSAGE_MAX_CHARS, ChannelABotIdentity
@@ -87,6 +88,14 @@ class ChannelAActivation:
     def prepare(self) -> bool:
         """Prepare once, preserving the runner's failure and cleanup semantics."""
         return self._runner.prepare()
+
+    def start(self) -> bool:
+        """Forward explicit managed start without adding lifecycle ownership."""
+        return self._runner.start()
+
+    def status(self) -> ChannelAStatus:
+        """Return the runner's actual immutable lifecycle snapshot."""
+        return self._runner.status()
 
     def poll_once(self) -> ChannelAPollResult:
         """Poll synchronously and publish through the caller's unchanged consumer."""

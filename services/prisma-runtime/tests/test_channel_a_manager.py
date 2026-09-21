@@ -249,6 +249,26 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assertNotIn(TOKEN, repr(result))
         self.assertNotIn(CANARY, repr(result))
 
+    def assert_sanitized_exception_chain(self, error):
+        """Check retained cause/context only, even when display suppresses them.
+
+        Caller-owned fixtures and traceback locals deliberately hold canaries;
+        they are not part of this exception-chain retention oracle.
+        """
+        pending = [error]
+        seen = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            for text in (repr(current.args), str(current), repr(current)):
+                for marker in (TOKEN, CANARY):
+                    self.assertTrue(marker not in text, "retained exception chain contains a canary")
+            for linked in (current.__cause__, current.__context__):
+                if linked is not None:
+                    pending.append(linked)
+
     def assert_error(self, code, operation):
         with self.assertRaises(self.Error) as caught:
             operation()
@@ -259,7 +279,39 @@ class ChannelAManagerTests(unittest.TestCase):
         rendered = "".join(traceback.format_exception(caught.exception))
         self.assertNotIn(TOKEN, rendered)
         self.assertNotIn(CANARY, rendered)
+        self.assert_sanitized_exception_chain(caught.exception)
         return caught.exception
+
+    def test_exception_chain_oracle_detects_display_suppressed_nested_canaries(self):
+        # Oracle control only; actual manager regressions use the existing
+        # credentials.set and factory_error cases below, not these errors.
+        for link in ("__context__", "__cause__"):
+            for marker in (TOKEN, CANARY):
+                with self.subTest(link=link, marker_kind="token" if marker == TOKEN else "path"):
+                    raw = OSError(marker)
+                    intermediate = RuntimeError(CREDENTIAL_UNAVAILABLE)
+                    setattr(intermediate, link, raw)
+                    sanitized = self.Error(CREDENTIAL_UNAVAILABLE)
+                    sanitized.__context__ = intermediate
+                    sanitized.__suppress_context__ = True
+                    rendered = "".join(traceback.format_exception(sanitized))
+                    self.assertNotIn(marker, rendered)
+                    with self.assertRaisesRegex(AssertionError, "retained exception chain contains a canary"):
+                        self.assert_sanitized_exception_chain(sanitized)
+        self.assertEqual(self.ledger, [])
+        self.assertEqual(self.factory_calls, [])
+
+    def test_exception_chain_oracle_accepts_detached_and_safe_cyclic_chains(self):
+        sanitized = self.Error(CREDENTIAL_UNAVAILABLE)
+        self.assert_sanitized_exception_chain(sanitized)
+        # Safe links need not be empty; repeated identities must terminate.
+        safe = RuntimeError(CREDENTIAL_UNAVAILABLE)
+        sanitized.__context__ = safe
+        sanitized.__cause__ = safe
+        safe.__context__ = sanitized
+        self.assert_sanitized_exception_chain(sanitized)
+        self.assertEqual(self.ledger, [])
+        self.assertEqual(self.factory_calls, [])
 
     def applied(self):
         result = self.manager.apply()
@@ -317,6 +369,7 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assert_status(self.manager.status(), error=CONFIG_UNAVAILABLE)
 
     def test_credential_write_failure_consumes_generation_without_rollback(self):
+        # assert_error checks the actual manager's retained dependency chain.
         self.credentials.fail["credentials.set"] = OSError(CANARY + TOKEN)
         self.assert_error(CREDENTIAL_UNAVAILABLE, lambda: self.manager.save_credential("replacement"))
         self.assertEqual(self.store.snapshot.desired_generation, 1)
@@ -489,6 +542,7 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assertIsNone(self.manager.status()["activation"])
 
     def test_factory_failure_never_publishes_identity_or_reuses_attempt_epoch(self):
+        # Factory failures must not retain raw exceptions behind sanitized ones.
         self.factory_error = RuntimeError(CANARY + TOKEN)
         self.assert_error(LIFECYCLE_UNAVAILABLE, self.manager.apply)
         failed_epoch = self.factory_calls[0][2]
