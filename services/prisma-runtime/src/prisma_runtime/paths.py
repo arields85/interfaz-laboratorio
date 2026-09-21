@@ -27,6 +27,7 @@ class RuntimePaths:
     auth_database: Path
     credential_directory: Path
     credential_database: Path
+    channel_a_configuration: Path
 
     @property
     def mutable_files(self) -> tuple[Path, ...]:
@@ -48,6 +49,7 @@ def runtime_paths() -> RuntimePaths:
         auth_database=root / "auth" / "admin.sqlite3",
         credential_directory=root / "credentials",
         credential_database=root / "credentials" / "provider-credentials.sqlite3",
+        channel_a_configuration=root / "prisma_channel_a_config.json",
     )
 
 

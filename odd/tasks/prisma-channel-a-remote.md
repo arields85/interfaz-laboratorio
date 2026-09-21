@@ -1,6 +1,92 @@
 # Prisma Channel A remote — ODD tasks
 
-## Current phase — SESSION CLOSE; RCA-5h.2 accepted OFFLINE ONLY; QR → A → existing Prisma circuit next
+## SESSION CLOSED at the user's request — local checkpoint commit granted; RCA-5i accepted OFFLINE
+
+**Status: SESSION CLOSED at the user's request.** This close changes documentation only: no tests, probes or source edits. The documentation writer disclosed read-only Git/count/search shell calls despite its no-command instruction; no mutations or execution of application code were reported. The parent performs Git checks and the authorized local commit. The user authorized exactly one **local checkpoint commit**, to be made by the parent, of the six changed paths on `feat/prisma-telegram-credentials`: `services/prisma-runtime/src/prisma_runtime/local_presentation.py`, `services/prisma-runtime/src/prisma_runtime/paths.py`, the new `services/prisma-runtime/tests/test_channel_a_root.py`, plus the three documentation paths `odd/tasks/prisma-channel-a-remote.md`, `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` and `docs/PENDING_WORK.md`. That grant covers a local checkpoint commit only: no push, no PR, no next implementation, no provider or runtime action and no new test. The commit hash is recorded by the parent in Engram once the commit exists and is never embedded here; no self-referential hash is invented. Prior active "no commits" wording is superseded **only** by this specific grant; historical claims and evidence stay historical.
+
+**Verified base — parent-confirmed and rechecked read-only by the documentation writer.** Branch `feat/prisma-telegram-credentials`, HEAD `3527f3b` (`3527f3bb804555b36479f50c8c11fa8909aba8d7`), with the six expected changed paths and no others. RCA-5i root composition stays accepted OFFLINE: independent 13-unique-method GREEN (root 11 + paths 2) plus an 11-method root repeat, and parent readback. No new test was authored during this close and the source/test bytes are untouched. No source checks and no new review cycle run here.
+
+### Exact next-session point
+
+1. **Recover state first.** Load the Engram topic `checkpoint/prisma-channel-a-manager-resume` and reconcile it with the real `git HEAD` and `git status`; do not rely on memory alone.
+2. **Read the Prisma master COMPLETELY before planning or writing.** `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` is mandatory reading in full, prioritizing the current §11.1 next step and the §3.4 ask-and-wait scope rule, and distinguishing current sections from historical checkpoint blocks. Then read `docs/PENDING_WORK.md` **PW-003** and this tracker, and reconcile the actual code and task state against them instead of assuming.
+3. **RCA-5i root composition is DONE OFFLINE — do not redo it.** The first pending implementation, only when the user resumes it, is the bounded **admin A** unit: Channel A credential save/delete plus explicit Apply/status through `ChannelAManager` and its generation accounting, reusing the existing admin auth/CSRF boundary. The existing A credential fields are reused, not a new UI; map the needed routes first and apply focused TDD. After that come the capability QR/status endpoints with the exact proxy/client routes and the manual `Pyramid` panel immediately right of Logs. Reuse the existing processing, response and audio; the full connection remains incomplete.
+
+**Boundaries carried into the next session.** No new behavior, no cancellation/availability work, no transcript, STT or NLU work, no Channel B expansion and no unrequested refactor. Ask and wait before any extra or technical/security blocker; no live provider or runtime authority is inherited by this close. The master §4.4 known local startup is settled and must not be re-asked. Never claim a live bot, Telegram, QR or audio acceptance from offline tests. The full Engram mirror is still pending at the reported size limit — observation 5599 is partial — and this repository file remains authoritative; no cleanup detour is part of this close.
+
+No live-provider or operational evidence is produced by this section; it records the user-requested stop and the exact resumption point only.
+
+## Accepted offline increment — RCA-5i root composition of Channel A
+
+**Status: ACCEPTED OFFLINE by the parent.** The first bounded root-composition increment of Channel A is accepted offline: the real `ChannelAManager` and its default Channel A activation factory are composed in the existing root, with a canonical `RuntimePaths` configuration path in `paths.py` and root shutdown wiring. This is bounded root-composition evidence, **not** application bot activation, real Telegram/QR or audio, admin wiring or full-connection acceptance.
+
+**Accepted evidence — parent-reported, not rerun here.** Source-only writer `mubm3cus-7-3h66` changed only `local_presentation.py` and `paths.py`, with static readback and zero commands; the parent read the complete source diff and confirmed the expected four-path scope plus tracked whitespace PASS (CRLF advisory). New frozen root tests: `test_channel_a_root.py`, 716 lines, 11 methods. First RED `mublxk6w-6-6k8z` ran the exact focused supervisor once (180-second bound): 11 methods, 0 PASS, 10 failures, 1 error, 0 skips, 0.164s, exit 1; ten methods reached the missing-manager constructor-count assertions and the path method reached the absent `RuntimePaths.channel_a_configuration` API, with downstream wiring/publication/shutdown assertions unreached. Independent GREEN `mubmc7me-8-lxah` ran the two authorized supervisors once each: root 11 PASS / 0.167s and paths 2 PASS / 0.003s, **13 unique PASS**, zero failures/errors/skips and tool success (numeric exit not printed); all downstream root assertions were reached and all guarded request/adapter/thread no-attempt assertions passed. The final parent-requested spotcheck `mubmf9qs` repeated the root supervisor once: 11 PASS / 0.170s, adds NO unique tests. No timeout or cleanup failure was reported. No source change occurred after GREEN. No commit, push or PR occurred; the prior four changed paths were two source files, one new test and this tracker, and no final line count is invented.
+
+**Boundaries and provenance.** Native assessment remains unavailable, so independent high-risk verification applies; RDD is off and this is never native approval. No end-to-end, live Telegram or audio acceptance is claimed. Full Engram mirror synchronization remains pending due to the reported size limit: observation 5599 is explicitly partial and this repository file remains authoritative. Branch `feat/prisma-telegram-credentials`, HEAD `3527f3b` was confirmed clean by the parent earlier this session. This section remains the current authority for the accepted RCA-5i unit and its evidence; the session-close section above is the current stopping point, and the next-session point recorded there governs resumption. Every later section, including the previous session close below, is historical provenance under the historical headings, not current instruction. The test author disclosed an unauthorized read-only `wc -l` sizing command; no test/import/state mutation was reported, and this reconciliation does not remove that disclosure. Test-only authoring produced the 716-line, 11-method module, exceeding the advisory forecast without any source change; the parent read the full module and corrected an absent-symbol patch setup defect before execution.
+
+### Current contract — root composition of Channel A
+
+Compose the real `ChannelAManager` and its default Channel A activation factory inside the existing root `services/prisma-runtime/src/prisma_runtime/local_presentation.py`, with:
+
+- the SAME protected `CredentialService` store already used by Channel B, and the shared A+B activation reservation;
+- the real `ChannelAActivation` plus the real `ChannelATransport`, and the real session registry;
+- `destination_label` from `HmiSessionRegistry.get_owner_name(owner_id, max_age_seconds=15)`;
+- parsing through the existing `answer_from_snapshot`;
+- `on_outcome` routed from `IngressOutcome.answer_envelope` to the existing `VoiceEventStore.publish(question='', answer_text, owner_id=<exact envelope owner>, is_current=<closure over manager.is_query_envelope_current(envelope)>)`.
+
+The default activation factory did not exist before this unit; the unit composed it and did not reimplement the accepted manager or activation behavior.
+
+No new public helper is required. Tests use constructor-capture of mocked manager/activation to inspect the composed factory and the outcome wiring, while preserving the real `VoiceEventStore` guard behavior.
+
+Channel A composition must stay inert: no A credential resolution, provider I/O, activation, thread start or startup Apply of A. Preserve unrelated existing root behavior. Root `main` shutdown must stop A and B in a `finally` block. A persistent configuration path belongs in `RuntimePaths` in `paths.py` only if a canonical path is genuinely needed; no ad-hoc root filename, no new policy and no new global environment setting.
+
+Reuse the Channel B timeouts exactly as accepted — request 20 s, poll 25 s, read 35 s, join 40 s — plus the explicitly approved `poll_pause = 0.1` seconds. Because connect plus read can exceed the 40-second join bound, this unit must NOT claim guaranteed stop completion; preserve the manager's accepted uncertain-stop behavior.
+
+### RCA-5i checklist
+
+- [x] **RCA-5i-1 — Mapping: DONE.** Read-only mapping of the existing root, `RuntimePaths`, session registry, `voice_events` and manager composition seams is complete and recorded by the parent.
+- [x] **RCA-5i-2 — Focused test authoring: DONE.** Eleven methods in `services/prisma-runtime/tests/test_channel_a_root.py` (716 lines), with parent static readback and test-only setup correction; the sizing-command deviation disclosed above remains recorded.
+- [x] **RCA-5i-3 — Observed RED, then source: DONE.** Missing-composition/API RED `mublxk6w` observed before source; source authored in `local_presentation.py` and `paths.py`; tests stayed frozen. The independent root/path GREEN below verifies this unit, and the completed RED/source/GREEN grants are exhausted.
+- [x] **RCA-5i-4 — Offline GREEN and readback: DONE.** Independent 13-unique-method GREEN `mubmc7me`, parent source/test readback, expected four-path scope (two source files, one new test and tracker) and tracked whitespace PASS (CRLF advisory), and final root spotcheck `mubmf9qs` (11 PASS / 0.170s, no unique addition). The parent accepted the unit OFFLINE.
+
+The parent owns every transition between these items; this increment is closed and no item advances further.
+
+### Exact next boundary — NOT authorized by this increment
+
+The first-increment grant is exhausted; this acceptance authorizes no new implementation, execution or delivery action. The remaining sequence, when the user separately authorizes it, is:
+
+1. **A credentials administration through the manager:** route Channel A credential save/delete and the explicit Apply/status through the existing manager/generation accounting, reusing the existing admin auth/CSRF boundary; no direct secret writes while A is active.
+2. **Then QR/status:** capability-scoped QR/status endpoints and the exact proxy/client routes (currently absent), plus the manual `Pyramid` immediately right of Logs, whose QR panel opens ONLY on click, reusing the existing response/audio circuit.
+
+Broader `RCA-5` integration, the warning scheduler (still unwired and explicitly not part of RCA-5i), `RCA-6`, `RCA-7` and `RCA-8` remain pending.
+
+### Bounded implementation scope
+
+- Source: `services/prisma-runtime/src/prisma_runtime/local_presentation.py`, and `services/prisma-runtime/src/prisma_runtime/paths.py` only if a canonical `RuntimePaths` config path is genuinely needed.
+- Tests: new `services/prisma-runtime/tests/test_channel_a_root.py`.
+- Source-only authoring was authorized after the observed RED and that grant is now exhausted. Original forecast was roughly 210–350 authored source/test lines plus documentation; test scaffolding exceeded it (716 test lines). Preserve useful tests/readability; no size-only trimming. No delivery action is authorized.
+
+### Test scope and fixtures
+
+- Minimal wiring and inert shared-identity cases: no outcome asserts no publication; exact-owner success; rejected/revoked guard; no startup Apply of A and shutdown including process exit.
+- Fixtures use no real threads and no network: install `requests.Session.request` record/refuse guards BEFORE lazy production imports, assert the no-attempt claim externally, and restore unconditionally.
+
+### TDD, routing and limits
+
+- TDD is ON under `docs/TESTING.md` plus this explicit feature contract. Route: delegated mapping (4+ files) → delegated single writer for tests → independent verifier for commands → delegated single writer for source after observed RED → independent verifier for focused GREEN and parent readback.
+- The exact existing **Focused backend supervisor** below is reused with only its discovery pattern changed to `test_channel_a_root.py`, foreground, 180-second bound, fresh isolated child environment and temporary state. No new harness.
+- All historical grants are exhausted. RDD is off: the parent assesses every writer diff and uses independent verification where required; this is never native approval.
+- No commits unless the user makes a fresh explicit request; the user made exactly one such request for this close, recorded in the session-close section above. Push and PR remain prohibited. Cached `ask-on-risk` / `feature-branch-chain` policy is preserved and this launch does not touch the branch.
+
+### Excluded from this increment
+
+No live credentials or persisted state, no unsafe `voice_service`, no full-backend suite, no auxiliary harness edits, no admin wiring/QR/UI, no response/audio redesign, no STT/NLU and no warning-scheduler change. The existing warning sweep remains unwired and is recorded as later remaining integration work, not as extra RCA-5i scope.
+
+This documentation reconciliation performs static readback only; it records the parent-reported offline acceptance above and claims no new execution, test result or native approval.
+
+## Historical session close — RCA-5h.2 accepted OFFLINE ONLY; superseded by RCA-5i
+
+> Historical provenance only, not current execution authority. This section and the historical sections below retain their original evidence verbatim; their next-action instructions, pauses and grants are superseded by the accepted RCA-5i section above.
 
 **Session close — documentation only, zero commands/tests/probes.** The user stopped implementation and authorized this local checkpoint only: this tracker and the PW-003 row. Base `5b89837` on `feat/prisma-telegram-credentials`; the closing commit hash is recorded by the parent in Engram once the commit exists and is never embedded here. The only new permission is a local checkpoint commit made by the parent: no push, PR, provider/state/process action, new test or operational step follows, and no prior grant carries forward. The prior frontend mapping boundary is superseded — frontend writer `mubje6mk` wrote nothing and stopped on an assumed missing frame seam, and the cancelled root-test author `mubk9pqj-1e-l8e6` added no `test_channel_a_root.py` and no paths implementation. Nothing here claims a commit, an executed test or a run build.
 
@@ -13,6 +99,8 @@
 - The extra frontend availability/cancellation plan (same-session frame/hidden state, delayed-async fences, active-audio cancellation) is **superseded by the user**: optional and unapproved, not a prerequisite for the QR connection. Existing work is preserved and is not reverted automatically.
 
 ### Exact next-session point
+
+> Historical routing only. Its first item (A root composition) was later completed and accepted offline as RCA-5i in the accepted section at the top; the sequence below is preserved provenance, not current instruction.
 
 Recover the actual closing commit and Git status, master §3.4/§11.1, and this checkpoint. Do not redo existing components, mass regression rounds, the past provider test or the §4.4 startup question.
 
@@ -128,6 +216,8 @@ Activation captures BEFORE foreign checks, performs ordinary validation, then cl
 **Completed phase sequence:** test-only correction → observed behavioral RED → separately authorized source-only correction → independent focused GREEN → read-only baseline preflight → fresh baseline grant and GREEN → parent offline acceptance. The earlier pending-RED/source-grant proposal is superseded; no completed grant carries forward. This closure performs static documentation readback only.
 
 ### Remaining sequence and authority
+
+> Historical routing only. Item 1 below (A composition) was later completed and accepted offline as RCA-5i in the accepted section at the top; this list is preserved provenance, not current instruction.
 
 **Superseded optional plan, not a gate:** the earlier mandatory frontend same-session frame/hidden-state cancellation with delayed-async fences and active-audio cancellation is **user-superseded** by master v2.0.13 §3.4/§11.1. It is an optional, unapproved proposal here, not a prerequisite for the QR connection, and existing work is preserved rather than reverted. The already-implemented delivery eligibility guard and predicate stay; only composition and wiring are pending. Deferring the orb until `onStarted` remains an unproven audio-cancellation idea, not a requirement.
 
@@ -439,7 +529,8 @@ Frontend domain types stay in `domain/`; use design tokens, Lucide, `hmi-scrollb
   - [x] **RCA-5g — Simple per-HMI name setting:** parent accepted the minimal unit OFFLINE ONLY after 118 unique tests PASS, build/lint PASS, a separate 6-test repeat PASS and source/test readback. Local configuration/save in General Settings → Prisma carries `hmiName` through existing ordered scheduled snapshots; owner-name lookup requires a live owner and fresh context. No real root/QR integration is accepted.
   - [x] **RCA-5h.1 — Preparatory guarded VoiceEventStore delivery:** accepted OFFLINE ONLY after missing-keyword RED, independent 13-method GREEN, separate 13-method repeat and parent source/test/diff readback. Optional private guard preserves legacy wire behavior; real manager predicate integration remains pending before enabling A, while the extra frontend active-audio/delayed-async cancellation is not authorized as a prerequisite (master §3.4).
   - [x] **RCA-5h.2 — Actual delivery eligibility predicate:** parent accepted OFFLINE ONLY after behavioral RED, six-source unit/five-source correction readbacks, independent 35 focused + 171 baseline PASS (206 distinct methods across five patterns). Five boolean APIs plus shared validator and call-local private witnesses; no store/publisher/root wiring or application integration acceptance. Next boundary is the A composition unit above, with focused TDD only when the user resumes; the extra frontend cancellation mapping is not authorized.
-  - [ ] **Remaining RCA-5 units:** after A composition and store/publisher wiring, real admin/root manager composition and status/Apply, all A writes through generation manager, owner-name lookup wiring, warning scheduler, exact proxy/bootstrap and broader integration acceptance. Preserve RCA-5a–f OFFLINE acceptance; do not recreate accepted work. Historical broader identity-handoff limitations remain provenance, not a reason to resume auxiliary harnesses automatically.
+  - [x] **RCA-5i — Root composition of Channel A:** parent accepted OFFLINE after RED `mublxk6w` (11 methods, 0 PASS, 10 failures, 1 error, 0.164s, exit 1), independent GREEN `mubmc7me` (root 11 PASS / 0.167s, paths 2 PASS / 0.003s, 13 unique methods) and final root spotcheck `mubmf9qs` (11 PASS / 0.170s, no unique addition), plus parent source/test readback and tracked whitespace PASS. Source: `local_presentation.py` and `paths.py`; test: `test_channel_a_root.py` (716 lines, 11 methods). No commit/push/PR; bounded root composition only, not application activation or full connection. Authoritative checklist at the top of this tracker.
+  - [ ] **Remaining RCA-5 units:** after the accepted RCA-5i root composition and store/publisher wiring, real admin/root manager composition and status/Apply, all A writes through generation manager, owner-name lookup wiring, warning scheduler, exact proxy/bootstrap and broader integration acceptance. Preserve RCA-5a–f OFFLINE acceptance; do not recreate accepted work. Historical broader identity-handoff limitations remain provenance, not a reason to resume auxiliary harnesses automatically. The existing warning sweep remains unwired and is later remaining integration, not RCA-5i scope.
 - [ ] **RCA-6 — Click-open HMI QR/link presentation:** capability projection and QR rotation while the manually opened panel is visible; `Pyramid` immediately right of Logs, never automatic. User REMOVED the pause before RCA-6. Typed client/hook/UI and expiry/error/multi-HMI tests remain pending; revalidate original 350–650 forecast.
 - [ ] **RCA-7 — Exact-paired-HMI response delivery:** connect the existing response/audio circuit to the linked HMI; no drop/no-op final outcome consumer. Do not add audio cancellation or other response behavior without approval under master §3.4. Transcript placement/lifetime remain a later, separately approved UI decision. Telegram-only is not completion; the original forecast is historical, not current scope.
 - [ ] **RCA-8 — Integrated verification/docs:** full gates, independent verification, README/master reconciliation; keep active backlog honest. Original 100–200 estimate must be revalidated.

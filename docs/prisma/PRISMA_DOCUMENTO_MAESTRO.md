@@ -2,13 +2,14 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.13
+> **Versión documental:** 2.0.14
 >
 > **Fecha:** 2026-09-21
 >
 > **Prioridad vigente:** terminar **QR → Canal A → circuito Prisma existente**, sin agregar
 > cambios al comportamiento de respuesta ni audio. Antes de implementar algo no solicitado,
 > consultar al usuario y esperar su aprobación explícita (§3.4 y §11.1).
+> RCA-5i (composición raíz del Canal A) está aceptado offline; siguen pendientes admin A y QR (§11.1).
 > El resumen 2.0.12 siguiente se conserva como contexto histórico, no como una nueva autorización.
 >
 > **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`). Se suma una aceptación **acotada** del Canal A sobre un widget simulado (contexto → respuesta → voz) y el hallazgo de que el `/status` de Telegram lee un archivo de instalación obsoleto. En esta versión se acuerda, **sin implementarlo**, el alcance del **acceso remoto del Canal A** (bot dedicado, emparejamiento por QR sin entrada local, reloj humano de inactividad y un único destino activo). Despliegue productivo, aceptación integral, máquinas reales y el trabajo posterior del asistente siguen pendientes.
@@ -970,9 +971,45 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (checkpoint 2.0.13; registros anteriores históricos)
+### 11.1 Próximo paso vigente (checkpoint 2.0.14; registros anteriores históricos)
 
-**Checkpoint vigente 2.0.13 (2026-09-21).** El usuario pide terminar la conexión
+**Checkpoint vigente 2.0.14 (2026-09-21).** El primer incremento acotado de composición raíz del
+Canal A quedó **aceptado solo offline**: el `ChannelAManager` real y su factory de activación por
+defecto se componen en el root existente `local_presentation.py`, con la ruta canónica de
+configuración en `paths.py`, el mismo almacén protegido del Canal B, la reserva compartida A+B, el
+registro/sesión reales y el guard de elegibilidad existente; el apagado del root detiene A y B. La
+evidencia independiente fue RED 11 métodos / 0 PASS / 10 fallas / 1 error, luego GREEN de 13 métodos
+únicos (root 11 + paths 2) y un spotcheck de root de 11 PASS, sin intentos de HTTP, adaptador ni
+hilos. Esto es composición raíz offline, **no** activación real del bot, ni Telegram/QR/audio reales,
+ni conexión de punta a punta.
+
+El próximo paso pendiente, **no autorizado por este incremento**, es administrar las credenciales del
+Canal A (guardar/borrar y Apply/status explícitos) a través del manager y su generación, reutilizando
+la autenticación/CSRF admin existente; después, la proyección QR/status por capability con las rutas
+proxy/cliente y la apertura **manual** del QR desde `Pyramid` inmediatamente a la derecha de Logs,
+reutilizando la respuesta y el audio existentes. La conexión sigue incompleta y la prioridad vigente
+no cambia. Detalle y checklist: [`../../odd/tasks/prisma-channel-a-remote.md`](../../odd/tasks/prisma-channel-a-remote.md);
+pendiente activo `PW-003`. Sin push ni PR.
+
+**Cierre de sesión a pedido del usuario (2026-09-21).** La sesión se cerró a pedido del usuario con un
+único permiso nuevo: un **commit local de checkpoint** de los seis archivos cambiados (dos de fuente,
+una prueba nueva y estos tres documentos), a realizar por el agente coordinador. Ese hash se registra en Engram una
+vez creado y **no se incrusta** en este árbol: no se inventa un SHA autorreferencial. No hay push, PR,
+proveedor ni acción operativa. **Próxima sesión: leer este documento maestro completo antes de
+planificar o escribir**, con prioridad en este §11.1 y en la regla de aprobación previa de §3.4, y
+distinguiendo los bloques de checkpoint históricos; recuperar el checkpoint de Engram
+`checkpoint/prisma-channel-a-manager-resume` y reconciliarlo con `git HEAD` y el estado real del árbol; después
+leer `PW-003` y `odd/tasks/prisma-channel-a-remote.md` y contrastarlos con el código real. RCA-5i ya
+está aceptado offline y no se rehace: el primer paso pendiente sigue siendo admin A (guardar/borrar
+credencial y Apply/status por el manager/generación con la auth/CSRF existente) y luego QR/status por
+capability con proxy/cliente y apertura manual del QR en `Pyramid`. Sin comportamiento nuevo, sin
+cancelación/disponibilidad, sin transcript/STT/NLU, sin ampliación del Canal B y sin refactor no
+solicitado: preguntar y esperar ante cualquier extra o bloqueo técnico/de seguridad. Ninguna autoridad
+de proveedor o runtime vivo se hereda, y una prueba offline nunca se reporta como bot, Telegram, QR o
+audio reales. La verificación de esta actualización documental es estática: no ejecuta pruebas,
+servicios ni proveedores.
+
+**Checkpoint histórico 2.0.13 (2026-09-21) — continuación precisada por 2.0.14; la conexión completa sigue pendiente.** El usuario pide terminar la conexión
 **QR → Canal A → circuito Prisma existente**, siguiendo las etapas acordadas, sin sumar por ahora
 cambios al comportamiento de respuesta o audio. Rige la aprobación previa de §3.4.
 
@@ -1287,6 +1324,25 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.14 — 2026-09-21
+
+- RCA-5i aceptado **solo offline**: composición raíz del Canal A (`ChannelAManager` y factory de
+  activación por defecto en `local_presentation.py`, ruta de configuración en `paths.py`, mismo
+  almacén protegido, reserva A+B, guard de elegibilidad y apagado A/B en el root). Evidencia
+  independiente RED→GREEN de 13 métodos únicos y spotcheck de root, sin HTTP, adaptador ni hilos. No
+  es activación real del bot ni conexión completa.
+- §11.1 fija el próximo paso pendiente y no autorizado por ese incremento: admin A (guardar/borrar y
+  Apply/status por el manager/generación con la auth/CSRF existente) y luego QR/status por capability
+  con proxy/cliente y apertura manual del QR en `Pyramid`, reutilizando respuesta/audio. El
+  checkpoint 2.0.13 queda como routing histórico.
+- Actualización documental únicamente; sin pruebas nuevas, servicios, proveedores, commits ni push en
+  ese incremento.
+- **Cierre de sesión a pedido del usuario:** único permiso nuevo, un commit local de checkpoint de los
+  seis archivos cambiados, con el hash registrado en Engram y no incrustado aquí. Próxima sesión: leer
+  este maestro completo (prioridad §11.1/§3.4), recuperar el checkpoint
+  `prisma-channel-a-manager-resume` y reconciliar `PW-003` y `odd/tasks/prisma-channel-a-remote.md`
+  con el código real. Sin push, PR, proveedores ni pruebas nuevas.
 
 ### 2.0.13 — 2026-09-21
 

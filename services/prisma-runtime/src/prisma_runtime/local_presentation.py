@@ -12,6 +12,7 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
 import unicodedata
 from dataclasses import dataclass
@@ -25,6 +26,10 @@ from flask import Flask, Response, jsonify, request
 from .admin_auth import AdminAuthRepository, AdminAuthService, ScryptPasswordHasher
 from .admin_http import AdminHttpBoundary
 from .bot_identity_reservation import process_bot_identity_reservation
+from .channel_a_activation import ChannelAActivation
+from .channel_a_configuration import ChannelAConfigurationStore
+from .channel_a_manager import ChannelAManager
+from .channel_a_transport import ChannelATransport
 from .credential_store import CredentialService
 from .hmi_sessions import (
     CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge,
@@ -46,6 +51,16 @@ HMI_SESSION_BOOTSTRAP_MAX_BYTES = 128
 HMI_ASK_MAX_BYTES = 32 * 1024
 HMI_QUESTION_MAX_BYTES = 4096
 TELEGRAM_STOPPING = "TELEGRAM_STOPPING"
+
+# Approved Channel A composition settings: the accepted Channel B request/poll/
+# read/join bounds plus the explicit poll pause, and the fresh live-owner label
+# receipt bound. No guaranteed stop completion is claimed for the join bound.
+CHANNEL_A_REQUEST_TIMEOUT_SECONDS = 20
+CHANNEL_A_POLL_TIMEOUT_SECONDS = 25
+CHANNEL_A_READ_TIMEOUT_SECONDS = 35
+CHANNEL_A_JOIN_TIMEOUT_SECONDS = 40
+CHANNEL_A_POLL_PAUSE_SECONDS = 0.1
+CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS = 15.0
 
 
 def utc_now_iso() -> str:
@@ -792,6 +807,9 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     # One process-local identity registry, shared by the manager factory, the
     # standalone bot builder and any later channel A wiring.
     identity_reservation = process_bot_identity_reservation()
+    # Composed only with the protected boundary below: an injected admin_http
+    # already owns its credential service, so Channel A stays unwired there.
+    channel_a_manager = None
     if admin_http is None:
         permissions = SecureStoragePermissions()
         repository = AdminAuthRepository(paths.auth_database, permission_checker=permissions.verify)
@@ -818,7 +836,57 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             telegram_manager=telegram_manager,
             public_origin=os.environ.get("PRISMA_PUBLIC_ORIGIN"),
         )
-    app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry)
+
+        def channel_a_destination_label(owner_id):
+            """Read only a fresh live owner's display label, never global identity."""
+            return session_registry.get_owner_name(
+                owner_id, max_age_seconds=CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS
+            )
+
+        def channel_a_on_outcome(outcome):
+            """Publish the delivered answer through the existing store; the store
+            owns the fail-closed read-time guard and no outcome is retained here."""
+            envelope = outcome.answer_envelope
+            if envelope is None:
+                return
+            voice_events.publish(
+                "",
+                envelope.answer_text,
+                owner_id=envelope.owner_id,
+                # Late-bound: the manager is inert during construction and only
+                # its already-published running authority may authorize delivery.
+                is_current=lambda: channel_a_manager.is_query_envelope_current(envelope),
+            )
+
+        def build_channel_a_activation(token, desired, epoch, reservation):
+            """Compose one real activation; the manager keeps this call lazy, so no
+            credential, transport effect, thread or provider call runs here."""
+            transport = ChannelATransport(token, request_timeout=CHANNEL_A_REQUEST_TIMEOUT_SECONDS)
+            return ChannelAActivation(
+                transport=transport,
+                sessions=session_registry,
+                destination_label=channel_a_destination_label,
+                parse=answer_from_snapshot,
+                on_outcome=channel_a_on_outcome,
+                clock=time.monotonic,
+                pairing_clock=time.monotonic,
+                query_clock=time.monotonic,
+                warning_lead=desired.warning_lead_seconds,
+                max_question_bytes=HMI_QUESTION_MAX_BYTES,
+                poll_timeout=CHANNEL_A_POLL_TIMEOUT_SECONDS,
+                read_timeout=CHANNEL_A_READ_TIMEOUT_SECONDS,
+                join_timeout=CHANNEL_A_JOIN_TIMEOUT_SECONDS,
+                poll_pause=CHANNEL_A_POLL_PAUSE_SECONDS,
+                reservation=reservation,
+            )
+
+        channel_a_manager = ChannelAManager(
+            credential_service=credentials,
+            configuration_store=ChannelAConfigurationStore(paths.channel_a_configuration),
+            activation_factory=build_channel_a_activation,
+            reservation=identity_reservation,
+        )
+    app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry, channel_a_manager=channel_a_manager)
     admin_http.register(app)
 
     @app.after_request
@@ -972,11 +1040,15 @@ def main():
     telegram_configuration = read_telegram_config()
     paths = runtime_paths(); snapshot_store = JsonFileStore(paths.snapshot); events = VoiceEventStore()
     app = create_app(snapshot_store, events, None, telegram_configuration)
-    manager = app.config.get("telegram_manager")
-    if manager: manager.startup_apply()
+    telegram_manager = app.config.get("telegram_manager")
+    channel_a_manager = app.config.get("channel_a_manager")
+    # Only Channel B has an accepted startup Apply; A stays inert until an
+    # explicit operator Apply, and neither stop path claims guaranteed closure.
+    if telegram_manager: telegram_manager.startup_apply()
     try: app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, threaded=True, use_reloader=False)
     finally:
-        if manager: manager.stop()
+        if channel_a_manager: channel_a_manager.stop()
+        if telegram_manager: telegram_manager.stop()
 
 
 if __name__ == "__main__": main()
