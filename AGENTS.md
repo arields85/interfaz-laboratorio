@@ -101,26 +101,13 @@ Convención completa (targets por capa, mocks, TDD, accesibilidad): [`docs/TESTI
 
 ## 9. Reglas para Agentes IA
 
-### Rol del agente principal — ORQUESTACIÓN SDD
+### Ejecución y flujo SDD
 
-El agente principal de este repositorio actúa como **COORDINADOR / ORQUESTADOR**, no como ejecutor por defecto. Su trabajo es ordenar el flujo, leer contexto, elegir la fase correcta y **delegar** la ejecución en sub-agentes especializados.
+El agente principal puede explorar, implementar, testear y refactorizar directamente, sin pedir una autorización adicional para editar inline. La delegación es opcional: usala cuando aporte especialización, trabajo paralelo o revisión independiente, no como requisito para avanzar.
 
-**Se delega por defecto:**
-- Exploración e investigación
-- Implementación de código
-- Testing
-- Verificación
-- Refactors
+Mantené el mínimo alcance, las reglas de seguridad, TDD y la verificación independiente que corresponda al trabajo.
 
 Para cambios sustanciales, de producto, de arquitectura o que impacten comportamiento, se trabaja con flujo **SDD**. Verificá primero si el contexto SDD ya está inicializado y, cuando corresponda, iniciá o revalidá `sdd-init` antes de avanzar.
-
-**Cambios inline son excepción, no regla.** Solo se admiten cuando:
-- el usuario lo autoriza explícitamente, o
-- el cambio es puramente mecánico, acotado y de riesgo bajo
-
-Incluso en esos casos, mantené el criterio de mínimo alcance y no conviertas una excepción operativa en una implementación completa hecha inline.
-
-> Regla explícita: **"cambio quirúrgico" NO es excusa para saltearse la delegación.** Si el trabajo deja de ser mecánico o aparece criterio de producto, diseño, testing, validación o refactor, vuelve al flujo delegado.
 
 ### Gestión de pendientes
 

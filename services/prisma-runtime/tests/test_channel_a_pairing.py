@@ -7,6 +7,7 @@ import time
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from threading import BrokenBarrierError
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
@@ -307,6 +308,74 @@ class ChannelAPairingGenerationTests(ChannelAPairingTestCase):
                 )
         self.assertIsNone(registry.owner_link(OWNER2))
 
+    def _run_generation_race(self, barrier, calls):
+        """Own each race through launch, bounded cleanup and external reporting."""
+        worker_errors = []
+        cleanup_errors = []
+        body_error = None
+
+        def run_worker(index, target, args):
+            try:
+                barrier.wait(5)
+                target(*args)
+            except BaseException as error:
+                # A broken wait caused by our failure unwind is not another
+                # independent failure. A spontaneous broken wait still is.
+                if isinstance(error, BrokenBarrierError) and (body_error is not None or worker_errors):
+                    return
+                worker_errors.append((index, error))
+                # Release peers even if the main thread is already in join().
+                try:
+                    barrier.abort()
+                except BaseException as abort_error:
+                    cleanup_errors.append((f"worker {index} abort", abort_error))
+
+        # Keep the existing prelaunch ownership guarantee for the whole group.
+        threads = [
+            threading.Thread(target=run_worker, args=(index, target, args))
+            for index, (target, args) in enumerate(calls)
+        ]
+        try:
+            for thread in threads:
+                thread.start()
+        except BaseException as error:
+            body_error = error
+        finally:
+            # A failed start can still have started its worker. Identity zero
+            # is also a started worker, not an absent identity.
+            started = [(index, thread) for index, thread in enumerate(threads) if thread.ident is not None]
+            if started and (body_error is not None or worker_errors):
+                try:
+                    barrier.abort()
+                except BaseException as error:
+                    cleanup_errors.append(("main abort", error))
+            # Do not abort a healthy rendezvous merely because start returned:
+            # its parties may still be arriving. Every wait has its own bound.
+            for index, thread in started:
+                try:
+                    thread.join(5)
+                except BaseException as error:
+                    cleanup_errors.append((f"worker {index} join", error))
+            survivors = []
+            for index, thread in started:
+                try:
+                    if thread.is_alive():
+                        survivors.append(index)
+                except BaseException as error:
+                    cleanup_errors.append((f"worker {index} liveness", error))
+
+        if body_error is not None and not worker_errors and not cleanup_errors and not survivors:
+            raise body_error
+        causes = []
+        if body_error is not None:
+            causes.append(f"launch: {type(body_error).__name__}: {body_error}")
+        causes.extend(f"worker {index}: {type(error).__name__}: {error}" for index, error in worker_errors)
+        causes.extend(f"{operation}: {type(error).__name__}: {error}" for operation, error in cleanup_errors)
+        if survivors:
+            causes.append(f"liveness: workers still alive: {survivors}")
+        if causes:
+            self.fail("; ".join(causes))
+
     def test_racing_claims_on_one_qr_produce_exactly_one_pending(self):
         registry = self.registry()
         challenge = registry.issue_qr(OWNER)
@@ -314,18 +383,12 @@ class ChannelAPairingGenerationTests(ChannelAPairingTestCase):
         outcomes = []
 
         def claim(phone):
-            barrier.wait()
             try:
                 outcomes.append((phone, registry.claim_qr(challenge.token, phone)))
             except ChannelAPairingError as error:
                 outcomes.append((phone, str(error)))
 
-        threads = [threading.Thread(target=claim, args=(phone,)) for phone in (PHONE, PHONE2)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(5)
-        self.assertFalse(any(thread.is_alive() for thread in threads), "claim threads must terminate")
+        self._run_generation_race(barrier, [(claim, (phone,)) for phone in (PHONE, PHONE2)])
         winners = [(phone, value) for phone, value in outcomes if not isinstance(value, str)]
         losers = [(phone, value) for phone, value in outcomes if isinstance(value, str)]
         self.assertEqual(len(winners), 1)
@@ -342,18 +405,12 @@ class ChannelAPairingGenerationTests(ChannelAPairingTestCase):
         outcomes = []
 
         def confirm():
-            barrier.wait()
             try:
                 outcomes.append(registry.confirm(ticket, PHONE))
             except ChannelAPairingError as error:
                 outcomes.append(str(error))
 
-        threads = [threading.Thread(target=confirm) for _ in range(2)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(5)
-        self.assertFalse(any(thread.is_alive() for thread in threads), "confirm threads must terminate")
+        self._run_generation_race(barrier, [(confirm, ()) for _ in range(2)])
         links = [value for value in outcomes if not isinstance(value, str)]
         self.assertEqual(len(links), 1)
         self.assertIn(PRISMA_CHANNEL_A_TICKET_REQUIRED, outcomes)
@@ -365,15 +422,9 @@ class ChannelAPairingGenerationTests(ChannelAPairingTestCase):
         tokens = []
 
         def issue():
-            barrier.wait()
             tokens.append(registry.issue_qr(OWNER).token)
 
-        threads = [threading.Thread(target=issue) for _ in range(4)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(5)
-        self.assertFalse(any(thread.is_alive() for thread in threads), "issue threads must terminate")
+        self._run_generation_race(barrier, [(issue, ()) for _ in range(4)])
         self.assertEqual(len(tokens), 4)
         self.assertEqual(len(set(tokens)), 1)
         self.assertEqual(registry.claim_qr(tokens[0], PHONE)[1].phone_id, PHONE)
@@ -992,21 +1043,78 @@ class ChannelAPairingWarningSweepTests(ChannelAPairingTestCase):
     def _race(self, first, second):
         barrier = threading.Barrier(3)
         results = []
+        worker_errors = []
+        cleanup_errors = []
+        body_error = None
 
-        def run(call):
-            barrier.wait(5)
+        def run(index, call):
             try:
-                results.append(call())
-            except ChannelAPairingError as error:
-                results.append(str(error))
+                try:
+                    barrier.wait(5)
+                except BrokenBarrierError:
+                    # Only a wait broken by an existing failure is unwind.
+                    if body_error is not None or worker_errors:
+                        return
+                    raise
+                try:
+                    results.append(call())
+                except ChannelAPairingError as error:
+                    results.append(str(error))
+            except BaseException as error:
+                worker_errors.append((index, error))
+                # Release MAIN and the other worker even during a main join.
+                try:
+                    barrier.abort()
+                except BaseException as abort_error:
+                    cleanup_errors.append((f"worker {index} abort", abort_error))
 
-        threads = [threading.Thread(target=run, args=(call,)) for call in (first, second)]
-        for thread in threads:
-            thread.start()
-        barrier.wait(5)
-        for thread in threads:
-            thread.join(5)
-        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        threads = [
+            threading.Thread(target=run, args=(index, call))
+            for index, call in enumerate((first, second))
+        ]
+        try:
+            for thread in threads:
+                thread.start()
+            try:
+                barrier.wait(5)
+            except BrokenBarrierError:
+                # A worker's abort can release MAIN without a new body fault.
+                # Launch exceptions never pass through this wait-only handler.
+                if not worker_errors:
+                    raise
+        except BaseException as error:
+            body_error = error
+        finally:
+            started = [(index, thread) for index, thread in enumerate(threads) if thread.ident is not None]
+            if started and (body_error is not None or worker_errors):
+                try:
+                    barrier.abort()
+                except BaseException as error:
+                    cleanup_errors.append(("main abort", error))
+            for index, thread in started:
+                try:
+                    thread.join(5)
+                except BaseException as error:
+                    cleanup_errors.append((f"worker {index} join", error))
+            survivors = []
+            for index, thread in started:
+                try:
+                    if thread.is_alive():
+                        survivors.append(index)
+                except BaseException as error:
+                    cleanup_errors.append((f"worker {index} liveness", error))
+
+        if body_error is not None and not worker_errors and not cleanup_errors and not survivors:
+            raise body_error
+        causes = []
+        if body_error is not None:
+            causes.append(f"body: {type(body_error).__name__}: {body_error}")
+        causes.extend(f"worker {index}: {type(error).__name__}: {error}" for index, error in worker_errors)
+        causes.extend(f"{operation}: {type(error).__name__}: {error}" for operation, error in cleanup_errors)
+        if survivors:
+            causes.append(f"liveness: workers still alive: {survivors}")
+        if causes:
+            self.fail("; ".join(causes))
         return results
 
     def test_concurrent_batch_and_individual_reserve_once(self):

@@ -843,31 +843,170 @@ class TransportBoundaryTests(ChannelATransportTestCase):
 
 
 class ConcurrencyTests(ChannelATransportTestCase):
+    def setUp(self):
+        super().setUp()
+        # Class-local HTTP containment. This class drives the transport through fake
+        # sessions only, so a real outbound dispatch inside it is always a defect. Two
+        # nested layers cover ``requests.Session.request``, the single funnel behind
+        # every verb: an inert floor is installed first on the live binding, and a
+        # numeric record-and-refuse guard is installed on top of it. Neither layer ever
+        # reaches the original implementation nor reads the URL, the arguments, the
+        # environment or the token, and a refusal carries only a fixed reason and its
+        # attempt count. The containment lives exactly as long as this case: each
+        # layer's attempt check runs while that layer is still installed, its restore
+        # runs next and the restored binding is proven last, so restoration stays
+        # unconditional and nests under whatever binding was already there.
+        session_class = transport_module.requests.Session
+        previous_request = session_class.request
+
+        self.addCleanup(
+            lambda: self.assertIs(
+                session_class.request,
+                previous_request,
+                "the class-local HTTP containment was not restored",
+            )
+        )
+
+        floor_attempts = []
+
+        def inert_request_floor(self, method, url, *args, **kwargs):
+            floor_attempts.append(1)
+            raise RuntimeError(f"PRISMA_CONCURRENCY_REQUEST_FLOOR_REACHED {len(floor_attempts)}")
+
+        session_class.request = inert_request_floor
+        self.addCleanup(lambda: setattr(session_class, "request", previous_request))
+        self.addCleanup(
+            lambda: self.assertEqual(floor_attempts, [], "the inert request floor must never be reached")
+        )
+        self.addCleanup(
+            lambda: self.assertIs(
+                session_class.request,
+                inert_request_floor,
+                "the inert request floor must still be installed while its attempts are checked",
+            )
+        )
+
+        guard_attempts = []
+
+        def refused_request(self, method, url, *args, **kwargs):
+            guard_attempts.append(1)
+            raise RuntimeError(f"PRISMA_CONCURRENCY_REQUEST_GUARD_REFUSED {len(guard_attempts)}")
+
+        self.assertIs(
+            session_class.request,
+            inert_request_floor,
+            "the inert request floor must sit directly under the refusal guard",
+        )
+        session_class.request = refused_request
+        self.addCleanup(lambda: setattr(session_class, "request", inert_request_floor))
+        self.addCleanup(
+            lambda: self.assertEqual(guard_attempts, [], "an unexpected real HTTP dispatch was attempted")
+        )
+        self.addCleanup(
+            lambda: self.assertIs(
+                session_class.request,
+                refused_request,
+                "the request guard must still be installed while its attempts are checked",
+            )
+        )
+
     def test_concurrent_send_and_poll_hold_owned_sessions_without_a_shared_lock(self):
         send_entered = threading.Event()
         release_send = threading.Event()
         send_response = FakeResponse(200, {"ok": True, "result": {"message_id": 1}})
         poll_response = FakeResponse(200, ok_body([{"update_id": 7}]))
-        send_session = FakeSession(send_response, before_post=lambda: (send_entered.set(), release_send.wait(5)))
+        release_observed = []
+
+        def enter_post():
+            send_entered.set()
+            release_observed.append(release_send.wait(5))
+
+        send_session = FakeSession(send_response, before_post=enter_post)
         poll_session = FakeSession(poll_response)
         factory = SessionFactory(send_session, poll_session)
         transport = ChannelATransport(TOKEN, request_timeout=TIMEOUT, session_factory=factory)
         results = {}
+        worker_errors = []
 
         def send():
-            results["send"] = transport.send_message(chat_id=CHAT_ID, text="hola")
+            try:
+                results["send"] = transport.send_message(chat_id=CHAT_ID, text="hola")
+            except BaseException as error:  # noqa: BLE001 - the owning test reports it, not a thread hook
+                worker_errors.append(error)
 
         worker = threading.Thread(target=send)
-        worker.start()
-        self.assertTrue(send_entered.wait(5), "the fake send must have entered post")
+        body_error = None
+        cleanup_errors = []
+        liveness_observed = []
 
-        results["updates"] = transport.get_updates(poll_timeout=1, read_timeout=2)
+        try:
+            # The worker is owned before it is started, and its identity -- never its
+            # truthiness -- decides later whether it may be joined at all.
+            worker.start()
+            self.assertTrue(send_entered.wait(5), "the fake send must have entered post")
+            results["updates"] = transport.get_updates(poll_timeout=1, read_timeout=2)
+            self.assertTrue(worker.is_alive(), "the send must still be in flight while the poll completes")
+        except BaseException as error:  # noqa: BLE001 - re-raised unchanged once the cleanup below has run
+            body_error = error
+        finally:
+            # One unwind, run exactly once on every exit path. Each step keeps its own
+            # guard, so a step that fails never skips the ones after it, and the whole
+            # cleanup finishes before any outcome is reported: the release first, then
+            # the bounded join, then the post-join liveness observation.
+            try:
+                release_send.set()
+            except BaseException as error:  # noqa: BLE001 - recorded, never allowed to skip the join
+                cleanup_errors.append(("the release signal", error))
+            if worker.ident is not None:
+                try:
+                    worker.join(5)
+                except BaseException as error:  # noqa: BLE001 - the liveness check below still runs
+                    cleanup_errors.append(("the worker join", error))
+                try:
+                    liveness_observed.append(worker.is_alive())
+                except BaseException as error:  # noqa: BLE001 - collected, never raised from the unwind
+                    cleanup_errors.append(("the post-join liveness check", error))
 
-        self.assertTrue(worker.is_alive(), "the send must still be in flight while the poll completes")
-        release_send.set()
-        worker.join(5)
+        # Every outcome the unwind produced is evaluated here as data before anything is
+        # reported, so no known problem can be lost to an earlier failure. The two cleanup
+        # obligations belong only to a worker that really started: an unstarted worker owes
+        # neither a liveness observation nor a completed release wait, so no violation is
+        # invented for it. Each obligation is judged independently of the other one and of
+        # any body, worker or cleanup failure.
+        worker_started = worker.ident is not None
+        violations = []
+        if worker_started and not liveness_observed:
+            violations.append(
+                ("liveness", "the joined send worker was never checked for liveness after its join")
+            )
+        if worker_started and any(liveness_observed):
+            violations.append(
+                ("liveness", f"the joined send worker was still alive after its join: alive={liveness_observed}")
+            )
+        if worker_started and not release_observed:
+            violations.append(("release wait", "the send worker recorded no bounded release wait"))
+        if worker_started and release_observed and not release_observed[0]:
+            violations.append(
+                ("release wait", f"the send worker's release wait did not complete: {release_observed}")
+            )
 
-        self.assertFalse(worker.is_alive())
+        # Every cause keeps its own neutral attribution: none of them is described as the
+        # origin of another. The body failure is re-raised unchanged only while it is the
+        # sole problem, keeping its own type, message and traceback; as soon as any
+        # independent cause exists, one assertion failure carries all of them, the body
+        # message included.
+        body_causes = [f"the case body reported {body_error!r}"] if body_error is not None else []
+        other_causes = [f"the send worker reported {error!r}" for error in worker_errors]
+        other_causes += [f"{label} reported {error!r}" for label, error in cleanup_errors]
+        other_causes += [
+            f"the cleanup contract was not met ({category}): {detail}" for category, detail in violations
+        ]
+        if body_error is not None and not other_causes:
+            raise body_error
+        if body_causes or other_causes:
+            self.fail(
+                f"the send and poll case did not complete cleanly: {'; '.join(body_causes + other_causes)}"
+            )
         self.assertIs(results["send"], send_response._body)
         self.assertEqual(results["updates"], ({"update_id": 7},))
         self.assertIsNot(send_session, poll_session)
@@ -885,30 +1024,125 @@ class ConcurrencyTests(ChannelATransportTestCase):
 
     def test_concurrent_sends_are_not_serialized_by_a_transport_lock(self):
         barrier = threading.Barrier(2)
+        results = []
+        worker_errors = []
+        rendezvous = []
 
-        def wait_for_peer():
-            barrier.wait(5)
+        def wait_for_peer(index):
+            """The rendezvous one session must complete before it posts."""
+
+            def enter_post():
+                # The party position is kept next to the worker that met it, so an
+                # incomplete rendezvous can never be read as a complete one.
+                rendezvous.append((index, barrier.wait(5)))
+
+            return enter_post
 
         sessions = [
-            FakeSession(FakeResponse(200, {"ok": True, "result": {"message_id": index}}), before_post=wait_for_peer)
+            FakeSession(
+                FakeResponse(200, {"ok": True, "result": {"message_id": index}}),
+                before_post=wait_for_peer(index),
+            )
             for index in (1, 2)
         ]
         factory = SessionFactory(*sessions)
         transport = ChannelATransport(TOKEN, request_timeout=TIMEOUT, session_factory=factory)
-        results = []
 
         def send(index):
             try:
                 results.append(transport.send_message(chat_id=CHAT_ID, text=f"hola {index}"))
-            except ChannelATransportError as error:
-                results.append(error)
+            except BaseException as error:  # noqa: BLE001 - the owning test reports it, not a thread hook
+                worker_errors.append(error)
 
         workers = [threading.Thread(target=send, args=(index,)) for index in (1, 2)]
-        for worker in workers:
-            worker.start()
-        for worker in workers:
-            worker.join(10)
+        launch_errors = []
+        cleanup_errors = []
+        liveness_observed = []
 
+        try:
+            # The launch stops at the first failure: only the workers that really
+            # started are ever joined below, and the unstarted ones are left alone.
+            for worker in workers:
+                try:
+                    worker.start()
+                except BaseException as error:  # noqa: BLE001 - recorded now, reported after the cleanup
+                    launch_errors.append(error)
+                    break
+        finally:
+            # One unwind, run exactly once on every exit path and before anything is
+            # reported. A rendezvous that can no longer complete is broken before any
+            # join, so no worker is joined while it is still blocked there; every worker
+            # that really started is then joined with a bounded wait; and every post-join
+            # liveness observation is taken before the first assertion can abort the rest.
+            if launch_errors:
+                try:
+                    barrier.abort()
+                except BaseException as error:  # noqa: BLE001 - a failed unblock must not skip the joins
+                    cleanup_errors.append(("the barrier abort", error))
+            for worker in workers:
+                if worker.ident is None:
+                    continue
+                try:
+                    worker.join(10)
+                except BaseException as error:  # noqa: BLE001 - every remaining join is still attempted
+                    cleanup_errors.append(("the worker join", error))
+            for worker in workers:
+                if worker.ident is None:
+                    continue
+                try:
+                    liveness_observed.append(worker.is_alive())
+                except BaseException as error:  # noqa: BLE001 - collected, never raised from the unwind
+                    cleanup_errors.append(("the post-join liveness check", error))
+            if not launch_errors:
+                # A final barrier release after all join attempts. Successful launches
+                # do not prove quiescence: the collected liveness observations and errors
+                # are validated below.
+                try:
+                    barrier.abort()
+                except BaseException as error:  # noqa: BLE001 - recorded, never raised from the unwind
+                    cleanup_errors.append(("the final barrier release", error))
+
+        # Every outcome the unwind produced is evaluated here as data before anything is
+        # reported. Liveness is owed only by the workers that actually started, and each of
+        # them owes one post-join observation: a partial launch is never asked for the
+        # observations of a worker it never started, and no cause is dropped because another
+        # one exists or described as the origin of another.
+        started_workers = [worker for worker in workers if worker.ident is not None]
+        violations = []
+        missing_liveness = len(started_workers) - len(liveness_observed)
+        if missing_liveness > 0:
+            violations.append(
+                (
+                    "liveness",
+                    f"{missing_liveness} started worker(s) were never checked for liveness after their join",
+                )
+            )
+        if any(liveness_observed):
+            violations.append(
+                ("liveness", f"a joined worker was still alive after its join: alive={liveness_observed}")
+            )
+
+        causes = [f"the send worker reported {error!r}" for error in worker_errors]
+        causes += [f"the launch reported {error!r}" for error in launch_errors]
+        causes += [f"{label} reported {error!r}" for label, error in cleanup_errors]
+        causes += [
+            f"the cleanup contract was not met ({category}): {detail}" for category, detail in violations
+        ]
+        if causes:
+            self.fail(f"the concurrent sends case did not complete cleanly: {'; '.join(causes)}")
+        # Non-vacuous rendezvous evidence: both owned workers must have reached the
+        # barrier and each must have been handed its own distinct party position, so a
+        # serialized pair can never pass as a concurrent one.
+        self.assertEqual(
+            sorted(index for index, _ in rendezvous),
+            [1, 2],
+            "both owned workers must reach the rendezvous before they post",
+        )
+        self.assertEqual(
+            sorted(party for _, party in rendezvous),
+            [0, 1],
+            "the rendezvous must give each worker its own party position",
+        )
         self.assertEqual([type(result).__name__ for result in results], ["dict", "dict"])
         self.assertEqual(sorted(result["result"]["message_id"] for result in results), [1, 2])
         self.assertEqual([session.close_calls for session in sessions], [1, 1])

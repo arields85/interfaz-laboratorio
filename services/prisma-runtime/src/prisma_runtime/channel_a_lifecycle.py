@@ -38,7 +38,11 @@ Identity and freshness
 The trusted factory must build a NEW :class:`ChannelAPairingDialogue` over a NEW
 EMPTY :class:`ChannelAPairingRegistry` and a fresh adapter epoch each time. An
 activation never inherits a prior activation's links; the runner validates the
-identity match but never reuses a retained dialogue.
+identity match but never reuses a retained dialogue. The factory is invoked once
+with exactly one positional argument: the immutable validated
+:class:`ChannelABotIdentity` projection built from the observed identity before
+the lease is acquired, never the raw provider object and never a token, lease,
+owner or epoch.
 
 Idle retirement limitation
 --------------------------
@@ -714,7 +718,13 @@ class ChannelARunner:
             identity = self.transport.get_me()
         except Exception:
             raise _unavailable() from None
-        bot_id = self._validated_identity(identity)
+        # Snapshot the immutable validated projection BEFORE the pre-acquire fence
+        # and the acquire call. Every later use -- the lease identifier, the
+        # dialogue validation and the private ``_bot_id`` -- reads these already
+        # validated locals, so a mutating acquire callback or any re-read of the
+        # observed object can never change what was validated.
+        validated_identity = self._validated_identity(identity)
+        bot_id = validated_identity.id
 
         if self._fenced():
             return False
@@ -739,8 +749,12 @@ class ChannelARunner:
         if self._fenced():
             return False
 
+        # Exactly one positional argument, invoked exactly once: the validated
+        # projection. A factory that cannot accept it fails through the normal
+        # call-exception normalization below, with no signature inspection, no
+        # backward-compatible fallback and no retry.
         try:
-            dialogue = self._dialogue_factory()
+            dialogue = self._dialogue_factory(validated_identity)
         except Exception:
             raise _unavailable() from None
         self._validated_dialogue(dialogue, bot_id)
@@ -758,8 +772,16 @@ class ChannelARunner:
             self._phase = PHASE_PREPARED
         return True
 
-    def _validated_identity(self, identity) -> int:
-        """Validate the observed identity, normalizing hostile accessors."""
+    def _validated_identity(self, identity) -> ChannelABotIdentity:
+        """Validate the observed identity and return an immutable base projection.
+
+        Reads ``id`` and ``username`` exactly once into locals, validates them
+        against the accepted exact types, bounds and ASCII grammar, then builds a
+        NEW exact-base :class:`ChannelABotIdentity` from those validated locals.
+        The provider object -- or any subclass of it -- is never returned, aliased
+        or read again, so later mutation of the observed value cannot change the
+        validated projection.
+        """
         if not isinstance(identity, ChannelABotIdentity):
             raise _unavailable() from None
         # A hostile accessor -- including one raising our own public error class --
@@ -773,7 +795,7 @@ class ChannelARunner:
             raise _unavailable() from None
         if type(username) is not str or _USERNAME_PATTERN.fullmatch(username) is None:
             raise _unavailable() from None
-        return bot_id
+        return ChannelABotIdentity(id=bot_id, username=username)
 
     def _validated_dialogue(self, dialogue, bot_id: int) -> None:
         """Validate the factory's dialogue, normalizing hostile accessors."""

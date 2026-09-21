@@ -742,6 +742,115 @@ class _FakeReservation:
         return True
 
 
+class _RecordingDialogueFactory:
+    """Arity-tolerant recording factory for the staged identity-to-factory handoff.
+
+    Every legacy factory site in this module was migrated to this double so the
+    already accepted behavioral cases keep measuring the same production
+    outcomes while the handoff of a validated ``ChannelABotIdentity`` projection
+    is staged test-first against the accepted standalone Channel A baseline. It
+    accepts the legacy zero-argument invocation *and* the single positional
+    projection the fixed contract requires, and it records the exact arguments of
+    every call instead of hiding them behind a bare ``lambda``.
+
+    This tolerance is staging only and is NOT production backward compatibility.
+    The dedicated handoff cases below pin exactly one positional argument and
+    prove the legacy zero-argument form is refused; the production signature must
+    never be inspected or retried. The call is deliberately arity-tolerant
+    precisely so a strict fixture signature cannot raise ``TypeError`` inside
+    production's own ``except Exception`` and masquerade as a canonical refusal.
+    For the same reason a captured argument is never read by indexing:
+    ``assert_single_projection`` and ``projection_at`` state the expected arity
+    explicitly first, so a missing projection fails as a contract assertion
+    instead of an ``IndexError``.
+    """
+
+    def __init__(self, build, *, label=None) -> None:
+        self._build = build
+        self.label = label
+        # One entry per invocation: the exact positional arguments, plus the
+        # keyword arguments a positional-only handoff must never use.
+        self.calls: list = []
+        self.keyword_calls: list = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append(args)
+        self.keyword_calls.append(kwargs)
+        return self._build()
+
+    def invocation_count(self) -> int:
+        """Number of recorded factory invocations."""
+        return len(self.calls)
+
+    def assert_call_arity(self, index: int) -> None:
+        """Assert one recorded call carries exactly one positional argument.
+
+        The check runs on the test thread and before any captured value is read,
+        so a call that is missing, repeated or keyword-carried is reported as a
+        contract violation rather than as an ``IndexError``.
+        """
+        if index >= len(self.calls):
+            raise AssertionError(
+                "the identity handoff must invoke the factory at least "
+                f"{index + 1} time(s), recorded {len(self.calls)} invocation(s)"
+            )
+        args = self.calls[index]
+        if len(args) != 1:
+            raise AssertionError(
+                "the identity handoff must pass exactly one positional argument, "
+                f"recorded {len(args)} on invocation {index}"
+            )
+        if self.keyword_calls[index]:
+            raise AssertionError(
+                "the identity handoff must be positional only, recorded keywords "
+                f"{sorted(self.keyword_calls[index])} on invocation {index}"
+            )
+
+    def assert_single_projection(self) -> None:
+        """Assert exactly one call carrying exactly one positional argument.
+
+        Arity is stated before any captured value is read, so a missing
+        projection is reported as a contract violation rather than surfacing as
+        an ``IndexError`` or as a fixture ``TypeError``.
+        """
+        if len(self.calls) != 1:
+            raise AssertionError(
+                "the identity handoff must invoke the factory exactly once, "
+                f"recorded {len(self.calls)} invocation(s)"
+            )
+        self.assert_call_arity(0)
+
+    def projection_at(self, index: int):
+        """Return one recorded argument once that call's arity was asserted."""
+        self.assert_call_arity(index)
+        return self.calls[index][0]
+
+    def projection(self):
+        """Return the single recorded argument once its arity was asserted."""
+        self.assert_single_projection()
+        return self.calls[0][0]
+
+    def observed_identity_at(self, index: int) -> ChannelABotIdentity:
+        """Return one recorded projection, requiring the exact frozen type."""
+        identity = self.projection_at(index)
+        if type(identity) is not ChannelABotIdentity:
+            raise AssertionError(
+                "the factory must receive exactly a ChannelABotIdentity, "
+                f"received {type(identity).__name__} on invocation {index}"
+            )
+        return identity
+
+    def observed_identity(self) -> ChannelABotIdentity:
+        """Return the single recorded projection, requiring the exact frozen type."""
+        self.assert_single_projection()
+        return self.observed_identity_at(0)
+
+    def observed_pair(self):
+        """Return the recorded projection's ``(id, username)`` pair."""
+        identity = self.observed_identity()
+        return identity.id, identity.username
+
+
 class _FakeTransport:
     """Inert Channel A transport double; it never constructs a session."""
 
@@ -1012,14 +1121,19 @@ class ChannelARunnerCase(ChannelALifecycleTestCase):
         transport = _FakeTransport() if transport is _UNSET else transport
         clock = _FakeClock() if clock is _UNSET else clock
         reservation = _FakeReservation() if reservation is _UNSET else reservation
-        calls = []
+        calls: list = []
         if factory is _UNSET:
-
-            def factory():
-                calls.append(1)
-                if dialogue is not None:
-                    return dialogue
-                return _make_dialogue(transport, clock, registry=registry, handler=handler)
+            factory = _RecordingDialogueFactory(
+                lambda: (
+                    dialogue
+                    if dialogue is not None
+                    else _make_dialogue(transport, clock, registry=registry, handler=handler)
+                ),
+                label="make_rig-default",
+            )
+            # The recorded invocations replace the bare call counter; the existing
+            # assertions only compare this to ``[]`` or check its length.
+            calls = factory.calls
 
         options = dict(
             transport=transport,
@@ -1450,7 +1564,9 @@ class ChannelARunnerPreparationTest(ChannelARunnerCase):
             transport=transport,
             clock=clock,
             reservation=reservation,
-            factory=lambda: (trace.append("factory"), dialogue)[1],
+            factory=_RecordingDialogueFactory(
+                lambda: (trace.append("factory"), dialogue)[1], label="prepare-order"
+            ),
         )
 
         self.assertTrue(runner.prepare())
@@ -1538,7 +1654,9 @@ class ChannelARunnerPreparationTest(ChannelARunnerCase):
             transport=transport,
             clock=clock,
             reservation=reservation,
-            factory=lambda: (trace.append("factory"), dialogue)[1],
+            factory=_RecordingDialogueFactory(
+                lambda: (trace.append("factory"), dialogue)[1], label="stop-from-clock"
+            ),
         )
         clock.arm(after_samples=1, hook=lambda: stops.append(runner.stop()))
 
@@ -1572,7 +1690,9 @@ class ChannelARunnerPreparationTest(ChannelARunnerCase):
             transport=transport,
             clock=clock,
             reservation=reservation,
-            factory=lambda: (trace.append("factory"), dialogue)[1],
+            factory=_RecordingDialogueFactory(
+                lambda: (trace.append("factory"), dialogue)[1], label="stop-from-reservation"
+            ),
         )
         runner_ref.append(runner)
 
@@ -1701,7 +1821,11 @@ class ChannelARunnerPreparationTest(ChannelARunnerCase):
         self.assertNotIn(CANARY, repr(runner.status()))
 
     def test_prepare_rejects_a_dialogue_that_is_not_the_validated_type(self) -> None:
-        runner = self.make_rig(factory=lambda: {"bot_id": DEFAULT_BOT_ID})
+        runner = self.make_rig(
+            factory=_RecordingDialogueFactory(
+                lambda: {"bot_id": DEFAULT_BOT_ID}, label="non-dialogue"
+            )
+        )
         with self.assertRaises(ChannelALifecycleError) as caught:
             runner.prepare()
         self.assertEqual(caught.exception.args, (PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,))
@@ -1737,7 +1861,10 @@ class ChannelARunnerPreparationTest(ChannelARunnerCase):
         def exploding_factory():
             raise RuntimeError(CANARY)
 
-        runner = self.make_rig(reservation=reservation, factory=exploding_factory)
+        runner = self.make_rig(
+            reservation=reservation,
+            factory=_RecordingDialogueFactory(exploding_factory, label="exploding-factory"),
+        )
         with self.assertRaises(ChannelALifecycleError) as caught:
             runner.prepare()
         self.assertEqual(caught.exception.args, (PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,))
@@ -2661,7 +2788,7 @@ class ChannelARunnerFreshnessTest(ChannelARunnerCase):
             created.append((dialogue, registry))
             return dialogue
 
-        return factory, created
+        return _RecordingDialogueFactory(factory, label="fresh-activation"), created
 
     def test_each_activation_gets_a_new_dialogue_and_an_empty_registry(self) -> None:
         clock = _FakeClock()
@@ -2689,6 +2816,26 @@ class ChannelARunnerFreshnessTest(ChannelARunnerCase):
         self.assertIsNone(registry_b.phone_link(phone))
         self.assertIsNone(registry_b.owner_link(owner))
         self.assertTrue(second.stop())
+
+        # Both activations must also have received the handoff projection: one
+        # positional argument each with no keywords, the exact frozen base type
+        # carrying the validated values, two distinct instances, and never the raw
+        # provider object the transport returned.
+        self.assertEqual(factory.invocation_count(), 2, "each activation builds one dialogue")
+        first_projection = factory.observed_identity_at(0)
+        second_projection = factory.observed_identity_at(1)
+        for index, projection in ((0, first_projection), (1, second_projection)):
+            self.assertEqual(
+                (projection.id, projection.username),
+                (DEFAULT_BOT_ID, DEFAULT_USERNAME),
+                f"activation {index} must receive the validated identity",
+            )
+            self.assertIsNot(
+                projection,
+                transport.identity,
+                f"activation {index} must never receive the provider object",
+            )
+        self.assertIsNot(first_projection, second_projection)
 
     def test_real_fresh_factories_survive_a_full_prepare_and_poll(self) -> None:
         clock = _FakeClock()
@@ -2718,7 +2865,10 @@ class ChannelARunnerFreshnessTest(ChannelARunnerCase):
             return foreign
 
         runner = self.make_rig(
-            transport=transport, clock=clock, reservation=reservation, factory=biased_factory
+            transport=transport,
+            clock=clock,
+            reservation=reservation,
+            factory=_RecordingDialogueFactory(biased_factory, label="biased-factory"),
         )
         with self.assertRaises(ChannelALifecycleError):
             runner.prepare()
@@ -2881,7 +3031,7 @@ class ChannelARunnerResidualRegressionTest(ChannelARunnerCase):
             transport=transport,
             clock=clock,
             reservation=_FakeReservation(),
-            factory=lambda: dialogue,
+            factory=_RecordingDialogueFactory(lambda: dialogue, label="cross-thread-stop"),
         )
         self.activity.register_canceller(runner.stop)
         self.assertTrue(runner.prepare())
@@ -2925,7 +3075,7 @@ class ChannelARunnerResidualRegressionTest(ChannelARunnerCase):
             transport=transport,
             clock=clock,
             reservation=reservation,
-            factory=lambda: dialogue,
+            factory=_RecordingDialogueFactory(lambda: dialogue, label="refused-settlement"),
         )
         self.activity.watch(runner.resume_refusal)
 
@@ -3101,6 +3251,404 @@ class ChannelARunnerFrozenCoverageProofTest(ChannelARunnerCase):
             len(reservation.releases), 1, "the lease is released only after quiescence"
         )
         self.assertTrue(runner.stop())
+
+
+# -- RCA-5d(i): identity-to-factory handoff (staged test-first) -------------
+#
+# This block pins the fixed identity-to-factory handoff contract against the
+# accepted standalone Channel A baseline (43ca2657118e389a7190d90fe290eb8c376bff1a).
+# The production module and its already accepted cases are not edited by these
+# tests. The contract requires the runner to validate the observed ``getMe``
+# identity once, build a fresh frozen ``ChannelABotIdentity`` from the validated
+# locals *before* the lease is acquired, and hand that single positional
+# projection to the factory exactly once. A zero-argument-only factory is refused
+# with the canonical code and with no fallback, no retry and no signature
+# inspection.
+#
+# The handoff assertions fail on that baseline; preservation cases already hold.
+# Together they guard the new contract once implemented. Captured arguments are
+# read only after arity checks, and no assertion runs inside a production catch.
+
+
+def _dialogue_returning(dialogue):
+    """Return a zero-argument factory body that returns ``dialogue``."""
+
+    def build():
+        return dialogue
+
+    return build
+
+
+class _HandoffRig:
+    """One prepare rig with a recording factory, returned as explicit fields."""
+
+    def __init__(self, runner, transport, clock, reservation, factory) -> None:
+        self.runner = runner
+        self.transport = transport
+        self.clock = clock
+        self.reservation = reservation
+        self.factory = factory
+
+
+class _CountingIdentity(ChannelABotIdentity):
+    """A benign identity subclass that counts every ``id``/``username`` read.
+
+    Both accessors are properties, so they win over the frozen dataclass fields
+    and every production read of the observed identity is observable. Neither
+    accessor raises: the counters only prove how often the validated projection is
+    read, which is the frozen read-once requirement.
+    """
+
+    def __init__(self, *, bot_id, username) -> None:
+        object.__setattr__(self, "reads", {"id": 0, "username": 0})
+        object.__setattr__(self, "_id", bot_id)
+        object.__setattr__(self, "_username", username)
+
+    @property
+    def id(self):
+        self.reads["id"] += 1
+        return self._id
+
+    @property
+    def username(self):
+        self.reads["username"] += 1
+        return self._username
+
+
+class _MutableIdentity(ChannelABotIdentity):
+    """A benign identity double whose backing values can be mutated in place.
+
+    ``mutate`` changes the SAME object the transport returned, so a projection
+    that merely aliased the provider object would observe the mutated values
+    instead of the validated ones.
+    """
+
+    def __init__(self, *, bot_id, username) -> None:
+        object.__setattr__(self, "_id", bot_id)
+        object.__setattr__(self, "_username", username)
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def username(self):
+        return self._username
+
+    def mutate(self, *, bot_id, username) -> None:
+        object.__setattr__(self, "_id", bot_id)
+        object.__setattr__(self, "_username", username)
+
+
+class ChannelARunnerIdentityHandoffTest(ChannelARunnerCase):
+    """Fixed identity-to-factory handoff contract, staged test-first.
+
+    Each case is a regression for this contract. On the accepted baseline the
+    factory is still invoked with zero positional arguments, so the handoff
+    assertions fail there and must keep passing once the source phase lands. The
+    refusal and cleanup cases guard behaviour the handoff must not weaken, so no
+    RED is invented and no GREEN is claimed for a handoff fact.
+    """
+
+    def handoff_rig(
+        self,
+        *,
+        transport=_UNSET,
+        clock=_UNSET,
+        reservation=_UNSET,
+        dialogue=_UNSET,
+        bot_id=DEFAULT_BOT_ID,
+        factory_build=None,
+    ) -> _HandoffRig:
+        """Build a prepare rig whose factory records the handoff arguments.
+
+        ``factory_build`` replaces the whole factory body, which is how a raising
+        factory is staged; otherwise the factory returns ``dialogue``, defaulting
+        to a real dialogue over the rig's own transport. The factory is always a
+        ``_RecordingDialogueFactory``, so every case states the expected arity
+        explicitly before reading a captured argument.
+        """
+        transport = _FakeTransport() if transport is _UNSET else transport
+        clock = _FakeClock() if clock is _UNSET else clock
+        reservation = _FakeReservation() if reservation is _UNSET else reservation
+        if factory_build is None:
+            if dialogue is _UNSET:
+                dialogue = _make_dialogue(transport, clock, bot_id=bot_id)
+            factory_build = _dialogue_returning(dialogue)
+        factory = _RecordingDialogueFactory(factory_build, label="identity-handoff")
+        runner = self.make_rig(
+            transport=transport,
+            clock=clock,
+            reservation=reservation,
+            factory=factory,
+        )
+        return _HandoffRig(runner, transport, clock, reservation, factory)
+
+    def test_prepare_hands_the_factory_one_frozen_projection_of_the_validated_identity(self) -> None:
+        clock = _FakeClock()
+        observed = ChannelABotIdentity(id=555001, username="prisma_alt_bot")
+        transport = _FakeTransport(identity=observed)
+        rig = self.handoff_rig(
+            transport=transport,
+            clock=clock,
+            dialogue=_make_dialogue(transport, clock, bot_id=555001),
+        )
+
+        self.assertTrue(rig.runner.prepare())
+
+        rig.factory.assert_single_projection()
+        projection = rig.factory.observed_identity()
+        self.assertEqual(rig.factory.observed_pair(), (555001, "prisma_alt_bot"))
+        self.assertEqual(rig.transport.get_me_calls, 1, "the identity is observed exactly once")
+        self.assertEqual(len(rig.reservation.acquires), 1)
+        self.assertEqual(rig.reservation.acquires[0][0], 555001)
+        self.assertIsNot(projection, observed, "the provider object must never reach the factory")
+        self.assertEqual(rig.runner.status().phase, PHASE_PREPARED)
+
+    def test_prepare_reads_the_observed_identity_once_and_hands_a_base_projection(self) -> None:
+        clock = _FakeClock()
+        observed = _CountingIdentity(bot_id=123456, username="counting_bot")
+        transport = _FakeTransport(identity=observed)
+        rig = self.handoff_rig(
+            transport=transport,
+            clock=clock,
+            dialogue=_make_dialogue(transport, clock, bot_id=123456),
+        )
+
+        self.assertTrue(rig.runner.prepare())
+
+        self.assertEqual(observed.reads, {"id": 1, "username": 1}, "each field is read once")
+        self.assertEqual(rig.transport.get_me_calls, 1, "no extra identity lookup")
+        projection = rig.factory.observed_identity()
+        self.assertIs(type(projection), ChannelABotIdentity)
+        self.assertNotIsInstance(projection, _CountingIdentity)
+        self.assertEqual(rig.factory.observed_pair(), (123456, "counting_bot"))
+
+    def test_the_projection_is_stable_when_the_acquire_callback_mutates_the_observed_identity(
+        self,
+    ) -> None:
+        clock = _FakeClock()
+        observed = _MutableIdentity(bot_id=777001, username="before_mutation")
+        transport = _FakeTransport(identity=observed)
+        reservation = _FakeReservation()
+
+        def mutate_in_place(bot_id, owner, epoch):
+            # The SAME provider object is mutated in place, not replaced on the
+            # transport, so a projection aliasing it would now carry the new values.
+            observed.mutate(bot_id=9, username="after_mutation")
+
+        reservation.on_acquire = mutate_in_place
+        rig = self.handoff_rig(
+            transport=transport,
+            clock=clock,
+            reservation=reservation,
+            dialogue=_make_dialogue(transport, clock, bot_id=777001),
+        )
+
+        self.assertTrue(rig.runner.prepare())
+
+        self.assertEqual(rig.reservation.acquires[0][0], 777001, "the lease keeps the validated id")
+        self.assertEqual(rig.factory.observed_pair(), (777001, "before_mutation"))
+        self.assertEqual(rig.runner.status().phase, PHASE_PREPARED)
+
+    def test_the_handed_projection_is_frozen_and_carries_no_authority_metadata(self) -> None:
+        rig = self.handoff_rig()
+
+        self.assertTrue(rig.runner.prepare())
+
+        projection = rig.factory.observed_identity()
+        self.assertEqual(
+            [field.name for field in dataclasses.fields(type(projection))], ["id", "username"]
+        )
+        for absent in ("lease", "owner", "epoch", "token", "secret", "endpoint"):
+            self.assertFalse(hasattr(projection, absent), absent)
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            projection.id = DEFAULT_BOT_ID + 1
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            projection.username = "mutated_username"
+        self.assertEqual(rig.factory.observed_pair(), (DEFAULT_BOT_ID, DEFAULT_USERNAME))
+
+    def test_the_handoff_runs_only_after_the_lease_is_acquired_and_held(self) -> None:
+        clock = _FakeClock()
+        transport = _FakeTransport()
+        reservation = _FakeReservation()
+        lease_at_handoff: list = []
+
+        def build_at_handoff():
+            # A read-only snapshot taken on the test thread at handoff time: the
+            # lease must already be acquired and must not have been released yet.
+            lease_at_handoff.append((len(reservation.acquires), len(reservation.releases)))
+            return _make_dialogue(transport, clock)
+
+        rig = self.handoff_rig(
+            transport=transport,
+            clock=clock,
+            reservation=reservation,
+            factory_build=build_at_handoff,
+        )
+
+        self.assertTrue(rig.runner.prepare())
+
+        self.assertEqual(
+            lease_at_handoff, [(1, 0)], "the factory runs once, with the lease acquired and held"
+        )
+        rig.factory.assert_single_projection()
+        self.assertEqual(rig.factory.observed_pair(), (DEFAULT_BOT_ID, DEFAULT_USERNAME))
+
+    def test_a_zero_argument_only_factory_is_refused_without_fallback_or_retry(self) -> None:
+        clock = _FakeClock()
+        transport = _FakeTransport()
+        dialogue = _make_dialogue(transport, clock)
+        reservation = _FakeReservation()
+        attempts: list = []
+
+        def zero_argument_factory():
+            # A legacy callable accepting nothing. Arity refusal happens before the
+            # body runs, so any recorded attempt would prove a fallback or a retry.
+            attempts.append(1)
+            return dialogue
+
+        runner = self.make_rig(
+            transport=transport,
+            clock=clock,
+            reservation=reservation,
+            factory=zero_argument_factory,
+        )
+
+        with self.assertRaises(ChannelALifecycleError) as caught:
+            runner.prepare()
+
+        self.assertEqual(caught.exception.args, (PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,))
+        self.assertEqual(attempts, [], "the refused zero-argument factory must never run")
+        self.assertEqual(len(reservation.acquires), 1)
+        self.assertEqual(len(reservation.releases), 1, "the refused call still releases the lease")
+        self.assertIs(reservation.releases[0].owner, reservation.acquires[0][1])
+        status = runner.status()
+        self.assertEqual(status.phase, PHASE_FAILED)
+        self.assertEqual(status.reason, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
+        self.assertTrue(status.quiescent)
+        self.assertFalse(runner.prepare(), "a settled failure is never retried")
+        self.assertEqual(len(reservation.releases), 1, "a settled failure never releases twice")
+
+    def test_a_conflict_never_reaches_the_factory(self) -> None:
+        reservation = _FakeReservation()
+        reservation.acquire_error = BotIdentityReservationError()
+        rig = self.handoff_rig(reservation=reservation)
+
+        with self.assertRaises(ChannelALifecycleError) as caught:
+            rig.runner.prepare()
+
+        self.assertEqual(caught.exception.args, (TELEGRAM_BOT_IDENTITY_RESERVED,))
+        self.assertEqual(rig.factory.invocation_count(), 0)
+        self.assertEqual(rig.reservation.acquires, [])
+        self.assertEqual(rig.runner.status().reason, TELEGRAM_BOT_IDENTITY_RESERVED)
+
+    def test_a_stop_reentering_from_the_acquire_callback_never_reaches_the_factory(self) -> None:
+        reservation = _FakeReservation()
+        rig = self.handoff_rig(reservation=reservation)
+        stops: list = []
+        reservation.on_acquire = lambda *args, **kwargs: stops.append(rig.runner.stop())
+
+        self.assertFalse(rig.runner.prepare())
+
+        self.assertEqual(stops, [False])
+        self.assertEqual(rig.factory.invocation_count(), 0)
+        self.assertEqual(len(reservation.acquires), 1)
+        self.assertEqual(len(reservation.releases), 1, "the already acquired lease is released")
+        self.assertEqual(rig.runner.status().phase, PHASE_STOPPED)
+
+    def test_a_hostile_identity_accessor_never_reaches_the_factory(self) -> None:
+        hostile = _FakeTransport(identity=_HostileIdentity.build(ChannelALifecycleError(CANARY)))
+        rig = self.handoff_rig(transport=hostile)
+
+        with self.assertRaises(ChannelALifecycleError) as caught:
+            rig.runner.prepare()
+
+        self.assertEqual(caught.exception.args, (PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,))
+        self.assertNotIn(CANARY, repr(caught.exception))
+        self.assertEqual(rig.factory.invocation_count(), 0)
+        self.assertEqual(rig.reservation.acquires, [])
+
+    def test_the_handoff_still_carries_one_projection_when_the_dialogue_is_rejected(self) -> None:
+        clock = _FakeClock()
+        transport = _FakeTransport(identity=ChannelABotIdentity(id=606, username="handoff_bot"))
+        reservation = _FakeReservation()
+        rig = self.handoff_rig(
+            transport=transport,
+            clock=clock,
+            reservation=reservation,
+            dialogue={"bot_id": 606},
+        )
+
+        with self.assertRaises(ChannelALifecycleError) as caught:
+            rig.runner.prepare()
+
+        self.assertEqual(caught.exception.args, (PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,))
+        rig.factory.assert_single_projection()
+        self.assertEqual(rig.factory.observed_pair(), (606, "handoff_bot"))
+        self.assertEqual(len(reservation.acquires), 1)
+        self.assertEqual(len(reservation.releases), 1)
+
+    def test_a_rejected_dialogue_still_fails_closed_with_a_confirmed_release(self) -> None:
+        clock = _FakeClock()
+        for label, build_dialogue in (
+            (
+                "mismatched_bot_id",
+                lambda transport: _make_dialogue(transport, clock, bot_id=DEFAULT_BOT_ID + 1),
+            ),
+            ("foreign_transport", lambda transport: _make_dialogue(_FakeTransport(), clock)),
+        ):
+            with self.subTest(case=label):
+                transport = _FakeTransport()
+                reservation = _FakeReservation()
+                rig = self.handoff_rig(
+                    transport=transport,
+                    clock=clock,
+                    reservation=reservation,
+                    dialogue=build_dialogue(transport),
+                )
+
+                with self.assertRaises(ChannelALifecycleError) as caught:
+                    rig.runner.prepare()
+
+                self.assertEqual(caught.exception.args, (PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,))
+                self.assertEqual(rig.factory.invocation_count(), 1, "the factory ran exactly once")
+                self.assertEqual(len(reservation.acquires), 1)
+                self.assertEqual(len(reservation.releases), 1)
+
+    def test_a_raising_factory_is_still_sanitized_and_releases_after_the_handoff(self) -> None:
+        def explode(*args):
+            # Arity-tolerant on purpose: the sanitized failure must always be the
+            # body's own exception, never a binding ``TypeError`` from the double.
+            raise RuntimeError(CANARY)
+
+        rig = self.handoff_rig(factory_build=explode)
+
+        with self.assertRaises(ChannelALifecycleError) as caught:
+            rig.runner.prepare()
+
+        self.assertEqual(caught.exception.args, (PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,))
+        self.assertNotIn(CANARY, repr(caught.exception))
+        rig.factory.assert_single_projection()
+        self.assertEqual(rig.factory.observed_pair(), (DEFAULT_BOT_ID, DEFAULT_USERNAME))
+        self.assertEqual(len(rig.reservation.acquires), 1)
+        self.assertEqual(len(rig.reservation.releases), 1)
+        self.assertIs(rig.reservation.releases[0].owner, rig.reservation.acquires[0][1])
+
+    def test_the_handoff_retains_only_the_validated_identifier_as_private_state(self) -> None:
+        rig = self.handoff_rig()
+
+        self.assertTrue(rig.runner.prepare())
+
+        self.assertEqual(rig.runner._bot_id, DEFAULT_BOT_ID)
+        self.assertFalse(
+            hasattr(rig.runner, "_identity"),
+            "the projection must not be retained as runner state",
+        )
+        self.assertFalse(
+            hasattr(rig.runner, "identity"),
+            "the handoff must not add a public identity getter",
+        )
 
 
 if __name__ == "__main__":
