@@ -707,6 +707,7 @@ class ChannelAPairingDialogue:
         freshness_bound,
         max_question_bytes,
         max_answer_chars,
+        clock=None,
     ) -> ChannelAQueryCoordinator:
         """Attach the correlated query coordinator around this adapter's seams.
 
@@ -728,6 +729,9 @@ class ChannelAPairingDialogue:
         with self._lock:
             if self.query is not None:
                 raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+            options = {}
+            if clock is not None:
+                options["clock"] = clock
             coordinator = ChannelAQueryCoordinator(
                 registry=self.registry,
                 validate=self.binding_admitted,
@@ -740,6 +744,7 @@ class ChannelAPairingDialogue:
                 delivered_label=SEND_DELIVERED,
                 rejected_label=SEND_REJECTED,
                 unknown_label=SEND_UNKNOWN,
+                **options,
             )
             self.query = coordinator
             return coordinator

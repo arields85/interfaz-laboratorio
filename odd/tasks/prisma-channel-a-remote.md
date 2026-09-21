@@ -1,8 +1,36 @@
 # Prisma Channel A remote — ODD tasks
 
-## Session checkpoint — resume functional Channel A integration
+## Session close — exact next-session continuation
 
-**Session closed at the user's explicit request. This is a WIP checkpoint, not completion or acceptance of RCA-5. Auxiliary harness expansion is paused.** This section supersedes every historical writer, correction, or execution grant below.
+The user requested a local commit and session closure after accepting the bounded offline composition. **Do not repeat that completed composition or resume auxiliary clock/cleanup harness work.** Recover `checkpoint/prisma-channel-a-functional-composition-current` in Engram, then read this section and PW-003 in `docs/PENDING_WORK.md`; older pinned checkpoints/full mirrors describe prior sessions.
+
+**First action next session:** a narrow read-only diagnosis of the credential-administration failure the user reported. The separate Telegram (Canal A) field already exists, but all provider inputs are disabled because administration loading fails with “No se pudo completar la operación con el servicio local.” Trace the failed frontend request and backend/proxy contract; obtain only the minimum non-secret browser/status evidence needed. Do not infer a stopped backend, bypass the disabled guard, request tokens in chat, or restart services. Live requests, provider validation and operational changes require their own explicit scope.
+
+**Next implementation boundary:** remaining RCA-5, starting with ordered visible-context invalidation and rejection of late/stale view publications. Map the existing exporter/session/context seams and freeze a minimal functional unit before writes. The just-accepted activation composition is its starting point, not work to recreate. Keep broader identity-handoff acceptance, A policy/admin Apply/status, capability-scoped pairing/deep-link projection, scheduler/exact proxy and application bootstrap explicit as pending; no full-product claim. Complete RCA-5 and pause before RCA-6.
+
+**Saved UI decision:** the future viewer `Pyramid` action goes immediately right of Logs and opens the QR panel **only on click**, never automatically. Existing A/B credential inputs remain separate. No new NLU/STT, offscreen/global fallback, industrial commands, live Telegram/Gemini calls, deployment, push or PR is authorized by this closure. No writer or test execution grant survives session close.
+
+This closure packages the five reviewed implementation/test/tracking paths in one local work-unit commit on `feat/prisma-telegram-credentials`. The resulting commit identity is recorded in Engram after commit creation to avoid leaving a self-referential tracker edit uncommitted.
+
+## Accepted offline composition — evidence and limits
+
+**The first bounded backend composition is implemented and accepted offline for this slice only.** `services/prisma-runtime/src/prisma_runtime/channel_a_activation.py` connects the existing runner, fresh pairing registry/dialogue, correct HMI-owner context and injected parser. `channel_a_bot.py` adds only optional `enable_queries(clock=None)` forwarding. The existing question limit is injected, the answer limit is transport-derived, and receipt freshness is fixed at 15 seconds. Outcomes pass to the caller without retained production history.
+
+`services/prisma-runtime/tests/test_channel_a_activation.py` contains 10 self-contained tests. The flow uses real prepare → challenge → start → observed confirmation callback → question → correct-owner answer; two owners prove isolation. Other cases cover expired/unlinked/oversized refusals, stale context, parser time consuming freshness, fresh epochs and basic lifecycle failure/retirement. No forged link/private action table, old cleanup fixture, managed worker or live Telegram boundary is used.
+
+TDD is ON under `docs/TESTING.md` and the feature contract. Independent `muaqr5s4-7-76zg` observed initial **10 tests / 1 PASS / 9 missing-module errors / 0 failures / 0.004s / exit 1** before source authoring; this was module-absence RED, not behavioral RED. Writer `muaqvs7f-8-zpyu` then observed **10 PASS / 0.005s / exit 0**. Independent `muaqzz1k-9-7di3` found no blocking source/test issue and observed **10 PASS / 0.005s / exit 0**; parent spotcheck observed **10 PASS / 0.004s / exit 0**. Each used the exact focused supervisor once; no unexpected dispatch, cleanup failure, timeout or retry was reported. Native risk assessment returned empty/unavailable output, treated as high risk; this is independent technical acceptance, not native approval.
+
+Reentrant stop, uncertain settlement and omitted-clock compatibility were reviewed statically, not dynamically exercised by these tests. The broader identity-handoff prerequisite remains independently unaccepted. Ordered view invalidation, A policy/admin Apply/status, capability-scoped pairing/deep-link projection, scheduling, exact proxy and bootstrap remain pending. **RCA-5 is not complete**; this composition is not wired into the running application. Finish RCA-5 and pause before RCA-6.
+
+Route: delegated test author, source writer and independent verification; parent owns readback and acceptance. The original 370–580-line estimate was exceeded (the final test file alone exceeds 800 lines); no tests or formatting were removed to fit a budget and no auxiliary proof unit was split out. The user subsequently requested committing this unit and closing the session; see the closure section above and its Engram commit record. No provider calls, installations, service restarts, deployments, push or PR occurred. Completed execution grants are exhausted.
+
+User confirmed the existing separate **Telegram (Canal A)** credential card is visible; no new credential field is needed and B remains unchanged. The screenshot reports a local-service error, whose cause has not been diagnosed.
+
+**New explicit RCA-6 presentation decision:** show the QR **only when the user clicks** the Prisma `Pyramid` icon, immediately right of Logs in the viewer topbar. Reuse enabled topbar action styling and an anchored panel; refresh the expired challenge while the panel is visible and the HMI is unlinked. This supersedes automatic QR *opening*, not single-use/expiry/phone-confirmation/exclusivity policy. No automatic popup. Backend pairing projection, deep-link construction and the actual UI remain pending; finish RCA-5 and pause before RCA-6.
+
+## Historical session checkpoint — prior restart point
+
+The active continuation above supersedes this prior-session restart instruction; historical evidence and restrictions remain preserved below. **That session closed with a WIP checkpoint, not completion or acceptance of RCA-5. Auxiliary harness expansion remains paused.** No historical writer, correction or execution grant is current authority.
 
 ### Next session: the first functional backend slice
 
@@ -43,7 +71,7 @@ Parent owns this tracker, its full Engram mirror, acceptance and commits. Delega
 
 ## Recovery and historical evidence
 
-Full recovery mirror: `odd/prisma-channel-a-remote/tasks` (the complete current document plus repository path). Current progress/commit/task identity: `checkpoint/prisma-channel-a-implementation-progress`. User boundary: `decision/prisma-channel-a-session-boundary`.
+Prior-session full recovery mirror: `odd/prisma-channel-a-remote/tasks`; it predates the active continuation above. Current bounded-composition evidence: `checkpoint/prisma-channel-a-functional-composition-current`. Earlier progress/commit identity: `checkpoint/prisma-channel-a-implementation-progress`. User boundary: `decision/prisma-channel-a-session-boundary`; QR presentation update: `decision/prisma-channel-a-viewer-qr-entry`. This repository document is the current task record; do not treat older memory mirrors as current execution grants.
 
 This consolidation keeps the mirror below its observed approximately 50k readback limit. It is not a diff-budget reduction. RCA-5c correction chronology through writer16/independent17 launch is preserved verbatim in verified Engram topic `evidence/prisma-rca5c-correction-chronology`; final completion/acceptance is below. Earlier lossless accepted contracts, failed rounds and command evidence remain in Git:
 
@@ -96,7 +124,8 @@ Frontend domain types stay in `domain/`; use design tokens, Lucide, `hmi-scrollb
   - [x] **RCA-5a — Standalone transport:** `6301e97`, independent 56 focused/681 backend and parent 56 focused PASS.
   - [x] **RCA-5b — Cooperative identity exclusion:** `7fb7edc`, independent 172 focused/730 backend, 81 focused/1,973 frontend, coverage/build/lint PASS; parent 38 lifecycle PASS.
   - [x] **RCA-5c — Standalone A activation runner:** accepted offline; independent516 focused/825 backend and parent95 PASS. Initial TDD deviation remains recorded. Commit identity/count recorded in progress checkpoint.
-  - [ ] **Remaining RCA-5 units:** query/context glue, ordered view invalidation, capability-scoped pairing projection, A policy/admin status/apply, scheduler, exact proxy and bootstrap. Names/order below are proposals, not frozen implementation contracts.
+  - [x] **Bounded query/context composition:** real offline start/confirm/question through the runner, correct-owner context and existing parser; 10 focused tests passed writer/independent/parent. Uncommitted; scope and static-only limits are recorded above, not full identity-handoff or RCA-5 acceptance.
+  - [ ] **Remaining RCA-5 units:** ordered view invalidation, capability-scoped pairing projection, A policy/admin status/apply, scheduler, exact proxy and bootstrap; broader identity-handoff acceptance remains pending. Names/order below are proposals, not frozen implementation contracts.
 - [ ] **RCA-6 — Automatic HMI QR/link presentation:** maintained local QR encoder, typed client/hook/UI and expiry/error/multi-HMI tests. PAUSE and notify before starting. Original 350–650 estimate must be revalidated.
 - [ ] **RCA-7 — HMI text/audio correlation:** generation/freshness checks and cancellation; decide automatic transcript placement/lifetime before UI. Original 250–500 estimate must be revalidated.
 - [ ] **RCA-8 — Integrated verification/docs:** full gates, independent verification, README/master reconciliation; keep active backlog honest. Original 100–200 estimate must be revalidated.
@@ -209,7 +238,7 @@ Composition is a separate later contract: one identity source (factory argument)
 | Boundary | Work and dependencies |
 |---|---|
 | Identity-to-factory prerequisite | RCA-5d(i) candidate: genuine RED then writer529/838 GREEN; independent0/8 blocked by pre-existing transport-test cleanup. Resolve safety prerequisite before verification/acceptance. |
-| Query/context composition | After the prerequisite, attach `enable_queries` once with owner context, existing parser and accepted bounds; preserve returned envelopes for later publication. Resolve deterministic coordinator-clock injection; never assume negligible elapsed time in tests. |
+| Query/context composition | Bounded offline composition completed as recorded at the top: one query attachment, injected owner context/parser/question bound, transport answer bound, explicit query clock and caller-owned outcome handoff. This does not close the broader identity-handoff prerequisite or authorize HMI publication. |
 | Ordered view invalidation | Add precise client intent/order and server context identity, reject late old publications, compose session removal, revalidate captured identity before phone/HMI effects. Must finish in RCA-5, not be skipped because QR could otherwise render. |
 | A policy and administration | Persist warning lead in a small A-specific policy, not DSP-only voice configuration. Use existing A admin section and backend session/CSRF. Explicit Apply/status, never auto-start on credential save. Preserve B's exact wire shape. |
 | Viewer pairing projection | Capability-scoped DTOs, no second login. Do not expose raw `as_dict()` owner/phone/generation authority fields. QR token is intentionally required for its deep link, unlike HMI capability or bot credentials. No inputless-HMI manual release control; compose internal owner removal and retain phone unlink. Freeze HTTP method/cache/idempotence details separately. |
