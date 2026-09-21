@@ -35,6 +35,51 @@ export interface TelegramAdministrationStatus {
     lastError: TelegramRuntimeError;
 }
 
+export type ChannelALifecyclePhase =
+    | 'idle'
+    | 'preparing'
+    | 'prepared'
+    | 'running'
+    | 'stopping'
+    | 'stopped'
+    | 'failed'
+    | 'retired';
+
+export type ChannelAActivationReason =
+    | 'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE'
+    | 'PRISMA_CHANNEL_A_RESTART_REQUIRED'
+    | 'TELEGRAM_BOT_IDENTITY_RESERVED'
+    | null;
+
+export type ChannelARuntimeError =
+    | 'PRISMA_CHANNEL_A_CONFIGURATION_INVALID'
+    | 'PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE'
+    | 'PRISMA_CHANNEL_A_CREDENTIAL_MISSING'
+    | 'PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE'
+    | 'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE'
+    | 'PRISMA_CHANNEL_A_RESTART_REQUIRED'
+    | 'TELEGRAM_BOT_IDENTITY_RESERVED'
+    | 'INVALID_CREDENTIAL_REQUEST'
+    | 'PRISMA_CHANNEL_A_MANAGER_BUSY'
+    | 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED'
+    | null;
+
+export interface ChannelAActivation {
+    phase: ChannelALifecyclePhase;
+    reason: ChannelAActivationReason;
+    quiescent: boolean;
+    restartRequired: boolean;
+}
+
+export interface ChannelAAdministrationStatus {
+    configured: boolean;
+    desiredGeneration: number;
+    appliedGeneration: number | null;
+    activationEpoch: number | null;
+    activation: ChannelAActivation | null;
+    lastError: ChannelARuntimeError;
+}
+
 export interface CredentialMutationResult {
     provider: CredentialProvider;
     configured: boolean;
@@ -61,6 +106,29 @@ const TELEGRAM_ERRORS = new Set<Exclude<TelegramRuntimeError, null>>([
     'TELEGRAM_POLL_FAILED',
     'TELEGRAM_PREPARATION_FAILED',
     'PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING',
+]);
+
+const CHANNEL_A_PHASES = new Set<ChannelALifecyclePhase>([
+    'idle', 'preparing', 'prepared', 'running', 'stopping', 'stopped', 'failed', 'retired',
+]);
+
+const CHANNEL_A_ACTIVATION_REASONS = new Set<Exclude<ChannelAActivationReason, null>>([
+    'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_RESTART_REQUIRED',
+    'TELEGRAM_BOT_IDENTITY_RESERVED',
+]);
+
+const CHANNEL_A_ERRORS = new Set<Exclude<ChannelARuntimeError, null>>([
+    'PRISMA_CHANNEL_A_CONFIGURATION_INVALID',
+    'PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_CREDENTIAL_MISSING',
+    'PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_RESTART_REQUIRED',
+    'TELEGRAM_BOT_IDENTITY_RESERVED',
+    'INVALID_CREDENTIAL_REQUEST',
+    'PRISMA_CHANNEL_A_MANAGER_BUSY',
+    'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
 ]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -142,6 +210,55 @@ export function parseTelegramAdministrationStatus(value: unknown): TelegramAdmin
         verified: status.verified,
         restartRequired: status.restartRequired,
         lastError: parseTelegramError(status.lastError),
+    };
+}
+
+function parseChannelAError(value: unknown): ChannelARuntimeError {
+    if (value === null) return null;
+    if (typeof value === 'string' && CHANNEL_A_ERRORS.has(value as Exclude<ChannelARuntimeError, null>)) {
+        return value as Exclude<ChannelARuntimeError, null>;
+    }
+    throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+}
+
+function parseChannelAActivation(value: unknown): ChannelAActivation | null {
+    if (value === null) return null;
+    if (!isObject(value) || !hasExactKeys(value, ['phase', 'reason', 'quiescent', 'restartRequired'])
+        || typeof value.quiescent !== 'boolean' || typeof value.restartRequired !== 'boolean'
+        || typeof value.phase !== 'string' || !CHANNEL_A_PHASES.has(value.phase as ChannelALifecyclePhase)
+        || (value.reason !== null && (typeof value.reason !== 'string'
+            || !CHANNEL_A_ACTIVATION_REASONS.has(value.reason as Exclude<ChannelAActivationReason, null>)))) {
+        throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    }
+    return {
+        phase: value.phase as ChannelALifecyclePhase,
+        reason: value.reason as ChannelAActivationReason,
+        quiescent: value.quiescent,
+        restartRequired: value.restartRequired,
+    };
+}
+
+export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdministrationStatus {
+    if (!isObject(value) || !hasExactKeys(value, ['ok', 'channelA']) || value.ok !== true
+        || !isObject(value.channelA) || !hasExactKeys(value.channelA, [
+            'configured', 'desiredGeneration', 'appliedGeneration',
+            'activationEpoch', 'activation', 'lastError',
+        ])) {
+        throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    }
+    const status = value.channelA;
+    if (typeof status.configured !== 'boolean' || !isGeneration(status.desiredGeneration)
+        || (status.appliedGeneration !== null && !isGeneration(status.appliedGeneration))
+        || (status.activationEpoch !== null && !isGeneration(status.activationEpoch))) {
+        throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    }
+    return {
+        configured: status.configured,
+        desiredGeneration: status.desiredGeneration,
+        appliedGeneration: status.appliedGeneration,
+        activationEpoch: status.activationEpoch,
+        activation: parseChannelAActivation(status.activation),
+        lastError: parseChannelAError(status.lastError),
     };
 }
 

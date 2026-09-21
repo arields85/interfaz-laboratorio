@@ -180,24 +180,30 @@ class CredentialHttpTests(unittest.TestCase):
         )
         self.assertNotEqual(lookalike.headers.get("Cache-Control"), "no-store")
 
-    def test_channel_a_writes_use_the_generic_store_and_never_invoke_telegram_manager(self) -> None:
+    def test_channel_a_writes_are_refused_without_a_manager_and_never_touch_the_store(self) -> None:
+        # Approved user decision: a missing Channel A manager refuses save/delete
+        # with a closed 503 instead of falling back to a direct store write.
         saved = self.client.put(
             "/api/prisma/admin/credentials/telegram_channel_a",
             json={"secret": SECRET},
             headers=self.headers,
             environ_overrides=self.environ,
         )
-        self.assertEqual(saved.get_json(), {"ok": True, "provider": "telegram_channel_a", "configured": True})
-        self.credentials.set_secret.assert_called_once_with("telegram_channel_a", SECRET)
+        self.assertEqual(saved.status_code, 503)
+        self.assertEqual(saved.get_json(), {"ok": False, "error": "PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE"})
+        self.assertEqual(saved.headers.get("Cache-Control"), "no-store")
+        self.credentials.set_secret.assert_not_called()
         self.assertNotIn(SECRET, saved.get_data(as_text=True))
-        self.assertEqual(self.telegram_manager.mock_calls, [])
+
         deleted = self.client.delete(
             "/api/prisma/admin/credentials/telegram_channel_a",
             headers=self.headers,
             environ_overrides=self.environ,
         )
-        self.assertEqual(deleted.status_code, 204)
-        self.credentials.delete_secret.assert_called_once_with("telegram_channel_a")
+        self.assertEqual(deleted.status_code, 503)
+        self.assertEqual(deleted.get_json(), {"ok": False, "error": "PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE"})
+        self.assertEqual(deleted.headers.get("Cache-Control"), "no-store")
+        self.credentials.delete_secret.assert_not_called()
         self.assertEqual(self.telegram_manager.mock_calls, [])
 
     def test_telegram_provider_keeps_the_manager_special_case(self) -> None:

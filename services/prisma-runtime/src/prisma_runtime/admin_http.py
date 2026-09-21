@@ -12,6 +12,8 @@ from flask import Response, jsonify, request
 
 from .admin_auth import AuthNotConfigured, AuthUnavailable, LoginRateLimited
 from .bot_identity_reservation import TELEGRAM_BOT_IDENTITY_RESERVED
+from .channel_a_lifecycle import PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE
+from .channel_a_manager import ChannelAManagerError
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
 from .telegram_lifecycle import TelegramLifecycleError
 
@@ -27,6 +29,13 @@ MAX_CREDENTIAL_REQUEST_BYTES = (
 )
 MAX_TELEGRAM_APPLY_REQUEST_BYTES = 128
 TELEGRAM_APPLY_ROUTE = "/api/prisma/admin/credentials/telegram/apply"
+CHANNEL_A_PROVIDER = "telegram_channel_a"
+CHANNEL_A_STATUS_ROUTE = f"{CREDENTIAL_ROUTE_ROOT}/{CHANNEL_A_PROVIDER}/status"
+CHANNEL_A_APPLY_ROUTE = f"{CREDENTIAL_ROUTE_ROOT}/{CHANNEL_A_PROVIDER}/apply"
+# Closed refusal for every Channel A route when no manager was composed into
+# this boundary: no direct-store fallback exists for Channel A (approved user
+# decision), and the report must stay independent of store availability.
+PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE = "PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE"
 # Frozen admin wire contract, mirrored by hmi-app/src/domain/adminCredential.types.ts,
 # which rejects a response carrying any additional key.
 ADMIN_TELEGRAM_STATUS_FIELDS = (
@@ -50,6 +59,56 @@ def project_admin_telegram_status(status: dict) -> dict:
     it. Copying keeps the manager-owned status object untouched.
     """
     return {field: status[field] for field in ADMIN_TELEGRAM_STATUS_FIELDS}
+
+
+# Frozen admin Channel A wire contract: exactly six status keys with a nested
+# activation projection; no raw manager object or credential is ever exposed.
+ADMIN_CHANNEL_A_STATUS_FIELDS = (
+    "configured",
+    "desiredGeneration",
+    "appliedGeneration",
+    "activationEpoch",
+    "activation",
+    "lastError",
+)
+
+
+def project_admin_channel_a_status(status: dict) -> dict:
+    """Copy only the six admin contract fields out of manager-owned status.
+
+    The nested activation object is projected through its four closed fields
+    (or ``None``), never serialized raw; the source status is never mutated.
+    """
+    projection = {field: status[field] for field in ADMIN_CHANNEL_A_STATUS_FIELDS}
+    activation = status["activation"]
+    projection["activation"] = (
+        None
+        if activation is None
+        else {
+            "phase": activation.phase,
+            "reason": activation.reason,
+            "quiescent": activation.quiescent,
+            "restartRequired": activation.restart_required,
+        }
+    )
+    return projection
+
+
+# Closed Channel A manager error mapping frozen by the tracker contract; any
+# unknown, empty or non-string manager error code sanitizes to the fixed
+# lifecycle-unavailable response instead of leaking manager internals.
+CHANNEL_A_MANAGER_ERROR_STATUS = {
+    "INVALID_CREDENTIAL_REQUEST": 400,
+    "PRISMA_CHANNEL_A_MANAGER_BUSY": 409,
+    "PRISMA_CHANNEL_A_CREDENTIAL_MISSING": 409,
+    "PRISMA_CHANNEL_A_RESTART_REQUIRED": 409,
+    "PRISMA_CHANNEL_A_STOP_UNCONFIRMED": 409,
+    TELEGRAM_BOT_IDENTITY_RESERVED: 409,
+    "PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE": 503,
+    "PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE": 503,
+    "PRISMA_CHANNEL_A_CONFIGURATION_INVALID": 503,
+    PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE: 502,
+}
 
 
 @dataclass(frozen=True)
@@ -97,11 +156,53 @@ class TransportPolicy:
 
 
 class AdminHttpBoundary:
-    def __init__(self, auth_service, *, credential_service=None, telegram_manager=None, public_origin: str | None = None):
+    def __init__(self, auth_service, *, credential_service=None, telegram_manager=None, channel_a_manager=None, public_origin: str | None = None):
         self.auth_service = auth_service
         self.credential_service = credential_service
         self.telegram_manager = telegram_manager
+        self.channel_a_manager = channel_a_manager
         self.transport = TransportPolicy.build(public_origin)
+
+    def _channel_a_manager_error(self, error):
+        """Map a closed manager error through the frozen allowlist."""
+        code = error.args[0] if error.args else None
+        status = CHANNEL_A_MANAGER_ERROR_STATUS.get(code) if isinstance(code, str) else None
+        if status is None:
+            return self._error(PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE, 502)
+        return self._error(code, status)
+
+    def _require_channel_a_manager(self):
+        """Refuse every Channel A route without a composed manager, regardless
+        of protected-store availability; there is no direct-store fallback."""
+        if self.channel_a_manager is None:
+            return self._error(PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE, 503)
+        return None
+
+    def _channel_a_credential_write(self, provider: str, secret: str):
+        """Save Channel A through the manager's generation accounting only."""
+        unavailable = self._require_channel_a_manager()
+        if unavailable:
+            return unavailable
+        try:
+            self.channel_a_manager.save_credential(secret)
+        except ChannelAManagerError as error:
+            return self._channel_a_manager_error(error)
+        response = jsonify({"ok": True, "provider": provider, "configured": True})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    def _channel_a_credential_delete(self):
+        """Delete Channel A through the manager; 204 only on confirmed success."""
+        unavailable = self._require_channel_a_manager()
+        if unavailable:
+            return unavailable
+        try:
+            self.channel_a_manager.delete_credential()
+        except ChannelAManagerError as error:
+            return self._channel_a_manager_error(error)
+        response = Response(status=204)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @staticmethod
     def _error(code: str, status: int):
@@ -170,7 +271,12 @@ class AdminHttpBoundary:
             provider_path = path.startswith(f"{CREDENTIAL_ROUTE_ROOT}/") and "/" not in path[
                 len(CREDENTIAL_ROUTE_ROOT) + 1 :
             ]
-            if path == CREDENTIAL_ROUTE_ROOT or provider_path or path == TELEGRAM_APPLY_ROUTE:
+            if (
+                path == CREDENTIAL_ROUTE_ROOT
+                or provider_path
+                or path == TELEGRAM_APPLY_ROUTE
+                or path in (CHANNEL_A_STATUS_ROUTE, CHANNEL_A_APPLY_ROUTE)
+            ):
                 response.headers["Cache-Control"] = "no-store"
             return response
 
@@ -288,6 +394,8 @@ class AdminHttpBoundary:
             secret, rejected = self._credential_payload()
             if rejected:
                 return rejected
+            if provider == CHANNEL_A_PROVIDER:
+                return self._channel_a_credential_write(provider, secret)
             try:
                 if self.credential_service is None:
                     raise CredentialUnavailable("CREDENTIAL_STORAGE_UNAVAILABLE")
@@ -313,6 +421,8 @@ class AdminHttpBoundary:
                 return rejected
             if provider not in ALLOWED_PROVIDERS:
                 return self._error("CREDENTIAL_PROVIDER_UNSUPPORTED", 404)
+            if provider == CHANNEL_A_PROVIDER:
+                return self._channel_a_credential_delete()
             try:
                 if self.credential_service is None:
                     raise CredentialUnavailable("CREDENTIAL_STORAGE_UNAVAILABLE")
@@ -374,6 +484,58 @@ class AdminHttpBoundary:
                 response.status_code = status_code
                 response.headers["Cache-Control"] = "no-store"
                 return response
+
+        @app.get(CHANNEL_A_STATUS_ROUTE)
+        def admin_channel_a_status():
+            """Observational Channel A status: authenticated read only, never a
+            validate, activate or store probe."""
+            rejected = self._allow(require_origin=False)
+            if rejected:
+                return rejected
+            _, rejected = self._authorized_session(require_csrf=False)
+            if rejected:
+                return rejected
+            unavailable = self._require_channel_a_manager()
+            if unavailable:
+                return unavailable
+            try:
+                status = self.channel_a_manager.status()
+            except ChannelAManagerError as error:
+                return self._channel_a_manager_error(error)
+            response = jsonify({"ok": True, "channelA": project_admin_channel_a_status(status)})
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+        @app.post(CHANNEL_A_APPLY_ROUTE)
+        def admin_channel_a_apply():
+            """The only explicit Channel A activation entry: the same auth,
+            origin, CSRF and empty-JSON-object bound as the Telegram Apply."""
+            rejected = self._allow(require_origin=True)
+            if rejected:
+                return rejected
+            _, rejected = self._authorized_session(require_csrf=True)
+            if rejected:
+                return rejected
+            if not request.is_json:
+                return self._error("JSON_REQUIRED", 415)
+            if request.content_length is None or request.content_length > MAX_TELEGRAM_APPLY_REQUEST_BYTES:
+                return self._error("TELEGRAM_APPLY_REQUEST_TOO_LARGE", 413)
+            try:
+                payload = json.loads(request.get_data(cache=False).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return self._error("INVALID_TELEGRAM_APPLY_REQUEST", 400)
+            if not isinstance(payload, dict) or payload:
+                return self._error("INVALID_TELEGRAM_APPLY_REQUEST", 400)
+            unavailable = self._require_channel_a_manager()
+            if unavailable:
+                return unavailable
+            try:
+                status = self.channel_a_manager.apply()
+            except ChannelAManagerError as error:
+                return self._channel_a_manager_error(error)
+            response = jsonify({"ok": True, "channelA": project_admin_channel_a_status(status)})
+            response.headers["Cache-Control"] = "no-store"
+            return response
 
     @staticmethod
     def _session_payload(session) -> dict:

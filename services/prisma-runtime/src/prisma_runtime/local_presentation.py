@@ -807,8 +807,9 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     # One process-local identity registry, shared by the manager factory, the
     # standalone bot builder and any later channel A wiring.
     identity_reservation = process_bot_identity_reservation()
-    # Composed only with the protected boundary below: an injected admin_http
-    # already owns its credential service, so Channel A stays unwired there.
+    # Channel A is composed only when this root builds the protected boundary
+    # itself: an injected admin boundary already owns its collaborators, so no
+    # duplicate manager is ever created for it.
     channel_a_manager = None
     if admin_http is None:
         permissions = SecureStoragePermissions()
@@ -830,12 +831,6 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                     token, snapshot_store, state_store, voice_events, reservation=identity_reservation
                 ),
             )
-        admin_http = AdminHttpBoundary(
-            AdminAuthService(repository, ScryptPasswordHasher()),
-            credential_service=credentials,
-            telegram_manager=telegram_manager,
-            public_origin=os.environ.get("PRISMA_PUBLIC_ORIGIN"),
-        )
 
         def channel_a_destination_label(owner_id):
             """Read only a fresh live owner's display label, never global identity."""
@@ -880,11 +875,22 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 reservation=reservation,
             )
 
+        # The root builds Channel A before its admin boundary and injects that
+        # exact instance, so admin A routes share the composed manager's
+        # generation accounting; the manager stays inert here (no startup Apply).
         channel_a_manager = ChannelAManager(
             credential_service=credentials,
             configuration_store=ChannelAConfigurationStore(paths.channel_a_configuration),
             activation_factory=build_channel_a_activation,
             reservation=identity_reservation,
+        )
+
+        admin_http = AdminHttpBoundary(
+            AdminAuthService(repository, ScryptPasswordHasher()),
+            credential_service=credentials,
+            telegram_manager=telegram_manager,
+            channel_a_manager=channel_a_manager,
+            public_origin=os.environ.get("PRISMA_PUBLIC_ORIGIN"),
         )
     app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry, channel_a_manager=channel_a_manager)
     admin_http.register(app)

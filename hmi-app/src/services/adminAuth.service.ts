@@ -1,4 +1,5 @@
 import {
+    parseChannelAAdministrationStatus,
     parseCredentialMetadata,
     parseCredentialMutation,
     parseTelegramAdministrationStatus,
@@ -6,6 +7,7 @@ import {
     validateCredentialSecret,
     type AdminAuthStatus,
     type AdministratorIdentity,
+    type ChannelAAdministrationStatus,
     type CredentialMetadata,
     type CredentialMutationResult,
     type CredentialProvider,
@@ -14,6 +16,8 @@ import {
 } from '../domain';
 
 const AUTH_ROOT = '/api/prisma/admin/auth';
+const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
+const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
 const CSRF_TOKEN_LENGTH = 43;
 const PUBLIC_ERROR_CODES = new Set([
     'ADMIN_CREDENTIAL_BLANK',
@@ -33,6 +37,15 @@ const PUBLIC_ERROR_CODES = new Set([
     'INVALID_TELEGRAM_APPLY_REQUEST',
     'JSON_REQUIRED',
     'LOGIN_RATE_LIMITED',
+    'PRISMA_CHANNEL_A_CONFIGURATION_INVALID',
+    'PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_CREDENTIAL_MISSING',
+    'PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_MANAGER_BUSY',
+    'PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE',
+    'PRISMA_CHANNEL_A_RESTART_REQUIRED',
+    'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
     'PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING',
     'TELEGRAM_CREDENTIAL_MISSING',
     'TELEGRAM_DISABLED',
@@ -229,9 +242,11 @@ export class AdminAuthClient {
                     throw new AdminAuthError('ADMIN_CREDENTIAL_RESPONSE_INVALID', response.status);
                 }
             } catch (error) {
-                if (error instanceof AdminAuthError
-                    && error.status === 409 && error.code === 'TELEGRAM_STOP_TIMEOUT') {
-                    throw new AdminAuthError(error.code, error.status, true);
+                if (error instanceof AdminAuthError && error.status === 409) {
+                    const stopUnconfirmed = (provider === 'telegram' && error.code === 'TELEGRAM_STOP_TIMEOUT')
+                        || (provider === 'telegram_channel_a'
+                            && error.code === 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED');
+                    if (stopUnconfirmed) throw new AdminAuthError(error.code, error.status, true);
                 }
                 throw error;
             }
@@ -247,6 +262,27 @@ export class AdminAuthClient {
                 signal: requestSignal,
             });
             return this.parseResponse(response, parseTelegramAdministrationStatus);
+        });
+    }
+
+    async channelAStatus(signal?: AbortSignal): Promise<ChannelAAdministrationStatus> {
+        return this.protectedOperation(false, signal, async (requestSignal) => {
+            const response = await this.request(CHANNEL_A_STATUS_ROUTE, {
+                method: 'GET', signal: requestSignal,
+            });
+            return this.parseResponse(response, parseChannelAAdministrationStatus);
+        });
+    }
+
+    async applyChannelA(signal?: AbortSignal): Promise<ChannelAAdministrationStatus> {
+        return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
+            const response = await this.request(CHANNEL_A_APPLY_ROUTE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: '{}',
+                signal: requestSignal,
+            });
+            return this.parseResponse(response, parseChannelAAdministrationStatus);
         });
     }
 

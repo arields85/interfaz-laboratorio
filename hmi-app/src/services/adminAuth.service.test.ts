@@ -28,6 +28,23 @@ const FRESH_SESSION = {
     csrfToken: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE',
 };
 
+const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
+const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
+
+const CHANNEL_A_STATUS = {
+    ok: true,
+    channelA: {
+        configured: true,
+        desiredGeneration: 4,
+        appliedGeneration: 4,
+        activationEpoch: 2,
+        activation: {
+            phase: 'running', reason: null, quiescent: false, restartRequired: false,
+        },
+        lastError: null,
+    },
+} as const;
+
 describe('AdminAuthClient', () => {
     beforeEach(() => {
         localStorage.clear();
@@ -172,6 +189,122 @@ describe('AdminAuthClient', () => {
         );
 
         await expect(client.credentialMetadata()).rejects.toMatchObject({ code, status });
+    });
+
+    it('reads the channel A status from its exact private GET route without a CSRF token', async () => {
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(CHANNEL_A_STATUS));
+        const client = new AdminAuthClient(fetcher);
+
+        await expect(client.channelAStatus()).resolves.toEqual(CHANNEL_A_STATUS.channelA);
+
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        expect(fetcher).toHaveBeenCalledWith(CHANNEL_A_STATUS_ROUTE, expect.objectContaining({
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            redirect: 'error',
+        }));
+        const headers = fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>;
+        expect(headers['X-CSRF-Token']).toBeUndefined();
+        expect(headers['X-Prisma-Session-Capability']).toBeUndefined();
+    });
+
+    it('applies channel A on its exact route with an empty JSON body and the active private CSRF', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse(CHANNEL_A_STATUS));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.applyChannelA()).resolves.toEqual(CHANNEL_A_STATUS.channelA);
+
+        expect(fetcher.mock.calls[1]?.[0]).toBe(CHANNEL_A_APPLY_ROUTE);
+        expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+            method: 'POST',
+            credentials: 'same-origin',
+            body: '{}',
+            headers: expect.objectContaining({
+                'X-CSRF-Token': SESSION.csrfToken,
+                'Content-Type': 'application/json',
+            }),
+        }));
+    });
+
+    it('keeps a channel A apply manager-busy failure uncommitted on its exact route', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: 'PRISMA_CHANNEL_A_MANAGER_BUSY' }, 409));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.applyChannelA()).rejects.toMatchObject({
+            code: 'PRISMA_CHANNEL_A_MANAGER_BUSY', status: 409, committed: false,
+        });
+        expect(fetcher.mock.calls[1]?.[0]).toBe(CHANNEL_A_APPLY_ROUTE);
+        expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+        ['PRISMA_CHANNEL_A_CONFIGURATION_INVALID', 503],
+        ['PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE', 503],
+        ['PRISMA_CHANNEL_A_CREDENTIAL_MISSING', 409],
+        ['PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE', 503],
+        ['PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE', 502],
+        ['PRISMA_CHANNEL_A_RESTART_REQUIRED', 409],
+        ['TELEGRAM_BOT_IDENTITY_RESERVED', 409],
+        ['INVALID_CREDENTIAL_REQUEST', 400],
+        ['PRISMA_CHANNEL_A_MANAGER_BUSY', 409],
+        ['PRISMA_CHANNEL_A_STOP_UNCONFIRMED', 409],
+        ['PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503],
+    ])('preserves the channel A canonical public code %s with its authoritative status %s', async (code, status) => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: code }, status));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.applyChannelA()).rejects.toMatchObject({ code, status, committed: false });
+        expect(fetcher.mock.calls[1]?.[0]).toBe(CHANNEL_A_APPLY_ROUTE);
+    });
+
+    it('replaces an unknown channel A status error with a fixed public code without leaking the raw value', async () => {
+        const canary = 'synthetic-channel-a-canary';
+        const client = new AdminAuthClient(vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+            ok: false, error: canary, details: { cause: canary },
+        }, 500)));
+
+        let failure: unknown;
+        try {
+            await client.channelAStatus();
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).toMatchObject({ code: 'AUTH_REQUEST_FAILED', status: 500 });
+        expect(failure).toBeInstanceOf(AdminAuthError);
+        expect(JSON.stringify(failure)).not.toContain(canary);
+
+        const malformed = new AdminAuthClient(vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+            ok: true, channelA: { ...CHANNEL_A_STATUS.channelA, configured: 'yes' },
+        })));
+        await expect(malformed.channelAStatus())
+            .rejects.toMatchObject({ code: 'ADMIN_CREDENTIAL_RESPONSE_INVALID' });
+    });
+
+    it('fences a pending channel A apply after logout invalidates the auth generation', async () => {
+        let releaseApply!: (response: Response) => void;
+        const pendingApply = new Promise<Response>((resolve) => { releaseApply = resolve; });
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockImplementationOnce(() => pendingApply);
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        const apply = client.applyChannelA();
+        client.clearPrivateSession();
+        releaseApply(jsonResponse(CHANNEL_A_STATUS));
+
+        await expect(apply).rejects.toMatchObject({ name: 'AbortError' });
     });
 
     it('keeps a channel identity collision as an uncommitted apply failure on its exact route', async () => {
@@ -373,6 +506,34 @@ describe('AdminAuthClient', () => {
             code: 'TELEGRAM_STOP_TIMEOUT', status: 409, committed: true,
         });
         expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it('marks only the channel A deletion stop-unconfirmed failure as committed without cross-provider misattribution', async () => {
+        const conflict = (code: string) => jsonResponse({ ok: false, error: code }, 409);
+
+        const channelA = new AdminAuthClient(vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(conflict('PRISMA_CHANNEL_A_STOP_UNCONFIRMED')));
+        await channelA.session();
+        await expect(channelA.deleteCredential('telegram_channel_a')).rejects.toMatchObject({
+            code: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED', status: 409, committed: true,
+        });
+
+        const telegram = new AdminAuthClient(vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(conflict('PRISMA_CHANNEL_A_STOP_UNCONFIRMED')));
+        await telegram.session();
+        await expect(telegram.deleteCredential('telegram')).rejects.toMatchObject({
+            code: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED', status: 409, committed: false,
+        });
+
+        const channelAWithBCode = new AdminAuthClient(vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(conflict('TELEGRAM_STOP_TIMEOUT')));
+        await channelAWithBCode.session();
+        await expect(channelAWithBCode.deleteCredential('telegram_channel_a')).rejects.toMatchObject({
+            code: 'TELEGRAM_STOP_TIMEOUT', status: 409, committed: false,
+        });
     });
 
     it.each([

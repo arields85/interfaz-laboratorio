@@ -5,7 +5,7 @@ import type {
 import { useEffect, useRef, useState } from 'react';
 import { KeyRound, Play, RefreshCw, Save, Trash2 } from 'lucide-react';
 
-import type { CredentialProvider } from '../../domain';
+import type { ChannelALifecyclePhase, CredentialProvider } from '../../domain';
 import { usePrismaCredentialAdministration } from '../../hooks/usePrismaCredentialAdministration';
 import { AdminAuthError } from '../../services/adminAuth.service';
 import { useAuthStore } from '../../store/auth.store';
@@ -38,6 +38,16 @@ function errorText(error: unknown): string {
         TELEGRAM_POLL_FAILED: 'Telegram informó una falla de conexión.',
         TELEGRAM_PREPARATION_FAILED: 'Telegram no pudo completar su preparación.',
         PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING: 'Falta la credencial de Telegram en el entorno local.',
+        PRISMA_CHANNEL_A_CONFIGURATION_INVALID: 'La configuración local del Canal A es inválida.',
+        PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE: 'La configuración local del Canal A no está disponible.',
+        PRISMA_CHANNEL_A_CREDENTIAL_MISSING: 'El Canal A no tiene una credencial protegida.',
+        PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE: 'La credencial del Canal A no está disponible.',
+        PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE: 'El ciclo de vida del Canal A no está disponible.',
+        PRISMA_CHANNEL_A_MANAGER_BUSY: 'El administrador del Canal A está ocupado. Reintentá la acción.',
+        PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE: 'El estado del Canal A no está disponible.',
+        PRISMA_CHANNEL_A_RESTART_REQUIRED: 'El Canal A requiere un reinicio para aplicar el cambio.',
+        PRISMA_CHANNEL_A_STOP_UNCONFIRMED: 'No se pudo confirmar la detención del Canal A.',
+        INVALID_CREDENTIAL_REQUEST: 'La solicitud de credencial es inválida.',
     }[code] ?? 'No se pudo completar la operación con el servicio local.';
 }
 
@@ -58,12 +68,24 @@ function emptySecretDrafts(): Record<CredentialProvider, string> {
     return { gemini: '', telegram: '', telegram_channel_a: '' };
 }
 
+// Channel A execution label must never infer quiescence from "not running":
+// only the canonical lifecycle phase decides what the card shows.
+function channelAExecutionLabel(phase: ChannelALifecyclePhase | null): string {
+    if (phase === 'running') return 'Ejecución activa';
+    if (phase === 'stopping') return 'Detención en curso';
+    if (phase === null || phase === 'idle' || phase === 'stopped') return 'Ejecución detenida';
+    return 'Estado de ejecución no confirmado';
+}
+
 export default function VoiceCredentialSettings({ active, client, controller }: VoiceCredentialSettingsProps) {
     const authenticated = useAuthStore((state) => state.session.isAuthenticated);
     const administration = usePrismaCredentialAdministration({ client, controller, active });
     const [secretDrafts, setSecretDrafts] = useState<Record<CredentialProvider, string>>(emptySecretDrafts);
     const [deleteProvider, setDeleteProvider] = useState<CredentialProvider | null>(null);
     const [feedback, setFeedback] = useState<Feedback>(null);
+    // Provider whose stop-unconfirmed deletion an explicit retry targets; it
+    // keeps the approved retry anchored to its originating channel only.
+    const [stopRetryProvider, setStopRetryProvider] = useState<CredentialProvider | null>(null);
     const panelGenerationRef = useRef(0);
     const secretRevisionRef = useRef<Record<CredentialProvider, number>>({ gemini: 0, telegram: 0, telegram_channel_a: 0 });
     const dialogRevisionRef = useRef(0);
@@ -85,6 +107,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         setSecretDrafts(emptySecretDrafts());
         setDeleteProvider(null);
         setFeedback(null);
+        setStopRetryProvider(null);
     }, [active, authenticated]);
 
     // Clearing one provider draft must never resurrect another provider's stale
@@ -131,6 +154,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         try {
             const outcome = await administration.deleteCredential(provider);
             if (panelGenerationRef.current === panelGeneration) {
+                setStopRetryProvider(outcome.stopUnconfirmed ? provider : null);
                 setFeedback(outcome.stopUnconfirmed
                     ? { kind: 'warning', text: 'La credencial fue eliminada, pero la detención no pudo confirmarse.' }
                     : { kind: 'success', text: 'Credencial eliminada.' });
@@ -165,19 +189,40 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         }
     };
 
-    const retryTelegramStop = async () => {
+    const applyChannelA = async () => {
         const panelGeneration = panelGenerationRef.current;
         setFeedback(null);
         try {
-            const outcome = await administration.deleteCredential('telegram');
+            await administration.applyChannelA();
             if (panelGenerationRef.current === panelGeneration) {
-                setFeedback(outcome.stopUnconfirmed
-                    ? { kind: 'warning', text: 'La credencial ya no existe, pero la detención todavía no pudo confirmarse.' }
-                    : { kind: 'success', text: 'La detención de Telegram quedó confirmada.' });
+                setFeedback({ kind: 'success', text: 'Cambio del Canal A aplicado y estado actualizado.' });
             }
         } catch (error) {
             if (panelGenerationRef.current === panelGeneration
                 && !(error instanceof DOMException && error.name === 'AbortError')) {
+                setFeedback({ kind: 'error', text: errorText(error) });
+            }
+        }
+    };
+
+    // One generalized retry for the approved stop-unconfirmed warning: it
+    // targets exactly the provider that produced the warning, never the other
+    // channel, and needs no configured credential (it was already deleted).
+    const retryStop = async (provider: CredentialProvider) => {
+        const panelGeneration = panelGenerationRef.current;
+        setFeedback(null);
+        try {
+            const outcome = await administration.deleteCredential(provider);
+            if (panelGenerationRef.current === panelGeneration) {
+                setStopRetryProvider(outcome.stopUnconfirmed ? provider : null);
+                setFeedback(outcome.stopUnconfirmed
+                    ? { kind: 'warning', text: 'La credencial ya no existe, pero la detención todavía no pudo confirmarse.' }
+                    : { kind: 'success', text: `La detención de ${PROVIDER_LABELS[provider]} quedó confirmada.` });
+            }
+        } catch (error) {
+            if (panelGenerationRef.current === panelGeneration
+                && !(error instanceof DOMException && error.name === 'AbortError')) {
+                setStopRetryProvider(null);
                 setFeedback({ kind: 'error', text: errorText(error) });
             }
         }
@@ -191,6 +236,12 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     const renderProvider = (provider: CredentialProvider) => {
         const label = PROVIDER_LABELS[provider];
         const value = secretDrafts[provider];
+        const isChannelA = provider === 'telegram_channel_a';
+        const channelA = isChannelA ? administration.channelA : null;
+        // A channel A status failure disables only that channel's controls;
+        // Gemini and Telegram keep working from their own metadata.
+        const channelAUnavailable = isChannelA && Boolean(administration.channelAError);
+        const providerDisabled = disabled || channelAUnavailable;
         return (
             <fieldset aria-label={label} className="space-y-3 rounded border border-white/10 p-3">
                 <legend className="px-1 text-industrial-text">{label}</legend>
@@ -214,15 +265,15 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             setProviderDraft(provider, nextValue);
                         }}
                         className={ADMIN_SIDEBAR_INPUT_CLS}
-                        disabled={disabled}
+                        disabled={providerDisabled}
                     />
                 </label>
                 <div className="flex flex-wrap gap-2">
-                    <HmiButton size="sm" variant="primary" disabled={disabled || !value} onClick={() => void save(provider)}>
+                    <HmiButton size="sm" variant="primary" disabled={providerDisabled || !value} onClick={() => void save(provider)}>
                         <Save size={14} aria-hidden="true" />
                         Guardar credencial
                     </HmiButton>
-                    <HmiButton size="sm" variant="danger" disabled={disabled} onClick={() => updateDeleteProvider(provider)}>
+                    <HmiButton size="sm" variant="danger" disabled={providerDisabled} onClick={() => updateDeleteProvider(provider)}>
                         <Trash2 size={14} aria-hidden="true" />
                         Eliminar credencial
                     </HmiButton>
@@ -257,6 +308,41 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                         </HmiButton>
                     </>
                 ) : null}
+                {isChannelA && channelA ? (
+                    <>
+                        <div className="grid grid-cols-2 gap-2 rounded border border-white/10 p-3 text-industrial-muted">
+                            <span>
+                                {channelA.appliedGeneration !== null
+                                    && channelA.appliedGeneration === channelA.desiredGeneration
+                                    ? 'Sin cambios pendientes'
+                                    : 'Cambio pendiente de aplicar'}
+                            </span>
+                            <span>{channelAExecutionLabel(channelA.activation?.phase ?? null)}</span>
+                        </div>
+                        {channelA.lastError ? (
+                            <p className="text-status-warning">
+                                {errorText(new AdminAuthError(channelA.lastError, null))}
+                            </p>
+                        ) : null}
+                        {administration.channelAError ? (
+                            <p className="text-status-warning">Último estado conocido; la actualización falló.</p>
+                        ) : null}
+                    </>
+                ) : null}
+                {isChannelA && administration.channelAError ? (
+                    <p className="text-status-warning">{errorText(administration.channelAError)}</p>
+                ) : null}
+                {isChannelA ? (
+                    <HmiButton
+                        size="sm"
+                        variant="primary"
+                        disabled={providerDisabled || !credentials?.telegram_channel_a.configured || !channelA}
+                        onClick={() => void applyChannelA()}
+                    >
+                        <Play size={14} aria-hidden="true" />
+                        Aplicar cambio
+                    </HmiButton>
+                ) : null}
             </fieldset>
         );
     };
@@ -288,8 +374,13 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                     className={`mt-3 ${feedback.kind === 'error' ? 'text-status-critical' : feedback.kind === 'warning' ? 'text-status-warning' : 'text-status-normal'}`}
                 >
                     {feedback.text}
-                    {feedback.kind === 'warning' ? (
-                        <HmiButton className="ml-3" size="sm" disabled={retryDisabled} onClick={() => void retryTelegramStop()}>
+                    {feedback.kind === 'warning' && stopRetryProvider !== null ? (
+                        <HmiButton
+                            className="ml-3"
+                            size="sm"
+                            disabled={retryDisabled}
+                            onClick={() => { if (stopRetryProvider) void retryStop(stopRetryProvider); }}
+                        >
                             <RefreshCw size={14} aria-hidden="true" />
                             Reintentar detención
                         </HmiButton>

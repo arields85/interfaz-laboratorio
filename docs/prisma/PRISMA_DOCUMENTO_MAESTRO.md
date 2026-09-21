@@ -2,27 +2,19 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.14
+> **Versión documental:** 2.0.16
 >
 > **Fecha:** 2026-09-21
 >
 > **Prioridad vigente:** terminar **QR → Canal A → circuito Prisma existente**, sin agregar
 > cambios al comportamiento de respuesta ni audio. Antes de implementar algo no solicitado,
 > consultar al usuario y esperar su aprobación explícita (§3.4 y §11.1).
-> RCA-5i (composición raíz del Canal A) está aceptado offline; siguen pendientes admin A y QR (§11.1).
+> RCA-5j (administración backend de credenciales del Canal A) y su integración frontend (RCA-5k: tarjeta A existente con status/Apply explícitos, parser/cliente estrictos, guards de sesión, query A separada, warning+reintento con provider-safety y rutas proxy exactas) están **aceptados solo offline**, incluida la corrección acotada de rotulado aprobada por el usuario («Corregir ahora»), completada con RED observado y cinco gates finales independientes aprobados (§11.1); sigue pendiente la proyección QR/status por capability con proxy/cliente y la apertura manual del QR en `Pyramid`, no implementada por este cierre.
 > El resumen 2.0.12 siguiente se conserva como contexto histórico, no como una nueva autorización.
 >
 > **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`). Se suma una aceptación **acotada** del Canal A sobre un widget simulado (contexto → respuesta → voz) y el hallazgo de que el `/status` de Telegram lee un archivo de instalación obsoleto. En esta versión se acuerda, **sin implementarlo**, el alcance del **acceso remoto del Canal A** (bot dedicado, emparejamiento por QR sin entrada local, reloj humano de inactividad y un único destino activo). Despliegue productivo, aceptación integral, máquinas reales y el trabajo posterior del asistente siguen pendientes.
 >
-> **Alcance de esta versión:** cierre de una sesión de **planificación** del acceso remoto del
-> Canal A, no de implementación. Se registran el alcance de producto acordado con el usuario (bot A
-> separado, emparejamiento por QR sin entrada en la HMI, inactividad humana, asociación exclusiva
-> temporal y primer incremento de consulta textual) y el camino exacto de reanudación por ODD. La
-> aceptación acotada 2.0.11 del Canal A se conserva como evidencia histórica válida. El Canal B sigue
-> aplazado y, en este alcance, no puede afectar la HMI. El próximo paso vigente (§11.1) es
-> **implementar por incrementos** el Canal A remoto en la próxima sesión, con ODD y no con SDD.
-> `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados. Cambio exclusivamente documental: no
-> ejecuta servicios, pruebas, proveedores ni red, y no afirma compilación ni suites aprobadas.
+> **Alcance de esta versión:** RCA-5k aceptado **solo offline**: la integración frontend de la administración del Canal A en su tarjeta existente quedó implementada y verificada, incluida la corrección de rotulado aprobada por el usuario («Corregir ahora»), con B/Gemini y la respuesta/audio existentes preservados. Evidencia final independiente: 155 pruebas focalizadas y 25 de integración (180 únicas en total), cobertura filtrada con los umbrales en 70 intactos, build con sus warnings conocidos y lint sin diagnósticos. El backend RCA-5j conserva su aceptación previa (48 métodos únicos y repeat final) y no se reejecutó. No hay aceptación real de navegador, Telegram, Gemini, QR, audio ni producto. El próximo paso pendiente (§11.1) es la proyección **QR/status por capability** con rutas proxy/cliente y apertura **manual** del QR en `Pyramid`, inmediatamente a la derecha de Logs, reutilizando la respuesta y el audio existentes; no recibe concesión de fuente nueva. La regla de aprobación previa de §3.4 sigue vigente: este cambio es exclusivamente documental y no ejecuta servicios, pruebas, proveedores ni red. `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados.
 
 ## 1. Objetivo y estado general
 
@@ -971,9 +963,101 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (checkpoint 2.0.14; registros anteriores históricos)
+### 11.1 Próximo paso vigente (checkpoint 2.0.16; registros anteriores históricos)
 
-**Checkpoint vigente 2.0.14 (2026-09-21).** El primer incremento acotado de composición raíz del
+**Checkpoint vigente 2.0.16 (2026-09-21).** La administración de credenciales del Canal A está
+aceptada **solo offline** en sus dos etapas admin, con aceptaciones separadas: el backend RCA-5j
+(`ChannelAManager`, guardar/borrar y Apply/status con auth/CSRF/origin existentes, manager ausente
+rechaza cerrado) conserva su aceptación previa (48 métodos únicos y repeat final de 15), y su
+**integración frontend RCA-5k** en la tarjeta de credencial A existente pasó los cinco gates
+finales independientes —
+status con query A separada, su propia clave y guard de sesión/autoridad que no contamina la
+metadata existente de Gemini/B; Apply explícito deshabilitado sin credencial guardada o ante A no
+disponible; parser/cliente de dominio estrictos con errores públicos canónicos; warning+reintento
+provider-safe tras un borrado exitoso del A con stop no confirmado, apuntando **solo al Canal A,
+nunca al B**; y las dos rutas proxy A exactas (status GET y apply POST ancladas al 5057 local,
+stripping de capability de sesión, B y su PUT/DELETE preservados). Dos regresiones adicionales de
+autoridad/staleness se observaron RED y se corrigieron con el refresh conjunto bajo el guard
+existente y el etiquetado veraz de los datos anteriores conservados cuando el refetch de A falla,
+sin framework nuevo de disponibilidad/cancelación. B, Gemini y la respuesta/audio existentes no
+cambiaron. Evidencia del candidato previo a la corrección (verificador `mubsaz3o-s-zxko`, comandos
+congelados una vez cada uno): 153 pruebas focalizadas PASS, 25 de integración PASS, cobertura
+filtrada con los cuatro umbrales 70 intactos, build y lint con exit 0. Tras la corrección de
+rotulado, la verificación independiente final (`mubszah4-y-q5gq`, los cinco gates congelados una
+vez cada uno) aprobó 155 focalizadas y 25 de integración (180 únicas en total), cobertura con
+umbrales intactos, build de 2737 módulos con sus warnings conocidos y lint sin diagnósticos, con
+exit codes no expuestos por la herramienta; sin
+navegador real, Telegram, Gemini, QR, audio ni aceptación de
+producto. Detalle y evidencia:
+[`../../odd/tasks/prisma-channel-a-remote.md`](../../odd/tasks/prisma-channel-a-remote.md).
+
+**Corrección de rotulado — completada y verificada; RCA-5k aceptado offline.** La revisión estática
+del padre había encontrado un caso no cubierto: la tarjeta A rotulaba `activa` solo con fase
+`running` y `detenida` en cualquier otra, mientras el backend deja fase `stopping` con actividad en
+curso (`channel_a_lifecycle.py`, `stop()` ~523–527 devuelve `False`) y `quiescent: false` (~550); el
+caso conocido podía mostrarse como `detenida` junto al aviso de stop no confirmado. El usuario
+aprobó «Corregir ahora» y la corrección se completó: pruebas de regresión (`mubsq4p7-u-zb19` y un
+follow-up tipado/comentario con dos casos adicionales) y RED independiente (`mubsvn4h-w-zxd5`,
+comando 1 una vez: 155 pruebas, 153 PASS/2 FAIL esperadas por ausencia de los rótulos
+stopping/failed, con el DOM mostrando `detenida`); luego el parche solo de tarjeta
+(`mubswysz-x-gd9a`, cero comandos): import de tipo, helper puro de rótulo y un JSX — `running`→
+`activa`; `null`/`idle`/`stopped`→`detenida`; `stopping`→«Detención en curso»; otros no-running→
+«Estado de ejecución no confirmado» — sin cambios de runtime ni controles. Los cinco gates finales
+independientes (`mubszah4-y-q5gq`) aprobaron; el verificador leyó el helper y confirmó el uso
+exclusivo de A con el rótulo booleano de B preservado y sin efectos de control en runtime. Fuente y
+pruebas quedan congeladas; las revisiones documentales parental e independiente aprobaron. Sin
+trabajo QR todavía.
+
+El próximo paso pendiente, **no implementado por este cierre y sin concesión de fuente nueva**, es
+la proyección **QR/status por capability** con las rutas proxy/cliente y la apertura **manual** del
+QR desde `Pyramid`, inmediatamente a la derecha de Logs, reutilizando la respuesta y el audio
+existentes, con la corrección de rotulado ya completada. Ese siguiente incremento requiere su
+propio mapeo/contrato/TDD cuando el usuario lo autorice. `PW-003` sigue pendiente con este
+próximo paso; `PW-002` y `PW-004` no cambian. Base actual `9864c25`, sin commit nuevo; sin push ni PR.
+La regla ask-and-wait de §3.4 sigue vigente y no se agregan extras ni cambios de respuesta/audio.
+La instrucción de **leer este documento maestro completo antes de planificar o escribir** se
+conserva para la próxima sesión.
+
+**Cierre de sesión documental (a pedido del usuario).** Para este checkpoint únicamente, el
+usuario autorizó **un commit local único** sobre los 20 paths actuales (código backend y frontend,
+pruebas y documentación); esta autorización reemplaza la regla de «sin commit» solo en este caso,
+y las concesiones anteriores quedan como historia. El parent ejecuta el commit desde la base
+`9864c25` (pre-commit, no el HEAD final) y su hash real se registra en Engram tras el éxito —
+nunca un SHA autorreferencial inventado; al escribir esta nota el commit puede estar pendiente y
+este documento no afirma que ya exista. Las pruebas existentes no se reejecutaron en este cierre
+documental; la evidencia vigente sigue siendo la aceptación offline de RCA-5k descripta arriba.
+
+**Checkpoint histórico 2.0.15 (2026-09-21) — aceptación backend RCA-5j; precisado por 2.0.16, que
+agrega la integración frontend aceptada.** La administración backend de las credenciales del
+Canal A (RCA-5j) quedó **aceptada solo offline**: guardar/borrar credenciales y Apply/status
+explícitos pasan por el `ChannelAManager` y su generación, con la auth/CSRF/origin admin existente.
+El root normal inyecta A antes de su frontera admin sin Apply de arranque; la ausencia del manager
+rechaza cerrado con `PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE`/503 sin mutar el almacén (decisión del
+usuario, sin fallback de escrituras directas). `GET .../telegram_channel_a/status` proyecta
+exactamente seis claves con la activación anidada de cuatro, `POST .../apply` exige un objeto JSON
+vacío, los errores de dominio mapean a `{ok: false, error}` cerrados y las rutas A usan
+`Cache-Control: no-store`; B mantiene sus nueve campos y sus rutas, la salud pública no se amplía y
+el root queda inerte. Evidencia independiente: RED inicial antes de la fuente, implementación solo
+en `admin_http.py`/`local_presentation.py`, GREEN de 48 métodos únicos en cuatro patrones y un
+repeat final del patrón A admin de 15 PASS; sin UI ni conexión real. Esto **no** completa la UI
+admin ni el circuito QR completo.
+
+El próximo paso pendiente es la **integración frontend**: la tarjeta de credencial A existente con
+Apply/status, el parser/cliente de dominio y la allowlist exacta de proxy. El mapper read-only
+completó su mapeo sin cambiar archivos frontend; el contrato y las pruebas frontend siguen
+pendientes y aún no hay autorización de escritura frontend. Decisión de UI ya **aprobada** por el
+usuario: ante borrado exitoso del Canal A con stop del bot no confirmado, el alcance frontend puede
+reutilizar la UI de warning+reintento existente (la opción estilo B "Aviso y reintento"), y el
+reintento debe apuntar **solo al Canal A, nunca al B**. Las pruebas/fuente frontend siguen sin
+iniciar ni congelar. Después sigue la proyección QR/status por capability con las rutas proxy/cliente y la
+apertura **manual** del QR desde `Pyramid`, reutilizando la respuesta y el audio existentes. Detalle
+y checklist: [`../../odd/tasks/prisma-channel-a-remote.md`](../../odd/tasks/prisma-channel-a-remote.md);
+pendiente activo `PW-003`. Base actual `9864c25`, sin commit nuevo; sin push ni PR. La regla
+ask-and-wait de §3.4 sigue vigente y no se agregan extras ni cambios de respuesta/audio. La
+instrucción de **leer este documento maestro completo antes de planificar o escribir** se conserva
+para la próxima sesión.
+
+**Checkpoint histórico 2.0.14 (2026-09-21) — precisado por 2.0.15; la composición raíz queda aceptada offline.** El primer incremento acotado de composición raíz del
 Canal A quedó **aceptado solo offline**: el `ChannelAManager` real y su factory de activación por
 defecto se componen en el root existente `local_presentation.py`, con la ruta canónica de
 configuración en `paths.py`, el mismo almacén protegido del Canal B, la reserva compartida A+B, el
@@ -1324,6 +1408,55 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.16 — 2026-09-21
+
+- RCA-5k **aceptado solo offline**: integración frontend de la administración del Canal A en su
+  tarjeta existente, sobre el backend RCA-5j ya aceptado — status con query A separada y guard de
+  sesión/autoridad, Apply explícito, parser/cliente de dominio estrictos, warning+reintento
+  provider-safe tras borrado con stop no confirmado (solo Canal A, nunca B) y rutas proxy A exactas.
+  Dos regresiones de autoridad/staleness observadas RED y corregidas con el refresh conjunto y el
+  etiquetado veraz de los datos anteriores conservados, sin framework nuevo. B/Gemini y
+  respuesta/audio sin cambios.
+- **Corrección de rotulado completada** (aprobada por el usuario como «Corregir ahora»): RED
+  independiente (`mubsvn4h-w-zxd5`, comando 1 una vez: 155 pruebas, 153 PASS/2 FAIL esperadas por
+  ausencia de los rótulos stopping/failed, DOM mostrando `detenida`) y parche solo de tarjeta
+  (`mubswysz-x-gd9a`, cero comandos): import de tipo, helper puro de rótulo y un JSX —
+  `running`→`activa`; `null`/`idle`/`stopped`→`detenida`; `stopping`→«Detención en curso»; otros
+  no-running→«Estado de ejecución no confirmado» — sin cambios de bot, borrado, audio ni runtime.
+- Verificación final independiente (`mubszah4-y-q5gq`): los cinco gates congelados una vez cada
+  uno — 155 focalizadas PASS, 25 de integración PASS, cobertura filtrada con umbrales 70 intactos
+  (statements 82,68 %, branches 73,84 %, functions 80,87 %, lines 84,46 %), build de 2737 módulos
+  con sus warnings conocidos y lint sin diagnósticos (exit codes no expuestos por la herramienta).
+  Sin navegador real, Telegram, Gemini, QR, audio ni aceptación de producto.
+- §11.1 fija el próximo paso pendiente, no implementado por este cierre y sin concesión de fuente
+  nueva: proyección QR/status por capability con proxy/cliente y apertura manual del QR en
+  `Pyramid`, inmediatamente a la derecha de Logs, reutilizando respuesta/audio. `PW-003` sigue
+  pendiente; `PW-002` y `PW-004` no cambian.
+- Cierre de sesión a pedido del usuario: autorización de **un commit local único de checkpoint**
+  sobre los 20 paths actuales (backend, frontend, pruebas y documentación) desde la base `9864c25`;
+  el parent lo ejecuta y el hash real se registra en Engram tras su éxito. Supera la regla de
+  «sin commit» solo para este checkpoint; las pruebas existentes no se reejecutaron en este cierre.
+- Actualización documental únicamente; sin pruebas nuevas, servicios, proveedores, commits ni push.
+  Base `9864c25`, sin commit nuevo. La regla de aprobación previa (§3.4) y la lectura completa del
+  maestro antes de la próxima sesión no cambian.
+
+### 2.0.15 — 2026-09-21
+
+- RCA-5j aceptado **solo offline**: administración backend de credenciales del Canal A (guardar/borrar
+  y Apply/status explícitos por el `ChannelAManager`/generación con la auth/CSRF/origin admin
+  existente; manager ausente rechaza cerrado con `PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE`/503 sin mutar
+  el almacén y sin fallback de escrituras directas; proyección de seis claves para A con activación
+  anidada, nueve campos de B sin cambios; salud pública sin ampliación; root inerte y sin Apply de
+  arranque). Evidencia independiente RED→GREEN de 48 métodos únicos en cuatro patrones y repeat final
+  del patrón A admin. **No** completa la UI admin ni el circuito QR.
+- §11.1 fija el próximo paso pendiente: integración frontend de la tarjeta de credencial A existente
+  con Apply/status, parser/cliente de dominio y allowlist exacta de proxy (mapper read-only
+  completado sin cambios frontend; contrato y pruebas frontend pendientes; aviso y reintento
+  aprobados ante borrado exitoso con stop no confirmado, apuntando solo al Canal A), y luego QR/status por capability con
+  apertura manual del QR en `Pyramid`, reutilizando respuesta/audio.
+- Actualización documental únicamente; sin pruebas nuevas, servicios, proveedores, commits ni push.
+  Base `9864c25`, sin commit nuevo. La regla de aprobación previa (§3.4) no cambia.
 
 ### 2.0.14 — 2026-09-21
 

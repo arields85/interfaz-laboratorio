@@ -102,6 +102,10 @@ describe('VoiceSettingsTab', () => {
             configurationError: 'TELEGRAM_CREDENTIAL_MISSING', lastError: null,
             desiredGeneration: 1, appliedGeneration: 1, restartRequired: false,
         });
+        const channelAStatus = vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
+            configured: false, desiredGeneration: 1, appliedGeneration: null,
+            activationEpoch: null, activation: null, lastError: null,
+        });
         try {
             const onDirtyChange = vi.fn();
             const view = render(<VoiceSettingsTab credentialControlsActive={false} onDirtyChange={onDirtyChange} />);
@@ -124,6 +128,7 @@ describe('VoiceSettingsTab', () => {
             useAuthStore.setState({ session: UNAUTHENTICATED_SESSION, isHydrated: false });
             metadata.mockRestore();
             health.mockRestore();
+            channelAStatus.mockRestore();
         }
     });
 

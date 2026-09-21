@@ -194,6 +194,10 @@ class AdminHttpBoundaryDouble(CaptureDouble):
     def credential_service(self):
         return self.argument(1, "credential_service")
 
+    @property
+    def channel_a_manager(self):
+        return self.kwargs.get("channel_a_manager")
+
     def register(self, app):
         self.registered_app = app
 
@@ -463,6 +467,10 @@ class ChannelARootCompositionTests(RootHarness, unittest.TestCase):
         self.assertIsInstance(protected, self.CredentialService)
         self.assertIs(manager.credential_service, protected)
         self.assertIs(telegram_manager.credential_service, protected)
+
+        # The root builds A before its admin boundary and injects that exact
+        # instance, so admin routes share the composed manager's accounting.
+        self.assertIs(boundary.channel_a_manager, manager)
 
         # A and B share the one process-local identity reservation.
         self.assertIs(manager.reservation, self.reservation)

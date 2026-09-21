@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -176,6 +176,10 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             configurationError: 'TELEGRAM_CREDENTIAL_MISSING', lastError: null,
             desiredGeneration: 1, appliedGeneration: 1, restartRequired: false,
         });
+        vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
+            configured: false, desiredGeneration: 1, appliedGeneration: null,
+            activationEpoch: null, activation: null, lastError: null,
+        });
         const fetchMock = vi.fn(async () => envelope());
         vi.stubGlobal('fetch', fetchMock);
         localStorage.setItem('hmi-global-settings-tab', 'connection');
@@ -190,9 +194,13 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
         expect(singletonNetwork.requests).toEqual([]);
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
-        // Preserve B's existing Apply; naming must not add another Apply.
-        expect(screen.getAllByRole('button', { name: /^Aplicar/ })).toHaveLength(1);
-        expect(screen.getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        // Frozen card contract renders exactly two Apply controls in this
+        // unconfigured fixture: Telegram (B) and Telegram (Canal A), both
+        // disabled without a configured credential. Name saving must not add a
+        // third Apply.
+        await waitFor(() => expect(screen.getAllByRole('button', { name: /^Aplicar/ })).toHaveLength(2));
+        expect(within(screen.getByRole('group', { name: 'Telegram' })).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        expect(within(screen.getByRole('group', { name: 'Telegram (Canal A)' })).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
         expect(localStorage.getItem('hmi:prisma-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
         fireEvent.change(input, { target: { value: 'Discard on tab switch' } });
         fireEvent.click(screen.getByRole('button', { name: 'Conexion' }));
@@ -340,6 +348,15 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     telegramRestartRequired: true,
                 }, 200);
             }
+            if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
+                return json({
+                    ok: true,
+                    channelA: {
+                        configured: false, desiredGeneration: 1, appliedGeneration: null,
+                        activationEpoch: null, activation: null, lastError: null,
+                    },
+                }, 200);
+            }
             if (path === '/api/prisma/admin/credentials/telegram/apply' && init?.method === 'POST') {
                 return json({ ok: false, error: 'TELEGRAM_BOT_IDENTITY_RESERVED' }, 409);
             }
@@ -349,7 +366,10 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await adminAuthClient.session();
         vi.stubGlobal('fetch', vi.fn(async () => envelope()));
         renderDialog();
-        const apply = await screen.findByRole('button', { name: 'Aplicar cambio' });
+        // Two Apply controls exist under the frozen card contract (B + A); the
+        // collision case exercises the Telegram (B) one specifically.
+        const telegramCard = await screen.findByRole('group', { name: 'Telegram' });
+        const apply = await within(telegramCard).findByRole('button', { name: 'Aplicar cambio' });
         await waitFor(() => expect(apply).toBeEnabled());
 
         await userEvent.click(apply);
@@ -392,6 +412,10 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             desiredGeneration: 1,
             appliedGeneration: 1,
             restartRequired: false,
+        });
+        vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
+            configured: false, desiredGeneration: 1, appliedGeneration: null,
+            activationEpoch: null, activation: null, lastError: null,
         });
         vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
             if (input === '/api/prisma/admin/credentials') {

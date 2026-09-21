@@ -42,6 +42,8 @@ export const PRISMA_PROXY_ROUTES: readonly PrismaProxyRoute[] = Object.freeze([
     createRoute('/api/prisma/admin/credentials/telegram', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram', ['PUT', 'DELETE'], true),
     createRoute('/api/prisma/admin/credentials/telegram/apply', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram/apply', ['POST'], true),
     createRoute('/api/prisma/admin/credentials/telegram_channel_a', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram_channel_a', ['PUT', 'DELETE'], true),
+    createRoute('/api/prisma/admin/credentials/telegram_channel_a/status', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram_channel_a/status', ['GET'], true),
+    createRoute('/api/prisma/admin/credentials/telegram_channel_a/apply', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram_channel_a/apply', ['POST'], true),
     createRoute('/api/prisma/health', 'http://127.0.0.1:5057', '/health', ['GET'], true),
 ]);
 

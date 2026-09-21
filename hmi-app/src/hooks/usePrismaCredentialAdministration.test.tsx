@@ -6,8 +6,9 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CredentialAdministrationClient, CredentialAdministrationController } from './usePrismaCredentialAdministration';
-import { PRISMA_CREDENTIAL_METADATA_QUERY_KEY, usePrismaCredentialAdministration } from './usePrismaCredentialAdministration';
+import { PRISMA_CHANNEL_A_STATUS_QUERY_KEY, PRISMA_CREDENTIAL_METADATA_QUERY_KEY, usePrismaCredentialAdministration } from './usePrismaCredentialAdministration';
 import { AdminAuthClient, AdminAuthError } from '../services/adminAuth.service';
+import type { ChannelAAdministrationStatus } from '../domain';
 import { useAuthStore } from '../store/auth.store';
 import RequirePermission from '../components/auth/RequirePermission';
 
@@ -25,6 +26,24 @@ const applied = {
     source: 'protected', enabled: true, configured: true,
     desiredGeneration: 2, appliedGeneration: 2, running: true,
     verified: true, restartRequired: false, lastError: null,
+} as const;
+// Canonical six-key channel A status with nullable generations/activation and
+// lowercase backend phases; mirrors the frozen domain parser contract.
+const channelAIdle = {
+    configured: false,
+    desiredGeneration: 1,
+    appliedGeneration: null,
+    activationEpoch: null,
+    activation: null,
+    lastError: null,
+} as const;
+const channelARunning = {
+    configured: true,
+    desiredGeneration: 4,
+    appliedGeneration: 4,
+    activationEpoch: 2,
+    activation: { phase: 'running', reason: null, quiescent: false, restartRequired: false },
+    lastError: null,
 } as const;
 
 function authenticated() {
@@ -48,6 +67,8 @@ function setup(clientOverrides: Partial<CredentialAdministrationClient> = {}) {
         saveCredential: vi.fn(async () => ({ provider: 'gemini', configured: true })),
         deleteCredential: vi.fn(async () => undefined),
         applyTelegram: vi.fn(async () => applied),
+        channelAStatus: vi.fn(async () => channelAIdle),
+        applyChannelA: vi.fn(async () => channelARunning),
         ...clientOverrides,
     };
     const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
@@ -58,6 +79,31 @@ function setup(clientOverrides: Partial<CredentialAdministrationClient> = {}) {
     const hook = renderHook(
         () => usePrismaCredentialAdministration({ client, controller, active: true }),
         { wrapper },
+    );
+    return { ...hook, client, controller, queryClient };
+}
+
+// Same client/controller defaults as setup, but the hook renders with a mutable
+// active flag so tests can deactivate the panel and observe cancellation.
+function setupWithActiveFlag(clientOverrides: Partial<CredentialAdministrationClient> = {}) {
+    const client: CredentialAdministrationClient = {
+        credentialMetadata: vi.fn(async () => metadata),
+        telegramHealth: vi.fn(async () => health),
+        saveCredential: vi.fn(async () => ({ provider: 'gemini', configured: true })),
+        deleteCredential: vi.fn(async () => undefined),
+        applyTelegram: vi.fn(async () => applied),
+        channelAStatus: vi.fn(async () => channelAIdle),
+        applyChannelA: vi.fn(async () => channelARunning),
+        ...clientOverrides,
+    };
+    const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const hook = renderHook(
+        ({ active }) => usePrismaCredentialAdministration({ client, controller, active }),
+        { wrapper, initialProps: { active: true } },
     );
     return { ...hook, client, controller, queryClient };
 }
@@ -241,6 +287,43 @@ describe('usePrismaCredentialAdministration', () => {
         });
     });
 
+    it('does not start the channel A status refresh after authority is revoked mid-refresh', async () => {
+        let releaseSecondMetadata!: (value: typeof metadata) => void;
+        const heldSecondMetadata = new Promise<typeof metadata>((resolve) => { releaseSecondMetadata = resolve; });
+        let metadataRequest = 0;
+        const credentialMetadata = vi.fn((): Promise<typeof metadata> => {
+            metadataRequest += 1;
+            return metadataRequest === 1 ? Promise.resolve(metadata) : heldSecondMetadata;
+        });
+        const channelAStatus = vi.fn(async () => channelAIdle);
+        const { result, queryClient } = setup({ credentialMetadata, channelAStatus });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let refreshPromise!: Promise<void>;
+        act(() => { refreshPromise = result.current.refresh(); });
+        await waitFor(() => expect(credentialMetadata).toHaveBeenCalledTimes(2));
+        // Captured dynamically before logout so a valid parallel refresh that
+        // already initiated the A query while still authorized can also pass.
+        const channelAStatusCallsAtLogout = channelAStatus.mock.calls.length;
+
+        act(() => {
+            useAuthStore.setState((state) => ({
+                session: { ...state.session, user: null, isAuthenticated: false },
+            }));
+        });
+
+        // Failsafe settlement: the awaited metadata refetch may already have
+        // been cancelled by the logout purge, and releasing the held deferred
+        // must never hang this test.
+        await act(async () => {
+            releaseSecondMetadata(metadata);
+            await refreshPromise.catch(() => undefined);
+        });
+
+        expect(channelAStatus.mock.calls.length).toBe(channelAStatusCallsAtLogout);
+        expect(queryClient.getQueryData(PRISMA_CHANNEL_A_STATUS_QUERY_KEY)).toBeUndefined();
+    });
+
     it('sanitizes an actual client error before TanStack Query retains it', async () => {
         const canary = 'synthetic-secret-canary';
         const fetcher = vi.fn<typeof fetch>(async (path) => path === '/api/prisma/admin/credentials'
@@ -277,6 +360,9 @@ describe('usePrismaCredentialAdministration', () => {
         const lateMetadata = new Promise<Response>((resolve) => { releaseLate = resolve; });
         const fetcher = vi.fn<typeof fetch>((path) => {
             if (path === '/api/prisma/health') return Promise.resolve(healthResponse());
+            if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
+                return Promise.resolve(jsonResponse({ ok: true, channelA: channelAIdle }));
+            }
             if (path === '/api/prisma/admin/credentials') {
                 metadataRequest += 1;
                 if (metadataRequest === 1) {
@@ -359,6 +445,8 @@ describe('usePrismaCredentialAdministration', () => {
             saveCredential: vi.fn(() => pendingSave),
             deleteCredential: vi.fn(async () => undefined),
             applyTelegram: vi.fn(async () => applied),
+            channelAStatus: vi.fn(async () => channelAIdle),
+            applyChannelA: vi.fn(async () => channelARunning),
         };
         const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -380,5 +468,143 @@ describe('usePrismaCredentialAdministration', () => {
         releaseSave();
 
         await expect(operation).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('resolves the channel A status into its own query key and returned fields', async () => {
+        const channelAStatus = vi.fn(async () => channelARunning);
+        const { result, client, queryClient } = setup({ channelAStatus });
+
+        await waitFor(() => expect(result.current.channelA).toEqual(channelARunning));
+
+        expect(result.current.channelAError).toBeNull();
+        expect(result.current.isChannelALoading).toBe(false);
+        expect(channelAStatus).toHaveBeenCalledWith(expect.any(AbortSignal));
+        expect(queryClient.getQueryData(PRISMA_CHANNEL_A_STATUS_QUERY_KEY)).toEqual(channelARunning);
+        expect(client.applyChannelA).not.toHaveBeenCalled();
+    });
+
+    it('enables the channel A status query only for an active authenticated admin', async () => {
+        act(() => {
+            useAuthStore.setState((state) => ({ session: { ...state.session, user: null, isAuthenticated: false } }));
+        });
+        const { result, client } = setup();
+        await act(async () => {});
+        expect(client.channelAStatus).not.toHaveBeenCalled();
+
+        act(() => { authenticated(); });
+
+        await waitFor(() => expect(result.current.channelA).toEqual(channelAIdle));
+        expect(client.channelAStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('cancels the in-flight channel A status query when the panel deactivates', async () => {
+        let signal: AbortSignal | undefined;
+        const channelAStatus = vi.fn((requestSignal?: AbortSignal): Promise<ChannelAAdministrationStatus> => {
+            if (requestSignal) signal = requestSignal;
+            return new Promise<ChannelAAdministrationStatus>(() => undefined);
+        });
+        const { rerender } = setupWithActiveFlag({ channelAStatus });
+        await waitFor(() => expect(signal).toBeDefined());
+
+        rerender({ active: false });
+
+        await waitFor(() => expect(signal?.aborted).toBe(true));
+    });
+
+    it('isolates a channel A status failure so the existing Gemini/B metadata stays usable', async () => {
+        const failure = new AdminAuthError('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
+        const { result } = setup({ channelAStatus: vi.fn(async () => { throw failure; }) });
+
+        await waitFor(() => expect(result.current.channelAError).toBe(failure));
+
+        expect(result.current.data).toEqual({ credentials: metadata, telegram: health });
+        expect(result.current.error).toBeNull();
+        expect(result.current.channelA).toBeNull();
+    });
+
+    it('makes the manual refresh fetch the channel A status alongside Gemini/B metadata', async () => {
+        const { result, client } = setup();
+        await waitFor(() => expect(result.current.channelA).toEqual(channelAIdle));
+
+        await act(async () => { await result.current.refresh(); });
+
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
+        expect(client.telegramHealth).toHaveBeenCalledTimes(2);
+        expect(client.channelAStatus).toHaveBeenCalledTimes(2);
+    });
+
+    it('reconciles channel A metadata and status after an A save without auto-applying', async () => {
+        const { result, client } = setup();
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        await act(async () => { await result.current.saveCredential('telegram_channel_a', 'synthetic-secret'); });
+
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
+        expect(client.telegramHealth).toHaveBeenCalledTimes(2);
+        expect(client.channelAStatus).toHaveBeenCalledTimes(2);
+        expect(client.applyChannelA).not.toHaveBeenCalled();
+        expect(client.applyTelegram).not.toHaveBeenCalled();
+    });
+
+    it('reconciles the channel A status after an explicit A apply without touching Telegram apply', async () => {
+        const { result, client } = setup({ channelAStatus: vi.fn(async () => channelARunning) });
+        await waitFor(() => expect(result.current.channelA).toEqual(channelARunning));
+
+        await act(async () => { await result.current.applyChannelA(); });
+
+        expect(client.applyChannelA).toHaveBeenCalledWith(expect.any(AbortSignal));
+        expect(client.applyTelegram).not.toHaveBeenCalled();
+        expect(client.channelAStatus).toHaveBeenCalledTimes(2);
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
+    });
+
+    it('treats a committed channel A stop-unconfirmed deletion as committed and refreshes without auto-apply', async () => {
+        const deleteCredential = vi.fn(async () => {
+            throw new AdminAuthError('PRISMA_CHANNEL_A_STOP_UNCONFIRMED', 409, true);
+        });
+        const { result, client, controller } = setup({ deleteCredential });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let outcome!: Awaited<ReturnType<typeof result.current.deleteCredential>>;
+        await act(async () => { outcome = await result.current.deleteCredential('telegram_channel_a'); });
+
+        expect(outcome).toEqual({ committed: true, stopUnconfirmed: true });
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
+        expect(client.telegramHealth).toHaveBeenCalledTimes(2);
+        expect(client.channelAStatus).toHaveBeenCalledTimes(2);
+        expect(client.applyChannelA).not.toHaveBeenCalled();
+        expect(controller.handleProtectedRequestError).not.toHaveBeenCalled();
+    });
+
+    it('keeps an uncommitted channel A conflict as a plain failure without posing as a committed deletion', async () => {
+        const conflict = new AdminAuthError('PRISMA_CHANNEL_A_STOP_UNCONFIRMED', 409, false);
+        const deleteCredential = vi.fn(async () => { throw conflict; });
+        const { result, client } = setup({ deleteCredential });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        await act(async () => {
+            await expect(result.current.deleteCredential('telegram_channel_a')).rejects.toBe(conflict);
+        });
+
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(1);
+        expect(client.telegramHealth).toHaveBeenCalledTimes(1);
+        expect(client.channelAStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('purges the channel A status cache on logout and never restores a stale late status result', async () => {
+        let release!: (value: ChannelAAdministrationStatus) => void;
+        const pending = new Promise<ChannelAAdministrationStatus>((resolve) => { release = resolve; });
+        const { result, queryClient } = setup({ channelAStatus: vi.fn(() => pending) });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        act(() => {
+            useAuthStore.setState((state) => ({ session: { ...state.session, user: null, isAuthenticated: false } }));
+        });
+        await act(async () => { release(channelARunning); await pending; });
+
+        await waitFor(() => {
+            expect(result.current.channelA).toBeNull();
+            expect(queryClient.getQueryData(PRISMA_CHANNEL_A_STATUS_QUERY_KEY)).toBeUndefined();
+        });
     });
 });

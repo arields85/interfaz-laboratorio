@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    parseChannelAAdministrationStatus,
     parseCredentialMetadata,
     parseCredentialMutation,
     parseTelegramAdministrationStatus,
     parseTelegramPassiveHealth,
     validateCredentialSecret,
+    type ChannelAAdministrationStatus,
 } from './adminCredential.types';
 
 describe('admin credential domain', () => {
@@ -112,6 +114,162 @@ describe('admin credential domain', () => {
             desiredGeneration: 3,
             appliedGeneration: 2,
             restartRequired: true,
+        });
+    });
+
+    describe('channel A administration status', () => {
+        const nullChannelA = {
+            configured: false,
+            desiredGeneration: 3,
+            appliedGeneration: null,
+            activationEpoch: null,
+            activation: null,
+            lastError: null,
+        } as const;
+
+        const runningActivation = {
+            phase: 'running',
+            reason: null,
+            quiescent: false,
+            restartRequired: false,
+        } as const;
+
+        it('parses the exact six-field status with null activation, epoch and lastError', () => {
+            const parsed: ChannelAAdministrationStatus =
+                parseChannelAAdministrationStatus({ ok: true, channelA: nullChannelA });
+            expect(parsed).toEqual(nullChannelA);
+        });
+
+        it('parses running, restart-required and identity-reserved activations with canonical codes', () => {
+            const running = parseChannelAAdministrationStatus({
+                ok: true,
+                channelA: {
+                    configured: true,
+                    desiredGeneration: 4,
+                    appliedGeneration: 4,
+                    activationEpoch: 7,
+                    activation: runningActivation,
+                    lastError: null,
+                },
+            });
+            expect(running.activation).toEqual({ phase: 'running', reason: null, quiescent: false, restartRequired: false });
+
+            const restartRequired = parseChannelAAdministrationStatus({
+                ok: true,
+                channelA: {
+                    configured: true,
+                    desiredGeneration: 5,
+                    appliedGeneration: 4,
+                    activationEpoch: 2,
+                    activation: {
+                        phase: 'stopped',
+                        reason: 'PRISMA_CHANNEL_A_RESTART_REQUIRED',
+                        quiescent: true,
+                        restartRequired: true,
+                    },
+                    lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+                },
+            });
+            expect(restartRequired.activation?.reason).toBe('PRISMA_CHANNEL_A_RESTART_REQUIRED');
+            expect(restartRequired.lastError).toBe('PRISMA_CHANNEL_A_STOP_UNCONFIRMED');
+
+            const reserved = parseChannelAAdministrationStatus({
+                ok: true,
+                channelA: {
+                    configured: true,
+                    desiredGeneration: 1,
+                    appliedGeneration: 0,
+                    activationEpoch: 0,
+                    activation: {
+                        phase: 'failed',
+                        reason: 'TELEGRAM_BOT_IDENTITY_RESERVED',
+                        quiescent: true,
+                        restartRequired: false,
+                    },
+                    lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED',
+                },
+            });
+            expect(reserved.activation?.phase).toBe('failed');
+        });
+
+        it('accepts only the eight canonical lifecycle phases', () => {
+            for (const phase of [
+                'idle', 'preparing', 'prepared', 'running',
+                'stopping', 'stopped', 'failed', 'retired',
+            ] as const) {
+                const parsed = parseChannelAAdministrationStatus({
+                    ok: true,
+                    channelA: {
+                        configured: true,
+                        desiredGeneration: 1,
+                        appliedGeneration: 1,
+                        activationEpoch: 1,
+                        activation: { phase, reason: null, quiescent: true, restartRequired: false },
+                        lastError: null,
+                    },
+                });
+                expect(parsed.activation?.phase).toBe(phase);
+            }
+        });
+
+        it('accepts all ten canonical manager lastError codes in a valid status', () => {
+            for (const lastError of [
+                'PRISMA_CHANNEL_A_CONFIGURATION_INVALID',
+                'PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
+                'PRISMA_CHANNEL_A_CREDENTIAL_MISSING',
+                'PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE',
+                'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
+                'PRISMA_CHANNEL_A_RESTART_REQUIRED',
+                'TELEGRAM_BOT_IDENTITY_RESERVED',
+                'INVALID_CREDENTIAL_REQUEST',
+                'PRISMA_CHANNEL_A_MANAGER_BUSY',
+                'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+            ] as const) {
+                const parsed = parseChannelAAdministrationStatus({
+                    ok: true,
+                    channelA: {
+                        configured: true,
+                        desiredGeneration: 1,
+                        appliedGeneration: 1,
+                        activationEpoch: 1,
+                        activation: { phase: 'failed', reason: null, quiescent: true, restartRequired: false },
+                        lastError,
+                    },
+                });
+                expect(parsed.lastError).toBe(lastError);
+            }
+        });
+
+        it('rejects malformed or dishonest channel A status instead of coercing it', () => {
+            const malformed = [
+                { ok: true },
+                { ok: true, channelA: 42 },
+                { ok: false, channelA: nullChannelA },
+                { ok: true, channelA: nullChannelA, extra: 1 },
+                { ok: true, channelA: { ...nullChannelA, future: true } },
+                { ok: true, channelA: { ...nullChannelA, configured: 'yes' } },
+                { ok: true, channelA: { ...nullChannelA, desiredGeneration: 1.5 } },
+                { ok: true, channelA: { ...nullChannelA, desiredGeneration: -1 } },
+                { ok: true, channelA: { ...nullChannelA, appliedGeneration: '2' } },
+                { ok: true, channelA: { ...nullChannelA, activationEpoch: Number.MAX_SAFE_INTEGER + 1 } },
+                { ok: true, channelA: { ...nullChannelA, activation: { phase: 'running' } } },
+                { ok: true, channelA: { ...nullChannelA, activation: { ...runningActivation, future: true } } },
+                { ok: true, channelA: { ...nullChannelA, activation: { ...runningActivation, phase: 'PAUSED' } } },
+                {
+                    ok: true,
+                    channelA: {
+                        ...nullChannelA,
+                        activation: { ...runningActivation, reason: 'PRISMA_CHANNEL_A_FUTURE_UNKNOWN' },
+                    },
+                },
+                { ok: true, channelA: { ...nullChannelA, activation: { ...runningActivation, quiescent: 'yes' } } },
+                { ok: true, channelA: { ...nullChannelA, lastError: 'internal diagnostic detail' } },
+                { ok: true, channelA: { ...nullChannelA, lastError: 'PRISMA_CHANNEL_A_FUTURE_UNKNOWN' } },
+            ];
+            for (const payload of malformed) {
+                expect(() => parseChannelAAdministrationStatus(payload))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            }
         });
     });
 

@@ -14,6 +14,9 @@ const metadata = {
     telegram: { configured: true },
     telegram_channel_a: { configured: false },
 };
+// Shared metadata snapshot for scenarios whose channel A status reports a
+// configured credential, so UI gating and status never contradict each other.
+const configuredA = { ...metadata, telegram_channel_a: { configured: true } };
 const health = {
     enabled: true, configured: true, running: true, verified: false,
     desiredGeneration: 2, appliedGeneration: 1, restartRequired: true,
@@ -23,6 +26,32 @@ const applied = {
     source: 'protected', enabled: true, configured: true,
     desiredGeneration: 2, appliedGeneration: 2, running: true,
     verified: true, restartRequired: false, lastError: null,
+} as const;
+// Canonical six-key channel A status with nullable generations/activation and
+// lowercase backend phases; mirrors the frozen domain parser contract.
+const channelAIdle = {
+    configured: false,
+    desiredGeneration: 1,
+    appliedGeneration: null,
+    activationEpoch: null,
+    activation: null,
+    lastError: null,
+} as const;
+const channelARunning = {
+    configured: true,
+    desiredGeneration: 4,
+    appliedGeneration: 4,
+    activationEpoch: 2,
+    activation: { phase: 'running', reason: null, quiescent: false, restartRequired: false },
+    lastError: null,
+} as const;
+const channelAStopUnconfirmed = {
+    configured: true,
+    desiredGeneration: 4,
+    appliedGeneration: 4,
+    activationEpoch: 2,
+    activation: { phase: 'stopped', reason: 'PRISMA_CHANNEL_A_RESTART_REQUIRED', quiescent: true, restartRequired: true },
+    lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
 } as const;
 
 function authenticated() {
@@ -46,6 +75,8 @@ function renderSettings(clientOverrides: Partial<CredentialAdministrationClient>
         saveCredential: vi.fn(async () => ({ provider: 'gemini', configured: true })),
         deleteCredential: vi.fn(async () => undefined),
         applyTelegram: vi.fn(async () => applied),
+        channelAStatus: vi.fn(async () => channelAIdle),
+        applyChannelA: vi.fn(async () => channelARunning),
         ...clientOverrides,
     };
     const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
@@ -109,6 +140,9 @@ async function createClientWithDeferredChannelAWrite(method: 'PUT' | 'DELETE') {
             return Promise.resolve(jsonResponse({ ok: true, providers: metadata }));
         }
         if (path === '/api/prisma/health') return Promise.resolve(jsonResponse(healthEnvelope()));
+        if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
+            return Promise.resolve(jsonResponse({ ok: true, channelA: channelAIdle }));
+        }
         if (path === '/api/prisma/admin/credentials/telegram_channel_a' && init?.method === method) {
             return pendingWrite;
         }
@@ -138,6 +172,9 @@ async function createClientWithDeferredRefresh() {
             return Promise.resolve(jsonResponse({ ok: true, providers: metadata }));
         }
         if (path === '/api/prisma/health') return Promise.resolve(jsonResponse(healthEnvelope()));
+        if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
+            return Promise.resolve(jsonResponse({ ok: true, channelA: channelAIdle }));
+        }
         if (init?.method === 'PUT') return Promise.resolve(jsonResponse({ ok: true, provider: 'gemini', configured: true }));
         if (init?.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }));
         if (path === '/api/prisma/admin/credentials/telegram/apply') {
@@ -231,6 +268,9 @@ describe('VoiceCredentialSettings', () => {
         expect(retry).toBeEnabled();
         await user.click(retry);
         expect(deleteCredential).toHaveBeenCalledTimes(2);
+        expect(deleteCredential).toHaveBeenNthCalledWith(1, 'telegram', expect.any(AbortSignal));
+        expect(deleteCredential).toHaveBeenNthCalledWith(2, 'telegram', expect.any(AbortSignal));
+        expect(deleteCredential).not.toHaveBeenCalledWith('telegram_channel_a', expect.anything());
         expect(client.applyTelegram).not.toHaveBeenCalled();
     });
 
@@ -251,12 +291,15 @@ describe('VoiceCredentialSettings', () => {
     it('applies Telegram only through its explicit action', async () => {
         const user = userEvent.setup();
         const { client } = renderSettings();
-        const apply = await screen.findByRole('button', { name: 'Aplicar cambio' });
+        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        // The B Apply control appears after Telegram metadata loads; await it.
+        const apply = await within(telegram).findByRole('button', { name: 'Aplicar cambio' });
         await waitFor(() => expect(apply).toBeEnabled());
 
         await user.click(apply);
 
         await waitFor(() => expect(client.applyTelegram).toHaveBeenCalledTimes(1));
+        expect(client.applyChannelA).not.toHaveBeenCalled();
         expect(client.saveCredential).not.toHaveBeenCalled();
         expect(client.deleteCredential).not.toHaveBeenCalled();
     });
@@ -267,7 +310,9 @@ describe('VoiceCredentialSettings', () => {
             throw new AdminAuthError('TELEGRAM_BOT_IDENTITY_RESERVED', 409, false);
         });
         const { client } = renderSettings({ applyTelegram });
-        const apply = await screen.findByRole('button', { name: 'Aplicar cambio' });
+        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        // The B Apply control appears after Telegram metadata loads; await it.
+        const apply = await within(telegram).findByRole('button', { name: 'Aplicar cambio' });
         await waitFor(() => expect(apply).toBeEnabled());
 
         await user.click(apply);
@@ -276,7 +321,7 @@ describe('VoiceCredentialSettings', () => {
             'Este bot ya está en uso por el otro canal. Configurá un bot distinto.',
         );
         expect(screen.queryByText('Cambio de Telegram aplicado y estado actualizado.')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Aplicar cambio' })).toBeEnabled();
+        expect(within(telegram).getByRole('button', { name: 'Aplicar cambio' })).toBeEnabled();
         expect(client.saveCredential).not.toHaveBeenCalled();
         expect(client.deleteCredential).not.toHaveBeenCalled();
     });
@@ -297,7 +342,7 @@ describe('VoiceCredentialSettings', () => {
         expect(screen.queryByText('raw-provider-detail')).not.toBeInTheDocument();
     });
 
-    it('renders the channel A card as a metadata-only credential field without runtime claims', async () => {
+    it('renders the channel A card with its own status and explicit apply without claiming verification or provenance', async () => {
         renderSettings();
         const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
         const telegram = screen.getByRole('group', { name: 'Telegram' });
@@ -311,11 +356,12 @@ describe('VoiceCredentialSettings', () => {
         const input = within(channelA).getByLabelText('Credencial Telegram (Canal A)');
         expect(input).toHaveAttribute('type', 'password');
         expect(input).toHaveAttribute('autocomplete', 'new-password');
-        expect(within(channelA).queryByRole('button', { name: 'Aplicar cambio' })).not.toBeInTheDocument();
-        expect(within(channelA).queryByText(/Ejecución|verificad|Habilitad|Generación|Origen/)).not.toBeInTheDocument();
+        // Channel A carries its own explicit apply, distinct from Telegram's.
+        expect(within(channelA).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        // No verification, provenance or enablement claims for channel A.
+        expect(within(channelA).queryByText(/Verificaci|Origen|Habilitada/)).not.toBeInTheDocument();
         expect(screen.getAllByRole('button', { name: 'Guardar credencial' })).toHaveLength(3);
         expect(screen.getAllByRole('button', { name: 'Eliminar credencial' })).toHaveLength(3);
-        expect(screen.getAllByRole('button', { name: 'Aplicar cambio' })).toHaveLength(1);
     });
 
     it('saves and deletes the channel A credential on its exact provider without applying or cross-clearing', async () => {
@@ -341,6 +387,7 @@ describe('VoiceCredentialSettings', () => {
         ));
         expect(saveCredential).toHaveBeenCalledTimes(1);
         expect(client.applyTelegram).not.toHaveBeenCalled();
+        expect(client.applyChannelA).not.toHaveBeenCalled();
         expect(await screen.findByText('Credencial guardada. No se aplicaron cambios al proveedor.')).toBeInTheDocument();
         expect(channelAInput).toHaveValue('');
         expect(geminiInput).toHaveValue('gemini-draft');
@@ -354,6 +401,7 @@ describe('VoiceCredentialSettings', () => {
 
         await waitFor(() => expect(deleteCredential).toHaveBeenCalledWith('telegram_channel_a', expect.any(AbortSignal)));
         expect(client.applyTelegram).not.toHaveBeenCalled();
+        expect(client.applyChannelA).not.toHaveBeenCalled();
         expect(await screen.findByText('Credencial eliminada.')).toBeInTheDocument();
         expect(geminiInput).toHaveValue('gemini-draft');
         expect(telegramInput).toHaveValue('telegram-draft');
@@ -434,6 +482,7 @@ describe('VoiceCredentialSettings', () => {
         renderSettings({
             credentialMetadata: vi.fn(() => pendingMetadata),
             telegramHealth: vi.fn(() => new Promise<typeof health>(() => undefined)),
+            channelAStatus: vi.fn(() => new Promise<typeof channelAIdle>(() => undefined)),
         });
 
         expect(screen.getAllByText('Consultando estado')).toHaveLength(3);
@@ -470,9 +519,32 @@ describe('VoiceCredentialSettings', () => {
         expect(await screen.findByText('Último estado conocido; la actualización falló.')).toBeInTheDocument();
         expect(screen.getByText('Ejecución activa')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Actualizar estado' })).toBeEnabled();
-        expect(screen.getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        expect(within(screen.getByRole('group', { name: 'Telegram' })).getByRole('button', { name: 'Aplicar cambio' }))
+            .toBeDisabled();
         expect(screen.getAllByRole('button', { name: 'Guardar credencial' })).toSatisfy((buttons: HTMLButtonElement[]) =>
             buttons.every((button) => button.disabled));
+    });
+
+    it('retains the last known channel A status and labels the card after a failed manual refresh', async () => {
+        const user = userEvent.setup();
+        const statusFailure = new AdminAuthError('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
+        const channelAStatus = vi.fn(async () => channelARunning)
+            .mockResolvedValueOnce(channelARunning)
+            .mockRejectedValueOnce(statusFailure);
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus });
+        const initialCard = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        expect(await within(initialCard).findByText('Ejecución activa')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Actualizar estado' }));
+
+        const channelACard = screen.getByRole('group', { name: 'Telegram (Canal A)' });
+        expect(await within(channelACard).findByText('Último estado conocido; la actualización falló.')).toBeInTheDocument();
+        // Prior A data is retained by TanStack Query on the failed refetch.
+        expect(within(channelACard).getByText('Ejecución activa')).toBeInTheDocument();
+        expect(within(channelACard).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        // The failure surfaces as the sanitized card message, never the raw code.
+        expect(within(channelACard).getByText('El estado del Canal A no está disponible.')).toBeInTheDocument();
+        expect(screen.queryByText('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE')).not.toBeInTheDocument();
     });
 
     it('does not clear a newer draft or publish save success when an old refresh completes', async () => {
@@ -518,7 +590,9 @@ describe('VoiceCredentialSettings', () => {
         const user = userEvent.setup();
         const controlled = await createClientWithDeferredRefresh();
         const { rerender, controller } = renderSettingsWithClient(controlled.client);
-        const apply = await screen.findByRole('button', { name: 'Aplicar cambio' });
+        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        // The B Apply control appears after Telegram metadata loads; await it.
+        const apply = await within(telegram).findByRole('button', { name: 'Aplicar cambio' });
         await waitFor(() => expect(apply).toBeEnabled());
         await user.click(apply);
         await waitFor(() => expect(controlled.metadataRequestCount()).toBe(2));
@@ -528,5 +602,159 @@ describe('VoiceCredentialSettings', () => {
         await act(async () => { controlled.releaseRefresh(); });
 
         await waitFor(() => expect(screen.queryByText('Cambio de Telegram aplicado y estado actualizado.')).not.toBeInTheDocument());
+    });
+
+    it('shows the channel A pending/applied and running/stopped state from the real status', async () => {
+        const running = renderSettings({ channelAStatus: vi.fn(async () => channelARunning) });
+        const runningCard = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        expect(await within(runningCard).findByText('Sin cambios pendientes')).toBeInTheDocument();
+        expect(within(runningCard).getByText('Ejecución activa')).toBeInTheDocument();
+        running.unmount();
+
+        renderSettings();
+        const idleCard = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        expect(await within(idleCard).findByText('Cambio pendiente de aplicar')).toBeInTheDocument();
+        expect(within(idleCard).getByText('Ejecución detenida')).toBeInTheDocument();
+    });
+
+    // Regression: the non-quiescent 'stopping' and 'failed' phases must not
+    // be labeled 'Ejecución detenida'; idle/stopped phases legitimately keep it.
+    it.each([
+        {
+            phase: 'stopping' as const,
+            expectedLabel: 'Detención en curso',
+        },
+        {
+            phase: 'failed' as const,
+            expectedLabel: 'Estado de ejecución no confirmado',
+        },
+    ])('does not render a non-running channel A activation phase ($phase) as stopped', async ({ phase, expectedLabel }) => {
+        const status = {
+            ...channelARunning,
+            activation: { phase, reason: null, quiescent: false, restartRequired: false },
+            lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+        } as const;
+        const { client } = renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => status),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+
+        // Anchor on the settled real status, not the initial-load render.
+        expect(await within(channelA).findByText('Sin cambios pendientes')).toBeInTheDocument();
+
+        expect(within(channelA).getByText(expectedLabel)).toBeInTheDocument();
+        expect(within(channelA).queryByText('Ejecución detenida')).not.toBeInTheDocument();
+        expect(client.applyChannelA).not.toHaveBeenCalled();
+        expect(client.deleteCredential).not.toHaveBeenCalled();
+    });
+
+    it('applies channel A only through its explicit action and never through Telegram apply', async () => {
+        const user = userEvent.setup();
+        const { client } = renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => channelARunning),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const apply = await within(channelA).findByRole('button', { name: 'Aplicar cambio' });
+        await waitFor(() => expect(apply).toBeEnabled());
+
+        await user.click(apply);
+
+        await waitFor(() => expect(client.applyChannelA).toHaveBeenCalledTimes(1));
+        expect(client.applyTelegram).not.toHaveBeenCalled();
+        expect(await screen.findByText('Cambio del Canal A aplicado y estado actualizado.')).toBeInTheDocument();
+    });
+
+    it('gates the channel A apply on a saved credential and available status without a typed secret', async () => {
+        // Without a configured credential the apply stays disabled even with status data.
+        const unconfigured = renderSettings();
+        const unconfiguredCard = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const unconfiguredApply = await waitFor(() =>
+            within(unconfiguredCard).getByRole('button', { name: 'Aplicar cambio' }));
+        await waitFor(() => expect(unconfiguredApply).toBeDisabled());
+        unconfigured.unmount();
+
+        // A configured credential and available status allow apply with no secret typed.
+        const configured = renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => channelARunning),
+        });
+        const configuredCard = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const configuredApply = await within(configuredCard).findByRole('button', { name: 'Aplicar cambio' });
+        await waitFor(() => expect(configuredApply).toBeEnabled());
+        expect(within(configuredCard).getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
+        configured.unmount();
+
+        // While the channel A status is unavailable, apply stays disabled.
+        renderSettings({ channelAStatus: vi.fn(() => new Promise<typeof channelARunning>(() => undefined)) });
+        const pendingCard = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const pendingApply = await waitFor(() =>
+            within(pendingCard).getByRole('button', { name: 'Aplicar cambio' }));
+        await waitFor(() => expect(pendingApply).toBeDisabled());
+    });
+
+    it('disables only channel A controls when its status fails and keeps Gemini/B usable', async () => {
+        const { client } = renderSettings({
+            channelAStatus: vi.fn(async () => {
+                throw new AdminAuthError('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
+            }),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        const gemini = screen.getByRole('group', { name: 'Gemini' });
+        const telegram = screen.getByRole('group', { name: 'Telegram' });
+
+        // Anchor every disablement assertion to the settled A error, not to a
+        // blank-draft or initial-load state that would disable controls anyway.
+        expect(await within(channelA).findByText('El estado del Canal A no está disponible.')).toBeInTheDocument();
+        expect(within(channelA).getByLabelText('Credencial Telegram (Canal A)')).toBeDisabled();
+        expect(within(channelA).getByRole('button', { name: 'Guardar credencial' })).toBeDisabled();
+        expect(within(channelA).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        expect(within(channelA).getByRole('button', { name: 'Eliminar credencial' })).toBeDisabled();
+        expect(screen.queryByText('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE')).not.toBeInTheDocument();
+
+        expect(within(gemini).getByLabelText('Credencial Gemini')).toBeEnabled();
+        expect(within(telegram).getByRole('button', { name: 'Aplicar cambio' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Actualizar estado' })).toBeEnabled();
+        expect(client.applyChannelA).not.toHaveBeenCalled();
+    });
+
+    it('retries only the channel A stop-unconfirmed deletion from its own warning', async () => {
+        const user = userEvent.setup();
+        const deleteCredential = vi.fn(async () => {
+            throw new AdminAuthError('PRISMA_CHANNEL_A_STOP_UNCONFIRMED', 409, true);
+        });
+        const { client } = renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            deleteCredential,
+            channelAStatus: vi.fn(async () => channelARunning),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+        await waitFor(() => expect(within(channelA).getByRole('button', { name: 'Eliminar credencial' })).toBeEnabled());
+
+        await user.click(within(channelA).getByRole('button', { name: 'Eliminar credencial' }));
+        await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
+
+        expect(await screen.findByText('La credencial fue eliminada, pero la detención no pudo confirmarse.'))
+            .toBeInTheDocument();
+        const retry = screen.getByRole('button', { name: 'Reintentar detención' });
+        expect(retry).toBeEnabled();
+        await user.click(retry);
+
+        expect(deleteCredential).toHaveBeenCalledTimes(2);
+        expect(deleteCredential).toHaveBeenNthCalledWith(1, 'telegram_channel_a', expect.any(AbortSignal));
+        expect(deleteCredential).toHaveBeenNthCalledWith(2, 'telegram_channel_a', expect.any(AbortSignal));
+        expect(deleteCredential).not.toHaveBeenCalledWith('telegram', expect.anything());
+        expect(client.applyChannelA).not.toHaveBeenCalled();
+        expect(await screen.findByText('La credencial ya no existe, pero la detención todavía no pudo confirmarse.'))
+            .toBeInTheDocument();
+    });
+
+    it('shows the channel A lastError as safe guidance without raw internal codes', async () => {
+        renderSettings({ channelAStatus: vi.fn(async () => channelAStopUnconfirmed) });
+        const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
+
+        expect(await within(channelA).findByText('No se pudo confirmar la detención del Canal A.')).toBeInTheDocument();
+        expect(within(channelA).queryByText('PRISMA_CHANNEL_A_STOP_UNCONFIRMED')).not.toBeInTheDocument();
     });
 });
