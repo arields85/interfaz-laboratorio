@@ -1,6 +1,12 @@
 # Especificación funcional — Modo Administrador
 ## Plataforma HMI/Observabilidad Industrial — Builder de estructura, dashboards y bindings
 
+> **Aviso histórico — no normativo.**
+> Este documento es un antecedente histórico del proyecto **interfaz HMI**. Registra decisiones de una etapa anterior del proyecto y puede contener información obsoleta o superada. No es fuente de requisitos ni de verdad de implementación vigente.
+> Para el estado actual, consultá [`../AGENTS.md`](../AGENTS.md) y la documentación activa en `../docs/`.
+
+---
+
 ## 0. Propósito
 
 Este documento define la especificación funcional del **Modo Administrador** de la plataforma HMI/Observabilidad Industrial.

@@ -1,13 +1,17 @@
 # UI Style Guide — Design System Base v1
 
-**Proyecto:** HMI Industrial Platform — Core Analytics  
-**Estado:** ✅ Activo · Baseline Visual Oficial  
+**Proyecto:** interfaz HMI\
+**Estado:** Histórico — no normativo (estado original: ✅ Activo · Baseline Visual Oficial)\
 **Versión:** 1.0.0  
 **Fecha de baseline:** 2026-03-11  
 **Complementa a:**
 - `Directiva_maestra_v3.1.md`
 - `Arquitectura Técnica de Implementación HMI v1.3.md`
 - `Especificación funcional_Modo Administrador.md`
+
+> **Aviso histórico — no normativo.**
+> Este documento es un antecedente histórico del proyecto **interfaz HMI**. Registra el baseline visual de una etapa anterior del proyecto y puede contener información obsoleta o superada. No es fuente de requisitos ni de verdad de implementación vigente.
+> Para el estado actual, consultá [`../AGENTS.md`](../AGENTS.md) y la documentación activa en `../docs/`.
 
 ---
 
@@ -232,7 +236,7 @@ Para botones de acción primaria con brillo de fondo (ej. "Subir CSV", "Publicar
 }
 ```
 
-Solo para la palabra "Analytics" en el branding del Topbar. Uso restringido — máximo una instancia por layout.
+Solo para la palabra "HMI" en el branding del Topbar. Uso restringido — máximo una instancia por layout.
 
 ### 5.9 `.nav-link-gradient-underline`
 
@@ -317,13 +321,13 @@ Para cards de área y alarmas, una barra rectangular izquierda refuerza el color
 | **Nav link activo (Topbar)** | Link de navegación seleccionado | `text-xs font-bold tracking-widest uppercase text-white` | "OVERVIEW" |
 | **Nav link inactivo (Topbar)** | Link no seleccionado | `text-xs font-bold tracking-widest uppercase text-slate-500` | "DIAGNOSTICS", "LOGS" |
 | **Nav item (Sidebar)** | Ítem de menú lateral | `text-sm font-medium` | "Visión General", "Alarmas" |
-| **Branding Topbar** | Nombre de la aplicación | `text-xl font-extrabold tracking-tight uppercase` | "CORE **Analytics**" |
+| **Branding Topbar** | Nombre de la aplicación | `text-xl font-extrabold tracking-tight uppercase` | "interfaz **HMI**" |
 | **Metadata técnica** | Timestamps, códigos, IDs | `text-[9px] font-mono text-slate-500` | "ERR-CP-402", "2026-03-11 10:05" |
 | **Badge / Tag** | Etiquetas de categoría o lote | `text-[10px] font-bold uppercase tracking-widest` | "RECIPE ASRP-500mg", "BATCH #BCTX-109" |
 
 ### 7.2 Reglas tipográficas
 
-- **Nunca** usar `font-light` excepto en la palabra "Analytics" del branding.
+- **Nunca** usar `font-light` excepto en la palabra "HMI" del branding.
 - **Siempre** aplicar `tracking-tight` o superior en headings (−0.025em mínimo).
 - Los KPI numéricos usan `font-black` (900). Nunca menos de `font-bold` (700).
 - El texto muted (`text-slate-400`) es el default para labels; el texto más claro está reservado para valores activos.
@@ -529,7 +533,7 @@ Compensación:    El layout principal usa pt-[81px] para no quedar debajo
 | Elemento | Especificación |
 |----------|---------------|
 | Logo | `size-10` (40×40px), `rounded-xl`, gradiente `from-[#A78BFA] to-[#22d3ee]`, ícono `Activity` size 22, shadow glow cyan |
-| Nombre app | `text-xl font-extrabold tracking-tight uppercase` — "CORE" en blanco + "Analytics" con `.text-gradient` |
+| Nombre app | `text-xl font-extrabold tracking-tight uppercase` — "interfaz" en blanco + "HMI" con `.text-gradient` |
 | Separación logo→nombre | `gap-4` |
 | Input de búsqueda | `bg-white/5 border border-white/5 rounded-2xl px-4 py-2 w-80`, placeholder `text-slate-600` |
 | Separación branding→búsqueda | `gap-12` |

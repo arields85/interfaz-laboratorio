@@ -1,4 +1,4 @@
-# AGENTS.md — Interfaz-Laboratorio
+# AGENTS.md — interfaz HMI
 
 > Guía de contexto para agentes de IA y desarrolladores. Leela completa antes de tocar código.
 
@@ -6,7 +6,7 @@
 
 ## 1. Identidad del Proyecto
 
-**Interfaz-Laboratorio** es una interfaz HMI (Human-Machine Interface) industrial de visualización de datos en tiempo real. Está pensada como una base escalable y reutilizable para múltiples laboratorios de distintas firmas. No es una interfaz cerrada para un único caso o cliente.
+**interfaz HMI** es una interfaz de visualización de datos en tiempo real (Human-Machine Interface) para entornos industriales, de solo lectura. Es una base escalable y reutilizable aplicable a distintas industrias, organizaciones y equipos. No es una interfaz cerrada para un único caso, planta o cliente.
 
 - La aplicación vive en `hmi-app/` (es un proyecto Vite independiente dentro del monorepo).
 - El código fuente está en `hmi-app/src/`.
@@ -66,6 +66,7 @@ Lo crítico en el día a día:
 - Cero parches ad-hoc — resolver en la capa responsable.
 - Cero valores hardcodeados cuando existe token, primitive o medición runtime.
 - Scrollbars: siempre `hmi-scrollbar`.
+- `Directrices/` contiene antecedentes históricos no normativos del proyecto: no es fuente de requisitos vigentes y sus archivos no deben modificarse. Ver [`Directrices/README_directrices.md`](Directrices/README_directrices.md).
 
 Políticas completas (anti-parches, anti-hardcode, anti-hardcode dimensional): [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md).
 
@@ -89,61 +90,13 @@ El modo admin es configuración de la propia HMI, no control de planta. Usar `Ad
 
 Convenciones completas del modo admin: [`hmi-app/src/components/admin/ADMIN_CONVENTIONS.md`](hmi-app/src/components/admin/ADMIN_CONVENTIONS.md).
 
----
-
-## 8. Testing
-
-Stack: vitest + @testing-library/react + jest-dom + user-event + jsdom. Tests co-locados como `*.test.ts(x)`. TDD obligatorio para lógica pura y bugs. Cobertura mínima 70/70 enforced.
-
-Convención completa (targets por capa, mocks, TDD, accesibilidad): [`docs/TESTING.md`](docs/TESTING.md).
+Para crear o corregir paneles de propiedades de widgets, cargá y seguí la skill de proyecto [widget-property-panel](.opencode/skills/widget-property-panel/SKILL.md).
 
 ---
 
-## 9. Reglas para Agentes IA
+## 8. Referencias
 
-### Ejecución y flujo SDD
-
-El agente principal puede explorar, implementar, testear y refactorizar directamente, sin pedir una autorización adicional para editar inline. La delegación es opcional: usala cuando aporte especialización, trabajo paralelo o revisión independiente, no como requisito para avanzar.
-
-Mantené el mínimo alcance, las reglas de seguridad, TDD y la verificación independiente que corresponda al trabajo.
-
-Para cambios sustanciales, de producto, de arquitectura o que impacten comportamiento, se trabaja con flujo **SDD**. Verificá primero si el contexto SDD ya está inicializado y, cuando corresponda, iniciá o revalidá `sdd-init` antes de avanzar.
-
-### Gestión de pendientes
-
-- `docs/PENDING_WORK.md` es la autoridad de descubrimiento sobre **qué** está pendiente y su estado activo. Leelo cuando el usuario mencione pendientes, backlog, continuación o próximos pasos, y antes de trabajar en un área indexada.
-- Para resolver el detalle, contexto, decisiones y criterios, usá el `Engram topic` de la fila: buscalo con `mem_search` y recuperalo con `mem_get_observation`. Nunca implementes basándote solo en el resumen del índice.
-- Para dar de alta un pendiente: guardá primero el detalle en Engram con un `topic_key` estable `backlog/<slug>`, verificá que sea recuperable y recién entonces agregá la fila al índice. No uses IDs numéricos de Engram como referencia canónica ni dejes filas huérfanas sin un topic verificable.
-- Para cerrar un pendiente: actualizá o cerrá primero el detalle en Engram y después retirá la fila activa. Git conserva el historial de las entradas resueltas o eliminadas.
-
-### Antes de escribir código, verificá:
-
-1. ¿El archivo que voy a modificar existe realmente? (no inventar rutas)
-2. ¿Los tipos que uso están definidos en `domain/`?
-3. ¿Estoy respetando el flujo de datos: service → adapter → domain → query/store → UI?
-4. ¿Estoy usando tokens CSS del `@theme {}` en lugar de valores hardcodeados?
-5. ¿Todo contenedor con scroll usa `hmi-scrollbar`?
-6. ¿Estoy usando `widgetCapabilities.ts` para chequear capacidades en vez de hardcodear `widget.type === 'xxx'`?
-7. ¿Pregunta de control: **"¿Esto refuerza una interfaz observadora, premium, industrial, clara y escalable?"**
-8. ¿Escribí el test antes del código cuando corresponde (utils, adapters, services, resolvers, bugs)?
-9. Si voy a crear/corregir un widget property panel, ¿cargué y seguí la skill de proyecto `.opencode/skills/widget-property-panel/SKILL.md`?
-
-### Prohibido:
-
-- Agregar cualquier funcionalidad de escritura o control hacia el proceso industrial
-- Hardcodear colores hex o nombres de fuente en componentes
-- Modificar archivos en `Directrices/` (son documentación fuente, no código)
-- Crear tipos de dominio fuera de `hmi-app/src/domain/`
-- Referenciar `tailwind.config.js` (no existe en este proyecto con Tailwind v4)
-- Ignorar los tres tipos de estado ortogonales (mezclar `EquipmentStatus` con `MetricStatus`, por ejemplo)
-
-### Ante la duda:
-
-Consultá los documentos en `Directrices/` antes de tomar una decisión arquitectural.
-
----
-
-## 10. Referencias
+Para pendientes, backlog, continuación o próximos pasos, y antes de trabajar en un área indexada, consultá [`docs/PENDING_WORK.md`](docs/PENDING_WORK.md). Allí se define el protocolo de consulta y mantenimiento del índice y su detalle en Engram.
 
 | Documento | Descripción |
 |-----------|-------------|
@@ -153,10 +106,6 @@ Consultá los documentos en `Directrices/` antes de tomar una decisión arquitec
 | [`docs/TESTING.md`](docs/TESTING.md) | Stack de testing, coverage, TDD, mocks, fixtures |
 | [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) | Contrato JSON estable de integración de datos en tiempo real, estados oficiales, resolución, fallbacks |
 | [`docs/PENDING_WORK.md`](docs/PENDING_WORK.md) | Índice activo de pendientes y referencias a su detalle en Engram |
-| [`Directrices/Directiva_maestra_v3.1.md`](Directrices/Directiva_maestra_v3.1.md) | Directiva maestra: visión, principios, restricciones globales |
-| [`Directrices/Arquitectura Técnica de Implementación HMI v1.3.md`](Directrices/Arquitectura%20Técnica%20de%20Implementación%20HMI%20v1.3.md) | Arquitectura técnica formal |
-| [`Directrices/Especificación funcional_Modo Administrador.md`](Directrices/Especificación%20funcional_Modo%20Administrador.md) | Spec funcional del modo administrador |
-| [`Directrices/UI_Style_Guide_Design_System_Base_v1.md`](Directrices/UI_Style_Guide_Design_System_Base_v1.md) | Guía visual formal |
 | [`hmi-app/src/widgets/WIDGET_AUTHORING.md`](hmi-app/src/widgets/WIDGET_AUTHORING.md) | Cómo crear widgets nuevos |
 | [`hmi-app/src/components/admin/ADMIN_CONVENTIONS.md`](hmi-app/src/components/admin/ADMIN_CONVENTIONS.md) | Convenciones operativas del modo admin |
 | [`docs/SHADER_BACKGROUND.md`](docs/SHADER_BACKGROUND.md) | Arquitectura del fondo WebGL shader, efectos, compatibilidad, performance, gotchas |

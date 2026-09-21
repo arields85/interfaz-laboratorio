@@ -1,13 +1,17 @@
 # V3.1 — Directiva Maestra del Proyecto HMI Industrial Web
 ## Sistema de visualización premium para datos de proceso industriales
 
-> **Estado:** Activo  
+> **Estado:** Histórico — no normativo (estado original: Activo)\
 > **Versión:** 3.1  
 > **Tipo de documento:** Directiva maestra de producto, diseño y arquitectura  
 > **Naturaleza del sistema:** Observador / Visualizador / Asistivo  
 > **Restricción crítica:** No actuador, no controlador, no sistema de mando, no sistema de seguridad  
 > **Tecnologías base aprobadas:** React + Vite + TypeScript + Tailwind CSS + CSS custom  
 > **Objetivo del documento:** Servir como marco rector para que cualquier agente IA, desarrollador o sistema de generación implemente el producto sin desviarse del alcance, del lenguaje visual ni de las restricciones operativas del proyecto
+
+> **Aviso histórico — no normativo.**
+> Este documento es un antecedente histórico del proyecto **interfaz HMI**. Registra decisiones de una etapa anterior del proyecto y puede contener información obsoleta o superada. No es fuente de requisitos ni de verdad de implementación vigente.
+> Para el estado actual, consultá [`../AGENTS.md`](../AGENTS.md) y la documentación activa en `../docs/`.
 
 ---
 

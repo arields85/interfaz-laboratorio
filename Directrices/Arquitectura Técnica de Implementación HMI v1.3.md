@@ -1,3 +1,9 @@
+> **Aviso histórico — no normativo.**
+> Este documento es un antecedente histórico del proyecto **interfaz HMI**. Registra decisiones de una etapa anterior del proyecto y puede contener información obsoleta o superada. No es fuente de requisitos ni de verdad de implementación vigente.
+> Para el estado actual, consultá [`../AGENTS.md`](../AGENTS.md) y la documentación activa en `../docs/`.
+
+---
+
 # 0. Objetivo del documento
 
 Este documento define la Arquitectura Técnica de Implementación HMI v1.3
