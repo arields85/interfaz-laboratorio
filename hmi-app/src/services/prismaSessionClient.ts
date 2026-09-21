@@ -5,7 +5,7 @@ import {
     PRISMA_SNAPSHOT_URL,
     PRISMA_TTS_LIVE_URL,
 } from '../config/prismaAssistant.config';
-import type { PrismaSessionMetadata, PrismaSessionRequestSnapshot } from '../domain/prismaSession.types';
+import type { PrismaContextCommand, PrismaContextIntent, PrismaSessionMetadata, PrismaSessionRequestSnapshot } from '../domain/prismaSession.types';
 
 const CAPABILITY_HEADER = 'X-Prisma-Session-Capability';
 const AUTHORIZED_PATHS = new Set([
@@ -29,6 +29,8 @@ export class PrismaSessionClient {
     #voiceEventKeys = new Set<string>();
     #responseEpochs = new WeakMap<Response, number>();
     #resetListeners = new Set<() => void>();
+    #commandOrder = 0;
+    #contextIntents = new WeakMap<PrismaContextIntent, { epoch: number; order: number }>();
 
     constructor(fetchImpl: typeof fetch = (...args) => fetch(...args)) {
         this.#fetchImpl = fetchImpl;
@@ -36,6 +38,65 @@ export class PrismaSessionClient {
 
     get snapshot(): PrismaSessionRequestSnapshot {
         return { epoch: this.#epoch };
+    }
+
+    createContextIntent(): PrismaContextIntent {
+        if (this.#commandOrder >= Number.MAX_SAFE_INTEGER) {
+            throw new Error('Prisma context command order exhausted');
+        }
+        const intent = Object.freeze({}) as PrismaContextIntent;
+        this.#contextIntents.set(intent, { epoch: this.#epoch, order: ++this.#commandOrder });
+        return intent;
+    }
+
+    async publishContext(
+        intent: PrismaContextIntent,
+        snapshot: unknown,
+        signal?: AbortSignal,
+        transport?: typeof fetch,
+    ): Promise<Response> {
+        const { order } = this.#currentContextIntent(intent);
+        return this.#sendContext(intent, { version: 1, command: 'publish', order, snapshot }, signal, transport);
+    }
+
+    async invalidateContext(
+        intent: PrismaContextIntent,
+        signal?: AbortSignal,
+        transport?: typeof fetch,
+    ): Promise<Response> {
+        const { order } = this.#currentContextIntent(intent);
+        return this.#sendContext(intent, { version: 1, command: 'invalidate', order }, signal, transport);
+    }
+
+    #currentContextIntent(intent: PrismaContextIntent): { epoch: number; order: number } {
+        const captured = this.#contextIntents.get(intent);
+        if (captured === undefined || captured.epoch !== this.#epoch) throw new PrismaStaleSessionResponse();
+        return captured;
+    }
+
+    async #sendContext(
+        intent: PrismaContextIntent,
+        command: PrismaContextCommand,
+        signal?: AbortSignal,
+        transport?: typeof fetch,
+    ): Promise<Response> {
+        this.#currentContextIntent(intent);
+        throwIfAborted(signal);
+        const body = JSON.stringify(command);
+        // Serialization can invoke caller code. Fence again before bootstrap or I/O.
+        this.#currentContextIntent(intent);
+        const init = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            signal,
+        };
+        if (transport === undefined) return this.fetch(PRISMA_SNAPSHOT_URL, init);
+        // Existing exporter test seam: ordered protocol without real bootstrap.
+        // Never attach the private capability to an injected transport.
+        const response = await transport(PRISMA_SNAPSHOT_URL, init);
+        this.#currentContextIntent(intent);
+        return response;
     }
 
     async bootstrap(): Promise<PrismaSessionMetadata> {

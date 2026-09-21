@@ -1,6 +1,144 @@
 # Prisma Channel A remote — ODD tasks
 
-## Session close — exact next-session continuation
+## Active continuation — RCA-5f manager and persisted configuration
+
+**Current phase: RCA-5f RED observed — session stop before implementation.** Test author `mub9bjs2-9-98k6` completed 42 new methods (11 configuration, 29 manager, 2 activation forwards), approximately 997 authored lines, with static readback only and no commands or production edits. Independent verifier `mub9obt7-a-lcwl` found no blocking oracle/containment issue in static review and executed exactly three existing focused supervisors once each, foreground with 180-second bounds. Native assessment returned unavailable/empty output; independent verification used the high-risk fallback, with RDD off, not native approval. RCA-5e's accepted offline 178 tests, build/lint and separate 13-test repeat remain historical evidence, not newly rerun.
+
+### Observed RED — completed phase-local grant
+
+| Discovery pattern | Methods | PASS | Failures | Error events | Skips | unittest duration | Exit |
+|---|---:|---:|---:|---:|---:|---|---:|
+| `test_channel_a_configuration.py` | 11 | 0 | 0 | 11 | 0 | 0.008s | 1 |
+| `test_channel_a_manager.py` | 29 | 0 | 0 | 29 | 0 | 0.005s | 1 |
+| `test_channel_a_activation.py` | 15 | 13 | 0 | 3 | 0 | 0.030s | 1 |
+
+The grant used the exact **Focused backend supervisor** block below with only its discovery pattern changed for each row, a fresh copied environment and owned sandbox. These are unittest durations, NOT supervisor wall times. The completed grant is exhausted: no replay or further execution is authorized. No unexpected dispatch, timeout, cleanup failure or surviving-worker warning was reported. Environment isolation is not network containment.
+
+All 42 new methods are RED from missing modules/APIs, **not observed behavioral failures**. Both configuration's 11 and manager's 29 methods first error on missing `prisma_runtime.channel_a_configuration` in setup; the manager import, constructor and behaviors are UNREACHED. The new activation start True/False subtests yield two errors and the new status method one; return, repeat and snapshot assertions are unreached. The 13 baseline PASS comprise 9 flow, 3 revision and 1 guard-proof methods. Aggregate: **55 methods, 13 PASS, 43 error events**; do not call these 43 failed methods. No GREEN, live, bootstrap or full-backend acceptance is established.
+
+Parent-reported whitespace evidence: `git diff --check` passed with LF/CRLF advisories only; the two untracked-file `--no-index --check` checks exited 1 for expected new-file differences, without whitespace diagnostics. This documentation handoff runs no checks and anticipates no later activation spotcheck result.
+
+Static limits remain: a reentrant fake cannot prove absence of a held `RLock`; private secret retention requires future production-source inspection.
+
+**User stop boundary:** RED is recorded; the user requested a local checkpoint commit and SESSION CLOSE immediately after “Escribir y observar RED del manager y configuración A”. Do NOT launch a production writer or GREEN work this session. There is no current production grant. Parent owns final readback/checks and the planned local checkpoint containing related uncommitted RCA-5e work plus RCA-5f RED tests/contract; it is not yet claimed committed. Parent will record the actual hash in Engram after commit. Approximate scope is 25 paths; parent will measure the final count. Preserve cached `ask-on-risk` / `feature-branch-chain`, with no size-only trimming and no requested push/PR or operational actions. Full historical Engram mirror reconciliation remains pending.
+
+**Next-session handoff:** recover Git HEAD/status and this frozen contract/evidence; preserve the test-first baseline. Only then authorize a source-only writer for the three production paths listed below, with no commands or temporary directories, followed by independent three-pattern focused GREEN under a NEW explicit execution grant. Existing exact APIs/error codes remain frozen. HTTP/API, UI/admin wiring, proxy, bootstrap, warning scheduler, pairing projection and broader identity-handoff acceptance remain separate. Warning default 60/range 15–300 is already decided. Finish RCA-5, then pause before RCA-6: manual `Pyramid` immediately right of Logs, no automatic QR opening. User startup is already documented in the master document §4.4; do not ask again.
+
+### Scope and phase boundaries
+
+- Three production paths: `services/prisma-runtime/src/prisma_runtime/channel_a_activation.py` (existing), `services/prisma-runtime/src/prisma_runtime/channel_a_configuration.py` (new), `services/prisma-runtime/src/prisma_runtime/channel_a_manager.py` (new).
+- Three test paths: `services/prisma-runtime/tests/test_channel_a_activation.py` (existing), `services/prisma-runtime/tests/test_channel_a_configuration.py` (new), `services/prisma-runtime/tests/test_channel_a_manager.py` (new).
+- Forecast: **850–1,450 authored lines**, advisory, not a cap. Report actual growth honestly; do not trim tests to fit.
+- Excluded: HTTP/admin routes, frontend/UI, proxy, bootstrap, warning scheduler, `local_presentation`, paths infrastructure, B, `voice_service` and unsafe auxiliary/harness changes. PW-003 records the RED/session-stop summary; policy/admin work remains indexed as pending.
+- No new Apply button or policy-only Apply semantics. When later wired, manager `apply()` actually calls activation `prepare()`/`start()`; fake offline tests do not establish live application acceptance.
+- No automatic startup/cold-start decision. Explicit A credential save NEVER starts runtime. Warning lead is already decided: default 60 seconds, range 15–300.
+- Future admin writes MUST route through the manager to account for generation. External store writes are outside the coordinator contract, not silently guaranteed.
+
+### Persisted configuration contract
+
+- Frozen immutable `ChannelAConfiguration(warning_lead_seconds, desired_generation)`; `ChannelAConfigurationStore(path)` receives an explicit caller-owned path and parent. No implicit global path, environment/default filesystem reads or constructor I/O.
+- `read()` returns immutable default 60/generation 0 when absent. Otherwise require strict version-1 JSON with exactly `{version, warningLeadSeconds, desiredGeneration}`; reject boolean/float numeric substitutes and extra fields.
+- Warning lead must be a strict integer 15–300; generation a strict nonnegative JavaScript-safe integer. Corrupt/unavailable storage yields fixed sanitized errors, never a corrupt-read overwrite.
+- `set_warning_lead(value)` returns a snapshot; unchanged values are idempotent and do not advance generation. A changed value advances desired generation; invalid values have zero effects.
+- `advance_generation()` returns the reserved snapshot for credential mutations. No automatic backfill or secret-store migration.
+- Writes use atomic replacement with only owned temporary files at the same path/parent boundary. Preserve the valid old file on failed write; no broad deletion or permissions cleanup.
+
+### Manager dependencies, admission and observation
+
+- `ChannelAManager(*, credential_service, configuration_store, activation_factory, reservation)` only captures dependencies. Construction performs no I/O, resolution, factory call or thread creation.
+- No independent resolver parameter: bind existing `ChannelACredentialResolver(lambda: credential_service)` to the SAME injected protected store, for A only.
+- Trusted positional factory contract: `activation_factory(token, policy_snapshot, activation_epoch, reservation)` receives the same exact reservation object on every attempt. Construction MUST be inert: only the manager invokes prepare/start, so constructor/factory failure cannot own an unreturnable worker/lease. Never retain tokens in manager status, representation or errors.
+- Operations: `save_credential(secret)`, `set_warning_lead(value)`, `apply()`, `delete_credential()`, `stop()`, `status()`. Successful save/policy/apply/delete return the six-field status; `stop()` returns a boolean and `status()` a fresh dict. Failed mutations raise fixed sanitized domain errors and record closed `lastError`, except busy refusal must not overwrite it; stop uncertainty returns False, while Apply/delete uncertainty raises the closed stop-unconfirmed error. Frozen test API: `ChannelAConfigurationError(RuntimeError)` and `ChannelAManagerError(RuntimeError)`, with fixed-code messages. New codes are `PRISMA_CHANNEL_A_CONFIGURATION_INVALID`, `PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE`, `PRISMA_CHANNEL_A_MANAGER_BUSY`, and `PRISMA_CHANNEL_A_STOP_UNCONFIRMED`; retain existing credential/lifecycle codes. Failed-candidate cleanup preserves the originating lifecycle error; a subsequent unconfirmed settlement reports stop-unconfirmed.
+- Mutations are single-admitted: no overlapping apply/save/delete/policy/stop. Reentrant mutation gets deterministic busy refusal, without changing the incumbent's `lastError` or causing deadlock/double effects.
+- Never hold a manager lock over foreign store, resolver, factory, start, stop or status calls. Passive observation is not activation.
+- `status()` has exactly these internal keys: `configured`, `desiredGeneration`, `appliedGeneration`, `activationEpoch`, `activation`, `lastError`.
+- `configured` comes only from strict-boolean `credential_service.status()['telegram_channel_a']`, not the resolver. Unknown metadata closes with unavailable error, never false/missing. Desired generation comes from persisted configuration.
+- Publish applied generation and public activation epoch only after prepare=True, start=True and observed `PHASE_RUNNING` without `restart_required`. Restart loads no fictional applied identity.
+- `activation` is the actual immutable `ChannelAStatus` or None, not B's nine-field shape or invented running/verified flags. A failed pending candidate may remain visible with applied generation/public epoch None; its private candidate epoch remains unique per factory attempt.
+- Errors use sanitized allowlisted credential/lifecycle/configuration errors plus fixed manager-busy/stop-unconfirmed codes. Never expose raw exceptions, paths or tokens.
+
+### Mutation and ownership transitions
+
+- Save first uses existing pure `validate_secret('telegram_channel_a', secret)`. Reserve/persist a new desired generation BEFORE `credential_service.set_secret('telegram_channel_a', secret)`; generation persistence failure means zero credential I/O.
+- Credential-write failure is a failed operation with a dirty generation, never false-clean idempotence or success. Generation gaps are allowed; no rollback may lose concurrent invalidation.
+- Save and policy changes never stop, resolve, construct or start an activation. Metadata status reads never resolve secrets; unchanged policy is idempotent and invalid policy has zero effects.
+- Delete advances generation before `delete_secret('telegram_channel_a')`. Credential-write failure is not successful deletion; successful deletion requests stop of the exact active instance.
+- If deletion's stop returns False or throws, retain that instance/authority in closed stop-unconfirmed state even though the credential is already removed.
+- Explicit `stop()` retires the exact owned instance only after confirmed True. False/exceptions retain it for retry; stop neither deletes credentials nor changes policy/generation. It remains usable by future application shutdown.
+- Apply loads one immutable desired snapshot. Same applied generation AND actual running/not-restart-required status returns status with zero resolve/factory/prepare/start/stop calls.
+- Otherwise stop the old instance first. False/exception preserves the exact instance, applied identity and lease, with no resolver/factory call; the next Apply retries settlement first.
+- After confirmed old stop, retire it, resolve A exactly once, increment the private candidate epoch and construct a fresh factory instance. Attach the candidate BEFORE prepare; call prepare then start exactly once on the successful path, and publish applied identity only after both True plus observed running status.
+- On any candidate failure, attempt owned stop. Uncertain cleanup retains the exact candidate; settle it on retry before any replacement, never overwrite it with a new candidate.
+- Identity collision preserves its coded error and the incumbent: no takeover. Reject current/just-retired instance reuse as fresh, without an unbounded retired-instance history/cache/framework. The manager NEVER acquires/releases a lease itself; the runner owns reservation lifecycle.
+- Secret resolution occurs only in Apply after the old instance has settled, never during save/status/policy/delete. Constructor and cold start remain inert.
+
+### Activation boundary and offline acceptance
+
+- Add only public `ChannelAActivation.start()` and `status()` forwarding to its existing runner; do not expose private lease/dialogue. Managed polling already exists through runner.start; warning scheduling remains unwired.
+- Factory dependency injection is not actual application bootstrap. Wiring the same-process reservation into A+B remains later work.
+- Configuration tests: absent defaults, bounds/type/exact-key rejection, idempotence, corruption/unavailability and atomic-write failure preserving the old file.
+- Manager tests: lazy construction/save/no resolution; generation reservation before credential I/O and partial failure; actual prepare → start → status ordering and idempotent apply; policy change creates fresh instance/epoch with the same reservation.
+- Exercise busy/reentrant callbacks without a held manager lock; old-stop False/exception retention and retry before secret resolution; prepare/start failure with uncertain cleanup retention; identity collision without takeover; delete plus uncertain stop ownership.
+- Verify passive honest status and sanitized error canaries. Activation-forward tests inject a local fake runner and start NO thread.
+- All providers/stores are fake except configuration-file tests using owned `TemporaryDirectory` under a later verifier grant. No actual credentials/runtime files, network, native worker or live operations.
+
+### Staged authoring and verification route
+
+- TDD is ON under `docs/TESTING.md` and this feature contract for implementation; this documentation-only freeze has no behavior RED/GREEN. The initial documentation freeze authored no tests; current phase-local test authoring authority is recorded above.
+- Route: test-only author with no execution → separately authorized verifier observes RED → source-only writer → separately authorized focused offline verifier. Source writing begins only AFTER observed RED.
+- New-module initial RED may be missing-module failure: label it honestly, not behavioral RED. Writer profiles forbid temporary directories; do not transfer verifier commands to writers.
+- Parent must later authorize the exact three focused Python patterns/commands phase by phase. No auxiliary harness, broad backend run or historical execution grant carries forward.
+- Stable unchecked work items are in the task table below. Full historical Engram mirror reconciliation remains pending; this freeze does not claim it occurred.
+
+## Accepted RCA-5e history — ordered visible context
+
+The user authorized continuing RCA-5, then pausing **before RCA-6**. The user personally stopped/restarted the local service; the credential blocker is resolved and the screenshot shows Telegram A **“Configurada”**. This is neither bot A activation nor provider verification. Do not inspect processes or ask about startup again: local startup is documented in the master document §4.4. Preserve its existing startup note.
+
+Accepted offline composition is committed in `469ee48`; do not redo it. This continuation supersedes only the old closure's next-action instructions; prior closure and evidence below are historical. The following scope is frozen; the nine-path production candidate is accepted by the parent as a bounded offline unit after independent focused GREEN and the final activation spotcheck. Broader identity-handoff acceptance remains independently pending.
+
+**Current phase — INDEPENDENT FOCUSED GREEN; RCA-5e accepted offline:** independent `mub85a3p-2-eaor` ran all seven authorized commands once, foreground, with 180-second bounds; all exited 0. Frontend: 4 files / 39 PASS / 22.51s (session 19, exporter 13, runtime 5, presentation 2 are declaration counts; the runner reported the aggregate only). Separate exact Python supervisors: sessions 35 PASS / 0.105s; query 90 PASS / 0.010s; activation 13 PASS / 0.014s; selected `LocalAskRevisionTests` 1 PASS / 0.029s. Total: **178 tests PASS**, build PASS (Vite 15.52s), lint silent PASS. Same-view profile persistence, increased revision, immediate invalidation and fresh publication were actually reached and passed, unlike RED; query API oracles were also reached and passed. No unexpected dispatch, cleanup failure, runner timeout or uncertainty was reported.
+
+Parent read the full nine-source diff and registry/HTTP implementation; Git showed the expected 22 modified paths and `git diff --check` PASS with LF/CRLF advisories. The pre-documentation snapshot was 1,393 additions / 93 deletions (1,486 authored lines), not a final count. Parent-requested activation spotcheck `mub8bssp-3-a7ij` ran the exact supervisor once, foreground with a 180-second bound: 13 PASS / 0.006s / exit 0, with no timeout, dispatch warning, cleanup failure, other command or retry. These 13 repeated tests are separate evidence, not additions to the 178 unique tests. Parent accepts RCA-5e as a bounded offline unit based on independent tests/build/lint, this spotcheck and source/scope/readback, despite unavailable writer execution evidence; this is not whole-RCA-5 or live acceptance. Native assessment was high risk, RDD is off, and independent verification is not native approval.
+
+**Recovery history and limits:** continuation `mub62qry-a-fehe` was absent from the task registry; its final writer handoff remains unavailable, and source-writer checks were not run by restriction. Read-only recovery `mub80215-1-qwl0` and parent readback found the nine-path implementation without recreating it. The proposed universal no-touch GET change was rejected: legacy `get_context` activity semantics remain unchanged; no-touch requirements apply to rejected/stale ordered POSTs and trusted owner captures/predicates. Build warnings for unresolved `/grid.svg` and chunks over 500 kB remain unresolved, with unknown provenance. Full coverage/backend, whole bot/local-presentation suites, isolation's `voice_service` import, live providers, actual bootstrap, QR and broader RCA-5 remain unverified. Full historical Engram mirror reconciliation remains pending.
+
+After RCA-5e closure, the next implementation boundary is remaining A-specific policy/admin status/apply, capability-scoped pairing projection, scheduler/exact proxy/bootstrap and broader identity-handoff acceptance. This documentation update authorizes no new scope. Finish RCA-5, then pause before QR/RCA-6; do not reopen credentials/startup or auxiliary harness work.
+
+**Observed RED before production — preserved evidence:** author `mub4xcft-5-7lf9` changed only the ten authorized test paths; parent read their full diff and fixture boundaries. Before the oracle correction, Git observed 13 changed files (10 tests and 3 docs), 1,074 additions plus 44 deletions; whitespace check passed with line-ending advisories. Native assessment returned high risk. Independent `mub5m9wr-6-snd4` ran four exact gates once each, all exit 1: frontend 39 cases / 20 pass / 19 fail (22.35s); sessions 35 / 21 pass / 12 fail / 2 missing-API errors (0.101s); query 90 constructor errors (0.017s), with no behavioral assertions reached; activation 13 / 10 pass / 2 behavioral race failures / 1 missing-API error (0.006s). Raw HTTP acceptance, absent exporter invalidation and old-context activation answers are observed RED. Profile-edit assertions were not reached; do not claim profile RED. No unexpected dispatch, cleanup failure, runner timeout or environment failure was reported. Independent readback of the three documentation changes passed.
+
+Parent corrected only the bootstrap-race test to await observable fetch entry before reset. Independent `mub5tmac-7-nmcq` reran that one case once: 0 pass / 1 missing-API failure / 18 skipped, 741ms, exit 1; timing behavior remains unreached. All other tests stay frozen. The single writer is limited to the nine planned production paths below. Its first launch `mub5ybns-8-zfzp` stopped with no commands or edits because its profile forbids the supervisor's temporary-directory effects. Verification was separated rather than overriding that restriction: independent `mub60sh5-9-5yuy` observed the selected `LocalAskRevisionTests` RED once (1 test / 1 failure / 0 errors, 0.018s, exit 1), proving that parser replacement still publishes a local event; no request-guard calls or cleanup error were reported. Writer continuation `mub62qry-a-fehe` now has source authoring and static readback only, with every execution command withdrawn. A separate verifier must run the four focused gates, selected local-ask gate and applicable build/lint after authoring; required functional checks are not waived. Exact launch commands are phase-local authority, not permission for retries or broad discovery. A deterministic code defect may be corrected within those source paths; a test defect must be returned for separately scoped correction. Unexpected dispatch, timeout, cleanup failure or uncertain completion stops remaining gates. Isolation, whole local-presentation and whole bot suites remain excluded; no live providers, runtime restart, commit, push or PR is authorized.
+
+### Frozen vertical unit: ordered context and query revision fences
+
+The stable unit/subtask checklist lives only in the task table below. Route: delegated **test-only author → observed RED → single production writer → focused independent check**, with parent readback and acceptance. TDD is ON under `docs/TESTING.md` and this feature contract. No historical execution grants carry forward; each phase needs newly authorized exact commands. The completed test-authoring launches had no execution authority. The user explicitly approved only the minimal injection of disabled Telegram/admin collaborators into the existing `test_local_presentation.py` HTTP fixture alongside its ordered-body migration; this exception does not authorize auxiliary harness changes, production edits or execution. The separate import-time `voice_service` concern in `test_hmi_session_isolation.py` remains unresolved before any execution.
+
+**Client intent and HTTP protocol**
+
+- One session-client-owned monotonic safe-integer `commandOrder` is allocated at intent creation, never async completion or retry. View lease and session epoch are local only. The counter survives exporter replacement; reset drops old intents, with no replay under a new capability.
+- Use the existing POST snapshot route with exact v1 envelopes: `{version:1,command:'publish',order,snapshot}` or `{version:1,command:'invalidate',order}`. Require exact keys, strict version (not boolean), order `1..MAX_SAFE_INTEGER`, and a snapshot object with a widgets array and finite serializable content bounded by the existing 1 MiB byte limit. Enforce the fixed body bound before snapshot parsing.
+- Reject legacy raw snapshots with HTTP 400, without mutation or touch. Preserve internal `set_context` / `get_owner_context` compatibility. Accepted commands return 202 `{ok:true,status:'accepted'}`; stale commands return 200 `{ok:true,status:'stale'}`. Authentication does not touch activity; apply touches only accepted commands.
+- Both accepted command types advance the per-owner watermark and server context revision. Stale commands refresh neither age nor activity. Internal `set_context` also increments revision.
+
+**Visible context and answer fences**
+
+- Invalidate immediately on known changed/unready/nonviewer/hidden/offline/unmount state, using a new independent cancellation scope, not the aborted export signal. An old stop cannot invalidate a new owner. Visible/online/ready recovery requires fresh capture only. Presentation identity includes actual profile changes, not literal `0`.
+- Keep the existing 5-second export interval, 4.5-second timeout and heartbeat unchanged. Lost delivery remains unknown to the server, not proof of invalidation.
+- Registry capture supplies age, a deep-copy snapshot and revision, plus a no-touch exact-current validator. A query captures before the parser; recheck pairing, revision and the original 15-second deadline after effectful callbacks, immediately before send and after send before publishing an envelope. `QueryEnvelope` carries revision; no backwards fallback may bypass the fence.
+- Already-delivered phone I/O cannot be retracted; a post-send stale result stays unpublished. Future HMI publisher/audio work belongs to RCA-7 and is not implemented here. Preserve shared local-ask snapshot compatibility; add only a minimal revision guard before local publication if needed, with no B development.
+
+**Planned surfaces — not current write authority**
+
+- Frontend source: `hmi-app/src/domain/prismaSession.types.ts`, `hmi-app/src/services/prismaSessionClient.ts`, `hmi-app/src/services/dashboardSnapshotExport.service.ts`, `hmi-app/src/pages/Dashboard.tsx`.
+- Backend source under `services/prisma-runtime/src/prisma_runtime/`: `hmi_sessions.py`, `local_presentation.py`, `channel_a_query.py`, `channel_a_bot.py`, `channel_a_activation.py`.
+- Tests: corresponding session-client/exporter tests, `Dashboard.runtime.integration.test.tsx`, `Dashboard.presentation.test.tsx`; backend `test_hmi_sessions.py`, `test_local_presentation.py`, `test_hmi_session_isolation.py`, `test_channel_a_query.py`, `test_channel_a_activation.py`, and minimal `test_channel_a_bot.py` compatibility changes only if needed.
+
+**Frozen acceptance traces and limits**
+
+- Cover old publish after invalidation, invalidate → publish in the same view, newer publish before delayed invalidation, duplicates/same-view reordering, StrictMode/reset, hidden/offline/unmount/recovery, invalid envelopes/size/owner isolation, and context changes during parser/validator/before phone/after send. No old answers or silent age extension.
+- Prior mapper forecast: **980–1,400 authored lines**; additional client/consumer fixtures may increase it. Remeasure honestly; no artificial splits or test trimming. Preserve `ask-on-risk` / `feature-branch-chain`; no automatic commit, push or PR now.
+- No full-backend run: known-unsafe unrelated fixtures remain excluded. Only later frozen focused supervisors may execute under fresh phase authority. The initial documentation reconciliation performed no source/test execution or operational changes. Current test authoring and verification authority are recorded above; the full historical Engram mirror still needs reconciliation, while the active contract/phase is checkpointed separately.
+
+## Historical session close — superseded next-action instructions
 
 The user requested a local commit and session closure after accepting the bounded offline composition. **Do not repeat that completed composition or resume auxiliary clock/cleanup harness work.** Recover `checkpoint/prisma-channel-a-functional-composition-current` in Engram, then read this section and PW-003 in `docs/PENDING_WORK.md`; older pinned checkpoints/full mirrors describe prior sessions.
 
@@ -124,9 +262,18 @@ Frontend domain types stay in `domain/`; use design tokens, Lucide, `hmi-scrollb
   - [x] **RCA-5a — Standalone transport:** `6301e97`, independent 56 focused/681 backend and parent 56 focused PASS.
   - [x] **RCA-5b — Cooperative identity exclusion:** `7fb7edc`, independent 172 focused/730 backend, 81 focused/1,973 frontend, coverage/build/lint PASS; parent 38 lifecycle PASS.
   - [x] **RCA-5c — Standalone A activation runner:** accepted offline; independent516 focused/825 backend and parent95 PASS. Initial TDD deviation remains recorded. Commit identity/count recorded in progress checkpoint.
-  - [x] **Bounded query/context composition:** real offline start/confirm/question through the runner, correct-owner context and existing parser; 10 focused tests passed writer/independent/parent. Uncommitted; scope and static-only limits are recorded above, not full identity-handoff or RCA-5 acceptance.
-  - [ ] **Remaining RCA-5 units:** ordered view invalidation, capability-scoped pairing projection, A policy/admin status/apply, scheduler, exact proxy and bootstrap; broader identity-handoff acceptance remains pending. Names/order below are proposals, not frozen implementation contracts.
-- [ ] **RCA-6 — Automatic HMI QR/link presentation:** maintained local QR encoder, typed client/hook/UI and expiry/error/multi-HMI tests. PAUSE and notify before starting. Original 350–650 estimate must be revalidated.
+  - [x] **Bounded query/context composition:** real offline start/confirm/question through the runner, correct-owner context and existing parser; 10 focused tests passed writer/independent/parent. Committed in `469ee48`; scope and static-only limits are recorded above, not full identity-handoff or RCA-5 acceptance.
+  - [x] **RCA-5e — Ordered visible context and query revision fences:** parent accepted the bounded offline unit; independent 178 tests/build/lint and separate 13-test activation spotcheck passed.
+    - [x] **RCA-5e.1 — Protocol/invalidation:** ordered client intents, strict envelopes, owner watermark and immediate invalidation; independent 178-test GREEN and parent source readback.
+    - [x] **RCA-5e.2 — Query revision fences:** captured revision and original deadline checks around effectful callbacks/send; independent 178-test GREEN and parent source readback.
+    - [x] **RCA-5e.3 — Offline verification:** independent focused tests/build/lint and parent source/scope/readback passed; final activation spotcheck `mub8bssp-3-a7ij` passed 13 repeated tests / 0.006s / exit 0.
+  - [ ] **RCA-5f — Manager and persisted configuration:** frozen backend-only contract above; no current production or execution grant.
+    RED subphase observed: 42 new methods reach missing-module/API errors, not behavioral failures; independent evidence is recorded above. Session stopped before implementation/GREEN; this does not complete RCA-5f.
+    - [ ] **RCA-5f.1 — Configuration:** immutable strict version-1 policy/generation snapshots, idempotent policy changes and owned atomic persistence.
+    - [ ] **RCA-5f.2 — Manager and activation forwards:** generation-accounted mutations, explicit prepare/start, honest status and exact-instance uncertain-stop retention; public runner start/status forwards only.
+    - [ ] **RCA-5f.3 — Focused offline verification:** separately authorized three focused Python patterns after observed RED and source-only authoring; fake boundaries, no live application acceptance.
+  - [ ] **Remaining RCA-5 units:** capability-scoped pairing projection, A policy/admin status/apply wiring, scheduler, exact proxy and bootstrap; broader identity-handoff acceptance remains pending. Other names/order below remain proposals, not frozen implementation contracts.
+- [ ] **RCA-6 — Click-open HMI QR/link presentation:** QR rotates while the panel is visible, never an automatic popup; maintained local QR encoder, typed client/hook/UI and expiry/error/multi-HMI tests. PAUSE and notify before starting. Original 350–650 estimate must be revalidated.
 - [ ] **RCA-7 — HMI text/audio correlation:** generation/freshness checks and cancellation; decide automatic transcript placement/lifetime before UI. Original 250–500 estimate must be revalidated.
 - [ ] **RCA-8 — Integrated verification/docs:** full gates, independent verification, README/master reconciliation; keep active backlog honest. Original 100–200 estimate must be revalidated.
 
@@ -273,7 +420,7 @@ Phase A `mu9v0ruj-k-2ddd` installed guarded thread fixtures and an inert nested 
 
 ## TDD, containment and authorized verification patterns
 
-TDD is ON by `AGENTS.md` §8–9 and `docs/TESTING.md`: meaningful observed RED before source, then GREEN/refactor. Coverage-only additions may honestly pass already-correct source; never mutate production to fabricate RED. Preserve coverage/readability when forecasts are exceeded.
+TDD is ON under `docs/TESTING.md` and this feature contract: meaningful observed RED before source, then GREEN/refactor. Coverage-only additions may honestly pass already-correct source; never mutate production to fabricate RED. Preserve coverage/readability when forecasts are exceeded.
 
 New runtime tests must inject inert transports/stores. Install a per-test `requests.Session.request` record/refuse guard and assert no unexpected attempts outside production catches; always restore it. A deliberate guard proof must first install an inert lower transport floor. Track every test-owned thread before launch, register failure-safe cancellation/barrier release/join/termination assertions, and keep the guard through teardown. No sleeps as race proof, daemon-only workaround or swallowed callback assertions.
 

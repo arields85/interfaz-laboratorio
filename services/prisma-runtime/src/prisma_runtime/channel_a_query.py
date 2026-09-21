@@ -147,6 +147,7 @@ class QueryEnvelope:
     update_id: int
     epoch: str = field(repr=False)
     answer_text: str = field(repr=False)
+    context_revision: int
 
     def as_dict(self) -> dict:
         return {
@@ -155,6 +156,7 @@ class QueryEnvelope:
             "updateId": self.update_id,
             "epoch": self.epoch,
             "answerText": self.answer_text,
+            "contextRevision": self.context_revision,
         }
 
 
@@ -219,7 +221,7 @@ class ChannelAQueryCoordinator:
 
     Every dependency is injected: the pairing registry (generation authority),
     the adapter ``validate`` seam (current admission without the raw nonce), the
-    context reader bound to ``HmiSessionRegistry.get_owner_context``, the parser
+    context reader bound to ``HmiSessionRegistry.capture_owner_context``, the parser
     (``answer_from_snapshot`` and nothing else), the delivery callable bound to
     the adapter's existing send classification, and the bounds and delivery
     labels. ``clock`` is a monotonic infrastructure function.
@@ -231,6 +233,7 @@ class ChannelAQueryCoordinator:
         registry,
         validate,
         read_context,
+        context_is_current,
         parse,
         deliver,
         freshness_bound,
@@ -244,6 +247,8 @@ class ChannelAQueryCoordinator:
         if not isinstance(registry, ChannelAPairingRegistry):
             raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
         if not callable(validate):
+            raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
+        if not callable(context_is_current):
             raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
         if not callable(read_context):
             raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
@@ -262,6 +267,7 @@ class ChannelAQueryCoordinator:
         self.registry = registry
         self.validate = validate
         self.read_context = read_context
+        self.context_is_current = context_is_current
         self.parse = parse
         self.deliver = deliver
         self.freshness_bound = _positive_bound(freshness_bound)
@@ -302,11 +308,11 @@ class ChannelAQueryCoordinator:
         read = self._read_context(binding)
         if read is None:
             return self._fail_closed(binding)
-        age, snapshot = read
+        age, snapshot, revision = read
         if not self._binding_current(binding):
             return QueryOutcome(QUERY_IGNORED_STALE)
         deadline = _remaining_lifetime(start, age, self.freshness_bound)
-        if deadline is None or not self._fresh(deadline):
+        if deadline is None or not self._context_current(binding, revision) or not self._fresh(deadline):
             return self._fail_closed(binding)
         answer_text = self._parse(snapshot, normalized)
         if answer_text is None:
@@ -318,7 +324,7 @@ class ChannelAQueryCoordinator:
         # sample and the send.
         if not self._binding_current(binding):
             return QueryOutcome(QUERY_IGNORED_STALE)
-        if not self._fresh(deadline):
+        if not self._context_current(binding, revision) or not self._fresh(deadline):
             return self._fail_closed(binding)
         delivery = self._attempt_deliver(binding, answer_text)
         if delivery != self.delivered_label:
@@ -328,7 +334,11 @@ class ChannelAQueryCoordinator:
                 else QUERY_ANSWER_UNKNOWN
             )
             return QueryOutcome(kind, delivery)
-        if not self._binding_current(binding) or not self._fresh(deadline):
+        if (
+            not self._binding_current(binding)
+            or not self._context_current(binding, revision)
+            or not self._fresh(deadline)
+        ):
             # The phone already received the text and it cannot be retracted,
             # but a stale or superseded answer must never reach the HMI.
             return QueryOutcome(QUERY_ANSWER_UNPUBLISHED, delivery)
@@ -338,6 +348,7 @@ class ChannelAQueryCoordinator:
             binding.update_id,
             binding.epoch,
             answer_text,
+            revision,
         )
         return QueryOutcome(QUERY_ANSWER_DELIVERED, delivery, envelope)
 
@@ -436,8 +447,14 @@ class ChannelAQueryCoordinator:
         now = self._now()
         return now is not None and now < deadline
 
+    def _context_current(self, binding, revision) -> bool:
+        try:
+            return self.context_is_current(binding.owner_id, revision) is True
+        except Exception:
+            return False
+
     def _read_context(self, binding):
-        """Return ``(age, snapshot)`` from the injected reader, or ``None``.
+        """Return ``(age, snapshot, revision)`` from the injected reader, or ``None``.
 
         The returned age is the server receipt age in the reader's own wall-clock
         domain; only the age value crosses into the monotonic arithmetic. A
@@ -448,9 +465,11 @@ class ChannelAQueryCoordinator:
             result = self.read_context(binding.owner_id, max_age_seconds=self.freshness_bound)
         except Exception:
             return None
-        if not isinstance(result, (tuple, list)) or len(result) != 2:
+        if not isinstance(result, (tuple, list)) or len(result) != 3:
             return None
-        age, snapshot = result
+        age, snapshot, revision = result
+        if type(revision) is not int or revision <= 0:
+            return None
         if isinstance(age, bool) or not isinstance(age, (int, float)):
             return None
         try:
@@ -461,7 +480,7 @@ class ChannelAQueryCoordinator:
             return None
         if number > self.freshness_bound:
             return None
-        return number, snapshot
+        return number, snapshot, revision
 
     def _parse(self, snapshot, question):
         """Return the bounded plain answer text, or ``None``.

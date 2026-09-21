@@ -169,7 +169,10 @@ class QueryHarness:
             self.context_hook()
         if self.context_override is not None:
             return self.context_override(owner_id, max_age_seconds)
-        return self.sessions.get_owner_context(owner_id, max_age_seconds=max_age_seconds)
+        return self.sessions.capture_owner_context(owner_id, max_age_seconds=max_age_seconds)
+
+    def context_is_current(self, owner_id, revision):
+        return self.sessions.is_owner_context_current(owner_id, revision)
 
     def parse(self, snapshot, question):
         self.parses.append((snapshot, question))
@@ -196,6 +199,7 @@ class QueryHarness:
             "registry": self.registry,
             "validate": self.validate,
             "read_context": self.read_context,
+            "context_is_current": self.context_is_current,
             "parse": self.parse,
             "deliver": self.deliver,
             "freshness_bound": self.freshness_bound,
@@ -229,6 +233,23 @@ class ChannelAQueryConfigTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             ChannelAQueryCoordinator(registry=self.harness.registry)
 
+    def test_revision_validator_is_required_not_an_optional_legacy_fallback(self):
+        with self.assertRaises(TypeError):
+            ChannelAQueryCoordinator(
+                registry=self.harness.registry,
+                validate=self.harness.validate,
+                read_context=self.harness.read_context,
+                parse=self.harness.parse,
+                deliver=self.harness.deliver,
+                freshness_bound=15.0,
+                max_question_bytes=4096,
+                max_answer_chars=4096,
+                delivered_label=DELIVERED,
+                rejected_label=REJECTED,
+                unknown_label=UNKNOWN,
+                clock=lambda: self.harness.mono[0],
+            )
+
     def test_registry_must_be_the_real_pairing_registry(self):
         for value in (None, object(), dict, "registry"):
             with self.subTest(value=value):
@@ -237,7 +258,7 @@ class ChannelAQueryConfigTests(unittest.TestCase):
                 self.assertEqual(str(captured.exception), PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
 
     def test_injected_callables_must_be_callable(self):
-        for name in ("validate", "read_context", "parse", "deliver", "clock"):
+        for name in ("validate", "read_context", "context_is_current", "parse", "deliver", "clock"):
             for value in (None, 5, "callable"):
                 with self.subTest(name=name, value=value):
                     with self.assertRaises(ChannelAQueryConfigInvalid):
@@ -396,7 +417,7 @@ class ChannelAQueryHappyPathTests(unittest.TestCase):
         data = outcome.envelope.as_dict()
         self.assertEqual(
             set(data),
-            {"ownerId", "generation", "updateId", "epoch", "answerText"},
+            {"ownerId", "generation", "updateId", "epoch", "answerText", "contextRevision"},
         )
         self.assertEqual(data["ownerId"], OWNER)
         self.assertEqual(data["answerText"], ANSWER)
@@ -616,7 +637,7 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
     def test_a_slow_reader_that_spends_the_deadline_never_parses(self):
         def slow(owner_id, max_age_seconds):
             self.harness.mono[0] += 5.0
-            return 29.0, SNAPSHOT
+            return 29.0, SNAPSHOT, 1
 
         self.harness.context_override = slow
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
@@ -631,7 +652,7 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
             self.harness.open_session(OWNER, SNAPSHOT2)
             self.harness.mono[0] += 5.0
 
-        self.harness.context_override = lambda owner_id, max_age_seconds: (29.0, SNAPSHOT)
+        self.harness.context_override = lambda owner_id, max_age_seconds: (29.0, SNAPSHOT, 1)
         self.harness.parser_hook = refresh_during_parse
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.assert_notice(outcome)
@@ -641,7 +662,7 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
         self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
 
     def test_an_expired_deadline_before_the_send_never_delivers_the_answer(self):
-        self.harness.context_override = lambda owner_id, max_age_seconds: (29.5, SNAPSHOT)
+        self.harness.context_override = lambda owner_id, max_age_seconds: (29.5, SNAPSHOT, 1)
         self.harness.parser_hook = lambda: self.harness.mono.__setitem__(0, self.harness.mono[0] + 1.0)
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.assert_notice(outcome)
@@ -658,7 +679,7 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
         self.assertEqual(harness.deliveries, [])
 
     def test_a_regressing_clock_refuses_silently(self):
-        self.harness.context_override = lambda owner_id, max_age_seconds: (1.0, SNAPSHOT)
+        self.harness.context_override = lambda owner_id, max_age_seconds: (1.0, SNAPSHOT, 1)
         self.harness.context_hook = lambda: self.harness.mono.__setitem__(0, self.harness.mono[0] - 10.0)
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.harness.assert_outcome(outcome, QUERY_IGNORED_STALE, delivery=None)
@@ -668,6 +689,7 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
         self.harness.context_override = lambda owner_id, max_age_seconds: (
             max_age_seconds + 1.0,
             SNAPSHOT,
+            1,
         )
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.assert_notice(outcome)
@@ -681,7 +703,7 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
                 link = self.harness.pair()
                 binding = self.harness.binding(link)
                 self.harness.context_override = (
-                    lambda owner_id, max_age_seconds, age=age: (age, SNAPSHOT)
+                    lambda owner_id, max_age_seconds, age=age: (age, SNAPSHOT, 1)
                 )
                 outcome = self.harness.coordinator.handle_query(binding, QUESTION)
                 self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE)
@@ -689,7 +711,7 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
                 self.assertEqual(self.harness.parses, [])
 
     def test_a_non_tuple_reader_result_fails_closed(self):
-        for value in (None, SNAPSHOT, (1.0,), (1.0, SNAPSHOT, 3)):
+        for value in (None, SNAPSHOT, (1.0,), (1.0, SNAPSHOT), (1.0, SNAPSHOT, 1, 2)):
             with self.subTest(value=value):
                 self.harness = QueryHarness()
                 self.harness.open_session(OWNER)
@@ -936,7 +958,7 @@ class ChannelAQueryDeadlineRaceTests(unittest.TestCase):
         self.binding = self.harness.binding(self.link)
 
     def test_a_final_predelivery_validation_that_expires_the_deadline_sends_no_answer(self):
-        self.harness.context_override = lambda owner_id, max_age_seconds: (29.0, SNAPSHOT)
+        self.harness.context_override = lambda owner_id, max_age_seconds: (29.0, SNAPSHOT, 1)
         state = {"parsed": False, "acted": False}
         self.harness.parser_hook = lambda: state.__setitem__("parsed", True)
 
@@ -953,7 +975,7 @@ class ChannelAQueryDeadlineRaceTests(unittest.TestCase):
         self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
 
     def test_a_post_send_validation_that_expires_the_deadline_withholds_the_envelope(self):
-        self.harness.context_override = lambda owner_id, max_age_seconds: (29.9, SNAPSHOT)
+        self.harness.context_override = lambda owner_id, max_age_seconds: (29.9, SNAPSHOT, 1)
         state = {"sent": False, "acted": False}
         self.harness.deliver_hook = lambda: state.__setitem__("sent", True)
 
@@ -973,6 +995,7 @@ class ChannelAQueryDeadlineRaceTests(unittest.TestCase):
         self.harness.context_override = lambda owner_id, max_age_seconds: (
             float(max_age_seconds),
             SNAPSHOT,
+            1,
         )
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
@@ -981,7 +1004,7 @@ class ChannelAQueryDeadlineRaceTests(unittest.TestCase):
         self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
 
     def test_a_slow_validator_that_crosses_the_deadline_sends_no_answer(self):
-        self.harness.context_override = lambda owner_id, max_age_seconds: (28.0, SNAPSHOT)
+        self.harness.context_override = lambda owner_id, max_age_seconds: (28.0, SNAPSHOT, 1)
         state = {"parsed": False, "acted": False}
         self.harness.parser_hook = lambda: state.__setitem__("parsed", True)
 
@@ -1059,7 +1082,7 @@ class ChannelAQueryDeliveryTests(unittest.TestCase):
         self.assertIsNone(outcome.envelope)
 
     def test_a_deadline_that_expires_after_the_send_withholds_the_envelope(self):
-        self.harness.context_override = lambda owner_id, max_age_seconds: (29.9, SNAPSHOT)
+        self.harness.context_override = lambda owner_id, max_age_seconds: (29.9, SNAPSHOT, 1)
         self.harness.deliver_hook = lambda: self.harness.mono.__setitem__(
             0, self.harness.mono[0] + 1.0
         )
@@ -1072,6 +1095,169 @@ class ChannelAQueryDeliveryTests(unittest.TestCase):
         self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.assertEqual(len(self.harness.deliveries), 1)
         self.assertEqual(self.harness.deliveries[0][0], self.binding)
+
+
+class ChannelAContextRevisionTests(unittest.TestCase):
+    def setUp(self):
+        self.harness = QueryHarness(freshness_bound=15.0)
+        self.capability = self.harness.open_session(OWNER)
+        self.link = self.harness.pair()
+        self.binding = self.harness.binding(self.link)
+
+    def replace_context(self):
+        self.harness.sessions.set_context(self.capability, SNAPSHOT2)
+
+    def assert_no_answer(self, outcome):
+        self.assertIsNone(outcome.envelope)
+        self.assertNotIn(ANSWER, [text for _binding, text in self.harness.deliveries])
+        # Preserve the generic-notice path while the phone binding stays valid.
+        self.assertEqual(outcome.kind, QUERY_UNAVAILABLE)
+        self.assertEqual(self.harness.deliveries, [(self.binding, COPY_QUERY_UNAVAILABLE)])
+
+    def test_unchanged_answer_carries_the_exact_captured_context_revision(self):
+        self.replace_context()
+        _, snapshot, revision = self.harness.sessions.capture_owner_context(
+            OWNER, max_age_seconds=15
+        )
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.assertEqual(outcome.kind, QUERY_ANSWER_DELIVERED)
+        self.assertEqual(self.harness.parses, [(snapshot, QUESTION)])
+        self.assertEqual(outcome.envelope.context_revision, revision)
+        self.assertEqual(outcome.envelope.as_dict()["contextRevision"], revision)
+        self.assertEqual(outcome.envelope.answer_text, ANSWER)
+        self.assertEqual(self.harness.context_reads, [(OWNER, 15.0)])
+
+    def test_parser_replacement_never_sends_the_answer_from_the_old_snapshot(self):
+        self.harness.parser_hook = self.replace_context
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.assertEqual(self.harness.parses, [(SNAPSHOT, QUESTION)])
+        self.assert_no_answer(outcome)
+
+    def test_parser_invalidation_refuses_the_captured_revision(self):
+        current = [True]
+        self.harness.parser_hook = lambda: current.__setitem__(0, False)
+        coordinator = self.harness.build(
+            context_is_current=lambda _owner, _revision: current[0]
+        )
+        self.assert_no_answer(coordinator.handle_query(self.binding, QUESTION))
+        self.assertEqual(self.harness.parses, [(SNAPSHOT, QUESTION)])
+
+    def test_revision_validator_cannot_spend_the_remaining_lifetime_before_send(self):
+        self.harness.wall[0] += 14.0
+
+        def validate_revision(owner, revision):
+            if self.harness.parses:
+                self.harness.mono[0] = 51.0
+            return self.harness.sessions.is_owner_context_current(owner, revision)
+
+        coordinator = self.harness.build(context_is_current=validate_revision)
+        self.assert_no_answer(coordinator.handle_query(self.binding, QUESTION))
+
+    def test_revision_validator_cannot_spend_the_remaining_lifetime_after_send(self):
+        self.harness.wall[0] += 14.0
+
+        def validate_revision(owner, revision):
+            if self.harness.deliveries:
+                self.harness.mono[0] = 51.0
+            return self.harness.sessions.is_owner_context_current(owner, revision)
+
+        coordinator = self.harness.build(context_is_current=validate_revision)
+        outcome = coordinator.handle_query(self.binding, QUESTION)
+        self.assertEqual(outcome.kind, QUERY_ANSWER_UNPUBLISHED)
+        self.assertIsNone(outcome.envelope)
+        self.assertEqual(self.harness.deliveries, [(self.binding, ANSWER)])
+
+    def test_parser_owner_close_never_sends_the_captured_answer(self):
+        self.harness.parser_hook = lambda: self.harness.sessions.close(self.capability)
+        self.assert_no_answer(self.harness.coordinator.handle_query(self.binding, QUESTION))
+
+    def test_admission_callback_replacement_after_capture_prevents_parsing(self):
+        def validate(_binding):
+            if self.harness.context_reads:
+                self.replace_context()
+            return True
+
+        self.harness.validate_hook = validate
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.assert_no_answer(outcome)
+        self.assertEqual(self.harness.parses, [])
+
+    def test_final_admission_callback_replacement_prevents_phone_answer(self):
+        def validate(_binding):
+            if self.harness.parses:
+                self.replace_context()
+            return True
+
+        self.harness.validate_hook = validate
+        self.assert_no_answer(self.harness.coordinator.handle_query(self.binding, QUESTION))
+        self.assertEqual(self.harness.parses, [(SNAPSHOT, QUESTION)])
+
+    def test_delivered_phone_answer_is_not_published_after_context_replacement(self):
+        self.harness.deliver_hook = self.replace_context
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.assertEqual(outcome.kind, QUERY_ANSWER_UNPUBLISHED)
+        self.assertEqual(outcome.delivery, DELIVERED)
+        self.assertIsNone(outcome.envelope)
+        self.assertEqual(self.harness.deliveries, [(self.binding, ANSWER)])
+
+    def test_post_send_admission_replacement_withholds_envelope_without_resending(self):
+        def validate(_binding):
+            if self.harness.deliveries:
+                self.replace_context()
+            return True
+
+        self.harness.validate_hook = validate
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.assertEqual(outcome.kind, QUERY_ANSWER_UNPUBLISHED)
+        self.assertIsNone(outcome.envelope)
+        self.assertEqual(self.harness.deliveries, [(self.binding, ANSWER)])
+
+    def test_new_context_cannot_extend_the_original_fifteen_second_deadline(self):
+        self.harness.wall[0] += 14.0
+
+        def parse_finished():
+            self.replace_context()
+            self.harness.mono[0] += 1.0
+
+        self.harness.parser_hook = parse_finished
+        self.assert_no_answer(self.harness.coordinator.handle_query(self.binding, QUESTION))
+        self.assertEqual(self.harness.context_reads, [(OWNER, 15.0)])
+
+    def test_post_send_expiry_at_the_original_deadline_withholds_envelope(self):
+        self.harness.wall[0] += 14.0
+        self.harness.deliver_hook = lambda: self.harness.mono.__setitem__(0, 51.0)
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.assertEqual(outcome.kind, QUERY_ANSWER_UNPUBLISHED)
+        self.assertIsNone(outcome.envelope)
+        self.assertEqual(self.harness.deliveries, [(self.binding, ANSWER)])
+
+    def test_context_revision_must_be_a_strict_positive_integer(self):
+        for revision in (None, True, False, 0, -1, 1.0, "1", float("nan")):
+            with self.subTest(revision=revision):
+                self.harness.parses.clear()
+                self.harness.deliveries.clear()
+                self.harness.context_override = lambda _owner, _bound: (0.0, SNAPSHOT, revision)
+                outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+                self.assert_no_answer(outcome)
+                self.assertEqual(self.harness.parses, [])
+
+    def test_legacy_two_tuple_reader_cannot_bypass_the_required_revision(self):
+        self.harness.context_override = lambda _owner, _bound: (0.0, SNAPSHOT)
+        self.assert_no_answer(self.harness.coordinator.handle_query(self.binding, QUESTION))
+        self.assertEqual(self.harness.parses, [])
+
+    def test_revision_validator_refusal_and_exception_fail_closed(self):
+        def unavailable(_owner, _revision):
+            raise RuntimeError("private-validator-detail")
+
+        for validator in (lambda _owner, _revision: False, unavailable):
+            with self.subTest(validator=validator):
+                self.harness.deliveries.clear()
+                coordinator = self.harness.build(context_is_current=validator)
+                outcome = coordinator.handle_query(self.binding, QUESTION)
+                self.assert_no_answer(outcome)
+                self.assertEqual(self.harness.parses, [])
+                self.assertNotIn("private-validator-detail", repr(outcome))
 
 
 if __name__ == "__main__":

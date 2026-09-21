@@ -1,9 +1,10 @@
 import itertools
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
@@ -405,6 +406,236 @@ class OwnerContextFreshnessTests(unittest.TestCase):
         skewed_now[0] = 10.0
         with self.assertRaises(HmiSessionFreshnessInvalid):
             skewed.get_owner_context(self.OWNER_FIRST, max_age_seconds=600)
+
+
+class OrderedOwnerContextTests(unittest.TestCase):
+    """Use HTTP for ordering; internal readers remain capability-free."""
+
+    def setUp(self):
+        dispatch_patch = patch("requests.Session.request", side_effect=AssertionError("offline HTTP only"))
+        dispatch = dispatch_patch.start()
+        self.addCleanup(dispatch_patch.stop)
+        self.addCleanup(dispatch.assert_not_called)
+        self.now = [10.0]
+        self.registry = OwnerContextFreshnessTests.make_registry(self.now, idle_ttl=20)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.client = HmiSessionHttpRedTests.make_client(
+            temporary.name, session_registry=self.registry
+        )
+        self.capability, _ = self.registry.create()
+        self.owner = self.registry.authorize(self.capability, touch=False)
+        self.headers = {"X-Prisma-Session-Capability": self.capability}
+        self.snapshot = {"timestamp": "fixed", "widgets": [{"id": "oee", "value": 10}]}
+
+    def command(self, order, command="publish", snapshot=None, headers=None):
+        body = {"version": 1, "command": command, "order": order}
+        if command == "publish":
+            body["snapshot"] = self.snapshot if snapshot is None else snapshot
+        return self.client.post(
+            "/hmi/current-snapshot", json=body,
+            headers=self.headers if headers is None else headers,
+        )
+
+    def capture(self):
+        return self.registry.capture_owner_context(self.owner, max_age_seconds=15)
+
+    def assert_accepted(self, response):
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.get_json(), {"ok": True, "status": "accepted"})
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def assert_stale(self, response):
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True, "status": "stale"})
+
+    def test_legacy_raw_snapshot_is_rejected_without_replacing_or_touching_context(self):
+        # Behavioral RED on the existing route, independent of any new API.
+        self.registry.set_context(self.capability, self.snapshot)
+        self.now[0] = 12.0
+        response = self.client.post(
+            "/hmi/current-snapshot", json={"widgets": [], "timestamp": "wrong"},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            self.registry.get_owner_context(self.owner, max_age_seconds=15),
+            (2.0, self.snapshot),
+        )
+        self.now[0] = 30.0
+        with self.assertRaises(HmiSessionUnauthorized):
+            self.registry.authorize(self.capability, touch=False)
+
+    def test_old_publish_cannot_resurrect_context_after_newer_invalidation(self):
+        self.assert_accepted(self.command(2, "invalidate"))
+        self.assert_stale(self.command(1))
+        with self.assertRaises(HmiSessionContextUnavailable):
+            self.capture()
+
+    def test_invalidation_then_new_publish_in_the_same_view_is_accepted(self):
+        self.assert_accepted(self.command(1))
+        _, _, first_revision = self.capture()
+        self.assert_accepted(self.command(2, "invalidate"))
+        self.assertFalse(self.registry.is_owner_context_current(self.owner, first_revision))
+        self.assert_accepted(self.command(3))
+        age, snapshot, revision = self.capture()
+        self.assertEqual((age, snapshot), (0.0, self.snapshot))
+        self.assertEqual(revision, first_revision + 2)
+
+    def test_new_publish_survives_delayed_invalidation(self):
+        self.assert_accepted(self.command(3))
+        original = self.capture()
+        self.assert_stale(self.command(2, "invalidate"))
+        self.assertEqual(self.capture(), original)
+
+    def test_same_view_reordering_and_duplicates_change_neither_revision_age_nor_activity(self):
+        self.assert_accepted(self.command(3))
+        _, _, revision = self.capture()
+        self.now[0] = 14.0
+        for order, kind in ((2, "publish"), (3, "publish"), (3, "invalidate")):
+            with self.subTest(order=order, kind=kind):
+                self.assert_stale(self.command(order, kind))
+                self.assertEqual(self.capture(), (4.0, self.snapshot, revision))
+        self.now[0] = 30.0
+        with self.assertRaises(HmiSessionUnauthorized):
+            self.registry.authorize(self.capability, touch=False)
+
+    def test_accepted_invalidation_renews_activity_but_stale_invalidation_does_not(self):
+        self.now[0] = 14.0
+        self.assert_accepted(self.command(5, "invalidate"))
+        self.now[0] = 30.0
+        self.assert_stale(self.command(5, "invalidate"))
+        self.assertEqual(self.registry.authorize(self.capability, touch=False), self.owner)
+        self.now[0] = 34.0
+        with self.assertRaises(HmiSessionUnauthorized):
+            self.registry.authorize(self.capability, touch=False)
+
+    def test_malformed_envelopes_do_not_advance_watermark_or_touch_context(self):
+        invalid = [
+            {"version": True, "command": "invalidate", "order": 50},
+            {"version": 2, "command": "invalidate", "order": 50},
+            {"version": 1, "command": "invalidate", "order": 50, "snapshot": {}},
+            {"version": 1, "command": "publish", "order": 50},
+            {"version": 1, "command": "publish", "order": 50, "snapshot": []},
+            {"version": 1, "command": "publish", "order": 50, "snapshot": {"widgets": {}}},
+            {"version": 1, "command": "publish", "order": 50, "snapshot": {"widgets": []}, "ownerId": self.owner},
+            {"version": 1, "command": "unknown", "order": 50},
+        ]
+        invalid.extend(
+            {"version": 1, "command": "invalidate", "order": value}
+            for value in (True, False, 0, -1, 1.5, "1", None, 9007199254740992)
+        )
+        self.registry.set_context(self.capability, self.snapshot)
+        self.now[0] = 12.0
+        for body in invalid:
+            with self.subTest(body=body):
+                response = self.client.post(
+                    "/hmi/current-snapshot", json=body, headers=self.headers
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    self.registry.get_owner_context(self.owner, max_age_seconds=15),
+                    (2.0, self.snapshot),
+                )
+        self.assert_accepted(self.command(1))
+
+    def test_invalid_wire_content_is_rejected_without_activity_renewal(self):
+        self.registry.set_context(self.capability, self.snapshot)
+        self.now[0] = 12.0
+        bodies = [b"null", b"[]", b"{", b'{}']
+        bodies.extend(
+            b'{"version":1,"command":"publish","order":50,"snapshot":{"widgets":[],"value":'
+            + value + b'}}'
+            for value in (b"NaN", b"Infinity", b"-Infinity", b"1e999")
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                response = self.client.post(
+                    "/hmi/current-snapshot", data=body, content_type="application/json",
+                    headers=self.headers,
+                )
+                self.assertEqual(response.status_code, 400)
+        self.now[0] = 30.0
+        with self.assertRaises(HmiSessionUnauthorized):
+            self.registry.authorize(self.capability, touch=False)
+
+    def test_body_bound_applies_before_json_parsing_and_never_advances_order(self):
+        response = self.client.post(
+            "/hmi/current-snapshot", data=b" " * (1024 * 1024) + b"{",
+            content_type="application/json", headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assert_accepted(self.command(1))
+
+    def test_utf8_snapshot_size_rejection_preserves_context_age_revision_and_watermark(self):
+        self.assert_accepted(self.command(1))
+        _, _, revision = self.capture()
+        self.now[0] = 12.0
+        body = json.dumps({
+            "version": 1, "command": "publish", "order": 50,
+            "snapshot": {"widgets": [], "value": "é" * (600 * 1024)},
+        }, ensure_ascii=False)
+        self.assertLess(len(body), 1024 * 1024)
+        response = self.client.post(
+            "/hmi/current-snapshot", data=body.encode("utf-8"),
+            content_type="application/json", headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(self.capture(), (2.0, self.snapshot, revision))
+        self.assert_accepted(self.command(2))
+
+    def test_internal_setter_does_not_reset_the_http_ordering_watermark(self):
+        self.assert_accepted(self.command(10, "invalidate"))
+        self.registry.set_context(self.capability, self.snapshot)
+        captured = self.capture()
+        self.assert_stale(self.command(9, "invalidate"))
+        self.assertEqual(self.capture(), captured)
+
+    def test_safe_integer_ceiling_and_owner_watermarks_are_independent(self):
+        other, _ = self.registry.create()
+        other_headers = {"X-Prisma-Session-Capability": other}
+        self.assert_accepted(self.command(9007199254740991, "invalidate"))
+        self.assert_accepted(self.command(1, headers=other_headers))
+        self.assert_stale(self.command(1))
+        self.assertEqual(self.registry.get_context(other)[1], self.snapshot)
+        with self.assertRaises(HmiSessionContextUnavailable):
+            self.capture()
+
+    def test_internal_setter_increments_revision_and_capture_is_a_deep_copy(self):
+        self.registry.set_context(self.capability, self.snapshot)
+        self.now[0] = 12.0
+        age, captured, revision = self.capture()
+        self.assertIs(type(revision), int)
+        self.assertGreater(revision, 0)
+        self.assertEqual(age, 2.0)
+        captured["widgets"][0]["value"] = 999
+        self.assertEqual(self.capture(), (2.0, self.snapshot, revision))
+        self.assertEqual(
+            self.registry.get_owner_context(self.owner, max_age_seconds=15),
+            (2.0, self.snapshot),
+        )
+        self.registry.set_context(self.capability, self.snapshot)
+        self.assertEqual(self.capture(), (0.0, self.snapshot, revision + 1))
+        self.assertFalse(self.registry.is_owner_context_current(self.owner, revision))
+        self.assertTrue(self.registry.is_owner_context_current(self.owner, revision + 1))
+
+    def test_current_validator_is_exact_non_touching_and_runs_no_removal_callback_under_lock(self):
+        self.registry.set_context(self.capability, self.snapshot)
+        _, _, revision = self.capture()
+        for invalid in (True, False, 0, -1, float(revision), str(revision), None):
+            with self.subTest(revision=invalid):
+                self.assertFalse(self.registry.is_owner_context_current(self.owner, invalid))
+        self.assertFalse(self.registry.is_owner_context_current("missing", revision))
+        self.now[0] = 14.0
+        self.assertTrue(self.registry.is_owner_context_current(self.owner, revision))
+        callbacks_under_lock = []
+        # Observe lock ownership without spawning a worker or risking a deadlock.
+        self.registry.on_remove = lambda _owner: callbacks_under_lock.append(
+            self.registry.lock._is_owned()
+        )
+        self.now[0] = 30.0
+        self.assertFalse(self.registry.is_owner_context_current(self.owner, revision))
+        self.assertNotIn(True, callbacks_under_lock)
 
 
 if __name__ == "__main__":

@@ -156,6 +156,7 @@ from prisma_runtime.channel_a_lifecycle import (
 from prisma_runtime.channel_a_query import (
     COPY_QUERY_UNAVAILABLE,
     QUERY_ANSWER_DELIVERED,
+    QUERY_ANSWER_UNPUBLISHED,
     QUERY_IGNORED_OVERSIZE,
     QUERY_IGNORED_UNBOUND,
     QUERY_UNAVAILABLE,
@@ -816,6 +817,132 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertTrue(recovered.activation.prepare())
         self.assertIsNotNone(self.reservation.held_by(BOT_ID))
         self.assertIsNotNone(recovered.activation.issue_pairing_challenge(owner_a))
+
+
+class ChannelAActivationRevisionTests(ActivationHarnessTestCase):
+    """Existing public composition must wire revision capture and validation."""
+
+    def test_parser_replacement_refuses_old_answer_through_real_pairing_flow(self):
+        capability, _ = self.sessions.create()
+        owner = self.sessions.authorize(capability, touch=False)
+        self.sessions.set_context(capability, SNAPSHOT_A)
+        self.labels[owner] = LABEL_A
+
+        def replace_during_parse(snapshot, question):
+            answer = answer_from_snapshot(snapshot, question)
+            self.sessions.set_context(capability, SNAPSHOT_B)
+            return answer
+
+        fixture = self.activate(parse=replace_during_parse)
+        self.assertTrue(fixture.activation.prepare())
+        self.link(fixture, PHONE_A, owner, 1)
+        sent_before = len(fixture.transport.sent)
+        fixture.transport.batches.append((question_update(3, PHONE_A, QUESTION),))
+        result = fixture.activation.poll_once()
+
+        # Behavioral RED on existing APIs: current production delivers ANSWER_A.
+        self.assertEqual([outcome.kind for outcome in result.outcomes], [QUERY_UNAVAILABLE])
+        self.assertEqual(fixture.parse_calls, [(SNAPSHOT_A, QUESTION)])
+        self.assertEqual(published_envelopes(fixture.observed), [])
+        self.assertEqual(
+            [message["text"] for message in fixture.transport.sent[sent_before:]],
+            [COPY_QUERY_UNAVAILABLE],
+        )
+
+    def test_post_send_replacement_is_delivered_but_never_published(self):
+        capability, _ = self.sessions.create()
+        owner = self.sessions.authorize(capability, touch=False)
+        self.sessions.set_context(capability, SNAPSHOT_A)
+        self.labels[owner] = LABEL_A
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        self.link(fixture, PHONE_A, owner, 1)
+        original_send = fixture.transport.send_message
+
+        def send_then_replace(**kwargs):
+            receipt = original_send(**kwargs)
+            if kwargs["text"] == ANSWER_A:
+                self.sessions.set_context(capability, SNAPSHOT_B)
+            return receipt
+
+        fixture.transport.send_message = send_then_replace
+        sent_before = len(fixture.transport.sent)
+        fixture.transport.batches.append((question_update(3, PHONE_A, QUESTION),))
+        result = fixture.activation.poll_once()
+        self.assertEqual([outcome.kind for outcome in result.outcomes], [QUERY_ANSWER_UNPUBLISHED])
+        self.assertEqual(published_envelopes(fixture.observed), [])
+        self.assertEqual(
+            [message["text"] for message in fixture.transport.sent[sent_before:]], [ANSWER_A]
+        )
+
+    def test_unchanged_composed_answer_preserves_exact_revision(self):
+        capability, _ = self.sessions.create()
+        owner = self.sessions.authorize(capability, touch=False)
+        self.labels[owner] = LABEL_A
+        self.sessions.set_context(capability, SNAPSHOT_B)
+        self.sessions.set_context(capability, SNAPSHOT_A)
+        _, _, revision = self.sessions.capture_owner_context(owner, max_age_seconds=15)
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        self.link(fixture, PHONE_A, owner, 1)
+        fixture.transport.batches.append((question_update(3, PHONE_A, QUESTION),))
+        result = fixture.activation.poll_once()
+        envelope = result.outcomes[0].answer_envelope
+        self.assertEqual(result.outcomes[0].kind, QUERY_ANSWER_DELIVERED)
+        self.assertEqual(envelope.context_revision, revision)
+        self.assertEqual(envelope.as_dict()["contextRevision"], revision)
+        self.assertEqual(envelope.answer_text, ANSWER_A)
+        self.assertEqual(published_envelopes(fixture.observed), [envelope])
+
+
+class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
+    """RCA-5f additions: constructor-injected local runner, never a real worker."""
+
+    def injected_activation(self, *, start_result=True):
+        from unittest.mock import patch
+        from prisma_runtime import channel_a_activation as module
+        from prisma_runtime.channel_a_lifecycle import ChannelAStatus
+
+        calls = []
+        status = ChannelAStatus("running", None, False, False)
+
+        class LocalRunner:
+            def __init__(self, **kwargs):
+                calls.append("construct")
+
+            def start(self):
+                calls.append("start")
+                return start_result
+
+            def status(self):
+                calls.append("status")
+                return status
+
+            def stop(self):
+                calls.append("stop")
+                return True
+
+        # Patch only the composition's constructor dependency. No private runner,
+        # lease or dialogue is inspected, and Thread.start is never called.
+        with patch.object(module, "ChannelARunner", LocalRunner):
+            activation = self.activate().activation
+        self.assertEqual(calls, ["construct"])
+        return activation, calls, status
+
+    def test_start_forwards_exact_runner_return_once_per_call(self):
+        for value in (True, False):
+            with self.subTest(value=value):
+                activation, calls, _ = self.injected_activation(start_result=value)
+                self.assertIs(activation.start(), value)
+                self.assertEqual(calls, ["construct", "start"])
+                self.assertIs(activation.start(), value)
+                self.assertEqual(calls, ["construct", "start", "start"])
+
+    def test_status_forwards_exact_immutable_runner_snapshot_without_start(self):
+        activation, calls, status = self.injected_activation()
+        self.assertIs(activation.status(), status)
+        self.assertIs(activation.status(), status)
+        self.assertEqual(calls, ["construct", "status", "status"])
 
 
 class OfflineDispatchGuardProofTests(unittest.TestCase):

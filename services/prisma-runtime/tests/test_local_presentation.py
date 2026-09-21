@@ -15,6 +15,16 @@ sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from prisma_runtime.local_presentation import JsonFileStore, VoiceEventStore, answer_from_snapshot, create_app
 from prisma_runtime.voice_events import VoiceEventCapacity
+from prisma_runtime.hmi_sessions import HmiSessionRegistry
+
+
+# Explicitly inert collaborators for these HTTP fixtures, never runtime defaults.
+DISABLED_HTTP_OPTIONS = {
+    "telegram_configuration": type("Config", (), {
+        "enabled": False, "configured": False, "configuration_error": None,
+    })(),
+    "admin_http": type("Admin", (), {"register": lambda _self, _app: None})(),
+}
 
 
 def demo_snapshot():
@@ -36,9 +46,9 @@ class LocalPresentationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             store = JsonFileStore(Path(temporary) / "snapshot.json")
             events = VoiceEventStore()
-            client = create_app(store, events, None).test_client()
+            client = create_app(store, events, None, **DISABLED_HTTP_OPTIONS).test_client()
             headers = session_headers(client)
-            self.assertEqual(client.post("/hmi/current-snapshot", json=demo_snapshot(), headers=headers).status_code, 202)
+            self.assertEqual(client.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": demo_snapshot()}, headers=headers).status_code, 202)
             self.assertEqual(client.get("/hmi/current-snapshot", headers=headers).get_json()["machine"]["name"], "FT2000")
             response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=headers)
             self.assertEqual(response.status_code, 200)
@@ -49,7 +59,7 @@ class LocalPresentationTests(unittest.TestCase):
 
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None).test_client()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()
             response = client.post("/local/ask", json={"question": "status", "telegramChatId": 12345}, headers=session_headers(client))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["error"], "TELEGRAM_RECIPIENT_NOT_ALLOWED")
@@ -66,7 +76,7 @@ class LocalPresentationTests(unittest.TestCase):
             b"{",
         )
         with tempfile.TemporaryDirectory() as temporary:
-            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None).test_client()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()
             headers = session_headers(client)
             for body in invalid_bodies:
                 with self.subTest(body=body):
@@ -76,7 +86,7 @@ class LocalPresentationTests(unittest.TestCase):
 
     def test_local_ask_enforces_utf8_question_and_wire_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None).test_client()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()
             headers = session_headers(client)
             max_unicode = "😀" * 1024
             accepted = client.post(
@@ -132,10 +142,47 @@ class LocalPresentationTests(unittest.TestCase):
 
     def test_invalid_snapshot_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None).test_client()
-            response = client.post("/hmi/current-snapshot", json={"widgets": "invalid"}, headers=session_headers(client))
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()
+            response = client.post("/hmi/current-snapshot", json={
+                "version": 1, "command": "publish", "order": 1,
+                "snapshot": {"widgets": "invalid"},
+            }, headers=session_headers(client))
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.get_json()["error"], "INVALID_SNAPSHOT")
+
+
+class LocalAskRevisionTests(unittest.TestCase):
+    def setUp(self):
+        dispatch_patch = patch("requests.Session.request", side_effect=AssertionError("offline HTTP only"))
+        dispatch = dispatch_patch.start()
+        self.addCleanup(dispatch_patch.stop)
+        self.addCleanup(dispatch.assert_not_called)
+
+    def test_local_answer_is_not_published_if_parser_replaces_owner_context(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            registry = HmiSessionRegistry()
+            events = VoiceEventStore()
+            client = create_app(
+                JsonFileStore(Path(temporary) / "snapshot.json"), events,
+                session_registry=registry, **DISABLED_HTTP_OPTIONS,
+            ).test_client()
+            headers = session_headers(client)
+            capability = headers["X-Prisma-Session-Capability"]
+            owner = registry.authorize(capability, touch=False)
+            registry.set_context(capability, demo_snapshot())
+            parsed = []
+
+            def replace_during_parse(snapshot, question):
+                parsed.append((snapshot, question))
+                answer = answer_from_snapshot(snapshot, question)
+                registry.set_context(capability, {"widgets": []})
+                return answer
+
+            with patch("prisma_runtime.local_presentation.answer_from_snapshot", replace_during_parse):
+                response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=headers)
+            self.assertEqual(len(parsed), 1)
+            self.assertIsNone(events.latest(owner))
+            self.assertNotIn("voiceEvent", response.get_json())
 
 
 class VoiceProbeTests(unittest.TestCase):

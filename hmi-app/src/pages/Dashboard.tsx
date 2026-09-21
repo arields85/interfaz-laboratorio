@@ -66,6 +66,7 @@ function SnapshotExportController({
     }, [activeDashboard, allNodes, connection, dashboardViewState, equipmentMap, frame, machines]);
 
     useEffect(() => {
+        if (dashboardViewState !== 'viewer' || !frame.ready) return;
         return startDashboardSnapshotExporter({
             intervalMs: 5_000,
             getSnapshot: () => {
@@ -85,7 +86,7 @@ function SnapshotExportController({
                 });
             },
         });
-    }, []);
+    }, [dashboardViewState, frame.revisionKey, frame.ready]);
 
     return <>{children}</>;
 }
@@ -111,6 +112,9 @@ export default function Dashboard() {
     const [loadFailed, setLoadFailed] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
     const [selectedViewIds, setSelectedViewIds] = useState<Record<string, string>>({});
+    // A persisted profile change retires all entries from the previous frame,
+    // including when the dashboard and view identities themselves stay equal.
+    const [profileRevision, setProfileRevision] = useState(0);
     const handledQueryRef = useRef<string | null>(null);
     const {
         connection,
@@ -332,9 +336,11 @@ export default function Dashboard() {
             return;
         }
 
+        const viewId = activeDashboard.activeViewId ?? getDefaultDashboardView(activeDashboard).id;
+        const previousOptions = activeDashboard.widgets.find((widget) => widget.id === widgetId)?.displayOptions;
         const updatedDashboard = await dashboardStorage.persistPublishedWidgetDisplayOptions(
             activeDashboard.id,
-            activeDashboard.activeViewId ?? getDefaultDashboardView(activeDashboard).id ?? 'view-default',
+            viewId,
             widgetId,
             displayOptions,
         );
@@ -343,6 +349,13 @@ export default function Dashboard() {
             return;
         }
 
+        const publishedProfile = updatedDashboard.publishedSnapshot ?? updatedDashboard;
+        const updatedWidgets = publishedProfile.views?.find((view) => view.id === viewId)?.widgets
+            ?? publishedProfile.widgets;
+        const updatedOptions = updatedWidgets.find((widget) => widget.id === widgetId)?.displayOptions;
+        if (JSON.stringify(previousOptions) !== JSON.stringify(updatedOptions)) {
+            setProfileRevision((revision) => revision + 1);
+        }
         setAllDashboards((previous) => previous.map((dashboard) => dashboard.id === updatedDashboard.id ? updatedDashboard : dashboard));
         setPublishedDashboards((previous) => previous.map((dashboard) => dashboard.id === updatedDashboard.id ? updatedDashboard : dashboard));
     };
@@ -419,7 +432,7 @@ export default function Dashboard() {
         <DashboardPresentationFrameProvider
             dashboardId={activeDashboard.id}
             viewId={activeDashboard.activeViewId ?? 'view-default'}
-            profileRevision={0}
+            profileRevision={profileRevision}
             expectedWidgetIds={presentationWidgetIds}
         >
         <SnapshotExportController

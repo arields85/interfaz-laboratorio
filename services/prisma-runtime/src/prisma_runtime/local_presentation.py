@@ -26,7 +26,10 @@ from .admin_auth import AdminAuthRepository, AdminAuthService, ScryptPasswordHas
 from .admin_http import AdminHttpBoundary
 from .bot_identity_reservation import process_bot_identity_reservation
 from .credential_store import CredentialService
-from .hmi_sessions import CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge, HmiSessionRegistry, HmiSessionUnauthorized
+from .hmi_sessions import (
+    CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge,
+    HmiSessionContextUnavailable, HmiSessionError, HmiSessionRegistry, HmiSessionUnauthorized,
+)
 from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
@@ -830,9 +833,9 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     def session_error():
         return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
 
-    def session_owner():
+    def session_owner(*, touch=True):
         try:
-            return session_registry.authorize(request.headers.get(CAPABILITY_HEADER, ""))
+            return session_registry.authorize(request.headers.get(CAPABILITY_HEADER, ""), touch=touch)
         except HmiSessionUnauthorized:
             return None
 
@@ -886,18 +889,22 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     def current_snapshot():
         if request.method == "OPTIONS": return Response(status=204)
         capability = request.headers.get(CAPABILITY_HEADER, "")
-        if session_owner() is None: return session_error()
+        if session_owner(touch=False) is None: return session_error()
         if request.method == "GET":
             _owner_id, snapshot = session_registry.get_context(capability)
             return (jsonify({"ok": False, "error": "NO_SNAPSHOT"}), 404) if snapshot is None else jsonify(snapshot)
-        snapshot = request.get_json(silent=True)
-        if not isinstance(snapshot, dict) or not isinstance(snapshot.get("widgets"), list): return jsonify({"ok": False, "error": "INVALID_SNAPSHOT", "message": "widgets must be a list."}), 400
-        if not snapshot.get("timestamp"): snapshot["timestamp"] = utc_now_iso()
+        payload = request_bytes_within(session_registry.max_context_bytes)
+        if payload is None:
+            return jsonify({"ok": False, "error": "PRISMA_SESSION_CONTEXT_TOO_LARGE"}), 413
         try:
-            session_registry.set_context(capability, snapshot)
+            applied = session_registry.apply_context_command(capability, parse_json_bytes(payload))
         except HmiSessionContextTooLarge:
             return jsonify({"ok": False, "error": "PRISMA_SESSION_CONTEXT_TOO_LARGE"}), 413
-        return jsonify({"ok": True, "status": "accepted", "timestamp": snapshot["timestamp"]}), 202
+        except HmiSessionUnauthorized:
+            return session_error()
+        except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError):
+            return jsonify({"ok": False, "error": "INVALID_SNAPSHOT"}), 400
+        return jsonify({"ok": True, "status": "accepted" if applied else "stale"}), 202 if applied else 200
 
     @app.route("/hmi/voice/latest", methods=["GET", "OPTIONS"])
     def latest_voice():
@@ -920,7 +927,6 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         payload = request_bytes_within(HMI_ASK_MAX_BYTES)
         if payload is None:
             return jsonify({"ok": False, "error": "INVALID_LOCAL_ASK_REQUEST"}), 400
-        capability = request.headers.get(CAPABILITY_HEADER, "")
         owner_id = session_owner()
         if owner_id is None: return session_error()
         data = parse_json_bytes(payload)
@@ -935,8 +941,18 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             return jsonify({"ok": False, "error": "INVALID_LOCAL_ASK_REQUEST"}), 400
         if not 1 <= question_bytes <= HMI_QUESTION_MAX_BYTES:
             return jsonify({"ok": False, "error": "QUESTION_REQUIRED"}), 400
-        _owner_id, snapshot = session_registry.get_context(capability)
+        try:
+            _age, snapshot, revision = session_registry.capture_owner_context(
+                owner_id, max_age_seconds=session_registry.absolute_ttl,
+            )
+        except HmiSessionContextUnavailable:
+            # Preserve the existing context-free local answer/event contract.
+            snapshot, revision = None, None
+        except HmiSessionError:
+            return jsonify({"ok": False, "error": "NO_SNAPSHOT"}), 409
         answer = answer_from_snapshot(snapshot, question)
+        if revision is not None and not session_registry.is_owner_context_current(owner_id, revision):
+            return jsonify({"ok": False, "error": "NO_SNAPSHOT"}), 409
         try:
             event = voice_events.publish(question, answer.answer_text, owner_id=owner_id)
         except VoiceEventCapacity:

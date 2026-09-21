@@ -279,6 +279,30 @@ No existe un requisito aprobado de bootstrap limpio completamente offline. Las
 dependencias de Internet continúan aplicando a Gemini y Telegram aun cuando la
 telemetría sea simulada.
 
+#### Entorno local actual del usuario — arranque conocido
+
+Antes de preguntar nuevamente cómo inicia el usuario la HMI/Prisma al retomar una
+sesión, consultar esta nota. Volver a preguntar solo si el usuario informa un cambio
+o si aparece evidencia que la contradiga.
+
+- El usuario inicia manualmente
+  `C:\Users\Ariel De Simone\Desktop\CoreAnalitycs\CoreAnalitycs.bat`.
+- Ese launcher define `PROJECT_PATH` como
+  `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\hmi-app`, ejecuta
+  `npm run dev -- --host 127.0.0.1 --port 5173` y abre Chrome en
+  `http://127.0.0.1:5173` tras una espera de 3 segundos.
+- El script `dev` de [`package.json`](../../hmi-app/package.json) invoca
+  `node ./scripts/dev.mjs`. En Windows, `runDevelopment` en
+  [`dev.mjs`](../../hmi-app/scripts/dev.mjs) intenta adquirir Prisma mediante
+  [`start-local.ps1`](../../services/prisma-runtime/operations/start-local.ps1)
+  antes de lanzar Vite; si la adquisición falla, advierte y continúa con Vite.
+
+Esto registra el entorno local del usuario, no un requisito general de despliegue ni
+una identidad global del producto. La evidencia es lectura del launcher y del código,
+no ejecución: siguen sin identificarse la fuente, instalación y versión del backend
+realmente en ejecución. El launcher por sí solo no descarta otro arranque automático
+de Windows ni demuestra health exitoso o una causa raíz corregida.
+
 ### 4.5 Frontera de acceso actual
 
 El servicio de presentación limita orígenes de desarrollo conocidos. El servicio de

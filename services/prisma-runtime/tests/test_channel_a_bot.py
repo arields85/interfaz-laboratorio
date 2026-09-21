@@ -2100,7 +2100,8 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
 
     def enable_queries(self, **overrides):
         options = {
-            "read_context": self.sessions.get_owner_context,
+            "read_context": self.sessions.capture_owner_context,
+            "context_is_current": self.sessions.is_owner_context_current,
             "parse": self.parse,
             "freshness_bound": 30.0,
             "max_question_bytes": 4096,
@@ -2126,6 +2127,7 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         for overrides in (
             {"parse": None},
             {"read_context": None},
+            {"context_is_current": None},
             {"freshness_bound": 0},
             {"max_question_bytes": 0},
             {"max_answer_chars": -1},
@@ -2133,7 +2135,8 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
             with self.subTest(overrides=overrides):
                 dialogue = self.build()
                 options = {
-                    "read_context": self.sessions.get_owner_context,
+                    "read_context": self.sessions.capture_owner_context,
+                    "context_is_current": self.sessions.is_owner_context_current,
                     "parse": self.parse,
                     "freshness_bound": 30.0,
                     "max_question_bytes": 4096,
@@ -2166,7 +2169,8 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
             try:
                 barrier.wait(timeout=5)
                 coordinator = dialogue.enable_queries(
-                    read_context=self.sessions.get_owner_context,
+                    read_context=self.sessions.capture_owner_context,
+                    context_is_current=self.sessions.is_owner_context_current,
                     parse=self.parse,
                     freshness_bound=30.0,
                     max_question_bytes=4096,

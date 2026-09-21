@@ -56,6 +56,8 @@ class _Session:
     last_seen_at: float
     context: dict | None = None
     context_received_at: float | None = None
+    command_order: int = 0
+    context_revision: int = 0
 
 
 class HmiSessionRegistry:
@@ -136,19 +138,67 @@ class HmiSessionRegistry:
         self.on_remove(session.owner_id)
         return session.owner_id
 
-    def set_context(self, capability: str, context: dict) -> str:
-        if len(json.dumps(context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > self.max_context_bytes:
+    def _copy_context(self, context: dict) -> dict:
+        # Copy and validate before acquiring authority or mutating session state.
+        copied = copy.deepcopy(context)
+        encoded = json.dumps(copied, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        if len(encoded) > self.max_context_bytes:
             raise HmiSessionContextTooLarge("PRISMA_SESSION_CONTEXT_TOO_LARGE")
+        return copied
+
+    def apply_context_command(self, capability: str, envelope: dict) -> bool:
+        """Atomically apply an ordered HTTP command; stale commands have no effects."""
+        if not isinstance(envelope, dict):
+            raise ValueError("INVALID_SNAPSHOT")
+        command = envelope.get("command")
+        expected = {"version", "command", "order"}
+        if command == "publish":
+            expected.add("snapshot")
+        elif command != "invalidate":
+            raise ValueError("INVALID_SNAPSHOT")
+        order = envelope.get("order")
+        if (
+            set(envelope) != expected
+            or type(envelope.get("version")) is not int
+            or envelope["version"] != 1
+            or type(order) is not int
+            or not 1 <= order <= 9007199254740991
+        ):
+            raise ValueError("INVALID_SNAPSHOT")
+        context = None
+        if command == "publish":
+            snapshot = envelope["snapshot"]
+            if not isinstance(snapshot, dict) or not isinstance(snapshot.get("widgets"), list):
+                raise ValueError("INVALID_SNAPSHOT")
+            context = self._copy_context(snapshot)
         digest = self._digest(capability)
-        now = self.clock()
         with self.lock:
+            now = self.clock()
+            session = self._sessions.get(digest)
+            if session is None or self._expired(session, now):
+                raise HmiSessionUnauthorized("PRISMA_SESSION_REQUIRED")
+            if order <= session.command_order:
+                return False
+            session.context = context
+            session.context_received_at = now if context is not None else None
+            session.last_seen_at = now
+            session.command_order = order
+            session.context_revision += 1
+            return True
+
+    def set_context(self, capability: str, context: dict) -> str:
+        copied = self._copy_context(context)
+        digest = self._digest(capability)
+        with self.lock:
+            now = self.clock()
             self._purge_locked(now)
             session = self._sessions.get(digest)
             if session is None:
                 raise HmiSessionUnauthorized("PRISMA_SESSION_REQUIRED")
             session.last_seen_at = now
-            session.context = copy.deepcopy(context)
+            session.context = copied
             session.context_received_at = now
+            session.context_revision += 1
             return session.owner_id
 
     def get_context(self, capability: str) -> tuple[str, dict | None]:
@@ -163,6 +213,10 @@ class HmiSessionRegistry:
             return session.owner_id, copy.deepcopy(session.context)
 
     def get_owner_context(self, owner_id: str, *, max_age_seconds: float) -> tuple[float, dict]:
+        age, context, _revision = self.capture_owner_context(owner_id, max_age_seconds=max_age_seconds)
+        return age, context
+
+    def capture_owner_context(self, owner_id: str, *, max_age_seconds: float) -> tuple[float, dict, int]:
         """Return one owner's server-received context and its observed receipt age.
 
         Trusted in-process lookup for internal collaborators -- the remote pairing
@@ -187,8 +241,8 @@ class HmiSessionRegistry:
             bound = math.inf
         if not math.isfinite(bound) or bound <= 0:
             raise HmiSessionFreshnessInvalid("PRISMA_SESSION_FRESHNESS_BOUND_INVALID")
-        now = self.clock()
         with self.lock:
+            now = self.clock()
             self._purge_locked(now)
             session = None
             for candidate in self._sessions.values():
@@ -206,7 +260,34 @@ class HmiSessionRegistry:
                 raise HmiSessionFreshnessInvalid("PRISMA_SESSION_RECEIPT_TIME_INVALID")
             if age > bound:
                 raise HmiSessionContextStale("PRISMA_SESSION_CONTEXT_STALE")
-            return age, copy.deepcopy(session.context)
+            return age, copy.deepcopy(session.context), session.context_revision
+
+    def _expired(self, session: _Session, now: float) -> bool:
+        idle_age = now - session.last_seen_at
+        absolute_age = now - session.created_at
+        return (
+            not math.isfinite(idle_age) or not math.isfinite(absolute_age)
+            or idle_age < 0 or absolute_age < 0
+            or idle_age >= self.idle_ttl or absolute_age >= self.absolute_ttl
+        )
+
+    def is_owner_context_current(self, owner_id: str, revision: int) -> bool:
+        """No-touch predicate: never purge or invoke removal callbacks under lock."""
+        if type(revision) is not int or revision <= 0:
+            return False
+        with self.lock:
+            now = self.clock()
+            for session in self._sessions.values():
+                if session.owner_id == owner_id:
+                    return (
+                        not self._expired(session, now)
+                        and session.context is not None
+                        and session.context_received_at is not None
+                        and math.isfinite(now - session.context_received_at)
+                        and now >= session.context_received_at
+                        and session.context_revision == revision
+                    )
+            return False
 
     def _purge_locked(self, now):
         expired = [

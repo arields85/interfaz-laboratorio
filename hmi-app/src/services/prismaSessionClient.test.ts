@@ -28,6 +28,103 @@ function deferred<Value>() {
 }
 
 describe('PrismaSessionClient', () => {
+    it('allocates command order at intent creation, not publication completion', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse())
+            .mockImplementation(async () => new Response(null, { status: 202 }));
+        const client = new PrismaSessionClient(fetchMock);
+        const oldIntent = client.createContextIntent();
+        const newIntent = client.createContextIntent();
+
+        await client.invalidateContext(newIntent);
+        await client.publishContext(oldIntent, { widgets: [] });
+
+        const bodies = fetchMock.mock.calls
+            .filter(([path]) => path === '/api/prisma/snapshot')
+            .map(([, init]) => JSON.parse(String(init?.body)));
+        expect(bodies).toEqual([
+            { version: 1, command: 'invalidate', order: 2 },
+            { version: 1, command: 'publish', order: 1, snapshot: { widgets: [] } },
+        ]);
+        expect(client.snapshot).toEqual({ epoch: 0 });
+    });
+
+    it('drops captured intents after reset without bootstrapping a new capability', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(sessionResponse());
+        const client = new PrismaSessionClient(fetchMock);
+        const oldIntent = client.createContextIntent();
+        client.reset({ close: false });
+
+        await expect(client.publishContext(oldIntent, { widgets: [] }))
+            .rejects.toBeInstanceOf(PrismaStaleSessionResponse);
+        await expect(client.invalidateContext(oldIntent))
+            .rejects.toBeInstanceOf(PrismaStaleSessionResponse);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('drops an ordered intent waiting for bootstrap when the epoch resets', async () => {
+        const bootstrap = deferred<Response>();
+        const bootstrapStarted = deferred<void>();
+        const fetchMock = vi.fn<typeof fetch>().mockImplementationOnce(() => {
+            bootstrapStarted.resolve();
+            return bootstrap.promise;
+        });
+        const client = new PrismaSessionClient(fetchMock);
+        const pending = client.publishContext(client.createContextIntent(), { widgets: [] });
+        const rejected = expect(pending).rejects.toBeInstanceOf(PrismaStaleSessionResponse);
+        await bootstrapStarted.promise;
+        client.reset({ close: false });
+        bootstrap.resolve(sessionResponse());
+
+        await rejected;
+        expect(fetchMock).toHaveBeenCalledOnce();
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/prisma/session');
+    });
+
+    it('does not replay an ordered body after a current authorization refusal', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse())
+            .mockResolvedValueOnce(new Response(null, { status: 401 }))
+            .mockResolvedValueOnce(sessionResponse(canonicalCapability(2)));
+        const client = new PrismaSessionClient(fetchMock);
+        const intent = client.createContextIntent();
+        await client.publishContext(intent, { widgets: [] });
+        await client.bootstrap();
+
+        await expect(client.publishContext(intent, { widgets: [] }))
+            .rejects.toBeInstanceOf(PrismaStaleSessionResponse);
+        expect(fetchMock.mock.calls.filter(([path]) => path === '/api/prisma/snapshot')).toHaveLength(1);
+    });
+
+    it('uses a fresh invalidation signal independent from an aborted publication', async () => {
+        const started = deferred<void>();
+        const signals: AbortSignal[] = [];
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse())
+            .mockImplementation(async (_path, init) => {
+                signals.push(init!.signal!);
+                if (signals.length === 1) {
+                    started.resolve();
+                    return new Promise<Response>((_resolve, reject) => {
+                        init!.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+                    });
+                }
+                return new Response(null, { status: 202 });
+            });
+        const client = new PrismaSessionClient(fetchMock);
+        const publication = new AbortController();
+        const pending = client.publishContext(client.createContextIntent(), { widgets: [] }, publication.signal);
+        const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+        await started.promise;
+        publication.abort();
+        await rejected;
+        await client.invalidateContext(client.createContextIntent(), new AbortController().signal);
+
+        expect(signals[0]?.aborted).toBe(true);
+        expect(signals[1]?.aborted).toBe(false);
+        expect(signals[1]).not.toBe(signals[0]);
+    });
+
     it('single-flights bootstrap and keeps the capability private', async () => {
         const capability = canonicalCapability();
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(sessionResponse(capability));

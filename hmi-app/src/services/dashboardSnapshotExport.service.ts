@@ -1,4 +1,5 @@
 import { PRISMA_SNAPSHOT_URL } from '../config/prismaAssistant.config';
+import type { PrismaContextIntent } from '../domain/prismaSession.types';
 import { prismaSessionClient } from './prismaSessionClient';
 
 const SNAPSHOT_EXPORT_FAILED_MESSAGE = '[dashboard-snapshot-export] Snapshot export failed.';
@@ -26,6 +27,19 @@ export async function exportDashboardSnapshot(
     snapshot: unknown,
     lifecycleSignal?: AbortSignal,
     fetchImpl?: typeof fetch,
+    intent?: PrismaContextIntent,
+): Promise<boolean> {
+    return sendContextCommand(
+        (signal) => prismaSessionClient.publishContext(
+            intent ?? prismaSessionClient.createContextIntent(), snapshot, signal, fetchImpl,
+        ),
+        lifecycleSignal,
+    );
+}
+
+async function sendContextCommand(
+    send: (signal: AbortSignal) => Promise<Response>,
+    lifecycleSignal?: AbortSignal,
 ): Promise<boolean> {
     if (lifecycleSignal?.aborted) {
         return false;
@@ -41,13 +55,7 @@ export async function exportDashboardSnapshot(
     lifecycleSignal?.addEventListener('abort', cancel, { once: true });
 
     try {
-        const response = await (fetchImpl ?? prismaSessionClient.fetch.bind(prismaSessionClient))(PRISMA_SNAPSHOT_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(snapshot),
-            signal: controller.signal,
-        });
-        if (fetchImpl === undefined && !prismaSessionClient.isCurrentResponse(response)) return false;
+        const response = await send(controller.signal);
         if (!response.ok) {
             const error = new Error(`HTTP ${response.status}`) as Error & { status: number };
             error.status = response.status;
@@ -81,38 +89,85 @@ export function startDashboardSnapshotExporter({
 
     let stopped = false;
     let inFlight: Promise<boolean> | null = null;
-    const lifecycleController = new AbortController();
+    let lifecycleController = new AbortController();
+    const owner = { stop: () => undefined as void };
+    const canCapture = () => document.visibilityState !== 'hidden' && navigator.onLine;
+    let paused = !canCapture();
+    let contextInvalid = false;
 
+    const abortPublication = () => {
+        lifecycleController.abort();
+        lifecycleController = new AbortController();
+        inFlight = null;
+    };
+    const invalidate = () => {
+        abortPublication();
+        if (contextInvalid || activeExporter !== owner) return;
+        contextInvalid = true;
+        // Allocate before any asynchronous work; never reuse the aborted publish signal.
+        void sendContextCommand((signal) => prismaSessionClient.invalidateContext(
+            prismaSessionClient.createContextIntent(), signal, fetchImpl,
+        ));
+    };
     const exportCurrentSnapshot = () => {
-        if (stopped || inFlight) {
+        if (stopped || activeExporter !== owner || paused || inFlight) return;
+        const epoch = prismaSessionClient.snapshot.epoch;
+        const captureSignal = lifecycleController.signal;
+        let intent: PrismaContextIntent;
+        let snapshot: unknown;
+        try {
+            intent = prismaSessionClient.createContextIntent();
+            snapshot = getSnapshot();
+        } catch (error: unknown) {
+            void sendContextCommand(() => Promise.reject(error));
             return;
         }
-        const snapshot = getSnapshot();
+        // Capture is foreign code and can synchronously retire this lease or session.
+        if (stopped || activeExporter !== owner || captureSignal.aborted
+            || paused || !canCapture() || epoch !== prismaSessionClient.snapshot.epoch) return;
         if (snapshot === null) {
+            invalidate();
             return;
         }
-        const request = exportDashboardSnapshot(snapshot, lifecycleController.signal, fetchImpl).finally(() => {
-            if (inFlight === request) {
-                inFlight = null;
-            }
+        contextInvalid = false;
+        const request = exportDashboardSnapshot(snapshot, lifecycleController.signal, fetchImpl, intent).finally(() => {
+            if (inFlight === request) inFlight = null;
         });
         inFlight = request;
         void request;
     };
-
+    const availabilityChanged = () => {
+        if (stopped || activeExporter !== owner) return;
+        paused = !canCapture();
+        if (paused) invalidate();
+    };
+    const unsubscribeReset = prismaSessionClient.subscribeToReset(() => {
+        abortPublication();
+        // Reset retired the old capability; only a future fresh capture may publish.
+        contextInvalid = true;
+    });
     const intervalId = window.setInterval(exportCurrentSnapshot, intervalMs);
-    const owner = { stop: () => undefined as void };
     const stop = () => {
         if (stopped) return;
         stopped = true;
         window.clearInterval(intervalId);
-        lifecycleController.abort();
+        document.removeEventListener('visibilitychange', availabilityChanged);
+        window.removeEventListener('offline', availabilityChanged);
+        window.removeEventListener('online', availabilityChanged);
+        unsubscribeReset();
         if (activeExporter === owner) {
-            activeExporter = null;
+            invalidate();
+            if (activeExporter === owner) activeExporter = null;
+        } else {
+            abortPublication();
         }
     };
     owner.stop = stop;
     activeExporter = owner;
+    document.addEventListener('visibilitychange', availabilityChanged);
+    window.addEventListener('offline', availabilityChanged);
+    window.addEventListener('online', availabilityChanged);
+    if (paused) invalidate();
     return stop;
 }
 

@@ -33,8 +33,8 @@ class HmiSessionIsolationTests(unittest.TestCase):
             headers_a = {HEADER: cap_a}
             headers_b = {HEADER: cap_b}
 
-            self.assertEqual(a.post("/hmi/current-snapshot", json={"widgets": [], "batch": "A"}, headers=headers_a).status_code, 202)
-            self.assertEqual(b.post("/hmi/current-snapshot", json={"widgets": [], "batch": "B"}, headers=headers_b).status_code, 202)
+            self.assertEqual(a.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": {"widgets": [], "batch": "A"}}, headers=headers_a).status_code, 202)
+            self.assertEqual(b.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": {"widgets": [], "batch": "B"}}, headers=headers_b).status_code, 202)
             self.assertEqual(a.get("/hmi/current-snapshot", headers=headers_a).get_json()["batch"], "A")
             self.assertEqual(b.get("/hmi/current-snapshot", headers=headers_b).get_json()["batch"], "B")
 

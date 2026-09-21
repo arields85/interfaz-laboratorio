@@ -299,10 +299,29 @@ added.
 |---|---|---|
 | `POST /api/prisma/session` | `POST /hmi/session` | Exact `{}`, 128-byte wire cap; returns `201`, expiry metadata, and capability header. |
 | `DELETE /api/prisma/session` | `DELETE /hmi/session` | No body; revokes the capability and returns bodyless `204`. |
-| `POST /api/prisma/snapshot` | `POST /hmi/current-snapshot` | Replaces only that session's latest view; maximum 1 MiB. |
+| `POST /api/prisma/snapshot` | `POST /hmi/current-snapshot` | Strict ordered v1 publish/invalidate commands for the same owner's context; maximum 1 MiB. |
 | `GET /api/prisma/events/latest` | `GET /hmi/voice/latest` | Returns only that session's latest event, or `204`. |
 | `POST /api/prisma/ask` | `POST /local/ask` | Exact question object, 1–4096 UTF-8 bytes and 32 KiB wire cap. |
 | `POST /api/prisma/tts/live` | `POST /prisma/speak-live` | Exact event ID plus capability; foreign events return nondisclosing `404`. |
+
+Snapshot commands use exact v1 wire envelopes:
+
+```json
+{"version":1,"command":"publish","order":1,"snapshot":{"widgets":[]}}
+{"version":1,"command":"invalidate","order":2}
+```
+
+`order` is a positive JavaScript-safe integer allocated per document session at intent
+creation; its counter survives exporter replacement. Accepted commands return HTTP 202
+with `{ "ok": true, "status": "accepted" }`; stale commands return HTTP 200 with
+`{ "ok": true, "status": "stale" }` without activity or receipt-age refresh.
+Legacy raw snapshots return HTTP 400 without effects. Request bodies and encoded UTF-8
+context are bounded to 1 MiB; payloads require strict finite JSON.
+Client and backend must understand v1 together; do not blindly restart services or change
+credentials to address a protocol mismatch. The GET snapshot shape is unchanged, as is
+legacy GET presence policy.
+Internal context revisions are rechecked before Channel A answer publication and local
+answer publication. These guards do not establish full remote activation or live acceptance.
 
 Every exact session/TTS response is `Cache-Control: no-store`. Missing, malformed, expired, or
 revoked capabilities fail before credential, coordinator, cache, or provider work. The capability

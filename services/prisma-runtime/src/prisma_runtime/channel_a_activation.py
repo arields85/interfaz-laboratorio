@@ -59,7 +59,8 @@ class ChannelAActivation:
                 destination_label=destination_label,
             )
             dialogue.enable_queries(
-                read_context=sessions.get_owner_context,
+                read_context=sessions.capture_owner_context,
+                context_is_current=sessions.is_owner_context_current,
                 parse=parse,
                 freshness_bound=_CONTEXT_FRESHNESS_SECONDS,
                 max_question_bytes=max_question_bytes,
