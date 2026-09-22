@@ -54,6 +54,7 @@ export function createPowerShellRuntime({
       try {
         await runScript('start-local.ps1', [
           '-DevelopmentOwnerToken', ownerToken,
+          '-DevelopmentOwnerProcessId', String(process.pid),
           '-DevelopmentReceiptPath', receiptPath,
           '-DevelopmentCancellationPath', cancellationPath,
           '-LockTimeoutMilliseconds', '10000',

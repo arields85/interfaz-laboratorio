@@ -897,6 +897,103 @@ class ChannelAActivationRevisionTests(ActivationHarnessTestCase):
         self.assertEqual(published_envelopes(fixture.observed), [envelope])
 
 
+class ChannelAActivationDeadlineTests(ActivationHarnessTestCase):
+    """The captured answer dies when the query clock passes its captured deadline."""
+
+    def _deliver_answer(self):
+        capability, _ = self.sessions.create()
+        owner = self.sessions.authorize(capability, touch=False)
+        self.labels[owner] = LABEL_A
+        self.sessions.set_context(capability, SNAPSHOT_A)
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        self.link(fixture, PHONE_A, owner, 1)
+        fixture.transport.batches.append((question_update(3, PHONE_A, QUESTION),))
+        result = fixture.activation.poll_once()
+        self.assertEqual([o.kind for o in result.outcomes], [QUERY_ANSWER_DELIVERED])
+        envelope = result.outcomes[0].answer_envelope
+        self.assertIsNotNone(envelope)
+        return fixture, envelope, capability
+
+    def test_the_delivered_answer_dies_when_the_query_clock_passes_its_deadline(self):
+        fixture, envelope, _capability = self._deliver_answer()
+        activation = fixture.activation
+        self.assertTrue(activation.is_query_envelope_current(envelope))
+        # No receipt-age or revision change: only the monotonic query clock moved.
+        # This is the reported intermittence: same-frame refreshes renew the
+        # receipt forever, while the captured answer must expire on its own.
+        self.query_now[0] += 16.0
+        self.assertFalse(activation.is_query_envelope_current(envelope))
+
+    def test_the_captured_deadline_is_strictly_after_the_delivery_sample(self):
+        fixture, envelope, _capability = self._deliver_answer()
+        activation = fixture.activation
+        deadline = envelope.captured_deadline
+        self.assertIs(type(deadline), float)
+        self.assertGreater(deadline, self.query_now[0])
+        self.query_now[0] = deadline - 0.5
+        self.assertTrue(activation.is_query_envelope_current(envelope))
+        # Exact equality fails closed: at the deadline the answer is expired.
+        self.query_now[0] = deadline
+        self.assertFalse(activation.is_query_envelope_current(envelope))
+        self.query_now[0] = deadline + 0.5
+        self.assertFalse(activation.is_query_envelope_current(envelope))
+
+    def test_an_unusable_query_clock_sample_fails_closed(self):
+        fixture, envelope, _capability = self._deliver_answer()
+        activation = fixture.activation
+        self.assertTrue(activation.is_query_envelope_current(envelope))
+        self.query_now[0] = envelope.captured_deadline - 1.0
+        broken = (
+            ("bool", lambda: True),
+            ("string", lambda: "1.0"),
+            ("nan", lambda: float("nan")),
+            ("inf", lambda: float("inf")),
+            ("negative", lambda: -1.0),
+        )
+        for name, clock in broken:
+            with self.subTest(clock=name):
+                activation._query_clock = clock
+                self.assertFalse(activation.is_query_envelope_current(envelope))
+
+        def exploding():
+            raise RuntimeError("query clock failure")
+
+        activation._query_clock = exploding
+        self.assertFalse(activation.is_query_envelope_current(envelope))
+
+    def test_a_reentrant_query_clock_that_stops_the_activation_cannot_authorize(self):
+        fixture, envelope, _capability = self._deliver_answer()
+        activation = fixture.activation
+        self.assertTrue(activation.is_query_envelope_current(envelope))
+        deadline = envelope.captured_deadline
+
+        def stop_during_sample():
+            # An injected clock is a foreign domain: it may reenter stop() and
+            # still return an otherwise-valid pre-deadline float.
+            activation.stop()
+            return deadline - 1.0
+
+        activation._query_clock = stop_during_sample
+        self.assertFalse(activation.is_query_envelope_current(envelope))
+
+    def test_a_reentrant_query_clock_that_invalidates_the_context_cannot_authorize(self):
+        fixture, envelope, capability = self._deliver_answer()
+        activation = fixture.activation
+        self.assertTrue(activation.is_query_envelope_current(envelope))
+        deadline = envelope.captured_deadline
+
+        def invalidate_during_sample():
+            # A same-domain reentrant invalidation during the final sample must
+            # not authorize the already-captured witness afterwards.
+            self.sessions.apply_context_command(
+                capability, {"version": 1, "command": "invalidate", "order": 1})
+            return deadline - 1.0
+
+        activation._query_clock = invalidate_during_sample
+        self.assertFalse(activation.is_query_envelope_current(envelope))
+
+
 class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
     """RCA-5f additions: constructor-injected local runner, never a real worker."""
 

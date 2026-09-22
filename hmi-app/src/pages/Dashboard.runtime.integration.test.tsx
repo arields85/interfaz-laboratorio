@@ -108,7 +108,10 @@ describe('Dashboard unified Prisma exporter integration', () => {
         expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/prisma/snapshot');
         expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('X-Prisma-Session-Capability')).toBe(SESSION_CAPABILITY);
         expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
-            version: 1, command: 'publish', order: expect.any(Number), snapshot: expect.objectContaining({ widgets: [] }),
+            version: 1, command: 'publish', order: expect.any(Number),
+            // One visit frame per exporter instance, reused across routine ticks.
+            frameGeneration: expect.any(Number),
+            snapshot: expect.objectContaining({ widgets: [] }),
         });
         expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('central');
         expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('https://legacy.invalid/snapshot');

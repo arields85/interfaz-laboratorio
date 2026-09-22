@@ -450,6 +450,7 @@ class ChannelARootCompositionTests(RootHarness, unittest.TestCase):
             epoch="offline-channel-a-epoch",
             answer_text=answer_text,
             context_revision=3,
+            captured_deadline=999999.0,
         )
 
     def test_create_app_composes_one_inert_manager_sharing_protected_state(self):

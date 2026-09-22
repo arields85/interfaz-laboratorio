@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$DevelopmentOwnerToken = '',
+    [string]$DevelopmentOwnerProcessId = '',
     [string]$DevelopmentReceiptPath = '',
     [string]$DevelopmentCancellationPath = '',
     [int]$LockTimeoutMilliseconds = 10000
@@ -98,6 +99,14 @@ function Stop-PrismaLaunchedProcess {
 function Invoke-PrismaStartTransaction {
     Assert-PrismaDevelopmentNotCancelled
     $isDevelopment = -not [string]::IsNullOrWhiteSpace($DevelopmentOwnerToken)
+    $ownerIdentity = $null
+    if ($isDevelopment -and -not [string]::IsNullOrWhiteSpace($DevelopmentOwnerProcessId)) {
+        $ownerIdentity = Get-PrismaDevelopmentOwnerRegistrationIdentity -ProcessId $DevelopmentOwnerProcessId
+    }
+    elseif ($isDevelopment) {
+        Write-Warning 'Prisma Local development owner process identity was omitted; this legacy owner cannot be reaped automatically.' -WarningAction Continue
+    }
+
     $canonical = Get-PrismaCanonicalManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -RequireCompleteRuntime
     if ($isDevelopment -and $canonical) {
         $ownershipProperty = $canonical.PSObject.Properties['developmentOwnership']
@@ -106,11 +115,16 @@ function Invoke-PrismaStartTransaction {
                 throw 'Prisma Local development runtime identity no longer matches its canonical manifest; it was not reused or stopped.'
             }
             $generation = [string]$ownershipProperty.Value.generation
-            Add-PrismaDevelopmentOwner -Manifest $canonical -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration $generation
+            $reap = Invoke-PrismaDevelopmentOwnerReap -Ownership $ownershipProperty.Value -ExcludedOwnerToken $DevelopmentOwnerToken
+            Add-PrismaDevelopmentOwner -Manifest $canonical -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration $generation -OwnerIdentity $ownerIdentity
             Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $canonical
+            Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
             return [ordered]@{ registered = $true; generation = $generation; reused = $true }
         }
         return [ordered]@{ registered = $false; generation = ''; reused = $true }
+    }
+    if ($isDevelopment -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'Prisma Local development acquisition found a partial or ambiguous manifest; it was preserved without repair or pruning.'
     }
 
     Prune-PrismaProcessManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot
@@ -153,7 +167,14 @@ function Invoke-PrismaStartTransaction {
         $generation = ''
         if ($isDevelopment) {
             $generation = [guid]::NewGuid().ToString('D')
-            $manifest.developmentOwnership = [ordered]@{ generation = $generation; owners = @($DevelopmentOwnerToken) }
+            $manifest.developmentOwnership = [pscustomobject][ordered]@{
+                generation = $generation
+                owners = @($DevelopmentOwnerToken)
+                ownerIdentities = [ordered]@{}
+            }
+            if ($null -ne $ownerIdentity) {
+                Set-PrismaDevelopmentOwnerIdentity -Ownership $manifest.developmentOwnership -OwnerToken $DevelopmentOwnerToken -OwnerIdentity $ownerIdentity
+            }
         }
         Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $manifest
         $startupComplete = $true

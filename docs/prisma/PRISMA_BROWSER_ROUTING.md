@@ -46,6 +46,14 @@ The Channel A credential route only writes or deletes a secret in the protected 
 Channel A bot is running, verified, paired, or connected. Channel A runtime status, apply, pairing,
 and session routes are not part of this proxy yet.
 
+The `/api/prisma/snapshot` publish command may carry an optional `frameGeneration` (positive
+JavaScript-safe integer): the browser exporter mints exactly one generation per view visit and
+reuses it across that visit's periodic ticks and resumes, so a routine same-view refresh renews
+context receipt freshness without a new context revision. It never renews the captured answer's
+deadline. The wire detail is defined by the runtime contract in
+`services/prisma-runtime/README.md`; routing, forwarding rules, and lifecycle ownership are
+unchanged.
+
 If auth status reports `configured: false`, provision the single administrator through the offline
 runtime procedure in `services/prisma-runtime/README.md` (`provision-admin`). The browser does not
 provision administrator credentials, configure the master key, create accounts, or provide recovery commands.

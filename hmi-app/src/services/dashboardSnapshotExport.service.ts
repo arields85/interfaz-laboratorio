@@ -29,10 +29,11 @@ export async function exportDashboardSnapshot(
     lifecycleSignal?: AbortSignal,
     fetchImpl?: typeof fetch,
     intent?: PrismaContextIntent,
+    frameGeneration?: number,
 ): Promise<boolean> {
     return sendContextCommand(
         (signal) => prismaSessionClient.publishContext(
-            intent ?? prismaSessionClient.createContextIntent(), snapshot, signal, fetchImpl,
+            intent ?? prismaSessionClient.createContextIntent(), snapshot, signal, fetchImpl, frameGeneration,
         ),
         lifecycleSignal,
     );
@@ -95,6 +96,11 @@ export function startDashboardSnapshotExporter({
     const canCapture = () => document.visibilityState !== 'hidden' && navigator.onLine;
     let paused = !canCapture();
     let contextInvalid = false;
+    // One visit identity per exporter instance: each instance is one view
+    // visit. The frame is reused across periodic ticks and hidden/offline
+    // resume (routine refreshes), while view navigation starts a new instance
+    // and mints the next frame. Never derived from snapshot object identity.
+    const frameGeneration = prismaSessionClient.createContextFrame();
 
     const abortPublication = () => {
         lifecycleController.abort();
@@ -134,7 +140,9 @@ export function startDashboardSnapshotExporter({
             return;
         }
         contextInvalid = false;
-        const request = exportDashboardSnapshot(snapshot, lifecycleController.signal, fetchImpl, intent).finally(() => {
+        const request = exportDashboardSnapshot(
+            snapshot, lifecycleController.signal, fetchImpl, intent, frameGeneration,
+        ).finally(() => {
             if (inFlight === request) inFlight = null;
         });
         inFlight = request;

@@ -79,7 +79,11 @@ class _GatedLock:
     def __enter__(self):
         if threading.current_thread() is self._held_thread:
             self.entered.set()
-            self.release.wait(5)
+            if not self.release.wait(5):
+                # A held worker must never be admitted after a failed gate wait:
+                # the bounded timeout is reported truthfully instead of letting
+                # the worker acquire the inner lock unreleased.
+                raise TimeoutError("the gated transition was not released within 5 seconds")
             self._held_thread = None
         self._inner.acquire()
         return self
@@ -733,14 +737,28 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
     section, publishes the deadline-crossing clock value, then releases it.
     """
 
-    def _race(self, registry, target, *, sample_at, publish_at):
+    def _run_gated_transition(self, registry, body, *, sample_at, publish_at, on_held=None):
+        """Own one gated transition through launch, release, cleanup and reporting.
+
+        Mirrors ``_run_generation_race``: the worker's ``BaseException`` and every
+        main-thread failure are captured, the gate release is always attempted
+        before any join, the successfully started worker is independently joined
+        and observed alive despite other cleanup failures, and every categorized
+        cause (worker, main, release, join, liveness) is aggregated preserving
+        the original injected markers before the test fails.
+        """
         outcomes = []
+        worker_errors = []
+        cleanup_errors = []
+        main_error = None
 
         def run():
             try:
-                outcomes.append(("ok", target()))
+                outcomes.append(("ok", body()))
             except ChannelAPairingError as error:
                 outcomes.append(("error", str(error)))
+            except BaseException as error:
+                worker_errors.append(error)
 
         worker = threading.Thread(target=run)
         gate = _GatedLock(registry.lock)
@@ -748,17 +766,50 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
         self.now[0] = sample_at
         gate.hold_next_acquisition_from(worker)
         worker.start()
-        self.assertTrue(gate.entered.wait(5), "the racing operation must reach the critical section")
-        self.now[0] = publish_at
-        gate.release_held()
-        worker.join(5)
-        self.assertFalse(worker.is_alive(), "the racing operation must terminate")
+        survivors = []
+        try:
+            if not gate.entered.wait(5):
+                cleanup_errors.append(("gate entry", TimeoutError(
+                    "the racing operation never reached the critical section")))
+            else:
+                self.now[0] = publish_at
+                if on_held is not None:
+                    on_held(gate)
+        except BaseException as error:
+            main_error = error
+        finally:
+            # Release is attempted even when the held work or the entry wait
+            # failed, and it always precedes the bounded join and the liveness
+            # observation.
+            try:
+                gate.release_held()
+            except BaseException as error:
+                cleanup_errors.append(("gate release", error))
+            try:
+                worker.join(5)
+            except BaseException as error:
+                cleanup_errors.append(("worker join", error))
+            try:
+                survivors.append(worker.is_alive())
+            except BaseException as error:
+                cleanup_errors.append(("worker liveness", error))
+        if main_error is not None and not worker_errors and not cleanup_errors and not survivors:
+            raise main_error
+        causes = []
+        if main_error is not None:
+            causes.append(f"main: {type(main_error).__name__}: {main_error}")
+        causes.extend(f"worker: {type(error).__name__}: {error}" for error in worker_errors)
+        causes.extend(f"{operation}: {type(error).__name__}: {error}" for operation, error in cleanup_errors)
+        if survivors and survivors[0]:
+            causes.append("liveness: the racing worker is still alive")
+        if causes:
+            self.fail("; ".join(causes))
         return outcomes
 
     def test_clock_is_sampled_inside_the_lock_so_claim_at_exact_expiry_is_rejected(self):
         registry = self.registry()
         challenge = registry.issue_qr(OWNER)
-        outcomes = self._race(
+        outcomes = self._run_gated_transition(
             registry,
             lambda: registry.claim_qr(challenge.token, PHONE),
             sample_at=challenge.expires_at - 1.0,
@@ -771,7 +822,7 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
     def test_clock_is_sampled_inside_the_lock_so_confirm_at_exact_expiry_is_rejected(self):
         registry = self.registry()
         ticket, pending = self.claim(registry)
-        outcomes = self._race(
+        outcomes = self._run_gated_transition(
             registry,
             lambda: registry.confirm(ticket, PHONE),
             sample_at=pending.expires_at - 1.0,
@@ -784,7 +835,7 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
     def test_clock_is_sampled_inside_the_lock_so_validation_at_exact_expiry_is_rejected(self):
         registry = self.registry()
         link = self.pair(registry)
-        outcomes = self._race(
+        outcomes = self._run_gated_transition(
             registry,
             lambda: ("validated", registry.validate_result(PHONE, link.generation)),
             sample_at=link.idle_expires_at - 1.0,
@@ -797,7 +848,7 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
     def test_clock_is_sampled_inside_the_lock_so_touch_at_exact_expiry_is_rejected(self):
         registry = self.registry()
         link = self.pair(registry)
-        outcomes = self._race(
+        outcomes = self._run_gated_transition(
             registry,
             lambda: registry.human_touch(PHONE, link.generation),
             sample_at=link.idle_expires_at - 1.0,
@@ -810,29 +861,24 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
     def test_delayed_touch_cannot_overwrite_a_newer_committed_activity(self):
         registry = self.registry()
         link = self.pair(registry)
-        outcomes = []
+        committed = []
 
         def touch():
-            try:
-                outcomes.append(registry.human_touch(PHONE, link.generation))
-            except ChannelAPairingError as error:
-                outcomes.append(str(error))
+            return registry.human_touch(PHONE, link.generation)
 
-        worker = threading.Thread(target=touch)
-        gate = _GatedLock(registry.lock)
-        registry.lock = gate
-        self.now[0] = 1400.0
-        gate.hold_next_acquisition_from(worker)
-        worker.start()
-        self.assertTrue(gate.entered.wait(5), "the delayed touch must reach the critical section")
-        self.now[0] = 1500.0
-        committed = registry.human_touch(PHONE, link.generation)
-        self.assertEqual(committed.last_human_activity_at, 1500.0)
-        self.assertEqual(committed.idle_expires_at, 2100.0)
-        gate.release_held()
-        worker.join(5)
-        self.assertFalse(worker.is_alive(), "the delayed touch must terminate")
-        self.assertEqual(outcomes, [committed])
+        def commit_newer_activity(gate):
+            committed.append(registry.human_touch(PHONE, link.generation))
+
+        outcomes = self._run_gated_transition(
+            registry,
+            touch,
+            sample_at=1400.0,
+            publish_at=1500.0,
+            on_held=commit_newer_activity,
+        )
+        self.assertEqual(committed[0].last_human_activity_at, 1500.0)
+        self.assertEqual(committed[0].idle_expires_at, 2100.0)
+        self.assertEqual(outcomes, [("ok", committed[0])])
         current = registry.owner_link(OWNER)
         self.assertEqual(current.last_human_activity_at, 1500.0)
         self.assertEqual(current.idle_expires_at, 2100.0)

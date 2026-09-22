@@ -229,6 +229,27 @@ describe('native child adapters', () => {
     )
   })
 
+  it('registers the Node owner process id with the acquisition start arguments', async () => {
+    // PW-005: acquisition must pass the calling Node process identity to the
+    // start helper so per-owner liveness can later be proven (planned
+    // -DevelopmentOwnerProcessId contract, section 4.3 of the task doc).
+    const child = new EventEmitter()
+    const spawn = vi.fn(() => Object.assign(child, { kill: vi.fn() }))
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({ registered: true, generation: 'generation' })),
+      writeFile: vi.fn(async () => undefined),
+      rm: vi.fn(async () => undefined),
+    }
+    const runtime = createPowerShellRuntime({ spawn, files, newId: () => 'id' })
+    const acquiring = runtime.acquire('owner')
+    child.emit('exit', 0, null)
+
+    await expect(acquiring).resolves.toEqual({ ownerToken: 'owner', generation: 'generation' })
+    expect(spawn.mock.calls[0]?.[1]).toEqual(expect.arrayContaining([
+      '-DevelopmentOwnerProcessId', String(process.pid),
+    ]))
+  })
+
   it.each([
     ['missing receipt', new Error('receipt missing')],
     ['invalid receipt JSON', '{broken'],

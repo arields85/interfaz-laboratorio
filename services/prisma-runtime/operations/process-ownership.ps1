@@ -14,6 +14,83 @@ function ConvertTo-PrismaCreationIdentity {
     return ([string]$Value).Trim()
 }
 
+function ConvertTo-PrismaOwnerCreationTime {
+    [CmdletBinding()]
+    param([object]$Value)
+
+    if ($null -eq $Value) { return '' }
+    $parsed = [DateTime]::MinValue
+    if ($Value -is [DateTime]) {
+        $parsed = [DateTime]$Value
+    }
+    elseif (-not [DateTime]::TryParse(
+        ([string]$Value).Trim(),
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$parsed
+    )) {
+        return ''
+    }
+    return $parsed.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertTo-PrismaOwnerProcessId {
+    [CmdletBinding()]
+    param([object]$Value)
+
+    if ($null -eq $Value -or $Value -is [bool]) { return 0 }
+    $parsed = 0
+    if (-not [int]::TryParse(
+        ([string]$Value).Trim(),
+        [Globalization.NumberStyles]::None,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$parsed
+    ) -or $parsed -le 0) {
+        return 0
+    }
+    return $parsed
+}
+
+function Get-PrismaDevelopmentOwnerState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [object]$OwnerIdentity)
+
+    if ($null -eq $OwnerIdentity) { return 'unknown' }
+    if ($OwnerIdentity -is [Collections.IDictionary]) {
+        if (-not $OwnerIdentity.Contains('pid') -or -not $OwnerIdentity.Contains('creationTimeUtc')) { return 'unknown' }
+        $storedPid = $OwnerIdentity['pid']
+        $storedCreationValue = $OwnerIdentity['creationTimeUtc']
+    }
+    else {
+        $pidProperty = $OwnerIdentity.PSObject.Properties['pid']
+        $creationProperty = $OwnerIdentity.PSObject.Properties['creationTimeUtc']
+        if (-not $pidProperty -or -not $creationProperty) { return 'unknown' }
+        $storedPid = $pidProperty.Value
+        $storedCreationValue = $creationProperty.Value
+    }
+    $pidValue = ConvertTo-PrismaOwnerProcessId -Value $storedPid
+    $storedCreation = ConvertTo-PrismaOwnerCreationTime -Value $storedCreationValue
+    if ($pidValue -eq 0 -or [string]::IsNullOrWhiteSpace($storedCreation) -or
+        -not [StringComparer]::Ordinal.Equals($storedCreation, ([string]$storedCreationValue).Trim())) {
+        return 'unknown'
+    }
+
+    try {
+        $matches = @(Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $pidValue" -ErrorAction Stop)
+    }
+    catch {
+        return 'unknown'
+    }
+    if ($matches.Count -eq 0) { return 'dead' }
+    if ($matches.Count -ne 1 -or (ConvertTo-PrismaOwnerProcessId -Value $matches[0].ProcessId) -ne $pidValue) { return 'unknown' }
+
+    $creationProperty = $matches[0].PSObject.Properties['CreationDate']
+    $currentCreation = ConvertTo-PrismaOwnerCreationTime -Value $(if ($creationProperty) { $creationProperty.Value } else { $null })
+    if ([string]::IsNullOrWhiteSpace($currentCreation)) { return 'unknown' }
+    if ([StringComparer]::Ordinal.Equals($currentCreation, $storedCreation)) { return 'alive' }
+    return 'dead'
+}
+
 function Get-PrismaProcessIdentity {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [int]$ProcessId)
@@ -187,12 +264,174 @@ function Get-PrismaCanonicalManifest {
     }
 }
 
+function Test-PrismaOwnerTokenEqual {
+    param([object]$Left, [object]$Right)
+    return [StringComparer]::OrdinalIgnoreCase.Equals([string]$Left, [string]$Right)
+}
+
+function Get-PrismaOwnerIdentityEntries {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Ownership,
+        [Parameter(Mandatory = $true)] [string]$OwnerToken
+    )
+
+    $mapProperty = $Ownership.PSObject.Properties['ownerIdentities']
+    if (-not $mapProperty -or $null -eq $mapProperty.Value) { return @() }
+    $map = $mapProperty.Value
+    $entries = @()
+    if ($map -is [Collections.IDictionary]) {
+        foreach ($key in @($map.Keys)) {
+            if (Test-PrismaOwnerTokenEqual -Left $key -Right $OwnerToken) {
+                $entries += [pscustomobject]@{ name = [string]$key; value = $map[$key] }
+            }
+        }
+    }
+    else {
+        foreach ($property in @($map.PSObject.Properties)) {
+            if (Test-PrismaOwnerTokenEqual -Left $property.Name -Right $OwnerToken) {
+                $entries += [pscustomobject]@{ name = [string]$property.Name; value = $property.Value }
+            }
+        }
+    }
+    return @($entries)
+}
+
+function Get-PrismaDevelopmentOwnerIdentity {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Ownership,
+        [Parameter(Mandatory = $true)] [string]$OwnerToken
+    )
+
+    $entries = @(Get-PrismaOwnerIdentityEntries -Ownership $Ownership -OwnerToken $OwnerToken)
+    if ($entries.Count -ne 1) { return $null }
+    $identity = $entries[0].value
+    if ($null -eq $identity) { return $null }
+    if ($identity -is [Collections.IDictionary]) {
+        if (-not $identity.Contains('pid') -or -not $identity.Contains('creationTimeUtc')) { return $null }
+        $storedPid = $identity['pid']
+        $storedCreation = $identity['creationTimeUtc']
+    }
+    else {
+        $pidProperty = $identity.PSObject.Properties['pid']
+        $creationProperty = $identity.PSObject.Properties['creationTimeUtc']
+        if (-not $pidProperty -or -not $creationProperty) { return $null }
+        $storedPid = $pidProperty.Value
+        $storedCreation = $creationProperty.Value
+    }
+    $pidValue = ConvertTo-PrismaOwnerProcessId -Value $storedPid
+    $creation = ConvertTo-PrismaOwnerCreationTime -Value $storedCreation
+    if ($pidValue -eq 0 -or [string]::IsNullOrWhiteSpace($creation) -or
+        -not [StringComparer]::Ordinal.Equals($creation, ([string]$storedCreation).Trim())) {
+        return $null
+    }
+    return [ordered]@{ pid = $pidValue; creationTimeUtc = $creation }
+}
+
+function Remove-PrismaDevelopmentOwnerIdentity {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Ownership,
+        [Parameter(Mandatory = $true)] [string]$OwnerToken
+    )
+
+    $mapProperty = $Ownership.PSObject.Properties['ownerIdentities']
+    if (-not $mapProperty -or $null -eq $mapProperty.Value) { return }
+    $map = $mapProperty.Value
+    foreach ($entry in @(Get-PrismaOwnerIdentityEntries -Ownership $Ownership -OwnerToken $OwnerToken)) {
+        if ($map -is [Collections.IDictionary]) { $map.Remove($entry.name) }
+        else { $map.PSObject.Properties.Remove($entry.name) }
+    }
+}
+
+function Set-PrismaDevelopmentOwnerIdentity {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Ownership,
+        [Parameter(Mandatory = $true)] [string]$OwnerToken,
+        [Parameter(Mandatory = $true)] [object]$OwnerIdentity
+    )
+
+    if (@(Get-PrismaOwnerIdentityEntries -Ownership $Ownership -OwnerToken $OwnerToken).Count -gt 0) {
+        throw 'Prisma Local development owner identity metadata collides with the registering token.'
+    }
+    $mapProperty = $Ownership.PSObject.Properties['ownerIdentities']
+    if (-not $mapProperty) {
+        $Ownership | Add-Member -NotePropertyName ownerIdentities -NotePropertyValue ([ordered]@{})
+        $mapProperty = $Ownership.PSObject.Properties['ownerIdentities']
+    }
+    if ($mapProperty.Value -is [Collections.IDictionary]) {
+        $mapProperty.Value[$OwnerToken] = $OwnerIdentity
+    }
+    else {
+        $mapProperty.Value | Add-Member -NotePropertyName $OwnerToken -NotePropertyValue $OwnerIdentity
+    }
+}
+
+function Invoke-PrismaDevelopmentOwnerReap {
+    param(
+        [Parameter(Mandatory = $true)] [object]$Ownership,
+        [string]$ExcludedOwnerToken = ''
+    )
+
+    $owners = @($Ownership.owners | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $dead = @()
+    $warnings = @()
+    $visited = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($owner in $owners) {
+        $ownerToken = [string]$owner
+        if (-not $visited.Add($ownerToken) -or
+            (-not [string]::IsNullOrWhiteSpace($ExcludedOwnerToken) -and (Test-PrismaOwnerTokenEqual -Left $ownerToken -Right $ExcludedOwnerToken))) {
+            continue
+        }
+        $identity = Get-PrismaDevelopmentOwnerIdentity -Ownership $Ownership -OwnerToken $ownerToken
+        if (-not $identity) {
+            $warnings += "Prisma Local development owner '$ownerToken' has unknown identity metadata and was retained."
+            continue
+        }
+        $state = Get-PrismaDevelopmentOwnerState -OwnerIdentity $identity
+        if ($state -eq 'dead') { $dead += $ownerToken }
+        elseif ($state -eq 'unknown') { $warnings += "Prisma Local development owner '$ownerToken' liveness is unknown and was retained." }
+    }
+    foreach ($ownerToken in $dead) {
+        $owners = @($owners | Where-Object { -not (Test-PrismaOwnerTokenEqual -Left $_ -Right $ownerToken) })
+        Remove-PrismaDevelopmentOwnerIdentity -Ownership $Ownership -OwnerToken $ownerToken
+    }
+    $Ownership.owners = @($owners)
+    return [pscustomobject]@{ warnings = @($warnings) }
+}
+
+function Write-PrismaDevelopmentOwnerWarnings {
+    param([string[]]$Messages)
+    foreach ($message in @($Messages)) { Write-Warning $message -WarningAction Continue }
+}
+
+function Get-PrismaDevelopmentOwnerRegistrationIdentity {
+    param([Parameter(Mandatory = $true)] [object]$ProcessId)
+
+    $pidValue = ConvertTo-PrismaOwnerProcessId -Value $ProcessId
+    if ($pidValue -eq 0) { throw 'Prisma Local development owner process id is invalid.' }
+    try {
+        $matches = @(Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $pidValue" -ErrorAction Stop)
+    }
+    catch {
+        throw 'Prisma Local development owner process identity could not be proven.'
+    }
+    if ($matches.Count -ne 1 -or (ConvertTo-PrismaOwnerProcessId -Value $matches[0].ProcessId) -ne $pidValue) {
+        throw 'Prisma Local development owner process identity could not be proven.'
+    }
+    $creationProperty = $matches[0].PSObject.Properties['CreationDate']
+    $creation = ConvertTo-PrismaOwnerCreationTime -Value $(if ($creationProperty) { $creationProperty.Value } else { $null })
+    if ([string]::IsNullOrWhiteSpace($creation)) {
+        throw 'Prisma Local development owner process creation time could not be proven.'
+    }
+    return [ordered]@{ pid = $pidValue; creationTimeUtc = $creation }
+}
+
 function Add-PrismaDevelopmentOwner {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [object]$Manifest,
         [Parameter(Mandatory = $true)] [string]$OwnerToken,
-        [Parameter(Mandatory = $true)] [string]$ExpectedGeneration
+        [Parameter(Mandatory = $true)] [string]$ExpectedGeneration,
+        [object]$OwnerIdentity = $null
     )
 
     $ownership = $Manifest.PSObject.Properties['developmentOwnership']
@@ -200,8 +439,15 @@ function Add-PrismaDevelopmentOwner {
         throw 'Prisma Local development generation changed before owner registration.'
     }
     $owners = @($ownership.Value.owners | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-    if ($OwnerToken -notin $owners) { $owners += $OwnerToken }
+    if ($owners | Where-Object { Test-PrismaOwnerTokenEqual -Left $_ -Right $OwnerToken }) {
+        if ($null -eq $OwnerIdentity) { return }
+        throw 'Prisma Local development owner token is already registered.'
+    }
+    $owners += $OwnerToken
     $ownership.Value.owners = @($owners)
+    if ($null -ne $OwnerIdentity) {
+        Set-PrismaDevelopmentOwnerIdentity -Ownership $ownership.Value -OwnerToken $OwnerToken -OwnerIdentity $OwnerIdentity
+    }
 }
 
 function Remove-PrismaDevelopmentOwner {
@@ -216,7 +462,8 @@ function Remove-PrismaDevelopmentOwner {
     if (-not $ownership -or [string]$ownership.Value.generation -ne $ExpectedGeneration) { return $false }
     $owners = @($ownership.Value.owners)
     if ($OwnerToken -notin $owners) { return $false }
-    $ownership.Value.owners = @($owners | Where-Object { [string]$_ -ne $OwnerToken })
+    $ownership.Value.owners = @($owners | Where-Object { -not (Test-PrismaOwnerTokenEqual -Left $_ -Right $OwnerToken) })
+    Remove-PrismaDevelopmentOwnerIdentity -Ownership $ownership.Value -OwnerToken $OwnerToken
     return @($ownership.Value.owners).Count -eq 0
 }
 
@@ -254,10 +501,9 @@ function Invoke-PrismaDevelopmentReleaseTransaction {
     }
 
     $generation = [string]$ownership.Value.generation
-    if ($RecoverRegisteredOwner) {
-        if ($OwnerToken -notin @($ownership.Value.owners)) { return }
-    }
-    elseif ([string]::IsNullOrWhiteSpace($ExpectedGeneration) -or $generation -ne $ExpectedGeneration) {
+    $callerRegistered = @($ownership.Value.owners | Where-Object { Test-PrismaOwnerTokenEqual -Left $_ -Right $OwnerToken }).Count -gt 0
+    if (-not $callerRegistered) { return }
+    if (-not $RecoverRegisteredOwner -and ([string]::IsNullOrWhiteSpace($ExpectedGeneration) -or $generation -ne $ExpectedGeneration)) {
         Write-Warning 'Prisma Local development generation changed; replacement state was left untouched.'
         return
     }
@@ -266,9 +512,12 @@ function Invoke-PrismaDevelopmentReleaseTransaction {
         return
     }
 
-    $shouldStop = Remove-PrismaDevelopmentOwner -Manifest $manifest -OwnerToken $OwnerToken -ExpectedGeneration $generation
+    $reap = Invoke-PrismaDevelopmentOwnerReap -Ownership $ownership.Value -ExcludedOwnerToken $OwnerToken
+    [void](Remove-PrismaDevelopmentOwner -Manifest $manifest -OwnerToken $OwnerToken -ExpectedGeneration $generation)
+    $shouldStop = @($ownership.Value.owners).Count -eq 0
     if (-not $shouldStop) {
         Save-PrismaProcessManifest -ManifestPath $ManifestPath -Manifest $manifest
+        Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
         return
     }
 
@@ -295,6 +544,7 @@ function Invoke-PrismaDevelopmentReleaseTransaction {
         Save-PrismaProcessManifest -ManifestPath $ManifestPath -Manifest $manifest
         Write-Warning 'One or more Prisma Local development processes could not be proven or stopped; their records were preserved.'
     }
+    Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
 }
 
 function Prune-PrismaProcessManifest {
@@ -307,6 +557,7 @@ function Prune-PrismaProcessManifest {
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { return }
     try {
         $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+        if ($manifest.PSObject.Properties['developmentOwnership']) { return }
         $manifestRoot = [IO.Path]::GetFullPath([string]$manifest.repositoryRoot)
         if (-not [StringComparer]::OrdinalIgnoreCase.Equals($manifestRoot, [IO.Path]::GetFullPath($RepositoryRoot))) { return }
         $remaining = @()
@@ -322,6 +573,6 @@ function Prune-PrismaProcessManifest {
             Save-PrismaProcessManifest -ManifestPath $ManifestPath -Manifest $manifest
         }
     } catch {
-        Remove-Item -LiteralPath $ManifestPath -Force -ErrorAction SilentlyContinue
+        return
     }
 }

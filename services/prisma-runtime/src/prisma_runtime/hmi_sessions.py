@@ -58,6 +58,7 @@ class _Session:
     context_received_at: float | None = None
     command_order: int = 0
     context_revision: int = 0
+    frame_generation_highwater: int = 0
 
 
 class HmiSessionRegistry:
@@ -152,8 +153,17 @@ class HmiSessionRegistry:
             raise ValueError("INVALID_SNAPSHOT")
         command = envelope.get("command")
         expected = {"version", "command", "order"}
+        frame = None
         if command == "publish":
             expected.add("snapshot")
+            if "frameGeneration" in envelope:
+                expected.add("frameGeneration")
+                frame = envelope["frameGeneration"]
+                if (
+                    isinstance(frame, bool) or not isinstance(frame, int)
+                    or not 1 <= frame <= 9007199254740991
+                ):
+                    raise ValueError("INVALID_SNAPSHOT")
         elif command != "invalidate":
             raise ValueError("INVALID_SNAPSHOT")
         order = envelope.get("order")
@@ -179,6 +189,26 @@ class HmiSessionRegistry:
                 raise HmiSessionUnauthorized("PRISMA_SESSION_REQUIRED")
             if order <= session.command_order:
                 return False
+            if command == "publish" and frame is not None:
+                # Reject an older frame before any mutation, even at a higher
+                # order: no ABA return into an established frame.
+                if frame < session.frame_generation_highwater:
+                    return False
+                # Decide the revision from the PRE-update state before assigning
+                # the new context: a new frame or an absent context starts a
+                # fresh lifetime; an equal frame with a live context is only a
+                # routine same-frame receipt renewal.
+                newer_frame = frame > session.frame_generation_highwater
+                bump = newer_frame or session.context is None
+                session.context = context
+                session.context_received_at = now
+                session.last_seen_at = now
+                session.command_order = order
+                if bump:
+                    session.context_revision += 1
+                if newer_frame:
+                    session.frame_generation_highwater = frame
+                return True
             session.context = context
             session.context_received_at = now if context is not None else None
             session.last_seen_at = now

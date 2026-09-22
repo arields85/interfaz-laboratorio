@@ -33,6 +33,10 @@ export class PrismaSessionClient {
     #resetListeners = new Set<() => void>();
     #commandOrder = 0;
     #contextIntents = new WeakMap<PrismaContextIntent, { epoch: number; order: number }>();
+    // Client-global visit identity: monotonic forever, never reset across
+    // epochs. A new epoch implies a fresh server session document (highwater
+    // 0), so the surviving counter value stays safe over the fresh document.
+    #frameGeneration = 0;
 
     constructor(fetchImpl: typeof fetch = (...args) => fetch(...args)) {
         this.#fetchImpl = fetchImpl;
@@ -51,14 +55,27 @@ export class PrismaSessionClient {
         return intent;
     }
 
+    createContextFrame(): number {
+        if (this.#frameGeneration >= Number.MAX_SAFE_INTEGER) {
+            throw new Error('Prisma context frame generation exhausted');
+        }
+        return ++this.#frameGeneration;
+    }
+
     async publishContext(
         intent: PrismaContextIntent,
         snapshot: unknown,
         signal?: AbortSignal,
         transport?: typeof fetch,
+        frameGeneration?: number,
     ): Promise<Response> {
         const { order } = this.#currentContextIntent(intent);
-        return this.#sendContext(intent, { version: 1, command: 'publish', order, snapshot }, signal, transport);
+        // Legacy omission stays exact: the field is only on the wire when a
+        // frame was minted for this publication.
+        const command: PrismaContextCommand = frameGeneration === undefined
+            ? { version: 1, command: 'publish', order, snapshot }
+            : { version: 1, command: 'publish', order, snapshot, frameGeneration };
+        return this.#sendContext(intent, command, signal, transport);
     }
 
     async invalidateContext(

@@ -2,30 +2,26 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.18
+> **Versión documental:** 2.0.20
 >
 > **Fecha:** 2026-09-22
 >
-> **Prioridad vigente:** aceptar el recorrido real **QR → Canal A → circuito Prisma existente**,
-> sin cambiar respuesta ni audio. La proyección QR/status por capability, proxy/cliente y panel
-> manual `Pyramid` están implementados y **aceptados solo offline** (RCA-5l, §11.1), y el
-> preflight de nombre HMI del panel de emparejamiento está implementado y **aceptado solo
-> offline** (§11.1). La administración A de RCA-5j/5k conserva su aceptación offline;
-> B/Gemini y EPPI no cambiaron.
+> **Estado vigente:** CL cerrado con aceptación manual del usuario: respuestas a las preguntas
+> ejercitadas, Telegram, voz HMI y orbe. PW-005 cerrado por decisión explícita sobre el camino
+> normal **Ctrl+C**; recuperación abrupta excluida, no aprobada. No repetir esas aceptaciones.
 >
-> **Evidencia de esta versión:** 2.184 pruebas frontend únicas aprobadas
-> (enfoque del panel de nombre: 58 PASS en 6 suites); las 156 backend de RCA-5l son evidencia
-> anterior, no reejecutada en este cambio. Cobertura estándar de la suite completa
-> con los cuatro umbrales 70 intactos, build y lint PASS. No equivale a aceptación real de
-> navegador, teléfono, Telegram/Gemini, audio ni producto.
+> **Evidencia:** los gates CL (1.121 backend, 2.188 frontend/209 suites, cobertura
+> 87,42/80,63/86,57/88,30 %, build/lint PASS) preceden PW-005. Sus 26 backend/14 Node
+> focalizados preceden la corrección de una línea de arranque frío, validada estáticamente y
+> mediante persistencia manual de identidad Node. No se ejecutaron gates completos finales
+> después de PW-005 ni pruebas en este cierre documental. Límites y cronología: §11.1.
 >
-> **Siguiente paso:** en la próxima sesión, reconfirmar el gate del contrato CL1 del tiempo de
-> vida de contexto antes de editar pruebas o fuente; ese cierre ni un «continúa» genérico
-> autorizan implementación (§3.4, §11.1). No repetir el wiring ya verificado ni heredar
-> permisos históricos de commit. Base `c82fe44` más la corrección NAME sin commit (estado
-> PRE-CLOSE: el cierre de sesión autorizó un único commit local de checkpoint; hash real en
-> Engram tras el éxito — §11.1). Despliegue, aceptación integral, máquinas reales y trabajo
-> posterior del asistente siguen pendientes; PW-002/003/004/005 continúan activos.
+> **NEXT SESSION:** presentar para aprobación una planificación acotada de la frontera de datos
+> semánticos compartidos HMI/Prisma de Entrega 1.3 (§6.4, §7.2, §8), preservando la interpretación
+> de widgets: aprobar esa planificación o aplazarla (§3.4), sin autorización implícita de fuente.
+> No iniciar automáticamente pruebas, servicios, proveedores ni push. PW-002/PW-004 no cambian;
+> PW-003 conserva solo el trabajo futuro amplio. Un único commit local está autorizado y pendiente
+> del padre; el hash real se registrará en Engram tras su éxito, sin cambiar hooks/configuración.
 
 ## 1. Objetivo y estado general
 
@@ -51,10 +47,10 @@ pero su validación productiva sigue pendiente.
 | Área | Estado (evidencia fechada en §11.1) | Conclusión |
 |---|---|---|
 | Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Prisma antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos, validación productiva del acceso protegido y retiro controlado del legado. |
-| Voz HMI y orbe | Implementados con evidencia histórica parcial | Hubo aceptación manual exitosa; continuidad, audibilidad humana, cancelación y recuperación no están aceptadas de forma integral. |
+| Voz HMI y orbe | Aceptación manual CL reportada por el usuario | Respuestas a las preguntas ejercitadas, Telegram, voz HMI y orbe aceptados (§11.1); sin prueba separada de cambio de vista/latencia ni garantía universal de continuidad, cancelación o recuperación. |
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
-| Canal A — QR/status y panel manual | RCA-5l aceptado solo offline | Proyección protegida, cliente/proxy y QR local desde Pyramid, a la derecha de Logs en Core. Falta aceptación real teléfono → consulta → respuesta/audio; no hay auto-Apply. |
+| Canal A — QR/status y panel manual | Wiring offline y aceptación de respuestas/voz reportada por el usuario | Proyección protegida, cliente/proxy y QR local desde Pyramid, a la derecha de Logs en Core; alcance manual acotado en §11.1, sin afirmar una matriz E2E integral. No hay auto-Apply. |
 | Canal B — Telegram autónomo | Pendiente y aplazado por el usuario el 2026-09-20 | Lee el archivo de instalación y responde **solo texto privado** por chat; **no** publica eventos de voz en la HMI y su fuente de datos autónoma sigue pendiente (conciliación de fuentes: §4.2; checkpoint vigente: §11.1). |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
@@ -127,8 +123,8 @@ anunciar que los va a implementar ni con considerarlos técnicamente conveniente
 
 - Seguir las etapas y decisiones acordadas de este documento; una mejora futura o una limitación
   detectada no se convierte automáticamente en requisito del incremento actual.
-- El alcance inmediato es terminar la **conexión QR → Canal A → circuito existente**: cambiar la
-  vinculación y entrada de la consulta, reutilizando el procesamiento, la respuesta y el audio.
+- El incremento **QR → Canal A → circuito existente** y CL quedan cerrados en el alcance de
+  aceptación de §11.1. Su cierre no autoriza automáticamente las capacidades futuras de §8.
 - No agregar ahora nuevas políticas de descarte de respuestas, cancelación de audio por cambio de
   vista u ocultamiento, ni infraestructura de disponibilidad/sincronización como prerrequisito.
   Cualquier propuesta en ese sentido requiere consulta y aprobación separadas.
@@ -230,8 +226,8 @@ el estado actual:
 **Canal A dedicado — checkpoint 2.0.17:** la composición ya aceptada offline conserva el
 propietario HMI emparejado y su contexto documental para el circuito de respuesta/voz existente.
 RCA-5l agrega la entrada QR/status y el panel manual; no cambia ese circuito ni vuelve a usar
-el archivo de instalación como fallback. La aceptación real teléfono → respuesta/audio sigue
-pendiente. El detalle y la evidencia están en §11.1; el Canal B permanece aplazado.
+el archivo de instalación como fallback. La aceptación manual posterior de respuestas Telegram,
+voz HMI y orbe está registrada con sus límites en §11.1; el Canal B permanece aplazado.
 
 ### 4.3 Integración HMI actual
 
@@ -552,7 +548,7 @@ Reglas obligatorias:
 - la respuesta conserva alcance, timestamp, frescura y procedencia;
 - no existe ningún comando industrial en el mismo canal.
 
-**Entrada remota del Canal A (acuerdo 2.0.12, pendiente de implementación).** El Canal A admite
+**Entrada remota del Canal A (acuerdo histórico 2.0.12; implementación y aceptación posterior en §11.1).** El Canal A admite
 además una entrada desde el teléfono del observador físico, sin mouse, teclado, touch ni clic en la
 HMI. La HMI muestra un QR cuando está libre y ese QR abre un **bot dedicado del Canal A** —nunca un
 modo ni un comando dentro del bot del Canal B— con un token opaco de un solo uso y vida corta. La
@@ -984,9 +980,33 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (checkpoint 2.0.18; registros anteriores históricos)
+### 11.1 Próximo paso vigente (checkpoint 2.0.20; registros anteriores históricos)
 
-**Checkpoint vigente 2.0.18 (2026-09-22) — preflight de nombre HMI aceptado solo offline; cierre documental.** El panel de emparejamiento exige un nombre HMI configurado antes de emitir peticiones de pairing: ante nombre ausente muestra una copia accionable antes del QR y no envía solicitudes; ante nombre ilegible usa una copia distinta y veraz («No se pudo leer el nombre guardado»); la lectura se repite en cada apertura. Respuesta, audio, backend y contratos de pairing no cambiaron. Detalle y evidencia: [`../../odd/tasks/prisma-pairing-name-preflight.md`](../../odd/tasks/prisma-pairing-name-preflight.md).
+**Checkpoint vigente 2.0.20 (2026-09-22) — cierre de sesión solicitado; CL aceptado y PW-005 cerrado.**
+
+- **CL6 aceptado por reporte del usuario:** «si, loacabo de comprobar y ahora si responde bien, no se evita ninguna pregunta y responde por telegram y por voz en la hmi mostrando el orbe.» Esto acepta las preguntas ejercitadas, las respuestas Telegram, la voz HMI y el orbe; no es una prueba ejecutada por el agente, una garantía sobre cualquier pregunta ni evidencia separada de navegación entre vistas o latencia.
+- **PW-005 cerrado por decisión explícita:** «listo asunto terminado, se cierra con ctrl+c y listo, no damos mas vueltas». El snapshot comunicado por el padre de `2026-09-22T19:47:25Z` no mostró listeners 5056/5057/5173 ni procesos Prisma ni errores. La recuperación tras cierre abrupto no fue demostrada independientemente: queda excluida de esta aceptación, no aprobada ni propuesta como próxima tarea.
+- **Cronología de verificación:** los gates completos CL de 2.0.19 preceden PW-005. Los 26 backend/14 Node focalizados de PW-005 preceden el arreglo de una línea `[pscustomobject][ordered]`; ese follow-up tiene readback estático independiente y persistencia manual de PID/birth Node coincidente, sin pruebas automatizadas nuevas. No hay un gate completo final del árbol posterior a PW-005. Detalle: [task CL](../../odd/tasks/prisma-channel-a-context-lifetime.md) y [task PW-005](../../odd/tasks/prisma-development-shutdown-recovery.md).
+- **Entrega:** el usuario autorizó UN commit local y eligió `skip_hook_this_commit` para omitir GGA únicamente en ese commit, sin editar hooks/configuración. El padre lo ejecutará; está pendiente, sin hash inventado ni autorreferencial. `.gga` permanece sin rastrear y excluido. No push/PR ni nuevas pruebas, proveedores o servicios.
+
+**NEXT SESSION — una primera acción concreta:** después de reconciliar este maestro completo, índice, tasks y Git, presentar una propuesta acotada de **planificación de la frontera semántica compartida HMI/Prisma** (catálogo, interpretación de widgets, frescura y procedencia; §6.4, decisiones abiertas §7.2 y Entrega 1.3 de §8). Pedir una elección: **aprobar esa planificación o aplazarla**. La secuencia de §11.1/2.0.11 ya priorizaba planificar mejoras del Canal A tras su aceptación; no se retoma Canal B ni se elige STT/LLM o implementación por inferencia. §3.4 exige aprobación separada antes de fuente. Sin auto-tests, push, arranque de servicios ni llamadas a proveedor; no repetir audio/orbe/Ctrl+C aceptados.
+
+PW-003 conserva el backlog amplio porque el objetivo completo sigue parcialmente implementado (§1, §6 y §8); su antigua aceptación CL pendiente queda cerrada. PW-005 se retira del índice tras cerrar su detalle en Engram. PW-002/PW-004 no cambian. Los próximos pasos, estados y permisos de todos los registros anteriores son históricos y no se heredan.
+
+**Checkpoint histórico 2.0.19 (2026-09-22) — contrato CL del tiempo de vida de contexto implementado y aceptado offline con verificación independiente completa.** La respuesta capturada del Canal A ya no queda invalidada por un refresco de rutina de la misma vista: el publicador del navegador emite un `frameGeneration` opcional por visita de vista (uno por instancia del exportador, reutilizado en ticks, reanudaciones y reset; contador cliente-global sin reset por epoch) y el backend usa un highwater por sesión — misma generación con contexto preexistente renueva la frescura sin bump de revisión, generación mayor o contexto ausente hace bump, la herencia legacy se mantiene verbatim y la invalidez conserva el highwater. Además, cada respuesta capturada lleva un `captured_deadline` interno (no es campo de wire) verificado contra el mismo reloj monotónico inyectado, con igualdad exacta fallando cerrado y recheck de testigo solo-referencial tras la muestra. El emparejamiento productivo no cambió: la corrección de las 11 fallas del harness de clock es solo-de-tests (helper de gate y agregación de causas en `test_channel_a_pairing.py`; cuerpos de aserción del oráculo intactos). Detalle, evidencia y contracto completo: [`../../odd/tasks/prisma-channel-a-context-lifetime.md`](../../odd/tasks/prisma-channel-a-context-lifetime.md).
+
+| Verificación independiente completa (`muctg3tg-7-tbg4`, cada gate una vez) | Resultado observado |
+|---|---|
+| Gate backend README PAC-5 (verbatim, sandbox fresco, once overrides ausentes) | 1.121 pruebas, 23,299 s, exit 0. |
+| Cobertura estándar completa | 209 suites, 2.188 pruebas PASS, 67,18 s, exit 0. |
+| Cobertura cargada | Statements 87,42 %; branches 80,63 %; functions 86,57 %; lines 88,30 %. Cuatro umbrales 70 intactos; cobertura estándar, sin afirmar inclusión exhaustiva de fuente. |
+| Build y lint | PASS (build 10,03 s); lint PASS; `git diff --check` PASS, exit 0. |
+
+Los avisos canvas, `/grid.svg`, tamaño de chunks y LF/CRLF son no fatales. El baseline independiente (`mucselsk-5-1sas`) confirmó en un archivo aislado de `1731350` las 11 fallas históricas de `test_channel_a_pairing_clock_cleanup` como preexistentes (14 pruebas, 11 fallas idénticas, 3 pases, 0 errores); quedan resueltas por CL5 y **no hay gate pendiente de confirmación**. TDD estricto con RED/GREEN observados por ola (task §10); limitación residual honesta: un arranque hipotético no ejecutado que falla después de la identidad no está cubierto — solo-de-tests, no defecto de producción. RDD desactivado y evaluación nativa no disponible: esto es verificación independiente, **no aprobación nativa**. Dif pre-documentación: 17 archivos modificados, 1180+/121− (producción 103+/6−, pruebas 517+/42−, task 560+/73−); `.gga` sin tocar; sin commit ni push.
+
+**Reporte histórico previo a CL6 (supersedido por aceptación 2.0.20):** el vínculo de Telegram y las respuestas fueron confirmados con capturas tras configurar el nombre; se reportó audio/orbe intermitente incluso con HMI visible, no atribuible solo a calentamiento. En ese checkpoint la aceptación manual seguía pendiente. El reporte posterior de éxito está arriba; no constituye causa raíz completa demostrada en vivo.
+
+**Checkpoint histórico 2.0.18 (2026-09-22) — preflight de nombre HMI aceptado solo offline; sustituido como vigente por 2.0.19.** El panel de emparejamiento exige un nombre HMI configurado antes de emitir peticiones de pairing: ante nombre ausente muestra una copia accionable antes del QR y no envía solicitudes; ante nombre ilegible usa una copia distinta y veraz («No se pudo leer el nombre guardado»); la lectura se repite en cada apertura. Respuesta, audio, backend y contratos de pairing no cambiaron. Detalle y evidencia: [`../../odd/tasks/prisma-pairing-name-preflight.md`](../../odd/tasks/prisma-pairing-name-preflight.md).
 
 | Verificación independiente (`muc76rbg-g-87k1`, una vez cada gate) | Resultado observado |
 |---|---|
@@ -999,9 +1019,9 @@ Los avisos jsdom canvas, `/grid.svg` y tamaño de chunks son no fatales. RDD des
 
 **Reportes reales del usuario (evidencia de usuario, no verificación de agente):** el 404 histórico del runtime se resolvió con el stop de la identidad oficial y un relanzamiento por el usuario; el nombre sin configurar dejó el documento de Telegram indisponible y configurar el nombre permitió el emparejamiento; capturas confirman el vínculo y varias respuestas de Telegram. El audio/orbe funciona de forma intermitente incluso con la HMI visible y tras cambiar de dashboard: **no está totalmente aceptado ni es solo calentamiento**. El legado `C:/hmi_tts` funcionaba de manera confiable según el usuario; eso no es prueba de agente. No hubo reinicios de credenciales ni consultas pagadas del agente. El diagnóstico offline de coordinador/almacén (`mucm74ng-i-40ua`, exit 0) confirmó dos casos: una publicación idéntica durante el envío simulado a Telegram impide generar el envelope HMI; en otro caso, una publicación posterior retira un evento ya generado. **No** es causa raíz completa en vivo ni RED de TDD.
 
-**Contrato CL1 del tiempo de vida de contexto — solo documentación, gate vigente.** El borrador en [`../../odd/tasks/prisma-channel-a-context-lifetime.md`](../../odd/tasks/prisma-channel-a-context-lifetime.md) es DRAFT/DOCUMENTATION-ONLY (CL1): no hay pruebas (CL2), fuente (CL3) ni verificación (CL4) de esa propuesta. El usuario pidió «avisame antes de implementar» y luego aplazó ese punto exacto a la próxima sesión; este cierre ni un «continúa» genérico infieren permiso de implementación. Al reanudar: leer este maestro COMPLETO (§11.1/§3.4), recuperar el checkpoint Engram `checkpoint/prisma-channel-a-manager-resume` (actualizado por el padre tras el commit), el task CL y su mirror `odd/prisma-channel-a-context-lifetime/tasks`, el registro NAME y PENDING/Git. Presentar las dos piezas planificadas (generación por frame/visita + deadline de la respuesta capturada) y esperar confirmación FRESCA antes de editar pruebas o fuente. El contrato de ejecución final NO está congelado: antes de ejecutar, aclarar la precedencia de generación igual/contexto `None`, la transición del setter/publicación legacy frente al highwater de frame, los paths exactos de edición de pruebas y un runner focalizado seguro ejecutable. Los seis archivos de producción planificados y sus pruebas aún no están finalizados ni congelados; sin expansión a framework, audioengine, B ni Ctrl+C. No afirmar que está listo para aplicación ciega.
+**Contrato CL del tiempo de vida de contexto — registro histórico del gate (2.0.18; supersado por 2.0.19).** El borrador en [`../../odd/tasks/prisma-channel-a-context-lifetime.md`](../../odd/tasks/prisma-channel-a-context-lifetime.md) era entonces DRAFT/DOCUMENTATION-ONLY (CL1): sin pruebas (CL2), fuente (CL3) ni verificación (CL4) de esa propuesta. El usuario pidió «avisame antes de implementar» y aplazó ese punto exacto a la sesión siguiente. Ese gate fue descargado después por la elección fresca `authorize_context_lifetime_implementation`; la implementación offline, el follow-up del harness de pruebas (CL5) y la verificación independiente completa quedan registrados en el checkpoint vigente 2.0.19 y en el task.
 
-**Cierre de sesión (2026-09-22):** a pedido explícito del usuario se autorizó UN único commit local de checkpoint con base pre-commit `c82fe44` (rama `feat/prisma-telegram-credentials`). El hash real lo confirma el padre y se registra en Engram tras el éxito; no se fabrica dentro del propio commit. Push/PR/servicios/proveedores siguen sin autorización; las pruebas no se reejecutaron en este cierre documental.
+**Cierre de sesión (2026-09-22; histórico):** a pedido explícito del usuario se autorizó UN único commit local de checkpoint con base pre-commit `c82fe44` (rama `feat/prisma-telegram-credentials`). El commit resultante es `1731350`, confirmado por Git y hoy baseline del checkpoint vigente 2.0.19. Push/PR/servicios/proveedores siguen sin autorización; las pruebas no se reejecutaron en ese cierre documental.
 
 **Checkpoint histórico 2.0.17 (2026-09-22) — RCA-5l aceptado solo offline; sustituido como vigente por 2.0.18.** El usuario aprobó
 la implementación con pruebas offline y la dependencia local `qrcode.react@4.2.0`.
@@ -1490,6 +1510,36 @@ incrustar un SHA autorreferencial. Esta versión documental no afirma que ese co
 
 ## 12. Changelog
 
+### 2.0.20 — 2026-09-22
+
+- CL6 aceptado por reporte del usuario para preguntas ejercitadas, Telegram, voz HMI y orbe;
+  sin atribuir prueba separada de cambio de vista/latencia o garantía universal.
+- PW-005 cerrado sobre Ctrl+C normal; recuperación abrupta excluida, no pasada. Evidencia
+  focalizada anterior al cold fix separada del readback y la persistencia manual posterior.
+- Próxima sesión: presentar para aprobación la planificación de la frontera semántica compartida
+  de Entrega 1.3; no iniciar implementación, pruebas, servicios ni proveedores por inferencia.
+- Un commit local autorizado y pendiente del padre, con omisión de GGA solo para ese commit;
+  sin cambios de hooks/configuración ni push. PW-003 conserva roadmap amplio; PW-002/PW-004 intactos.
+
+### 2.0.19 — 2026-09-22
+
+- Contrato del tiempo de vida de contexto del Canal A **implementado y aceptado offline con
+  verificación independiente completa** (`muctg3tg-7-tbg4`): `frameGeneration` opcional por
+  visita de vista (publish-only, highwater por sesión, misma generación renueva sin bump,
+  generación mayor/contexto ausente hace bump, legacy verbatim, invalidez conserva highwater)
+  + `captured_deadline` interno de la respuesta capturada contra el reloj monotónico inyectado
+  (igualdad exacta falla cerrado; recheck de testigo solo-referencial tras la muestra) (§11.1).
+- Corrección acotada **solo-de-tests** del harness de clock de pairing: las 11 fallas fueron
+  confirmadas preexistentes en base `1731350` por baseline independiente (`mucselsk-5-1sas`)
+  y quedan resueltas; cuerpos de aserción del oráculo intactos. Sin cambios de emparejamiento
+  productivo. Limitación residual solo-de-test documentada en el task.
+- Verificación independiente completa PASS: gate backend README PAC-5 verbatim 1.121 pruebas
+  exit 0; cobertura estándar 209 suites / 2.188 PASS con umbrales 70 intactos; build y lint
+  PASS; `git diff --check` PASS. Base `1731350` sin commit ni push; RDD desactivado: no es
+  aprobación nativa.
+- Próximo paso: **aceptación manual real de audio/orbe con el usuario** (sin proveedores ni
+  servicios automáticos); el commit work-unit es decisión separada del usuario (§3.4).
+
 ### 2.0.18 — 2026-09-22
 
 - Preflight de nombre HMI del panel de emparejamiento aceptado **solo offline**: nombre ausente
@@ -1504,6 +1554,7 @@ incrustar un SHA autorreferencial. Esta versión documental no afirma que ese co
   (§11.1).
 - El contrato CL1 del tiempo de vida de contexto queda como DRAFT documental con gate: el usuario
   aplazó su implementación a la próxima sesión; este cierre no otorga permiso (§3.4, §11.1).
+  (Registro histórico: ese gate fue descargado y la implementación verificada en 2.0.19.)
 - Cierre de sesión: UN único commit local de checkpoint autorizado desde `c82fe44`; hash real en
   Engram tras el éxito. Sin push, PR, servicios ni proveedores.
 

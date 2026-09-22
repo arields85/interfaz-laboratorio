@@ -21,6 +21,8 @@ from prisma_runtime.hmi_sessions import (
     HmiSessionUnauthorized,
 )
 
+_ABSENT = object()
+
 
 class SessionRegistryTests(unittest.TestCase):
     def test_capacity_rejects_without_evicting_a_live_session_and_expiry_releases_it(self):
@@ -636,6 +638,153 @@ class OrderedOwnerContextTests(unittest.TestCase):
         self.now[0] = 30.0
         self.assertFalse(self.registry.is_owner_context_current(self.owner, revision))
         self.assertNotIn(True, callbacks_under_lock)
+
+
+class FrameGenerationTests(unittest.TestCase):
+    """Ordered publish commands may carry a frameGeneration visit identity.
+
+    A new (or first) frame and a publish over an absent context each bump the
+    context revision; a routine same-frame refresh renews the receipt only. An
+    older frame is rejected with zero mutation even at a higher order, and the
+    legacy publish/setter transition keeps today's unconditional bump while
+    leaving the frame highwater untouched.
+    """
+
+    def setUp(self):
+        dispatch_patch = patch("requests.Session.request", side_effect=AssertionError("offline HTTP only"))
+        dispatch = dispatch_patch.start()
+        self.addCleanup(dispatch_patch.stop)
+        self.addCleanup(dispatch.assert_not_called)
+        self.now = [10.0]
+        self.registry = OwnerContextFreshnessTests.make_registry(self.now, idle_ttl=20)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.client = HmiSessionHttpRedTests.make_client(
+            temporary.name, session_registry=self.registry
+        )
+        self.capability, _ = self.registry.create()
+        self.owner = self.registry.authorize(self.capability, touch=False)
+        self.headers = {"X-Prisma-Session-Capability": self.capability}
+        self.snapshot = {"timestamp": "fixed", "widgets": [{"id": "oee", "value": 10}]}
+
+    def command(self, order, command="publish", snapshot=None, frame=_ABSENT):
+        body = {"version": 1, "command": command, "order": order}
+        if command == "publish":
+            body["snapshot"] = self.snapshot if snapshot is None else snapshot
+        if frame is not _ABSENT:
+            body["frameGeneration"] = frame
+        return self.client.post(
+            "/hmi/current-snapshot", json=body, headers=self.headers
+        )
+
+    def capture(self):
+        return self.registry.capture_owner_context(self.owner, max_age_seconds=15)
+
+    def assert_accepted(self, response):
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.get_json(), {"ok": True, "status": "accepted"})
+
+    def assert_stale(self, response):
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True, "status": "stale"})
+
+    def test_routine_same_frame_refresh_keeps_the_captured_answer_current(self):
+        self.assert_accepted(self.command(1, frame=5))
+        _, _, revision = self.capture()
+        self.now[0] = 12.0
+        self.assert_accepted(self.command(2, frame=5))
+        # Age 0.0 proves the receipt was renewed at now=12 without a revision bump.
+        self.assertEqual(self.capture(), (0.0, self.snapshot, revision))
+        self.assertTrue(self.registry.is_owner_context_current(self.owner, revision))
+
+    def test_a_new_frame_visit_bumps_revision_and_ends_the_previous_answer(self):
+        self.assert_accepted(self.command(1, frame=5))
+        _, _, first = self.capture()
+        self.now[0] = 12.0
+        self.assert_accepted(self.command(2, frame=6))
+        _, _, second = self.capture()
+        self.assertEqual(second, first + 1)
+        self.assertFalse(self.registry.is_owner_context_current(self.owner, first))
+        self.assertTrue(self.registry.is_owner_context_current(self.owner, second))
+
+    def test_an_older_frame_is_rejected_without_mutation_even_at_a_higher_order(self):
+        self.assert_accepted(self.command(1, frame=6))
+        _, _, revision = self.capture()
+        self.now[0] = 12.0
+        self.assert_stale(self.command(2, frame=5))
+        self.assertEqual(self.capture(), (2.0, self.snapshot, revision))
+
+    def test_invalidation_retains_the_highwater_and_a_same_frame_republish_bumps(self):
+        self.assert_accepted(self.command(1, frame=5))
+        _, _, revision = self.capture()
+        self.assert_accepted(self.command(2, "invalidate"))
+        self.now[0] = 12.0
+        # An older frame cannot resurrect the invalidated context: zero mutation.
+        self.assert_stale(self.command(3, frame=4))
+        with self.assertRaises(HmiSessionContextUnavailable):
+            self.capture()
+        # The equal frame over an absent context is a fresh receipt, not a return.
+        self.assert_accepted(self.command(4, frame=5))
+        self.assertEqual(self.capture(), (0.0, self.snapshot, revision + 2))
+
+    def test_legacy_publish_bumps_revision_and_leaves_the_frame_highwater(self):
+        self.assert_accepted(self.command(1, frame=5))
+        _, _, revision = self.capture()
+        self.now[0] = 12.0
+        self.assert_accepted(self.command(2))
+        self.assertEqual(self.capture(), (0.0, self.snapshot, revision + 1))
+        # The legacy transition leaves the highwater at 5: frame 4 stays older.
+        self.assert_stale(self.command(3, frame=4))
+        self.assertEqual(self.capture(), (0.0, self.snapshot, revision + 1))
+        # Equal frame with an existing context renews the receipt only.
+        self.assert_accepted(self.command(4, frame=5))
+        self.assertEqual(self.capture(), (0.0, self.snapshot, revision + 1))
+
+    def test_malformed_frame_generation_is_rejected_without_mutation(self):
+        self.registry.set_context(self.capability, self.snapshot)
+        self.now[0] = 12.0
+        invalid_frames = (True, False, 0, -1, 1.5, "5", None, 9007199254740992)
+        for frame in invalid_frames:
+            with self.subTest(frame=frame):
+                response = self.client.post(
+                    "/hmi/current-snapshot",
+                    json={"version": 1, "command": "publish", "order": 50,
+                          "snapshot": self.snapshot, "frameGeneration": frame},
+                    headers=self.headers,
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    self.registry.get_owner_context(self.owner, max_age_seconds=15),
+                    (2.0, self.snapshot),
+                )
+        # The frame identity is publish-only: invalidate rejects the field too.
+        response = self.client.post(
+            "/hmi/current-snapshot",
+            json={"version": 1, "command": "invalidate", "order": 50,
+                  "frameGeneration": 5},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            self.registry.get_owner_context(self.owner, max_age_seconds=15),
+            (2.0, self.snapshot),
+        )
+
+    def test_a_frame_publish_with_an_unknown_extra_key_is_still_rejected(self):
+        self.registry.set_context(self.capability, self.snapshot)
+        self.now[0] = 12.0
+        response = self.client.post(
+            "/hmi/current-snapshot",
+            json={"version": 1, "command": "publish", "order": 50,
+                  "snapshot": self.snapshot, "frameGeneration": 5,
+                  "ownerId": self.owner},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            self.registry.get_owner_context(self.owner, max_age_seconds=15),
+            (2.0, self.snapshot),
+        )
 
 
 if __name__ == "__main__":

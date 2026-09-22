@@ -1,8 +1,10 @@
 """Inert fault-unwind proof, not a healthy clock-interleaving simulation.
 
-The original clock tests and gate execute unchanged. A transparent gate observer
+The original clock test assertions execute unchanged. A transparent gate observer
 records entry attempts, exceptions and normal returns, NOT inner acquire attempts.
 The False-return contract also requires a later static guard-before-acquire check.
+The tested helper in ``test_channel_a_pairing.py`` now also rejects a failed gate
+wait with a truthful TimeoutError; no expectation in this module changed.
 """
 
 if __package__:

@@ -7,6 +7,7 @@ I/O, reads credentials, sleeps or starts a bot.
 """
 
 import itertools
+import math
 import sys
 import unittest
 from dataclasses import FrozenInstanceError
@@ -35,6 +36,7 @@ from prisma_runtime.channel_a_query import (
     QueryBinding,
     QueryEnvelope,
     QueryOutcome,
+    is_query_envelope_well_formed,
 )
 from prisma_runtime.channel_a_pairing import ChannelAPairingRegistry
 from prisma_runtime.hmi_sessions import HmiSessionRegistry
@@ -1258,6 +1260,70 @@ class ChannelAContextRevisionTests(unittest.TestCase):
                 self.assert_no_answer(outcome)
                 self.assertEqual(self.harness.parses, [])
                 self.assertNotIn("private-validator-detail", repr(outcome))
+
+
+class QueryEnvelopeDeadlineTests(unittest.TestCase):
+    """The captured monotonic deadline is a required internal envelope field.
+
+    The coordinator already computes the deadline from the injected monotonic
+    query clock; anchoring it inside the envelope makes the captured answer's
+    lifetime immune to same-frame receipt renewal. The field stays internal:
+    ``as_dict`` and the answerEnvelope wire projection are unchanged, and the
+    six-field constructor fails at construction, not at the guard.
+    """
+
+    def envelope(self, **overrides):
+        values = {
+            "owner_id": OWNER,
+            "generation": 1,
+            "update_id": 11,
+            "epoch": EPOCH,
+            "answer_text": ANSWER,
+            "context_revision": 1,
+            "captured_deadline": 61.5,
+        }
+        values.update(overrides)
+        return QueryEnvelope(**values)
+
+    def test_the_six_field_constructor_fails_at_construction_not_at_the_guard(self):
+        with self.assertRaises(TypeError):
+            QueryEnvelope(
+                owner_id=OWNER, generation=1, update_id=11, epoch=EPOCH,
+                answer_text=ANSWER, context_revision=1,
+            )
+        self.assertTrue(is_query_envelope_well_formed(self.envelope()))
+
+    def test_the_deadline_must_be_a_positive_finite_float(self):
+        invalid = (None, True, False, 1, "61.5", float("nan"), float("inf"),
+                   -float("inf"), 0.0, -1.5)
+        for deadline in invalid:
+            with self.subTest(deadline=deadline):
+                self.assertFalse(is_query_envelope_well_formed(
+                    self.envelope(captured_deadline=deadline)))
+        self.assertTrue(is_query_envelope_well_formed(
+            self.envelope(captured_deadline=1.0)))
+
+    def test_as_dict_keeps_the_internal_deadline_off_the_wire(self):
+        data = self.envelope().as_dict()
+        self.assertEqual(
+            set(data),
+            {"ownerId", "generation", "updateId", "epoch", "answerText",
+             "contextRevision"},
+        )
+        self.assertNotIn("capturedDeadline", data)
+        self.assertNotIn("captured_deadline", data)
+
+    def test_the_delivered_envelope_anchors_the_coordinator_deadline(self):
+        harness = QueryHarness()
+        harness.open_session(OWNER)
+        link = harness.pair()
+        outcome = harness.coordinator.handle_query(harness.binding(link), QUESTION)
+        harness.assert_outcome(outcome, QUERY_ANSWER_DELIVERED)
+        envelope = outcome.envelope
+        self.assertIs(type(envelope.captured_deadline), float)
+        self.assertTrue(math.isfinite(envelope.captured_deadline))
+        self.assertGreater(envelope.captured_deadline, harness.mono[0])
+        self.assertTrue(is_query_envelope_well_formed(envelope))
 
 
 if __name__ == "__main__":

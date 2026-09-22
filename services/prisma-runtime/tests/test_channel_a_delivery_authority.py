@@ -299,7 +299,7 @@ class ActivationAuthorityTests(AuthorityCase):
     def test_constructor_is_inert_and_prepared_is_not_running(self):
         self.assertEqual(self.runner_calls, ["construct"])
         self.assertIsNone(self.runner.dialogue)
-        envelope = self.Envelope(OWNER, 1, 3, "not-an-adapter", ANSWER, 1)
+        envelope = self.Envelope(OWNER, 1, 3, "not-an-adapter", ANSWER, 1, 999999.0)
         self.assertIs(self.current(envelope), False)
         self.activation.prepare()
         self.assertIs(self.current(envelope), False)
@@ -339,7 +339,10 @@ class ActivationAuthorityTests(AuthorityCase):
                      {"owner_id": []}, {"generation": True}, {"generation": 0},
                      {"update_id": 2}, {"update_id": True}, {"update_id": -1},
                      {"update_id": 2**53}, {"context_revision": True},
-                     {"context_revision": 0}, {"epoch": ""})
+                     {"context_revision": 0}, {"epoch": ""},
+                     {"captured_deadline": True}, {"captured_deadline": 0.0},
+                     {"captured_deadline": -1.0}, {"captured_deadline": float("nan")},
+                     {"captured_deadline": float("inf")}, {"captured_deadline": None})
         for fields in mutations:
             with self.subTest(fields=fields):
                 malformed = replace(envelope, **fields)
@@ -351,7 +354,8 @@ class ActivationAuthorityTests(AuthorityCase):
                 self.assertIs(self.dialogue.is_query_envelope_admitted(wrong), False)
         class DerivedEnvelope(self.Envelope):
             pass
-        derived = DerivedEnvelope(OWNER, envelope.generation, 3, envelope.epoch, ANSWER, 1)
+        derived = DerivedEnvelope(OWNER, envelope.generation, 3, envelope.epoch, ANSWER, 1,
+                                  envelope.captured_deadline)
         self.assertIs(self.current(derived), False)
         self.assertIs(self.dialogue.is_query_envelope_admitted(derived), False)
 
@@ -366,12 +370,31 @@ class ActivationAuthorityTests(AuthorityCase):
             {"version": 1, "command": "invalidate", "order": 1})
         self.assertIs(self.current(fresh), False)
 
-    def test_receipt_age_includes_boundary_then_expires(self):
+    def test_receipt_age_boundary_now_ends_exactly_at_the_captured_deadline(self):
         envelope = self.linked()
-        self.clock.now += 15
+        # The captured monotonic deadline (exclusive, equality fails closed) is
+        # start + (bound - captured age), so it lands exactly on the inclusive
+        # 15s receipt-age boundary of this shared-clock fixture. The answer is
+        # therefore current just before the boundary and expired exactly at it;
+        # the receipt-age guard's own inclusive semantics are unchanged.
+        self.clock.now = envelope.captured_deadline - 0.001
         self.assertIs(self.current(envelope), True)
-        self.clock.now += 0.001
+        self.clock.now = envelope.captured_deadline
         self.assertIs(self.current(envelope), False)
+
+    def test_the_inclusive_receipt_age_boundary_holds_for_the_direct_predicate(self):
+        self.linked()
+        _, _, revision = self.sessions.capture_owner_context(OWNER, max_age_seconds=15)
+        self.assertEqual(self.clock.now, 100.0)
+        # The composed deadline gate above ends the answer exactly at its
+        # exclusive deadline; the guard's own inclusive semantics remain
+        # directly observable on the registry predicate.
+        self.clock.now = 115.0
+        self.assertTrue(self.sessions.is_owner_context_fresh_current(
+            OWNER, revision, max_age_seconds=15))
+        self.clock.now = 115.001
+        self.assertFalse(self.sessions.is_owner_context_fresh_current(
+            OWNER, revision, max_age_seconds=15))
 
     def test_live_session_idle_expiry_is_not_masked_by_freshness(self):
         self.sessions.idle_ttl = 5
@@ -624,7 +647,7 @@ class ManagerAuthorityTests(AuthorityCase):
         self.manager = ChannelAManager(credential_service=Credentials(),
             configuration_store=Configuration(), activation_factory=factory, reservation=object())
         self.manager._lock = DepthLock()
-        self.envelope = self.Envelope(OWNER, 1, 3, "adapter-not-manager-epoch", ANSWER, 1)
+        self.envelope = self.Envelope(OWNER, 1, 3, "adapter-not-manager-epoch", ANSWER, 1, 999999.0)
         return self.manager
 
     def assert_manager_inner_revocation(self, *, late):
@@ -698,7 +721,10 @@ class ManagerAuthorityTests(AuthorityCase):
         for envelope in (None, {}, self.envelope.as_dict(),
                          replace(self.envelope, generation=True),
                          replace(self.envelope, update_id=-1),
-                         replace(self.envelope, context_revision=0)):
+                         replace(self.envelope, context_revision=0),
+                         replace(self.envelope, captured_deadline=True),
+                         replace(self.envelope, captured_deadline=0.0),
+                         replace(self.envelope, captured_deadline=float("nan"))):
             with self.subTest(envelope_type=type(envelope)):
                 self.assertIs(manager.is_query_envelope_current(envelope), False)
 

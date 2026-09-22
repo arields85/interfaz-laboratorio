@@ -8,6 +8,8 @@ to later integration layers.
 
 from __future__ import annotations
 
+import math
+
 from .channel_a_bot import ChannelAPairingDialogue
 from .channel_a_lifecycle import (
     PHASE_PREPARED,
@@ -55,6 +57,9 @@ class ChannelAActivation:
         self._dialogue: ChannelAPairingDialogue | None = None
         self._bot_username: str | None = None
         self._sessions = sessions
+        # The same monotonic clock the coordinator uses for the captured
+        # deadline: both domains are one, so no wall-clock mixing is possible.
+        self._query_clock = query_clock
 
         def dialogue_factory(identity: ChannelABotIdentity) -> ChannelAPairingDialogue:
             registry = ChannelAPairingRegistry(
@@ -191,16 +196,48 @@ class ChannelAActivation:
             ) is not True:
                 return False
             observed = self._runner.status()
-            return (
+            if not (
                 type(observed) is ChannelAStatus
                 and type(observed.phase) is str and observed.phase == PHASE_RUNNING
                 and observed.restart_required is False
                 and type(observed.quiescent) is bool and observed.reason is None
                 and self._dialogue is dialogue
                 and self._delivery_witness_matches(witness) is True
-            )
+            ):
+                return False
+            # Final gate: the captured monotonic deadline. Same-frame receipt
+            # renewal can keep the revision guard satisfied forever, so the
+            # answer itself expires when the injected query clock reaches the
+            # deadline sampled before the context read at capture time.
+            return self._captured_deadline_current(envelope, witness)
         except Exception:
             return False
+
+    def _captured_deadline_current(self, envelope, witness) -> bool:
+        """Sample the injected query clock once; fail closed on any misuse.
+
+        The clock sample is the last foreign action before the verdict: an
+        exception, a bool, a non-number, a non-finite or a negative sample
+        closes the gate, and exact deadline equality expires the answer. The
+        production clock is ``time.monotonic``, but an injected clock is a
+        foreign domain that may reenter ``stop()`` or invalidate the context
+        during that sample — the same reentrancy ``issue_pairing_challenge``
+        already documents. The reference-only witness recheck closes that
+        window: it compares captured references under the existing locks and
+        runs no foreign callback, clock sample or status query of its own, so
+        nothing foreign executes after the sample.
+        """
+        try:
+            now = self._query_clock()
+        except Exception:
+            return False
+        if isinstance(now, bool) or not isinstance(now, (int, float)):
+            return False
+        if not math.isfinite(now) or now < 0:
+            return False
+        if now >= envelope.captured_deadline:
+            return False
+        return self._delivery_witness_matches(witness) is True
 
     def issue_pairing_challenge(self, owner_id: str) -> QrChallenge | None:
         """Issue only while prepared; domain refusals retain their native errors."""

@@ -12,7 +12,7 @@ export interface PrismaContextIntent {
 }
 
 export type PrismaContextCommand =
-    | { version: 1; command: 'publish'; order: number; snapshot: unknown }
+    | { version: 1; command: 'publish'; order: number; snapshot: unknown; frameGeneration?: number }
     | { version: 1; command: 'invalidate'; order: number };
 
 export interface PrismaSessionRequestSnapshot {

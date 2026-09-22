@@ -323,6 +323,18 @@ legacy GET presence policy.
 Internal context revisions are rechecked before Channel A answer publication and local
 answer publication. These guards do not establish full remote activation or live acceptance.
 
+The publish command may carry an optional `frameGeneration`: a positive JavaScript-safe
+integer, accepted on publish only (rejected on `invalidate` and by the same unknown-key
+discipline as any other field). Each visit to a view mints exactly one generation, reused
+across that visit's periodic ticks and resumes: republishing the same generation renews
+receipt freshness without a new context revision, while a greater generation — or an accepted
+publish over an absent context — bumps the revision. The legacy publish without the field
+keeps the unconditional revision bump, and invalidation retains the generation highwater so
+a retired frame cannot resurrect. Existing order guards are unchanged. Separately, a
+captured Channel A answer expires at a fixed internal deadline computed before parsing and
+delivery from the capture-time clock sample and context receipt age. The envelope carries that
+deadline unchanged; later refreshes never renew it, and it is not a wire field.
+
 Every exact session/TTS response is `Cache-Control: no-store`. Missing, malformed, expired, or
 revoked capabilities fail before credential, coordinator, cache, or provider work. The capability
 header is forwarded only on the fixed session paths. Raw text TTS `/prisma/speak` is retired and
@@ -367,7 +379,8 @@ running. The wrapper never installs dependencies or invokes bootstrap.
 
 On Windows, helper and service windows are hidden while the existing npm/Vite
 terminal remains attached. Concurrent development commands share one verified
-development-owned runtime generation. Closing one command removes only its
+development-owned runtime generation. **Use Ctrl+C in the owning terminal for normal
+shutdown**; wait for release before closing the window. A normal release removes only its
 owner; the final owner stops only the exact process identities started by that
 generation. A complete canonical runtime started manually may be reused, but
 the development wrapper never stops it. Foreign, replaced, corrupt, or
@@ -389,6 +402,15 @@ errors are reported but do not replace the established ownership outcome.
 same idempotent release path. Browser or tab closure has no backend lifecycle
 authority. This is bounded normal-development cleanup, not a claim of recovery
 after forced terminal termination, power loss, or an operating-system crash.
+PW-005 was closed by the user on this normal Ctrl+C path on 2026-09-22. The final
+reported snapshot at 19:47:25Z had no Prisma processes or listeners on 5056/5057/5173.
+Closing the terminal with X is not an accepted cleanup guarantee; abrupt recovery was
+not independently demonstrated and was excluded from acceptance, not passed.
+The initial focused 26 backend/14 Node tests predate the one-line cold-owner representation
+fix; that fix has static readback and manual matching Node PID/birth persistence evidence,
+not a subsequent automated full-gate pass. See the
+[PW-005 task](../../odd/tasks/prisma-development-shutdown-recovery.md).
+
 Automatic Prisma orchestration is currently Windows-only; unsupported systems
 run Vite with an explicit warning rather than pretending the backend is owned.
 

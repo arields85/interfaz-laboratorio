@@ -51,6 +51,8 @@ describe('dashboardSnapshotExport.service', () => {
         const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
         expect(first).toEqual({
             version: 1, command: 'publish', order: expect.any(Number),
+            // One frame per exporter instance, reused across routine ticks.
+            frameGeneration: expect.any(Number),
             snapshot: { ...snapshot, hmiName: 'Panel recepción' },
         });
         expect(publish.mock.calls[0]?.[1]).not.toBe(snapshot);
@@ -291,6 +293,56 @@ describe('dashboardSnapshotExport.service', () => {
         expect(publications()[0].snapshot.value).toBe('fresh');
         stop();
         replacementStop?.();
+    });
+
+    it('reuses one frame generation across ticks and mints a greater one per instance', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => new Response(null, { status: 202 }));
+        let tick = 0;
+        const stop = startDashboardSnapshotExporter({
+            intervalMs: 5_000,
+            getSnapshot: () => ({ widgets: [], tick: tick++ }),
+            fetchImpl: fetchMock,
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+        expect(bodies).toHaveLength(2);
+        expect(bodies[0].frameGeneration).toEqual(expect.any(Number));
+        // Different snapshot objects, same visit identity: no per-tick minting.
+        expect(bodies[1].frameGeneration).toBe(bodies[0].frameGeneration);
+        stop();
+        await vi.advanceTimersByTimeAsync(0);
+
+        const nextStop = startDashboardSnapshotExporter({
+            intervalMs: 5_000,
+            getSnapshot: () => ({ widgets: [], tick: 'next-instance' }),
+            fetchImpl: fetchMock,
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        const nextBodies = fetchMock.mock.calls.slice(bodies.length + 1)
+            .map(([, init]) => JSON.parse(String(init?.body)));
+        expect(nextBodies[0].command).toBe('publish');
+        expect(nextBodies[0].frameGeneration).toBeGreaterThan(bodies[0].frameGeneration);
+        nextStop();
+    });
+
+    it('reuses the instance frame after a session reset onto the fresh server document', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => new Response(null, { status: 202 }));
+        let value = 'before';
+        const stop = startDashboardSnapshotExporter({
+            intervalMs: 5_000,
+            getSnapshot: () => ({ widgets: [], value }),
+            fetchImpl: fetchMock,
+        });
+        await vi.advanceTimersByTimeAsync(5_000);
+        const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+        prismaSessionClient.reset({ close: false });
+        value = 'after';
+        await vi.advanceTimersByTimeAsync(5_000);
+        const published = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))
+            .filter(body => body.command === 'publish');
+        expect(published).toHaveLength(2);
+        expect(published[1].frameGeneration).toBe(first.frameGeneration);
+        stop();
     });
 
     it('replaces the previous exporter and aborts its request', async () => {

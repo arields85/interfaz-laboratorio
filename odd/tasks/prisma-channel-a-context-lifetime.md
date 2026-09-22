@@ -1,87 +1,386 @@
 # CL — Context lifetime contract fix: distinguish view visits from routine updates
 
-## SESSION CLOSE / NEXT SESSION (2026-09-22) — GATE RECONFIRMATION REQUIRED
+## Status (current truth; 2026-09-22, user acceptance and session closure)
 
-Documentation-only close. Status remains DRAFT/DOCUMENTATION-ONLY CL1: no CL2 tests, no CL3 source, and no CL4 verification of this proposal were started or executed. The user said "avisame antes de implementar" and then explicitly deferred this exact point to the next session; neither this session close nor a generic "continue" infers implementation permission.
+**CL1–CL6 CLOSED.** User-reported manual acceptance: replies to the exercised questions,
+Telegram replies, HMI voice and orb. No separately observed cross-view/latency test or
+universal guarantee is claimed. Full CL gates below predate PW-005, not final gates for
+its later cold-start correction. One local commit is authorized and pending parent execution;
+no hash is claimed. The user selected `skip_hook_this_commit` for that commit only, without
+hook/configuration edits; `.gga` remains untracked/excluded. No push or new automated checks.
 
-Next session must: read the master COMPLETE (§11.1/§3.4), recover Engram checkpoint `checkpoint/prisma-channel-a-manager-resume` (updated by the parent after the authorized session-close commit), this CL task and its mirror `odd/prisma-channel-a-context-lifetime/tasks`, the NAME record (`prisma-pairing-name-preflight`) and PENDING/Git. Then present the planned two pieces (frame/visit generation + captured-answer deadline) and WAIT for FRESH explicit confirmation BEFORE any test or source edit.
+**NEXT SESSION:** present for approval a bounded planning proposal for the shared semantic
+data boundary (master §6.4, §7.2, §8 Entrega 1.3 and current §11.1): approve planning or defer.
+No implicit implementation authority, automatic tests, services or provider calls; do not
+repeat accepted audio/orb/Ctrl+C. PW-003 retains broader roadmap work, not CL acceptance.
 
-The final execution contract is NOT frozen. Before execution, clarify: (a) equal frameGeneration / context None precedence, (b) the legacy setter/publication transition versus the frame highwater, (c) exact test edit paths and a safe, executable focused runner. Do NOT claim ready for blind apply. The six planned production files and their tests are not yet finalized or frozen. No scope expansion to frameworks, audioengine, B or Ctrl+C. Source and tests for this fix have NOT been started.
+### Historical implementation checkpoint (before manual acceptance)
 
-Status: CONTRACT ONLY (CL1). No source/test edits, no commands run for this fix. Baseline `HEAD c82fe44` (feat/prisma-telegram-credentials) plus the COMPLETE, uncommitted NAME-panel fix — preserve it, its task doc, its tests, and `docs/PENDING_WORK.md` PW005 untouched.
+The following evidence and counts describe the pre-PW-005 checkpoint, not current Git totals.
 
-## 1. Objective and current problem
+- **CL1 DONE. CL2 RED observed. CL3 GREEN. CL4 independent offline PASS. CL5 test-harness
+  follow-up DONE.** This documentation follow-up completed after its own readback and git
+  checks (see §12). The historical 11-failure gate blocker is independently
+  baseline-confirmed as pre-existing on base `1731350` and is **resolved**; there is no
+  gate awaiting confirmation.
+- **Strict TDD: ACTIVE.** Sources: `openspec/config.yaml` (`strict_tdd: true`) and
+  `docs/TESTING.md` (TDD obligatorio for services/bugs). RED was observed before each
+  source wave and GREEN after, with runner repeats (§10).
+- **Baseline: `HEAD 1731350`** (`fix(prisma): require HMI name before QR pairing`, branch
+  `feat/prisma-telegram-credentials`), unchanged. 21 modified files including the five
+  documentation surfaces (§5, §12); untracked `.gga` untouched.
+- **Delivery at that checkpoint: no commit, no push.** Manual acceptance and commit
+  authorization were pending then; the current status above supersedes those next steps.
+- **Route: delegated-direct** with task ids: read-only mapper `mucpyxaw-1-66yn` (original
+  mapping), CL5 mapper `mucs6iq1-4-mzcj`, baseline verifier `mucselsk-5-1sas`, final
+  independent verifier `muctg3tg-7-tbg4` (full-candidate PASS). RDD is off; no native
+  review ran; the parent owns the Engram task mirror.
+- **Non-goals (unchanged):** no scope expansion to frameworks, audioengine, STT, Telegram
+  transport, Channel B, credentials, Ctrl+C handling, or live services. Production
+  pairing behavior is untouched (the pairing corrections are test-harness only).
 
-A captured Channel A answer is authorized against `context_revision` (hmi_sessions.py) and its lifetime is bounded only by the 15s receipt-age window. The browser exporter (`dashboardSnapshotExport.service.ts`) republishes the visible snapshot every ~5s; every `apply_context_command` publish bumps `context_revision`. Therefore a captured answer is routinely invalidated by a routine same-view refresh between capture and the HMI read-time guard (`channel_a_manager.is_query_envelope_current` → `voice_events.publish(is_current=...)`): phone effect observed, HMI orb/audio silenced — the reported intermittence (phone answers, no HMI audio; not a warmup issue).
+## 1. Objective and problem
 
-## 2. Why this scope is essential (user-authorized)
+A captured Channel A answer was authorized against `context_revision` (`hmi_sessions.py`)
+and bounded only by the 15s receipt-age window. The browser exporter
+(`dashboardSnapshotExport.service.ts`) republishes the visible snapshot every ~5s and every
+publish bumped `context_revision`, so a captured answer was routinely invalidated between
+capture and the HMI read-time guard (`channel_a_manager.is_query_envelope_current` →
+`voice_events.publish(is_current=...)`): phone answered, HMI orb/audio silenced — the
+reported intermittence (phone answers, no HMI audio; not a warmup issue).
 
-`authorize_context_lifetime_contract_fix`: the browser/backend contract must distinguish each visit to a view from routine same-frame updates, while preserving captured-answer expiry. Excluded: audioengine, STT, Telegram transport, Channel B, credentials, Ctrl+C handling, framework work, commits/push, live queries. The former reliable HMI TTS behavior is wanted, but the legacy path is never reactivated. The accepted offline primitive stays: an identical publish during a fake Telegram send yields phone effect 1 and `QUERY_ANSWER_UNPUBLISHED` with no envelope; after publish, events may retire.
+Two fixes, both implemented: (1) `frameGeneration` distinguishes each visit to a view from
+routine same-frame updates while preserving captured-answer expiry; (2) a captured
+`captured_deadline` anchors each answer's true expiry in one monotonic domain. The legacy
+path was never reactivated. Before the fix, the offline diagnostic showed that an identical
+publish during a fake Telegram send could yield phone effect 1 and
+`QUERY_ANSWER_UNPUBLISHED` with no HMI envelope.
 
-Rejected plan (debate closed — one independent challenge spent, do not reopen): a single-session stable revision keyed by screen/view id. Unsafe: (a) invalidate can be lost/reordered ahead of a higher-order new publish (A→B→A with no B publish looks unchanged); (b) `is_owner_context_fresh_current` renews from the LATEST `context_received_at`, so a captured answer could stay "fresh" up to the voice-event TTL (300 s). Both are addressed by the two approved pieces below.
+Rejected (debate closed — do not reopen): a single-session stable revision keyed by
+screen/view id — invalidate can be lost/reordered ahead of a higher-order publish
+(A→B→A looks unchanged), and `is_owner_context_fresh_current` renews from the LATEST
+`context_received_at`, which could keep a captured answer "fresh" up to the voice-event TTL.
 
-## 3. Implementation gate (binding)
+## 2. Accepted contract resolutions (binding)
 
-After this CL1 contract, the parent presents the planned scope to the user and WAITS for fresh explicit confirmation BEFORE any implementation, including test edits. CL2/CL3/CL4 are blocked by this gate; the prior implementation authorization is not auto-executable. Only CL1 (this document) is complete now.
+1. **Server ordering and None precedence** — under the lock, after the existing order
+   check, reject `fg < highwater` with zero mutation FIRST, then evaluate whether the
+   PRE-UPDATE context is None BEFORE assigning the new context (never assign-then-check).
+2. **Client frame minting** — one client-global monotonically increasing numeric counter;
+   no WeakMap/token/re-mint design; never reset across epoch.
+3. **Captured deadline** — required `captured_deadline` float on `QueryEnvelope`;
+   six-field construction fails at construction; activation samples the injected
+   clock after the final status/witness gate.
+4. **Regression coverage** — delivery_authority and root modules included in the focused
+   runner; constructor fixtures adapted alongside the required-field GREEN rather than
+   counting TypeErrors as RED.
 
-## 4. Piece 1 — `frameGeneration` (browser → backend publish contract)
+## 3. Piece 1 — `frameGeneration` (browser → backend publish contract)
 
-**Wire (publish command only):** `{version:1, command:'publish', order, snapshot, frameGeneration?}`. Missing `frameGeneration` = legacy command: today's behavior (revision bump on every publish). Present: must be `int` (not bool), `1 ≤ frameGeneration ≤ 9007199254740991`; anything else → `ValueError("INVALID_SNAPSHOT")` without mutation. Exact-set envelope discipline and body limits unchanged; unknown keys still rejected. `invalidate` unchanged.
+**Server rules (`hmi_sessions.py`):** `_Session` carries
+`frame_generation_highwater: int = 0`. Wire: `{version:1, command:'publish', order,
+snapshot, frameGeneration?}` — optional on publish only. Validation is exact: `int` (not
+`bool`), positive, `Number.MAX_SAFE_INTEGER`-bounded (Python: `isinstance(fg, int) and not
+isinstance(fg, bool) and fg > 0 and fg <= 9007199254740991`); anything else →
+`ValueError("INVALID_SNAPSHOT")` without mutation. Unknown keys still rejected;
+`frameGeneration` on an `invalidate` command rejected; envelope discipline and body
+limits unchanged.
 
-**Server state/rules (hmi_sessions.py, `_Session` gains `frame_generation_highwater: int = 0`):** under the existing lock, after the existing `order <= command_order → False` check, for a publish carrying `frameGeneration`:
-- `fg < highwater` → return `False`, zero mutation (older frame rejected even with a higher order; no ABA return).
-- `fg == highwater` → apply context, renew `context_received_at`/`command_order`, `context_revision` UNCHANGED (routine refresh of the same frame).
-- `fg > highwater` or `context is None` → apply, `context_revision += 1` (new frame / post-invalidate replacement), `highwater = fg`.
-- Legacy publish (no `fg`) → today's behavior verbatim; highwater untouched.
-- `invalidate` → today's behavior verbatim (`context=None`, revision bump); highwater untouched so a retired frame cannot resurrect after invalidation.
-`capture_owner_context` keeps its exact 3-tuple `(age, context, revision)`; no other registry API changes.
+**State transition (under the existing lock, after the existing
+`order <= command_order → False` check, for a publish carrying `frameGeneration`), in
+this exact order:**
 
-**Client minting (prismaSessionClient.ts, mirroring the existing intent pattern):** new `#frameGeneration` counter and `createContextFrame(): PrismaContextFrame` (frozen token + WeakMap frame→`{epoch, generation}`; exhausted at `MAX_SAFE_INTEGER`; stale frame after epoch change throws `PrismaStaleSessionResponse`, same as intents). The counter renews (resets) on capability epoch change — safe because a new epoch implies a fresh server session document with highwater 0. `publishContext(intent, snapshot, signal?, transport?, frame?)` includes `frameGeneration` only when a frame is supplied.
+1. `fg < highwater` → return `False`, zero mutation (older frame rejected even with a
+   higher order; no ABA return).
+2. Evaluate whether the PRE-UPDATE context is None BEFORE assigning. Bump
+   `context_revision` when `fg > highwater` **or** pre-update context is None; apply the
+   context; when `fg > highwater`, set `highwater = fg`.
+3. `fg == highwater` with pre-existing context → apply context and renew
+   `context_received_at`/`command_order` only; `context_revision` UNCHANGED (routine
+   refresh of the same frame).
 
-**Exporter wiring (dashboardSnapshotExport.service.ts):** `startDashboardSnapshotExporter` mints one frame per instance — each instance is one view visit (view navigation already stops the old exporter and starts a new one; retirement stays the immediate invalidation seam). The frame is reused across periodic ticks; it is re-minted only on observed client epoch change. `exportDashboardSnapshot` gains an optional trailing `frame` param. The frame is instance-scoped, never derived from snapshot object identity or per tick, so routine value updates cannot accidentally mint a new frame (CL2 frontend test asserts two ticks with different snapshot objects share one `frameGeneration`).
+Legacy publish (no `fg`) and `set_context`: today's behavior verbatim — unconditional
+revision bump, highwater untouched. Invalidate: today's behavior verbatim
+(`context=None`, revision bump); highwater retained so a retired frame cannot resurrect
+after invalidation. `capture_owner_context` keeps its exact 3-tuple.
 
-**Ordering safety (analyzed, no code):** orders are client-global and monotonic. A retired exporter's in-flight publish (lower order, older `fg`) is rejected by order and by the highwater rule; its invalidate (minted at retirement, order N) is either accepted before the new exporter's first publish (order > N, new frame → revision bump) or rejected after it. No sequence clears an established new frame. Hide/offline → existing invalidate; resume → same-fg publish over `context=None` → revision bump = fresh lifetime for new captures. Capability reset while an exporter survives → epoch fence discards in-flight intents, frame re-minted on next tick; captures fail closed (`CONTEXT_UNAVAILABLE`) until the first publish lands.
+**Client minting (`prismaSessionClient.ts`, `dashboardSnapshotExport.service.ts`):**
+client-global monotonic counter with `createContextFrame(): number`; safe-integer
+exhaustion fails closed; the counter is never reset across epoch (epoch fences in-flight
+intents; a new epoch implies a fresh server document with highwater 0) and increases
+across exporter replacements and `reset`. `startDashboardSnapshotExporter` mints ONE
+frame per exporter instance — each instance is one view visit — reused across periodic
+ticks, hidden/offline resume, and `reset`; never derived from snapshot object identity or
+minted per tick. `publishContext(...)` and `exportDashboardSnapshot` gain an optional
+trailing numeric `frameGeneration`; legacy omission unchanged (no field on the wire when
+absent).
 
-## 5. Piece 2 — captured deadline anchor (internal envelope field)
+**Ordering safety (analyzed):** orders are client-global and monotonic; a retired
+exporter's in-flight publish is rejected by order and highwater; its invalidate is either
+accepted before the new exporter's first publish or rejected after it — no sequence
+clears an established new frame. Hide/offline → existing invalidate; resume → same-fg
+publish over `context=None` → revision bump = fresh lifetime for new captures. Capability
+reset while an exporter survives → epoch fence discards in-flight intents; the surviving
+exporter reuses its frame over the fresh document (highwater 0, absent context → revision
+bump) and the client counter increases only when `createContextFrame` is called. Captures
+fail closed (`CONTEXT_UNAVAILABLE`) until the next publish lands.
 
-**Choice:** propagate the coordinator's ALREADY-computed monotonic `deadline` inside `QueryEnvelope` as new required field `captured_deadline: float`. Justification: the coordinator's clock is the activation's injected `query_clock` (`time.monotonic` in `local_presentation.py`); the guard samples that same injected clock, so both values live in one monotonic domain — no wall-clock/monotonic mixing, and `capture_owner_context`'s 3-tuple and all its callers stay untouched.
+## 4. Piece 2 — captured deadline anchor (internal envelope field)
 
-**channel_a_query.py:** `QueryEnvelope(owner_id, generation, update_id, epoch, answer_text, context_revision, captured_deadline)`; `handle_query` passes its existing `deadline`. `is_query_envelope_well_formed` additionally requires `type(...) is float`, finite, `> 0`; a missing field fails the `try/except` → not well-formed (fail closed, never silently renewed). `as_dict()` and the `answerEnvelope` wire projection are UNCHANGED (internal field omitted; no external-wire or fixture churn beyond envelope constructors).
+**`channel_a_query.py`:** `QueryEnvelope` gains required `captured_deadline: float`
+(SEVEN fields; six-field construction fails at construction — the correct oracle;
+TypeErrors are not counted as behavior RED). `handle_query` passes its existing
+coordinator `deadline`; validation is strict (`type(...) is float`, finite, `> 0`;
+`None`/NaN/inf/non-positive rejected). `as_dict()` and the `answerEnvelope` wire
+projection are UNCHANGED (internal field omitted).
 
-**channel_a_activation.py:** retain `self._query_clock = query_clock`. In `is_query_envelope_current`, keep every existing check (admission witness, RUNNING status, `is_owner_context_fresh_current` 15s receipt-age revision guard — exact 15-boundary semantics preserved) and make the FINAL gate, after the last `status()` re-observation and the final reference-only witness match: sample `now = self._query_clock()` (fail closed on exception, bool, non-number, non-finite, negative) and require `now < captured_deadline`. No foreign callback runs between that sample and the return (existing pattern). The 15s receipt-age check remains the revision/presence guard; the deadline is the true per-answer expiry, immune to same-frame `received_at` renewal.
+**`channel_a_activation.py`:** `is_query_envelope_current` keeps every existing check
+(admission witness, RUNNING status, `is_owner_context_fresh_current` 15s receipt-age
+revision guard — exact 15-boundary semantics preserved) and, after the last `status()`
+re-observation and the final reference-only witness match, makes the FINAL gate: sample
+`now = self._query_clock()`, fail closed on exception/bool/non-number/non-finite/negative,
+then require `now < captured_deadline` (exact equality fails closed). A reference-only
+post-sample witness recheck closes injected-clock reentrancy (stop/invalidation during
+the sample); it compares captured references under the existing locks and runs no foreign
+callback, clock sample, or status query after the sample. The 15s receipt-age check
+remains the revision/presence guard; the deadline is the per-answer expiry, immune to
+same-frame `received_at` renewal. Runtime behavior now has a fixed internal answer
+deadline — it is not a wire field.
 
-## 6. Invariants
+## 5. Edit surfaces (all authorized; writer scope single-threaded)
 
-1. Each view visit strictly increases `frameGeneration` (client-global counter, renewed per epoch) and bumps `context_revision` server-side; routine same-frame refreshes never do.
-2. A captured answer dies on: view visit, invalidate, view change (A→B→A cannot return it — no ABA), or deadline passage — never by routine refresh, never extended by later receipts.
-3. Legacy commands (missing field) keep today's fail-closed bump behavior; malformed field/unknown keys rejected without mutation; body limits unchanged.
-4. Clock domains never mix: monotonic deadline vs monotonic guard sample; wall-clock receipt age stays inside its own check.
-5. No new globals/framework; only the listed surfaces change; read-only HMI rules and the accepted offline primitive hold.
+**Production (6):**
 
-## 7. Tasks
+| Path | Change |
+|---|---|
+| `services/prisma-runtime/src/prisma_runtime/hmi_sessions.py` | §3 state transition + field validation |
+| `services/prisma-runtime/src/prisma_runtime/channel_a_query.py` | §4 envelope field + strict validation |
+| `services/prisma-runtime/src/prisma_runtime/channel_a_activation.py` | §4 final deadline gate + reentrancy fence |
+| `hmi-app/src/domain/prismaSession.types.ts` | frame type for the publish command |
+| `hmi-app/src/services/prismaSessionClient.ts` | §3 counter + optional trailing param |
+| `hmi-app/src/services/dashboardSnapshotExport.service.ts` | §3 one frame per instance |
 
-- **CL1-contract** — this document. DONE.
-- **[GATE] user re-confirmation** — parent presents scope; wait. Blocks CL2–CL4.
-- **CL2-test-RED** — add the smallest failing tests per §8 (backend first, then frontend); capture observed failures. Existing defensive fixtures are adapted (e.g., envelope constructors gain the field), never with deleted assertions; test count managed, no giant matrix.
-- **CL3-source-GREEN** — implement §4/§5 minimum on the exact surfaces in §4/§5; focused tests green; triangulate negative cases already in §8.
-- **CL4-verify** — run §9 commands; full backend suite (shape change) and frontend `test:coverage`/`build`/`lint` final.
+**Tests — ten files total (7 original + 3 expanded-authority):**
 
-## 8. Regression oracles (composed, meaningful)
+| Path | Coverage |
+|---|---|
+| `services/prisma-runtime/tests/test_hmi_sessions.py` | §3 oracles |
+| `services/prisma-runtime/tests/test_channel_a_query.py` | §4 envelope oracles |
+| `services/prisma-runtime/tests/test_channel_a_activation.py` | §4 deadline gate + reentrancy oracles |
+| `services/prisma-runtime/tests/test_channel_a_delivery_authority.py` | required in focused runner + boundary restoration (CL5.3) |
+| `services/prisma-runtime/tests/test_channel_a_root.py` | required in focused runner |
+| `hmi-app/src/services/prismaSessionClient.test.ts` | §6.7 frame discipline |
+| `hmi-app/src/services/dashboardSnapshotExport.service.test.ts` | §6.7 exporter ticks |
+| `hmi-app/src/pages/Dashboard.runtime.integration.test.tsx` | one-property fixture adaptation (CL5.1) |
+| `services/prisma-runtime/tests/test_channel_a_pairing.py` | test-local harness fix (CL5.2) |
+| `services/prisma-runtime/tests/test_channel_a_pairing_clock_cleanup.py` | docstring truthfulness only (CL5.2) |
 
-1. **Routine refresh keeps the answer current (RED core):** publish `fg=5` → revision R; publish same `fg=5` with higher order → revision still R and `is_owner_context_current(owner, R)` True (fails today).
-2. **Visit invalidates:** publish `fg=6` → revision R+1; `is_owner_context_current(owner, R)` False.
-3. **No ABA + post-invalidate rule:** publish with higher order but `fg=5` after `fg=6` → `False`, zero mutation; invalidate then same-fg republish → revision bump (no stale resurrection).
-4. **Compat + discipline:** legacy publish (no field) accepted with bump; malformed `fg` (bool/0/negative/float/2^53) → `INVALID_SNAPSHOT`, no mutation; unknown key still rejected.
-5. **Deadline anchor:** delivered envelope carries finite `captured_deadline` and is well-formed; `as_dict()` omits it; a legacy 6-field envelope is not well-formed; `is_query_envelope_current` flips False when the injected `query_clock` passes the deadline even though revision is current and receipt age < 15s (the exact intermittence scenario); non-finite/negative clock sample fails closed.
-6. **Frontend frame discipline:** two exporter ticks with different snapshot objects send the same `frameGeneration`; epoch reset re-mints; a new exporter instance mints a greater value; legacy path without frame still publishes.
+`test_channel_a_bot.py` and the other Dashboard test files ran UNCHANGED as regression
+witnesses. Production pairing is untouched.
 
-## 9. Commands (run later only by parent/verifier; one run per pattern)
+## 6. Regression oracles (implemented)
 
-- **Backend focused (derived, run once):** the README's sandboxed child-only supervisor (`services/prisma-runtime/README.md`, section "Offline-safe verification", the 11-cleared-variable PAC-5 block) with `command` replaced by `['services/prisma-runtime/.venv/Scripts/python.exe', '-B', '-m', 'unittest', 'tests.test_hmi_sessions', 'tests.test_channel_a_query', 'tests.test_channel_a_activation', 'tests.test_channel_a_bot']` and `child_env['PYTHONPATH'] = 'services/prisma-runtime/src;services/prisma-runtime'`, from the monorepo root in Bash/Git Bash.
-- **Backend full gate (verbatim, locator):** `services/prisma-runtime/README.md` → "Offline-safe verification" → the PAC-5 reproduction block, unchanged, from the monorepo root in Bash/Git Bash.
-- **Frontend focused:** from `hmi-app/`: `npx vitest run src/services/prismaSessionClient.test.ts src/services/dashboardSnapshotExport.service.test.ts src/pages/Dashboard.test.tsx src/pages/Dashboard.presentation.test.tsx`.
-- **Frontend final:** from `hmi-app/`: `npm run test:coverage` → `npm run build` → `npm run lint`.
+1. **Routine refresh keeps the answer current (RED core):** publish `fg=5` → revision R;
+   captured answer stays current; same `fg=5` with higher order → revision still R and
+   `is_owner_context_current(owner, R)` True.
+2. **Visit invalidates:** publish `fg=6` → revision R+1; previous revision no longer current.
+3. **Guards:** ABA rejection; invalidate retains highwater; order guard; legacy
+   publish/set_context unconditional bump; invalidate unchanged.
+4. **None precedence:** same-fg publish over `context=None` bumps revision.
+5. **Discipline:** malformed `fg` (bool/0/negative/float/2^53) → `INVALID_SNAPSHOT`; unknown
+   key rejected; `frameGeneration` on invalidate rejected; body limits unchanged; legacy
+   body accepted.
+6. **Deadline anchor:** delivered envelope carries finite `captured_deadline`; `as_dict()`
+   omits it; six-field construction fails AT CONSTRUCTION; guard flips False when the
+   injected clock passes the deadline while revision is current and receipt age < 15s;
+   exact equality fails closed; non-finite/negative/bool clock samples fail closed; no
+   callback after the sample; injected-clock stop/invalidate during the sample still fails
+   closed via the reference-only witness recheck (CL5.4).
+7. **Frontend frame discipline:** two exporter ticks with different snapshot objects send
+   the same `frameGeneration`; a new exporter instance mints a GREATER value;
+   `reset`/epoch is safe (counter never resets); legacy path without frame unchanged.
+8. **Inclusive receipt-age boundary restored (CL5.3):** direct predicate check —
+   `is_owner_context_fresh_current` True at 115.0, False at 115.001,
+   `max_age_seconds=15`, revision captured at 100.
 
-## 10. Safety and forecast
+## 7. TDD discipline (strict, observed)
 
-No network, providers, credentials, commits, or destructive operations anywhere in this plan; all tests offline. Forecast: backend ≈ 60–90 source lines + ≈ 200 test lines across 4 test modules; frontend ≈ 50 source lines (2 services + 1 domain type) + ≈ 120 test lines. Delivery strategy: ask-on-risk — no commit now; after the gate and green CL4, the parent proposes work-unit commits (Conventional Commits, tests+docs with behavior) and the user decides. Risks: the derived focused-backend command has not been run before (full gate is the authoritative fallback); exporter instance↔view-visit equivalence relies on the existing per-view `startDashboardSnapshotExporter` lifecycle (asserted by `Dashboard.presentation.test.tsx`).
+RED: smallest failing tests per §6 added and actual failures observed before each source
+wave (backend first, then frontend). GREEN: §3/§4 minimum implemented on §5 surfaces;
+focused runner repeated after implementation. TRIANGULATE: negative/alternate cases in §6;
+fixtures adapted, never deleted; assertions bodies preserved (only docstring/clock-helper
+test-local changes). REFACTOR: clarity only, tests staying green.
+
+## 8. Verification commands
+
+**Backend focused — S1 narrow (one module) and S2 full (six modules).** Outer wrapper
+from the monorepo root in Bash/Git Bash; the inner supervisor resolves the runtime root,
+runs from it, uses a fresh temporary state dir, and strips the exact eleven README PAC-5
+variables. Narrow S1 by reducing the module list to `tests.test_hmi_sessions` only;
+narrow the harness wave to `['tests.test_channel_a_pairing',
+'tests.test_channel_a_pairing_cleanup', 'tests.test_channel_a_pairing_clock_cleanup']`.
+
+```bash
+./services/prisma-runtime/.venv/Scripts/python.exe -B - <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+root = Path('services/prisma-runtime').resolve()
+cleared = (
+    'PRISMA_VOICE_CONFIG_FILE',
+    'PRISMA_CREDENTIAL_MASTER_KEY_FILE',
+    'GEMINI_API_KEY',
+    'TELEGRAM_BOT_TOKEN',
+    'PRISMA_LOCAL_TELEGRAM_ENABLED',
+    'PRISMA_LOCAL_TELEGRAM_BOT_TOKEN',
+    'PRISMA_LOCAL_SNAPSHOT_FILE',
+    'PRISMA_LOCAL_STATE_FILE',
+    'PRISMA_LOCAL_VOICE_URL',
+    'PRISMA_PUBLIC_ORIGIN',
+    'TELEGRAM_BOT_API_BASE',
+)
+command = [
+    str(root / '.venv' / 'Scripts' / 'python.exe'), '-B', '-m', 'unittest',
+    'tests.test_hmi_sessions',
+    'tests.test_channel_a_query',
+    'tests.test_channel_a_activation',
+    'tests.test_channel_a_delivery_authority',
+    'tests.test_channel_a_root',
+    'tests.test_channel_a_bot',
+]
+with tempfile.TemporaryDirectory(prefix='prisma-cl-') as temporary:
+    child_env = os.environ.copy()
+    child_env['PRISMA_RUNTIME_STATE_DIR'] = temporary
+    for name in cleared:
+        child_env.pop(name, None)
+    child_env['PYTHONPATH'] = str(root / 'src')
+    child_env['PYTHONDONTWRITEBYTECODE'] = '1'
+    result = subprocess.run(command, env=child_env, cwd=str(root), check=False)
+    print(f'CL focused backend exit:{result.returncode}', flush=True)
+exit(result.returncode)
+PY
+```
+
+**Backend final gate (unchanged README block, run verbatim):** locator
+`services/prisma-runtime/README.md` → section "Offline-safe verification" → the PAC-5
+reproduction block (the eleven-cleared-variable child-only supervisor invoking
+`verify-local.ps1`), from the monorepo root in Bash/Git Bash. Do not change those
+canonical instructions.
+
+**Frontend focused (from repo root):**
+
+```bash
+npm --prefix hmi-app test -- src/services/prismaSessionClient.test.ts src/services/dashboardSnapshotExport.service.test.ts src/pages/Dashboard.test.tsx src/pages/Dashboard.presentation.test.tsx
+npm --prefix hmi-app test -- src/pages/Dashboard.runtime.integration.test.tsx
+```
+
+**Frontend final (from repo root, in order):**
+
+```bash
+npm --prefix hmi-app run test:coverage
+npm --prefix hmi-app run build
+npm --prefix hmi-app run lint
+```
+
+No installs, service starts, or environment mutation beyond the supervisor's child copy;
+`services/prisma-runtime/.venv/Scripts/python.exe` exists (parent-confirmed).
+
+## 9. Tasks
+
+- [x] **CL1-contract** — this document frozen per §2. DONE.
+- [x] **[GATE] user authorization** — `authorize_context_lifetime_implementation`, then
+      the follow-up selection plus `authorize_pairing_test_harness_fix` for CL5.
+- [x] **CL2-test-RED** — §6 backend first, then frontend; failures observed (§10).
+- [x] **CL3-source-GREEN** — §3/§4 minimum on §5 surfaces; runner repeats to green.
+- [x] **CL4-verify** — writer-level gates green, then **independent offline full-candidate
+      PASS** (`muctg3tg-7-tbg4`; §10, §11), before PW-005. Manual acceptance followed in CL6.
+- [x] **CL5-gates-follow-up** — frontend fixture (CL5.1), test-local pairing harness fix
+      (CL5.2), boundary restoration (CL5.3), injected-clock fence (CL5.4). DONE (§10).
+- [x] **CL6-manual-acceptance** — user reported: «si, loacabo de comprobar y ahora si
+      responde bien, no se evita ninguna pregunta y responde por telegram y por voz en la
+      hmi mostrando el orbe.» Acceptance covers exercised questions and reported Telegram,
+      HMI voice/orb outcomes only; no agent-executed live acceptance, separate cross-view
+      or latency evidence. One local commit is authorized/pending the parent.
+
+## 10. Implementation evidence (strict TDD; observed)
+
+| Wave | RED observed (before source) | GREEN observed (after source) |
+|---|---|---|
+| S1 registry (`hmi_sessions.py`) | S1-narrowed supervisor: 42 tests, 5 failures — framed publish rejected `400 != 202`; two follow-up failures were fixture arithmetic, fixed in test, then repeat. | 42/42 OK, exit 0. |
+| S2 envelope+activation (4 backend modules) | Six-module supervisor: 391 tests, 2 failures + 15 errors. Behavioral RED core: delivered answer stayed `current` after the query clock advanced 16s past delivery — the missing fixed-expiry guard reproduced, not a live intermittence reproduction; six-field constructor did not raise. The 15 errors were fixture-class TypeErrors, adapted at GREEN. | 391/391 OK, exit 0. |
+| S3 frontend (client/exporter/types) | Focused: 3 failed / 59 passed — `createContextFrame is not a function`; `frameGeneration` missing from framed and exporter bodies. | 62/62 passed, 4 suites; Dashboard suites unchanged. |
+| CL5.1 frontend fixture | `Dashboard.runtime.integration.test.tsx`: 1 failed / 4 passed — received body carries `frameGeneration: 1`, expected object lacked it. | 5/5 passed. |
+| CL5.2 pairing harness | §8 supervisor, harness vector: 100 tests, 11 failures, exit 1 — identical to independent baseline `mucselsk-5-1sas` (current tree AND isolated archive of `1731350`: each 14 tests, 11 identical failures, 3 passes, 0 errors, exits `[1, 1]`). | 100/100 OK, exit 0. |
+| CL5.3 boundary | Coverage restoration only; the registry predicate is unchanged production, so no behavioral RED is claimed. | Covered by the CL5.4 six-module GREEN. |
+| CL5.4 clock fence | Six-module §8 vector: 394 tests, 2 failures — both reentrancy scenarios (stop/invalidate during the final sample still authorized the witness). | 394/394 OK, exit 0. |
+
+**CL5 content:** `Dashboard.runtime.integration.test.tsx` gained
+`frameGeneration: expect.any(Number)` on the exact expected publish object (everything
+else unchanged). `test_channel_a_pairing.py` (test-local only): `_GatedLock.__enter__`
+rejects a falsy `release.wait(5)` with a truthful `TimeoutError` BEFORE acquiring the
+inner lock, and `_race` plus the delayed-touch duplicate share one `_run_gated_transition`
+mirroring `_run_generation_race` — worker `BaseException`/main failures captured, gate
+release always attempted before joins, every successfully started worker independently
+joined (bounded 5s) and observed alive despite other cleanup failures, categorized
+worker/main/release/join/liveness causes aggregated with original injected markers.
+`test_channel_a_pairing_clock_cleanup.py` assertion bodies unchanged; only the docstring
+was corrected for truthfulness. `test_channel_a_delivery_authority.py` gained the direct
+inclusive-boundary check (§6.8) while the composed exclusive-deadline test stays verbatim;
+`channel_a_activation.py` gained the reference-only post-sample witness recheck
+(`_captured_deadline_current` requires `self._delivery_witness_matches(original_witness)
+is True`) after two behavioral reentrancy REDs.
+
+**Residual test-only limitation (honest):** the supported harness cleanup path
+(successfully started workers + refused-before-start) is exercised; a static, unexecuted
+hypothetical worker start raising AFTER identity is not covered by tests. This is a
+residual test-only limitation of the harness, not a new production defect, and not scope
+expansion.
+
+## 11. Independent CL verification (`muctg3tg-7-tbg4`, full CL candidate PASS before PW-005)
+
+| Command | Observed result |
+|---|---|
+| README PAC-5 backend gate (verbatim, fresh sandbox, eleven overrides absent) | 1121 tests, 23.299 s, exit 0. |
+| `npm --prefix hmi-app run test:coverage` | 209 suites / 2188 PASS, 67.18 s, exit 0; statements 87.42 %, branches 80.63 %, functions 86.57 %, lines 88.30 %; thresholds 70 unchanged. |
+| `npm --prefix hmi-app run build` | PASS, 10.03 s, exit 0. |
+| `npm --prefix hmi-app run lint` | PASS, exit 0. |
+| `git diff --check` | PASS, exit 0 (LF/CRLF warnings only). |
+
+Non-failing canvas warnings came from frontend tests; `grid.svg` and chunk-size
+warnings came from build, not from the diff check.
+
+Baseline `mucselsk-5-1sas` confirmed the 11 historical `test_channel_a_pairing_clock_cleanup`
+failures identical on the current tree and an isolated archive of `1731350`
+(children `[1, 1]`, outer 0, NOT green) — pre-existing, now resolved by CL5.2.
+Diff before this documentation follow-up: `HEAD 1731350` unchanged, 17 modified files,
+1180+/121− (production 103+/6−, tests 517+/42−, task 560+/73−). Production pairing
+untouched; clock-cleanup oracle assertion bodies unchanged (docstring only). The user's
+real audio/orb acceptance had NOT yet occurred at this gate; CL6 later records the user
+report, without separate latency evidence or a live root-cause proof.
+RDD off and native risk assessment unavailable due to untracked-scope declaration, hence the
+independent verifier route; no native terminal review or approval was run.
+
+## 12. Historical documentation follow-up (2.0.19)
+
+Authorized documentation-only follow-up after the independent full-candidate PASS:
+consolidated this task file into one truthful current document (superseded contradictory
+status removed; history condensed without dropping contract semantics, exact paths, auth
+history, stable CL1–CL5 ids, observed RED/GREEN, final numeric proof, the manual next
+step, and the residual clock-harness limitation); updated `docs/PENDING_WORK.md` PW-003
+only, the master document (2.0.19: header, §11.1 checkpoint, changelog), the runtime
+README wire-contract paragraph, and one consistency paragraph in
+`docs/prisma/PRISMA_BROWSER_ROUTING.md`. No source/test edits, no test/runtime runs, no
+commit/staging/push; readback and `git diff --check` / `git status --short` /
+`git diff --numstat` verified, with source/test numstat identical before and after.
+
+## 13. Historical provenance (brief)
+
+The 2026-09-22 first close froze a DRAFT/DOCUMENTATION-ONLY CL1 with a reconfirmation
+gate (base pre-commit `c82fe44`, committed as `1731350`); a fresh explicit user choice
+(`authorize_context_lifetime_implementation`) discharged that gate and authorized the
+offline TDD implementation. §10/§11 supersede all earlier "gate awaiting confirmation"
+wording; historical labels in the master document retain their period meaning. No commit
+or push had been made at that checkpoint. Current session closure authorizes one local
+commit, pending the parent; its actual identity will be recorded in Engram only after success.

@@ -150,6 +150,7 @@ class QueryEnvelope:
     epoch: str = field(repr=False)
     answer_text: str = field(repr=False)
     context_revision: int
+    captured_deadline: float
 
     def as_dict(self) -> dict:
         return {
@@ -176,6 +177,9 @@ def is_query_envelope_well_formed(envelope) -> bool:
             and type(envelope.update_id) is int
             and 0 <= envelope.update_id <= 2**53 - 1
             and type(envelope.context_revision) is int and envelope.context_revision > 0
+            and type(envelope.captured_deadline) is float
+            and math.isfinite(envelope.captured_deadline)
+            and envelope.captured_deadline > 0.0
             and type(envelope.epoch) is str and 0 < len(envelope.epoch) <= 128
             and envelope.epoch.isascii() and envelope.epoch.isprintable()
             and type(envelope.answer_text) is str and bool(envelope.answer_text.strip())
@@ -373,6 +377,7 @@ class ChannelAQueryCoordinator:
             binding.epoch,
             answer_text,
             revision,
+            deadline,
         )
         return QueryOutcome(QUERY_ANSWER_DELIVERED, delivery, envelope)
 

@@ -381,6 +381,39 @@ describe('PrismaSessionClient', () => {
         }
     });
 
+    it('mints monotonic client-global frames that never reset across epochs', () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(sessionResponse());
+        const client = new PrismaSessionClient(fetchMock);
+
+        const first = client.createContextFrame();
+        const second = client.createContextFrame();
+        expect(Number.isSafeInteger(first)).toBe(true);
+        expect(second).toBeGreaterThan(first);
+
+        client.reset({ close: false });
+        const afterReset = client.createContextFrame();
+        expect(afterReset).toBeGreaterThan(second);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('sends frameGeneration only when a frame is supplied and keeps the legacy body', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse())
+            .mockResolvedValue(new Response(null, { status: 202 }));
+        const client = new PrismaSessionClient(fetchMock);
+
+        await client.publishContext(client.createContextIntent(), { widgets: [] });
+        await client.publishContext(client.createContextIntent(), { widgets: [] }, undefined, undefined, 7);
+
+        const bodies = fetchMock.mock.calls
+            .filter(([path]) => path === '/api/prisma/snapshot')
+            .map(([, init]) => JSON.parse(String(init?.body)));
+        expect(bodies).toEqual([
+            { version: 1, command: 'publish', order: expect.any(Number), snapshot: { widgets: [] } },
+            { version: 1, command: 'publish', order: expect.any(Number), snapshot: { widgets: [] }, frameGeneration: 7 },
+        ]);
+    });
+
     it('adds the capability only to the exact pairing route and refuses its lookalikes', async () => {
         const fetchMock = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(sessionResponse())
