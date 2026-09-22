@@ -9,6 +9,7 @@ written to by this service.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -29,6 +30,7 @@ from .bot_identity_reservation import process_bot_identity_reservation
 from .channel_a_activation import ChannelAActivation
 from .channel_a_configuration import ChannelAConfigurationStore
 from .channel_a_manager import ChannelAManager
+from .channel_a_pairing import OPAQUE_CHARS, PRISMA_CHANNEL_A_CONFLICT, ChannelAPairingConflict
 from .channel_a_transport import ChannelATransport
 from .credential_store import CredentialService
 from .hmi_sessions import (
@@ -50,6 +52,12 @@ DEFAULT_TELEGRAM_API_URL = "https://api.telegram.org"
 HMI_SESSION_BOOTSTRAP_MAX_BYTES = 128
 HMI_ASK_MAX_BYTES = 32 * 1024
 HMI_QUESTION_MAX_BYTES = 4096
+# The closed pairing projection is validated before any HTTP value is built:
+# the opaque URL-safe token may appear only inside the deep link and the bot
+# username is restricted to the Telegram-safe alphabet.
+HMI_PAIRING_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{%d}" % OPAQUE_CHARS)
+HMI_PAIRING_BOT_USERNAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]{4,31}")
+HMI_PAIRING_STATES = ("free", "pending", "linked")
 TELEGRAM_STOPPING = "TELEGRAM_STOPPING"
 
 # Approved Channel A composition settings: the accepted Channel B request/poll/
@@ -350,6 +358,33 @@ def answer_from_snapshot(snapshot: dict[str, Any] | None, question: str) -> Loca
         if alert_count is not None: parts.append(f"{int(alert_count)} alertas en histórico")
         if parts: answer = f"Resumen actual: {', '.join(parts)}."; relevant.append({"tema": "resumen"})
     return LocalAnswer(question, answer or "Ese dato no está visible en el dashboard actual.", relevant)
+
+
+def _channel_a_pairing_qr(view: Any) -> dict[str, Any] | None:
+    """Project the closed manager view into the public QR envelope, or ``None``.
+
+    Fail-closed validation of the internal projection before any HTTP value is
+    built: the opaque token appears only inside the backend-built deep link,
+    no bare token, bot-username field or internal object is exposed, and any
+    unexpected projection value is refused instead of clamped into validity.
+    """
+    if not isinstance(view, dict):
+        return None
+    token = view.get("token")
+    username = view.get("botUsername")
+    expires = view.get("expiresInSeconds")
+    if type(token) is not str or HMI_PAIRING_TOKEN_PATTERN.fullmatch(token) is None:
+        return None
+    if type(username) is not str or HMI_PAIRING_BOT_USERNAME_PATTERN.fullmatch(username) is None:
+        return None
+    if (
+        isinstance(expires, bool)
+        or not isinstance(expires, (int, float))
+        or not math.isfinite(expires)
+        or expires <= 0
+    ):
+        return None
+    return {"deepLink": f"https://t.me/{username}?start={token}", "expiresInSeconds": expires}
 
 
 class JsonFileStore:
@@ -795,7 +830,7 @@ def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAU
     )
 
 
-def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None, telegram_manager=None) -> Flask:
+def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None, telegram_manager=None, channel_a_manager=None) -> Flask:
     paths = runtime_paths()
     snapshot_store = snapshot_store or JsonFileStore(paths.snapshot)
     voice_events = voice_events or VoiceEventStore()
@@ -807,10 +842,12 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     # One process-local identity registry, shared by the manager factory, the
     # standalone bot builder and any later channel A wiring.
     identity_reservation = process_bot_identity_reservation()
-    # Channel A is composed only when this root builds the protected boundary
-    # itself: an injected admin boundary already owns its collaborators, so no
-    # duplicate manager is ever created for it.
-    channel_a_manager = None
+    # Channel A: an explicitly injected manager is preserved verbatim and shared
+    # with the default-built admin boundary; only this root's own default
+    # composition may construct one. An injected admin boundary owns its
+    # already-constructed collaborators and is never mutated here, so a supplied
+    # boundary without a manager keeps the configuration key honestly None with
+    # no duplicate composition.
     if admin_http is None:
         permissions = SecureStoragePermissions()
         repository = AdminAuthRepository(paths.auth_database, permission_checker=permissions.verify)
@@ -878,12 +915,14 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         # The root builds Channel A before its admin boundary and injects that
         # exact instance, so admin A routes share the composed manager's
         # generation accounting; the manager stays inert here (no startup Apply).
-        channel_a_manager = ChannelAManager(
-            credential_service=credentials,
-            configuration_store=ChannelAConfigurationStore(paths.channel_a_configuration),
-            activation_factory=build_channel_a_activation,
-            reservation=identity_reservation,
-        )
+        # An injected manager is never replaced by this default composition.
+        if channel_a_manager is None:
+            channel_a_manager = ChannelAManager(
+                credential_service=credentials,
+                configuration_store=ChannelAConfigurationStore(paths.channel_a_configuration),
+                activation_factory=build_channel_a_activation,
+                reservation=identity_reservation,
+            )
 
         admin_http = AdminHttpBoundary(
             AdminAuthService(repository, ScryptPasswordHasher()),
@@ -900,7 +939,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         origin = request.headers.get("Origin"); allowed = {"http://127.0.0.1:5173", "http://localhost:5173"}
         response.headers["Access-Control-Allow-Origin"] = origin if origin in allowed else "http://127.0.0.1:5173"; response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Headers"] = f"Content-Type, X-CSRF-Token, {CAPABILITY_HEADER}"; response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        if request.path in {"/hmi/session", "/hmi/current-snapshot", "/hmi/voice/latest", "/local/ask"} or request.path.startswith("/internal/prisma/voice-events/"):
+        if request.path in {"/hmi/session", "/hmi/channel-a/pairing", "/hmi/current-snapshot", "/hmi/voice/latest", "/local/ask"} or request.path.startswith("/internal/prisma/voice-events/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1032,6 +1071,55 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         except VoiceEventCapacity:
             return jsonify({"ok": False, "error": "VOICE_EVENT_CAPACITY"}), 503
         return jsonify({**answer.as_dict(), "voiceEvent": event})
+
+    @app.route("/hmi/channel-a/pairing", methods=["GET", "POST", "OPTIONS"])
+    def channel_a_pairing():
+        """Observational pairing state (GET) and explicit QR issuance (POST).
+
+        Owner authority comes only from the existing HMI session capability;
+        the request body can never choose an owner or inject a capability. The
+        observational GET never touches either idle clock, and the POST
+        refreshes the HMI session timer only -- never the pairing registry's
+        human-activity clock, which belongs to the phone's confirmed link.
+        """
+        if request.method == "OPTIONS":
+            return Response(status=204)
+        manager = app.config.get("channel_a_manager")
+        if request.method == "GET":
+            owner_id = session_owner(touch=False)
+            if owner_id is None:
+                return session_error()
+            state = "unavailable"
+            if manager is not None:
+                try:
+                    observed = manager.pairing_status(owner_id)
+                except Exception:
+                    observed = None
+                if observed in HMI_PAIRING_STATES:
+                    state = observed
+            return jsonify({"ok": True, "state": state})
+        owner_id = session_owner(touch=True)
+        if owner_id is None:
+            return session_error()
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "INVALID_REQUEST"}), 400
+        # Exactly one empty JSON object inside the same 128-byte bound as the
+        # session bootstrap; a body can never inject a capability or owner.
+        payload = request_bytes_within(HMI_SESSION_BOOTSTRAP_MAX_BYTES)
+        if payload is None or parse_json_bytes(payload) != {}:
+            return jsonify({"ok": False, "error": "INVALID_REQUEST"}), 400
+        if manager is None:
+            return jsonify({"ok": False, "error": "PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE"}), 503
+        try:
+            view = manager.issue_pairing_challenge(owner_id)
+        except ChannelAPairingConflict:
+            return jsonify({"ok": False, "error": PRISMA_CHANNEL_A_CONFLICT}), 409
+        except Exception:
+            return jsonify({"ok": False, "error": "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE"}), 502
+        qr = _channel_a_pairing_qr(view)
+        if qr is None:
+            return jsonify({"ok": False, "error": "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE"}), 502
+        return jsonify({"ok": True, "qr": qr})
 
     @app.route("/hmi/prisma-config", methods=["GET", "PUT", "OPTIONS"])
     def prisma_config_proxy():

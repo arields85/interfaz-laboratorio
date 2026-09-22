@@ -1,5 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
+import { PRISMA_CHANNEL_A_PAIRING_URL } from '../config/prismaAssistant.config';
+
 const external = vi.hoisted(() => {
     const refused: string[] = [];
     vi.stubGlobal('fetch', async (path: RequestInfo | URL) => {
@@ -377,5 +379,30 @@ describe('PrismaSessionClient', () => {
 
             expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
         }
+    });
+
+    it('adds the capability only to the exact pairing route and refuses its lookalikes', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse())
+            .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, state: 'free' }), { status: 200 }));
+        const client = new PrismaSessionClient(fetchMock);
+
+        const response = await client.fetch(PRISMA_CHANNEL_A_PAIRING_URL);
+
+        expect(response.status).toBe(200);
+        const [path, request] = fetchMock.mock.calls[1];
+        expect(path).toBe(PRISMA_CHANNEL_A_PAIRING_URL);
+        expect(new Headers(request?.headers).get('X-Prisma-Session-Capability')).toBe(canonicalCapability());
+        expect(request?.redirect).toBe('error');
+
+        for (const lookalike of [
+            '/api/prisma/channel-a/pairing/extra',
+            '/api/prisma/channel-a/pairings',
+            '/api/prisma/channel-a%2Fpairing',
+            '//api/prisma/channel-a/pairing',
+        ]) {
+            await expect(client.fetch(lookalike)).rejects.toThrow();
+        }
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 });

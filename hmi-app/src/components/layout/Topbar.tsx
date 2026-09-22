@@ -10,6 +10,7 @@ import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { dashboardStorage } from '../../services/DashboardStorageService';
 import { adminSessionController } from '../../services/adminSession.controller';
 import { TOPBAR_ICON_BUTTON_ACTIVE_CLS, TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
+import PrismaPairingControl from './PrismaPairingControl';
 import EppiTopbarNavigation from '../viewer/eppi/EppiTopbarNavigation';
 import {
     createEppiEntryState,
@@ -173,6 +174,7 @@ export default function Topbar() {
                                 {navRightItems.map((item) => (
                                     <NavIconLink key={item.path} {...item} />
                                 ))}
+                                <PrismaPairingControl />
                             </nav>
                         </>
                     )}

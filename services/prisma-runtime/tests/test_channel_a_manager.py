@@ -772,5 +772,336 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assertNotIn((candidate.name, "stop"), self.ledger)
 
 
+from prisma_runtime.channel_a_pairing import (
+    ChannelAPairingConflict,
+    ChannelAPairingConfigInvalid,
+    PRISMA_CHANNEL_A_CLOCK_INVALID,
+    PRISMA_CHANNEL_A_CONFLICT,
+)
+
+PAIRING_OWNER = "00000000-0000-4000-8000-00000000000a"
+PAIRING_VIEW = {"token": "b" * 43, "botUsername": "prisma_channel_a_bot", "expiresInSeconds": 42.0}
+
+
+class PairingFakeActivation(FakeActivation):
+    """FakeActivation with the additive RCA-5l pairing surface and mid-call hooks.
+
+    The manager's public issuance API is ``issue_pairing_challenge``, but the
+    contract delegates it to the activation's ``issue_pairing_challenge_view``;
+    this fake records the delegated call under the view's exact name.
+    """
+
+    def __init__(self, ledger, name, status_type):
+        super().__init__(ledger, name, status_type)
+        self.pairing_calls = []
+        self.pairing_states = []
+        self.pairing_issue_results = []
+        self.pairing_status_error = None
+        self.pairing_issue_error = None
+        self.on_pairing_status = None
+        self.on_pairing_issue = None
+
+    def _pairing_event(self, operation):
+        self.ledger.append((self.name, operation))
+        if self.callback is not None:
+            self.callback(operation)
+        if operation in self.fail:
+            raise self.fail[operation]
+
+    def pairing_status(self, owner_id):
+        self.pairing_calls.append(("pairing_status", owner_id))
+        self._pairing_event("pairing_status")
+        if self.on_pairing_status is not None:
+            self.on_pairing_status()
+        if self.pairing_status_error is not None:
+            raise self.pairing_status_error
+        return self.pairing_states.pop(0) if self.pairing_states else "free"
+
+    def issue_pairing_challenge_view(self, owner_id):
+        self.pairing_calls.append(("issue_pairing_challenge_view", owner_id))
+        self._pairing_event("pairing_issue")
+        if self.on_pairing_issue is not None:
+            self.on_pairing_issue()
+        if self.pairing_issue_error is not None:
+            raise self.pairing_issue_error
+        return self.pairing_issue_results.pop(0) if self.pairing_issue_results else None
+
+
+class ChannelAManagerPairingTests(unittest.TestCase):
+    """RCA-5l: additive pairing projection and issuance over the published activation.
+
+    The manager observes the pairing state of its published activation only:
+    no mutation gate, no configuration or credential read and no
+    desired==applied requirement. Every foreign call stays outside the state
+    lock and the publication is revalidated afterwards. A real pairing
+    conflict is the one exception that survives; every other failure closes.
+
+    Fixture-only reuse: this class deliberately extends ``unittest.TestCase``
+    directly and delegates to the existing suite's helpers unbound, so none of
+    its 31 prior test methods are collected twice here. The existing suite is
+    untouched.
+    """
+
+    def setUp(self):
+        self.dispatches = []
+
+        def refuse(*args, **kwargs):
+            self.dispatches.append(1)
+            raise RuntimeError("OFFLINE_DISPATCH_REFUSED")
+
+        guard = patch.object(requests.Session, "request", refuse)
+        guard.start()
+        self.addCleanup(guard.stop)
+        self.addCleanup(self.assertEqual, self.dispatches, [])
+
+        from prisma_runtime.channel_a_configuration import (
+            ChannelAConfiguration,
+            ChannelAConfigurationError,
+        )
+        from prisma_runtime.channel_a_lifecycle import ChannelAStatus
+        from prisma_runtime.channel_a_manager import ChannelAManager, ChannelAManagerError
+
+        self.Manager = ChannelAManager
+        self.Error = ChannelAManagerError
+        self.Status = ChannelAStatus
+        self.ledger = []
+        self.credentials = FakeCredentials(self.ledger)
+        self.store = FakeConfigurationStore(self.ledger, ChannelAConfiguration, ChannelAConfigurationError)
+        self.reservation = ForbiddenManagerReservation()
+        self.addCleanup(self.assertEqual, self.reservation.calls, [])
+        self.candidates = []
+        self.factory_calls = []
+        self.factory_result = None
+        self.factory_error = None
+        self.factory_callback = None
+        self.manager = self.Manager(
+            credential_service=self.credentials,
+            configuration_store=self.store,
+            activation_factory=self.factory,
+            reservation=self.reservation,
+        )
+
+    # -- fixture-only delegates into the existing suite's helpers ----------
+
+    def factory(self, token, snapshot, epoch, reservation):
+        return ChannelAManagerTests.factory(self, token, snapshot, epoch, reservation)
+
+    def new_candidate(self):
+        return ChannelAManagerTests.new_candidate(self)
+
+    def assert_status(self, result, **kwargs):
+        return ChannelAManagerTests.assert_status(self, result, **kwargs)
+
+    def assert_sanitized_exception_chain(self, error):
+        return ChannelAManagerTests.assert_sanitized_exception_chain(self, error)
+
+    def assert_error(self, code, operation):
+        return ChannelAManagerTests.assert_error(self, code, operation)
+
+    def applied(self):
+        return ChannelAManagerTests.applied(self)
+
+    def publish_pairing_candidate(self):
+        candidate = PairingFakeActivation(self.ledger, "pairing-candidate", self.Status)
+        self.factory_result = candidate
+        self.applied()
+        return candidate
+
+    def test_pairing_status_projects_published_states_without_any_mutation_or_read(self):
+        candidate = self.publish_pairing_candidate()
+        published_epoch = self.manager.status()["activationEpoch"]
+        self.ledger.clear()
+
+        for expected in ("free", "pending", "linked"):
+            with self.subTest(state=expected):
+                candidate.pairing_states.append(expected)
+                self.assertEqual(self.manager.pairing_status(PAIRING_OWNER), expected)
+        self.assertEqual(candidate.pairing_calls, [("pairing_status", PAIRING_OWNER)] * 3)
+        # Observation only: beyond the closed status read and the pairing
+        # projection itself, the ledger must stay empty.
+        self.assertEqual(
+            [entry for entry in self.ledger if entry not in (
+                ("pairing-candidate", "status"), ("pairing-candidate", "pairing_status"),
+            )],
+            [],
+        )
+        final = self.manager.status()
+        self.assertEqual(final["lastError"], None)
+        self.assertEqual(final["activationEpoch"], published_epoch)
+
+    def test_pairing_status_fails_closed_on_absence_phase_and_broken_observations(self):
+        # No published activation: unavailable, with zero foreign work.
+        self.assertEqual(self.manager.pairing_status(PAIRING_OWNER), "unavailable")
+        self.assertEqual(self.ledger, [])
+
+        candidate = self.publish_pairing_candidate()
+        self.ledger.clear()
+
+        # Inactive or untrusted phases: refused before the foreign pairing call.
+        for phase, reason, quiescent, restart in (
+            ("stopped", None, True, False),
+            ("running", None, False, True),
+        ):
+            with self.subTest(phase=phase, restart_required=restart):
+                candidate.observed = self.Status(phase, reason, quiescent, restart)
+                self.assertEqual(self.manager.pairing_status(PAIRING_OWNER), "unavailable")
+                self.assertEqual(candidate.pairing_calls, [])
+
+        # A broken status observation is closed into the unavailable state.
+        candidate.observed = None
+        self.assertEqual(self.manager.pairing_status(PAIRING_OWNER), "unavailable")
+        self.assertEqual(candidate.pairing_calls, [])
+
+        # A foreign pairing failure is closed too, never leaked.
+        candidate.observed = self.Status("running", None, False, False)
+        candidate.pairing_status_error = RuntimeError(CANARY)
+        self.assertEqual(self.manager.pairing_status(PAIRING_OWNER), "unavailable")
+        candidate.pairing_status_error = None
+
+        # Publication withdrawn during the foreign call revalidates to
+        # unavailable: a reentrant stop during the pairing observation wins.
+        candidate.on_pairing_status = self.manager.stop
+        self.assertEqual(self.manager.pairing_status(PAIRING_OWNER), "unavailable")
+
+        # Observation never changes lastError or the lifecycle record.
+        final = self.manager.status()
+        self.assertEqual(final["lastError"], None)
+        self.assertIsNone(final["activation"])
+
+    def test_issue_pairing_challenge_passes_views_through_and_refuses_inactive_phases(self):
+        # No published activation issues nothing.
+        self.assertIsNone(self.manager.issue_pairing_challenge(PAIRING_OWNER))
+
+        candidate = self.publish_pairing_candidate()
+
+        view = dict(PAIRING_VIEW)
+        candidate.pairing_issue_results.append(view)
+        self.assertIs(self.manager.issue_pairing_challenge(PAIRING_OWNER), view)
+        self.assertEqual(
+            candidate.pairing_calls[-1], ("issue_pairing_challenge_view", PAIRING_OWNER)
+        )
+
+        candidate.pairing_issue_results.append(None)
+        self.assertIsNone(self.manager.issue_pairing_challenge(PAIRING_OWNER))
+
+        # Inactive or untrusted phases: refused before the foreign issuance.
+        for phase, reason, quiescent, restart in (
+            ("stopped", None, True, False),
+            ("running", None, False, True),
+        ):
+            with self.subTest(phase=phase, restart_required=restart):
+                calls_before = len(candidate.pairing_calls)
+                candidate.observed = self.Status(phase, reason, quiescent, restart)
+                self.assertIsNone(self.manager.issue_pairing_challenge(PAIRING_OWNER))
+                self.assertEqual(len(candidate.pairing_calls), calls_before)
+
+    def test_post_delegation_phase_and_restart_changes_fail_closed_without_withdrawal(self):
+        """A same-publication observed-state change after the delegated call wins.
+
+        Before every call the pre-call status observation is valid; only the
+        delegated foreign pairing call itself mutates the activation's
+        observed status (stopped/stopping, running+restartRequired, or a
+        broken observation). The publication identity is never withdrawn, so
+        the refusal comes purely from the post-call observation: identity
+        alone is not authority. No lifecycle resurrection happens.
+        """
+        candidate = self.publish_pairing_candidate()
+        before = self.manager.status()
+        self.ledger.clear()
+
+        rows = (
+            ("stopped", self.Status("stopped", None, True, False)),
+            ("stopping", self.Status("stopping", None, False, False)),
+            ("restart_required", self.Status("running", None, False, True)),
+            ("broken_observation", None),
+        )
+        for verb in ("pairing_status", "issue_pairing_challenge"):
+            for label, mutated in rows:
+                with self.subTest(verb=verb, state=label):
+                    candidate.observed = self.Status("running", None, False, False)
+                    hook = lambda mutated=mutated: setattr(candidate, "observed", mutated)
+                    if verb == "pairing_status":
+                        candidate.on_pairing_status = hook
+                        self.assertEqual(
+                            self.manager.pairing_status(PAIRING_OWNER), "unavailable"
+                        )
+                        candidate.on_pairing_status = None
+                    else:
+                        candidate.on_pairing_issue = hook
+                        candidate.pairing_issue_results.append(dict(PAIRING_VIEW))
+                        self.assertIsNone(self.manager.issue_pairing_challenge(PAIRING_OWNER))
+                        candidate.on_pairing_issue = None
+
+        # The publication was never withdrawn: identity survived every row,
+        # which is exactly why the post-call observation must gate.
+        candidate.observed = self.Status("running", None, False, False)
+        after = self.manager.status()
+        self.assertIs(after["activation"], candidate.observed)
+        self.assertEqual(after["activationEpoch"], before["activationEpoch"])
+        self.assertEqual(after["appliedGeneration"], before["appliedGeneration"])
+        self.assertEqual(
+            [entry for entry in self.ledger if entry[-1] in ("prepare", "start", "stop")],
+            [],
+        )
+
+    def test_issue_pairing_challenge_maps_failures_closed_except_a_real_conflict(self):
+        candidate = self.publish_pairing_candidate()
+
+        candidate.pairing_issue_error = RuntimeError(CANARY)
+        self.assert_error(
+            LIFECYCLE_UNAVAILABLE,
+            lambda: self.manager.issue_pairing_challenge(PAIRING_OWNER),
+        )
+
+        candidate.pairing_issue_error = ChannelAPairingConfigInvalid(PRISMA_CHANNEL_A_CLOCK_INVALID)
+        self.assert_error(
+            LIFECYCLE_UNAVAILABLE,
+            lambda: self.manager.issue_pairing_challenge(PAIRING_OWNER),
+        )
+
+        # The one real pairing conflict survives untouched for the HTTP layer.
+        candidate.pairing_issue_error = ChannelAPairingConflict(PRISMA_CHANNEL_A_CONFLICT)
+        with self.assertRaises(ChannelAPairingConflict) as conflict:
+            self.manager.issue_pairing_challenge(PAIRING_OWNER)
+        self.assertEqual(str(conflict.exception), PRISMA_CHANNEL_A_CONFLICT)
+        self.assertNotIsInstance(conflict.exception, self.Error)
+
+        # None of the pairing failures changed lastError or lifecycle ownership.
+        final = self.manager.status()
+        self.assertEqual(final["lastError"], None)
+        # The nested activation field is the observed ChannelAStatus projection,
+        # never the candidate activation object itself.
+        self.assertIs(final["activation"], candidate.observed)
+
+    def test_issue_pairing_challenge_reentry_withdraws_publication_without_resurrection(self):
+        candidate = self.publish_pairing_candidate()
+        ledger_before = len(self.ledger)
+
+        # Seed a real view: without the reentrant stop the delegated issuance
+        # would return it, so a None result proves the confirmed stop discarded
+        # it rather than the fake having nothing to give.
+        candidate.pairing_issue_results.append(dict(PAIRING_VIEW))
+
+        # A reentrant confirmed stop during the delegated foreign issuance wins:
+        # the view is refused and the publication stays withdrawn.
+        candidate.callback = lambda operation: (
+            self.manager.stop() if operation == "pairing_issue" else None
+        )
+        self.assertIsNone(self.manager.issue_pairing_challenge(PAIRING_OWNER))
+
+        # No unsafe lifecycle resurrection: the stopped publication stays gone,
+        # no candidate is prepared or started behind the pairing call, and a
+        # repeated issuance keeps returning None.
+        prepared = [
+            entry for entry in self.ledger[ledger_before:] if entry[1] in ("prepare", "start")
+        ]
+        self.assertEqual(prepared, [])
+        self.assertIsNone(self.manager.issue_pairing_challenge(PAIRING_OWNER))
+        final = self.manager.status()
+        self.assertIsNone(final["activation"])
+        self.assertIsNone(final["appliedGeneration"])
+        self.assertIsNone(final["activationEpoch"])
+
+
 if __name__ == "__main__":
     unittest.main()

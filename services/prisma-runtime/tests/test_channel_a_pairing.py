@@ -1160,5 +1160,73 @@ class ChannelAPairingWarningSweepTests(ChannelAPairingTestCase):
         self.assertFalse(registry._links[OWNER].warning_issued)
 
 
+class ChannelAPairingOwnerStateTests(ChannelAPairingTestCase):
+    """RCA-5l additive read-only owner-state projection for the QR/status view.
+
+    ``owner_state(owner_id)`` returns ``free | pending | linked`` for the
+    existing registry state. It is a technical observation like
+    ``owner_link``: under the same lock, sampling the same validated clock and
+    purging the same expirations, but never minting a challenge, never
+    touching a human-activity deadline and never creating state.
+    """
+
+    def test_owner_state_projects_free_pending_and_linked_per_owner(self):
+        registry = self.registry()
+        self.assertEqual(registry.owner_state(OWNER), "free")
+        self.assertEqual(registry.owner_state(OWNER2), "free")
+
+        self.claim(registry)
+        self.assertEqual(registry.owner_state(OWNER), "pending")
+        self.assertEqual(registry.owner_state(OWNER2), "free")
+
+        self.pair(registry, owner=OWNER2, phone=PHONE2)
+        self.assertEqual(registry.owner_state(OWNER), "pending")
+        self.assertEqual(registry.owner_state(OWNER2), "linked")
+
+        registry = self.registry()
+        ticket, _pending = self.claim(registry)
+        registry.confirm(ticket, PHONE)
+        self.assertEqual(registry.owner_state(OWNER), "linked")
+        # A live challenge or a phone reservation is not a state of its own:
+        # an unrelated owner without pending claim or link stays free.
+        self.assertEqual(registry.owner_state("00000000-0000-4000-8000-00000000000c"), "free")
+
+    def test_owner_state_is_a_technical_read_that_never_mints_touches_or_extends(self):
+        registry = self.registry()
+        challenge = registry.issue_qr(OWNER)
+        self.now[0] = challenge.expires_at - 0.001
+        # Observing an owner with a live challenge stays free and never mints.
+        self.assertEqual(registry.owner_state(OWNER), "free")
+        self.assertEqual(registry.owner_state(OWNER2), "free")
+        second = registry.issue_qr(OWNER)
+        self.assertEqual(second.token, challenge.token)
+        self.assertEqual(second.issued_at, 1000.0)
+        self.assertEqual(second.expires_at, 1060.0)
+
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 0.001
+        self.assertEqual(registry.owner_state(OWNER), "linked")
+        # The human-idle deadline is neither renewed nor advanced by the read:
+        # one instant past it the owner is honestly free again.
+        self.now[0] = link.idle_expires_at + 0.001
+        self.assertEqual(registry.owner_state(OWNER), "free")
+        self.assertIsNone(registry.owner_link(OWNER))
+
+    def test_owner_state_fails_closed_on_an_invalid_owner_identity(self):
+        registry = self.registry()
+        for value in (None, "", OWNER.upper(), "not-a-uuid", OWNER + "x"):
+            with self.subTest(owner=value):
+                self.assert_error(
+                    ChannelAPairingUnauthorized,
+                    PRISMA_CHANNEL_A_IDENTITY_REQUIRED,
+                    registry.owner_state,
+                    value,
+                )
+        # The failed observations leave the registry untouched and usable.
+        self.now[0] = 1001.0
+        self.assertEqual(registry.owner_state(OWNER), "free")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,19 +2,25 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.16
+> **Versión documental:** 2.0.17
 >
-> **Fecha:** 2026-09-21
+> **Fecha:** 2026-09-22
 >
-> **Prioridad vigente:** terminar **QR → Canal A → circuito Prisma existente**, sin agregar
-> cambios al comportamiento de respuesta ni audio. Antes de implementar algo no solicitado,
-> consultar al usuario y esperar su aprobación explícita (§3.4 y §11.1).
-> RCA-5j (administración backend de credenciales del Canal A) y su integración frontend (RCA-5k: tarjeta A existente con status/Apply explícitos, parser/cliente estrictos, guards de sesión, query A separada, warning+reintento con provider-safety y rutas proxy exactas) están **aceptados solo offline**, incluida la corrección acotada de rotulado aprobada por el usuario («Corregir ahora»), completada con RED observado y cinco gates finales independientes aprobados (§11.1); sigue pendiente la proyección QR/status por capability con proxy/cliente y la apertura manual del QR en `Pyramid`, no implementada por este cierre.
-> El resumen 2.0.12 siguiente se conserva como contexto histórico, no como una nueva autorización.
+> **Prioridad vigente:** aceptar el recorrido real **QR → Canal A → circuito Prisma existente**,
+> sin cambiar respuesta ni audio. La proyección QR/status por capability, proxy/cliente y panel
+> manual `Pyramid` están implementados y **aceptados solo offline** (RCA-5l, §11.1).
+> La administración A de RCA-5j/5k conserva su aceptación offline; B/Gemini y EPPI no cambiaron.
 >
-> **Estado del producto:** runtime local, enrutamiento web same-origin y acceso protegido (autenticación y credenciales) cerrados offline; la carrera de sembrado concurrente quedó corregida y endurecida (`f865e79`, `855c26b`). Se suma una aceptación **acotada** del Canal A sobre un widget simulado (contexto → respuesta → voz) y el hallazgo de que el `/status` de Telegram lee un archivo de instalación obsoleto. En esta versión se acuerda, **sin implementarlo**, el alcance del **acceso remoto del Canal A** (bot dedicado, emparejamiento por QR sin entrada local, reloj humano de inactividad y un único destino activo). Despliegue productivo, aceptación integral, máquinas reales y el trabajo posterior del asistente siguen pendientes.
+> **Evidencia de esta versión:** 156 pruebas backend y 2.181 frontend únicas aprobadas;
+> cobertura estándar de la suite completa con los cuatro umbrales 70 intactos, build y lint PASS.
+> No equivale a aceptación real de navegador, teléfono, Telegram/Gemini, audio ni producto.
 >
-> **Alcance de esta versión:** RCA-5k aceptado **solo offline**: la integración frontend de la administración del Canal A en su tarjeta existente quedó implementada y verificada, incluida la corrección de rotulado aprobada por el usuario («Corregir ahora»), con B/Gemini y la respuesta/audio existentes preservados. Evidencia final independiente: 155 pruebas focalizadas y 25 de integración (180 únicas en total), cobertura filtrada con los umbrales en 70 intactos, build con sus warnings conocidos y lint sin diagnósticos. El backend RCA-5j conserva su aceptación previa (48 métodos únicos y repeat final) y no se reejecutó. No hay aceptación real de navegador, Telegram, Gemini, QR, audio ni producto. El próximo paso pendiente (§11.1) es la proyección **QR/status por capability** con rutas proxy/cliente y apertura **manual** del QR en `Pyramid`, inmediatamente a la derecha de Logs, reutilizando la respuesta y el audio existentes; no recibe concesión de fuente nueva. La regla de aprobación previa de §3.4 sigue vigente: este cambio es exclusivamente documental y no ejecuta servicios, pruebas, proveedores ni red. `PW-002`, `PW-003` y `PW-004` siguen pendientes o aplazados.
+> **Siguiente paso:** acordar y autorizar la prueba real antes de iniciar servicios o proveedores
+> (§3.4). No repetir el wiring ya verificado ni heredar el permiso histórico de commit.
+> Base `bffe4ed`, cambios actuales sin commit, push ni PR (estado PRE-CLOSE: el cierre de sesión
+> autorizó un único commit local de checkpoint; hash real en Engram tras el éxito — §11.1).
+> Despliegue, aceptación integral,
+> máquinas reales y trabajo posterior del asistente siguen pendientes; PW-002/003/004 continúan activos.
 
 ## 1. Objetivo y estado general
 
@@ -29,7 +35,7 @@ separadas:
   autorizada, sin navegador, sin publicador de snapshots y sin producir audio ni
   navegación global en la HMI.
 
-El objetivo está **aprobado pero no implementado**. El repositorio ya contiene un
+El objetivo completo está **aprobado y parcialmente implementado**. El repositorio ya contiene un
 runtime de presentación y voz, integración HMI y contratos parciales, pero su flujo
 actual sigue dependiendo del último snapshot visible y no satisface el modelo completo de dos
 canales ni el despliegue remoto. La configuración protegida está cerrada offline (PAC-1 a PAC-5),
@@ -37,18 +43,19 @@ pero su validación productiva sigue pendiente.
 
 ### 1.1 Resumen de estado
 
-| Área | Estado al 2026-09-17 | Conclusión |
+| Área | Estado (evidencia fechada en §11.1) | Conclusión |
 |---|---|---|
 | Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Prisma antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos, validación productiva del acceso protegido y retiro controlado del legado. |
 | Voz HMI y orbe | Implementados con evidencia histórica parcial | Hubo aceptación manual exitosa; continuidad, audibilidad humana, cancelación y recuperación no están aceptadas de forma integral. |
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
+| Canal A — QR/status y panel manual | RCA-5l aceptado solo offline | Proyección protegida, cliente/proxy y QR local desde Pyramid, a la derecha de Logs en Core. Falta aceptación real teléfono → consulta → respuesta/audio; no hay auto-Apply. |
 | Canal B — Telegram autónomo | Pendiente y aplazado por el usuario el 2026-09-20 | Lee el archivo de instalación y responde **solo texto privado** por chat; **no** publica eventos de voz en la HMI y su fuente de datos autónoma sigue pendiente (conciliación de fuentes: §4.2; checkpoint vigente: §11.1). |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
 | Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Prisma y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
 | Seguridad de acceso | Protegida offline; insuficiente para despliegue remoto | La autenticación de administrador backend y el almacenamiento cifrado de credenciales se cerraron offline (PAC-1 a PAC-4, verificación PAC-5). El CORS wildcard histórico del servicio de voz y la autorización por instalación siguen sin resolver para un despliegue remoto productivo. |
-| Enrutamiento web de Prisma | Cerrado offline con verificación independiente | El navegador usa cuatro rutas same-origin fijas. Node-RED continúa como fuente de telemetría industrial, no como runtime Prisma seleccionable. |
+| Enrutamiento web de Prisma | Cerrado offline con verificación independiente | El registro de sesión/voz contiene siete rutas same-origin fijas (§4.3), además de la administración protegida y los diagnósticos. Node-RED continúa como fuente de telemetría industrial, no como runtime Prisma seleccionable. |
 
 La autoridad de descubrimiento del trabajo pendiente continúa en
 [`../PENDING_WORK.md`](../PENDING_WORK.md). El detalle se conserva en los topics
@@ -158,6 +165,7 @@ Los endpoints ya inspeccionados y relevantes para describir el presente son:
 | Presentación | `GET/POST /hmi/current-snapshot` | Lee o reemplaza el snapshot visible persistido. |
 | Presentación | `GET /hmi/voice/latest` | Devuelve un único último evento global. |
 | Presentación | `POST /local/ask` | Ejecuta el parser sin Telegram y publica un evento. |
+| Presentación | `GET/POST /hmi/channel-a/pairing` | Capability de sesión: estado seguro o deep link QR con TTL; no arranca ni aplica el Canal A. |
 | Presentación | `GET/PUT /hmi/prisma-config` | Proxy de configuración de voz. |
 | Voz | `GET /health` | Liveness y metadata; `providerStatus` informa configuración y `verified:false` sin llamar al proveedor. |
 | Voz | `GET/PUT /prisma/config` | Lee o reemplaza configuración local de voz. |
@@ -174,7 +182,8 @@ no autenticación ni readiness genuina del proveedor.
 
 ### 4.2 Flujo actual de preguntas
 
-El comportamiento actual es, de forma simplificada:
+El flujo histórico anterior a la separación por sesión era, de forma simplificada
+(la conciliación posterior y el Canal A vigente se precisan debajo):
 
 ```text
 dashboard visible
@@ -194,10 +203,9 @@ potencia, progreso, tiempo restante, alertas y resumen. No es un motor de consul
 general, no usa Gemini para comprender la pregunta y no puede buscar por sí mismo
 equipos o variables fuera del snapshot visible.
 
-El snapshot persiste sin una caducidad obligatoria después de cerrar el navegador.
-Existe un único evento más reciente, también global. Esta combinación puede producir
-respuestas obsoletas, consumo duplicado o interferencia entre contextos. Debe tratarse
-como una limitación pendiente, no como contrato objetivo.
+En aquel flujo, el snapshot persistía sin caducidad obligatoria después de cerrar el navegador
+y el último evento era global, con riesgo de respuestas obsoletas e interferencia entre contextos.
+Es evidencia histórica, no descripción del aislamiento documental actual ni contrato objetivo.
 
 **Conciliación de implementación 2.0.11 (2026-09-20).** El flujo anterior se conserva como
 evidencia histórica. La inspección de esta sesión precisa dos hechos que cambian cómo se lee
@@ -210,20 +218,28 @@ el estado actual:
   **no** son evidencia del contexto HMI de la sesión.
 - La HMI **no** tiene UI de pregunta ni micrófono: el orbe es presentación hasta que llega un
   evento. `/local/ask` (parser determinístico) publica un evento de voz por propietario y el
-  listener de la aplicación inicia el TTS automáticamente. Telegram, en cambio, responde **solo
-  texto** desde el archivo de instalación separado y **no** publica eventos de voz en la HMI.
+  listener de la aplicación inicia el TTS automáticamente. El Telegram personal del **Canal B**,
+  en cambio, responde **solo texto** desde el archivo de instalación separado y **no** publica
+  eventos de voz en la HMI.
 
-El detalle y la evidencia están en §11.1; el Canal B queda aplazado por decisión del usuario.
+**Canal A dedicado — checkpoint 2.0.17:** la composición ya aceptada offline conserva el
+propietario HMI emparejado y su contexto documental para el circuito de respuesta/voz existente.
+RCA-5l agrega la entrada QR/status y el panel manual; no cambia ese circuito ni vuelve a usar
+el archivo de instalación como fallback. La aceptación real teléfono → respuesta/audio sigue
+pendiente. El detalle y la evidencia están en §11.1; el Canal B permanece aplazado.
 
 ### 4.3 Integración HMI actual
 
-La HMI consume Prisma exclusivamente mediante cuatro rutas same-origin fijas:
-`/api/prisma/snapshot`, `/api/prisma/events/latest`, `/api/prisma/voice-config` y
-`/api/prisma/tts/live`. El contrato completo se documenta en
+El registro canónico `PRISMA_BROWSER_ROUTES` contiene siete rutas same-origin fijas:
+`/api/prisma/snapshot`, `/api/prisma/events/latest`, `/api/prisma/session`, `/api/prisma/ask`,
+`/api/prisma/voice-config`, `/api/prisma/tts/live` y `/api/prisma/channel-a/pairing`.
+La última reenvía GET/POST a `/hmi/channel-a/pairing` en el runtime local 5057 y conserva
+la capability de sesión; no sustituye las rutas separadas de administración y diagnósticos.
+Las convenciones de forwarding se documentan en
 [`PRISMA_BROWSER_ROUTING.md`](./PRISMA_BROWSER_ROUTING.md). El navegador no conoce
 destinos de loopback, no selecciona runtimes y no acepta endpoints Prisma editables.
 
-Durante desarrollo, Vite reenvía únicamente esas rutas exactas a los servicios de
+Durante desarrollo, Vite reenvía únicamente las rutas exactas configuradas a los servicios de
 loopback. En producción, el host administrado por IT deberá ofrecer forwarding
 equivalente, preservar headers y streaming progresivo de TTS, y excluir estas rutas del
 fallback de la SPA. El producto de proxy, autenticación, certificados y supervisión
@@ -288,7 +304,7 @@ detenerlo. Varias invocaciones de desarrollo comparten una generación y solo la
 liberación normal detiene identidades exactas iniciadas por desarrollo. Ctrl+C converge
 en esa liberación; cerrar el navegador no detiene Prisma. No se afirma durabilidad ante
 cierre abrupto de consola o reinicio del sistema operativo. `npm run dev` conserva esta
-orquestación previa y Vite expone las cuatro rutas same-origin sin requerir una selección
+orquestación previa y Vite expone las rutas same-origin configuradas sin requerir una selección
 en el navegador.
 
 El selector Server/Local, el tipo y perfil de runtime, la rama de query y los endpoints
@@ -963,9 +979,52 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (checkpoint 2.0.16; registros anteriores históricos)
+### 11.1 Próximo paso vigente (checkpoint 2.0.17; registros anteriores históricos)
 
-**Checkpoint vigente 2.0.16 (2026-09-21).** La administración de credenciales del Canal A está
+**Checkpoint vigente 2.0.17 (2026-09-22) — RCA-5l aceptado solo offline.** El usuario aprobó
+la implementación con pruebas offline y la dependencia local `qrcode.react@4.2.0`.
+GET/POST protegidos por capability proyectan solo el estado de emparejamiento o el deep link
+con TTL; el cliente/proxy, el hook efímero y el panel manual Core completan el wiring QR/status.
+`Pyramid` está inmediatamente a la derecha de Logs (que sigue deshabilitado); EPPI no cambia.
+La confirmación pertenece al teléfono: abrir el panel no aplica ni arranca el Canal A.
+Se preserva el circuito de respuesta/audio existente, sin ampliar B/Gemini ni agregar frameworks.
+
+| Verificación independiente | Resultado observado |
+|---|---|
+| Backend, `mubxc48f-g-3xla` | 156 PASS: HTTP 10, pairing 57, activation 23, manager 37, root 14, admin HTTP 15. |
+| Frontend enfocado, `muc375jj-13-xccb` | 8 suites, 189 PASS (36 UI), 2,96 s. |
+| Cobertura estándar completa, mismo verificador | 209 suites, 2.181 pruebas únicas PASS, 59,79 s; las 189 anteriores se repiten, no se suman como únicas. |
+| Cobertura de módulos cargados | Statements 87,42%; branches 80,62%; functions 86,57%; lines 88,31%. Cuatro umbrales 70 intactos; no prueba inclusión de fuente no importada. |
+| Build y lint | `tsc -b && vite build` PASS (Vite 11,35 s); lint PASS sin diagnósticos. Build no acredita tipado de fixtures de prueba. |
+
+Los gates frontend se ejecutaron una vez cada uno, en orden, sin cambios de configuración de
+cobertura. Los códigos de salida numéricos no fueron expuestos. Avisos jsdom canvas, `/grid.svg`
+y tamaño de chunks no impidieron el pase; no se afirma su antigüedad respecto del baseline.
+Los RED y correcciones de cierre inmediato, medida exterior y estado del hook, así como el fallo
+previo de cobertura filtrada, quedan en el
+[tracker](../../odd/tasks/prisma-channel-a-remote.md). La revisión estática acotada no halló
+bloqueadores; la evaluación nativa no estuvo disponible y esto no es aprobación nativa.
+
+**Pendiente y sin autorización nueva:** acordar la aceptación real QR → confirmación en Telegram
+→ consulta → respuesta/audio en la HMI vinculada. No se ejecutaron navegador/teléfono reales,
+servicios, proveedores, cambios de credenciales ni aceptación productiva. Consultar y esperar
+según §3.4 antes de ese trabajo; no introducir scheduler, STT/NLU, cancelación u otros extras.
+PW-003 continúa pendiente; PW-002/PW-004 no cambian. Leer el maestro completo al reanudar,
+recuperar `checkpoint/prisma-channel-a-manager-resume` y contrastar tracker, índice y Git.
+Base `bffe4ed`, rama `feat/prisma-telegram-credentials`, cambios actuales sin commit/push/PR.
+El permiso de un commit del checkpoint anterior se consumió en `bffe4ed`; no se hereda.
+
+**Cierre de sesión (2026-09-22, estado PRE-COMMIT):** a pedido explícito del usuario se autorizó
+UN único commit local de checkpoint de los 30 paths ya verificados, con base pre-commit `bffe4ed`
+(no es el hash resultante). El hash real lo confirma el padre y se registra en Engram
+`checkpoint/prisma-channel-a-manager-resume` tras el éxito; no se fabrica dentro del propio commit.
+El estado "sin commit" de este bloque y del encabezado es el PREVIO al cierre; solo este commit
+queda autorizado (push/PR/servicios/proveedores siguen sin autorización).
+
+**Registros históricos siguientes:** sus próximos pasos y permisos describen aquel checkpoint,
+no el estado ni la autorización actuales.
+
+**Checkpoint histórico 2.0.16 (2026-09-21).** La administración de credenciales del Canal A está
 aceptada **solo offline** en sus dos etapas admin, con aceptaciones separadas: el backend RCA-5j
 (`ChannelAManager`, guardar/borrar y Apply/status con auth/CSRF/origin existentes, manager ausente
 rechaza cerrado) conserva su aceptación previa (48 métodos únicos y repeat final de 15), y su
@@ -1408,6 +1467,17 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.17 — 2026-09-22
+
+- RCA-5l aceptado solo offline: QR/status por capability, cliente/proxy estrictos, hook efímero
+  y QR local de apertura manual en Core, inmediatamente a la derecha de Logs. EPPI y el
+  comportamiento existente de respuesta/audio y B/Gemini permanecen sin cambios.
+- TDD con RED independiente y correcciones acotadas; 156 pruebas backend y 2.181 frontend
+  únicas PASS, cobertura estándar con umbrales 70 intactos, build y lint PASS (§11.1).
+- PW-003 pasa de wiring pendiente a aceptación real pendiente, sujeta a autorización explícita.
+  Maestro, índice y tracker reconciliados; checkpoint anterior y su permiso de commit son historia.
+  Base `bffe4ed`, sin nuevo commit, push, PR, servicios ni proveedores reales.
 
 ### 2.0.16 — 2026-09-21
 

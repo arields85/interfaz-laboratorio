@@ -719,5 +719,97 @@ class ChannelAConfigurationPathTests(unittest.TestCase):
         self.assertEqual(relocated.channel_a_configuration, Path(r"D:\PrismaState") / configured.name)
 
 
+class ChannelARootManagerSeamTests(RootHarness, unittest.TestCase):
+    """RCA-5l: the optional ``channel_a_manager`` injection seam on ``create_app``.
+
+    The default composition keeps building exactly one inert manager for the
+    admin boundary and the root configuration. An explicitly injected manager
+    is shared as-is and never replaced; an injected admin boundary without a
+    manager leaves the configuration key honestly ``None`` with no duplicate
+    composition; the existing default root composition stays inert. An
+    injected admin boundary owns its already-constructed collaborators: the
+    root never mutates a supplied boundary, and only the default-built
+    boundary receives the composed manager. The seam is construction wiring
+    only and stays inert.
+    """
+
+    def setUp(self):
+        self.install_offline_guards()
+        self.isolate_runtime_state()
+        self.reset_doubles(
+            ChannelAManagerDouble,
+            ChannelAActivationDouble,
+            ChannelATransportDouble,
+            ChannelAConfigurationStoreDouble,
+            AdminHttpBoundaryDouble,
+            TelegramLifecycleManagerDouble,
+            TelegramLocalBotDouble,
+        )
+        self.reservation = InertReservation()
+
+        from prisma_runtime import local_presentation
+
+        self.module = local_presentation
+        for module, name, value, create in (
+            (local_presentation, "ChannelAManager", ChannelAManagerDouble, True),
+            (local_presentation, "AdminHttpBoundary", AdminHttpBoundaryDouble, False),
+            (local_presentation, "TelegramLifecycleManager", TelegramLifecycleManagerDouble, False),
+            (local_presentation, "TelegramLocalBot", TelegramLocalBotDouble, False),
+        ):
+            self.patch_target(module, name, value, create=create)
+        self.patch_target(
+            local_presentation, "process_bot_identity_reservation", lambda: self.reservation
+        )
+
+    def compose(self, **overrides):
+        from prisma_runtime.telegram_config import TelegramConfig
+
+        self.events = self.module.VoiceEventStore()
+        self.registry = self.build_session_registry(self.events)
+        arguments = {
+            "snapshot_store": self.module.JsonFileStore(self.state_root / "snapshot.json"),
+            "voice_events": self.events,
+            "telegram_configuration": TelegramConfig(enabled=False, token=""),
+            "session_registry": self.registry,
+        }
+        arguments.update(overrides)
+        return self.module.create_app(**arguments)
+
+    def test_injected_channel_a_manager_is_shared_with_admin_and_root_never_replaced(self):
+        injected = object()
+        app = self.compose(channel_a_manager=injected)
+
+        # The seam must not compose a replacement manager: zero doubles built.
+        self.assertEqual(ChannelAManagerDouble.instances, ())
+        boundary = self.single(AdminHttpBoundaryDouble)
+        self.assertIs(boundary.channel_a_manager, injected)
+        self.assertIs(app.config["channel_a_manager"], injected)
+
+    def test_injected_admin_boundary_without_a_manager_keeps_the_manager_none(self):
+        admin = AdminHttpBoundaryDouble()
+        app = self.compose(admin_http=admin)
+
+        self.assertIs(admin.registered_app, app)
+        self.assertIsNone(admin.channel_a_manager)
+        self.assertIsNone(app.config["channel_a_manager"])
+        # No duplicate Channel A or B composition either: the injected
+        # boundary already owns its collaborators.
+        self.assertEqual(ChannelAManagerDouble.instances, ())
+        self.assertEqual(TelegramLifecycleManagerDouble.instances, ())
+
+    def test_injected_manager_is_honored_alongside_an_injected_admin_boundary(self):
+        injected = object()
+        # An injected boundary owns its collaborators: it is constructed with
+        # the manager it already holds, and the root must preserve it verbatim
+        # instead of mutating a supplied boundary's wiring.
+        admin = AdminHttpBoundaryDouble(channel_a_manager=injected)
+        app = self.compose(admin_http=admin, channel_a_manager=injected)
+
+        self.assertIs(admin.registered_app, app)
+        self.assertIs(admin.channel_a_manager, injected)
+        self.assertIs(app.config["channel_a_manager"], injected)
+        self.assertEqual(ChannelAManagerDouble.instances, ())
+
+
 if __name__ == "__main__":
     unittest.main()

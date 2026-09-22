@@ -23,6 +23,10 @@ from .channel_a_transport import MESSAGE_MAX_CHARS, ChannelABotIdentity
 __all__ = ["ChannelAActivation"]
 
 _CONTEXT_FRESHNESS_SECONDS = 15.0
+# The pairing projections are active only while the runner holds a prepared or
+# running phase without a pending restart; every other phase is unavailable.
+_PAIRING_ACTIVE_PHASES = (PHASE_PREPARED, PHASE_RUNNING)
+_PAIRING_STATES = frozenset({"free", "pending", "linked"})
 
 
 class ChannelAActivation:
@@ -49,6 +53,7 @@ class ChannelAActivation:
     ) -> None:
         self._registry: ChannelAPairingRegistry | None = None
         self._dialogue: ChannelAPairingDialogue | None = None
+        self._bot_username: str | None = None
         self._sessions = sessions
 
         def dialogue_factory(identity: ChannelABotIdentity) -> ChannelAPairingDialogue:
@@ -75,6 +80,9 @@ class ChannelAActivation:
             # successful preparation can open the public status gate below.
             self._registry = registry
             self._dialogue = dialogue
+            # The validated bot identity is retained for the QR deep-link view
+            # only; it is withdrawn together with the registry on stop.
+            self._bot_username = identity.username
             return dialogue
 
         self._runner = ChannelARunner(
@@ -107,9 +115,11 @@ class ChannelAActivation:
 
     def stop(self) -> bool:
         """Request the runner's sticky stop, even when settlement is uncertain."""
-        # Withdraw issuance before settlement can call a foreign reservation.
+        # Withdraw issuance and the retained bot identity before settlement can
+        # call a foreign reservation.
         self._dialogue = None
         self._registry = None
+        self._bot_username = None
         return self._runner.stop()
 
     def _capture_delivery_witness(self, envelope):
@@ -202,7 +212,81 @@ class ChannelAActivation:
         # challenge based on a status sampled before that foreign domain work.
         if (
             self._registry is not registry
-            or self._runner.status().phase not in (PHASE_PREPARED, PHASE_RUNNING)
+            or self._runner.status().phase not in _PAIRING_ACTIVE_PHASES
         ):
             return None
         return challenge
+
+    def _pairing_gate_open(self, registry) -> bool:
+        """One closed observation guarding every pairing projection.
+
+        The runner status is a foreign callback: it must return a real
+        ``ChannelAStatus`` in an active phase without a pending restart, and
+        the registry identity is only trusted AFTER that status callback
+        returned. Any failure or mismatch closes the gate; a registry-invalid
+        domain error is never handled here and keeps its native code.
+        """
+        try:
+            observed = self._runner.status()
+        except Exception:
+            return False
+        if (
+            type(observed) is not ChannelAStatus
+            or observed.phase not in _PAIRING_ACTIVE_PHASES
+            or observed.restart_required is not False
+        ):
+            return False
+        return self._registry is registry
+
+    def pairing_status(self, owner_id: str) -> str:
+        """Observe one owner's pairing state through the live registry.
+
+        Returns ``'free' | 'pending' | 'linked'`` or ``'unavailable'``: a
+        missing registry, an inactive phase, a restart fence, a broken status
+        observation or any failed observation is unavailable, never ``free``.
+        Both status observations and the registry identity check happen inside
+        fail-closed handling, with the identity trusted only after each status
+        callback returned; the registry's clock is a foreign domain that may
+        reenter stop().
+        """
+        registry = self._registry
+        if registry is None or not self._pairing_gate_open(registry):
+            return "unavailable"
+        try:
+            state = registry.owner_state(owner_id)
+        except Exception:
+            return "unavailable"
+        if not self._pairing_gate_open(registry):
+            return "unavailable"
+        return state if state in _PAIRING_STATES else "unavailable"
+
+    def issue_pairing_challenge_view(self, owner_id: str) -> dict | None:
+        """Issue (or re-read) the owner's QR challenge as the closed backend view.
+
+        Returns the exact ``{token, botUsername, expiresInSeconds}`` projection
+        or ``None`` when nothing may be issued or projected: before a
+        successful preparation, under a restart fence, after a stop, on a
+        withdrawn registry, on a broken status observation, on a failed
+        post-issuance projection sample, or without a usable retained bot
+        username. Phase and restart are re-gated before the issuance, after it
+        and after the remaining-seconds helper, and the registry identity is
+        checked after every status callback. The registry's clock is a foreign
+        domain that may reenter stop(); a registry-invalid clock keeps its
+        native error. The retained :meth:`issue_pairing_challenge` API is
+        unchanged.
+        """
+        registry = self._registry
+        if registry is None or not self._pairing_gate_open(registry):
+            return None
+        challenge = registry.issue_qr(owner_id)
+        if not self._pairing_gate_open(registry):
+            return None
+        remaining = registry.challenge_remaining_seconds(challenge)
+        if remaining is None:
+            return None
+        if not self._pairing_gate_open(registry):
+            return None
+        username = self._bot_username
+        if type(username) is not str or not username:
+            return None
+        return {"token": challenge.token, "botUsername": username, "expiresInSeconds": remaining}

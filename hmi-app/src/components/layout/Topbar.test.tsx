@@ -39,6 +39,24 @@ vi.mock('./ShaderSettingsPanel', () => ({
     default: () => null,
 }));
 
+// Isolation mock only: the real control is covered by PrismaPairingControl.test.tsx. The fake
+// is never rendered unconditionally at the root — it only appears where Topbar itself mounts
+// the control, so an un-integrated source fails the wiring assertions below instead of
+// passing through the mock.
+vi.mock('./PrismaPairingControl', () => ({
+    default: () => (
+        <button
+            type="button"
+            aria-label="Prisma"
+            title="Prisma"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+        >
+            Prisma
+        </button>
+    ),
+}));
+
 const unauthenticatedSession: AuthSession = {
     user: null,
     isAuthenticated: false,
@@ -390,6 +408,28 @@ describe('Topbar', () => {
 
         expect(screen.queryByRole('status', { name: 'PRISMA LOCAL' })).not.toBeInTheDocument();
         expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('local');
+    });
+
+    it('places the Prisma pairing control immediately after Logs in the Core Topbar nav', () => {
+        renderTopbar('/explorer');
+
+        const prismaButton = screen.queryByRole('button', { name: 'Prisma' });
+        const logsButton = screen.getByRole('button', { name: 'Logs' });
+
+        // Soft assertions keep BOTH wiring failures observable while the control is not yet
+        // integrated. The unchanged Logs behavior is asserted first and must keep passing.
+        expect.soft(logsButton).toBeDisabled();
+        expect.soft(prismaButton, 'the pairing control must render in the Core Topbar nav').not.toBeNull();
+        expect.soft(logsButton.nextElementSibling).toContainElement(prismaButton);
+    });
+
+    it('keeps the Prisma pairing control out of the EPPI route', () => {
+        renderTopbar('/eppi/orders');
+
+        // EPPI never mounts the Core pairing control; the component owns its open state
+        // locally, so leaving EPPI unmounts it and nothing is persisted or auto-reopened.
+        expect(screen.queryByRole('button', { name: 'Prisma' })).not.toBeInTheDocument();
+        expect(screen.getByRole('navigation', { name: 'Navegación EPPI' })).toBeInTheDocument();
     });
 
 });

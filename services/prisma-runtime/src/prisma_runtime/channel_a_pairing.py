@@ -444,6 +444,50 @@ class ChannelAPairingRegistry:
                 return None
             return self._snapshot_locked(owner)
 
+    def owner_state(self, owner_id: str) -> str:
+        """Project ``'free' | 'pending' | 'linked'`` for one owner.
+
+        A technical observation like :meth:`owner_link`: under the existing
+        lock, sampling the same validated clock and purging the same
+        expirations, but never minting a challenge, never touching a
+        human-activity deadline and never creating state. A live unclaimed
+        challenge is not a state of its own: an owner with only a QR still
+        reads ``free`` until the phone claims it.
+        """
+        owner = _identity(owner_id, owner=True)
+        with self.lock:
+            now = self._now()
+            self._purge_locked(now)
+            if owner in self._links:
+                return "linked"
+            if owner in self._pending_owner:
+                return "pending"
+            return "free"
+
+    def challenge_remaining_seconds(self, challenge: QrChallenge) -> float | None:
+        """Remaining seconds of one issued challenge, or ``None`` when not live.
+
+        Internal QR-projection helper for the activation's closed view: it
+        reuses the registry's own clock validation and monotonic watermark, so
+        a backwards post-issuance sample fails closed instead of extending
+        remaining time. The challenge must still be live with the same token
+        and deadline after the purge; the read never mints, extends or touches
+        anything, and an unusable clock keeps its native config error.
+        """
+        if type(challenge) is not QrChallenge:
+            return None
+        with self.lock:
+            now = self._now()
+            self._purge_locked(now)
+            digest = self._challenge_owner.get(challenge.owner_id)
+            live = self._challenges.get(digest) if digest is not None else None
+            if live is None or live.token != challenge.token or live.expires_at != challenge.expires_at:
+                return None
+            remaining = live.expires_at - now
+            if not math.isfinite(remaining) or remaining <= 0.0:
+                return None
+            return remaining
+
     def _capture_link_witness(self, owner_id, generation):
         """Capture identity only; no clock sample or liveness assertion."""
         if type(owner_id) is not str or type(generation) is not int or generation <= 0:

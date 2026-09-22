@@ -491,11 +491,13 @@ class ActivationHarnessTestCase(unittest.TestCase):
             fail_get_me=fail_get_me,
         )
 
-    def activate(self, *, transport=None, reservation=None, parse=None):
+    def activate(self, *, transport=None, reservation=None, parse=None, pairing_clock=None):
         """Build the real composition over inert boundaries and fake clocks.
 
         The absent production module is imported here, after the containment
         layers are installed, with no ``ImportError`` catch and no fallback.
+        ``pairing_clock`` optionally replaces the default fixture pairing clock
+        for tests that must retarget individual clock samples.
         """
         from prisma_runtime.channel_a_activation import ChannelAActivation
 
@@ -510,7 +512,7 @@ class ActivationHarnessTestCase(unittest.TestCase):
             parse=recording_parser(injected_parse, parse_calls),
             on_outcome=observed.append,
             clock=lambda: self.runner_now[0],
-            pairing_clock=lambda: self.pairing_now[0],
+            pairing_clock=lambda: self.pairing_now[0] if pairing_clock is None else pairing_clock(),
             query_clock=lambda: self.query_now[0],
             warning_lead=60.0,
             max_question_bytes=HMI_QUESTION_MAX_BYTES,
@@ -943,6 +945,352 @@ class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
         self.assertIs(activation.status(), status)
         self.assertIs(activation.status(), status)
         self.assertEqual(calls, ["construct", "status", "status"])
+
+
+from prisma_runtime.channel_a_pairing import (
+    ChannelAPairingConfigInvalid,
+    PRISMA_CHANNEL_A_CLOCK_INVALID,
+)
+from prisma_runtime.channel_a_lifecycle import ChannelAStatus
+from unittest.mock import patch
+
+URLSAFE_TOKEN_ALPHABET = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+UNKNOWN_PAIRING_OWNER = "00000000-0000-4000-8000-00000000000f"
+
+
+class ChannelAActivationPairingViewTests(ActivationHarnessTestCase):
+    """RCA-5l additive pairing-status and QR-view projection over the real composition.
+
+    The public surface under test does not exist yet: ``pairing_status`` and
+    ``issue_pairing_challenge_view`` are expected next to the retained
+    ``issue_pairing_challenge``. The pairing clock is the fixture's
+    ``pairing_now`` domain and the registry QR TTL stays at its 60-second
+    default, so remaining seconds are always positive and bounded by it.
+    """
+
+    def test_pairing_status_is_unavailable_without_a_registry_then_reports_free_pending_and_linked(self):
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+
+        # No registry exists before a successful preparation: unavailable,
+        # never free.
+        self.assertEqual(fixture.activation.pairing_status(owner), "unavailable")
+        self.assertEqual(fixture.activation.pairing_status(UNKNOWN_PAIRING_OWNER), "unavailable")
+
+        self.assertTrue(fixture.activation.prepare())
+        self.assertEqual(fixture.activation.pairing_status(owner), "free")
+        self.assertEqual(fixture.activation.pairing_status(UNKNOWN_PAIRING_OWNER), "free")
+
+        challenge = fixture.activation.issue_pairing_challenge(owner)
+        self.assertIsNotNone(challenge)
+        fixture.transport.batches.append((start_update(1, PHONE_A, challenge.token),))
+        prompt = fixture.activation.poll_once()
+        self.assertEqual([outcome.kind for outcome in prompt.outcomes], [PAIRING_PROMPT_DELIVERED])
+        self.assertEqual(fixture.activation.pairing_status(owner), "pending")
+        self.assertEqual(fixture.activation.pairing_status(UNKNOWN_PAIRING_OWNER), "free")
+
+        confirm_data = callback_data_for(fixture.transport, PHONE_A, BUTTON_CONFIRM)
+        fixture.transport.batches.append((callback_update(2, PHONE_A, confirm_data),))
+        confirmed = fixture.activation.poll_once()
+        self.assertEqual([outcome.kind for outcome in confirmed.outcomes], [PAIRING_CONFIRMED])
+        self.assertEqual(fixture.activation.pairing_status(owner), "linked")
+        self.assertEqual(fixture.activation.pairing_status(UNKNOWN_PAIRING_OWNER), "free")
+
+    def test_issue_pairing_challenge_view_returns_the_exact_backend_view(self):
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+
+        # Before a successful preparation nothing is issued.
+        self.assertIsNone(fixture.activation.issue_pairing_challenge_view(owner))
+
+        self.assertTrue(fixture.activation.prepare())
+        view = fixture.activation.issue_pairing_challenge_view(owner)
+        self.assertEqual(set(view), {"token", "botUsername", "expiresInSeconds"})
+        self.assertEqual(view["botUsername"], BOT_USERNAME)
+        token = view["token"]
+        self.assertEqual(len(token), 43)
+        self.assertTrue(set(token) <= URLSAFE_TOKEN_ALPHABET)
+        remaining = view["expiresInSeconds"]
+        self.assertIsInstance(remaining, (int, float))
+        self.assertNotIsInstance(remaining, bool)
+        self.assertGreater(remaining, 0.0)
+        self.assertLessEqual(remaining, 60.0)
+
+        # Retrieval is idempotent inside the TTL and recomputes the remaining
+        # seconds from the injected pairing clock.
+        self.assertEqual(fixture.activation.issue_pairing_challenge_view(owner), view)
+        self.pairing_now[0] += 10.0
+        refreshed = fixture.activation.issue_pairing_challenge_view(owner)
+        self.assertEqual(refreshed["token"], token)
+        self.assertEqual(refreshed["expiresInSeconds"], remaining - 10.0)
+
+    def test_issue_pairing_challenge_view_rotates_at_expiry_and_rejects_unusable_clocks(self):
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        first = fixture.activation.issue_pairing_challenge_view(owner)
+
+        # Rotation at expiry mints a fresh challenge: never a stale or clamped
+        # view.
+        self.pairing_now[0] += 60.0
+        rotated = fixture.activation.issue_pairing_challenge_view(owner)
+        self.assertNotEqual(rotated["token"], first["token"])
+        self.assertGreater(rotated["expiresInSeconds"], 0.0)
+        self.assertLessEqual(rotated["expiresInSeconds"], 60.0)
+
+        registry = fixture.activation._registry
+        original_clock = registry.clock
+        cases = (
+            ("boolean", lambda: True),
+            ("nonfinite", lambda: float("nan")),
+            ("backwards", lambda: 0.0),
+        )
+        try:
+            for label, broken_clock in cases:
+                with self.subTest(clock=label):
+                    registry.clock = broken_clock
+                    with self.assertRaises(ChannelAPairingConfigInvalid) as rejected:
+                        fixture.activation.issue_pairing_challenge_view(owner)
+                    self.assertEqual(str(rejected.exception), PRISMA_CHANNEL_A_CLOCK_INVALID)
+        finally:
+            registry.clock = original_clock
+        # The registry stays usable after the rejected samples.
+        recovered = fixture.activation.issue_pairing_challenge_view(owner)
+        self.assertEqual(recovered["token"], rotated["token"])
+
+    def test_stop_withdraws_the_registry_and_every_pairing_projection(self):
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        self.assertIsNotNone(fixture.activation.issue_pairing_challenge_view(owner))
+        self.assertEqual(fixture.activation.pairing_status(owner), "free")
+
+        self.assertTrue(fixture.activation.stop())
+
+        self.assertEqual(fixture.activation.pairing_status(owner), "unavailable")
+        self.assertIsNone(fixture.activation.issue_pairing_challenge_view(owner))
+        self.assertIsNone(fixture.activation.issue_pairing_challenge(owner))
+
+    def test_pairing_status_revalidates_the_registry_after_a_foreign_stop(self):
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        self.assertEqual(fixture.activation.pairing_status(owner), "free")
+
+        registry = fixture.activation._registry
+        original_clock = registry.clock
+
+        def reentrant_stop_clock():
+            # The injected pairing clock may reenter stop(): the projection
+            # must revalidate the registry identity afterwards and fail closed.
+            fixture.activation.stop()
+            return self.pairing_now[0]
+
+        registry.clock = reentrant_stop_clock
+        try:
+            self.assertEqual(fixture.activation.pairing_status(owner), "unavailable")
+        finally:
+            registry.clock = original_clock
+
+    def test_issue_pairing_challenge_view_revalidates_issuance_and_rejects_broken_projection_samples(self):
+        """Issuance reentry and post-issuance projection samples fail closed.
+
+        The gated pairing clock returns one valid sample for the registry's
+        challenge read and breaks every later sample of the same call, so the
+        *projection* (not the registry validation) is what must refuse. A
+        broken projection sample returns an explicit ``None``: never a stale
+        positive or clamped view. A registry-invalid clock keeps its native
+        code (covered by the existing registry tests).
+        """
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        self.projection_samples = []
+        self.projection_mode = ["valid"]
+
+        def gated_pairing_clock():
+            self.projection_samples.append(1)
+            if len(self.projection_samples) == 1:
+                return self.pairing_now[0]
+            if self.projection_mode[0] == "valid":
+                # The initial successful view and every restored call need a
+                # valid second sample for the remaining-seconds projection.
+                return self.pairing_now[0]
+            if self.projection_mode[0] == "stop":
+                fixture.activation.stop()
+                return self.pairing_now[0]
+            if self.projection_mode[0] == "expired":
+                # One second past the live challenge's 60-second deadline:
+                # remaining seconds compute non-positive and must never be
+                # projected as a positive or clamped view.
+                return self.pairing_now[0] + 61.0
+            return float("nan")
+
+        fixture = self.activate(pairing_clock=gated_pairing_clock)
+        self.assertTrue(fixture.activation.prepare())
+
+        # A valid issuance projects the normal view; at least two samples are
+        # consumed: one for the registry challenge read, one for the projection.
+        valid = fixture.activation.issue_pairing_challenge_view(owner)
+        self.assertIsNotNone(valid)
+        self.assertGreaterEqual(len(self.projection_samples), 2)
+
+        for mode in ("invalid", "expired", "stop"):
+            with self.subTest(sample=mode):
+                self.projection_samples.clear()
+                self.projection_mode[0] = mode
+                try:
+                    outcome = fixture.activation.issue_pairing_challenge_view(owner)
+                except ChannelAPairingConfigInvalid as rejected:
+                    # A broken sample that reaches the registry keeps its
+                    # native code; both fail-closed shapes are acceptable,
+                    # a fabricated view never is.
+                    self.assertEqual(str(rejected), PRISMA_CHANNEL_A_CLOCK_INVALID)
+                else:
+                    # Explicit None on a failed projection sample or a
+                    # withdrawn registry; never a positive, stale or clamped
+                    # view.
+                    self.assertIsNone(outcome)
+                finally:
+                    self.projection_mode[0] = "valid"
+                # An expired sample sits one second past the live challenge's
+                # deadline; advancing the fixture clock past it keeps every
+                # later registry sample watermark-safe regardless of which
+                # layer consumed the broken sample.
+                if mode == "expired":
+                    self.pairing_now[0] += 61.0
+
+        # After the reentrant stop inside issuance, the withdrawn registry is
+        # never resurrected: the stopped activation still issues and observes
+        # nothing.
+        self.assertIsNone(fixture.activation.issue_pairing_challenge_view(owner))
+        self.assertEqual(fixture.activation.pairing_status(owner), "unavailable")
+
+
+    def test_issue_pairing_challenge_view_enforces_the_runner_restart_fence(self):
+        """The frozen restart rule fences issuance; no new lifecycle transition.
+
+        Row A pins a constant restart-required status: nothing is issued and
+        no challenge is minted behind the fence. Row B pins the order rule:
+        an initially active status that turns restart-required only after the
+        registry issue still suppresses the view, while the retained challenge
+        becomes retrievable once the real status is restored.
+        """
+        active = ChannelAStatus("running", None, False, False)
+        fenced = ChannelAStatus("running", None, False, True)
+
+        # Row A: constant restart-required status. A later valid call must
+        # mint a fresh 60-second challenge: a 50-second retrieval would prove
+        # the fenced call had minted after all.
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        with patch.object(fixture.activation._runner, "status", lambda: fenced):
+            self.assertIsNone(fixture.activation.issue_pairing_challenge_view(owner))
+            self.assertIsNone(fixture.activation.issue_pairing_challenge_view(owner))
+        self.pairing_now[0] += 10.0
+        fresh = fixture.activation.issue_pairing_challenge_view(owner)
+        self.assertIsNotNone(fresh)
+        self.assertEqual(fresh["expiresInSeconds"], 60.0)
+
+        # Row A is done: stop while the real status is restored so the runner
+        # releases its bot identity before the next fixture prepares with the
+        # same bot in this method (teardown alone would come too late).
+        self.assertTrue(fixture.activation.stop())
+
+        # Row B: the status turns restart-required only after the registry
+        # issue (flagged by the pairing clock sample inside the foreign call).
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        state = {"issued": False}
+
+        def flip_after_issue_clock():
+            state["issued"] = True
+            return self.pairing_now[0]
+
+        fixture = self.activate(pairing_clock=flip_after_issue_clock)
+        self.assertTrue(fixture.activation.prepare())
+
+        def status_flipping_after_issue():
+            return fenced if state["issued"] else active
+
+        with patch.object(fixture.activation._runner, "status", status_flipping_after_issue):
+            self.assertIsNone(fixture.activation.issue_pairing_challenge_view(owner))
+        # The fence suppresses the projection; the minted challenge itself
+        # stays retrievable under the restored real status.
+        restored = fixture.activation.issue_pairing_challenge_view(owner)
+        self.assertIsNotNone(restored)
+
+    def test_pairing_status_final_observation_fails_closed_in_order(self):
+        """Final-observation order: throw, restart fence, identity after stop.
+
+        Each row uses a fresh prepared fixture and a scoped patch of the
+        runner's status only; the pairing clock sample inside the foreign
+        registry read marks the point after which the final observation
+        differs from the valid pre-call one. No global atomicity is claimed
+        and no call counts are asserted beyond this finite boundary.
+        """
+        active = ChannelAStatus("running", None, False, False)
+        fenced = ChannelAStatus("running", None, False, True)
+
+        def flip_state_clock(state):
+            def clock():
+                state["observed"] = True
+                return self.pairing_now[0]
+
+            return clock
+
+        # Row A: the final observation raises -> unavailable, never propagates.
+        state = {"observed": False}
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate(pairing_clock=flip_state_clock(state))
+        self.assertTrue(fixture.activation.prepare())
+
+        def breaking_status():
+            if state["observed"]:
+                raise RuntimeError("final-observation-canary")
+            return active
+
+        with patch.object(fixture.activation._runner, "status", breaking_status):
+            self.assertEqual(fixture.activation.pairing_status(owner), "unavailable")
+
+        # Row A is done: stop after the patch exits (real status restored) to
+        # release the bot identity before the next fixture prepares.
+        self.assertTrue(fixture.activation.stop())
+
+        # Row B: the final observation reports restart-required -> unavailable.
+        state = {"observed": False}
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate(pairing_clock=flip_state_clock(state))
+        self.assertTrue(fixture.activation.prepare())
+
+        def fenced_status():
+            return fenced if state["observed"] else active
+
+        with patch.object(fixture.activation._runner, "status", fenced_status):
+            self.assertEqual(fixture.activation.pairing_status(owner), "unavailable")
+
+        # Row B is done: stop after the patch exits (real status restored) to
+        # release the bot identity before the row C fixture prepares.
+        self.assertTrue(fixture.activation.stop())
+
+        # Row C: the final status callback stops the activation and still
+        # returns a previously captured valid snapshot; the registry identity
+        # recheck after the callback must fail closed. The one-shot guard keeps
+        # the reentrant stop from recursing through the patched status.
+        state = {"observed": False}
+        stops = {"done": False}
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate(pairing_clock=flip_state_clock(state))
+        self.assertTrue(fixture.activation.prepare())
+
+        def stopping_status():
+            if state["observed"] and not stops["done"]:
+                stops["done"] = True
+                fixture.activation.stop()
+            return active
+
+        with patch.object(fixture.activation._runner, "status", stopping_status):
+            self.assertEqual(fixture.activation.pairing_status(owner), "unavailable")
 
 
 class OfflineDispatchGuardProofTests(unittest.TestCase):

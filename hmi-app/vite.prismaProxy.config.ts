@@ -33,6 +33,7 @@ export const PRISMA_PROXY_ROUTES: readonly PrismaProxyRoute[] = Object.freeze([
     createRoute('/api/prisma/ask', 'http://127.0.0.1:5057', '/local/ask', ['POST']),
     createRoute('/api/prisma/voice-config', 'http://127.0.0.1:5057', '/hmi/prisma-config', ['GET', 'PUT']),
     createRoute('/api/prisma/tts/live', 'http://127.0.0.1:5056', '/prisma/speak-live', ['POST']),
+    createRoute('/api/prisma/channel-a/pairing', 'http://127.0.0.1:5057', '/hmi/channel-a/pairing', ['GET', 'POST']),
     createRoute('/api/prisma/admin/auth/status', 'http://127.0.0.1:5057', '/api/prisma/admin/auth/status', ['GET'], true),
     createRoute('/api/prisma/admin/auth/login', 'http://127.0.0.1:5057', '/api/prisma/admin/auth/login', ['POST'], true),
     createRoute('/api/prisma/admin/auth/session', 'http://127.0.0.1:5057', '/api/prisma/admin/auth/session', ['GET'], true),

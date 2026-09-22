@@ -12,6 +12,8 @@ import {
 const CHANNEL_A_CREDENTIAL_PATH = '/api/prisma/admin/credentials/telegram_channel_a';
 const CHANNEL_A_STATUS_PATH = '/api/prisma/admin/credentials/telegram_channel_a/status';
 const CHANNEL_A_APPLY_PATH = '/api/prisma/admin/credentials/telegram_channel_a/apply';
+const CHANNEL_A_PAIRING_BROWSER_PATH = '/api/prisma/channel-a/pairing';
+const CHANNEL_A_PAIRING_UPSTREAM_PATH = '/hmi/channel-a/pairing';
 
 type ProxyConfigure = NonNullable<ProxyOptions['configure']>;
 type ProxyBypass = NonNullable<ProxyOptions['bypass']>;
@@ -229,5 +231,67 @@ describe('Prisma Vite proxy configuration', () => {
         handlers.forEach((handler) => handler(proxyRequest));
         expect(proxyRequest.removeHeader).toHaveBeenCalledWith('X-Prisma-Session-Capability');
         expect(route?.stripSessionCapability).toBe(true);
+    });
+
+    it('declares the exact anchored channel A pairing route with the local 5057 target and forwarded capability', () => {
+        const route = PRISMA_PROXY_ROUTES.find((candidate) => candidate.browserPath === CHANNEL_A_PAIRING_BROWSER_PATH);
+
+        expect(route).toMatchObject({
+            browserPath: CHANNEL_A_PAIRING_BROWSER_PATH,
+            pattern: `^${CHANNEL_A_PAIRING_BROWSER_PATH}(?:\\?.*)?$`,
+            upstreamPath: CHANNEL_A_PAIRING_UPSTREAM_PATH,
+            target: 'http://127.0.0.1:5057',
+            methods: ['GET', 'POST'],
+            stripSessionCapability: false,
+        });
+        expect(PRISMA_PROXY_ROUTES.filter((candidate) => candidate.browserPath === CHANNEL_A_PAIRING_BROWSER_PATH))
+            .toHaveLength(1);
+
+        const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+        expect(credentialProxyRequestHandlers(proxy?.configure)).toHaveLength(0);
+    });
+
+    it.each([
+        '/api/prisma/channel-a/pairing/',
+        '/api/prisma/channel-a/pairing/extra',
+        '/api/prisma/channel-a/pairing%2Fextra',
+        '/api/prisma/channel-a%2Fpairing',
+        '/api/prisma/channel-a/pairings',
+        '/api/prisma/channel-a/pair',
+        '/api/prisma/channel-a',
+    ])('keeps the pairing path lookalike %s away from the anchored route', (path) => {
+        expect(PRISMA_PROXY_ROUTES.some(({ pattern }) => new RegExp(pattern).test(path))).toBe(false);
+    });
+
+    it('accepts exactly GET and POST on the pairing route and answers other methods with 405 no-store', () => {
+        const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+        const bypass = proxy?.bypass as ProxyBypass;
+        const response = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
+        const request = (method: string) => bypass(
+            { method } as unknown as IncomingMessage,
+            response as unknown as ServerResponse,
+            {} as Parameters<ProxyBypass>[2],
+        );
+
+        expect(bypass).toBeTypeOf('function');
+        expect(request('GET')).toBeUndefined();
+        expect(response.statusCode).toBe(200);
+        expect(request('POST')).toBeUndefined();
+        expect(response.statusCode).toBe(200);
+        for (const denied of ['PUT', 'DELETE', 'PATCH']) {
+            response.statusCode = 200;
+            expect(request(denied)).toBe(false);
+            expect(response.statusCode).toBe(405);
+            expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+            expect(response.end).toHaveBeenCalled();
+        }
+    });
+
+    it('rewrites the pairing route to the exact upstream path while preserving encoded query bytes', () => {
+        const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+
+        expect(proxy?.rewrite(CHANNEL_A_PAIRING_BROWSER_PATH)).toBe(CHANNEL_A_PAIRING_UPSTREAM_PATH);
+        expect(proxy?.rewrite(`${CHANNEL_A_PAIRING_BROWSER_PATH}?value=a%2Fb%20c&next=%252F`))
+            .toBe(`${CHANNEL_A_PAIRING_UPSTREAM_PATH}?value=a%2Fb%20c&next=%252F`);
     });
 });

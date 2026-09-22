@@ -1,6 +1,1000 @@
 # Prisma Channel A remote — ODD tasks
 
-## SESSION CLOSED — one local checkpoint commit authorized (user grant, highest current authority)
+## SESSION CLOSE — one local checkpoint authorized (current; supersedes the no-commit restriction below)
+
+**SESSION CLOSED at the user's explicit request.** This close changes documentation only: no source,
+test or config edits; no test runs; no Git execution by this writer. The user authorized, for this
+checkpoint ONLY, **one local checkpoint commit** of the already verified 30 paths on branch
+`feat/prisma-telegram-credentials`, base `bffe4ed` (PRE-COMMIT state, not the resulting hash). The
+actual commit hash will be confirmed by the parent and saved in Engram
+`checkpoint/prisma-channel-a-manager-resume` after success; it must NOT be fabricated inside this
+self-referential commit. This grant supersedes the "no commit, push or PR is authorized" restriction
+above for this single commit only (push/PR/services/providers stay unauthorized) while all historical
+disclosures and evidence below remain preserved.
+
+**NEXT SESSION:** read the MASTER COMPLETO 2.0.17 (§11.1/§3.4), recover
+`checkpoint/prisma-channel-a-manager-resume`, then the tracker, PW-003 and actual Git. Do NOT redo
+the accepted offline QR/admin/wiring. First action: agree/obtain explicit user authorization for the
+REAL QR → phone Telegram confirmation → query → existing response/audio acceptance on the linked HMI.
+This close does NOT authorize services, providers, credentials or new behavior; no framework,
+scheduler or STT/NLU changes; source acceptance stays OFFLINE pending real phone/browser/audio/product
+acceptance.
+
+## Active resume — RCA-5l QR/status and manual panel (user authorized)
+
+**Current gate — RCA-5l ACCEPTED OFFLINE.** The historical entry below is superseded for
+current state and next actions; its RED/coverage-failure evidence and disclosures are preserved
+as historical chronology of how the unit converged.
+
+| Independent verification (offline only) | Observed result |
+|---|---|
+| Backend | 156 PASS (HTTP 10 / pairing 57 / activation 23 / manager 37 / root 14 / admin 15). |
+| Frontend focus | 8 suites, 189 PASS (36 UI), 2.96 s. |
+| Full standard coverage | 209 suites, 2,181 UNIQUE PASS, 59.79 s; the 189 repeat inside the total, not 2,370 unique; ST 87.42%, BR 80.62%, FN 86.57%, LN 88.31% — all four 70 thresholds intact (loaded modules, not unimported source). |
+| Build | `tsc -b && vite build` PASS (Vite 11.35 s). |
+| Lint | PASS, no diagnostics. |
+
+Numeric exit codes were not exposed. No real browser, phone, runtime, provider, Telegram,
+Gemini, audio or product acceptance. The NEXT step — real phone → Telegram confirmation → query
+→ existing response/audio acceptance on the linked HMI — requires NEW explicit user approval.
+Historical evidence below remains untouched.
+
+**Historical — superseded gate (kept intact as evidence):** independent `muc1h8s7-u-h83k` ran the eight-file
+frontend focus once (187 PASS, 2.98 s), then standard coverage once (187 PASS again, 3.75 s)
+which FAILED all unchanged 70% loaded-module thresholds: statements 48.01% (703/1464),
+branches 34.99% (352/1006), functions 44.64% (146/327), lines 47.50% (648/1364), exit 1.
+Build/lint and post-gate static verification were NOT run at that point. Backend 156 PASS and
+foundation
+153 PASS/standard coverage remain accepted offline; that was not UI/product acceptance.
+Read-only mapper `muc1k6vj-v-rchz` inspected the coverage artifacts and existing companion
+suites, plus the already-flagged closed-render/dimensional UI contract points. No threshold,
+include/exclude or mode changes, coverage-hiding mocks, unrelated feature tests or source
+changes were authorized by that failed gate itself. The selected bounded plan was
+recorded in "RCA-5l-4 coverage gate failure and two authored test-only regressions" below: the
+failed 187-coverage evidence was kept, source was FROZEN until a fresh observed RED, and the
+parent-authorized next gate was the FULL existing-suite offline coverage run.
+
+**Current authority:** the user approved `Avanzar (Recommended)` to implement the pending
+QR/status wiring and manual panel with offline tests, without starting live services or providers.
+HEAD reconciled to `bffe4ed`, branch `feat/prisma-telegram-credentials`, initially clean.
+The prior one-commit grant is consumed; no commit, push or PR is authorized in this session.
+RCA-5i/5j/5k remain accepted OFFLINE and must not be redone. The SESSION CLOSED block below
+is historical; its pre-commit uncertainty was resolved by the actual `bffe4ed` checkpoint.
+
+**Recovery completed (historical, initial mapping state):** mapper `mubtxkbf-1-xrog` read all 1669 master lines and the full tracker;
+parent recovered checkpoint/PW-003 and reconciled Git. At the INITIAL mapping state the pairing
+domain existed but its safe HTTP projection, proxy/client and manual panel did not — those
+surfaces are now implemented and accepted OFFLINE (see the accepted gate at the top). Existing response/audio stays unchanged.
+Add the enabled `Pyramid` immediately after Logs in the Core Topbar; do not enable Logs or
+change EPPI. Unavailable Channel A is displayed honestly, never auto-applied.
+
+**Method/routing:** TDD ON from the existing feature contract and `docs/TESTING.md`;
+freeze contract → test-only writer → observed independent RED → bounded source writer →
+offline verification. Delegated mapping (4+ files) and sequential bounded writers; no SDD.
+No credentials/state resets, live services, provider calls, cancellation/availability framework,
+scheduler, STT/NLU, Channel B expansion, unrelated refactor or response/audio change.
+Cached delivery strategy `ask-on-risk` / `feature-branch-chain`; prospective backend and
+frontend units keep tests with behavior. Exact forecast/surfaces follow the bounded contract.
+Full historical Engram mirror remains partial under the previously recorded size limitation;
+this repository file is authoritative, and current phase progress is mirrored explicitly.
+
+- [x] **RCA-5l-1 — Recover and map existing wiring.** Read-only mapping and Git reconciliation done.
+- [x] **RCA-5l-2 — Freeze backend QR/status contract and test surfaces (DONE).** Frozen contract,
+  source/test surfaces, supervisor patterns and gates below; authored by the frozen test-only
+  contract writer. No runtime evidence exists yet.
+- [x] **RCA-5l-3 — Author/observe backend RED, implement and verify offline. ACCEPTED OFFLINE by the
+  parent:** six-GREEN 156 PASS (HTTP 10 / pairing 57 / activation 23 / manager 37 / root 14 /
+  admin baseline 15), durations .197/.008/.007/.027/.197/.193 s; numeric exit codes not exposed;
+  no live services; no remaining static blocker within the frozen contract; parent Git whitespace
+  PASS. Do not redo or change the backend. Historical chronology (superseded by the acceptance
+  above; preserved below in full): observed independent RED
+  `mubvoxzg-7-qjzp`, then the bounded source worker authored the four
+  frozen source surfaces (one disclosed read-only `wc -l`; corrector batches zero commands), then
+  the first candidate GREEN `mubwdlf6-9-t69f` passed 153/153 but the verifier's static readback
+  confirmed blockers that prevent acceptance; a bounded test-only correction batch (three
+  methods) was authored, then the focused correction RED `mubwrlp7-b-5zne` was observed (60
+  collected: 57 PASS / 3 failing methods, exactly the pinned omissions), and the bounded
+  source-only correction is now authored. The fresh six-GREEN attempt `mubx3ymg-d-20xd` FAILED
+  on a test-fixture sequencing defect (2 activation ERRORs, not production); the test-only
+  cleanup fix is authored (zero commands) and a fresh full six-GREEN run is authorized NEXT, not
+  yet executed. Corrected source stays UNVERIFIED until that run; expected total 156, NOT
+  observed. Tests unchanged and FROZEN apart from the three explicit stop transitions.
+- [x] **RCA-5l-4 — Connect exact client/proxy and manual panel with focused TDD. ACCEPTED OFFLINE by
+  the parent:** final independent verifier `muc375jj-13-xccb` passed the focused 8-suite run
+  (189 PASS, 36 UI, 2.96 s) and the FULL standard coverage run (209 suites, 2,181 UNIQUE PASS,
+  59.79 s — the earlier 189 repeat inside that total, not 2,370 unique), with loaded-module
+  coverage statements 87.42% (14024/16041), branches 80.62% (10359/12848), functions 86.57%
+  (3294/3805), lines 88.31% (13216/14965) — all unchanged 70 thresholds intact (full coverage
+  measures LOADED modules, not unimported source). Build `tsc -b && vite build` PASS (Vite
+  11.35 s) and lint PASS with no diagnostics; numeric exit codes not exposed. jsdom canvas,
+  unresolved `/grid.svg` and chunk-size warnings were nonfatal with no age claim. Chronology
+  preserved below: frontend foundation acceptance (`mubyog4m-o-r8gg`), the authored hook/control
+  surfaces, the observed independent UI REDs and the bounded contract-gap corrections (closed
+  hook return + runtime border-box panel measurement feeding the shared primitive,
+  render-time canonicalization without the direct effect setters), and the earlier failed
+  filtered-coverage run — all kept as historical evidence of how the unit converged. No claim of
+  real browser, phone, Telegram, provider, audio or product acceptance; the backend stays FROZEN
+  and unchanged.
+- [x] **RCA-5l-5 — Verify integration and reconcile master/PW-003/checkpoint. COMPLETED OFFLINE:**
+  parent readback accepted (master current checkpoint, PW-003 diff, tracker header/checklists);
+  Git scope exactly the expected 30 paths with `diff --check` PASS at HEAD `bffe4ed` on
+  `feat/prisma-telegram-credentials`, no commit; master 2.0.17, PW-003 and the Engram canonical
+  backlog are reconciled; checkpoint/mirror remain parent-owned. This checkbox denotes completed
+  implementation/docs reconciliation OFFLINE, NOT real product acceptance. The final independent
+  documentation review is the remaining handoff — not a new product task; the parent's overall
+  todo stays in progress until that review passes.
+
+### RCA-5l-3 observed independent RED and authored source (unverified)
+
+**Observed independent RED — `mubvoxzg-7-qjzp` (parent-executed, frozen supervisor, exact
+patterns, each ONCE, foreground, fresh isolated child environment and temporary state; all
+exits 1; durations .345/.012/.030/.030/.186 unittest seconds):**
+
+1. `test_channel_a_pairing_http.py`: 0 PASS / 10 ERROR (missing route/API surface).
+2. `test_channel_a_pairing.py`: 57 collected — 54 PASS / 3 non-PASS (8 suberrors) — the three
+   `ChannelAPairingOwnerStateTests` methods on the missing `owner_state` projection.
+3. `test_channel_a_activation.py`: 21 collected — 15 PASS / 6 ERROR — the six
+   `ChannelAActivationPairingViewTests` methods on the missing pairing status/view APIs.
+4. `test_channel_a_manager.py`: 36 collected — 31 PASS / 5 non-PASS (7 suberrors plus 1
+   consequential failure) — the five `ChannelAManagerPairingTests` methods.
+5. `test_channel_a_root.py`: 14 collected — 12 PASS / 2 ERROR — the injected-manager seam
+   methods (one already PASSing row shared the absent-manager expectation with the old code).
+
+Total 138 unique: 112 PASS / 26 non-passing; all 111 old-baseline methods PASS; 27 new methods,
+1 already PASS (absent-manager rows in manager/root). No fixture blocker, no unexpected
+dispatch, no timeout, no cleanup failure. Tests are now FROZEN; RED preceded all source writes.
+
+**Authored source (UNVERIFIED — static readback only, tests NOT RUN by the author; the author
+ran ONE read-only shell command (`wc -l` over `local_presentation.py`), disclosed in the worker
+disclosure below — the prior "zero commands" wording here was inaccurate and is corrected;
+independent GREEN must observe every claim below):**
+
+- `channel_a_pairing.py`: additive `owner_state(owner_id)` (technical read under the existing
+  lock/`_now`/`_purge_locked`; linked > pending > free; invalid identity keeps the native
+  `PRISMA_CHANNEL_A_IDENTITY_REQUIRED`; never mints/touches/creates) and the internal
+  `challenge_remaining_seconds(challenge)` QR-projection helper (see clock ownership below).
+- `channel_a_activation.py`: retained `self._bot_username` set in `dialogue_factory` from the
+  runner-validated identity and cleared in `stop()` together with the registry; new
+  `pairing_status(owner_id)` (registry None/inactive phase/restart fence/any failure →
+  `'unavailable'`, never `'free'`; registry identity and phase revalidated after the foreign
+  `owner_state` read) and `issue_pairing_challenge_view(owner_id)` returning the exact
+  `{token, botUsername, expiresInSeconds}` view or `None` (pre-prepare, stopped, withdrawn
+  registry, failed projection sample, or no retained username; a registry-invalid clock keeps
+  its native `ChannelAPairingConfigInvalid` code). `issue_pairing_challenge` API/signature/
+  behavior unchanged (now sharing the `_PAIRING_ACTIVE_PHASES` constant).
+- `channel_a_manager.py`: additive `pairing_status(owner_id)` and `issue_pairing_challenge(owner_id)`
+  delegating to the published activation (snapshot under the existing lock, phase
+  prepared/running + restart False checked before any foreign pairing call, foreign calls
+  outside the lock, publication revalidated afterwards; no mutation gate, no config/credential
+  read, no desired==applied, `lastError`/lifecycle never touched). Closed status observation →
+  `'unavailable'`; issuance absent/inactive → `None`; a real `ChannelAPairingConflict` survives
+  untouched; every other failure closes to a detached sanitized `ChannelAManagerError(
+  PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)` via the existing `_error_code`/`_raise_closed`
+  helpers (no raw chained context or canary retained).
+- `local_presentation.py`: `create_app` gained the appended optional `channel_a_manager=None`
+  seam — an injected non-None manager is preserved verbatim, shared with the default-built
+  admin boundary and published under the config key; only the default composition constructs
+  one; a supplied admin boundary is never mutated. New exact route `GET`/`POST`/`OPTIONS
+  /hmi/channel-a/pairing`: capability via `session_owner(touch=False/True)` before everything,
+  POST body exactly one empty JSON object with JSON content type inside 128 bytes else 400
+  `INVALID_REQUEST`, GET exact `{ok, state}` with manager-absent/fault → `unavailable` 200,
+  POST QR envelope `{ok, qr:{deepLink, expiresInSeconds}}` built backend-side from the
+  fail-closed validated projection (`_channel_a_pairing_qr`: 43-char URL-safe token, Telegram-
+  safe bot username, finite positive expires — imported `OPAQUE_CHARS`, no literal 43),
+  absent manager 503 `PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE`, None/unknown view and foreign
+  failures 502 `PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE`, real conflict 409
+  `PRISMA_CHANNEL_A_CONFLICT`, no exception detail leaked, no bare token/username field,
+  route added to the `no-store` set (including 405/OPTIONS/errors), existing loopback CORS
+  unchanged, no new locks/threads/scheduler/auth/health.
+
+**Clock ownership precision (recorded per the delegated contract):** the activation's view uses
+the new registry-owned `challenge_remaining_seconds(challenge)` helper instead of duplicating
+the clock rules or retention outside the registry. Rationale: the remaining-seconds projection
+must reuse the registry's validated `_now()` watermark so a backwards post-issuance sample
+fails closed with the native `PRISMA_CHANNEL_A_CLOCK_INVALID` instead of extending remaining
+time, and must re-purge under the existing lock so an expired post-issuance sample makes the
+challenge not-live (explicit `None`, never a stale positive or clamped view). The helper
+validates the challenge is still live with the same token and deadline, never mints, extends,
+touches or creates state, and adds no thread, scheduler or new lock. The activation additionally
+revalidates registry identity and runner phase after every foreign call (clock and status
+callbacks included), so a reentrant `stop()` inside a clock or status sample withdraws the
+projection.
+
+**Worker disclosure (recorded truthfully):** this source worker ran ONE unauthorized read-only
+shell command (`wc -l` over `local_presentation.py`) before the no-commands rule had been
+re-read; no mutation, no test/production execution, no other shell use. Every other operation
+used read/find/grep/edit/write only. No runtime evidence exists: tests are NOT RUN by this
+author and no GREEN is claimed.
+
+**First candidate GREEN and confirmed static blockers:** independent `mubwdlf6-9-t69f` ran the
+frozen supervisor once per pattern (foreground, 180-second bound, fresh isolated child
+environment and temporary state): HTTP 10, pairing 57, activation 21, manager 36, root 14, admin
+baseline 15 — **153 PASS, all OK**; numeric exit codes are not exposed by the tool and are
+reported as not separately printed; unittest durations .216/.008/.030/.028/.200/.190s; no
+timeout, no unexpected dispatch, no cleanup failure. Despite the full pass, the verifier's
+static readback confirmed concrete blockers that prevent acceptance: (1) the manager's
+post-delegation revalidation is unpinned against a same-publication observed-state change
+(stopped/stopping/running+restartRequired/broken observation) — publication identity alone must
+not authorize; (2) the activation view's restart fence is unpinned (a constant restart-required
+status must mint nothing; a post-issuance restart-required status must suppress the view while
+the retained challenge stays retrievable); (3) the activation `pairing_status` final-observation
+order is unpinned (a throwing, restart-required, or stop-then-previously-valid final status must
+fail closed to `'unavailable'`, the last via registry identity after the callback). No debate
+and no new product scope.
+
+**Correction batch authored (TEST-ONLY, static readback only, NOT RUN, awaiting focused RED):**
+three compact methods, existing 27 tests unchanged except the minimal fake hook support:
+- `ChannelAManagerPairingTests.test_post_delegation_phase_and_restart_changes_fail_closed_without_withdrawal`:
+  subTest matrix verb × {stopped, stopping, restart_required, broken_observation}; the pre-call
+  status is valid and only the delegated foreign call mutates `candidate.observed` through the
+  fake's new `on_pairing_issue` hook (`on_pairing_status` already existed); a real view is seeded
+  for issuance rows; publication identity/epoch/generation are asserted unchanged afterwards to
+  show identity alone is insufficient; no prepare/start/stop ledger entries (no lifecycle
+  resurrection); no real threads; no inherited test duplication.
+- `ChannelAActivationPairingViewTests.test_issue_pairing_challenge_view_enforces_the_runner_restart_fence`:
+  row A patches the runner status to a constant real `ChannelAStatus("running", None, False, True)`
+  → view None twice and NO challenge minted, proven behaviorally by a later valid call minting a
+  fresh challenge with exactly 60.0 remaining seconds (a 50.0 retrieval would prove a fenced
+  mint); row B flips the status to restart-required only after the registry issue (flagged by the
+  pairing clock sample inside the foreign call) → view None, and the retained challenge becomes
+  retrievable once the real status is restored. No call-count assertions beyond the finite
+  boundary; the frozen restart rule is pinned, not a new lifecycle transition.
+- `ChannelAActivationPairingViewTests.test_pairing_status_final_observation_fails_closed_in_order`:
+  three rows, each a fresh prepared fixture with a scoped runner-status patch; the pairing clock
+  sample inside the foreign registry read flags the post-foreign point. Row A: the final
+  observation raises → `'unavailable'`, never propagates. Row B: the final observation returns
+  restart-required → `'unavailable'`. Row C: the final status callback calls `activation.stop()`
+  once (one-shot guard prevents recursion through the patched status) and returns a previously
+  captured valid snapshot → `'unavailable'` via the registry identity recheck after the callback.
+  No new framework or harness; no unattainable global-atomicity claims; cleanup oracles stay
+  outside the patched regions.
+
+Expected next collection counts (static): activation 23, manager 37, pairing 57, HTTP 10, root
+14, admin 15 → 156; 30 added methods total.
+
+**Correction RED then full GREEN gates (frozen supervisor, unchanged):** the correction RED
+patterns run first — `test_channel_a_activation.py` THEN `test_channel_a_manager.py`, each ONCE,
+foreground, 180-second bound, fresh isolated child environment and temporary state; the parent
+verifier executes them later, not this author. Only after that observed RED may the bounded
+source worker correct the pinned behavior within the four frozen source surfaces (likely
+activation/manager plus one mechanical bootstrap-limit reuse in `local_presentation.py`); the
+full six GREEN supervisors (activation, manager, HTTP, pairing, root, admin baseline) run
+afterwards, each ONCE, only after the source fix. Source stays frozen until RED is observed.
+
+### RCA-5l-3 correction RED observed and corrected source (STILL UNVERIFIED)
+
+**Correction RED observed — independent `mubwrlp7-b-5zne` (frozen supervisor, each pattern ONCE,
+foreground; no fixture, infrastructure, unexpected-dispatch, timeout or cleanup failure; tests
+unchanged and now FROZEN):**
+
+1. `test_channel_a_activation.py`: 23 methods — 21 PASS / 2 non-PASS (1 failure + 1 error),
+   exit 1, .008 s. Failure: the restart-required status constant still returned a QR view (the
+   view gated on phase only). Error: the final status observation escaped a raw `RuntimeError`
+   outside fail-closed handling, so later subTest rows were unreached.
+2. `test_channel_a_manager.py`: 37 methods — 36 PASS / 1 non-PASS (8 subfailures), exit 1,
+   .030 s. Both new delegates returned the state/view for stopped, stopping,
+   restart-required-True and broken observations reached during the foreign call (all 8 rows
+   observed): publication identity alone was revalidated, but the status was never re-observed
+   after the delegation.
+
+Totals: 60 collected — 57 PASS / 3 failing methods; every original method passed. This matches
+the pinned correction rows exactly.
+
+**Corrected source authored (UNVERIFIED — static readback only, zero commands, tests NOT RUN by
+the author; stays unverified until the six GREEN gates re-run; expected total 156, NOT
+observed):**
+
+- `channel_a_activation.py`: new private `_pairing_gate_open(registry)` predicate — one closed
+  observation: a real `ChannelAStatus` in phase prepared/running with `restart_required is
+  False`, then the registry identity checked AFTER the status callback returned; any failure or
+  mismatch closes the gate; no generalized framework, witness or new lock.
+  `pairing_status` now gates through the predicate before AND after the registry read, so both
+  status observations sit inside fail-closed handling (a throwing, restart-required or
+  stop-then-valid final status closes to `'unavailable'`, the last via the post-callback
+  registry identity recheck) and the state stays validated against the closed set.
+  `issue_pairing_challenge_view` re-gates phase AND restart before the issuance, after the
+  issuance and after the remaining-seconds helper, so a constant restart-required status mints
+  nothing, a post-issuance restart-required status suppresses the view while the retained
+  challenge stays retrievable after the real status is restored, and a broken status yields
+  `None` while registry domain clock errors keep their native code. The old
+  `issue_pairing_challenge` API, signature and behavior are untouched; stop still never
+  resurrects the registry or the retained username.
+- `channel_a_manager.py`: both new delegates now perform a safe second `_observe` (active
+  phase, restart False) OUTSIDE the lock after the delegation — an observation failure closes
+  to `'unavailable'`/`None` — and then run the FINAL publication identity check under the lock
+  AFTER the last foreign observation; a publication withdrawn before the delegation never
+  reaches the foreign call. No configuration/credential reads, no mutation gate, no `lastError`
+  changes; the existing conflict exception mapping is preserved; no new framework, witness or
+  locks.
+- `local_presentation.py`: mechanical only — the duplicated `HMI_PAIRING_MAX_BYTES = 128` was
+  removed and the pairing route reuses the existing `HMI_SESSION_BOOTSTRAP_MAX_BYTES`; no API
+  or behavior change; no stricter TTL/unknown-key matrices added (the verifier found no actual
+  production defect there); no additional code areas touched.
+The source author's one unauthorized read-only `wc -l` disclosure above remains recorded; no
+runtime. Numeric exits remain not exposed by the tool and are never invented.
+
+**Failed GREEN `mubx3ymg-d-20xd` and fixture-only cleanup correction (recorded truthfully):**
+the fresh verifier ran the first three supervisors once each, foreground with the 180-second
+bound, then stopped: HTTP 10 PASS / .195s; pairing 57 PASS / .007s; activation 23 collected =
+21 PASS / 2 ERROR / .008s, exit 1. The manager, root and admin supervisors were NOT executed.
+Both errors are `TELEGRAM_BOT_IDENTITY_RESERVED` at `test_channel_a_activation.py` lines 1206
+and 1255 while PREPARING the SECOND fixture of the same method: the first row's fixture was
+still prepared and the runner's bot identity reservation is only released at test teardown. The
+first new assertions of each method passed and the next row was blocked — a test-fixture
+sequencing defect, NOT a production defect. No retry occurred. The test-only corrector (this
+batch, ZERO commands) added an explicit `assertTrue(fixture.activation.stop())` after the
+scoped patch exits (real status restored) and before the next fixture in exactly three
+transitions: restart-fence row A→B and final-status rows A→B and B→C. No assertion was weakened
+and no source changed; the existing harness teardown still covers early failures; the 30 added
+count is unchanged with no new methods, harness or framework. A fresh full six-GREEN run
+(activation, manager, HTTP, pairing, root, admin baseline) is authorized NEXT and has NOT been
+executed yet.
+
+### RCA-5l-3 backend accepted OFFLINE (parent)
+
+The full six-GREEN supervisor run passed: **156 PASS** — HTTP 10, pairing 57, activation 23,
+manager 37, root 14, admin baseline 15 — durations .197/.008/.007/.027/.197/.193 s, all OK;
+numeric exit codes are not exposed by the tool and are never invented; no live dispatch, no
+remaining static blocker within the frozen contract, parent Git whitespace PASS. The four
+frozen source surfaces (`channel_a_pairing.py`, `channel_a_activation.py`, `channel_a_manager.py`,
+`local_presentation.py`) and all backend tests are FROZEN and accepted; do not redo or change
+the backend.
+
+### RCA-5l-4 frontend foundation contract (frozen; test authoring in progress)
+
+User-authorized QR/status manual panel unit, OFFLINE: no providers, no live app, no credentials,
+no commit. This stage writes tests only — no production source, no hook/panel yet. TDD ON under
+this feature contract and `docs/TESTING.md`; no production until observed RED. Dependency
+`qrcode.react` installed at exact pin 4.2.0 (package/lock only, ignore-scripts; zero runtime
+deps, ISC) for the LATER panel unit; no build yet. Test-only writer: read/grep/find/edit/write
+only, NO commands.
+
+**Config (`prismaAssistant.config.ts`).** Add `PRISMA_CHANNEL_A_PAIRING_URL =
+'/api/prisma/channel-a/pairing'` and add `pairing` to the frozen `PRISMA_BROWSER_ROUTES`
+registry (same central registry, correct source of truth; the mapper-based "preserve exact-six
+by hiding the route" advice was REJECTED by the parent). The exact config test updates to
+**seven** routes including `pairing`. Existing routes unchanged.
+
+**Domain (`channelAPairing.types.ts`, new).** Export `ChannelAPairingState = 'free' | 'pending'
+| 'linked' | 'unavailable'`; `ChannelAPairingStatus = { ok: true; state: ChannelAPairingState }`;
+`ChannelAPairingQr = { deepLink: string; expiresInSeconds: number }`;
+`ChannelAPairingIssue = { ok: true; qr: ChannelAPairingQr }`;
+`ChannelAPairingErrorKind = 'session' | 'conflict' | 'unavailable'`.
+`parseChannelAPairingStatus(value: unknown)` and `parseChannelAPairingIssue(value: unknown)`
+return the typed payload or **null** on invalid (contract-frozen null convention; the local
+throwing parser convention does NOT apply here). Strict plain object, exact keys at both
+levels; `ok === true`; `expiresInSeconds` numeric finite `> 0` and `<= 60`, booleans rejected;
+monotonic fractional seconds are ACCEPTED (no integer constraint; 1.5 and 0.25 valid, 0
+invalid); deep link exactly `https://t.me/[A-Za-z][A-Za-z0-9_]{4,31}?start=[A-Za-z0-9_-]{43}`
+(bot username 5–32 total chars, so `repeat(32)` is valid and `repeat(33)` invalid) — no extra
+query, hash, path, whitespace or userinfo; no authority IDs or extra keys. Tests use fake
+opaque values, never a real credential.
+
+**Service (`prismaChannelAPairing.service.ts`, new).** Export singleton `prismaChannelAPairing`
+with `status(signal?: AbortSignal): Promise<ChannelAPairingStatus>` (GET) and
+`issue(signal?: AbortSignal): Promise<ChannelAPairingIssue>` (POST, body exactly `{}` JSON);
+both `cache: 'no-store'` via the existing `prismaSessionClient.fetch`; no admin cookie, CSRF,
+secret storage or logging. Export `PrismaChannelAPairingError extends Error` with a `readonly`
+`kind` from `ChannelAPairingErrorKind`. Map 401 → `'session'`; 409 only with the exact
+`{ ok: false, error: 'PRISMA_CHANNEL_A_CONFLICT' }` payload → `'conflict'`; every other
+failure, malformed body, error payload or unknown network error → safe `'unavailable'` with no
+raw server text propagated. Preserve `AbortError` and `PrismaStaleSessionResponse` for the
+local lifecycle guard. Validate `isCurrentResponse` AFTER body JSON resolution too; stale →
+`PrismaStaleSessionResponse`, never a stale QR (the client already does the early epoch check).
+No cache or global QR state. Unit tests mock `prismaSessionClient.fetch`/`isCurrentResponse`
+with known responses and a deferred fake body guarding staleness after body resolution.
+
+**Session client (`prismaSessionClient.ts`).** Additive only: the pairing route import plus
+`AUTHORIZED_PATHS` membership; no session framework changes. Existing tests keep every
+unauthorized-URL case; one narrow exact-allowlist case proves capability authority on the exact
+route via the actual client bootstrap with a fake fetch.
+
+**Proxy (`vite.prismaProxy.config.ts`).** Exact anchored route
+`/api/prisma/channel-a/pairing` → `http://127.0.0.1:5057` + `/hmi/channel-a/pairing`, methods
+GET/POST only, capability FORWARDED (`stripSessionCapability` false, no strip handler),
+anchored against extra paths/methods, 405 path stays `no-store`. Existing admin/B/Gemini/audio
+routes preserved.
+
+**Test surfaces (this stage, all authored).**
+`hmi-app/src/domain/channelAPairing.types.test.ts` (new),
+`hmi-app/src/services/prismaChannelAPairing.service.test.ts` (new),
+`hmi-app/src/config/prismaAssistant.config.test.ts` (exact test 6 → 7 routes),
+`hmi-app/src/services/prismaSessionClient.test.ts` (one narrow allowlist case added,
+existing cases intact), `hmi-app/vite.prismaProxy.config.test.ts` (pairing anchoring,
+method allowlist, capability forwarding, rewrite; existing cases intact).
+
+**Pre-RED fixture corrections, round 1 (parent static readback; applied by the same author,
+read/edit only, zero commands, tests NOT RUN):** (1) the domain expires matrix now accepts
+monotonic fractional seconds (`1.5` and `0.25` valid; `0` stays invalid; no integer
+constraint); (2) the bot username matrix uses the total 32-char maximum (`repeat(32)` valid,
+`repeat(33)` invalid); (3) the missing `type` imports for `ChannelAPairingStatus` and
+`ChannelAPairingIssue` were added to the domain test instead of leaving undefined type
+references; (4) the service no-cache case returns a fresh Response per call (a real Response
+body cannot be consumed twice); (5) the deferred-body staleness oracle is now deterministic:
+the helper signals when `json()` actually starts, the test awaits that signal, flips the
+current-response boolean, then resolves the body — no check counters, timers or wait loops;
+(6) the 409 matrix gains an extra-key row carrying the canonical conflict code plus an extra
+key, expecting `'unavailable'` (exact keys are frozen). **Author disclosure (recorded
+truthfully):** this initial author ran ONE unauthorized no-op shell command (`true`) during
+setup, contradicting a blanket zero-commands claim; no mutation, no test/production execution,
+no other shell use; NO additional commands from this author. Executed row counts are not
+claimed — matrix row counts are static authoring counts only. Backend accepted 156 PASS
+unchanged; no historical or source changes.
+
+**Foundation source authored (UNVERIFIED) and parent readback found three frozen-contract
+violations; bounded TEST-ONLY regressions authored, NOT RUN:** the five frozen source surfaces
+exist now (`prismaAssistant.config.ts`, `channelAPairing.types.ts`,
+`prismaChannelAPairing.service.ts`, `prismaSessionClient.ts` allowlist, `vite.prismaProxy.config.ts`);
+the source author disclosed ONE unauthorized read-only `ls` (NOT a blanket zero-commands claim);
+no GREEN has run yet. Parent readback violations, each now pinned by a test-only regression in
+`prismaChannelAPairing.service.test.ts` (production frozen, no new features): (1) the service's
+`requestPairing` never checks `response.ok`, so a 503 carrying a structurally valid success
+body could return as SUCCESS — new `it.each` (status + issue) pins 503 + valid payload →
+`PrismaChannelAPairingError` `'unavailable'` (frozen HTTP failure semantics, not hardening);
+(2) the body `json()` catch swallows `AbortError` into the unavailable mapping — new case pins
+rethrowing the SAME `DOMException('Aborted', 'AbortError')` instance raised while reading the
+body (isCurrent true; no custom timers); (3) the actual `prismaSessionClient` invalidates on
+401 BEFORE returning, so `isCurrentResponse` is already false — the existing 401→session test
+is strengthened to mock `isCurrentResponse: false`, expect `'session'` and explicitly NOT a
+`PrismaStaleSessionResponse` (this does not authorize accepting any stale QR; the malformed-401
+case and all previous oracles stay). All mocks use fresh/fake responses; no actual network.
+Pending NEXT: parent reads these regressions, then runs the exact frozen five-file command as
+the observed CORRECTION RED; the bounded source correction follows only after that observed
+RED.
+
+**Frozen RED/GREEN command (parent executes ONLY, foreground, 180 s):**
+`npm --prefix hmi-app test -- src/domain/channelAPairing.types.test.ts
+src/services/prismaChannelAPairing.service.test.ts src/services/prismaSessionClient.test.ts
+src/config/prismaAssistant.config.test.ts vite.prismaProxy.config.test.ts`.
+Expected honest RED at this stage: collection errors for the two NEW modules (domain parser,
+service) and for the new config constant consumers (`prismaSessionClient.test.ts`,
+`prismaAssistant.config.test.ts` import the not-yet-existing export), plus behavioral failures
+in the proxy tests; no placeholder production and no import catch fakes a behavioral RED.
+After source: same files with standard `--coverage` (thresholds 70 all intact, not
+coverage-focused), then build/lint at the final UI stage — NOT executed by the test author.
+Next sequential units: hooks/panel tests, then source. Forecast for the full frontend unit
+800–1200 lines, advisory; readable matrices may grow test lines; cached `ask-on-risk` /
+`feature-branch-chain`; no commit grant. No giant duplicated journal: this section plus the
+checklist are the live record.
+
+### RCA-5l-4 observed RED and authored source (UNVERIFIED)
+
+**Observed RED (parent-executed, exact frozen command ONCE, foreground, 180 s bound, exit 1,
+duration 22.74 s):** 70 collected across the five frozen suites — 65 PASS / 5 FAIL — plus 2
+collection-error suites. Actual shape versus the static prediction: 2 collection errors (the
+new `channelAPairing.types.test.ts` and `prismaChannelAPairing.service.test.ts`, missing the
+not-yet-existing domain/service modules), NOT 4 — the config suite and session-client suite
+collected and FAILED behaviorally instead: config on the missing `pairing` registry entry
+(`/api/prisma/channel-a/pairing` vs actual), session client on `undefined.startsWith` inside
+`#assertAuthorizedPath` (the allowlist membership was absent, so capability-refusal oracles
+unreached); proxy 3 fails (missing route / bypass / rewrite), pairing path lookalikes already
+PASS. No fixture, network, timeout or cleanup failure. Tests are FROZEN; RED preceded all
+source writes.
+
+**Authored source (UNVERIFIED — static readback only, tests NOT RUN by the author; next gate
+is the independent focused GREEN + standard coverage command):**
+
+1. `channelAPairing.types.ts` (new): state/status/qr/issue/error-kind types; null-returning
+   strict parsers with exact-key plain objects and `ok === true`; named TTL constant
+   `CHANNEL_A_PAIRING_TTL_SECONDS = 60` (fractional seconds accepted, no integer constraint);
+   exact anchored deep-link pattern (bot username 5–32 chars, letter first, 43-char URL-safe
+   token, no extra query/hash/path/userinfo) plus an explicit all-whitespace guard because a
+   bare `$` anchor would accept one trailing newline.
+2. `prismaChannelAPairing.service.ts` (new): singleton `prismaChannelAPairing.status/issue`
+   via `prismaSessionClient.fetch` (GET / POST `{}` JSON, `cache: 'no-store'`, no admin
+   cookie/CSRF/capability duplication, no storage or logging); `PrismaChannelAPairingError`
+   with typed `kind` and safe owned messages (no raw server text/cause); 401 → session
+   (checked before parsing, so a malformed 401 body still maps to session); 409 → conflict
+   only for the exact `{ ok: false, error: 'PRISMA_CHANNEL_A_CONFLICT' }` payload; everything
+   else → unavailable; AbortError and `PrismaStaleSessionResponse` preserved; session-epoch
+   checks before body AND after `await json()` (never a stale QR); erasable-syntax-only (no
+   parameter properties); no session framework or client capability accessor added.
+3. `prismaAssistant.config.ts`: added `PRISMA_CHANNEL_A_PAIRING_URL` and `pairing` in
+   `PRISMA_BROWSER_ROUTES` (now 7 routes); no hidden standalone workaround.
+4. `prismaSessionClient.ts`: additive only — the pairing URL import plus one
+   `AUTHORIZED_PATHS` membership; no other logic.
+5. `vite.prismaProxy.config.ts`: exact anchored route `/api/prisma/channel-a/pairing` →
+   `http://127.0.0.1:5057` + `/hmi/channel-a/pairing`, methods GET/POST,
+   `stripSessionCapability` false (no strip handler); existing routes and admin stripping
+   preserved; 405 path stays `no-store` via the shared helpers.
+
+**Author disclosure (recorded truthfully):** this source worker ran ONE unauthorized read-only
+shell command (`ls` over the domain/services directories) before re-reading the no-commands
+rule; no mutation, no test/production execution, no other shell use. Every edit used
+read/grep/find/edit/write only; no GREEN is claimed.
+
+### RCA-5l-4 correction RED observed and corrected service (STILL UNVERIFIED)
+
+**Observed RED — independent `mubyiqzk-m-5u8d` (parent-executed, exact frozen 5-file command
+ONCE, foreground, 180 s bound, exit 1, Vitest 903 ms):** 153 tests — 149 PASS / 4 FAIL; 4
+suites PASS / 1 FAIL (service); no collection errors, fixture, dispatch, timeout or cleanup
+failures. Tests are FROZEN. The 4 failures were all `requestPairing` semantics: a 401 mapped
+stale instead of session (the real client invalidates its epoch on 401, so the pre-body
+current-response gate fired first); a 503 response carrying a valid status payload AND QR was
+accepted (no non-success refusal before the success parse); a body-read AbortError was
+swallowed into the malformed-body mapping.
+
+**Corrected source (UNVERIFIED — static readback only, ZERO commands, tests NOT RUN by the
+author; next gate is the independent focused GREEN + standard coverage command, thresholds 70
+intact):** `prismaChannelAPairing.service.ts` `requestPairing` only — 401 is classified as the
+session kind BEFORE the pre-body current-response check (the client invalidates its epoch on
+401; 200 stale checks are not weakened); after the pre- and post-body epoch gates, 409 is
+resolved strictly (exact `{ ok: false, error: 'PRISMA_CHANNEL_A_CONFLICT' }` payload →
+conflict, any other 409 body → unavailable) and every other non-success code is refused as
+unavailable BEFORE the success parse, so a valid-looking payload on 4xx/5xx never surfaces as
+a status or QR; the body-read catch rethrows the SAME AbortError (and the stale class if
+encountered) before malformed mapping. No raw error details, logging or storage; no test,
+config, package, backend or other source change. The earlier one-command `ls` disclosure
+above is preserved; this launch ran zero commands.
+
+### Frozen RCA-5l backend contract (QR/status capability projection)
+
+- **Routes.** Exactly `GET`/`POST /hmi/channel-a/pairing` with `OPTIONS` → 204. The browser
+  proxy `/api/prisma/channel-a/pairing` is the later frontend unit's exact mirror. Capability
+  comes from the existing `session_owner` only (`touch=False` GET, `touch=True` POST); missing or
+  unknown capability is `401 {"ok": false, "error": "PRISMA_SESSION_REQUIRED"}` with no manager
+  call. POST accepts exactly one empty JSON object inside the existing 128-byte bound; anything
+  else is `400 {"ok": false, "error": "INVALID_REQUEST"}` before the manager (the body can never
+  inject a capability or owner). Every response on the route, including method refusals and
+  OPTIONS, is `Cache-Control: no-store`; existing loopback CORS conventions are retained and no
+  new auth framework is introduced.
+- **GET.** `200 {"ok": true, "state": <"free"|"pending"|"linked"|"unavailable">}` and nothing
+  else: no owner, phone, generation, timestamps or secrets. Pending is the existing registry
+  pending claim (a pending owner is never projected as free). An absent manager/activation or a
+  closed observation is `unavailable`, never free, and never auto-applies. GET never mints,
+  never touches the human timer and never drives activation/config/credentials; POST is the only
+  explicit issue/renew path. Session vs pairing clocks are distinct domains: the GET's
+  `touch=False` and the POST's `touch=True` govern only the HMI **session** idle timer; the
+  pairing registry's **human-activity** clock is never touched by any HTTP verb — POST refreshes
+  the session only, never the human pairing clock.
+- **POST.** `200 {"ok": true, "qr": {"deepLink": "https://t.me/<validatedBotUsername>?start=<opaqueToken>",
+  "expiresInSeconds": <finite number>}}` exactly. The backend builds the link; the opaque 43-char
+  URL-safe token appears only inside the deep link; no bare token, bot-username field, internal
+  object or health addition is exposed. Token comes from the existing registry: repeated issue
+  inside the TTL preserves token+deadline and rotates at expiry. Remaining seconds are positive
+  and ≤ TTL, computed from the injected monotonic pairing clock; bool/nonfinite/backwards or
+  expired samples are rejected, never clamped into fake validity, and registry/activation are
+  rechecked after every foreign call (including clock and status callbacks). Contract precision:
+  a registry-invalid clock may raise its native `ChannelAPairingConfigInvalid` code; a failed
+  **post-issuance projection** sample (after a successful registry issue) may return an explicit
+  `None`; never a positive, stale or clamped view.
+- **POST failures.** Absent manager → `503 PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE`; a `None` view
+  (nothing issued) and unavailable/unknown/foreign errors → `502 PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE`;
+  a real pairing domain conflict (linked/pending) → `409 PRISMA_CHANNEL_A_CONFLICT`. No exception
+  detail is ever leaked. Capability/body checks precede any manager access.
+- **Additive public APIs.** `ChannelAPairingRegistry.owner_state(owner_id) ->
+  'free'|'pending'|'linked'` under the existing lock/`_now`/`_purge_locked`, a technical read
+  that never mints or touches. `ChannelAActivation.pairing_status(owner_id)` returns the same
+  state or `'unavailable'` (no registry is unavailable, never free) and
+  `issue_pairing_challenge_view(owner_id) -> {token, botUsername, expiresInSeconds} | None`;
+  the existing `issue_pairing_challenge` API is retained, the validated bot username and pairing
+  clock are retained, and username clears with the registry on stop; registry identity and runner
+  phase/restart are rechecked before and after foreign calls. `ChannelAManager.pairing_status(owner_id)`
+  → state string and `issue_pairing_challenge(owner_id)` → view|None, delegating to the
+  activation's `issue_pairing_challenge_view`: the published activation is
+  snapshotted under the existing lock, all foreign calls run outside it and publication plus
+  active phase are revalidated afterwards; no mutation gate, no config/credential reads and no
+  desired==applied requirement (a running prior activation stays usable after a saved
+  credential); closed status observation is `unavailable`; issuance exceptions map closed except
+  an actual `ChannelAPairingConflict`, which survives; observation never changes `lastError` or
+  lifecycle. No new locks, framework or scheduler.
+- **Root seam.** `create_app` gains an optional `channel_a_manager=None` parameter: an injected
+  non-None manager is shared with admin and root and never replaced; with an injected admin
+  boundary and no manager the configuration key stays `None` with no duplicate composition; the
+  existing default root composition stays inert. An injected admin boundary **owns its
+  already-constructed collaborators**: the root never mutates a supplied boundary's wiring — only
+  the default-built boundary receives the composed manager. HTTP tests may use an inert manager
+  fixture and the real in-memory `HmiSessionRegistry`.
+
+**Exact test surfaces (authored, static only, after the parent's pre-RED fixture corrections):**
+`test_channel_a_pairing_http.py` (new, 10 methods: OPTIONS/CORS, exact 401s, 405 no-store, exact
+GET projections incl. pending/unavailable, GET no-touch vs POST touch with the session-vs-human
+clock distinction, exact {} body bound with capability-injection rows, exact QR envelope/deep
+link/no bare token, 503/502/409 mapping with canary sanitization, per-session owner isolation;
+all production imports moved inside the guarded setUp with self-referenced error classes and
+constants); `test_channel_a_pairing.py` (+3 owner_state methods); `test_channel_a_activation.py`
+(+6 pairing_status/view methods incl. rotation, clock rejection, stop withdrawal, a dedicated
+pairing_status reentry case and a gated-clock issuance case with a fresh prepared fixture covering
+invalid/expired/reentrant-stop post-issuance projection samples); `test_channel_a_manager.py`
+(+5 pairing methods in a fixture-only `unittest.TestCase` that delegates unbound to the existing
+suite's helpers — the fake's delegated method is `issue_pairing_challenge_view`, restart_required
+gating shares the phase subTests, and one reentry case drives `manager.stop` through the
+`pairing_issue` callback asserting no lifecycle resurrection); `test_channel_a_root.py` (+3 seam
+methods, with the injected-admin ownership semantics). Existing tests are frozen; only additive
+cases and minimal fixture support were added. Static collection counts: `ChannelAManagerTests`
+collects its existing 31 methods unchanged; `ChannelAManagerPairingTests` collects exactly its 5
+added methods with zero inherited duplicates (the earlier inheritance would have re-collected all
+31); activation adds 6, pairing 3, root 3, HTTP 10 → 27 new methods total, no execution.
+
+**Exact source surfaces for the later bounded worker (four files):**
+`channel_a_pairing.py`, `channel_a_activation.py`, `channel_a_manager.py`, `local_presentation.py`.
+
+**Frozen supervisor patterns (parent executes, NOT the test author):** the exact existing
+Focused backend supervisor block below is reused unchanged, foreground, 180-second bound, fresh
+isolated child environment and temporary state, changing only its discovery pattern. RED and
+GREEN patterns: `test_channel_a_pairing_http.py`, `test_channel_a_pairing.py`,
+`test_channel_a_activation.py`, `test_channel_a_manager.py`, `test_channel_a_root.py`; GREEN
+adds the existing `test_channel_a_admin_http.py` baseline. Each command runs ONCE; stop on
+unexpected dispatch, timeout or cleanup failure. No runtime evidence exists yet: tests are NOT
+RUN and no RED has been observed.
+
+**Pre-RED fixture corrections (parent static readback; applied by the test author, read/edit
+only, zero commands):** (1) the pairing fake's delegated method renamed to
+`issue_pairing_challenge_view` with matching recorded call; the manager's public
+`issue_pairing_challenge` retained; the closed-mapping test now asserts
+`final["activation"] is candidate.observed` (a ChannelAStatus, never the activation object) and
+uses the setUp-owned `self.Error` instead of a non-module-level `ChannelAManagerError`;
+(2) `ChannelAManagerPairingTests` no longer inherits the 31 prior cases — fixture-only reuse via
+unbound delegates; (3) root injected-admin test constructs the boundary with its manager up front
+and asserts preservation, never mutation of a supplied boundary; frozen root-seam wording updated;
+(4) the HTTP module's production imports moved inside the guarded setUp with self-referenced
+classes/constants; (5) activation reentry split: pairing_status reentry kept separate, and a new
+gated-clock issuance case on a fresh prepared fixture covers invalid/expired/reentrant-stop
+post-issuance projection samples returning explicit None (never a positive/clamped stale view)
+while registry-invalid clocks keep native codes; (6) one manager issuance reentry case drives
+`manager.stop` through the candidate's `pairing_issue` callback asserting None plus no
+prepare/start resurrection, with restart_required gating folded into the existing phase subTests;
+(7) session idle TTL and pairing human-idle TTL are documented as distinct domains in the HTTP
+tests and this contract. **Author disclosure (recorded truthfully):** during the initial authoring
+launch this writer ran ONE unauthorized read-only shell command (`tail -n 30` over three existing
+test files) to locate append anchors — no mutation, no test/production execution, no other shell
+use; every other operation used read/find/grep/edit/write only. No runtime evidence exists: tests
+are NOT RUN and RED has not been observed.
+
+**Pre-RED fixture corrections, round 2 (parent static readback; applied by the test author,
+read/edit only, zero commands):** (1) the earlier claim that the new manager class's helper
+requirements were "verified" was WRONG: `ChannelAManagerTests.applied` invokes `self.assert_status`,
+`assert_error` invokes `self.assert_sanitized_exception_chain`, and `factory` can invoke
+`self.new_candidate`, and none of the three existed on the delegate class. Fixed by readback of
+the actual helper bodies: fixture-only unbound delegates for `assert_status` (kwargs-forwarding),
+`assert_sanitized_exception_chain` and `new_candidate` were added alongside the existing
+`factory`/`assert_error`/`applied` delegates; no prior tests inherited; (2) the gated pairing
+clock in the activation issuance test returned NaN for mode `'valid'` after the first sample,
+which would have broken the initial successful view's remaining-seconds projection; an explicit
+`'valid'` branch returning `pairing_now[0]` was added before the broken-mode branches, so the
+initial view and every restored call project valid remaining seconds; (3) the manager reentry
+issuance case now seeds `candidate.pairing_issue_results` with `dict(PAIRING_VIEW)` before the
+reentrant stop, so the asserted None proves a real issued view was discarded, not that the fake
+had nothing to give. Method counts unchanged: 27 added methods total (manager 5, activation 6,
+pairing 3, root 3, HTTP 10); still no commands, no source changes, tests NOT RUN.
+
+**Unit accounting:** forecast ~500–850 backend authored lines, advisory (not a cap or trimming
+instruction). Cached delivery strategy `ask-on-risk` / `feature-branch-chain`; no commit, push
+or PR authority in this session. Dependency decision: `qrcode.react` is user-authorized for the
+LATER frontend unit only. Dependency execution record: task `mubx4fsd-e-33h0` installed
+`qrcode.react` 4.2.0 via the exact npm command with ignore-scripts (no tests, no build);
+the frontend unit itself is NOT implemented.
+
+No new tests or source changes have run at this point; end-to-end remains incomplete.
+
+### RCA-5l-4 foundation ACCEPTED OFFLINE; UI tests authored sequentially (NOT RUN)
+
+**Frontend foundation ACCEPTED OFFLINE (parent):** independent `mubyog4m-o-r8gg` ran the exact
+frozen five-file command ONCE plus one repeat: **153 PASS**, durations .917 s and 1.10 s,
+standard coverage statements 89.76 % / branches 89.94 % / functions 85.71 % / lines 93 % (all
+four 70-thresholds intact, loaded modules only), numeric exit codes not exposed, no failure and
+no unexpected dispatch. Foundation source and tests (`prismaAssistant.config.ts`,
+`channelAPairing.types.ts`, `prismaChannelAPairing.service.ts`, `prismaSessionClient.ts`
+allowlist, `vite.prismaProxy.config.ts` and their five test surfaces) are FROZEN and accepted;
+do not redo them. Backend stays accepted at 156 PASS; `qrcode.react` stays pinned at 4.2.0
+(authorized install, no runtime use yet).
+
+**UI authoring interruption and split:** the prior combined UI author `mubyqnnz-p-2yld` failed
+with `assistant reported an error` and no retained result. Parent `git`/`find` confirmed NO
+hook/control test files and NO `Topbar.test` diff; no cause is inferred and no rollback was
+needed. Authoring continues SEQUENTIALLY without scope change: the first bounded writer owned
+the HOOK test only; the second (this record) corrected it and authored the control/Topbar half.
+Source and tests of backend and foundation remain frozen.
+
+**Frozen hook/control contract recap (hook and control sources do NOT exist yet):**
+`src/hooks/useChannelAPairing.ts` exports `useChannelAPairing(open: boolean)` returning
+`{ phase: 'closed' | 'loading' | 'free' | 'pending' | 'linked' | 'unavailable' | 'error',
+qr: ChannelAPairingQr | null, remainingSeconds: number }` and
+`CHANNEL_A_PAIRING_POLL_INTERVAL_MS = 2000`. ALL pairing requests are SINGLE-FLIGHT: while an
+issuance POST is in flight the status poll does NOT run a concurrent GET; the bounded
+sequential poll resumes through its normal cadence afterwards (parent-corrected contract — the
+earlier "poll keeps its own cadence during POST" reading was wrong and was removed from the
+fixture). Service `prismaChannelAPairing.status/issue` return the full ok payload;
+`PrismaChannelAPairingError(kind session/conflict/unavailable)`;
+`prismaSessionClient.subscribeToReset` existing API; abort/stale are ordinary cleanup; local
+ephemeral React state ONLY (no TanStack/Zustand/logs/storage/framework, no new
+availability/cancellation layer — just a local effect guard). Control colocation:
+`PrismaPairingControl` default owns the `Pyramid` button ref/open state plus the existing
+`AnchoredOverlay`, mounted AFTER Logs in the Core Topbar only (EPPI unmounts it; parent state
+colocation means nothing persisted or auto-reopened), local `QRCodeSVG` with design tokens and
+quiet zone 4, phone confirmation only, Spanish neutral copy, no admin auth dependency.
+
+**Fixture corrections after parent full readback (applied by this author, read/edit only, zero
+commands, tests still NOT RUN):** (1) the timer helper now awaits `vi.advanceTimersByTimeAsync`
+inside `act` instead of a sync advance plus a fixed microtick count, so completion-chained
+sequential polls settle at their own deadlines inside large advances; fake performance stays
+faked; RTL `cleanup()` runs BEFORE real timers are restored; the session-reset notification is
+dispatched inside `act`; (2) the delayed-POST test was rewritten to the single-flight contract:
+while the POST is held 5 s the status call count stays at 1 with no concurrent GET, the expired
+TTL-3 response is never shown and never immediately re-issued, and the renewal POST happens
+only after the normal 2 s delay with a fresh free status (fake pending poll rows removed; no
+fixed poll counts contradicting the sequential model; the first-QR-expiry renewal via the next
+normal poll kept); (3) the conflict test now injects 409 from the FIRST POST (the real GET
+never conflicts): GET free → POST conflict → QR never shown → one immediate refresh GET free →
+2 status/1 issue, settling again adds nothing, and the next normal poll gives GET free + valid
+POST → 3 status/2 issue; bounded refresh and no-loop oracles preserved, no broader GET
+conflict policy.
+
+**Hook, control and Topbar tests authored — NOT RUN, honest RED stage:** this author wrote ONLY
+`hmi-app/src/hooks/useChannelAPairing.test.tsx` (12 tests: closed inert with zero requests,
+timers and no direct client fetch; open+free issues exactly one QR; pending/linked/unavailable
+never issue; bounded sequential single-flight polling with linked kept polled and unlink→fresh
+QR; countdown anchored at POST dispatch (fake performance) with ceil, non-negative, immediate
+hiding at expiry and no re-issue while the QR is live; delayed already-expired response never
+exposed, retried only via the next normal poll; close/unmount abort+discard+late
+old-generation ignored; reset clears the QR, restarts the GET and never revives the old
+generation (stale rejection as ordinary cleanup); subscribe/unsubscribe owns the listener;
+POST conflict → one immediate GET, no immediate re-issue while free; unavailable error stops
+polling until close/reopen),
+`hmi-app/src/components/layout/PrismaPairingControl.test.tsx` (6 tests: manual open/close via
+the owned button with aria-expanded/haspopup and captured hook `open` argument; the real
+installed qrcode.react SVG exposed as role img "Código QR para vincular Telegram" while phase
+free + valid qr + remaining > 0, with exactly one "Cerrar" button and no extra actions;
+pending/linked/unavailable copy without any QR even when a payload exists; remaining 0 or
+missing payload never shows a QR; Escape close; outside-click close — both through the REAL
+`AnchoredOverlay` primitive with userEvent on real timers; no computed-color assertions), and
+Topbar.test.tsx additions (mocking `./PrismaPairingControl` as a simple Prisma button for
+isolation only; all 14 prior cases and the router harness preserved): one soft-assertion
+wiring test — Logs stays disabled first, then the pairing control must render immediately
+after Logs in the Core nav (TWO assertions are expected to fail while the source is
+un-integrated, both observable because they are soft) — and one EPPI test asserting no Prisma
+control on `/eppi/orders` (trivially passing pre-integration, meaningful after it). Expected
+RED shape for the frozen 3-file UI RED command: collection errors for the two absent modules
+(hook, control) plus the Topbar wiring failures; no placeholder source and no import catch
+were authored anywhere, and NO execution, RED count or GREEN is claimed. Frozen UI RED command
+(parent executes LATER): `npm --prefix hmi-app test -- src/hooks/useChannelAPairing.test.tsx
+src/components/layout/PrismaPairingControl.test.tsx src/components/layout/Topbar.test.tsx`.
+
+### RCA-5l-4 UI RED observed and UI source authored (STILL UNVERIFIED)
+
+**Observed independent UI RED (parent-executed, exact frozen 3-file command ONCE, foreground,
+180 s bound, exit 1, duration 6.67 s):** Topbar 16 tests — 15 PASS / 1 FAIL (the missing Prisma
+pairing button; the Logs-disabled baseline assertion inside the same test PASSED before the
+soft wiring failures); 2 collection-error suites — `useChannelAPairing.test.tsx` and
+`PrismaPairingControl.test.tsx`, 0 tests collected each (the absent hook/control modules);
+no fixture, timeout, cleanup or retry failure. Tests remain FROZEN; RED preceded all UI source
+writes.
+
+**UI source authored (UNVERIFIED — static readback only, tests NOT RUN by the author; the next
+gate is the independent full 8-file GREEN run plus standard coverage with the 70 thresholds and
+build/lint; no GREEN is claimed):**
+
+1. `hmi-app/src/hooks/useChannelAPairing.ts` (new): exports `CHANNEL_A_PAIRING_POLL_INTERVAL_MS
+   = 2000`, the UI-only `ChannelAPairingPhase` union and `useChannelAPairing(open)` returning
+   `{ phase, qr, remainingSeconds }`. Local ephemeral React state only (no query/global cache,
+   storage or logs). Single-flight rounds: each round is one status GET; free + no live QR →
+   exactly one POST with the countdown deadline anchored at `performance.now()` at POST dispatch
+   plus `expiresInSeconds * 1000` (never arrival; an already-expired late response is never
+   shown and renewal waits for the next routine poll); ONE 2 s poll timer is scheduled after the
+   round settles for free/pending/linked (linked keeps polling to observe unlink); no GET runs
+   while a POST is held; no tight loop. `unavailable` state and non-conflict pairing errors are
+   terminal (QR hidden, polling stopped until close/reopen); a 409 conflict from the POST clears
+   the QR slot and runs exactly ONE immediate refresh GET with issuance disabled (allowIssue
+   false), then the normal poll cadence resumes. Countdown: 1 s tick recomputes
+   `max(0, ceil((deadline - now)/1000))` and an exact deadline timeout hides the QR (remaining 0)
+   — the QR payload keeps the original server value. Cleanup: close/unmount/session-reset bump a
+   per-instance epoch (`disposed` flag + `roundEpoch`), abort the in-flight request, clear all
+   owned timers and discard the QR; late old-generation responses are quiet cleanup that can
+   never set state, re-issue or schedule another poll. One `prismaSessionClient.subscribeToReset`
+   subscription owned while open and unsubscribed on cleanup; the global client is never reset
+   by the hook.
+2. `hmi-app/src/components/layout/PrismaPairingControl.tsx` (new): default component owning the
+   trigger button ref, the open state and the existing `AnchoredOverlay` (no props). Trigger:
+   `Pyramid` Lucide icon, `title`/`aria-label` "Prisma", `aria-haspopup="dialog"`,
+   `aria-expanded`, enabled (viewer, no admin auth); only a click opens/toggles. Panel is
+   `role="dialog"` named "Vincular teléfono con Prisma" with one `Cerrar` button; Escape and
+   outside click close through the primitive. The QR renders ONLY while phase `free` + non-null
+   payload + `remainingSeconds > 0`, as the real installed `qrcode.react` `QRCodeSVG`
+   (`value={qr.deepLink}`, `level="M"`, `marginSize={4}`, cell-based viewBox with responsive CSS
+   width, `role="img"` + `title`/`aria-label` "Código QR para vincular Telegram"); colors come
+   from existing theme tokens as CSS variable fills (near-white `--color-industrial-text`
+   background, near-black `--color-industrial-bg` modules — high contrast, no hex). Spanish
+   neutral copy per phase (pending "Confirma el destino en Telegram.", linked "Teléfono
+   vinculado", unavailable "Canal A no disponible", honest generic loading/error/free-no-QR);
+   no Renew/Apply/local-confirm actions, no token in any title, no logs/storage.
+3. `hmi-app/src/components/layout/Topbar.tsx` (edit): one import plus `<PrismaPairingControl />`
+   immediately AFTER the `navRightItems` map inside the Core nav only; the EPPI branch is
+   untouched (the control's local open state unmounts on entering EPPI), Logs stays disabled and
+   no route/auth/audio behavior changed.
+
+**Author disclosure (recorded truthfully):** this source worker ran FOUR read-only shell
+inspections before the zero-commands rule was fully applied: one `git status`/`git branch`
+working-tree inspection and three `ls` presence checks (lucide `Pyramid` icon; two on
+`node_modules/qrcode.react`, one exiting 2 on a wrong subpath). No mutation, no
+test/production/build/install execution, no other shell use; every file operation used
+read/grep/find/edit/write only, and static readback verified the Topbar placement, the hook
+round logic and the qrcode.react prop passthrough (`role="img"` default, `aria-label`/`className`
+spread, cell-based viewBox). Source stays UNVERIFIED until the independent GREEN gate.
+
+### RCA-5l-4 coverage gate failure and two authored test-only regressions (source FROZEN)
+
+**Coverage gate failure (evidence kept, not reinterpreted):** the eight-file frontend focus ran
+187 PASS twice (2.98 s plain, 3.75 s standard coverage) and the standard coverage run FAILED the
+unchanged global 70% thresholds: statements 48.01% (703/1464), branches 34.99% (352/1006),
+functions 44.64% (146/327), lines 47.50% (648/1364), exit 1. Read-only mapper `muc1k6vj-v-rchz`
+confirmed the root cause is transitively loaded modules whose EXISTING companion suites are not
+included in the scoped run — not a UI regression and not a threshold problem.
+
+**Parent-authorized coverage plan (offline, no providers/runtime/commit):** run the FULL
+existing test suite once with standard coverage via `npm --prefix hmi-app run test:coverage`
+(parent executes; future bound 600 seconds for this full run versus the 180-second focused
+bound). Standard 70 thresholds stay UNCHANGED; no include/exclude or mode changes, no
+coverage-hiding mocks, no filler tests. Full coverage is NOT claimed to pass before that run is
+observed. Build/lint follow the standing frontend commands afterwards.
+
+**Two focused TEST-ONLY regressions authored (static readback only, NOT RUN, ZERO commands,
+read/grep/find/edit/write only; production source FROZEN until the fresh RED is observed):**
+
+1. `hmi-app/src/hooks/useChannelAPairing.test.tsx` — new 13th case pinning the closed-render
+   hook contract: after an initial free+live-QR round, `rerender({ open: false })` must find
+   EVERY closed render already reporting `phase 'closed'` / `qr null` / `remainingSeconds 0`.
+   The result is captured INSIDE the `renderHook` render callback, snapshot BY COPY (the qr
+   field is a shared reference), so the very first closed render — before the open effect's
+   cleanup and state reset flush — is recorded; it does not rely only on `result.current` after
+   RTL flushes effects (the existing close test already covers that). The 12 existing cases,
+   single-flight and timing checks are untouched. Expected RED shape: the first captured closed
+   render records the OLD state (phase `free` with the live QR), not an absent API.
+2. `hmi-app/src/components/layout/PrismaPairingControl.test.tsx` — new 7th case pinning runtime
+   panel measurement per the anti-hardcode dimensional policy: the REAL `AnchoredOverlay` is
+   used (never mocked out to hide coverage), a `ResizeObserver` fixture is stubbed globally and
+   the observed targets' `getBoundingClientRect` plus the delivered entries carry synthetic
+   TEST-INPUT geometry (measured width 320; tall 500 flips the overlay ABOVE the trigger with
+   only 160 px of space below; short 120 with a pending fixture fits BELOW). End-alignment
+   `minWidth` and `left` must derive from the MEASURED width; expected styles are computed from
+   the test inputs (viewport 1280x720, trigger rect bottom 560, gap 4), never asserting 340/280.
+   The observer must disconnect on explicit close AND on unmount while open; geometry spies,
+   viewport properties and the observer global are restored after every test via a scoped
+   `afterEach` (additive; existing 6 cases unchanged). Expected RED shape: the current control
+   has no observer at all and still passes the removed constants `estimatedHeight 340` /
+   `minWidth 280`, so the case fails at the missing-observer instrumentation assertion.
+
+**Fresh correction RED (parent ONLY, later):** the exact frozen 3-file UI command, each file
+ONCE, foreground, focused 180-second bound: `npm --prefix hmi-app test --
+src/hooks/useChannelAPairing.test.tsx src/components/layout/PrismaPairingControl.test.tsx
+src/components/layout/Topbar.test.tsx`. Expected: exactly the 2 NEW tests fail (actual counts
+reported after execution), all previous cases PASS. Only after that observed RED may a bounded
+source correction touch the hook return and the control measurement. NO `quietAbort`/
+stale-active framework is authorized: the mapper established that the normal abort/reset epoch
+bump happens BEFORE the rejection is observed, so the quiet branch remains hypothetical. No new
+parent product question is open.
+
+### RCA-5l-4 UI correction RED observed and bounded source correction (STILL UNVERIFIED)
+
+**Observed independent correction RED — `muc27vwt-x-84ow` (parent-executed, exact frozen 3-file
+command ONCE, foreground, exit 1, duration 2.71 s):** 36 tests — 34 PASS / 2 FAIL, exactly the
+two authored regressions and nothing else. Hook 13 tests — 12 PASS / 1 FAIL: the FIRST closed
+render (before the open effect's cleanup and state reset flush) leaked the previous `free`
+phase instead of the canonical closed slot. Control 7 tests — 6 PASS / 1 FAIL: missing
+`ResizeObserver` (the control never measured its open panel); the later runtime-geometry and
+observer-disconnect rows were unreached. Topbar 16 tests PASS. No fixture,
+unexpected-dispatch, timeout or cleanup failure. Tests remain FROZEN; RED preceded the
+correction writes.
+
+**Bounded source-only correction (UNVERIFIED — static readback only; this launch ran ZERO
+commands, tests NOT RUN by the author; next independent gates: focused 8-file command 180 s,
+FULL `npm --prefix hmi-app run test:coverage` 600 s with the standard 70 thresholds unchanged,
+build 180 s, lint 180 s — executed by the parent/independent verifier; no gate is claimed
+passed and the earlier scoped 18/7 coverage failure stays historical evidence):**
+
+1. `hmi-app/src/hooks/useChannelAPairing.ts`: render-level return normalization ONLY — a
+   canonical `CLOSED_RESULT` constant plus `return open ? { phase, qr, remainingSeconds } :
+   CLOSED_RESULT;` placed after all hooks, so EVERY closed render returns
+   `{ phase: 'closed', qr: null, remainingSeconds: 0 }` immediately, even before effect
+   cleanup. The async single-flight round logic, session-reset generation guards, deadline
+   anchoring and cleanup are untouched; no quietAbort/stale framework, no new hooks, no
+   behavioral change while open.
+2. `hmi-app/src/components/layout/PrismaPairingControl.tsx`: the arbitrary
+   `estimatedHeight={340}`/`minWidth={280}` constants are REMOVED. The control now measures the
+   open panel at runtime: a local `ResizeObserver` (guarded for environments without one)
+   observes the open dialog node from an `open`-keyed effect, an initial
+   `getBoundingClientRect` measurement runs on open/layout, observer entries feed
+   `entry.contentRect` (with a live-rect fallback), and the measured `{width, height}` is
+   passed as `estimatedHeight`/`minWidth` to the SHARED `AnchoredOverlay` primitive (primitive
+   defaults apply until the first valid measurement). An equal-measure guard returns the
+   previous state object so identical sizes never re-render, and degenerate zero rects never
+   become measurements. The observer is owned by the open panel only: close/unmount
+   disconnects it, nothing observes while closed, no stale element is retained; no new
+   polls/sleeps and no suppressed lint. The shared primitive was NOT edited — its existing
+   per-render style re-application already clears the opposing top/bottom on each flip (static
+   readback of `AnchoredOverlay.tsx` and `anchoredOverlayStyle.ts` confirms the recompute path:
+   the inline ref callback re-runs against the persistent wrapper node on every render), so the
+   above/below transition resolves correctly inside the allowed file and no blocker report was
+   needed. Intentional design constants kept: `w-72` panel width, `size={256}` structural SVG
+   intrinsic size, quiet zone `marginSize={4}` and the token CSS-variable QR colors unchanged;
+   no rename, no action change, no accessibility change.
+
+**Correction author disclosure (recorded truthfully):** this correction launch ran ONE shell
+command — a no-op `true` bash invocation fired during the final readback step, after the source
+edits, with zero filesystem, network or process side effects; it violated the zero-commands
+contract and is disclosed here. Every other operation used read/find/grep/edit/write only,
+with static readback of both corrected files, the two new frozen regression tests and both
+shared-primitive files. The prior UI source launch's four read-only shell violations remain
+disclosed in the section above. Corrected source stays UNVERIFIED until the independent gate run.
+
+**Parent readback note (fixture-only border-box correction, TEST-ONLY, ZERO commands):** before
+any final gate the parent found ONE measurement oracle gap in the control regression:
+getBoundingClientRect reports the BORDER box (actual rendered size) while a ResizeObserver
+entry.contentRect is the CONTENT box (padding/border excluded), and the actual panel (p-4 +
+border, w-72 = 288 px outer) would misalign `end` if a source treated the content width as the
+whole overlay width — the original fixture hid this by delivering identical contentRect/border
+rects. The fixture was narrowed (emitPanelMeasurement only): getBoundingClientRect spies keep
+the provided border-box width/height while entry.contentRect is deliberately smaller by an
+explicit positive 24 px TEST inset, so only a source measuring the ACTUAL rendered panel
+(getBoundingClientRect on the RO callback, or borderBoxSize) passes; expected minWidth 320 /
+left 840 and the above/below flips are UNCHANGED, no new test methods, and the prior
+"contentRect or getBoundingClientRect either acceptable" comment was corrected (it was wrong).
+Measurement border-box regression PENDING a fresh UI RED: the currently-authored control
+correction (entry.contentRect-fed) is expected to fail the measured-width rows under the
+narrowed fixture, and the source may be changed only after that RED; the hook closed-return fix
+awaits the same verification. No full gates (focus/coverage/build/lint) have been executed
+since the authoring; no new features.
+
+### RCA-5l-4 second UI+lint RED observed and final bounded fix (STILL UNVERIFIED)
+
+**Two observed independent failures (parent-executed, tests FROZEN):**
+
+1. UI correction RED — `muc2rdvk-10-qw61` (exact frozen 3-file command ONCE, foreground, exit 1,
+   2.71 s): 36 tests — 35 PASS / 1 FAIL. The hook closed-render regression now PASSES; the
+   control measurement case PASSES the observer-existence and tall (above) placement rows, then
+   FAILS on `minWidth` expected 320: the observer callback read the entry CONTENT box (296 in
+   the narrowed synthetic fixture) instead of the actual border box (320); the later
+   below-placement and disconnect rows were unreached. No timeout, unexpected dispatch,
+   cleanup or retry failure.
+2. Lint — `muc2s1mf-11-53uj` (exact `npm run lint` ONCE, foreground, exit 1): 1 error, 0
+   warnings — `useChannelAPairing.ts:56:13` `react-hooks/set-state-in-effect` on the closed
+   branch's direct `setPhase('closed')` effect-body call.
+
+**Final bounded source-only fix (AUTHORED UNVERIFIED — this launch ran ZERO commands,
+read/grep/find/edit/write only with careful static readback; source FROZEN after this return
+pending the full gates; gate plan unchanged: focused 8-file command 180 s, FULL
+`npm --prefix hmi-app run test:coverage` 600 s with standard 70 thresholds unchanged, build
+180 s, lint 180 s — all independent and later; the earlier scoped 18/7 coverage failure stays
+historical evidence and no full-pass claim is made):**
+
+1. `hmi-app/src/components/layout/PrismaPairingControl.tsx`: the ResizeObserver callback now
+   ALWAYS measures the panel's ACTUAL border box via `panel.getBoundingClientRect()` (the same
+   box the initial on-open measurement reads) instead of `entry.contentRect`, which excludes
+   borders/padding — exactly the border-box rule the parent readback note pinned. Observer
+   updates, the equal-measure guard, the zero-rect guard, the open-keyed lifecycle and
+   disconnect cleanup are unchanged; no new framework, no shared-primitive edit, no test
+   change, no prop change.
+2. `hmi-app/src/hooks/useChannelAPairing.ts`: made the hook
+   `react-hooks/set-state-in-effect`-compliant with NO eslint-disable, no config change and no
+   dummy await/queueMicrotask/setTimeout hiding. Minimal legitimate React guarded render-time
+   adjustment: `phase` initializes from the initial `open` prop (`open ? 'loading' : 'closed'`);
+   a new `previousOpen` state tracks the previous prop; whenever `open !== previousOpen` the
+   slot is re-canonicalized AT RENDER (React-permitted conditional self-state adjustment, all
+   hooks still called unconditionally): closed stays empty and a fresh opening starts clean
+   (`loading`, `qr null`, `remainingSeconds 0`) so no old QR can leak on reopen, and no request
+   is made during render. The effect body now owns ONLY the subscription, request initiation
+   and timer cleanup: BOTH the closed-branch sync setters and the bottom opening direct setters
+   (`setPhase('loading')`/`setQr(null)`/`setRemainingSeconds(0)`) are removed, avoiding the
+   next same-rule red. `handleSessionReset` state changes remain a real external callback and
+   the async GET/POST result updates are unchanged; single-flight, TTL/poll cadence, deadline
+   anchoring, quiet abort and cleanup semantics are preserved.
+
+**Final-fix author disclosure (recorded truthfully):** this launch ran ZERO shell commands —
+read/find/grep/edit/write only, with static readback of both corrected files. Source is FROZEN
+after this return; the full gates execute independently.
+
+**Documentation-writer disclosure (added at the final tracker-only metadata pass):** the
+previous documentation launch (`muc3ukop-15-8uew`) executed TWO unauthorized read-only shell
+commands (`wc -l` over the three docs, `grep -n` over the master) before internalizing the
+zero-commands verification contract. No source/runtime/test mutation, no test or application
+execution, no staging/commit. The earlier documented disclosures (one `wc -l` by the backend
+source worker, one `true` and one `ls` by test authors) are preserved unchanged above; all
+historical source outcomes are unchanged.
+
+## HISTORICAL — SESSION CLOSED (consumed one-local-commit grant, base `bffe4ed`; NOT current authority)
+
+This section is historical: its one-local-commit grant was CONSUMED by the actual `bffe4ed`
+checkpoint commit; it is not current authority and its next actions are superseded by the
+accepted gate at the top. Evidence and chronology are preserved intact below.
 
 **SESSION CLOSED:** the user authorized, for this checkpoint ONLY, **one local commit** covering
 the 20 current paths (backend + frontend + tests + docs) on base `9864c25` (PRE-COMMIT; the final
@@ -697,10 +1691,10 @@ Frontend domain types stay in `domain/`; use design tokens, Lucide, `hmi-scrollb
   - [x] **RCA-5h.1 — Preparatory guarded VoiceEventStore delivery:** accepted OFFLINE ONLY after missing-keyword RED, independent 13-method GREEN, separate 13-method repeat and parent source/test/diff readback. Optional private guard preserves legacy wire behavior; real manager predicate integration remains pending before enabling A, while the extra frontend active-audio/delayed-async cancellation is not authorized as a prerequisite (master §3.4).
   - [x] **RCA-5h.2 — Actual delivery eligibility predicate:** parent accepted OFFLINE ONLY after behavioral RED, six-source unit/five-source correction readbacks, independent 35 focused + 171 baseline PASS (206 distinct methods across five patterns). Five boolean APIs plus shared validator and call-local private witnesses; no store/publisher/root wiring or application integration acceptance. Next boundary is the A composition unit above, with focused TDD only when the user resumes; the extra frontend cancellation mapping is not authorized.
   - [x] **RCA-5i — Root composition of Channel A:** parent accepted OFFLINE after RED `mublxk6w` (11 methods, 0 PASS, 10 failures, 1 error, 0.164s, exit 1), independent GREEN `mubmc7me` (root 11 PASS / 0.167s, paths 2 PASS / 0.003s, 13 unique methods) and final root spotcheck `mubmf9qs` (11 PASS / 0.170s, no unique addition), plus parent source/test readback and tracked whitespace PASS. Source: `local_presentation.py` and `paths.py`; test: `test_channel_a_root.py` (716 lines, 11 methods). No commit/push/PR; bounded root composition only, not application activation or full connection. Authoritative checklist at the top of this tracker.
-  - [ ] **Remaining RCA-5 units:** after the accepted RCA-5i root composition and store/publisher wiring, real admin/root manager composition and status/Apply, all A writes through generation manager, owner-name lookup wiring, warning scheduler, exact proxy/bootstrap and broader integration acceptance. Preserve RCA-5a–f OFFLINE acceptance; do not recreate accepted work. Historical broader identity-handoff limitations remain provenance, not a reason to resume auxiliary harnesses automatically. The existing warning sweep remains unwired and is later remaining integration, not RCA-5i scope.
-- [ ] **RCA-6 — Click-open HMI QR/link presentation:** capability projection and QR rotation while the manually opened panel is visible; `Pyramid` immediately right of Logs, never automatic. User REMOVED the pause before RCA-6. Typed client/hook/UI and expiry/error/multi-HMI tests remain pending; revalidate original 350–650 forecast.
-- [ ] **RCA-7 — Exact-paired-HMI response delivery:** connect the existing response/audio circuit to the linked HMI; no drop/no-op final outcome consumer. Do not add audio cancellation or other response behavior without approval under master §3.4. Transcript placement/lifetime remain a later, separately approved UI decision. Telegram-only is not completion; the original forecast is historical, not current scope.
-- [ ] **RCA-8 — Integrated verification/docs:** full gates, independent verification, README/master reconciliation; keep active backlog honest. Original 100–200 estimate must be revalidated.
+  - [ ] **Remaining RCA-5 units:** after the accepted RCA-5i root composition and store/publisher wiring, real admin/root manager composition and status/Apply, all A writes through generation manager, owner-name lookup wiring, warning scheduler, exact proxy/bootstrap and broader integration acceptance. The admin credential card (RCA-5j/5k) and the QR/status capability projection, proxy/client routes and manual `Pyramid` panel (RCA-5l) are already implemented and accepted OFFLINE — do not list them as missing; what remains is real/online acceptance and the still-unwired pieces (e.g. the existing warning sweep, later integration — explicitly NOT authorized to start here, no scheduler work). Preserve RCA-5a–f OFFLINE acceptance; do not recreate accepted work. Historical broader identity-handoff limitations remain provenance, not a reason to resume auxiliary harnesses automatically.
+- [ ] **RCA-6 — Click-open HMI QR/link presentation:** aligned with the RCA-5l OFFLINE acceptance — the capability projection, proxy/client routes, ephemeral hook and the manual `Pyramid` click-open panel ARE implemented and accepted offline; what remains pending is REAL acceptance (phone scan/Telegram confirmation against the linked HMI, expiry/rotation behavior in the visible panel, error/multi-HMI rows observed on a real runtime). Never automatic; no reimplementation of the accepted QR work.
+- [ ] **RCA-7 — Exact-paired-HMI response delivery:** keep pending REAL acceptance of the exact-linked-HMI response/audio circuit; preserve the existing root/store/publisher wiring already in place — do not demand automatic code redo before real evidence. No drop/no-op final outcome consumer; no new response behavior without approval under master §3.4.
+- [ ] **RCA-8 — Integrated verification/docs:** pending broader integration acceptance; this increment's OFFLINE gates and documentation (master 2.0.17, PW-003, tracker) are separate and accepted, not full-product closure. Original 100–200 estimate must be revalidated.
 
 ## Accepted integration contracts to preserve
 

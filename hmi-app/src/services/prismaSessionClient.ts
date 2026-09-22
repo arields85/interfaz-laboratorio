@@ -1,5 +1,6 @@
 import {
     PRISMA_ASK_URL,
+    PRISMA_CHANNEL_A_PAIRING_URL,
     PRISMA_EVENTS_URL,
     PRISMA_SESSION_URL,
     PRISMA_SNAPSHOT_URL,
@@ -14,6 +15,7 @@ const AUTHORIZED_PATHS = new Set([
     PRISMA_EVENTS_URL,
     PRISMA_ASK_URL,
     PRISMA_TTS_LIVE_URL,
+    PRISMA_CHANNEL_A_PAIRING_URL,
 ]);
 const SESSION_METADATA_KEYS = ['absoluteExpiresAt', 'idleExpiresAt', 'ok'] as const;
 

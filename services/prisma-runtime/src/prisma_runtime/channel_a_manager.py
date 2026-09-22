@@ -38,6 +38,7 @@ from .channel_a_lifecycle import (
     TELEGRAM_BOT_IDENTITY_RESERVED,
 )
 from .channel_a_query import is_query_envelope_well_formed
+from .channel_a_pairing import ChannelAPairingConflict
 from .credential_store import InvalidCredential, validate_secret
 
 PRISMA_CHANNEL_A_MANAGER_BUSY = "PRISMA_CHANNEL_A_MANAGER_BUSY"
@@ -61,6 +62,11 @@ _PHASES = frozenset({
     PHASE_IDLE, PHASE_PREPARING, PHASE_PREPARED, PHASE_RUNNING,
     PHASE_STOPPING, PHASE_STOPPED, PHASE_FAILED, PHASE_RETIRED,
 })
+# Pairing projections are active only in these phases without a pending
+# restart; every other observation closes to 'unavailable' without any
+# foreign pairing call.
+_PAIRING_ACTIVE_PHASES = (PHASE_PREPARED, PHASE_RUNNING)
+_PAIRING_STATES = frozenset({"free", "pending", "linked"})
 
 
 class ChannelAManagerError(RuntimeError):
@@ -222,6 +228,110 @@ class ChannelAManager:
             code = _error_code(error, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
         self._record_error(code)
         _raise_closed(code)
+
+    def pairing_status(self, owner_id):
+        """Observe the published activation's pairing state without mutation.
+
+        No configuration or credential read, no mutation gate and no
+        desired==applied requirement: a technical read of the currently
+        published activation only. Inactive or untrusted phases are refused
+        before the foreign pairing call, a withdrawn publication never
+        delegates, every foreign call (status and pairing projection) runs
+        outside the state lock, a safe second status observation follows the
+        delegation, and the publication identity is finally revalidated under
+        the lock after the last foreign observation. Any failure closes to
+        ``'unavailable'``; ``lastError`` and lifecycle ownership never change.
+        """
+        with self._lock:
+            activation = self._activation
+        if activation is None:
+            return "unavailable"
+        try:
+            observed = self._observe(activation)
+        except Exception:
+            return "unavailable"
+        if (
+            observed.phase not in _PAIRING_ACTIVE_PHASES
+            or observed.restart_required is not False
+        ):
+            return "unavailable"
+        # A publication withdrawn before the delegation never reaches the
+        # foreign pairing call.
+        with self._lock:
+            if self._activation is not activation:
+                return "unavailable"
+        try:
+            state = activation.pairing_status(owner_id)
+            # A status transition during the foreign pairing call closes the
+            # projection: re-observe safely outside the lock after delegation.
+            reobserved = self._observe(activation)
+            if (
+                reobserved.phase not in _PAIRING_ACTIVE_PHASES
+                or reobserved.restart_required is not False
+            ):
+                return "unavailable"
+        except Exception:
+            return "unavailable"
+        # Final publication identity check after the last foreign observation.
+        with self._lock:
+            if self._activation is not activation:
+                return "unavailable"
+        return state if state in _PAIRING_STATES else "unavailable"
+
+    def issue_pairing_challenge(self, owner_id):
+        """Delegate issuance to the published activation's closed QR view.
+
+        The activation is snapshotted under the existing lock and the foreign
+        issuance runs outside it. Inactive or untrusted phases issue nothing,
+        a withdrawn publication never delegates, a safe second status
+        observation follows the delegation and the publication identity is
+        finally revalidated under the lock after the last foreign observation,
+        so a reentrant confirmed stop discards the view. A real pairing domain
+        conflict survives untouched for the HTTP layer and every other failure
+        closes to a sanitized lifecycle error. ``lastError`` and lifecycle
+        ownership never change.
+        """
+        with self._lock:
+            activation = self._activation
+        if activation is None:
+            return None
+        try:
+            observed = self._observe(activation)
+        except Exception:
+            return None
+        if (
+            observed.phase not in _PAIRING_ACTIVE_PHASES
+            or observed.restart_required is not False
+        ):
+            return None
+        # A publication withdrawn before the delegation never reaches the
+        # foreign issuance call.
+        with self._lock:
+            if self._activation is not activation:
+                return None
+        try:
+            view = activation.issue_pairing_challenge_view(owner_id)
+        except ChannelAPairingConflict:
+            # The one real pairing conflict is the caller's contract.
+            raise
+        except Exception as error:
+            _raise_closed(_error_code(error, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE))
+        try:
+            # A status transition during the foreign issuance closes the
+            # projection: re-observe safely outside the lock after delegation.
+            reobserved = self._observe(activation)
+        except Exception:
+            return None
+        if (
+            reobserved.phase not in _PAIRING_ACTIVE_PHASES
+            or reobserved.restart_required is not False
+        ):
+            return None
+        # Final publication identity check after the last foreign observation.
+        with self._lock:
+            if self._activation is not activation:
+                return None
+        return view
 
     def is_query_envelope_current(self, envelope) -> bool:
         """Read published running authority without configuration or credential I/O."""
