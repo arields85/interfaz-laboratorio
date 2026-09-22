@@ -3,9 +3,14 @@ import { Pyramid } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import AnchoredOverlay from '../ui/AnchoredOverlay';
 import { useChannelAPairing, type ChannelAPairingPhase } from '../../hooks/useChannelAPairing';
+import { readHmiName } from '../../services/hmiName.service';
+import type { HmiNameReadResult } from '../../domain/hmiName';
 import { TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
 
 const DIALOG_LABEL = 'Vincular teléfono con Prisma';
+const MISSING_NAME_COPY = 'Configurá el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
+const READ_FAILURE_COPY = 'No se pudo leer el nombre guardado.';
+const READ_FAILURE_DIRECTION_COPY = 'Revisá el nombre de esta HMI en Configuración general → Prisma.';
 const QR_IMAGE_LABEL = 'Código QR para vincular Telegram';
 const TRIGGER_LABEL = 'Prisma';
 const CLOSE_LABEL = 'Cerrar';
@@ -48,13 +53,33 @@ function pairingStatusCopy(phase: ChannelAPairingPhase): string {
 // with manual open/close.
 export default function PrismaPairingControl() {
     const [open, setOpen] = useState(false);
+    // Result of the latest name read, refreshed on every panel open (never cached across
+    // openings and never re-read while closed). `null` means the panel was never opened yet.
+    const [nameRead, setNameRead] = useState<HmiNameReadResult | null>(null);
     const [panelSize, setPanelSize] = useState<PanelSize | null>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
-    const { phase, qr, remainingSeconds } = useChannelAPairing(open);
+
+    // The pairing hook only observes while the panel is open AND a valid configured name was
+    // read; a stale or mocked hook result can never leak a QR past this gate.
+    const nameGateOk = nameRead !== null && nameRead.ok && nameRead.name !== null;
+    const hookOpen = open && nameGateOk;
+    const { phase, qr, remainingSeconds } = useChannelAPairing(hookOpen);
 
     const close = () => setOpen(false);
-    const qrIsLive = phase === 'free' && qr !== null && remainingSeconds > 0;
+    const qrIsLive = hookOpen && phase === 'free' && qr !== null && remainingSeconds > 0;
+
+    // Read the saved name in the trigger handler before opening state, so each opening shows
+    // the current configuration without a setState-in-effect read cycle.
+    const togglePanel = () => {
+        if (open) {
+            setOpen(false);
+            return;
+        }
+        const read = readHmiName();
+        setNameRead(read);
+        setOpen(true);
+    };
 
     useEffect(() => {
         // The observer is owned by the open panel only: nothing observes while closed.
@@ -100,7 +125,7 @@ export default function PrismaPairingControl() {
                 aria-haspopup="dialog"
                 aria-expanded={open}
                 className={TOPBAR_ICON_BUTTON_CLS}
-                onClick={() => setOpen((value) => !value)}
+                onClick={togglePanel}
             >
                 <Pyramid size={20} />
             </button>
@@ -119,7 +144,25 @@ export default function PrismaPairingControl() {
                     className="w-72 rounded-2xl border border-industrial-border bg-industrial-surface/95 p-4 shadow-2xl backdrop-blur-xl"
                 >
                     <div className="flex flex-col gap-3">
-                        {qrIsLive && qr !== null ? (
+                        {!hookOpen ? (
+                            // Blocked states: the name service is the authority. A missing name is
+                            // actionable copy; a failed/invalid read is reported truthfully as a
+                            // read failure with the settings direction in its own paragraph.
+                            nameRead !== null && !nameRead.ok ? (
+                                <>
+                                    <p className="text-sm text-industrial-text-soft">
+                                        {READ_FAILURE_COPY}
+                                    </p>
+                                    <p className="text-sm text-industrial-text-soft">
+                                        {READ_FAILURE_DIRECTION_COPY}
+                                    </p>
+                                </>
+                            ) : (
+                                <p className="text-sm text-industrial-text-soft">
+                                    {MISSING_NAME_COPY}
+                                </p>
+                            )
+                        ) : qrIsLive && qr !== null ? (
                             <>
                                 <div className="rounded-xl bg-industrial-surface p-3">
                                     <QRCodeSVG

@@ -20,6 +20,16 @@
 //   generic (exact copy intentionally not pinned). No extra Renew/Apply/local-confirm buttons;
 //   no admin auth dependency. High-contrast token styling is checked by static source review,
 //   never by computed color assertions (jsdom does not resolve stylesheets).
+// - NAME gate (tracker `odd/tasks/prisma-pairing-name-preflight.md`): every panel open reads
+//   the saved HMI name through `readHmiName()` (service mocked at the boundary, default
+//   `{ ok: true, name: 'Panel recepción' }`), so later openings re-read instead of caching.
+//   A valid name preserves every existing behavior below. With no configured name the panel
+//   shows the actionable copy `Configurá el nombre de esta HMI en Configuración general →
+//   Prisma antes de vincular un teléfono.`; when the read itself fails or returns an invalid
+//   result it truthfully shows `No se pudo leer el nombre guardado.` with the settings
+//   direction instead of falsely claiming the name is absent. Both blocked states pass `false`
+//   to the pairing hook and render no QR even if a mocked/stale hook result contains one, and
+//   the close action still works.
 // - Panel sizing follows the anti-hardcode dimensional policy: the control measures the open
 //   panel at runtime (ResizeObserver/getBoundingClientRect) and feeds the SHARED
 //   AnchoredOverlay primitive, instead of arbitrary estimatedHeight/minWidth constants. The
@@ -31,6 +41,7 @@ import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { HmiNameReadResult } from '../../domain/hmiName';
 import PrismaPairingControl from './PrismaPairingControl';
 
 type PairingPhase =
@@ -50,6 +61,9 @@ interface PairingQr {
 const QR_LINK = `https://t.me/PrismaHmiBot?start=${'A'.repeat(43)}`;
 const DIALOG_NAME = 'Vincular teléfono con Prisma';
 const QR_IMG_NAME = 'Código QR para vincular Telegram';
+const MISSING_NAME_COPY = 'Configurá el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
+const READ_FAILURE_COPY = 'No se pudo leer el nombre guardado.';
+const SETTINGS_DIRECTION_FRAGMENT = 'Configuración general';
 
 // Mutable per-test fixture shaped exactly like the real hook return; the mock records every
 // `open` argument so manual open/close is asserted without any service or clock.
@@ -91,6 +105,34 @@ function setPairingFixture(phase: PairingPhase, qr: PairingQr | null, remainingS
     pairingFixture.remainingSeconds = remainingSeconds;
 }
 
+// The name service is the authority for the configured HMI name; the mock sits exactly on that
+// boundary and returns the real discriminated `HmiNameReadResult` union (never a parallel
+// validator). The default is a valid configured name so every pre-existing case keeps its
+// current pairing flow; each read is recorded so re-open behavior is observable without
+// duplicating any storage key or validation rule.
+const hmiNameBoundary = vi.hoisted(() => ({
+    result: {
+        ok: true,
+        name: 'Panel recepción',
+    } as HmiNameReadResult,
+    reads: [] as HmiNameReadResult[],
+}));
+
+const readHmiNameMock = vi.hoisted(() =>
+    vi.fn((): HmiNameReadResult => {
+        hmiNameBoundary.reads.push(hmiNameBoundary.result);
+        return hmiNameBoundary.result;
+    }),
+);
+
+vi.mock('../../services/hmiName.service', () => ({
+    readHmiName: readHmiNameMock,
+}));
+
+function setHmiNameResult(result: HmiNameReadResult): void {
+    hmiNameBoundary.result = result;
+}
+
 function liveQr(): PairingQr {
     return { deepLink: QR_LINK, expiresInSeconds: 42 };
 }
@@ -114,6 +156,9 @@ beforeEach(() => {
     setPairingFixture('closed', null, 0);
     pairingFixture.openArguments = [];
     useChannelAPairingMock.mockClear();
+    setHmiNameResult({ ok: true, name: 'Panel recepción' });
+    hmiNameBoundary.reads = [];
+    readHmiNameMock.mockClear();
 });
 
 // --- Runtime panel measurement fixture (anti-hardcode dimensional policy) --------------------
@@ -293,6 +338,92 @@ describe('PrismaPairingControl', () => {
         const dialogButtons = within(dialog).getAllByRole('button');
         expect(dialogButtons).toHaveLength(1);
         expect(dialogButtons[0]).toHaveAccessibleName('Cerrar');
+    });
+
+    it('blocks the panel with the actionable missing-name copy before any QR even while a challenge is live', async () => {
+        // A stale/live hook result must never leak a QR past the missing-name gate.
+        setPairingFixture('free', liveQr(), 42);
+        setHmiNameResult({ ok: true, name: null });
+
+        render(<PrismaPairingControl />);
+        const dialog = await openDialog();
+
+        expect(within(dialog).getByText(MISSING_NAME_COPY)).toBeInTheDocument();
+        // Truthful state separation: the read did not fail, so no failure copy may appear.
+        expect(within(dialog).queryByText(READ_FAILURE_COPY)).not.toBeInTheDocument();
+        expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
+        // The gate passes `false` to the existing hook on every call while the name is missing.
+        expect(pairingFixture.openArguments.every((value) => value === false)).toBe(true);
+
+        // The close action stays available in the blocked state.
+        const user = userEvent.setup();
+        await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+
+        expect(screen.queryByRole('dialog', { name: DIALOG_NAME })).not.toBeInTheDocument();
+        expect(pairingFixture.openArguments.at(-1)).toBe(false);
+    });
+
+    it('reports a failed or invalid name read truthfully with the settings direction and never a QR', async () => {
+        setPairingFixture('free', liveQr(), 42);
+
+        // Both service failure variants are real `HmiNameReadResult` members: an invalid saved
+        // value and unavailable storage. Neither may be reported as "no name configured".
+        const failures: ReadonlyArray<HmiNameReadResult> = [
+            { ok: false, name: null, error: 'invalid' },
+            { ok: false, name: null, error: 'unavailable' },
+        ];
+
+        for (const failure of failures) {
+            setHmiNameResult(failure);
+
+            const { unmount } = render(<PrismaPairingControl />);
+            const dialog = await openDialog();
+
+            expect(within(dialog).getByText(READ_FAILURE_COPY)).toBeInTheDocument();
+            // The direction reuses the existing admin settings route wording.
+            expect(within(dialog).getByText(new RegExp(SETTINGS_DIRECTION_FRAGMENT))).toBeInTheDocument();
+            expect(within(dialog).queryByText(MISSING_NAME_COPY)).not.toBeInTheDocument();
+            expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
+            expect(pairingFixture.openArguments.every((value) => value === false)).toBe(true);
+
+            unmount();
+        }
+    });
+
+    it('re-reads the saved name on every open: blocked while missing, pairing once configured, blocked again after clearing', async () => {
+        setHmiNameResult({ ok: true, name: null });
+
+        render(<PrismaPairingControl />);
+
+        const first = await openDialog();
+        expect(within(first).getByText(MISSING_NAME_COPY)).toBeInTheDocument();
+        expect(within(first).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
+
+        const user = userEvent.setup();
+        await user.click(within(first).getByRole('button', { name: 'Cerrar' }));
+
+        // Configuring the name in settings re-opens into the unchanged valid pairing flow;
+        // the changed behavior after a fixture change is the observable re-read proof.
+        setPairingFixture('free', liveQr(), 42);
+        setHmiNameResult({ ok: true, name: 'Panel recepción' });
+
+        const second = await openDialog();
+        expect(within(second).getByRole('img', { name: QR_IMG_NAME })).toBeInTheDocument();
+        expect(within(second).queryByText(MISSING_NAME_COPY)).not.toBeInTheDocument();
+
+        await user.click(within(second).getByRole('button', { name: 'Cerrar' }));
+
+        // Clearing the name blocks again on the next open.
+        setHmiNameResult({ ok: true, name: null });
+
+        const third = await openDialog();
+        expect(within(third).getByText(MISSING_NAME_COPY)).toBeInTheDocument();
+        expect(within(third).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
+
+        // Every opening performed its own service read (at least one per open), never a
+        // module-load snapshot; exact call counts stay unpinned to avoid coupling to renders.
+        expect(hmiNameBoundary.reads.length).toBeGreaterThanOrEqual(3);
+        expect(hmiNameBoundary.reads.at(-1)).toEqual({ ok: true, name: null });
     });
 
     it('reflects pending, linked and unavailable states with their copy and never a QR', async () => {
