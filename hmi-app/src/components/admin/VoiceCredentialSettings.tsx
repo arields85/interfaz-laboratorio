@@ -369,7 +369,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 aria-label="Proveedor de voz"
                 className="rounded border border-white/10 p-3"
             >
-                <legend className="float-left w-full px-0 text-industrial-text">Proveedor de voz</legend>
+                <legend className="float-left mb-3 w-full px-0 text-industrial-text">Proveedor de voz</legend>
                 <div className="clear-both" />
                 <div className="flex flex-col gap-2">
                     <label htmlFor="gemini-api-key-input" className="text-industrial-muted">API Key de Gemini</label>
