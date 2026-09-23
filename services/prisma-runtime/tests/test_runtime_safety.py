@@ -481,6 +481,10 @@ Write-Output "registered=$($receiptValue.registered);started=$global:started;sto
             result = self.run_powershell(command)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("registered=False;started=0;stopped=0", result.stdout)
+        # T1c: a manual reuse must still announce itself in the launcher terminal, distinct
+        # from the fresh-start message, so a relaunch after an abrupt close is not silent.
+        self.assertIn("Prisma voice is ready at http://127.0.0.1:5056 (already running).", result.stdout)
+        self.assertIn("Prisma is ready at http://127.0.0.1:5057 (already running).", result.stdout)
 
     def test_concurrent_acquisitions_join_one_owned_generation_without_manifest_corruption(self) -> None:
         start_script = OPERATIONS_ROOT / "start-local.ps1"
@@ -990,6 +994,10 @@ Write-Output "registered=$($receiptValue.registered);started=$global:started;sto
             result = self.run_powershell(command)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("registered=True;started=0;stopped=0", result.stdout)
+        # T1c: a healthy dev-owned reuse must also announce itself, matching the fresh-start
+        # messages' format (green, same URLs) but marked "(already running)".
+        self.assertIn("Prisma voice is ready at http://127.0.0.1:5056 (already running).", result.stdout)
+        self.assertIn("Prisma is ready at http://127.0.0.1:5057 (already running).", result.stdout)
 
     def test_start_local_recovers_an_identity_verified_but_unhealthy_runtime(self) -> None:
         """T1b acceptance (e): identity matches (listeners are verified as

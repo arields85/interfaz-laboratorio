@@ -113,6 +113,8 @@ function Invoke-PrismaStartTransaction {
         if (-not $ownershipProperty) {
             # Manual (non-development) runtime: reused as-is, exactly like today. Never
             # registered, stopped or health-checked.
+            Write-Host 'Prisma voice is ready at http://127.0.0.1:5056 (already running).' -ForegroundColor Green
+            Write-Host 'Prisma is ready at http://127.0.0.1:5057 (already running).' -ForegroundColor Green
             return [ordered]@{ registered = $false; generation = ''; reused = $true }
         }
         if ((Test-PrismaDevelopmentRuntimeIdentity -Manifest $canonical) -and (Test-PrismaDevelopmentRuntimeHealthy)) {
@@ -121,6 +123,11 @@ function Invoke-PrismaStartTransaction {
             Add-PrismaDevelopmentOwner -Manifest $canonical -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration $generation -OwnerIdentity $ownerIdentity
             Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $canonical
             Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
+            # T1c: reuse (e.g. after the launcher window was closed with X and relaunched) was
+            # previously silent, leaving the terminal showing only Vite with no indication
+            # Prisma was ever touched. Announce it the same way a fresh start does.
+            Write-Host 'Prisma voice is ready at http://127.0.0.1:5056 (already running).' -ForegroundColor Green
+            Write-Host 'Prisma is ready at http://127.0.0.1:5057 (already running).' -ForegroundColor Green
             return [ordered]@{ registered = $true; generation = $generation; reused = $true }
         }
         # Identity mismatch or an unhealthy runtime: never reused. Falls through to the
