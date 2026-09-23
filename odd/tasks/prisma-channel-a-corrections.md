@@ -109,6 +109,32 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   directly without forwarding; `clearScreen: false`. Route: delegated (writer). Commits
   `95d5d2a` (never-forward proxy fix), `f2ebf49` (clearScreen).
 
+- [x] **T1c** Manual test 2026-09-23 (point 3) found reuse after an abrupt close (window
+  closed with X, then relaunched) is silent: listeners on 5056/5057 survived (pids
+  27000/5056, started 10:06:35/38) and were correctly reused at 10:11 (the dead owner
+  reaped, new owner pid 12788 registered, Prisma worked, QR shown), but the terminal
+  showed only Vite — `Invoke-PrismaStartTransaction`'s two reuse `return`s (manual runtime,
+  and healthy identity-verified dev-owned runtime) never print anything. Fix: print the
+  same green "is ready" lines as a fresh start, marked "(already running)", on both reuse
+  paths; no other behavior change. Route: delegated (same writer). Commit `f34a8ad`.
+
+- [x] **T4d** Manual test 2026-09-23 (point 4, with `python -m http.server 5057` occupying
+  the port) found two remaining gaps after T4c: (1) `curl` against the proxy correctly
+  returned the 503 `port_in_use` marker, but the popover still showed only the generic
+  "Prisma no se pudo iniciar." — the session bootstrap (POST /api/prisma/session) got the
+  same marker (T4c answers every Prisma route consistently) but threw a generic Error that
+  discarded the detail, and `requestPairing`'s catch mapped it to `runtime_unreachable`
+  with no port; T4b's tests never exercised this because they mocked the session client
+  entirely. (2) The terminal printed 4 blocks of noise for one expected outcome: the clear
+  line, then a full PowerShell uncaught-error record, then dev.mjs's ownership-recovery
+  warning, then its generic "unavailable" warning. Fix A: shared
+  `prismaRuntimeUnreachable` module; session bootstrap throws a typed, detail-carrying
+  `PrismaRuntimeUnreachableError`; `requestPairing` recognizes it. Fix B: `start-local.ps1`
+  exits cleanly via a top-level handler instead of an uncaught throw for this one case;
+  `dev.mjs` skips the redundant recovery call and generic warning when the receipt already
+  carries a structured failure. Route: delegated (same writer). Commits `9ad120d` (Fix A),
+  `5cd10a5` (Fix B).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
@@ -484,9 +510,104 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   constants — neither touched, pre-existing pattern, not requested).
   Commit `f2ebf49` (`clearScreen: false` + its test; GGA PASSED, no notes).
 
+- 2026-09-23: T1c done. Confirmed the underlying reuse/reap behavior observed by the user
+  was already correct (listeners survived the abrupt close, the dead owner was reaped, the
+  new owner registered, Prisma worked) — only the terminal feedback was missing, because
+  both reuse `return`s in `Invoke-PrismaStartTransaction` (manual-runtime reuse around line
+  116, and healthy identity-verified dev-owned reuse around line 124) never printed
+  anything, unlike the fresh-start path a few lines below. Added
+  `Write-Host 'Prisma voice is ready at http://127.0.0.1:5056 (already running).'` and
+  `Write-Host 'Prisma is ready at http://127.0.0.1:5057 (already running).'`
+  (`-ForegroundColor Green`, matching the fresh-start lines exactly except for the
+  "(already running)" suffix) immediately before each reuse `return`; no other behavior
+  change. Extended the two existing reuse tests (`test_manual_canonical_runtime_is_reused_
+  without_start_or_stop_ownership`, `test_start_local_reuses_a_healthy_verified_runtime_
+  without_stopping_or_starting`) with `assertIn` checks against `result.stdout` for both
+  new lines, rather than adding a separate test, since `Write-Host` output is already
+  captured in `result.stdout` for these PowerShell subprocess invocations (confirmed by
+  the pre-existing `Write-Warning` lines already visible in that same stdout capture).
+  RED: both assertions failed against the unmodified source (the reuse paths printed
+  nothing beyond the pre-existing owner-identity warnings). GREEN: `test_runtime_safety` +
+  `test_operations` 53/53; full repo `python -m unittest discover` 1138/1138.
+  Commit `f34a8ad`.
+
+- 2026-09-23: T4d done. Fix A root cause (parent-traced, verified): `prismaSessionClient
+  .ts`'s `bootstrap()` POSTs to `/api/prisma/session`; once T4c made the proxy answer
+  every Prisma route with the same JSON marker, that POST got it too. `bootstrap()` did
+  `response.json()` (succeeds, valid JSON) then checked `response.status !== 201` (true,
+  503) and threw a generic `Error('Prisma session bootstrap failed')` -- never inspecting
+  the body for the marker. `prismaChannelAPairing.service.ts`'s `requestPairing()` awaits
+  `prismaSessionClient.fetch()`, which internally awaits `bootstrap()` first; its catch
+  only special-cased `AbortError`/`PrismaStaleSessionResponse`, so the generic Error fell
+  into the plain `PrismaChannelAPairingError('runtime_unreachable')` branch with no detail.
+  T4b/T4c's own tests never caught this because `prismaChannelAPairing.service.test.ts`
+  mocks `./prismaSessionClient` entirely (bootstrap never actually runs there).
+  Fix: new `hmi-app/src/services/prismaRuntimeUnreachable.ts` (marker/detail parsing +
+  `PrismaRuntimeUnreachableError`), used by both `prismaSessionClient.ts` (bootstrap now
+  checks the marker right after the epoch-staleness check, before the generic status/shape
+  validation, and throws the typed error) and `prismaChannelAPairing.service.ts` (removed
+  its own duplicated marker/detail functions in favor of the shared ones; `requestPairing`'s
+  catch now recognizes `PrismaRuntimeUnreachableError` and maps it to
+  `PrismaChannelAPairingError('runtime_unreachable', error.detail)` before the generic
+  fallback). `fetch()` and `#waitForBootstrap()` already propagated any bootstrap
+  rejection unchanged, so no change was needed there. Checked every other session-client
+  consumer (dashboardSnapshotExport, prismaVoiceTtsAudioSource, voiceEventListener,
+  usePrismaOrbPresentation, main.tsx): all catch generically (`catch (error: unknown)`,
+  bare `catch {}`, or `.catch(() => undefined)`) with no `instanceof` distinction, so they
+  treat the new error type exactly like the old plain Error -- no regressions. Added the
+  regression test the coordinator asked for: `prismaChannelAPairing.service.integration
+  .test.ts` (new file) exercises the REAL `prismaSessionClient` singleton + REAL
+  `prismaChannelAPairing` service (neither mocked), with only `global.fetch` stubbed to
+  answer `/api/prisma/session` with the 503 marker -- this is the one test that would have
+  caught the original bug. Also added two focused unit tests in `prismaSessionClient
+  .test.ts` for `bootstrap()`'s new marker recognition (with and without detail).
+  RED: `prismaSessionClient.test.ts` failed to even collect (missing module) and the
+  integration test's detail assertion failed, against the pre-fix source. GREEN: focused
+  61/61; full `npm test` 211 files / 2235 tests; `tsc -b --noEmit` and `eslint` clean.
+  Commit `9ad120d` (GGA PASSED, 1 non-blocking note: `isPlainObject` duplicated between
+  the shared module and the pairing service -- pre-existing pattern, not touched).
+
+  Fix B: verified structurally that `Invoke-PrismaStartTransaction`'s port_in_use throw is
+  its EARLIEST guard in the always-start recovery block, before `Prune-PrismaProcessManifest`,
+  `Assert-PrismaLocalPortsAvailable` or any `Start-Process`/manifest-write -- no development
+  owner is ever registered before it, so dev.mjs's ownership-recovery call has nothing to
+  recover for this case. `start-local.ps1`: the port_in_use branch now sets
+  `$script:portInUseTerminalMessage` right before its existing `throw $message` (kept as a
+  normal exception so `Invoke-PrismaManifestLock`'s own `finally { $stream.Dispose() }`
+  still unwinds correctly -- `exit` was deliberately NOT used this deep, since PowerShell
+  does not reliably run enclosing `finally` blocks for it); a NEW top-level `try/catch`
+  around the existing `Invoke-PrismaManifestLock` call recognizes that flag, prints the
+  one message with `Write-Host -ForegroundColor Red` (never `Write-Error`/`throw` at that
+  point, so no uncaught-error record), and calls `exit 1` directly (safe at this truly
+  top-level point); every other exception still `throw`s unchanged. `dev.mjs`: added
+  `hasPrismaStartupFailure()`; `acquire()`'s catch skips the `release-dev-local.ps1
+  -RecoverRegisteredOwner` call when the rejection already carries `.failure`;
+  `runDevelopment`'s catch skips the generic "Prisma Local is unavailable" warning in the
+  same case (start-local.ps1 already printed the one line that matters), and still runs
+  both exactly as before for every other rejection (regression-tested).
+  Rewrote the two existing port_in_use terminal-message tests in `test_runtime_safety.py`
+  to invoke `start-local.ps1` WITHOUT the test's own wrapping try/catch (an outer
+  try/catch can never observe `exit`, unlike a `throw`) and assert `result.returncode !=
+  0`, the one clean line in `result.stdout`, and the ABSENCE of `FullyQualifiedErrorId`/
+  `CategoryInfo` in `result.stderr`; the "never stops the foreign process" assertion moved
+  from an in-process `$global:stopped` variable (unobservable after `exit`) to a file
+  marker written by the stubbed `Stop-Process`. Added `hasPrismaStartupFailure`-skip
+  assertions to `dev.test.ts` (both the `acquire()`-level spawn-count check and the
+  `runDevelopment`-level `warn` check), with matching regression assertions for the
+  non-failure case (recovery/warning still run exactly as before).
+  RED: both rewritten PS tests failed against the pre-fix source (message landed in
+  stderr as part of the uncaught-error record, never in stdout); both new dev.test.ts
+  assertions failed against the pre-fix dev.mjs. GREEN: `test_runtime_safety` +
+  `test_operations` 53/53; full repo `python -m unittest discover` 1138/1138; full
+  `npm test` 211 files / 2235 tests; `tsc -b --noEmit` and `eslint` clean.
+  Commit `5cd10a5` (GGA: no matching files -- `.mjs` is outside its `*.js` glob, `.ps1`/
+  `.py` are outside its configured patterns entirely).
+
 ## Next step
 
-T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`, `039bf14`, `02d9695`) and T4c (`95d5d2a`,
-`f2ebf49`) are all committed. Next step: the user re-runs manual test point 4 (foreign
-process on 5057, confirm the popover now shows the port and the terminal message survives
-the Vite restart).
+T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`, `039bf14`, `02d9695`), T4c (`95d5d2a`,
+`f2ebf49`), T1c (`f34a8ad`) and T4d (`9ad120d`, `5cd10a5`) are all committed. Next step:
+the user re-runs manual test point 4 (foreign process on 5057, confirm the popover now
+shows the port through the session bootstrap AND the terminal shows exactly one clean
+red line) and re-checks point 3 (relaunch after closing the
+launcher window with X, confirm the terminal now announces the reused runtime).
