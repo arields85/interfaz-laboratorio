@@ -2,7 +2,7 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.20
+> **Versión documental:** 2.0.21
 >
 > **Fecha:** 2026-09-22
 >
@@ -16,12 +16,11 @@
 > mediante persistencia manual de identidad Node. No se ejecutaron gates completos finales
 > después de PW-005 ni pruebas en este cierre documental. Límites y cronología: §11.1.
 >
-> **NEXT SESSION:** presentar para aprobación una planificación acotada de la frontera de datos
-> semánticos compartidos HMI/Prisma de Entrega 1.3 (§6.4, §7.2, §8), preservando la interpretación
-> de widgets: aprobar esa planificación o aplazarla (§3.4), sin autorización implícita de fuente.
-> No iniciar automáticamente pruebas, servicios, proveedores ni push. PW-002/PW-004 no cambian;
-> PW-003 conserva solo el trabajo futuro amplio. Un único commit local está autorizado y pendiente
-> del padre; el hash real se registrará en Engram tras su éxito, sin cambiar hooks/configuración.
+> **Próximo paso:** diseño semántico acordado y [documentado](PRISMA_SEMANTIC_QUERY_SERVICE.md);
+> prueba acotada pendiente, sin implementación autorizada. Ahora corresponde revisión documental
+> y respaldo estable por el padre: commit, integración fast-forward a main y push a `origin/main`
+> autorizados. No iniciar pruebas, servicios ni proveedores. PW-002/PW-004 no cambian; PW-003
+> conserva el trabajo amplio. Hash y entrega se registrarán tras observarlos; no se hereda omisión de hooks.
 
 ## 1. Objetivo y estado general
 
@@ -608,8 +607,11 @@ La frontera compartida de datos deberá resolver como mínimo:
 - frescura y motivo de indisponibilidad.
 
 Se propone un catálogo compartido de instalaciones y una frontera de consulta común.
-Su modelo concreto está pendiente. Esto no autoriza reescribir toda la persistencia de
-la HMI ni crear un framework genérico de plugins.
+La dirección acordada, sus alternativas y la prueba inicial pendiente están en
+[Servicio de consulta semántica](PRISMA_SEMANTIC_QUERY_SERVICE.md): interpretación HMI compartida,
+consultas actuales tipadas por demanda y manifiesto derivado aún no implementado. La procedencia
+se conserva internamente; no se exige al modelo ni implica avisos automáticos de simulación.
+Esto no autoriza reescribir la persistencia ni crear un framework genérico de plugins.
 
 ### 6.5 Configuración en la HMI
 
@@ -738,6 +740,10 @@ alcance, razón y remedio; guardar no se confunde con verificar; una integració
 opcional deshabilitada permanece saludable.
 
 #### Entrega 1.3 — lenguaje natural textual y datos compartidos
+
+**Incremento acotado documentado:** [diseño semántico](PRISMA_SEMANTIC_QUERY_SERVICE.md) y
+[QRY-1–QRY-4](../../odd/tasks/prisma-semantic-query-service.md), pendientes de autorización nueva.
+No equivalen al cierre de esta entrega ni habilitan Canal B o histórico.
 
 **Alcance:**
 
@@ -980,9 +986,25 @@ supervisión administrados por IT, recuperación durable, retiro explícito de l
 y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
 points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
 
-### 11.1 Próximo paso vigente (checkpoint 2.0.20; registros anteriores históricos)
+### 11.1 Próximo paso vigente (checkpoint 2.0.21; registros anteriores históricos)
 
-**Checkpoint vigente 2.0.20 (2026-09-22) — cierre de sesión solicitado; CL aceptado y PW-005 cerrado.**
+**Checkpoint vigente 2.0.21 (2026-09-22) — diseño documentado; prueba inicial no implementada.**
+
+La dirección acordada y su evolución están en [Servicio de consulta semántica](PRISMA_SEMANTIC_QUERY_SERVICE.md);
+DOC-1 y las cuatro pruebas futuras se registran en el [tracker único](../../odd/tasks/prisma-semantic-query-service.md).
+QRY-1–QRY-4 requieren autorización explícita nueva: no iniciar implementación, pruebas, servicios
+ni proveedores. Canal B sigue aplazado. PW-003 conserva el roadmap amplio; PW-002/PW-004 son independientes.
+
+El cierre estable observado por el padre es `19adf7d`. CL (preguntas ejercitadas, Telegram, voz HMI y
+orbe) y PW-005 (Ctrl+C normal) permanecen aceptados con los límites y cronología de 2.0.20 debajo;
+no se repiten ni se afirma una suite completa nueva. Esta actualización es exclusivamente documental.
+
+**Siguiente acción:** revisión estática del padre y respaldo autorizado con documentación: commit,
+fast-forward de la rama existente a main y push a `origin/main` con autenticación Git configurada.
+Solo el padre ejecuta esas operaciones. Entrega y hash siguen pendientes de observación; no hay PR
+solicitado ni permiso heredado para omitir GGA o cambiar hooks/configuración.
+
+**Checkpoint histórico 2.0.20 (2026-09-22) — CL aceptado y PW-005 cerrado; permisos y próximos pasos sustituidos por 2.0.21.**
 
 - **CL6 aceptado por reporte del usuario:** «si, loacabo de comprobar y ahora si responde bien, no se evita ninguna pregunta y responde por telegram y por voz en la hmi mostrando el orbe.» Esto acepta las preguntas ejercitadas, las respuestas Telegram, la voz HMI y el orbe; no es una prueba ejecutada por el agente, una garantía sobre cualquier pregunta ni evidencia separada de navegación entre vistas o latencia.
 - **PW-005 cerrado por decisión explícita:** «listo asunto terminado, se cierra con ctrl+c y listo, no damos mas vueltas». El snapshot comunicado por el padre de `2026-09-22T19:47:25Z` no mostró listeners 5056/5057/5173 ni procesos Prisma ni errores. La recuperación tras cierre abrupto no fue demostrada independientemente: queda excluida de esta aceptación, no aprobada ni propuesta como próxima tarea.
@@ -1509,6 +1531,13 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.21 — 2026-09-22
+
+- Diseño semántico acordado documentado con alternativas, límites y cuatro pruebas futuras;
+  sin implementación autorizada ni cambios funcionales. PW-003 conserva el roadmap amplio.
+- Cierre estable `19adf7d`, CL y Ctrl+C preservados; revisión y respaldo a main autorizados al padre,
+  pendientes de observación, sin heredar omisión de hooks ni afirmar nuevas pruebas.
 
 ### 2.0.20 — 2026-09-22
 
