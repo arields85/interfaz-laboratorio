@@ -304,6 +304,62 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   tests). Commit `style(admin): unify credential verification into grouped
   icon buttons` (`8b2fb6e`).
 
+- [x] **T15** From the user's manual test of T14 (`8b2fb6e`), with two mid-task coordinator
+  additions (below). (1) Clicking Verify in one row disabled ALL rows' Save/Delete/Verify:
+  `usePrismaCredentialAdministration.ts`'s `runOperation` used one global
+  `operationRef`/`pendingAction`, and the panel-level `disabled` flag read it. Verification is
+  read-only per provider (backend already 409s a concurrent same-provider verify); moved verify
+  OUTSIDE the global mutation lock into its own `runVerify`, with per-provider
+  `verifyOperationsRef`/`verifyGenerationRef`/`verifyingProviders`, so only the pressed row's own
+  Verificar disables itself -- other rows' Save/Delete/Verify stay fully usable. **Decision**: a
+  same-row Save/Delete during that row's own in-flight verify IS allowed (verification is
+  read-only, does not conflict with a mutation); `saveCredential`/`deleteCredential` bump that
+  provider's `verifyGenerationRef` so a still-in-flight verify's result is discarded (thrown as
+  `AbortError`, already-ignored by the caller) once it resolves late. (2) The pressed Verify
+  button no longer swaps to a spinner -- it keeps its Play icon, just `disabled`; "Verificando…"
+  is text-only in both the button's accessible name and the result area (no `Loader2` anywhere
+  in this component any more). (3) Coordinator's first mid-task addition (superseding the
+  original narrower ask): the result area shows an icon ONLY for a `tone: 'success'` state (the
+  green `Check`) -- every other state (not-yet-verified, invalid/unreachable, connecting,
+  stopped, unconfirmed, in-flight) is text only, tinted by tone; the separate credential-presence
+  icon between the input and Save is unaffected. (4) Backend root-cause diagnosis (no service
+  starts/stops, tests only) -- **root cause** (file:line): `channel_a_lifecycle.py`'s
+  `ChannelARunner._terminal_fail()` (608-614) sets `phase='failed'` from the managed loop's OWN
+  background thread; `channel_a_manager.py`'s `_record_error()` (167-169), the only setter of
+  `manager._last_error`, is called ONLY from `_mutation()`'s except path and `status()`'s own
+  exception handler -- neither ever observes that background failure, since `_observe()`
+  (183-203) treats a valid `ChannelAStatus` with `phase='failed'` as a SUCCESSFUL observation.
+  So a genuinely, terminally failed activation (this module's own "no retry" design) reports
+  `lastError: None` alongside `activation.phase == 'failed'`; the pre-T15 frontend checked
+  `lastError` first and then lumped a bare `'failed'` phase into the same ambiguous "Estado no
+  confirmado" bucket as a truly unknown state. Reproduced in
+  `test_a_background_activation_failure_is_not_reflected_in_manager_last_error`
+  (`test_channel_a_manager.py`) before any fix. **Fix**: frontend-only for the
+  failed-vs-unconfirmed split (`channelAConnectionResult` now checks `phase === 'failed'`
+  independently of `lastError`, promoting it to the same critical "No se pudo conectar el bot"
+  text; only `'retired'` or a running phase with a pending restart stays "Estado no confirmado").
+  Separately, added a real `paired` signal (`ChannelAPairingRegistry.has_any_link()` ->
+  `ChannelAActivation.has_paired_owner()` -> `ChannelAManager.status()`'s new `paired` field,
+  gated exactly like `botUsername` -- only meaningful while running without a pending restart)
+  through `admin_http.py`'s `ADMIN_CHANNEL_A_STATUS_FIELDS` to the frontend domain type.
+  **Coordinator's second mid-task addition, final decision**: the live connection display
+  ALWAYS shows "@username" + Check when healthy/connected (paired or not) -- `paired` is used
+  ONLY in the post-Verificar transient message (Canal A: "Bot vinculado" / "Bot disponible, sin
+  vincular", text only, muted, for `VERIFICATION_RESULT_DISPLAY_MS`, then reverts to the
+  connection display; Canal B has no reliable paired signal, so its verify-success stays the
+  generic "@username" + Check, per the coordinator's own explicit fallback). **Coordinator's
+  third mid-task addition**: Gemini's resting result-area state now shows the assigned TTS model
+  name (`gemini_credentials.py`'s `GEMINI_VERIFY_MODEL`, exposed non-secret via
+  `admin_http.py`'s `_provider_metadata`/`admin_gemini_verify` as a new `model` field, never
+  hardcoded on the frontend) instead of "Verificación: no realizada"; a successful verify shows
+  "Verificado" + Check transiently, then reverts to the model name (still green/Check, since the
+  credential stays verified); invalid_key/unreachable persist as before. Route: direct (single
+  bounded writer, per coordinator instruction). Commits (work units):
+  `fix(admin): verify credentials per row without locking the panel` (`a1c0a9b`),
+  `fix(prisma): expose Canal A pairing state and the Gemini TTS model in admin status`
+  (`819a08f`), `style(admin): show only a success icon in the result area, with per-row
+  verify and Canal A pairing/Gemini model copy` (`36ba072`).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
@@ -1502,6 +1558,47 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   content-derived but fits the CONVENTIONS.md "fixed structural value" exception since 33 is
   Telegram's own API limit, not a guess). Commit `8b2fb6e`.
 
+- 2026-09-23: T15 done, in three commits (full task detail and root-cause diagnosis already
+  recorded in T15's own task entry above; this logs the RED/GREEN/GGA evidence).
+
+  **Hook** (`a1c0a9b`). RED: reused/extended the existing `usePrismaCredentialAdministration
+  .test.tsx` -- the 6 tests asserting `pendingAction === 'verify-*'` failed once verify stopped
+  setting it (moved to `runVerify`'s own `verifyingProviders`); updated them plus added a new
+  cross-row independence test and a same-row-save-discards-a-late-verify staleness test. GREEN:
+  `usePrismaCredentialAdministration.test.tsx` 32/32.
+
+  **Backend** (`819a08f`). RED per layer, each confirmed failing before implementing: 
+  `test_channel_a_pairing.py`'s `test_has_any_link_...` (`AttributeError`), 
+  `test_channel_a_activation.py`'s `test_has_paired_owner_...` (`AttributeError`), 
+  `test_channel_a_manager.py`'s `test_status_exposes_paired_...` (missing `STATUS_KEYS` member),
+  `test_channel_a_admin_http.py`'s two six-vs-eight-field assertions, `test_credential_http.py`'s
+  three exact-shape assertions missing `model`. Root-cause reproduction
+  (`test_a_background_activation_failure_is_not_reflected_in_manager_last_error`) is a
+  diagnostic, not a RED/GREEN pair -- it passes unchanged before and after (channel_a_manager.py
+  itself was not modified for that disconnect; the fix is frontend-only, see below). GREEN: full
+  `python -m unittest discover` 1195/1195 (43 new/updated assertions net across five files, no
+  regressions).
+
+  **Frontend** (`36ba072`). RED: ran the full pre-T15 `VoiceCredentialSettings.test.tsx` against
+  the rewritten component in three passes as the coordinator's scope grew -- 60 failures after
+  the per-row-verify/icon-removal rewrite (mostly a single root cause: every fixture missing the
+  new required `model`/`paired` domain fields, crashing `ResultDisplay` on `text.startsWith`),
+  down to 21 after fixing the shared fixtures, down to 3 after the per-state icon/text rewrites,
+  confirmed fixed after the icon-aria-label regression (`iconLabel` needed on the connection
+  "success" glyphs so `role=img name='Bot conectado'` didn't silently become the raw username)
+  and the Canal A paired-copy tests. Also fixed `GlobalSettingsDialog.voice.integration.test.tsx`
+  (5 raw fixtures needing `model`/`paired`, 1 icon-removal assertion) and
+  `usePrismaCredentialAdministration.test.tsx`/`adminAuth.service.test.ts`/
+  `adminCredential.types.test.ts` (fixture-only `model`/`paired` additions, all through the real
+  parser in those files). Added dedicated fake-timer tests for Gemini's own resting/verified/
+  revert/failure cycle (mirroring Canal A's) and a component-level cross-row independence test.
+  GREEN: `VoiceCredentialSettings.test.tsx` 79/79; full `npm test` 211 files / 2329 tests;
+  `npx tsc -b --noEmit` clean; `npm run lint` clean. GGA PASSED on the hook and the frontend
+  commits (2 optional non-blocking notes each, none acted on: a `CREDENTIAL_PROVIDERS` constant
+  suggestion for the hook, an icon-size-literal note for the component, both pre-existing-pattern
+  observations); the backend commit matched no GGA file pattern (`.py`), as with every prior
+  Python-only commit in this tracker.
+
 ## Next step
 
 All seventeen roadmap items were committed before T14. Still pending, unchanged by
@@ -1521,4 +1618,13 @@ each state (including a real long Telegram username if available), and the 5-sec
 auto-revert after a successful Canal A/B verification is visually smooth and not jarring; this
 writer's test suite only proves the DOM/timer contract, not the real rendered layout (no
 browser was available to confirm the exact `md:w-44`/`min-w-[33ch]` fit against real font
-metrics -- see the arithmetic in T14's own task entry above).
+metrics -- see the arithmetic in T14's own task entry above). New from T15: manual re-check of
+the panel confirming (a) verifying one row no longer blocks the other rows' Save/Delete/Verify
+in the real browser (this writer only proved it against mocked clients), (b) the Canal A
+"Bot vinculado"/"Bot disponible, sin vincular" transient message reads clearly before reverting
+to "@username" against a REAL paired and REAL unpaired bot (the `paired` backend signal was
+proven only against fakes/mocks, never a live Telegram pairing flow), (c) whether the
+previously-observed "Estado no confirmado" Canal A failure actually recurs as
+"No se pudo conectar el bot" now, ideally by reproducing a real transient network failure during
+long-polling (not exercised end-to-end -- this writer's Python tests mock every HTTP call), and
+(d) the Gemini model name displays legibly and turns green after a real verify.
