@@ -8,6 +8,7 @@ import {
     type ChannelAPairingStatus,
 } from '../domain/channelAPairing.types';
 import { PrismaStaleSessionResponse, prismaSessionClient } from './prismaSessionClient';
+import { isPrismaRuntimeUnreachableMarker, parsePrismaRuntimeUnreachableDetail, PrismaRuntimeUnreachableError } from './prismaRuntimeUnreachable';
 
 const CONFLICT_ERROR_CODE = 'PRISMA_CHANNEL_A_CONFLICT';
 
@@ -35,25 +36,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-// The dev proxy's own structured failure marker (T4b, vite.prismaProxy.config.ts's error
-// handler): { error: 'prisma_runtime_unreachable', reason?, port? }. Recognizing it takes
-// precedence over the generic "non-2xx with valid JSON = unavailable" rule below, because this
-// JSON body was never produced by the Prisma runtime itself — it is the proxy reporting that
-// the runtime could not be reached, exactly like the malformed-body case, just with detail.
-const RUNTIME_UNREACHABLE_MARKER = 'prisma_runtime_unreachable';
-
-function parseRuntimeUnreachableDetail(payload: unknown): ChannelARuntimeUnreachableDetail | undefined {
-    if (!isPlainObject(payload)) return undefined;
-    const { reason, port } = payload;
-    if (reason !== 'port_in_use') return undefined;
-    if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return undefined;
-    return { reason, port };
-}
-
-function isRuntimeUnreachableMarker(payload: unknown): boolean {
-    return isPlainObject(payload) && payload.error === RUNTIME_UNREACHABLE_MARKER;
-}
-
 // 409 counts as a pairing conflict only for the exact canonical payload; any extra key,
 // different code or malformed body falls back to the safe unavailable kind.
 function isExactConflictPayload(value: unknown): boolean {
@@ -76,9 +58,14 @@ async function requestPairing<T>(
         response = await prismaSessionClient.fetch(PRISMA_CHANNEL_A_PAIRING_URL, init);
     } catch (error: unknown) {
         if (isAbortError(error) || error instanceof PrismaStaleSessionResponse) throw error;
-        // fetch() only rejects for a genuine connectivity failure (a TypeError per the Fetch
-        // spec): the Prisma runtime was never reached at all, distinct from any case below
-        // where a real HTTP response was read from it.
+        // T4d: the session bootstrap itself can reject with this typed error when the proxy
+        // answered the session POST with its own runtime_unreachable marker (the launcher
+        // already detected a specific reason, e.g. a busy port) — carry that detail through
+        // instead of discarding it into the generic case below.
+        if (error instanceof PrismaRuntimeUnreachableError) throw new PrismaChannelAPairingError('runtime_unreachable', error.detail);
+        // fetch() otherwise only rejects for a genuine connectivity failure (a TypeError per
+        // the Fetch spec): the Prisma runtime was never reached at all, distinct from any case
+        // below where a real HTTP response was read from it.
         throw new PrismaChannelAPairingError('runtime_unreachable');
     }
 
@@ -107,8 +94,8 @@ async function requestPairing<T>(
     // The dev proxy's own runtime_unreachable marker takes precedence over every classification
     // below, including 409: a body carrying it was never produced by the Prisma runtime, no
     // matter which status code the proxy answered with, so it is never a real runtime response.
-    if (!response.ok && !bodyMalformed && isRuntimeUnreachableMarker(payload)) {
-        throw new PrismaChannelAPairingError('runtime_unreachable', parseRuntimeUnreachableDetail(payload));
+    if (!response.ok && !bodyMalformed && isPrismaRuntimeUnreachableMarker(payload)) {
+        throw new PrismaChannelAPairingError('runtime_unreachable', parsePrismaRuntimeUnreachableDetail(payload));
     }
 
     if (response.status === 409) {

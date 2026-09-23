@@ -7,6 +7,7 @@ import {
     PRISMA_TTS_LIVE_URL,
 } from '../config/prismaAssistant.config';
 import type { PrismaContextCommand, PrismaContextIntent, PrismaSessionMetadata, PrismaSessionRequestSnapshot } from '../domain/prismaSession.types';
+import { isPrismaRuntimeUnreachableMarker, parsePrismaRuntimeUnreachableDetail, PrismaRuntimeUnreachableError } from './prismaRuntimeUnreachable';
 
 const CAPABILITY_HEADER = 'X-Prisma-Session-Capability';
 const AUTHORIZED_PATHS = new Set([
@@ -139,6 +140,13 @@ export class PrismaSessionClient {
                 throw new Error('Prisma session bootstrap failed');
             }
             if (bootstrapEpoch !== this.#epoch) throw new PrismaStaleSessionResponse();
+            // T4d: the dev proxy answers EVERY Prisma route with its own runtime_unreachable
+            // marker once the launcher reported a startup failure, including this session
+            // POST -- distinct from the generic "malformed/unexpected" bucket below so the
+            // detected port can reach the pairing popover instead of being discarded here.
+            if (isPrismaRuntimeUnreachableMarker(metadata)) {
+                throw new PrismaRuntimeUnreachableError(parsePrismaRuntimeUnreachableDetail(metadata));
+            }
             const capability = response.headers.get(CAPABILITY_HEADER);
             if (response.status !== 201
                 || !isCanonicalCapability(capability)

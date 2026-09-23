@@ -14,6 +14,7 @@ afterEach(() => { expect(external.refused).toEqual([]); });
 afterAll(() => vi.unstubAllGlobals());
 
 import { PrismaSessionClient, PrismaStaleSessionResponse } from './prismaSessionClient';
+import { PrismaRuntimeUnreachableError } from './prismaRuntimeUnreachable';
 
 function canonicalCapability(seed = 0): string {
     const bytes = Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
@@ -309,6 +310,35 @@ describe('PrismaSessionClient', () => {
             await expect(client.fetch('/api/prisma/events/latest')).rejects.toThrow('Prisma session bootstrap failed');
             expect(fetchMock).toHaveBeenCalledOnce();
         }
+    });
+
+    it('T4d: rejects bootstrap with a typed, detail-carrying error when the dev proxy answers the session endpoint with its own runtime_unreachable marker', async () => {
+        const markerResponse = new Response(
+            JSON.stringify({ error: 'prisma_runtime_unreachable', reason: 'port_in_use', port: 5057 }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } },
+        );
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(markerResponse);
+        const client = new PrismaSessionClient(fetchMock);
+
+        const caught = await client.fetch('/api/prisma/events/latest').catch((error: unknown) => error);
+
+        expect(caught).toBeInstanceOf(PrismaRuntimeUnreachableError);
+        expect((caught as PrismaRuntimeUnreachableError).detail).toEqual({ reason: 'port_in_use', port: 5057 });
+        expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it('T4d: reports no detail when the marker carries none, still distinct from the generic bootstrap failure', async () => {
+        const markerResponse = new Response(
+            JSON.stringify({ error: 'prisma_runtime_unreachable' }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } },
+        );
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(markerResponse);
+        const client = new PrismaSessionClient(fetchMock);
+
+        const caught = await client.fetch('/api/prisma/events/latest').catch((error: unknown) => error);
+
+        expect(caught).toBeInstanceOf(PrismaRuntimeUnreachableError);
+        expect((caught as PrismaRuntimeUnreachableError).detail).toBeUndefined();
     });
 
     it('keeps caller and session abort wiring until a TTS stream terminates', async () => {
