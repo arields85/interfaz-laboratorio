@@ -10,6 +10,7 @@ sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from prisma_runtime.admin_http import AdminHttpBoundary
 from prisma_runtime.credential_store import CredentialUnavailable
+from prisma_runtime.gemini_credentials import GeminiVerification, GeminiVerificationInProgress
 from prisma_runtime.local_presentation import JsonFileStore, VoiceEventStore, create_app
 
 
@@ -26,8 +27,13 @@ class CredentialHttpTests(unittest.TestCase):
         self.session = SimpleNamespace(csrf_token="csrf-token", username="admin")
         self.auth.read_session.return_value = self.session
         self.telegram_manager = Mock()
+        self.gemini_verification = Mock()
+        self.gemini_verification.snapshot.return_value = GeminiVerification("not_checked", None)
         boundary = AdminHttpBoundary(
-            self.auth, credential_service=self.credentials, telegram_manager=self.telegram_manager
+            self.auth,
+            credential_service=self.credentials,
+            telegram_manager=self.telegram_manager,
+            gemini_verification_service=self.gemini_verification,
         )
         self.client = create_app(
             JsonFileStore(self.root / "snapshot.json"),
@@ -85,7 +91,11 @@ class CredentialHttpTests(unittest.TestCase):
             {
                 "ok": True,
                 "providers": {
-                    "gemini": {"configured": True},
+                    "gemini": {
+                        "configured": True,
+                        "verified": False,
+                        "verification": {"state": "not_checked", "checkedAt": None},
+                    },
                     "telegram": {"configured": False},
                     "telegram_channel_a": {"configured": False},
                 },
@@ -103,11 +113,38 @@ class CredentialHttpTests(unittest.TestCase):
         self.assertEqual(saved.get_json(), {"ok": True, "provider": "gemini", "configured": True})
         self.credentials.set_secret.assert_called_once_with("gemini", SECRET)
         self.assertNotIn(SECRET, saved.get_data(as_text=True))
+        # Saving a new Gemini credential invalidates any prior verification result.
+        self.gemini_verification.reset.assert_called_once_with()
+
         deleted = self.client.delete(
             "/api/prisma/admin/credentials/gemini", headers=self.headers, environ_overrides=self.environ
         )
         self.assertEqual(deleted.status_code, 204)
         self.credentials.delete_secret.assert_called_once_with("gemini")
+        # Deleting it resets verification too.
+        self.assertEqual(self.gemini_verification.reset.call_count, 2)
+
+    def test_gemini_verification_reset_is_optional_when_no_service_is_composed(self) -> None:
+        boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
+        client = create_app(
+            JsonFileStore(self.root / "no-verification-snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        client.set_cookie("prisma_admin_session", "session-id", path="/api/prisma/admin")
+        self.credentials.status.return_value = {"gemini": False, "telegram": False, "telegram_channel_a": False}
+
+        status = client.get("/api/prisma/admin/credentials", environ_overrides=self.environ)
+        self.assertEqual(
+            status.get_json()["providers"]["gemini"],
+            {"configured": False, "verified": False, "verification": {"state": "not_checked", "checkedAt": None}},
+        )
+
+        saved = client.put(
+            "/api/prisma/admin/credentials/gemini",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.status_code, 200)
 
     def test_strict_provider_payload_type_shape_and_decoded_bound_are_controlled(self) -> None:
         invalid_payloads = (None, [], {}, {"secret": None}, {"secret": ""}, {"secret": "   "}, {"secret": "x", "extra": 1})
@@ -238,6 +275,109 @@ class CredentialHttpTests(unittest.TestCase):
         self.assertEqual(response.get_json(), {"ok": False, "error": "CREDENTIAL_STORAGE_UNAVAILABLE"})
         self.assertNotIn(SECRET, response.get_data(as_text=True))
         self.assertNotIn("sensitive", response.get_data(as_text=True))
+
+
+class GeminiVerifyHttpTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.auth = Mock()
+        self.credentials = Mock()
+        self.credentials.status.return_value = {"gemini": True, "telegram": False, "telegram_channel_a": False}
+        self.session = SimpleNamespace(csrf_token="csrf-token", username="admin")
+        self.auth.read_session.return_value = self.session
+        self.verification = Mock()
+        self.verification.snapshot.return_value = GeminiVerification("not_checked", None)
+        boundary = AdminHttpBoundary(
+            self.auth, credential_service=self.credentials, gemini_verification_service=self.verification
+        )
+        self.client = create_app(
+            JsonFileStore(self.root / "snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        self.client.set_cookie("prisma_admin_session", "session-id", path="/api/prisma/admin")
+        self.environ = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
+        self.headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf-token"}
+
+    def _verify(self):
+        return self.client.post(
+            "/api/prisma/admin/credentials/gemini/verify", headers=self.headers, environ_overrides=self.environ
+        )
+
+    def test_requires_authenticated_session_before_verifying(self) -> None:
+        self.auth.read_session.return_value = None
+        response = self._verify()
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
+        self.verification.verify.assert_not_called()
+
+    def test_requires_origin_and_valid_csrf(self) -> None:
+        missing_origin = self.client.post(
+            "/api/prisma/admin/credentials/gemini/verify",
+            headers={"X-CSRF-Token": "csrf-token"},
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(missing_origin.status_code, 403)
+
+        bad_csrf = self.client.post(
+            "/api/prisma/admin/credentials/gemini/verify",
+            headers={"Origin": "http://localhost:5173", "X-CSRF-Token": "wrong"},
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(bad_csrf.status_code, 403)
+        self.assertEqual(bad_csrf.get_json()["error"], "CSRF_VALIDATION_FAILED")
+        self.verification.verify.assert_not_called()
+
+    def test_successful_verification_reports_the_gemini_status_shape(self) -> None:
+        self.verification.verify.return_value = GeminiVerification("verified", 123.5)
+        response = self._verify()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "ok": True,
+                "gemini": {
+                    "configured": True,
+                    "verified": True,
+                    "verification": {"state": "verified", "checkedAt": 123.5},
+                },
+            },
+        )
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+
+    def test_invalid_key_and_unreachable_report_without_leaking_provider_text(self) -> None:
+        for state in ("invalid_key", "unreachable", "not_configured"):
+            with self.subTest(state=state):
+                self.verification.verify.return_value = GeminiVerification(state, 1.0)
+                response = self._verify()
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["gemini"]["verification"]["state"], state)
+                self.assertEqual(response.get_json()["gemini"]["verified"], state == "verified")
+
+    def test_concurrent_verification_is_rejected_with_409(self) -> None:
+        self.verification.verify.side_effect = GeminiVerificationInProgress("GEMINI_VERIFICATION_IN_PROGRESS")
+        response = self._verify()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "GEMINI_VERIFICATION_IN_PROGRESS")
+
+    def test_missing_verification_service_fails_closed(self) -> None:
+        boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
+        client = create_app(
+            JsonFileStore(self.root / "unavailable-snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        client.set_cookie("prisma_admin_session", "session-id", path="/api/prisma/admin")
+        response = client.post(
+            "/api/prisma/admin/credentials/gemini/verify", headers=self.headers, environ_overrides=self.environ
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "GEMINI_VERIFICATION_UNAVAILABLE")
+
+    def test_verify_route_is_no_store_and_never_leaks_a_get_lookalike(self) -> None:
+        self.verification.verify.return_value = GeminiVerification("verified", 1.0)
+        wrong_method = self.client.get(
+            "/api/prisma/admin/credentials/gemini/verify", environ_overrides=self.environ
+        )
+        self.assertEqual(wrong_method.status_code, 405)
 
 
 if __name__ == "__main__":

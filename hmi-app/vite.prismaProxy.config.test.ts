@@ -84,6 +84,7 @@ describe('Prisma Vite proxy configuration', () => {
         ['/api/prisma/admin/auth/logout', '/api/prisma/admin/auth/logout', ['POST']],
         ['/api/prisma/admin/credentials', '/api/prisma/admin/credentials', ['GET']],
         ['/api/prisma/admin/credentials/gemini', '/api/prisma/admin/credentials/gemini', ['PUT', 'DELETE']],
+        ['/api/prisma/admin/credentials/gemini/verify', '/api/prisma/admin/credentials/gemini/verify', ['POST']],
         ['/api/prisma/admin/credentials/telegram', '/api/prisma/admin/credentials/telegram', ['PUT', 'DELETE']],
         ['/api/prisma/admin/credentials/telegram_channel_a', '/api/prisma/admin/credentials/telegram_channel_a', ['PUT', 'DELETE']],
         ['/api/prisma/admin/credentials/telegram_channel_a/status', '/api/prisma/admin/credentials/telegram_channel_a/status', ['GET']],
@@ -113,6 +114,10 @@ describe('Prisma Vite proxy configuration', () => {
         '/api/prisma/admin/credentials/telegram_channel_a/apply%2Fextra',
         '/api/prisma/admin/credentials%2Ftelegram_channel_a',
         '/api/prisma/admin/credentials/telegram_channel_b',
+        '/api/prisma/admin/credentials/gemini/verify/',
+        '/api/prisma/admin/credentials/gemini/verify/extra',
+        '/api/prisma/admin/credentials/gemini/verify%2Fextra',
+        '/api/prisma/admin/credentials/gemini%2Fverify',
     ])('rejects the path lookalike %s', (path) => {
         expect(PRISMA_PROXY_ROUTES.some(({ pattern }) => new RegExp(pattern).test(path))).toBe(false);
     });

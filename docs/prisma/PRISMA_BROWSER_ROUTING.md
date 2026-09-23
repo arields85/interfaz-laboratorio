@@ -20,6 +20,7 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/prisma/admin/auth/logout` | `POST` | Same path on `http://127.0.0.1:5057` | Administrator revocation |
 | `/api/prisma/admin/credentials` | `GET` | Same path on `http://127.0.0.1:5057` | Metadata-only credential status |
 | `/api/prisma/admin/credentials/gemini` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Gemini credential save and deletion |
+| `/api/prisma/admin/credentials/gemini/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-generating Gemini API key verification |
 | `/api/prisma/admin/credentials/telegram` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Telegram credential save and deletion |
 | `/api/prisma/admin/credentials/telegram/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Telegram apply and restart |
 | `/api/prisma/admin/credentials/telegram_channel_a` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Channel A credential save and deletion |
@@ -45,6 +46,12 @@ The Channel A credential route only writes or deletes a secret in the protected 
 `configured: true` metadata value means the store holds a Channel A credential; it does not mean the
 Channel A bot is running, verified, paired, or connected. Channel A runtime status, apply, pairing,
 and session routes are not part of this proxy yet.
+
+The Gemini verify route triggers one on-demand, non-generating key check against Google (a model
+lookup, never a generation call, so it never consumes generation quota) and reports a closed
+classification (`verified`, `invalid_key`, `unreachable`, or `not_configured`) with a timestamp; it
+never returns the secret or raw provider error text. The result lives only in the runtime's process
+memory (not persisted) and resets to unverified whenever the Gemini credential is saved or deleted.
 
 The `/api/prisma/snapshot` publish command may carry an optional `frameGeneration` (positive
 JavaScript-safe integer): the browser exporter mints exactly one generation per view visit and

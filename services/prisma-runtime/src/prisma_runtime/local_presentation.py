@@ -33,6 +33,7 @@ from .channel_a_manager import ChannelAManager
 from .channel_a_pairing import OPAQUE_CHARS, PRISMA_CHANNEL_A_CONFLICT, ChannelAPairingConflict
 from .channel_a_transport import ChannelATransport
 from .credential_store import CredentialService
+from .gemini_credentials import GeminiCredentialResolver, GeminiVerificationService
 from .hmi_sessions import (
     CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge,
     HmiSessionContextUnavailable, HmiSessionError, HmiSessionRegistry, HmiSessionUnauthorized,
@@ -924,12 +925,18 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 reservation=identity_reservation,
             )
 
+        # Same protected store the generic credential routes already resolve
+        # Gemini through; verification never gets its own credential source.
+        gemini_verification_service = GeminiVerificationService(
+            GeminiCredentialResolver(os.environ, lambda: credentials)
+        )
         admin_http = AdminHttpBoundary(
             AdminAuthService(repository, ScryptPasswordHasher()),
             credential_service=credentials,
             telegram_manager=telegram_manager,
             channel_a_manager=channel_a_manager,
             public_origin=os.environ.get("PRISMA_PUBLIC_ORIGIN"),
+            gemini_verification_service=gemini_verification_service,
         )
     app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry, channel_a_manager=channel_a_manager)
     admin_http.register(app)
