@@ -17,6 +17,7 @@ from .channel_a_manager import ChannelAManagerError
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
 from .gemini_credentials import GeminiVerificationInProgress
 from .telegram_lifecycle import TelegramLifecycleError
+from .telegram_verification import TelegramTokenVerificationInProgress
 
 
 COOKIE_NAME = "prisma_admin_session"
@@ -31,9 +32,11 @@ MAX_CREDENTIAL_REQUEST_BYTES = (
 MAX_TELEGRAM_APPLY_REQUEST_BYTES = 128
 TELEGRAM_APPLY_ROUTE = "/api/prisma/admin/credentials/telegram/apply"
 GEMINI_VERIFY_ROUTE = "/api/prisma/admin/credentials/gemini/verify"
+TELEGRAM_VERIFY_ROUTE = "/api/prisma/admin/credentials/telegram/verify"
 CHANNEL_A_PROVIDER = "telegram_channel_a"
 CHANNEL_A_STATUS_ROUTE = f"{CREDENTIAL_ROUTE_ROOT}/{CHANNEL_A_PROVIDER}/status"
 CHANNEL_A_APPLY_ROUTE = f"{CREDENTIAL_ROUTE_ROOT}/{CHANNEL_A_PROVIDER}/apply"
+CHANNEL_A_VERIFY_ROUTE = f"{CREDENTIAL_ROUTE_ROOT}/{CHANNEL_A_PROVIDER}/verify"
 # Closed refusal for every Channel A route when no manager was composed into
 # this boundary: no direct-store fallback exists for Channel A (approved user
 # decision), and the report must stay independent of store availability.
@@ -169,12 +172,16 @@ class AdminHttpBoundary:
         channel_a_manager=None,
         public_origin: str | None = None,
         gemini_verification_service=None,
+        telegram_verification_service=None,
+        channel_a_verification_service=None,
     ):
         self.auth_service = auth_service
         self.credential_service = credential_service
         self.telegram_manager = telegram_manager
         self.channel_a_manager = channel_a_manager
         self.gemini_verification_service = gemini_verification_service
+        self.telegram_verification_service = telegram_verification_service
+        self.channel_a_verification_service = channel_a_verification_service
         self.transport = TransportPolicy.build(public_origin)
 
     def _gemini_verification_snapshot(self) -> dict:
@@ -185,17 +192,37 @@ class AdminHttpBoundary:
         snapshot = self.gemini_verification_service.snapshot()
         return {"state": snapshot.state, "checkedAt": snapshot.checked_at}
 
+    def _telegram_family_verification_snapshot(self, service) -> dict:
+        """Same closed not_checked shape as Gemini's, plus the bot username
+        the last successful verification observed (never the token itself);
+        a missing service reports the same shape instead of crashing."""
+        if service is None:
+            return {"state": "not_checked", "checkedAt": None, "username": None}
+        snapshot = service.snapshot()
+        return {"state": snapshot.state, "checkedAt": snapshot.checked_at, "username": snapshot.username}
+
     def _provider_metadata(self, provider: str, configured: bool) -> dict:
-        if provider != "gemini":
+        if provider == "gemini":
+            verification = self._gemini_verification_snapshot()
+        elif provider == "telegram":
+            verification = self._telegram_family_verification_snapshot(self.telegram_verification_service)
+        elif provider == CHANNEL_A_PROVIDER:
+            verification = self._telegram_family_verification_snapshot(self.channel_a_verification_service)
+        else:
             return {"configured": configured}
-        verification = self._gemini_verification_snapshot()
         return {"configured": configured, "verified": verification["state"] == "verified", "verification": verification}
 
-    def _reset_gemini_verification_if_applicable(self, provider: str) -> None:
-        """Saving or deleting the Gemini credential invalidates any prior
-        verification result; a missing service is a silent no-op."""
-        if provider == "gemini" and self.gemini_verification_service is not None:
-            self.gemini_verification_service.reset()
+    def _reset_verification_if_applicable(self, provider: str) -> None:
+        """Saving or deleting a credential invalidates any prior verification
+        result for that exact provider only; a missing service, or a provider
+        with no verification service at all, is a silent no-op."""
+        service = {
+            "gemini": self.gemini_verification_service,
+            "telegram": self.telegram_verification_service,
+            CHANNEL_A_PROVIDER: self.channel_a_verification_service,
+        }.get(provider)
+        if service is not None:
+            service.reset()
 
     def _channel_a_manager_error(self, error):
         """Map a closed manager error through the frozen allowlist."""
@@ -246,6 +273,7 @@ class AdminHttpBoundary:
         except ChannelAManagerError as error:
             return self._channel_a_manager_error(error)
         self._apply_channel_a_after_save()
+        self._reset_verification_if_applicable(CHANNEL_A_PROVIDER)
         response = jsonify({"ok": True, "provider": provider, "configured": True})
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -259,6 +287,7 @@ class AdminHttpBoundary:
             self.channel_a_manager.delete_credential()
         except ChannelAManagerError as error:
             return self._channel_a_manager_error(error)
+        self._reset_verification_if_applicable(CHANNEL_A_PROVIDER)
         response = Response(status=204)
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -335,7 +364,8 @@ class AdminHttpBoundary:
                 or provider_path
                 or path == TELEGRAM_APPLY_ROUTE
                 or path == GEMINI_VERIFY_ROUTE
-                or path in (CHANNEL_A_STATUS_ROUTE, CHANNEL_A_APPLY_ROUTE)
+                or path == TELEGRAM_VERIFY_ROUTE
+                or path in (CHANNEL_A_STATUS_ROUTE, CHANNEL_A_APPLY_ROUTE, CHANNEL_A_VERIFY_ROUTE)
             ):
                 response.headers["Cache-Control"] = "no-store"
             return response
@@ -470,7 +500,7 @@ class AdminHttpBoundary:
                     self._apply_telegram_after_save()
                 else:
                     self.credential_service.set_secret(provider, secret)
-                self._reset_gemini_verification_if_applicable(provider)
+                self._reset_verification_if_applicable(provider)
                 response = jsonify({"ok": True, "provider": provider, "configured": True})
                 response.headers["Cache-Control"] = "no-store"
                 return response
@@ -499,7 +529,7 @@ class AdminHttpBoundary:
                         return self._error("TELEGRAM_STOP_TIMEOUT", 409)
                 else:
                     self.credential_service.delete_secret(provider)
-                self._reset_gemini_verification_if_applicable(provider)
+                self._reset_verification_if_applicable(provider)
                 response = Response(status=204)
                 response.headers["Cache-Control"] = "no-store"
                 return response
@@ -537,6 +567,64 @@ class AdminHttpBoundary:
             })
             response.headers["Cache-Control"] = "no-store"
             return response
+
+        def _telegram_family_verify(*, service, in_progress_code, unavailable_code, provider, key):
+            """Shared body for both Telegram-family verify routes (T13).
+
+            Same auth/origin/CSRF pattern and non-leaking contract as Gemini's
+            verify route; never starts, stops or restarts the bot, and never
+            reads or advances its update offset -- the composed service only
+            ever performs one non-sending ``getMe`` call.
+            """
+            rejected = self._allow(require_origin=True)
+            if rejected:
+                return rejected
+            _, rejected = self._authorized_session(require_csrf=True)
+            if rejected:
+                return rejected
+            if service is None:
+                return self._error(unavailable_code, 503)
+            try:
+                result = service.verify()
+            except TelegramTokenVerificationInProgress:
+                return self._error(in_progress_code, 409)
+            try:
+                configured = bool(self.credential_service.status()[provider]) if self.credential_service is not None else False
+            except (CredentialUnavailable, KeyError, TypeError):
+                configured = False
+            verification = {"state": result.state, "checkedAt": result.checked_at, "username": result.username}
+            response = jsonify({
+                "ok": True,
+                key: {"configured": configured, "verified": result.state == "verified", "verification": verification},
+            })
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+        @app.post(TELEGRAM_VERIFY_ROUTE)
+        def admin_telegram_verify():
+            """Explicit, admin-authenticated, non-sending Telegram (Canal B)
+            bot token check: one ``getMe`` call, never ``getUpdates`` or a
+            send."""
+            return _telegram_family_verify(
+                service=self.telegram_verification_service,
+                in_progress_code="TELEGRAM_VERIFICATION_IN_PROGRESS",
+                unavailable_code="TELEGRAM_VERIFICATION_UNAVAILABLE",
+                provider="telegram",
+                key="telegram",
+            )
+
+        @app.post(CHANNEL_A_VERIFY_ROUTE)
+        def admin_channel_a_verify():
+            """Same non-sending Telegram token check for Channel A. Deliberately
+            independent of ``channel_a_manager``: verification never touches
+            manager mutation state (busy lock, activation, generations)."""
+            return _telegram_family_verify(
+                service=self.channel_a_verification_service,
+                in_progress_code="PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS",
+                unavailable_code="PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE",
+                provider=CHANNEL_A_PROVIDER,
+                key="channelA",
+            )
 
         @app.post(TELEGRAM_APPLY_ROUTE)
         def admin_telegram_apply():

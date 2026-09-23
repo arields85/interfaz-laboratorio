@@ -128,6 +128,11 @@ class ChannelAManager:
         self._reservation = reservation
         # This closure captures the protected service, never a resolved secret.
         self._resolver = ChannelACredentialResolver(lambda: credential_service)
+        # Public alias for composition callers that need only a read-only
+        # resolve() (T13: on-demand token verification, composed outside this
+        # manager, mirrors TelegramLifecycleManager's own public `resolver`
+        # attribute). Internal call sites keep using `_resolver` unchanged.
+        self.resolver = self._resolver
         self._lock = Lock()
         self._busy = False
         self._activation = None

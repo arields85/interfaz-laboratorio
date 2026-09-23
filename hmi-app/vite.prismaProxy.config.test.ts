@@ -12,6 +12,7 @@ import {
 const CHANNEL_A_CREDENTIAL_PATH = '/api/prisma/admin/credentials/telegram_channel_a';
 const CHANNEL_A_STATUS_PATH = '/api/prisma/admin/credentials/telegram_channel_a/status';
 const CHANNEL_A_APPLY_PATH = '/api/prisma/admin/credentials/telegram_channel_a/apply';
+const CHANNEL_A_VERIFY_PATH = '/api/prisma/admin/credentials/telegram_channel_a/verify';
 const CHANNEL_A_PAIRING_BROWSER_PATH = '/api/prisma/channel-a/pairing';
 const CHANNEL_A_PAIRING_UPSTREAM_PATH = '/hmi/channel-a/pairing';
 
@@ -90,6 +91,8 @@ describe('Prisma Vite proxy configuration', () => {
         ['/api/prisma/admin/credentials/telegram_channel_a/status', '/api/prisma/admin/credentials/telegram_channel_a/status', ['GET']],
         ['/api/prisma/admin/credentials/telegram_channel_a/apply', '/api/prisma/admin/credentials/telegram_channel_a/apply', ['POST']],
         ['/api/prisma/admin/credentials/telegram/apply', '/api/prisma/admin/credentials/telegram/apply', ['POST']],
+        ['/api/prisma/admin/credentials/telegram/verify', '/api/prisma/admin/credentials/telegram/verify', ['POST']],
+        ['/api/prisma/admin/credentials/telegram_channel_a/verify', '/api/prisma/admin/credentials/telegram_channel_a/verify', ['POST']],
         ['/api/prisma/health', '/health', ['GET']],
     ])('declares the exact admin route %s with its method allowlist', (browserPath, upstreamPath, methods) => {
         const route = PRISMA_PROXY_ROUTES.find((candidate) => candidate.browserPath === browserPath);
@@ -118,6 +121,12 @@ describe('Prisma Vite proxy configuration', () => {
         '/api/prisma/admin/credentials/gemini/verify/extra',
         '/api/prisma/admin/credentials/gemini/verify%2Fextra',
         '/api/prisma/admin/credentials/gemini%2Fverify',
+        '/api/prisma/admin/credentials/telegram/verify/',
+        '/api/prisma/admin/credentials/telegram/verify/extra',
+        '/api/prisma/admin/credentials/telegram/verify%2Fextra',
+        '/api/prisma/admin/credentials/telegram_channel_a/verify/',
+        '/api/prisma/admin/credentials/telegram_channel_a/verify/extra',
+        '/api/prisma/admin/credentials/telegram_channel_a/verify%2Fextra',
     ])('rejects the path lookalike %s', (path) => {
         expect(PRISMA_PROXY_ROUTES.some(({ pattern }) => new RegExp(pattern).test(path))).toBe(false);
     });
@@ -133,17 +142,19 @@ describe('Prisma Vite proxy configuration', () => {
         expect(channelAPattern.test(CHANNEL_A_APPLY_PATH)).toBe(false);
     });
 
-    it('adds exactly three anchored channel A admin routes with the local 5057 target and stripped session capability', () => {
+    it('adds exactly four anchored channel A admin routes with the local 5057 target and stripped session capability', () => {
         const aRoutes = PRISMA_PROXY_ROUTES.filter((candidate) => candidate.browserPath.includes('channel_a'));
         expect(aRoutes.map((candidate) => candidate.browserPath)).toEqual([
             CHANNEL_A_CREDENTIAL_PATH,
             CHANNEL_A_STATUS_PATH,
             CHANNEL_A_APPLY_PATH,
+            CHANNEL_A_VERIFY_PATH,
         ]);
 
         const credential = aRoutes.find((candidate) => candidate.browserPath === CHANNEL_A_CREDENTIAL_PATH);
         const status = aRoutes.find((candidate) => candidate.browserPath === CHANNEL_A_STATUS_PATH);
         const apply = aRoutes.find((candidate) => candidate.browserPath === CHANNEL_A_APPLY_PATH);
+        const verify = aRoutes.find((candidate) => candidate.browserPath === CHANNEL_A_VERIFY_PATH);
 
         expect(credential).toMatchObject({
             browserPath: CHANNEL_A_CREDENTIAL_PATH,
@@ -167,21 +178,31 @@ describe('Prisma Vite proxy configuration', () => {
             methods: ['POST'],
             stripSessionCapability: true,
         });
+        expect(verify).toMatchObject({
+            browserPath: CHANNEL_A_VERIFY_PATH,
+            upstreamPath: CHANNEL_A_VERIFY_PATH,
+            target: 'http://127.0.0.1:5057',
+            methods: ['POST'],
+            stripSessionCapability: true,
+        });
     });
 
-    it('keeps the anchored channel A status and apply patterns from matching each other or the credential route', () => {
+    it('keeps the anchored channel A status, apply and verify patterns from matching each other or the credential route', () => {
         const patternFor = (browserPath: string) =>
             PRISMA_PROXY_ROUTES.find((candidate) => candidate.browserPath === browserPath)?.pattern;
         const credentialPattern = patternFor(CHANNEL_A_CREDENTIAL_PATH);
         const statusPattern = patternFor(CHANNEL_A_STATUS_PATH);
         const applyPattern = patternFor(CHANNEL_A_APPLY_PATH);
+        const verifyPattern = patternFor(CHANNEL_A_VERIFY_PATH);
 
         expect(credentialPattern).toBeDefined();
         expect(statusPattern).toBeDefined();
         expect(applyPattern).toBeDefined();
-        for (const pattern of [credentialPattern, statusPattern, applyPattern]) {
+        expect(verifyPattern).toBeDefined();
+        for (const pattern of [credentialPattern, statusPattern, applyPattern, verifyPattern]) {
             expect(new RegExp(pattern ?? '').test(CHANNEL_A_STATUS_PATH)).toBe(pattern === statusPattern);
             expect(new RegExp(pattern ?? '').test(CHANNEL_A_APPLY_PATH)).toBe(pattern === applyPattern);
+            expect(new RegExp(pattern ?? '').test(CHANNEL_A_VERIFY_PATH)).toBe(pattern === verifyPattern);
         }
     });
 

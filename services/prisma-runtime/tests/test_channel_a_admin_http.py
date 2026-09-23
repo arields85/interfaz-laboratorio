@@ -142,6 +142,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
         self.auth.is_configured.return_value = True
         self.credentials = Mock()
         self.telegram_manager = Mock()
+        self.channel_a_verification = Mock()
         self.channel_a = Mock()
         self.channel_a.status.return_value = self.channel_a_status()
         # The real manager returns its status mapping on every successful mutation.
@@ -167,19 +168,22 @@ class ChannelAAdminHttpTests(unittest.TestCase):
         status.update(overrides)
         return status
 
-    def build_client(self, *, channel_a=None, telegram=None, auth_service=None):
+    def build_client(self, *, channel_a=None, telegram=None, auth_service=None, channel_a_verification=None):
         app = self.Flask(__name__)
         boundary = self.AdminHttpBoundary(
             auth_service if auth_service is not None else self.auth,
             credential_service=self.credentials,
             telegram_manager=telegram,
             channel_a_manager=channel_a,
+            channel_a_verification_service=channel_a_verification,
         )
         boundary.register(app)
         return app.test_client()
 
     def test_a_credential_writes_route_through_the_manager_and_never_the_store(self) -> None:
-        client = self.build_client(channel_a=self.channel_a, telegram=self.telegram_manager)
+        client = self.build_client(
+            channel_a=self.channel_a, telegram=self.telegram_manager, channel_a_verification=self.channel_a_verification,
+        )
 
         saved = client.put(A_ROUTE, json={"secret": SECRET}, headers=self.headers, environ_overrides=self.environ)
 
@@ -193,6 +197,8 @@ class ChannelAAdminHttpTests(unittest.TestCase):
         self.assertEqual(self.channel_a.mock_calls, [call.save_credential(SECRET), call.apply()])
         self.assertEqual(self.credentials.mock_calls, [])
         self.assertEqual(self.telegram_manager.mock_calls, [])
+        # T13: a saved token invalidates any prior verification result.
+        self.channel_a_verification.reset.assert_called_once_with()
 
         deleted = client.delete(A_ROUTE, headers=self.headers, environ_overrides=self.environ)
 
@@ -205,6 +211,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
         )
         self.assertEqual(self.credentials.mock_calls, [])
         self.assertEqual(self.telegram_manager.mock_calls, [])
+        self.assertEqual(self.channel_a_verification.reset.call_count, 2)
 
     def test_a_missing_manager_refuses_every_route_without_touching_the_protected_store(self) -> None:
         client = self.build_client(channel_a=None, telegram=self.telegram_manager)

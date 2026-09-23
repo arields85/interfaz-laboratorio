@@ -43,6 +43,7 @@ from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
 from .telegram_credentials import TelegramCredentialResolver
 from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, project_telegram_diagnostic, validate_telegram_state
+from .telegram_verification import TelegramTokenVerificationService
 from .voice_events import VoiceEventCapacity, VoiceEventStore
 
 
@@ -930,6 +931,23 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         gemini_verification_service = GeminiVerificationService(
             GeminiCredentialResolver(os.environ, lambda: credentials)
         )
+        # T13: each Telegram-family verification service is composed around
+        # its OWN manager's existing public `resolver` -- the exact same
+        # resolver save/apply already use, so verification never gets a
+        # second, independent credential source. `telegram_manager` stays
+        # None when a standalone `telegram_bot` was injected instead (tests,
+        # alternate composition), and an injected manager double (also
+        # tests) may carry no `resolver` at all; both close to no
+        # verification service composed rather than crashing, and the route
+        # reports it unavailable.
+        telegram_resolver = getattr(telegram_manager, "resolver", None)
+        telegram_verification_service = (
+            TelegramTokenVerificationService(telegram_resolver.resolve) if telegram_resolver is not None else None
+        )
+        channel_a_resolver = getattr(channel_a_manager, "resolver", None)
+        channel_a_verification_service = (
+            TelegramTokenVerificationService(channel_a_resolver.resolve) if channel_a_resolver is not None else None
+        )
         admin_http = AdminHttpBoundary(
             AdminAuthService(repository, ScryptPasswordHasher()),
             credential_service=credentials,
@@ -937,6 +955,8 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             channel_a_manager=channel_a_manager,
             public_origin=os.environ.get("PRISMA_PUBLIC_ORIGIN"),
             gemini_verification_service=gemini_verification_service,
+            telegram_verification_service=telegram_verification_service,
+            channel_a_verification_service=channel_a_verification_service,
         )
     app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry, channel_a_manager=channel_a_manager)
     admin_http.register(app)

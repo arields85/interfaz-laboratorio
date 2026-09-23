@@ -23,7 +23,9 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/prisma/admin/credentials/gemini/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-generating Gemini API key verification |
 | `/api/prisma/admin/credentials/telegram` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Telegram credential save (applies/restarts the bot with the new token in the same request) and deletion (stops the bot) |
 | `/api/prisma/admin/credentials/telegram/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Telegram apply and restart, kept for callers that need to re-apply without saving a new credential |
+| `/api/prisma/admin/credentials/telegram/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-sending Telegram (Canal B) bot token verification |
 | `/api/prisma/admin/credentials/telegram_channel_a` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Channel A credential save (applies/restarts the bot with the new token in the same request) and deletion (stops the bot) |
+| `/api/prisma/admin/credentials/telegram_channel_a/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-sending Channel A bot token verification |
 | `/api/prisma/health` | `GET` | `http://127.0.0.1:5057/health` | Passive runtime diagnostics |
 
 Browser constants live in `hmi-app/src/config/prismaAssistant.config.ts`. Development-only targets and rewrite rules live in `hmi-app/vite.prismaProxy.config.ts` and must not be imported by browser modules.
@@ -54,6 +56,15 @@ lookup, never a generation call, so it never consumes generation quota) and repo
 classification (`verified`, `invalid_key`, `unreachable`, or `not_configured`) with a timestamp; it
 never returns the secret or raw provider error text. The result lives only in the runtime's process
 memory (not persisted) and resets to unverified whenever the Gemini credential is saved or deleted.
+
+The Telegram and Channel A verify routes each trigger one on-demand, non-sending bot token check: a
+single Telegram Bot API `getMe` call, never `getUpdates` (no update offset is read or consumed) and
+never a message send, so verifying never starts, stops, or restarts the bot. They report a closed
+classification (`verified`, `invalid_token`, `unreachable`, or `not_configured`) with a timestamp and,
+only once verified, the bot's own public `username`; the token and any raw provider response are
+never returned. Each result lives only in the runtime's process memory (not persisted) and resets to
+unverified whenever that exact provider's credential is saved or deleted -- verifying Telegram never
+resets Channel A's result or vice versa.
 
 The `/api/prisma/snapshot` publish command may carry an optional `frameGeneration` (positive
 JavaScript-safe integer): the browser exporter mints exactly one generation per view visit and

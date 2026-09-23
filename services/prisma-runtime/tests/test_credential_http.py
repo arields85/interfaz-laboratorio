@@ -12,6 +12,7 @@ from prisma_runtime.admin_http import AdminHttpBoundary
 from prisma_runtime.credential_store import CredentialUnavailable
 from prisma_runtime.gemini_credentials import GeminiVerification, GeminiVerificationInProgress
 from prisma_runtime.local_presentation import JsonFileStore, VoiceEventStore, create_app
+from prisma_runtime.telegram_verification import TelegramTokenVerification, TelegramTokenVerificationInProgress
 
 
 SECRET = "  synthetic-秘密-token  "
@@ -29,11 +30,17 @@ class CredentialHttpTests(unittest.TestCase):
         self.telegram_manager = Mock()
         self.gemini_verification = Mock()
         self.gemini_verification.snapshot.return_value = GeminiVerification("not_checked", None)
+        self.telegram_verification = Mock()
+        self.telegram_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
+        self.channel_a_verification = Mock()
+        self.channel_a_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
         boundary = AdminHttpBoundary(
             self.auth,
             credential_service=self.credentials,
             telegram_manager=self.telegram_manager,
             gemini_verification_service=self.gemini_verification,
+            telegram_verification_service=self.telegram_verification,
+            channel_a_verification_service=self.channel_a_verification,
         )
         self.client = create_app(
             JsonFileStore(self.root / "snapshot.json"),
@@ -96,8 +103,16 @@ class CredentialHttpTests(unittest.TestCase):
                         "verified": False,
                         "verification": {"state": "not_checked", "checkedAt": None},
                     },
-                    "telegram": {"configured": False},
-                    "telegram_channel_a": {"configured": False},
+                    "telegram": {
+                        "configured": False,
+                        "verified": False,
+                        "verification": {"state": "not_checked", "checkedAt": None, "username": None},
+                    },
+                    "telegram_channel_a": {
+                        "configured": False,
+                        "verified": False,
+                        "verification": {"state": "not_checked", "checkedAt": None, "username": None},
+                    },
                 },
             },
         )
@@ -115,6 +130,9 @@ class CredentialHttpTests(unittest.TestCase):
         self.assertNotIn(SECRET, saved.get_data(as_text=True))
         # Saving a new Gemini credential invalidates any prior verification result.
         self.gemini_verification.reset.assert_called_once_with()
+        # Saving a different provider never resets an unrelated one's verification.
+        self.telegram_verification.reset.assert_not_called()
+        self.channel_a_verification.reset.assert_not_called()
 
         deleted = self.client.delete(
             "/api/prisma/admin/credentials/gemini", headers=self.headers, environ_overrides=self.environ
@@ -123,6 +141,8 @@ class CredentialHttpTests(unittest.TestCase):
         self.credentials.delete_secret.assert_called_once_with("gemini")
         # Deleting it resets verification too.
         self.assertEqual(self.gemini_verification.reset.call_count, 2)
+        self.telegram_verification.reset.assert_not_called()
+        self.channel_a_verification.reset.assert_not_called()
 
     def test_gemini_verification_reset_is_optional_when_no_service_is_composed(self) -> None:
         boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
@@ -242,6 +262,8 @@ class CredentialHttpTests(unittest.TestCase):
         self.assertEqual(deleted.headers.get("Cache-Control"), "no-store")
         self.credentials.delete_secret.assert_not_called()
         self.assertEqual(self.telegram_manager.mock_calls, [])
+        # A refused write must never reset a verification result either.
+        self.channel_a_verification.reset.assert_not_called()
 
     def test_telegram_provider_keeps_the_manager_special_case(self) -> None:
         self.telegram_manager.delete_secret.return_value = True
@@ -254,6 +276,10 @@ class CredentialHttpTests(unittest.TestCase):
         self.assertEqual(saved.get_json(), {"ok": True, "provider": "telegram", "configured": True})
         self.telegram_manager.set_secret.assert_called_once_with(SECRET)
         self.credentials.set_secret.assert_not_called()
+        # Saving a new Telegram token invalidates any prior verification result.
+        self.telegram_verification.reset.assert_called_once_with()
+        self.gemini_verification.reset.assert_not_called()
+        self.channel_a_verification.reset.assert_not_called()
         deleted = self.client.delete(
             "/api/prisma/admin/credentials/telegram",
             headers=self.headers,
@@ -262,6 +288,7 @@ class CredentialHttpTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 204)
         self.telegram_manager.delete_secret.assert_called_once_with()
         self.credentials.delete_secret.assert_not_called()
+        self.assertEqual(self.telegram_verification.reset.call_count, 2)
 
     def test_telegram_save_restarts_the_bot_with_the_new_token(self) -> None:
         """T10: a saved Telegram credential is applied (restarted) in the same
@@ -413,6 +440,153 @@ class GeminiVerifyHttpTests(unittest.TestCase):
             "/api/prisma/admin/credentials/gemini/verify", environ_overrides=self.environ
         )
         self.assertEqual(wrong_method.status_code, 405)
+
+
+class TelegramFamilyVerifyHttpTests(unittest.TestCase):
+    """Shared scenarios for both Telegram-family verify routes (Channel A and
+    the legacy/"Canal B" bot), parametrized by provider so both channels are
+    proven identical without duplicating the whole test body."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.auth = Mock()
+        self.credentials = Mock()
+        self.credentials.status.return_value = {"gemini": False, "telegram": True, "telegram_channel_a": True}
+        self.session = SimpleNamespace(csrf_token="csrf-token", username="admin")
+        self.auth.read_session.return_value = self.session
+        self.telegram_verification = Mock()
+        self.telegram_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
+        self.channel_a_verification = Mock()
+        self.channel_a_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
+        boundary = AdminHttpBoundary(
+            self.auth,
+            credential_service=self.credentials,
+            telegram_verification_service=self.telegram_verification,
+            channel_a_verification_service=self.channel_a_verification,
+        )
+        self.client = create_app(
+            JsonFileStore(self.root / "snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        self.client.set_cookie("prisma_admin_session", "session-id", path="/api/prisma/admin")
+        self.environ = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
+        self.headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf-token"}
+
+    def _service(self, provider: str) -> Mock:
+        return self.telegram_verification if provider == "telegram" else self.channel_a_verification
+
+    def _route(self, provider: str) -> str:
+        return f"/api/prisma/admin/credentials/{provider}/verify"
+
+    def _key(self, provider: str) -> str:
+        return "telegram" if provider == "telegram" else "channelA"
+
+    def _verify(self, provider: str):
+        return self.client.post(self._route(provider), headers=self.headers, environ_overrides=self.environ)
+
+    def test_requires_authenticated_session_before_verifying(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                self.auth.read_session.return_value = None
+                response = self._verify(provider)
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
+                self._service(provider).verify.assert_not_called()
+        self.auth.read_session.return_value = self.session
+
+    def test_requires_origin_and_valid_csrf(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                missing_origin = self.client.post(
+                    self._route(provider), headers={"X-CSRF-Token": "csrf-token"}, environ_overrides=self.environ,
+                )
+                self.assertEqual(missing_origin.status_code, 403)
+                bad_csrf = self.client.post(
+                    self._route(provider),
+                    headers={"Origin": "http://localhost:5173", "X-CSRF-Token": "wrong"},
+                    environ_overrides=self.environ,
+                )
+                self.assertEqual(bad_csrf.status_code, 403)
+                self.assertEqual(bad_csrf.get_json()["error"], "CSRF_VALIDATION_FAILED")
+                self._service(provider).verify.assert_not_called()
+
+    def test_successful_verification_reports_the_configured_state_and_username(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                self._service(provider).verify.return_value = TelegramTokenVerification(
+                    "verified", 123.5, "prisma_channel_a_bot",
+                )
+                response = self._verify(provider)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.get_json(),
+                    {
+                        "ok": True,
+                        self._key(provider): {
+                            "configured": True,
+                            "verified": True,
+                            "verification": {
+                                "state": "verified", "checkedAt": 123.5, "username": "prisma_channel_a_bot",
+                            },
+                        },
+                    },
+                )
+                self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+
+    def test_invalid_and_unreachable_report_without_leaking_provider_text(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            for state in ("invalid_token", "unreachable", "not_configured"):
+                with self.subTest(provider=provider, state=state):
+                    self._service(provider).verify.return_value = TelegramTokenVerification(state, 1.0, None)
+                    response = self._verify(provider)
+                    self.assertEqual(response.status_code, 200)
+                    body = response.get_json()[self._key(provider)]
+                    self.assertEqual(body["verification"]["state"], state)
+                    self.assertEqual(body["verified"], state == "verified")
+                    self.assertIsNone(body["verification"]["username"])
+
+    def test_concurrent_verification_is_rejected_with_409(self) -> None:
+        for provider, code in (
+            ("telegram", "TELEGRAM_VERIFICATION_IN_PROGRESS"),
+            ("telegram_channel_a", "PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS"),
+        ):
+            with self.subTest(provider=provider):
+                self._service(provider).verify.side_effect = TelegramTokenVerificationInProgress(code)
+                response = self._verify(provider)
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.get_json()["error"], code)
+
+    def test_missing_verification_service_fails_closed(self) -> None:
+        boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
+        client = create_app(
+            JsonFileStore(self.root / "unavailable-snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        client.set_cookie("prisma_admin_session", "session-id", path="/api/prisma/admin")
+        for provider, code in (
+            ("telegram", "TELEGRAM_VERIFICATION_UNAVAILABLE"),
+            ("telegram_channel_a", "PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE"),
+        ):
+            with self.subTest(provider=provider):
+                response = client.post(self._route(provider), headers=self.headers, environ_overrides=self.environ)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json()["error"], code)
+
+    def test_verify_route_is_no_store_and_never_a_get_lookalike(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                self._service(provider).verify.return_value = TelegramTokenVerification("verified", 1.0, "bot")
+                wrong_method = self.client.get(self._route(provider), environ_overrides=self.environ)
+                self.assertEqual(wrong_method.status_code, 405)
+
+    def test_verify_never_calls_the_other_channels_service(self) -> None:
+        self.telegram_verification.verify.return_value = TelegramTokenVerification("verified", 1.0, "bot")
+        self._verify("telegram")
+        self.channel_a_verification.verify.assert_not_called()
+
+        self.channel_a_verification.verify.return_value = TelegramTokenVerification("verified", 2.0, "bot")
+        self._verify("telegram_channel_a")
+        self.assertEqual(self.telegram_verification.verify.call_count, 1)
 
 
 if __name__ == "__main__":

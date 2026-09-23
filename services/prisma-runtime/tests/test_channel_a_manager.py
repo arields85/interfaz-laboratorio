@@ -339,6 +339,14 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assert_status(self.manager.status(), configured=False)
         self.assertEqual(self.effects(), [])
 
+    def test_public_resolver_alias_resolves_the_same_credential_as_internal_save_apply(self):
+        """T13: on-demand verification is composed outside the manager and
+        needs only a read-only resolve(); this is the same public seam
+        TelegramLifecycleManager already exposes as `resolver`."""
+        self.assertIs(self.manager.resolver, self.manager._resolver)
+        self.assertEqual(self.manager.resolver.resolve(), TOKEN)
+        self.assertEqual(self.names(), ["credentials.get"])
+
     def test_save_reserves_generation_before_only_a_write_without_resolution(self):
         self.credentials.secret = None
         self.credentials.metadata[A] = False
