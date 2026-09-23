@@ -666,12 +666,12 @@ class TelegramLocalBot:
         command, paired = normalize(text.split()[0]) if text.strip() else "", self.paired_chat_ids
         if command.startswith("/start"):
             if migration_active:
-                self.send_message(chat_id, "Send /start again after migration completes.")
+                self.send_message(chat_id, "Envíe /start nuevamente cuando finalice la migración.")
             elif not paired and self.bot_id is not None: self._pair(chat_id); self.send_message(chat_id, "Prisma Local quedó vinculada a este chat. Abra la HMI en modo presentación y ya puede consultar los datos visibles.")
             elif chat_id in paired: self.send_message(chat_id, "Prisma Local está lista para responder sobre la HMI visible.")
             else: self.send_message(chat_id, "Este bot local ya está vinculado a otro chat.")
             return
-        if chat_id not in paired: self.send_message(chat_id, "Send /start to pair this local bot."); return
+        if chat_id not in paired: self.send_message(chat_id, "Envíe /start para vincular este bot."); return
         if command.startswith("/status"):
             snapshot = self.snapshot_store.read(); self.send_message(chat_id, f"Prisma Local está activa. Último snapshot: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
         if command.startswith("/help"):

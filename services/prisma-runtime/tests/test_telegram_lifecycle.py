@@ -433,7 +433,7 @@ class TelegramLifecycleTests(unittest.TestCase):
             bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/status"})
 
         self.assertEqual(bot.state_store.writes, [])
-        bot.send_message.assert_called_once_with(7, "Send /start to pair this local bot.")
+        bot.send_message.assert_called_once_with(7, "Envíe /start para vincular este bot.")
 
     def test_migration_fence_drains_multiple_backlog_batches_before_pairing(self):
         bot = self.build_bot()
@@ -467,7 +467,7 @@ class TelegramLifecycleTests(unittest.TestCase):
         self.assertEqual(record["pairedPrivateChatIds"], [7])
         self.assertEqual(record["nextUpdateOffset"], 4)
         self.assertFalse(record["migrationActive"])
-        self.assertEqual([text for _, text in sent[:2]], ["Send /start again after migration completes."] * 2)
+        self.assertEqual([text for _, text in sent[:2]], ["Envíe /start nuevamente cuando finalice la migración."] * 2)
 
     def test_state_write_failure_retries_same_update_without_acknowledging_it(self):
         state = {
