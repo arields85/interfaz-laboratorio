@@ -1599,32 +1599,18 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   observations); the backend commit matched no GGA file pattern (`.py`), as with every prior
   Python-only commit in this tracker.
 
+- 2026-09-23: MANUAL ACCEPTANCE by the user with the real launcher: points 1–7 approved
+  (normal start, Canal A auto-apply, abrupt close/reuse, busy port terminal+popover, Ver viewer
+  keeps session, credentials panel after T15 "todo perfecto", usted copy).
+
 ## Next step
 
-All seventeen roadmap items were committed before T14. Still pending, unchanged by
-T11/T12/T13/T14: manual re-checks of point 3 (relaunch after closing the launcher window with
-X), point 4 (foreign process on 5057, terminal + popover), T5b (Ver viewer keeps the session),
-point 6's Chrome-specific no-autofill-prompt behavior (T9c's proof was offline/mocked only),
-and T10's own manual test (save/delete a Canal A and a Telegram token, plus one deliberately
-wrong token). New from T13: manual test of Verificar on both rows against real Telegram (valid
-token, deliberately wrong token, and offline/unreachable) to confirm the three verification
-states render as expected outside the mocked test suite -- this writer's Python tests mock
-every HTTP call, so the real Telegram Bot API surface (401 shape, timeout behavior) was never
-exercised end-to-end. New from T14: manual check of the credentials panel in the real
-GlobalSettingsDialog -- confirm all three rows (Proveedor de voz, Canal A, Canal B) fit on one
-line at the dialog's normal (desktop, >= md) width with no wrap, the icon-only Verificar button
-reads clearly next to Save/Delete, the trailing result area shows the expected text+icon for
-each state (including a real long Telegram username if available), and the 5-second
-auto-revert after a successful Canal A/B verification is visually smooth and not jarring; this
-writer's test suite only proves the DOM/timer contract, not the real rendered layout (no
-browser was available to confirm the exact `md:w-44`/`min-w-[33ch]` fit against real font
-metrics -- see the arithmetic in T14's own task entry above). New from T15: manual re-check of
-the panel confirming (a) verifying one row no longer blocks the other rows' Save/Delete/Verify
-in the real browser (this writer only proved it against mocked clients), (b) the Canal A
-"Bot vinculado"/"Bot disponible, sin vincular" transient message reads clearly before reverting
-to "@username" against a REAL paired and REAL unpaired bot (the `paired` backend signal was
-proven only against fakes/mocks, never a live Telegram pairing flow), (c) whether the
-previously-observed "Estado no confirmado" Canal A failure actually recurs as
-"No se pudo conectar el bot" now, ideally by reproducing a real transient network failure during
-long-polling (not exercised end-to-end -- this writer's Python tests mock every HTTP call), and
-(d) the Gemini model name displays legibly and turns green after a real verify.
+Open follow-ups (not started, need user choice):
+1. Canal A background failure is not recorded in `lastError` (`channel_a_lifecycle.py:608-614`
+   vs `channel_a_manager.py:167-169`) and the bot does not recover automatically; propose
+   recording the cause and an automatic retry.
+2. Save/apply error copy still says "Telegram" for the row now named "Canal B".
+3. Launcher reuses a running Prisma even if its code is older than the checkout (dev gotcha).
+4. `.hmi-masked-text` relies on `-webkit-text-security` (not Firefox).
+5. Delivery: branch not pushed; forecast far above ~400 lines → chain strategy question if a PR
+   is requested (ask-on-risk). PW-003 semantic query remains parked.
