@@ -936,6 +936,45 @@ describe('VoiceCredentialSettings', () => {
         await act(async () => { release(GEMINI_VERIFIED); });
     });
 
+    it('keeps the Verificar button width stable across Verificar/Verificando by grid-stacking both labels', async () => {
+        const user = userEvent.setup();
+        let release!: (value: typeof GEMINI_VERIFIED) => void;
+        const pending = new Promise<typeof GEMINI_VERIFIED>((resolve) => { release = resolve; });
+        const verifyGemini = vi.fn(() => pending);
+        renderSettings({
+            credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })),
+            verifyGemini,
+        });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const verify = await within(gemini).findByRole('button', { name: 'Verificar' });
+        await waitFor(() => expect(verify).toBeEnabled());
+
+        // Both labels always exist in the DOM (grid-stacked in the same cell),
+        // so the button's intrinsic width never changes; only the inactive one
+        // is aria-hidden, which is what keeps the accessible name exact.
+        expect(within(verify).getByText('Verificar')).not.toHaveAttribute('aria-hidden', 'true');
+        expect(within(verify).getByText('Verificando…')).toHaveAttribute('aria-hidden', 'true');
+
+        await user.click(verify);
+
+        const verifying = await within(gemini).findByRole('button', { name: 'Verificando…' });
+        expect(within(verifying).getByText('Verificando…')).not.toHaveAttribute('aria-hidden', 'true');
+        expect(within(verifying).getByText('Verificar')).toHaveAttribute('aria-hidden', 'true');
+        await act(async () => { release(GEMINI_VERIFIED); });
+    });
+
+    it('renders the Gemini Delete button with the same styling as Save, not the red danger variant', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const save = await within(gemini).findByRole('button', { name: 'Guardar credencial' });
+        const del = within(gemini).getByRole('button', { name: 'Eliminar credencial' });
+
+        expect(del.className).not.toMatch(/status-critical/);
+        // Same variant/size contract as Save (HmiButton's class output is a pure
+        // function of variant+size+className), not a hardcoded class snapshot.
+        expect(del.className.split(' ').sort()).toEqual(save.className.split(' ').sort());
+    });
+
     it.each([
         ['invalid_key', 'API key inválida', 'circle-x'],
         ['unreachable', 'No se pudo verificar: sin conexión con Google', 'wifi-off'],

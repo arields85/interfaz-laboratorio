@@ -154,6 +154,26 @@ function StatusIcon({ Icon, label, tone }: StatusGlyph) {
     );
 }
 
+// T9d: "Verificar" and "Verificando…" stack in the same CSS grid cell instead
+// of swapping in place, so the button's intrinsic width is always the wider
+// label's width -- no hardcoded pixel width, no runtime measurement, just the
+// browser sizing the grid cell to its content (anti-hardcode dimensional
+// policy). The inactive label is `invisible` (keeps its layout box, so the
+// grid cell doesn't collapse) and `aria-hidden` (excluded from the button's
+// accessible name, which stays exactly the active label).
+function VerifyButtonLabel({ verifying }: { verifying: boolean }) {
+    return (
+        <span className="grid">
+            <span className={`[grid-area:1/1] ${verifying ? 'invisible' : ''}`} aria-hidden={verifying}>
+                Verificar
+            </span>
+            <span className={`[grid-area:1/1] ${verifying ? '' : 'invisible'}`} aria-hidden={!verifying}>
+                Verificando…
+            </span>
+        </span>
+    );
+}
+
 export default function VoiceCredentialSettings({ active, client, controller }: VoiceCredentialSettingsProps) {
     const authenticated = useAuthStore((state) => state.session.isAuthenticated);
     const administration = usePrismaCredentialAdministration({ client, controller, active });
@@ -390,7 +410,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                     <HoverTooltip label="Eliminar credencial" position="top">
                         <HmiButton
                             size="sm"
-                            variant="danger"
+                            variant="primary"
                             aria-label="Eliminar credencial"
                             title="Eliminar credencial"
                             disabled={disabled}
@@ -408,12 +428,12 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                                     disabled={disabled}
                                     onClick={() => void verifyGemini()}
                                 >
-                                    {verifying ? 'Verificando…' : 'Verificar'}
+                                    <VerifyButtonLabel verifying={verifying} />
                                 </HmiButton>
                             ) : (
                                 <HoverTooltip label="Configure una API key para verificarla." position="top">
                                     <HmiButton size="sm" variant="secondary" disabled>
-                                        Verificar
+                                        <VerifyButtonLabel verifying={false} />
                                     </HmiButton>
                                 </HoverTooltip>
                             )}
