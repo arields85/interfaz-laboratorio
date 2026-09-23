@@ -60,6 +60,7 @@ identifier reset, so that limitation stays visible in
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import threading
@@ -155,6 +156,34 @@ DISPOSITION_RESTART_REQUIRED = "restart_required"
 _USERNAME_PATTERN = re.compile(r"\A[A-Za-z0-9_]{5,32}\Z")
 
 _LOOP_THREAD_NAME = "prisma-channel-a-lifecycle"
+
+# T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
+# comment in `channel_a_manager.py`); relying on the same WARNING-or-above
+# "handler of last resort" keeps this diagnostic visible in
+# `prisma-presentation-stderr.log` without adding runtime-wide configuration.
+# Only a closed update-shape label and a duration are ever logged, never a
+# chat id, username or message body.
+_logger = logging.getLogger(__name__)
+
+
+def _update_type(entry) -> str:
+    try:
+        if entry.get("message") is not None:
+            return "message"
+        if entry.get("callback_query") is not None:
+            return "callback_query"
+    except Exception:
+        return "unknown"
+    return "unknown"
+
+
+def _log_update_handled(update_type: str, started: float, clock) -> None:
+    """Best-effort diagnostic only: never raises and never affects the batch."""
+    try:
+        elapsed_ms = round((clock() - started) * 1000)
+    except Exception:
+        return
+    _logger.warning("Channel A update: type=%s elapsed_ms=%d", update_type, elapsed_ms)
 
 
 class ChannelALifecycleError(RuntimeError):
@@ -1073,6 +1102,7 @@ class ChannelARunner:
                 outcome = dialogue.handle_update(entry)
             except Exception:
                 return self._terminal_result(completed, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
+            _log_update_handled(_update_type(entry), sample, self.clock)
 
             if not self._outcome_is_consistent(outcome, value):
                 return self._terminal_result(completed, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)

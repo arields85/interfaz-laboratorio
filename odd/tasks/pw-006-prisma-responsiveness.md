@@ -74,15 +74,56 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     typing needs `send_chat_action` on `ChannelATextTransport` (`channel_a_bot.py:313-326`) and
     `ChannelATransport` (`channel_a_transport.py`), call site `_handle_query` (~874).
 - [ ] **T2 — Confirmation copy.** Replace the pairing confirmation text with the approved copy.
-- [ ] **T3 — Keep/unlink buttons reachable.** Present pinned-message vs persistent-keyboard options
-  to the user, then implement the chosen one.
+- [ ] **T3 — Keep/unlink buttons reachable.** Decided by the user (2026-09-23): persistent reply
+  keyboard (`is_persistent`) with a "Desvincular" button, always visible under the input. Tapping it
+  sends "Desvincular" as a user message; Prisma answers asking for confirmation with an inline
+  button (guards against accidental unlinking). Pinned message discarded (two taps, pin service
+  message, unpin on relink). Remove the keyboard when the chat is unlinked.
 - [ ] **T4 — Typing indicator.** Send Telegram "typing…" while an answer is being prepared.
-- [ ] **T5 — Timing instrumentation.** Monotonic timing logs for Channel A update received →
+- [x] **T1b — Old vs new comparison (read-only, delegated).** Findings (2026-09-23), static code:
+  - Same library (raw `requests`), same poll cadence (25 s / 35 s), same Gemini TTS model, both
+    Flask servers `threaded=True` (not a differentiator).
+  - Difference 1 (confirmed by code): old reused one `requests.Session` for the bot's lifetime
+    (`C:\hmi_tts\prisma_local_service.py:434,455`); new opens and closes a Session on every Bot API
+    call (`channel_a_transport.py:16-21,252-259,345-366`) — fresh TCP+TLS handshake per
+    `getUpdates`/`sendMessage`, more transient failures.
+  - Difference 2 (confirmed by code): old retried a failed `getUpdates` in place after a flat 5 s in
+    the same thread/session (`prisma_local_service.py:549-552`); new ends the whole activation on
+    one failed poll (`channel_a_lifecycle.py:993-1009,1124-1143`) and rebuilds it after 5→10→20→40→80 s
+    backoff (`channel_a_manager.py:77-91,310-378`). Combined with difference 1 this matches the
+    ~1 min gaps.
+  - HMI voice: no code path found that drops fresh events; `AudioContext.resume()` is called when
+    suspended. Orb/audio misses remain unexplained → need live instrumentation.
+- [x] **T5 — Timing instrumentation.** Monotonic timing logs for Channel A update received →
   message sent, and HMI voice query → first audio byte, so the lag can be measured.
+  Evidence (2026-09-23): `channel_a_transport.py` logs `sendMessage`/`getUpdates` elapsed_ms (+count)
+  around `_effect`/`_discovery`; `channel_a_lifecycle.py` logs per-update `type=message|callback_query
+  |unknown elapsed_ms=` in `_process_batch` (update received → `handle_update` return, which includes
+  the synchronous send); `voice_service.py` logs `Prisma speak-live: first_chunk_elapsed_ms=`/
+  `stream_end_elapsed_ms=` wrapping the `/prisma/speak-live` PCM generator; `local_presentation.py`
+  logs `Prisma voice event publish: elapsed_ms=` around both `voice_events.publish()` call sites
+  (`/local/ask` and the Channel A on-outcome callback). All at `logger.warning(...)` — not `.info()` as
+  literally requested — because this runtime has no `logging.basicConfig` anywhere (confirmed by grep)
+  and Python's default "handler of last resort" only surfaces WARNING+ to stderr; INFO would be
+  silently dropped and useless for T6. Same module-logger convention as the existing T16 lines
+  (`channel_a_manager.py`), new lines use "Channel A"/"Prisma" (English) instead of the legacy "Canal A"
+  prefix per AGENTS.md. No secrets/tokens/chat text/user/event ids logged (verified by test). RED
+  confirmed via `git stash` of the 4 source files (4 new tests failed with `AttributeError: ... no
+  attribute '_logger'`), GREEN after restore. 7 new focused tests added (4 transport, 1 lifecycle,
+  1 voice_service, 1 local_presentation) using `assertLogs`. Full suite:
+  `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+  -p "test_*.py"` → 1276 passed (was 1269 on main + 7 new). Commit: `feat(prisma): log Channel A and
+  voice timings`.
 - [ ] **T6 — Live repro and confirmation (user manual).** Tail the presentation log and watch the
   admin reconnecting indicator during a QR pairing and voice queries; check VPN state and stray
   processes polling the same token.
-- [ ] **T7+ — Root-cause fixes.** Defined from T5/T6 evidence.
+- [ ] **T7 — Reuse one HTTP session per activation.** Port back the old behavior: one
+  `requests.Session` reused for all Bot API calls of an activation, closed on teardown.
+- [ ] **T8 — In-place poll retry.** Port back the old behavior: a transient `getUpdates` failure
+  retries in place after a flat 5 s within the same activation (status surfaces "reconnecting");
+  terminal failures (e.g. invalid token) still end the activation; the manager backoff remains only
+  for activation-level failures.
+- [ ] **T9+ — Further fixes.** From T5/T6 evidence (HMI voice orb/audio).
 
 ## Acceptance criteria
 
@@ -99,5 +140,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
 
 ## Next step
 
-T2 copy + T4 typing + T5 instrumentation (writer), then T6 live repro with the user; T3 needs the
-user's choice.
+User priority (2026-09-23): resolve the lag first; UX items T2–T4 afterwards. Behavior should match
+pre-migration `C:\hmi_tts`. In progress: read-only side-by-side comparison old vs new (Telegram
+reception/reply, HMI voice delivery, TTS, blocking servers). Then T5 instrumentation and T6 live
+repro, then root-cause fixes (port back the faster old mechanisms where they apply).

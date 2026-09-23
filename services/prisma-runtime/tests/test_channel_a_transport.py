@@ -875,6 +875,53 @@ class TransportBoundaryTests(ChannelATransportTestCase):
                 self.assertNotIn(forbidden, source)
 
 
+class TimingLogTests(ChannelATransportTestCase):
+    """T5: monotonic timing logs for the two Bot API calls the lag reports name."""
+
+    def test_send_message_logs_elapsed_ms_on_success_and_failure(self):
+        session = FakeSession(FakeResponse(200, {"ok": True}))
+        transport = self.build(session)
+        with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+            transport.send_message(chat_id=CHAT_ID, text="hola")
+        self.assertEqual(len(observed.output), 1)
+        self.assertIn("Channel A sendMessage: elapsed_ms=", observed.output[0])
+
+        session2 = FakeSession(FakeResponse(500, {"ok": False}))
+        transport2 = self.build(session2)
+        with self.assertLogs(transport_module._logger, level="WARNING") as observed2:
+            with self.assertRaises(ChannelATransportError):
+                transport2.send_message(chat_id=CHAT_ID, text="hola")
+        self.assertEqual(len(observed2.output), 1)
+        self.assertIn("Channel A sendMessage: elapsed_ms=", observed2.output[0])
+
+    def test_get_updates_logs_the_returned_count_and_elapsed_ms(self):
+        session = FakeSession(FakeResponse(200, ok_body([{"update_id": 1}, {"update_id": 2}])))
+        transport = self.build(session)
+        with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+            transport.get_updates(poll_timeout=1, read_timeout=2)
+        self.assertEqual(len(observed.output), 1)
+        self.assertIn("Channel A getUpdates: count=2 elapsed_ms=", observed.output[0])
+
+    def test_get_updates_logs_a_failure_without_a_count(self):
+        session = FakeSession(post_error=ConnectionError(f"refused {CANARY}"))
+        transport = self.build(session)
+        with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+            with self.assertRaises(ChannelATransportError):
+                transport.get_updates(poll_timeout=1, read_timeout=2)
+        self.assertEqual(len(observed.output), 1)
+        self.assertIn("Channel A getUpdates: count=failed elapsed_ms=", observed.output[0])
+        self.assertNotIn(CANARY, observed.output[0])
+
+    def test_timing_logs_never_contain_the_token_or_message_text(self):
+        session = FakeSession(FakeResponse(200, {"ok": True}))
+        transport = self.build(session)
+        with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+            transport.send_message(chat_id=CHAT_ID, text="secreto-de-usuario")
+        self.assertNotIn(TOKEN, observed.output[0])
+        self.assertNotIn("secreto-de-usuario", observed.output[0])
+        self.assertNotIn(str(CHAT_ID), observed.output[0])
+
+
 class ConcurrencyTests(ChannelATransportTestCase):
     def setUp(self):
         super().setUp()

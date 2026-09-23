@@ -57,6 +57,23 @@ class LocalPresentationTests(unittest.TestCase):
             self.assertNotIn("telegramChatId", event)
             self.assertEqual(client.get(f"/internal/prisma/voice-events/{event['id']}", headers=headers).get_json()["text"], "El OEE actual es 88,6 %.")
 
+    def test_local_ask_logs_the_voice_event_publish_elapsed_ms(self) -> None:
+        """T5: the voice event publish duration for HMI voice queries."""
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        with tempfile.TemporaryDirectory() as temporary:
+            store = JsonFileStore(Path(temporary) / "snapshot.json")
+            events = VoiceEventStore()
+            client = create_app(store, events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            headers = session_headers(client)
+            client.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": demo_snapshot()}, headers=headers)
+            with self.assertLogs(local_presentation_module._logger, level="WARNING") as observed:
+                response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            matching = [line for line in observed.output if "Prisma voice event publish: elapsed_ms=" in line]
+            self.assertEqual(len(matching), 1)
+            self.assertNotIn("OEE", matching[0])
+
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()

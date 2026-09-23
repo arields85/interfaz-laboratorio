@@ -167,6 +167,24 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertEqual(response.data, b"\x12\x34")
         coordinator.subscribe.assert_called_once()
 
+    def test_speak_live_logs_first_chunk_and_stream_end_elapsed_ms(self):
+        """T5: request received -> first audio chunk -> stream end, elapsed ms."""
+        event_id = str(uuid.uuid4())
+        event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999}
+        coordinator = Mock()
+        coordinator.subscribe.return_value = iter([b"\x12\x34", b"\x56\x78"])
+        with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+            with self.assertLogs(service._logger, level="WARNING") as observed:
+                response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data, b"\x12\x34\x56\x78")
+        first_chunk = [line for line in observed.output if "first_chunk_elapsed_ms" in line]
+        stream_end = [line for line in observed.output if "stream_end_elapsed_ms" in line]
+        self.assertEqual(len(first_chunk), 1)
+        self.assertEqual(len(stream_end), 1)
+        self.assertNotIn(event_id, first_chunk[0])
+        self.assertNotIn(event_id, stream_end[0])
+
     def test_http_response_close_releases_unstarted_audio_subscription(self):
         stream = Mock()
         stream.__iter__ = Mock(return_value=iter(()))

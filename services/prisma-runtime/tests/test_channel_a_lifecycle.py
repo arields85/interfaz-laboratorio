@@ -1935,6 +1935,27 @@ class ChannelARunnerPollingTest(ChannelARunnerCase):
             [(1, 2.0, None), (1, 2.0, 6)],
         )
 
+    def test_poll_logs_the_elapsed_time_and_type_of_each_handled_update(self) -> None:
+        """T5: one compact line per update, with its type and elapsed ms."""
+        runner, transport = self.prepared(
+            batches=[
+                (
+                    {"update_id": 5, "message": {"text": "hola"}},
+                    {"update_id": 6, "callback_query": {"id": "cb"}},
+                )
+            ],
+            handler=self._echo_handler(),
+        )
+        with self.assertLogs(lifecycle_module._logger, level="WARNING") as observed:
+            result = runner.poll_once()
+        self.assertEqual(result.disposition, DISPOSITION_COMPLETED)
+        matching = [line for line in observed.output if "Channel A update:" in line]
+        self.assertEqual(len(matching), 2)
+        self.assertIn("type=message", matching[0])
+        self.assertIn("elapsed_ms=", matching[0])
+        self.assertIn("type=callback_query", matching[1])
+        self.assertIn("elapsed_ms=", matching[1])
+
     def test_poll_keeps_the_first_occurrence_and_skips_stale_duplicates(self) -> None:
         runner, transport = self.prepared(
             batches=[({"update_id": 7}, {"update_id": 7})],

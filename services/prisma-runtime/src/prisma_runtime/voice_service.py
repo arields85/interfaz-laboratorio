@@ -12,6 +12,7 @@ import base64
 import binascii
 import io
 import json
+import logging
 import os
 import queue
 import shutil
@@ -36,6 +37,12 @@ from .voice_events import validate_voice_event
 
 
 app = Flask(__name__)
+# T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
+# comment in `channel_a_manager.py`); relying on the same WARNING-or-above
+# "handler of last resort" keeps these timings visible in
+# `prisma-voice-stderr.log` without adding runtime-wide configuration. Only a
+# duration is ever logged, never an event id, question or answer text.
+_logger = logging.getLogger(__name__)
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
 VOICE = "Leda"
 SAMPLE_RATE = 24000
@@ -615,8 +622,33 @@ def _pcm_stream_response(generate_audio):
     return response
 
 
+def _timed_pcm_stream(stream, request_received):
+    """Wrap a speak-live PCM generator with T5 timing, never altering its bytes.
+
+    Logs the elapsed time from the request being received to the first yielded
+    chunk (once), and again from the request being received to stream end
+    (always, including on an early close or a generator error).
+    """
+    first_chunk_logged = False
+    try:
+        for chunk in stream:
+            if not first_chunk_logged:
+                _logger.warning(
+                    "Prisma speak-live: first_chunk_elapsed_ms=%d",
+                    round((time.monotonic() - request_received) * 1000),
+                )
+                first_chunk_logged = True
+            yield chunk
+    finally:
+        _logger.warning(
+            "Prisma speak-live: stream_end_elapsed_ms=%d",
+            round((time.monotonic() - request_received) * 1000),
+        )
+
+
 @app.route("/prisma/speak-live", methods=["POST", "OPTIONS"])
 def prisma_speak_live():
+    request_received = time.monotonic()
     if request.method == "OPTIONS": return Response(status=204)
     if request.content_length is not None and request.content_length > 1024:
         return jsonify({"ok": False, "error": "INVALID_VOICE_EVENT_REQUEST"}), 400
@@ -647,7 +679,7 @@ def prisma_speak_live():
         return jsonify({"ok": False, "error": str(error)}), status
     except (AudioCoordinatorError, RuntimeError):
         return jsonify({"ok": False, "error": "VOICE_SERVICE_UNAVAILABLE"}), 503
-    return _pcm_stream_response(lambda: stream)
+    return _pcm_stream_response(lambda: _timed_pcm_stream(stream, request_received))
 
 
 def _validate_single_process_environment(environ=None):

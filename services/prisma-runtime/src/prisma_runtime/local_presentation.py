@@ -9,6 +9,7 @@ written to by this service.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -61,6 +62,13 @@ HMI_PAIRING_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{%d}" % OPAQUE_CHARS)
 HMI_PAIRING_BOT_USERNAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]{4,31}")
 HMI_PAIRING_STATES = ("free", "pending", "linked")
 TELEGRAM_STOPPING = "TELEGRAM_STOPPING"
+
+# T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
+# comment in `channel_a_manager.py`); relying on the same WARNING-or-above
+# "handler of last resort" keeps this timing visible in
+# `prisma-presentation-stderr.log` without adding runtime-wide configuration.
+# Only a duration is ever logged, never a question, answer or owner id.
+_logger = logging.getLogger(__name__)
 
 # Approved Channel A composition settings: the accepted Channel B request/poll/
 # read/join bounds plus the explicit poll pause, and the fresh live-owner label
@@ -883,14 +891,21 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             envelope = outcome.answer_envelope
             if envelope is None:
                 return
-            voice_events.publish(
-                "",
-                envelope.answer_text,
-                owner_id=envelope.owner_id,
-                # Late-bound: the manager is inert during construction and only
-                # its already-published running authority may authorize delivery.
-                is_current=lambda: channel_a_manager.is_query_envelope_current(envelope),
-            )
+            publish_started = time.monotonic()
+            try:
+                voice_events.publish(
+                    "",
+                    envelope.answer_text,
+                    owner_id=envelope.owner_id,
+                    # Late-bound: the manager is inert during construction and only
+                    # its already-published running authority may authorize delivery.
+                    is_current=lambda: channel_a_manager.is_query_envelope_current(envelope),
+                )
+            finally:
+                _logger.warning(
+                    "Prisma voice event publish (channel A): elapsed_ms=%d",
+                    round((time.monotonic() - publish_started) * 1000),
+                )
 
         def build_channel_a_activation(token, desired, epoch, reservation):
             """Compose one real activation; the manager keeps this call lazy, so no
@@ -1101,10 +1116,16 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         answer = answer_from_snapshot(snapshot, question)
         if revision is not None and not session_registry.is_owner_context_current(owner_id, revision):
             return jsonify({"ok": False, "error": "NO_SNAPSHOT"}), 409
+        publish_started = time.monotonic()
         try:
             event = voice_events.publish(question, answer.answer_text, owner_id=owner_id)
         except VoiceEventCapacity:
             return jsonify({"ok": False, "error": "VOICE_EVENT_CAPACITY"}), 503
+        finally:
+            _logger.warning(
+                "Prisma voice event publish: elapsed_ms=%d",
+                round((time.monotonic() - publish_started) * 1000),
+            )
         return jsonify({**answer.as_dict(), "voiceEvent": event})
 
     @app.route("/hmi/channel-a/pairing", methods=["GET", "POST", "OPTIONS"])

@@ -52,8 +52,10 @@ a polling loop, and any wiring into the runtime lifecycle.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
@@ -65,6 +67,26 @@ from .channel_a_bot import (
     MAX_TELEGRAM_ID,
 )
 from .credential_store import MAX_SECRET_BYTES
+
+# T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
+# comment in `channel_a_manager.py`); a module logger with no handler falls
+# back to `logging`'s WARNING-or-above "handler of last resort", which writes
+# directly to `sys.stderr` -- the stream the launcher redirects to
+# `prisma-presentation-stderr.log`. Every field below is a closed code,
+# duration or count; never a token, chat id, username or update body.
+_logger = logging.getLogger(__name__)
+
+
+def _log_send_message_elapsed(elapsed_seconds: float) -> None:
+    _logger.warning("Channel A sendMessage: elapsed_ms=%d", round(elapsed_seconds * 1000))
+
+
+def _log_get_updates_elapsed(count: int | None, elapsed_seconds: float) -> None:
+    _logger.warning(
+        "Channel A getUpdates: count=%s elapsed_ms=%d",
+        "failed" if count is None else count,
+        round(elapsed_seconds * 1000),
+    )
 
 PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE = "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE"
 # T16: the one deliberate exception to "every failure becomes the same fixed
@@ -289,7 +311,11 @@ class ChannelATransport:
         }
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
-        return self._effect(SEND_MESSAGE_METHOD, payload, self.request_timeout)
+        started = time.monotonic()
+        try:
+            return self._effect(SEND_MESSAGE_METHOD, payload, self.request_timeout)
+        finally:
+            _log_send_message_elapsed(time.monotonic() - started)
 
     def answer_callback_query(self, *, callback_query_id: str, text: str = None) -> object:
         """Acknowledge one callback press and return the raw Bot API response body."""
@@ -330,14 +356,21 @@ class ChannelATransport:
         }
         if offset is not None:
             payload["offset"] = _validated_offset(offset)
-        _, body = self._discovery(GET_UPDATES_METHOD, payload, (self.request_timeout, read))
-        result = _field(body, "result")
-        if not isinstance(result, list):
-            raise _unavailable() from None
-        for item in result:
-            if not isinstance(item, Mapping):
+        started = time.monotonic()
+        count: int | None = None
+        try:
+            _, body = self._discovery(GET_UPDATES_METHOD, payload, (self.request_timeout, read))
+            result = _field(body, "result")
+            if not isinstance(result, list):
                 raise _unavailable() from None
-        return tuple(result)
+            for item in result:
+                if not isinstance(item, Mapping):
+                    raise _unavailable() from None
+            updates = tuple(result)
+            count = len(updates)
+            return updates
+        finally:
+            _log_get_updates_elapsed(count, time.monotonic() - started)
 
     def _url(self, method: str) -> str:
         return f"{CHANNEL_A_API_BASE}/bot{self._token}/{method}"
