@@ -364,7 +364,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await adminAuthClient.session();
         vi.stubGlobal('fetch', vi.fn(async () => envelope()));
         renderDialog();
-        const telegramCard = await screen.findByRole('group', { name: 'Telegram' });
+        const telegramCard = await screen.findByRole('group', { name: 'Canal B' });
 
         const icon = await within(telegramCard).findByRole('img', { name: 'No se pudo conectar el bot' });
         expect(icon).toBeInTheDocument();

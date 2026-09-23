@@ -72,14 +72,42 @@ function errorText(error: unknown): string {
     }[code] ?? 'No se pudo completar la operación con el servicio local.';
 }
 
-// Single presentation mapping for the credential providers, reused by the
-// deletion confirmation dialog body (the fieldset's own accessible group name
-// is set per-row below, e.g. Channel A's is the shorter "Canal A").
+// Single presentation mapping for the credential providers, used only by the
+// stop-unconfirmed retry feedback message (the deletion confirmation dialog
+// has its own explicit per-provider text below, and the fieldset's own
+// accessible group name is set per-row, e.g. Channel A's is "Canal A").
+// T11 (2026-09-23): renamed to match the rows' own current names -- Telegram
+// (channel B) is now "Canal B", Channel A dropped the "Telegram (...)"
+// prefix, and Gemini reads as its row's own "proveedor de voz" title.
 const PROVIDER_LABELS: Record<CredentialProvider, string> = {
-    gemini: 'Gemini',
-    telegram: 'Telegram',
-    telegram_channel_a: 'Telegram (Canal A)',
+    gemini: 'proveedor de voz',
+    telegram: 'Canal B',
+    telegram_channel_a: 'Canal A',
 };
+
+// T11 (2026-09-23): explicit per-provider deletion-confirmation copy,
+// replacing label interpolation so each provider's exact wording is reviewed
+// and changed independently of PROVIDER_LABELS' own (differently-cased,
+// differently-worded) usage elsewhere.
+const DELETE_CONFIRMATION_TEXT: Record<CredentialProvider, string> = {
+    telegram_channel_a: 'La credencial protegida de Canal A se eliminará del servicio local. Esta acción no puede deshacerse.',
+    telegram: 'La credencial protegida de Canal B se eliminará del servicio local. Esta acción no puede deshacerse.',
+    gemini: 'La credencial protegida del proveedor de voz se eliminará del servicio local. Esta acción no puede deshacerse.',
+};
+
+// T11 (2026-09-23, user decision): all three credential rows must share the
+// exact same fixed input width, regardless of each row's own trailing content
+// (Verificar + its icon, @username, an execution icon) -- previously each
+// input was `flex-1` and grew to fill whatever space its own row's trailing
+// content left, so widths differed between rows and shifted as that content
+// appeared or disappeared. This is a Tailwind spacing-scale token (a
+// deliberate design-system constant), not a raw pixel measurement or a
+// content-dependent estimate, so it does not violate the anti-hardcode
+// dimensional policy; full width is kept only below the `md` breakpoint.
+const CREDENTIAL_INPUT_WIDTH_CLS = 'w-full md:w-80';
+
+// T11 (2026-09-23): Canal B (Telegram) row description, user-approved copy.
+const CHANNEL_B_DESCRIPTION = 'Consultas a distancia por Telegram: Prisma responde por mensaje, sin necesidad de mirar la interfaz.';
 
 function emptySecretDrafts(): Record<CredentialProvider, string> {
     return { gemini: '', telegram: '', telegram_channel_a: '' };
@@ -237,7 +265,10 @@ function CredentialFieldset({
             <legend className="float-left mb-3 w-full px-0 text-industrial-text">{legend}</legend>
             <div className="clear-both" />
             <div className="flex flex-col gap-2">
-                {description ? <p className="text-industrial-muted">{description}</p> : null}
+                {/* T11 (2026-09-23): extra bottom margin (beyond the shared
+                    gap-2) between the description and the field label below
+                    it, matching the legend's own mb-3 spacing above. */}
+                {description ? <p className="mb-3 text-industrial-muted">{description}</p> : null}
                 {children}
             </div>
         </fieldset>
@@ -429,7 +460,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             secretRevisionRef.current.gemini += 1;
                             setProviderDraft('gemini', nextValue);
                         }}
-                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text ${CREDENTIAL_INPUT_WIDTH_CLS}`}
                         disabled={disabled}
                     />
                     {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
@@ -519,10 +550,10 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
 
         return (
             <CredentialFieldset
-                legend={isChannelA ? 'Canal A' : 'Telegram'}
+                legend={isChannelA ? 'Canal A' : 'Canal B'}
                 description={isChannelA
                     ? 'Canal privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.'
-                    : undefined}
+                    : CHANNEL_B_DESCRIPTION}
             >
                 <label htmlFor={inputId} className="text-industrial-muted">Telegram bot API Token</label>
                 <div data-testid={`${provider}-credential-row`} className="flex flex-wrap items-center gap-2">
@@ -546,7 +577,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             secretRevisionRef.current[provider] += 1;
                             setProviderDraft(provider, nextValue);
                         }}
-                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text ${CREDENTIAL_INPUT_WIDTH_CLS}`}
                         disabled={providerDisabled}
                     />
                     {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
@@ -608,10 +639,11 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
             {/* No manual refresh control: administration.refresh() still runs
                 automatically after every save/delete/verify (inside the hook),
                 which is what keeps this metadata current. */}
+            {/* T11 (2026-09-23, user decision): Canal A above Canal B. */}
             <div className="mt-3 flex flex-col gap-3">
                 {renderGeminiProvider()}
-                {renderTelegramFamilyProvider('telegram')}
                 {renderTelegramFamilyProvider('telegram_channel_a')}
+                {renderTelegramFamilyProvider('telegram')}
             </div>
             {feedback ? (
                 <div
@@ -647,7 +679,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 )}
             >
                 <p>{deleteProvider
-                    ? `La credencial protegida de ${PROVIDER_LABELS[deleteProvider]} se eliminará del servicio local. Esta acción no puede deshacerse.`
+                    ? DELETE_CONFIRMATION_TEXT[deleteProvider]
                     : 'La credencial protegida se eliminará del servicio local. Esta acción no puede deshacerse.'}</p>
             </AdminDialog>
         </section>

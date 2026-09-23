@@ -223,7 +223,7 @@ describe('VoiceCredentialSettings', () => {
         const user = userEvent.setup();
         const { client } = renderSettings();
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
 
         expect(await within(gemini).findByRole('img', { name: 'Credencial no configurada' })).toBeInTheDocument();
         expect(within(gemini).getByRole('img', { name: 'Verificación: no realizada' })).toBeInTheDocument();
@@ -249,7 +249,7 @@ describe('VoiceCredentialSettings', () => {
         const user = userEvent.setup();
         const { rerender, client, controller } = renderSettings();
         const input = await screen.findByLabelText('API Key de Gemini');
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
         const channelA = screen.getByRole('group', { name: 'Canal A' });
         await user.type(input, 'synthetic-secret');
         await user.type(within(telegram).getByLabelText('Telegram bot API Token'), 'synthetic-telegram-secret');
@@ -258,7 +258,7 @@ describe('VoiceCredentialSettings', () => {
         rerender(<VoiceCredentialSettings active={false} client={client} controller={controller} />);
         rerender(<VoiceCredentialSettings active client={client} controller={controller} />);
         expect(await screen.findByLabelText('API Key de Gemini')).toHaveValue('');
-        expect(within(screen.getByRole('group', { name: 'Telegram' })).getByLabelText('Telegram bot API Token')).toHaveValue('');
+        expect(within(screen.getByRole('group', { name: 'Canal B' })).getByLabelText('Telegram bot API Token')).toHaveValue('');
         expect(within(screen.getByRole('group', { name: 'Canal A' })).getByLabelText('Telegram bot API Token')).toHaveValue('');
 
         await user.type(screen.getByLabelText('API Key de Gemini'), 'another-secret');
@@ -283,7 +283,7 @@ describe('VoiceCredentialSettings', () => {
             telegramHealth: vi.fn(async () => ({ ...health, configured: false, running: true, restartRequired: true })),
             deleteCredential,
         });
-        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        const telegram = await screen.findByRole('group', { name: 'Canal B' });
 
         await user.click(within(telegram).getByRole('button', { name: 'Eliminar credencial' }));
         expect(deleteCredential).not.toHaveBeenCalled();
@@ -317,7 +317,7 @@ describe('VoiceCredentialSettings', () => {
 
     it('has no "Aplicar cambio" button anywhere: saving Telegram or Canal A applies on the backend instead', async () => {
         renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
-        await screen.findByRole('group', { name: 'Telegram' });
+        await screen.findByRole('group', { name: 'Canal B' });
 
         expect(screen.queryByRole('button', { name: 'Aplicar cambio' })).not.toBeInTheDocument();
     });
@@ -325,7 +325,7 @@ describe('VoiceCredentialSettings', () => {
     it('saves Telegram through its exact provider only, never through the retired apply action', async () => {
         const user = userEvent.setup();
         const { client } = renderSettings();
-        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        const telegram = await screen.findByRole('group', { name: 'Canal B' });
         const input = within(telegram).getByLabelText('Telegram bot API Token');
         await waitFor(() => expect(input).toBeEnabled());
         await user.type(input, 'new-telegram-token');
@@ -346,7 +346,7 @@ describe('VoiceCredentialSettings', () => {
                 ...health, running: false, verified: false, lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED',
             })),
         });
-        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        const telegram = await screen.findByRole('group', { name: 'Canal B' });
 
         const icon = await within(telegram).findByRole('img', { name: 'No se pudo conectar el bot' });
         expectLucideIcon(icon, 'circle-x');
@@ -375,7 +375,7 @@ describe('VoiceCredentialSettings', () => {
     it('renders the channel A card with its own status, botUsername and description, matching the Gemini row design', async () => {
         renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
 
         expect(screen.getAllByRole('group')).toHaveLength(3);
         expect(channelA).not.toBe(telegram);
@@ -403,7 +403,7 @@ describe('VoiceCredentialSettings', () => {
         const deleteCredential = vi.fn(async () => undefined);
         const { client } = renderSettings({ saveCredential, deleteCredential });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
         const gemini = screen.getByRole('group', { name: 'Proveedor de voz' });
         const geminiInput = within(gemini).getByLabelText('API Key de Gemini');
         const telegramInput = within(telegram).getByLabelText('Telegram bot API Token');
@@ -429,7 +429,9 @@ describe('VoiceCredentialSettings', () => {
 
         await user.click(within(channelA).getByRole('button', { name: 'Eliminar credencial' }));
         const dialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
-        expect(within(dialog).getByText(/Telegram \(Canal A\)/)).toBeInTheDocument();
+        expect(within(dialog).getByText(
+            'La credencial protegida de Canal A se eliminará del servicio local. Esta acción no puede deshacerse.',
+        )).toBeInTheDocument();
         expect(deleteCredential).not.toHaveBeenCalled();
         await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
 
@@ -474,7 +476,7 @@ describe('VoiceCredentialSettings', () => {
         rerender(<VoiceCredentialSettings active client={controlled.client} controller={controller} />);
         const reopenedChannelA = await screen.findByRole('group', { name: 'Canal A' });
         const reopened = within(reopenedChannelA).getByLabelText('Telegram bot API Token');
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
         const telegramInput = within(telegram).getByLabelText('Telegram bot API Token');
         await user.type(reopened, 'newer-channel-a-draft');
         await user.type(telegramInput, 'telegram-draft');
@@ -494,17 +496,21 @@ describe('VoiceCredentialSettings', () => {
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
         await user.click(within(channelA).getByRole('button', { name: 'Eliminar credencial' }));
         const channelADialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
-        expect(within(channelADialog).getByText(/Telegram \(Canal A\)/)).toBeInTheDocument();
+        expect(within(channelADialog).getByText(
+            'La credencial protegida de Canal A se eliminará del servicio local. Esta acción no puede deshacerse.',
+        )).toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
 
         rerender(<VoiceCredentialSettings active={false} client={controlled.client} controller={controller} />);
         rerender(<VoiceCredentialSettings active client={controlled.client} controller={controller} />);
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
         const telegramInput = within(telegram).getByLabelText('Telegram bot API Token');
         await user.type(telegramInput, 'telegram-draft');
         await user.click(within(screen.getByRole('group', { name: 'Proveedor de voz' })).getByRole('button', { name: 'Eliminar credencial' }));
         const freshDialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
-        expect(within(freshDialog).getByText(/Gemini/)).toBeInTheDocument();
+        expect(within(freshDialog).getByText(
+            'La credencial protegida del proveedor de voz se eliminará del servicio local. Esta acción no puede deshacerse.',
+        )).toBeInTheDocument();
         await act(async () => { controlled.releaseWrite(); });
 
         await waitFor(() => expect(screen.getByRole('dialog', { name: 'Eliminar credencial' })).toBeInTheDocument());
@@ -548,7 +554,7 @@ describe('VoiceCredentialSettings', () => {
             .mockResolvedValueOnce(metadata)
             .mockRejectedValueOnce(new AdminAuthError('CREDENTIAL_STORAGE_UNAVAILABLE', 503));
         renderSettings({ credentialMetadata });
-        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        const telegram = await screen.findByRole('group', { name: 'Canal B' });
         expect(await within(telegram).findByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
         const input = within(telegram).getByLabelText('Telegram bot API Token');
         await waitFor(() => expect(input).toBeEnabled());
@@ -614,7 +620,7 @@ describe('VoiceCredentialSettings', () => {
         const user = userEvent.setup();
         const controlled = await createClientWithDeferredRefresh();
         const { rerender, controller } = renderSettingsWithClient(controlled.client);
-        const telegram = await screen.findByRole('group', { name: 'Telegram' });
+        const telegram = await screen.findByRole('group', { name: 'Canal B' });
         await user.click(within(telegram).getByRole('button', { name: 'Eliminar credencial' }));
         await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
         await waitFor(() => expect(controlled.metadataRequestCount()).toBe(2));
@@ -698,7 +704,7 @@ describe('VoiceCredentialSettings', () => {
             channelAStatus: vi.fn(async () => status),
         });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
 
         const icon = await within(channelA).findByRole('img', { name: 'No se pudo conectar el bot' });
         expectLucideIcon(icon, 'circle-x');
@@ -713,7 +719,7 @@ describe('VoiceCredentialSettings', () => {
         });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
         const gemini = screen.getByRole('group', { name: 'Proveedor de voz' });
-        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const telegram = screen.getByRole('group', { name: 'Canal B' });
 
         // Anchor every disablement assertion to the settled A error, not to a
         // blank-draft or initial-load state that would disable controls anyway.
@@ -1037,5 +1043,81 @@ describe('VoiceCredentialSettings', () => {
 
         expect(await within(channelA).findByText('No se pudo confirmar la detención del Canal A.')).toBeInTheDocument();
         expect(within(channelA).queryByText('PRISMA_CHANNEL_A_STOP_UNCONFIRMED')).not.toBeInTheDocument();
+    });
+
+    // T11 (2026-09-23, user manual-test feedback): Canal A must render above
+    // Canal B (renamed from the plain "Telegram" row), and every credential
+    // row's input must share one fixed width regardless of its own trailing
+    // content, instead of growing to fill the row (flex-1), which made widths
+    // differ between rows and shift as content like Verificar or @username
+    // appeared/disappeared.
+    it('renders Canal A above Canal B in the provider list', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
+        await screen.findByRole('group', { name: 'Canal A' });
+
+        const groupNames = screen.getAllByRole('group').map((group) => group.querySelector('legend')?.textContent);
+        expect(groupNames).toEqual(['Proveedor de voz', 'Canal A', 'Canal B']);
+    });
+
+    it('gives the Gemini, Canal A and Canal B credential inputs the exact same fixed width', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const channelA = screen.getByRole('group', { name: 'Canal A' });
+        const channelB = screen.getByRole('group', { name: 'Canal B' });
+
+        const geminiInput = within(gemini).getByLabelText('API Key de Gemini');
+        const channelAInput = within(channelA).getByLabelText('Telegram bot API Token');
+        const channelBInput = within(channelB).getByLabelText('Telegram bot API Token');
+
+        // Same width class list on all three, and no flex-grow class left over
+        // from the old per-row-different width (each row's own trailing
+        // content -- Verificar, @username, an execution icon -- used to
+        // stretch or shrink the input instead of the input staying fixed).
+        expect(geminiInput.className).not.toMatch(/\bflex-1\b/);
+        expect(channelAInput.className).not.toMatch(/\bflex-1\b/);
+        expect(channelBInput.className).not.toMatch(/\bflex-1\b/);
+        const widthClasses = (element: HTMLElement) => element.className.split(' ').filter((cls) => /^(w-|md:w-)/.test(cls)).sort();
+        expect(widthClasses(geminiInput)).toEqual(widthClasses(channelAInput));
+        expect(widthClasses(channelAInput)).toEqual(widthClasses(channelBInput));
+        expect(widthClasses(geminiInput).length).toBeGreaterThan(0);
+    });
+
+    it.each([
+        ['Canal A', 'Canal privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.'],
+        ['Canal B', 'Consultas a distancia por Telegram: Prisma responde por mensaje, sin necesidad de mirar la interfaz.'],
+    ])('gives the %s description extra bottom margin before its field label', async (groupName, description) => {
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
+        const group = await screen.findByRole('group', { name: groupName });
+
+        const paragraph = within(group).getByText(description);
+        expect(paragraph.tagName).toBe('P');
+        expect(paragraph).toHaveClass('mb-3');
+    });
+
+    // Placeholder text pending the parent's final Canal B copy (T11, item 3);
+    // once received, only this literal and the component's constant change --
+    // the row/legend/description wiring stays the same.
+    it('renders the Canal B row with its own legend and a description placeholder', async () => {
+        renderSettings();
+        const channelB = await screen.findByRole('group', { name: 'Canal B' });
+
+        expect(within(channelB).getByText('Consultas a distancia por Telegram: Prisma responde por mensaje, sin necesidad de mirar la interfaz.')).toBeInTheDocument();
+        expect(await within(channelB).findByLabelText('Telegram bot API Token')).toBeInTheDocument();
+    });
+
+    it.each([
+        ['Canal A' as const, 'telegram_channel_a' as const, 'La credencial protegida de Canal A se eliminará del servicio local. Esta acción no puede deshacerse.'],
+        ['Canal B' as const, 'telegram' as const, 'La credencial protegida de Canal B se eliminará del servicio local. Esta acción no puede deshacerse.'],
+        ['Proveedor de voz' as const, 'gemini' as const, 'La credencial protegida del proveedor de voz se eliminará del servicio local. Esta acción no puede deshacerse.'],
+    ])('shows the exact per-provider delete confirmation copy for %s', async (groupName, _provider, expectedText) => {
+        const user = userEvent.setup();
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
+        const group = await screen.findByRole('group', { name: groupName });
+        await waitFor(() => expect(within(group).getByRole('button', { name: 'Eliminar credencial' })).toBeEnabled());
+
+        await user.click(within(group).getByRole('button', { name: 'Eliminar credencial' }));
+
+        const dialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
+        expect(within(dialog).getByText(expectedText)).toBeInTheDocument();
     });
 });
