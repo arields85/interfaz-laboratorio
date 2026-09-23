@@ -1761,7 +1761,20 @@ only remaining local branch is `feat/prisma-local-runtime-complete` (kept on pur
    first (≈1 min Telegram lag, orb/audio misses), then approved UX items: confirmation copy
    "Está a un paso: confirme y Prisma responderá sus consultas en este chat.", pinned message vs
    persistent keyboard options for keep/unlink buttons, Telegram "typing…" indicator.
-3. Then PW-007 (responsive scaling between ~1440×900 and ~2560×1440 CSS px).
+3. PW-007 (responsive scaling between ~1440×900 and ~2560×1440 CSS px) runs in the SAME session.
+
+**Working mode agreed with the user (2026-09-23) — mandatory for the next session:**
+- ONE session, ONE branch for both (e.g. `feat/prisma-responsiveness-and-scaling`), in the normal
+  checkout. NO git worktrees (user rejected them: deferred merge conflicts, shared fixed ports
+  5056/5057/5173, single `%LOCALAPPDATA%\CoreAnalytics\Prisma` state dir, launcher bound to the
+  main checkout).
+- TWO separate ODD feature documents: `odd/tasks/pw-006-prisma-responsiveness.md` and
+  `odd/tasks/pw-007-responsive-scaling.md` (+ their Engram mirrors); every commit belongs to one
+  task of one feature.
+- ONE writer at a time (sequential commits, no index races). Parallelism only for non-writing
+  work: PW-006 read-only diagnosis/measurements and user manual tests may run while a writer
+  implements PW-007, and vice versa.
+- Single Prisma runtime and launcher; integrate to `main` by fast-forward at the end, NO push.
 Remaining minor follow-ups from this feature: Canal B errors still say "Telegram"; Canal B has no
 auto-retry (different composition, documented); launcher reuses an older running runtime in dev;
 `.hmi-masked-text` not supported in Firefox. PW-003 stays parked.
