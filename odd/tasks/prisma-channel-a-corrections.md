@@ -193,6 +193,34 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   stays the active label only; icon/spinner placement unchanged. (2) Delete-credential
   button (Gemini row only; Telegram/Canal A come in T10) must not use the red danger
   variant — same styling as Save. Route: direct (single file + its test).
+- [x] **T10** Apply the approved Gemini row design (single row, block fieldset with
+  floated legend, masked text input, credential icon, Save/Delete, tokens-only) to the
+  Telegram and Canal A provider rows (user decisions 2026-09-23). Component:
+  `VoiceCredentialSettings.tsx` (`renderProvider` → shared `renderTelegramFamilyProvider`
+  reusing the new `CredentialFieldset` helper, also used by Gemini's row). Changes for
+  BOTH rows (Canal A = `telegram_channel_a`; Telegram = `telegram`, channel B voice):
+  (1) same layout as Gemini, reusing shared pieces (`CredentialFieldset`,
+  `credentialConfiguredGlyph`, `StatusIcon`, `CREDENTIAL_KEY_MASK`), Gemini's own
+  row/tests untouched; (2) removed "Aplicar cambio" and the pending/execution TEXT
+  blocks — SAVE now applies (backend restarts the bot with the new token in the same
+  request); DELETE already stopped the bot, confirmed unchanged; (3) execution status as
+  ONE icon per row (Check/Loader2-spin/MessageCircleWarning/CircleX, plus Channel-A-only
+  CircleDashed for a genuinely unconfirmed phase), mapped from existing status fields only
+  (never inferred from "not running"); (4) NEW `botUsername` (string|null) exposed from
+  Channel A status and the public `/health` route, shown as muted "@username" text when
+  connected; (5) copy: Canal A legend "Canal A" / description "Canal privado de Telegram:
+  se vincula con un QR y Prisma responde consultas sobre la interfaz." / field label
+  "Telegram bot API Token"; Telegram legend "Telegram", no pre-existing description found
+  (none invented); removed the now-false section description
+  ("Guardar una credencial no la aplica..."); (6) tests updated across
+  `VoiceCredentialSettings.test.tsx`, `GlobalSettingsDialog.voice.integration.test.tsx`,
+  `adminCredential.types.test.ts`, `usePrismaCredentialAdministration.test.tsx`,
+  `adminAuth.service.test.ts`, and Python (`channel_a_manager.py`, `channel_a_activation.py`,
+  `telegram_lifecycle.py`, `admin_http.py`, `local_presentation.py` + their tests).
+  Route: delegated in spirit but executed by this same bounded writer (backend + frontend,
+  2+ non-trivial files). Commits (work units): `feat(prisma): apply Telegram credentials
+  on save and expose bot usernames` (backend), `feat(admin): unify Telegram and Canal A
+  credential rows with the Gemini design` (frontend).
 
 ## Acceptance criteria
 
@@ -985,19 +1013,160 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   (2 non-blocking notes, both already recorded: stale task-ID comments, double-tooltip
   risk -- neither touched). Commit `7b96b59`.
 
+- 2026-09-23: T10 done, in three commits.
+
+  **Backend** (`397e838`). Decided to implement "save applies" at the admin HTTP boundary
+  layer (`admin_http.py`) rather than inside `ChannelAManager.save_credential()` or
+  `TelegramLifecycleManager.set_secret()` themselves, per the brief's own example ("the save
+  endpoint applies"): the PUT `/api/prisma/admin/credentials/telegram` route now calls
+  `telegram_manager.apply()` right after `set_secret()` (Telegram's `operation_lock` is a
+  reentrant `RLock`, but the call happens as a separate statement, not nested, so no
+  reentrancy question even arises), and `_channel_a_credential_write` calls
+  `channel_a_manager.apply()` right after `save_credential()` (Channel A's `_mutation()`
+  busy-lock has already been released by then, since `save_credential()`'s `with
+  self._mutation():` block exited). This was far less invasive than fusing apply into each
+  manager's own save method: `channel_a_manager.py`'s `save_credential()` and `apply()` are
+  completely unchanged, so the ~40 existing manager-level tests (structural invariants like
+  "save never calls factory", busy-reentrancy assertions) needed zero changes. Both new
+  `_apply_*_after_save()` helpers swallow the apply exception (`TelegramLifecycleError` /
+  `ChannelAManagerError`) so a post-save apply failure never fails the save response --
+  mirrors `startup_apply()`'s existing non-raising contract; the failure is already captured
+  in the manager's own `lastError` by the time the next status/health refresh runs.
+  Confirmed DELETE already stopped the bot on both channels (`_settle()`/`_stop_owned_bot()`
+  were already wired into `delete_credential()`); no code change needed there, only a new
+  regression test.
+  `botUsername` (string|null, public info, never the token): added a public `bot_username`
+  property to `ChannelAActivation` (already privately tracked, set from `getMe` during
+  prepare, cleared on stop) and a `ChannelAManager._bot_username_if_running()` helper that
+  exposes it only when `phase == running` and `not restart_required` (fail-closed on any
+  broken/missing attribute); added to `ChannelAManager.status()` and
+  `ADMIN_CHANNEL_A_STATUS_FIELDS` (six fields -> seven). Telegram: `TelegramLifecycleManager
+  .status()` computes it fresh from `self.bot.bot_username` (via `getattr`, defensive against
+  a minimal test double) gated on the same "actually running" check already used for the
+  `running` field; added to `ADMIN_TELEGRAM_STATUS_FIELDS` and to the public `/health` route
+  as `telegramBotUsername` (gated the same way, with a `telegram_bot` no-manager legacy
+  fallback for symmetry with the route's other fields, though no test exercises that branch
+  since the manager path is what's actually used).
+  RED verified per unit: `test_channel_a_manager.py` (`STATUS_KEYS`/`assert_status` updated
+  to 7 fields, `FakeActivation` gained a `bot_username` attribute defaulting `None`, one new
+  dedicated test), `test_telegram_credentials.py` (`FakeBot` gained `bot_username`, one
+  updated + one new test), `test_credential_http.py` (two new tests: apply-called-after-save,
+  apply-failure-swallowed), `test_channel_a_admin_http.py` (`ADMIN_CHANNEL_A_FIELDS`/
+  `ADMIN_TELEGRAM_FIELDS` updated, the `mock_calls` assertion in the existing "exactly one
+  manager mutation" test flipped to expect `save_credential` then `apply`, one new
+  apply-failure-swallowed test), `test_telegram_http.py` (`ADMIN_TELEGRAM_FIELDS`/
+  `canonical_admin_status` updated, the existing "PUT is desired-only" test renamed and
+  flipped to expect `apply()` called, two new `/health` botUsername tests) -- all failed
+  against the pre-change source for the reasons described (missing key, wrong call sequence,
+  KeyError), confirmed by direct runs (not git-stash, since the changes were additive/
+  small enough to reason about directly). Collateral: `test_telegram_diagnostics.py`'s own
+  separate `ADMIN_TELEGRAM_FIELDS` copy needed the same update (found via a full-suite run,
+  not grep, since it wasn't in the initially targeted file list). GREEN: full
+  `python -m unittest discover` 1163/1163 (up from 1156 pre-T10: +7 new tests net of the
+  test-only field/fixture updates). Also updated `docs/prisma/PRISMA_BROWSER_ROUTING.md`'s
+  route table and the Channel A credential-route paragraph to describe the new save-applies
+  contract (previously stated "only writes or deletes a secret", now false). GGA PASSED.
+
+  **Frontend** (`4ad6aaf`). Domain types: added `botUsername: string | null` to
+  `ChannelAAdministrationStatus` (exact-key parser, seven fields) and `TelegramPassiveHealth`
+  (parsed from `telegramBotUsername`), with a shared `isBotUsername()` validator (null, or a
+  non-empty string -- an empty string is never a real username). Fixed every collateral
+  fixture across `usePrismaCredentialAdministration.test.tsx`,
+  `GlobalSettingsDialog.voice.integration.test.tsx`, `VoiceSettingsTab.test.tsx` and
+  `adminAuth.service.test.ts` that constructed a raw channelA/health JSON object or a typed
+  mock without the new field (found by grep across all four files, not just the ones vitest
+  first flagged, since `parseTelegramPassiveHealth` and the exact-key `parseChannelA
+  AdministrationStatus` both now reject a payload missing it).
+  Component: extracted a shared `CredentialFieldset` (the block-fieldset + floated legend +
+  clearing div shell already approved for Gemini in T9's follow-up) and reused Gemini's own
+  `credentialConfiguredGlyph`/`StatusIcon`/`CREDENTIAL_KEY_MASK` (renamed from
+  `geminiCredentialGlyph`/`GEMINI_KEY_MASK` since they're now shared) for a new
+  `renderTelegramFamilyProvider(provider)`, replacing the old three-column `renderProvider`
+  entirely for Telegram and Channel A; Gemini's own `renderGeminiProvider` was refactored to
+  use the same `CredentialFieldset` wrapper with byte-identical output (verified by its 47
+  pre-existing assertions passing unchanged). Removed "Aplicar cambio", the pending/applied
+  and Ejecución activa/detenida text blocks, "Origen:"/"Generación:"/"Habilitada" spans, the
+  now-dead `ProviderStatus` and `channelAExecutionLabel` helpers, the `Play` icon import, and
+  the section-level "Guardar una credencial no la aplica..." paragraph (removed per the
+  brief's stated preference, now false). Added `StatusIcon`'s `spin` prop (also used to
+  de-duplicate Gemini's previously hand-rolled verifying-spinner block into the same
+  primitive, byte-identical markup).
+  Execution icon mapping: `telegramExecutionGlyph(telegram, pending)` and
+  `channelAExecutionGlyph(channelA, pending)`, both reading only existing status fields
+  (never a derived "not running" guess) plus a client-side `pending` flag (`pendingAction ===
+  'save-<provider>' || 'delete-<provider>'`) for the "Conectando..." state, since neither
+  health payload has its own transitional phase and T10 makes save apply synchronously within
+  the same request. Channel A reuses the exact phase branching the pre-existing
+  `channelAExecutionLabel` established (the "never infer quiescence from not-running" rule):
+  idle/stopped/null -> "Bot detenido"; preparing/prepared/stopping -> "Conectando..."
+  (spinner); running without a pending restart -> "Bot conectado"; failed/retired/
+  running-with-restart-required -> the new "Estado del bot no confirmado" (`CircleDashed`,
+  muted) -- lastError always takes precedence over phase when present. Telegram's glyph does
+  not read `restartRequired` (documented decision: since save now applies immediately, a
+  genuinely running bot is honestly "conectado" even with a stale desired/applied generation
+  from another source; Telegram has no extra transitional phase to fall back to the way
+  Channel A does). `botUsername` renders as muted "@username" text next to the icon on both
+  rows.
+  Copy (per brief): Canal A legend/group name "Canal A" (was "Telegram (Canal A)"; the
+  deletion-confirmation dialog's body text was left as "Telegram (Canal A)" -- out of the
+  brief's stated scope, which named only the fieldset's group accessible name), description
+  "Canal privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la
+  interfaz." (replacing the now-false "Guardar la credencial no inicia ni verifica el bot.");
+  Telegram legend stays "Telegram" -- grepped for any existing description paragraph before
+  this task and found none, so none was invented (reporting this so the parent/user can
+  decide whether one is wanted); both rows' field label is "Telegram bot API Token" (shared
+  literal, not derived from `PROVIDER_LABELS`).
+  RED verified directly: ran the full `VoiceCredentialSettings.test.tsx` before any test edits
+  (22 of 47 failed against the rewritten component, all Telegram/Canal A related -- old
+  button/text/label queries), then rewrote each failing test to the new contract (icon
+  queries via `getByRole('img', {name})` + `expectLucideIcon`, `within(group).getByLabelText
+  ('Telegram bot API Token')` since the label text is now shared by two rows, `@username`
+  text assertions) and removed four tests that had become meaningless once "Aplicar cambio"
+  no longer exists (`applies Telegram only through its explicit action`, `translates a
+  channel identity collision...`, `applies channel A only through its explicit action...`,
+  `gates the channel A apply on a saved credential...`), replacing them with tests for the
+  new save-applies/icon contract instead. Split the old dual-purpose "does not render a
+  non-running channel A activation phase as stopped" `it.each` (stopping/failed, both forcing
+  `lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED'`) into a phase-only version (`lastError:
+  null`, since lastError now visually outranks phase in the icon mapping) plus a separate new
+  lastError-icon test, since the two concerns can no longer share one assertion under the
+  icon design. GREEN: `VoiceCredentialSettings.test.tsx` 47/47; full `npm test` 211 files /
+  2270 tests; `tsc -b --noEmit` and `eslint` clean.
+  GGA PASSED with one legitimate, in-scope non-blocking note (fixed immediately, see below)
+  and two accepted-as-is notes: the icon-size-vs-button-size inconsistency (`size={16}` icons,
+  `size={14}` buttons -- pre-existing pattern from T9b, no documented token, not touched) and
+  the Gemini-vs-Telegram/CanalA input+Save+Delete markup still repeating ~60 lines each
+  (already reduced via `CredentialFieldset`/glyph/mask reuse; a full shared-row component
+  was deliberately not extracted further, to keep Gemini's approved row byte-identical and
+  minimize regression risk to its 47 pinned assertions -- a legitimate follow-up, not done
+  here).
+
+  **Follow-up fix** (`beed20e`, same day). GGA's one legitimate finding: the shared save
+  success message ("Credencial guardada. No se aplicaron cambios al proveedor.") became false
+  for Telegram/Canal A once their save started applying on the backend. Added a
+  provider-keyed `SAVE_SUCCESS_TEXT` map -- Gemini keeps the original text (still accurate:
+  its save never applies or verifies), Telegram/Canal A get "Credencial guardada y
+  aplicada." RED: the Channel-A-save test's message assertion failed against the (still
+  Gemini-worded) pre-fix text; GREEN: `VoiceCredentialSettings.test.tsx` 47/47; full
+  `npm test` 211/2270; `tsc -b --noEmit` and `eslint` clean. GGA PASSED, no further findings.
+
 ## Next step
 
-All thirteen roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
+All fourteen roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
 `039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
 `5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`), T9b (`5917ca6`), T9c (`43069c5`,
-`a5a2908`, `8110edb`) and T9d (`d982a06`, `ffa1d31`, `c2a19cb`, `7b96b59`). Next step: the
-user re-runs manual test point 4
-(foreign process on 5057,
-confirm the popover now shows the port through the session bootstrap AND the terminal shows
-exactly one clean red line), re-checks point 3 (relaunch after closing the launcher window
-with X, confirm the terminal now announces the reused runtime), manually verifies T5b (enter
-/admin, click "Ver viewer", confirm the session stays active; confirm "Cerrar sesión" still
-ends it), re-checks point 6 against T9c's icon/tooltip/no-password-prompt refinements (this
-writer's proof was offline/mocked only -- no network, no launcher/runtime, no real Chrome
-autofill behavior observed, per constraint), and then T10 applies the same approved Gemini
-row design (single row, icons, HoverTooltip) to the Telegram and Canal A provider rows.
+`a5a2908`, `8110edb`), T9d (`d982a06`, `ffa1d31`, `c2a19cb`, `7b96b59`) and T10 (`397e838`,
+`4ad6aaf`, `beed20e`). Next step: the user manually tests T10 for Canal A and Telegram --
+save a token (bot should connect, its `@username` should appear next to the connected icon),
+delete it (bot should stop, icon should disappear since the credential is no longer
+configured) -- for both rows, plus a deliberately wrong/foreign-bot-token save on one row to
+confirm the error icon and its safe guidance text; also still pending from before T10: manual
+re-checks of point 3 (relaunch after closing the launcher window with X), point 4 (foreign
+process on 5057, terminal + popover), T5b (Ver viewer keeps the session), and point 6's
+Chrome-specific no-autofill-prompt behavior (T9c's proof was offline/mocked only).
+
+**Product question for the user (not guessed):** Telegram's provider row has no existing
+description paragraph (grepped before writing any copy) -- Canal A now has one ("Canal
+privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.").
+Does Telegram (channel B) want a short description too, and if so what should it say, or is
+having no description there intentional/fine?
