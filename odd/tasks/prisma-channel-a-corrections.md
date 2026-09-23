@@ -101,6 +101,14 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   Route: delegated (same writer). Commits `4a6b4a5` (prisma-runtime), `039bf14` (23 of 27
   hmi-app files, parent-committed), `02d9695` (remaining 4 hmi-app files + color-token fix).
 
+- [x] **T4c** Manual test 2026-09-23 found two gaps in T4b: (1) with a foreign program on
+  5057 the Vite proxy forwards to it (observed `404 File not found`, `server: SimpleHTTP`),
+  so the proxy error handler never fires and the popover shows the generic copy without the
+  port; (2) Vite clears the terminal on start, erasing the launcher's port-in-use message.
+  Fix: when the launcher reported a startup failure, Prisma routes answer the failure JSON
+  directly without forwarding; `clearScreen: false`. Route: delegated (writer). Commits
+  `95d5d2a` (never-forward proxy fix), `f2ebf49` (clearScreen).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
@@ -437,7 +445,48 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   and pre-existing English info-card copy in `PropertyDock.tsx` — neither touched).
   Commit `02d9695`.
 
+- 2026-09-23: T4c done. Root cause of gap 1: a foreign process holding 5056/5057 IS a real
+  TCP listener, so the Vite proxy middleware forwarded to it successfully (observed live:
+  `curl http://127.0.0.1:5173/api/prisma/channel-a/pairing` -> `HTTP/1.1 404 File not
+  found`, `server: SimpleHTTP/0.6 Python/3.14.7`, HTML body) and the `proxy.on('error')`
+  handler from T4b never fired, since no connection error ever occurred. Verified the exact
+  mechanism against Vite's own proxy middleware source
+  (`node_modules/vite/dist/node/chunks/config.js`, `viteProxyMiddleware`): when a route's
+  `bypass` returns `false`, Vite trusts the response was already written and never calls
+  `proxy.web()` — the same mechanism the existing 405 method-rejection code already used.
+  `vite.prismaProxy.config.ts`: moved the `PRISMA_STARTUP_FAILURE` read to run once at
+  `createPrismaProxyConfig()` build time (not per-request); `bypass` now checks it FIRST,
+  before the method allowlist — when present, every route answers the same
+  `{error:'prisma_runtime_unreachable', reason, port}` JSON 503 directly via
+  `response.end()` and returns `false`, for every method (including ones the route would
+  otherwise 405), so proxying is never attempted. The `on('error')` handler is unchanged
+  and still covers the no-detected-failure case (runtime genuinely down, nothing at all
+  listening). Root cause of gap 2: Vite clears the terminal on dev server start by default
+  (`clearScreen: false` is the documented off-switch), erasing `start-local.ps1`'s own
+  "Prisma could not start: port ... is in use by ..." warning that `dev.mjs` prints before
+  ever spawning Vite. Chose `hmi-app/vite.config.ts` over routing it through `dev.mjs`'s
+  spawn args: `clearScreen` is Vite's own native top-level config key (documented at
+  vite.dev/config/shared-options.html#clearscreen), so setting it directly in the config
+  Vite already reads is simpler and needs no new plumbing through the launcher. Added
+  `hmi-app/vite.config.test.ts` (new file): imports the config's default export, resolves
+  it (it's a `({mode}) => {...}` function) and asserts `clearScreen: false` on the
+  resolved object — a real behavioral assertion, not a source-string match.
+  RED verified per file (stash the one implementation file, run its tests, confirm the
+  new/updated tests fail, pop): `vite.prismaProxy.config.ts` (5 new T4c tests fail with
+  the old bypass, 59 pre-existing pass unaffected); `vite.config.ts` (the new
+  `vite.config.test.ts` fails, showing the actual resolved config object missing
+  `clearScreen`). GREEN: focused run of all 6 touched/related test files (proxy config,
+  vite config, pairing service/hook/component, dev.mjs) 152/152; full `npm test`
+  210 files / 2231 tests; `tsc -b --noEmit` and `eslint` clean.
+  Commit `95d5d2a` (never-forward proxy fix; GGA PASSED, 2 non-blocking notes: the 503
+  body is built twice — once in `bypass`, once in `on('error')` — a shared helper could
+  dedupe it; the `127.0.0.1:505x` target strings repeat 18 times and could become named
+  constants — neither touched, pre-existing pattern, not requested).
+  Commit `f2ebf49` (`clearScreen: false` + its test; GGA PASSED, no notes).
+
 ## Next step
 
-T1b (`5bf9fa4`), T4b (`c4cf0f1`) and T8 (`4a6b4a5`, `039bf14`, `02d9695`) are all
-committed. Next step: manual verification with the real launcher (user).
+T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`, `039bf14`, `02d9695`) and T4c (`95d5d2a`,
+`f2ebf49`) are all committed. Next step: the user re-runs manual test point 4 (foreign
+process on 5057, confirm the popover now shows the port and the terminal message survives
+the Vite restart).
