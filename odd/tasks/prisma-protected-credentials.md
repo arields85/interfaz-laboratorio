@@ -214,8 +214,19 @@ account-management UI, browser credential fallback, or storage-hydrated privileg
 
 Viewer routes and individual Voice/conversation capabilities remain available without administrator
 authentication. Closing and reopening **Configuración general** preserves the active administrator
-session. Leaving administrator mode through **Ver viewer**, **Cerrar sesión**, browser history, or
-another `/admin` to non-admin transition ends local administrator authority through one central path.
+session.
+
+> **Reversed 2026-09-23 (T5b, `odd/tasks/prisma-channel-a-corrections.md`):** the user
+> explicitly reversed the paragraph below. Leaving administrator mode through **Ver viewer**,
+> browser history, or another `/admin` to non-admin transition **no longer** ends local
+> administrator authority — viewing is not logging out. Only **Cerrar sesión** (and
+> LoginOverlay's explicit exit), backend expiry/revocation, or another existing
+> non-navigation path ends it. The paragraph is kept below for history; it no longer
+> reflects current behavior.
+>
+> ~~Leaving administrator mode through **Ver viewer**, **Cerrar sesión**, browser history, or
+> another `/admin` to non-admin transition ends local administrator authority through one
+> central path.~~
 
 Bootstrap validates backend state before privileged rendering without blocking public viewer use.
 Missing, invalid, expired, revoked, or unreachable backend state leaves viewer behavior available and
@@ -338,8 +349,11 @@ leaves and the four-defect correction ledger are independently accepted offline.
   DELETE. The UI never auto-applies or loops.
 - `configured`, desired/applied generation, running, and last verified remain separate facts. Loading,
   unavailable, and retained last-known data are labelled rather than rendered as negative facts.
-- Closing Settings clears credential drafts but preserves the administrator session. Leaving admin
-  mode ends that authority. Viewer Voice and per-document conversation sessions remain independent.
+- Closing Settings clears credential drafts but preserves the administrator session. **Reversed
+  2026-09-23 (T5b):** leaving admin mode (Ver viewer, browser history) no longer ends that
+  authority — only Cerrar sesión, backend expiry/revocation, or another existing
+  non-navigation path does. Viewer Voice and per-document conversation sessions remain
+  independent.
 
 ### PAC-4B final correction ledger
 
