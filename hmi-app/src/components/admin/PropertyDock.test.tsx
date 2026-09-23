@@ -541,7 +541,7 @@ describe('PropertyDock text-title', () => {
         });
 
         expect(screen.getByRole('button', { name: /navegación/i })).toBeInTheDocument();
-        expect(screen.getByText('Si seleccionás un dashboard, este widget navegará a ese dashboard en el viewer.')).toBeInTheDocument();
+        expect(screen.getByText('Si selecciona un dashboard, este widget navegará a ese dashboard en el viewer.')).toBeInTheDocument();
 
         await user.click(getFieldButtonInSection('Navegación', 'Enlace'));
 

@@ -132,7 +132,7 @@ function extractPortabilityIssues(error: unknown): DashboardPortabilityIssue[] {
     return [{
         code: 'portable_dashboard_operation_failed',
         path: '$',
-        message: 'No pudimos completar la operación portable del dashboard. Volvé a intentarlo.',
+        message: 'No pudimos completar la operación portable del dashboard. Vuelva a intentarlo.',
         severity: 'error',
     }];
 }
@@ -843,7 +843,7 @@ export default function DashboardManagerPage() {
                                     <button 
                                         type="button"
                                         aria-label="Guardar como Template"
-                                        className="p-2 hover:bg-violet-500/20 hover:text-violet-400 rounded transition-colors"
+                                        className="p-2 hover:bg-accent-pink/20 hover:text-accent-pink rounded transition-colors"
                                         onClick={() => {
                                             setShowTemplatePrompt(dash.id);
                                             setTemplateName(getSuggestedTemplateName(dash));
@@ -869,7 +869,7 @@ export default function DashboardManagerPage() {
                                     <button 
                                         type="button"
                                         aria-label="Eliminar"
-                                        className="p-2 hover:bg-red-500/20 hover:text-red-400 rounded transition-colors" 
+                                        className="p-2 hover:bg-white/10 hover:[color:var(--color-status-critical)] rounded transition-colors"
                                         onClick={() => handleDelete(dash.id)}
                                     >
                                         <Trash2 size={16} />
@@ -1113,7 +1113,7 @@ export default function DashboardManagerPage() {
                     </div>
                 ) : (
                     <div className="space-y-3 text-industrial-muted">
-                        <p>Revisá los problemas marcados antes de volver a intentar la importación.</p>
+                        <p>Revise los problemas marcados antes de volver a intentar la importación.</p>
                         <ul className="space-y-2">
                             {portabilityFeedback?.issues.map((issue) => (
                                 <li key={`${issue.code}-${issue.path}`} className="rounded border border-status-critical/30 bg-status-critical/10 px-3 py-2">

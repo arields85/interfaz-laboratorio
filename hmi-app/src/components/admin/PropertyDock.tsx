@@ -1720,7 +1720,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                 <div className="h-[calc(100%-44px)] px-5">
                     <AdminEmptyState
                         icon={MousePointerClick}
-                        message="Seleccioná un widget para editar sus propiedades"
+                        message="Seleccione un widget para editar sus propiedades"
                     />
                 </div>
             </div>
@@ -1940,7 +1940,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             />
                                             <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                         </div>
-                                        <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                        <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                             Relleno bajo línea OEE
                                         </span>
                                     </label>
@@ -1955,7 +1955,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             />
                                             <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                         </div>
-                                        <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                        <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                             Puntos en OEE
                                         </span>
                                     </label>
@@ -2230,11 +2230,11 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         </DockFieldRow>
 
                                         {binding.unit && !hasCatalogVariablesForUnit && !isHierarchyModeEnabled && (
-                                            <DockInfoBox variant="normal" text="Sin variables para esta unidad. Podés crear una nueva desde el selector." />
+                                            <DockInfoBox variant="normal" text="Sin variables para esta unidad. Puede crear una nueva desde el selector." />
                                         )}
 
                                         {binding.unit && hasCatalogVariablesForUnit && !binding.catalogVariableId && (
-                                            <DockInfoBox variant="warning" text="La unidad ya tiene variables. Selecciona una o crea una nueva desde el selector." />
+                                            <DockInfoBox variant="warning" text="La unidad ya tiene variables. Seleccione una o cree una nueva desde el selector." />
                                         )}
 
                                         <DockFieldRow label="Operación">
@@ -2549,7 +2549,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                                 />
                                                                 <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                                             </div>
-                                                            <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                                            <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                                                 Unidad custom
                                                             </span>
                                                         </label>
@@ -2599,7 +2599,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                     />
                                                     <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                                 </div>
-                                                <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                                <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                                     Mostrar Tiempo
                                                 </span>
                                             </label>
@@ -2996,7 +2996,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Mostrar subtítulo de estado
                                     </span>
                                 </label>
@@ -3011,7 +3011,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         {isSimulatedBinding ? 'Mostrar valor en subtexto' : 'Mostrar variable en subtexto'}
                                     </span>
                                 </label>
@@ -3026,7 +3026,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Color dinámico por estado
                                     </span>
                                 </label>
@@ -3041,7 +3041,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Animación por estado
                                     </span>
                                 </label>
@@ -3155,7 +3155,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Color Dinámico
                                     </span>
                                 </label>
@@ -3190,7 +3190,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Activar Umbrales
                                     </span>
                                 </label>
@@ -3387,7 +3387,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Mostrar OEE
                                     </span>
                                 </label>
@@ -3402,7 +3402,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Usar eje secundario para OEE
                                     </span>
                                 </label>
@@ -3421,7 +3421,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Autoescala
                                     </span>
                                 </label>
@@ -3477,7 +3477,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         />
                                         <div className="w-7 h-4 rounded-full border border-transparent bg-white/10 transition-all peer peer-checked:bg-white/20 peer-checked:border-white/30 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"></div>
                                     </div>
-                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_rgba(255,255,255,0.4)] transition-all whitespace-nowrap">
+                                    <span className="text-white/70 peer-checked:text-white group-hover:!text-white group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)] transition-all whitespace-nowrap">
                                         Mostrar grilla
                                     </span>
                                 </label>
@@ -3568,7 +3568,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                             </DockFieldRow>
                             <DockInfoBox
                                 variant="normal"
-                                text="Si seleccionás un dashboard, este widget navegará a ese dashboard en el viewer."
+                                text="Si selecciona un dashboard, este widget navegará a ese dashboard en el viewer."
                             />
                         </DockSection>
 

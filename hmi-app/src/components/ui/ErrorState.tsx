@@ -16,13 +16,13 @@ interface ErrorStateProps {
 
 export default function ErrorState({
     title = 'Error de conexión',
-    message = 'No se pudo obtener la información. Verificá la fuente de datos.',
+    message = 'No se pudo obtener la información. Verifique la fuente de datos.',
     onRetry,
     className = '',
 }: ErrorStateProps) {
     return (
         <div className={`flex flex-col items-center justify-center py-16 px-6 gap-4 text-center ${className}`}>
-            <div className="w-14 h-14 rounded-2xl bg-[#1a0b0f] border border-accent-ruby/30 flex items-center justify-center">
+            <div className="w-14 h-14 rounded-2xl bg-accent-ruby/10 border border-accent-ruby/30 flex items-center justify-center">
                 <AlertCircle size={24} className="text-accent-ruby" strokeWidth={1.5} />
             </div>
             <div className="flex flex-col gap-1">
