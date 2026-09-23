@@ -80,6 +80,8 @@ const CHANNEL_A_STATUS = {
         lastError: null,
         botUsername: 'prisma_channel_a_bot',
         paired: false,
+        retrying: false,
+        retryAttempt: 0,
     },
 } as const;
 

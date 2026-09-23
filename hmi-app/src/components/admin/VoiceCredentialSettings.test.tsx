@@ -58,6 +58,8 @@ const channelAIdle = {
     lastError: null,
     botUsername: null,
     paired: false,
+    retrying: false,
+    retryAttempt: 0,
 } as const;
 const channelARunning = {
     configured: true,
@@ -68,6 +70,8 @@ const channelARunning = {
     lastError: null,
     botUsername: 'prisma_channel_a_bot',
     paired: true,
+    retrying: false,
+    retryAttempt: 0,
 } as const;
 const channelAStopUnconfirmed = {
     configured: true,
@@ -78,6 +82,8 @@ const channelAStopUnconfirmed = {
     lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
     botUsername: null,
     paired: false,
+    retrying: false,
+    retryAttempt: 0,
 } as const;
 
 function authenticated() {
@@ -740,6 +746,54 @@ describe('VoiceCredentialSettings', () => {
 
         expect(await within(channelA).findByText('Estado no confirmado')).toBeInTheDocument();
         expect(within(channelA).queryByRole('img', { name: 'Estado no confirmado' })).not.toBeInTheDocument();
+    });
+
+    // T16: a background failure the manager is actively retrying with backoff
+    // shows a distinct warning state instead of the generic critical failure
+    // text, even though lastError still carries the transient failure code.
+    it('shows a retrying channel A background failure as "Reconectando…", warning tone', async () => {
+        const status = {
+            ...channelARunning,
+            activation: { phase: 'failed', reason: 'PRISMA_CHANNEL_A_POLL_FAILED', quiescent: true, restartRequired: false },
+            lastError: 'PRISMA_CHANNEL_A_POLL_FAILED',
+            botUsername: null,
+            retrying: true,
+            retryAttempt: 2,
+        } as const;
+        renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => status),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Canal A' });
+
+        const result = await within(channelA).findByText('Reconectando…');
+        expect(result).toBeInTheDocument();
+        expect(result.className).toContain('text-status-warning');
+        expect(within(channelA).queryByText('No se pudo conectar el bot')).not.toBeInTheDocument();
+        expect(within(channelA).queryByRole('img', { name: 'Reconectando…' })).not.toBeInTheDocument();
+    });
+
+    // T16: the two PERMANENT failures the backend never retries get their own
+    // specific critical text instead of the generic fallback.
+    it.each([
+        { lastError: 'PRISMA_CHANNEL_A_UNAUTHORIZED' as const, expectedText: 'Token inválido' },
+        { lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED' as const, expectedText: 'Bot en uso por el otro canal' },
+    ])('shows the permanent channel A failure ($lastError) with its specific text', async ({ lastError, expectedText }) => {
+        const status = {
+            ...channelARunning,
+            activation: { phase: 'failed', reason: lastError, quiescent: true, restartRequired: false },
+            lastError,
+            botUsername: null,
+            retrying: false,
+        } as const;
+        renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => status),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Canal A' });
+
+        expect(await within(channelA).findByText(expectedText)).toBeInTheDocument();
+        expect(within(channelA).queryByText('No se pudo conectar el bot')).not.toBeInTheDocument();
     });
 
     it('shows the channel A stop-unconfirmed lastError as the error state, distinct from Telegram, text only', async () => {

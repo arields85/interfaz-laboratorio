@@ -263,6 +263,8 @@ describe('admin credential domain', () => {
             lastError: null,
             botUsername: null,
             paired: false,
+            retrying: false,
+            retryAttempt: 0,
         } as const;
 
         const runningActivation = {
@@ -272,10 +274,39 @@ describe('admin credential domain', () => {
             restartRequired: false,
         } as const;
 
-        it('parses the exact eight-field status with null activation, epoch, lastError and botUsername', () => {
+        it('parses the exact ten-field status with null activation, epoch, lastError and botUsername', () => {
             const parsed: ChannelAAdministrationStatus =
                 parseChannelAAdministrationStatus({ ok: true, channelA: nullChannelA });
             expect(parsed).toEqual(nullChannelA);
+        });
+
+        it('T16: tolerates an older payload missing retrying/retryAttempt, defaulting to false/0', () => {
+            const legacy = Object.fromEntries(
+                Object.entries(nullChannelA).filter(([key]) => key !== 'retrying' && key !== 'retryAttempt'),
+            );
+            const parsed = parseChannelAAdministrationStatus({ ok: true, channelA: legacy });
+            expect(parsed.retrying).toBe(false);
+            expect(parsed.retryAttempt).toBe(0);
+        });
+
+        it('T16: parses retrying and retryAttempt when the runtime provides them', () => {
+            const parsed = parseChannelAAdministrationStatus({
+                ok: true,
+                channelA: { ...nullChannelA, retrying: true, retryAttempt: 3 },
+            });
+            expect(parsed.retrying).toBe(true);
+            expect(parsed.retryAttempt).toBe(3);
+        });
+
+        it('T16: rejects a non-boolean retrying or a malformed retryAttempt when present', () => {
+            for (const retrying of ['yes', 1, null]) {
+                expect(() => parseChannelAAdministrationStatus({ ok: true, channelA: { ...nullChannelA, retrying } }))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            }
+            for (const retryAttempt of [-1, 1.5, '2', null]) {
+                expect(() => parseChannelAAdministrationStatus({ ok: true, channelA: { ...nullChannelA, retryAttempt } }))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            }
         });
 
         it('parses running, restart-required and identity-reserved activations with canonical codes', () => {
@@ -338,6 +369,21 @@ describe('admin credential domain', () => {
             expect(reserved.activation?.phase).toBe('failed');
         });
 
+        it('T16: accepts the two classified background-failure activation reasons', () => {
+            for (const reason of ['PRISMA_CHANNEL_A_POLL_FAILED', 'PRISMA_CHANNEL_A_UNAUTHORIZED'] as const) {
+                const parsed = parseChannelAAdministrationStatus({
+                    ok: true,
+                    channelA: {
+                        ...nullChannelA,
+                        activation: { phase: 'failed', reason, quiescent: true, restartRequired: false },
+                        lastError: reason,
+                    },
+                });
+                expect(parsed.activation?.reason).toBe(reason);
+                expect(parsed.lastError).toBe(reason);
+            }
+        });
+
         it('accepts only the eight canonical lifecycle phases', () => {
             for (const phase of [
                 'idle', 'preparing', 'prepared', 'running',
@@ -360,7 +406,7 @@ describe('admin credential domain', () => {
             }
         });
 
-        it('accepts all ten canonical manager lastError codes in a valid status', () => {
+        it('accepts all twelve canonical manager lastError codes in a valid status', () => {
             for (const lastError of [
                 'PRISMA_CHANNEL_A_CONFIGURATION_INVALID',
                 'PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
@@ -372,6 +418,8 @@ describe('admin credential domain', () => {
                 'INVALID_CREDENTIAL_REQUEST',
                 'PRISMA_CHANNEL_A_MANAGER_BUSY',
                 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+                'PRISMA_CHANNEL_A_POLL_FAILED',
+                'PRISMA_CHANNEL_A_UNAUTHORIZED',
             ] as const) {
                 const parsed = parseChannelAAdministrationStatus({
                     ok: true,

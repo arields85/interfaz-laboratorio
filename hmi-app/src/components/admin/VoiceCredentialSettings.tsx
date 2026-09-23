@@ -63,6 +63,8 @@ function errorText(error: unknown): string {
         PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE: 'El estado del Canal A no está disponible.',
         PRISMA_CHANNEL_A_RESTART_REQUIRED: 'El Canal A requiere un reinicio para aplicar el cambio.',
         PRISMA_CHANNEL_A_STOP_UNCONFIRMED: 'No se pudo confirmar la detención del Canal A.',
+        PRISMA_CHANNEL_A_POLL_FAILED: 'El Canal A informó una falla de conexión.',
+        PRISMA_CHANNEL_A_UNAUTHORIZED: 'El token del Canal A fue rechazado por Telegram.',
         INVALID_CREDENTIAL_REQUEST: 'La solicitud de credencial es inválida.',
         GEMINI_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
         GEMINI_VERIFICATION_UNAVAILABLE: 'La verificación de Gemini no está disponible.',
@@ -279,18 +281,27 @@ function telegramConnectionResult(telegram: TelegramPassiveHealth | null, pendin
 // Channel A's live connection state must never infer quiescence from "not
 // running": only the canonical lifecycle phase decides between "stopped"
 // (confirmed quiescent) and "unconfirmed" (a genuinely unknown phase).
-// T15: a genuinely FAILED phase is a CONFIRMED failure -- this module's own
-// backend design is "no retry, no backoff, no reactivation" once failed
-// (channel_a_lifecycle.py), so it is promoted to the same critical text a
-// manager-level lastError already uses, instead of being lumped into the
-// ambiguous "unconfirmed" bucket below (see T15 root-cause diagnosis in the
-// tracker: a background poll-loop failure never updates the manager's own
-// lastError, so `phase === 'failed'` must be checked independently of it).
-// Only 'retired' (the 7-day idle horizon) or a running phase with a pending
-// restart stays genuinely unknown.
+// T15: a genuinely FAILED phase is a CONFIRMED failure, promoted to the same
+// critical text a manager-level lastError already uses, instead of being
+// lumped into the ambiguous "unconfirmed" bucket below (see T15 root-cause
+// diagnosis in the tracker: a background poll-loop failure never updated the
+// manager's own lastError, so `phase === 'failed'` had to be checked
+// independently of it). T16 fixed that root cause on the backend (the
+// manager now records the failure AND retries it automatically when it is
+// transient), so this frontend function now also distinguishes: `retrying`
+// (a transient failure being retried with backoff) shows a distinct
+// "Reconectando…" warning instead of the generic critical text, and the two
+// PERMANENT codes the backend never retries (revoked token / identity
+// reserved by the other channel) get their own specific critical text
+// instead of the generic fallback. Only 'retired' (the 7-day idle horizon,
+// still out of T16's scope) or a running phase with a pending restart stays
+// genuinely unknown.
 function channelAConnectionResult(channelA: ChannelAAdministrationStatus | null, pending: boolean): ResultGlyph | null {
     if (!channelA || !channelA.configured) return null;
     if (pending) return { text: 'Conectando…', tone: 'muted' };
+    if (channelA.retrying) return { text: 'Reconectando…', tone: 'warning' };
+    if (channelA.lastError === 'PRISMA_CHANNEL_A_UNAUTHORIZED') return { text: 'Token inválido', tone: 'critical' };
+    if (channelA.lastError === 'TELEGRAM_BOT_IDENTITY_RESERVED') return { text: 'Bot en uso por el otro canal', tone: 'critical' };
     if (channelA.lastError) return { text: 'No se pudo conectar el bot', tone: 'critical' };
     const phase = channelA.activation?.phase ?? null;
     const restartRequired = channelA.activation?.restartRequired ?? false;

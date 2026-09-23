@@ -82,6 +82,9 @@ export type ChannelAActivationReason =
     | 'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE'
     | 'PRISMA_CHANNEL_A_RESTART_REQUIRED'
     | 'TELEGRAM_BOT_IDENTITY_RESERVED'
+    // T16: the runner's own two classified background-failure codes.
+    | 'PRISMA_CHANNEL_A_POLL_FAILED'
+    | 'PRISMA_CHANNEL_A_UNAUTHORIZED'
     | null;
 
 export type ChannelARuntimeError =
@@ -95,6 +98,9 @@ export type ChannelARuntimeError =
     | 'INVALID_CREDENTIAL_REQUEST'
     | 'PRISMA_CHANNEL_A_MANAGER_BUSY'
     | 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED'
+    // T16: the runner's own two classified background-failure codes.
+    | 'PRISMA_CHANNEL_A_POLL_FAILED'
+    | 'PRISMA_CHANNEL_A_UNAUTHORIZED'
     | null;
 
 export interface ChannelAActivation {
@@ -118,6 +124,12 @@ export interface ChannelAAdministrationStatus {
     // owner-agnostic); only meaningful while actually running without a
     // pending restart, false otherwise -- same gating as botUsername.
     paired: boolean;
+    // T16: true while a background failure is being automatically retried
+    // with backoff. Optional on the wire (a running runtime may predate this
+    // field): defaults to false/0 when absent so the UI never breaks against
+    // an older backend.
+    retrying: boolean;
+    retryAttempt: number;
 }
 
 export interface CredentialMutationResult {
@@ -159,6 +171,8 @@ const CHANNEL_A_ACTIVATION_REASONS = new Set<Exclude<ChannelAActivationReason, n
     'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
     'PRISMA_CHANNEL_A_RESTART_REQUIRED',
     'TELEGRAM_BOT_IDENTITY_RESERVED',
+    'PRISMA_CHANNEL_A_POLL_FAILED',
+    'PRISMA_CHANNEL_A_UNAUTHORIZED',
 ]);
 
 const CHANNEL_A_ERRORS = new Set<Exclude<ChannelARuntimeError, null>>([
@@ -172,6 +186,8 @@ const CHANNEL_A_ERRORS = new Set<Exclude<ChannelARuntimeError, null>>([
     'INVALID_CREDENTIAL_REQUEST',
     'PRISMA_CHANNEL_A_MANAGER_BUSY',
     'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+    'PRISMA_CHANNEL_A_POLL_FAILED',
+    'PRISMA_CHANNEL_A_UNAUTHORIZED',
 ]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -182,6 +198,20 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
     const actual = Object.keys(value).sort();
     const expected = [...keys].sort();
     return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+// T16: every required key must be present; every present key must be either
+// required or optional. Unlike hasExactKeys, an optional key may be ABSENT
+// (an older runtime's payload) without failing -- but an unrelated unknown
+// key still fails closed, exactly like hasExactKeys does.
+function hasKeysWithin(
+    value: Record<string, unknown>,
+    required: readonly string[],
+    optional: readonly string[],
+): boolean {
+    const allowed = new Set<string>([...required, ...optional]);
+    const keys = Object.keys(value);
+    return required.every((key) => keys.includes(key)) && keys.every((key) => allowed.has(key));
 }
 
 const GEMINI_VERIFICATION_STATES = new Set<GeminiVerificationState>([
@@ -344,12 +374,19 @@ function parseChannelAActivation(value: unknown): ChannelAActivation | null {
     };
 }
 
+// T16: required on every payload; optional so an older runtime's response
+// (predating retrying/retryAttempt) still parses, defaulting to false/0.
+const CHANNEL_A_STATUS_REQUIRED_FIELDS = [
+    'configured', 'desiredGeneration', 'appliedGeneration',
+    'activationEpoch', 'activation', 'lastError', 'botUsername', 'paired',
+] as const;
+const CHANNEL_A_STATUS_OPTIONAL_FIELDS = ['retrying', 'retryAttempt'] as const;
+
 export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdministrationStatus {
     if (!isObject(value) || !hasExactKeys(value, ['ok', 'channelA']) || value.ok !== true
-        || !isObject(value.channelA) || !hasExactKeys(value.channelA, [
-            'configured', 'desiredGeneration', 'appliedGeneration',
-            'activationEpoch', 'activation', 'lastError', 'botUsername', 'paired',
-        ])) {
+        || !isObject(value.channelA) || !hasKeysWithin(
+            value.channelA, CHANNEL_A_STATUS_REQUIRED_FIELDS, CHANNEL_A_STATUS_OPTIONAL_FIELDS,
+        )) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     const status = value.channelA;
@@ -357,7 +394,9 @@ export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdmin
         || (status.appliedGeneration !== null && !isGeneration(status.appliedGeneration))
         || (status.activationEpoch !== null && !isGeneration(status.activationEpoch))
         || !isBotUsername(status.botUsername)
-        || typeof status.paired !== 'boolean') {
+        || typeof status.paired !== 'boolean'
+        || (status.retrying !== undefined && typeof status.retrying !== 'boolean')
+        || (status.retryAttempt !== undefined && !isGeneration(status.retryAttempt))) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     return {
@@ -369,6 +408,8 @@ export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdmin
         lastError: parseChannelAError(status.lastError),
         botUsername: status.botUsername,
         paired: status.paired,
+        retrying: status.retrying === undefined ? false : status.retrying,
+        retryAttempt: status.retryAttempt === undefined ? 0 : status.retryAttempt,
     };
 }
 
