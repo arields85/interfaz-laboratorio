@@ -104,13 +104,18 @@ describe('AdminLayout', () => {
         document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 
-    it('suspends the admin session before navigating back to the viewer', () => {
+    it('navigates to the viewer without ending the admin session, so returning to /admin stays authenticated', () => {
+        // "Ver viewer" only opens the read-only viewer; unlike "Cerrar sesion" it must never
+        // call controller.exit(), which revokes the server session and clears the auth store.
+        // The '/' route carries no permission guard, so the admin session staying alive here
+        // does not leak into viewer behavior, and RequirePermission on '/admin' still redirects
+        // an unauthenticated visitor exactly as before.
         render(<AdminLayout />);
 
         fireEvent.click(screen.getByRole('button', { name: /ver viewer/i }));
 
         expect(navigateMock).toHaveBeenCalledWith('/');
-        expect(logoutMock).toHaveBeenCalledTimes(1);
+        expect(logoutMock).not.toHaveBeenCalled();
     });
 
     it('opens the global settings dialog from the admin toolbar and renders inactive sections separately', () => {

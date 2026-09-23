@@ -76,7 +76,10 @@ export default function AdminLayout({ controller = adminSessionController }: Adm
                         variant="primary"
                         size="sm"
                         onClick={() => {
-                            void controller.exit();
+                            // Viewing the read-only viewer must not end the admin session: the
+                            // '/' route carries no permission guard, and controller.exit() (used
+                            // by "Cerrar sesion" below) revokes the server session and clears the
+                            // auth store, forcing a re-login just to come back to /admin.
                             navigate('/');
                         }}
                     >
