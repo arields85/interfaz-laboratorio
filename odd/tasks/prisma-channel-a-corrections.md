@@ -222,6 +222,46 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   on save and expose bot usernames` (backend), `feat(admin): unify Telegram and Canal A
   credential rows with the Gemini design` (frontend).
 
+- [x] **T11** Credential rows polish (user manual-test feedback, 2026-09-23).
+  `VoiceCredentialSettings.tsx`: (1) same fixed input width (`w-full md:w-80`) on all three
+  rows instead of each growing (`flex-1`) to fill its own row's leftover space. (2) extra
+  bottom margin (`mb-3`) on the Canal A/Canal B description paragraphs, before the field
+  label. (3) rename Telegram (channel B) row to "Canal B" (legend + group accessible name)
+  and give it a description paragraph -- final copy pending from the parent, implemented
+  with placeholder `CHANNEL_B_DESCRIPTION = 'TODO_CHANNEL_B_DESCRIPTION'`; frontend commit
+  withheld until the real text arrives. (4) reorder rows: Proveedor de voz, Canal A, Canal B.
+  (5) explicit per-provider `DELETE_CONFIRMATION_TEXT` map replacing `PROVIDER_LABELS`
+  interpolation in the deletion dialog; `PROVIDER_LABELS` itself renamed to match ("Canal A",
+  "Canal B", "proveedor de voz"). (6) Canal B bot: translated its last two English Telegram
+  replies in `local_presentation.py` (`_handle_message`) to Spanish usted. Route: direct
+  (single component + its tests, plus the separate Python fix). Backend commit
+  `fix(prisma): reply in Spanish in the Canal B bot` (`5a2e86f`). Frontend commit
+  `style(admin): align credential rows and rename Telegram to Canal B` (`ea99dcc`), using the
+  user-approved Canal B description "Consultas a distancia por Telegram: Prisma responde por
+  mensaje, sin necesidad de mirar la interfaz."
+
+- [x] **T12** Drop screen-bound wording from Canal B bot replies (user decision
+  2026-09-23): "presentación" must never appear user-facing; Canal B is remote personal
+  Telegram queries without looking at a screen (`docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md`
+  §1/§6.3). `local_presentation.py` `_handle_message`: reword the paired/ready/`/status`
+  replies to drop "modo presentación"/"HMI visible"/"Local", keep the already-correct
+  "ya está vinculado a otro chat" line (just drop "local"). Grep hmi-app + prisma-runtime
+  user-facing strings for "presentación"/"Prisma Local" and report other hits. Route: direct.
+  Commit `fix(prisma): drop screen-bound wording from Canal B replies` (`5692652`).
+- [x] **T13** "Verificar" (non-sending token check) for Canal A and Canal B rows, same UX as
+  Gemini's row (stable-width label stack, secondary variant, verification icon, disabled
+  tooltip). Backend: admin-authenticated `POST .../telegram/verify` and
+  `.../telegram_channel_a/verify` endpoints, non-sending `getMe`-only identity check (never
+  `getUpdates`, never starts/stops/restarts the bot), refreshed `@username`, in-memory result
+  reset on save/delete, 409 on concurrent verify, short timeout, never logs/returns the raw
+  token or provider text. Proxy routes + `docs/prisma/PRISMA_BROWSER_ROUTING.md`. Frontend:
+  wire Verificar + verification icon into both rows, decide and document row layout order.
+  Route: delegated in spirit but executed by this same bounded writer (backend + proxy +
+  frontend, 2+ non-trivial files). Commits: `feat(prisma): verify Telegram bot tokens on
+  demand` (`6a91fab`, backend + proxy + docs), `feat(admin): add verification to Canal A and
+  Canal B` (`218c203`, frontend), `fix(admin): add safe messages for Telegram and Canal A
+  verification errors` (`21fe03a`, GGA follow-up).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
@@ -1150,23 +1190,216 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   Gemini-worded) pre-fix text; GREEN: `VoiceCredentialSettings.test.tsx` 47/47; full
   `npm test` 211/2270; `tsc -b --noEmit` and `eslint` clean. GGA PASSED, no further findings.
 
+- 2026-09-23: T11 backend done and committed; T11 frontend implemented and GREEN, held
+  uncommitted pending the Canal B description text (this answers the "Product question for
+  the user" below, which is now superseded by the parent's own T11 instructions).
+
+  **Backend** (`5a2e86f`). Found the two English Canal B bot replies the coordinator
+  named in `local_presentation.py`'s `_handle_message` (migration-active `/start` and
+  not-yet-paired fallback) and translated them to usted: "Send /start again after migration
+  completes." -> "Envíe /start nuevamente cuando finalice la migración."; "Send /start to
+  pair this local bot." -> "Envíe /start para vincular este bot." Grepped the rest of
+  `services/prisma-runtime/src/prisma_runtime` for other English user-facing bot/Telegram
+  reply strings (broad literal-sentence pattern across every module, then manual review of
+  every hit): every `channel_a_bot.py`/`channel_a_query.py` copy constant is already Spanish
+  (T8); the only other English hits were `local_presentation.py`'s three `_voice_probe_error`
+  messages ("Voice health request timed out.", "...failed to connect.", "...failed.") and
+  `voice_service.py`'s `"Gemini speech is unavailable."` -- both are internal
+  diagnostic/error-code text embedded in JSON API responses (health probe detail, TTS HTTP
+  error body), never a Telegram/bot reply, so left untouched per this task's explicit "bot
+  replies only, not error codes" scope; reporting them here for the parent to decide if a
+  separate task should touch them. RED: rewrote the two existing pinning assertions in
+  `test_telegram_lifecycle.py` (`test_legacy_allowlists_do_not_authorize_first_migrating_bot`,
+  `test_migration_fence_drains_multiple_backlog_batches_before_pairing`) to the Spanish text
+  first, confirmed both failed against the unmodified source (English still returned), then
+  translated the source. GREEN: `test_telegram_lifecycle` 38/38; full
+  `python -m unittest discover` 1163/1163. GGA: no matching files (`.py` outside its
+  configured patterns, same as prior Python-only commits). Commit `5a2e86f`.
+
+  **Frontend** (implemented, tested, NOT committed). `VoiceCredentialSettings.tsx`: added
+  `CREDENTIAL_INPUT_WIDTH_CLS = 'w-full md:w-80'` (a Tailwind spacing-scale token, not a raw
+  px value -- documented inline as a deliberate 2026-09-23 user decision so it isn't mistaken
+  for an anti-hardcode-dimensional violation) and applied it to all three credential inputs
+  in place of `min-w-40 flex-1`, so every row's input keeps the same fixed width regardless
+  of its own trailing content (Verificar+icon, @username, execution icon) instead of growing
+  to fill whatever space that content leaves; the row container already had `flex-wrap`, so a
+  row that doesn't fit at narrow widths wraps instead of overflowing (accepted per the task).
+  Could not visually confirm the longest trailing content fits on one line at the panel's
+  normal width (no server/runtime available to this writer per this task's constraints);
+  reasoned it through instead: `GlobalSettingsDialog` caps at `max-w-3xl` (768px), minus
+  dialog/section/fieldset padding leaves roughly 660px of row width at the `md` breakpoint,
+  and `w-80` (320px) plus the credential icon, Save, Delete, gaps, and either "Verificar" +
+  its icon or the longest observed `@username` text (~25 chars) sum to roughly 600-650px --
+  tight but fitting, and `flex-wrap` degrades gracefully if a narrower viewport disagrees.
+  `CredentialFieldset`'s description `<p>` gained `mb-3` (applies to both Canal A's existing
+  description and Canal B's new one, since both go through the same shared component) -- extra
+  space beyond the row's own `gap-2`, matching the legend's own `mb-3` above it. Canal B
+  (`renderTelegramFamilyProvider('telegram')`): legend/group name "Telegram" -> "Canal B";
+  added its description via a new `CHANNEL_B_DESCRIPTION = 'TODO_CHANNEL_B_DESCRIPTION'`
+  placeholder constant (documented inline: swapping this one constant is the only change
+  needed once the real text arrives; do not commit until then); field label unchanged
+  ("Telegram bot API Token"). Render order swapped to Canal A before Canal B ("Proveedor de
+  voz, Canal A, Canal B"). `PROVIDER_LABELS` renamed to match current row names (`gemini:
+  'proveedor de voz'`, `telegram: 'Canal B'`, `telegram_channel_a: 'Canal A'`) -- still used
+  by the stop-unconfirmed retry feedback message, the only remaining consumer. Added a new
+  explicit `DELETE_CONFIRMATION_TEXT: Record<CredentialProvider, string>` map and pointed the
+  deletion dialog at it instead of interpolating `PROVIDER_LABELS`, so each provider's exact
+  wording ("La credencial protegida de Canal A/Canal B se eliminará..."; "...del proveedor de
+  voz se eliminará...") is reviewed independently of that other map's own casing/wording.
+  RED: updated all group-name queries (`{ name: 'Telegram' }` -> `{ name: 'Canal B' }`, 17
+  occurrences across this file plus 1 in `GlobalSettingsDialog.voice.integration.test.tsx`),
+  the two pre-existing dialog-text regex assertions (`/Telegram \(Canal A\)/` -> the new exact
+  Canal A text) and one `/Gemini/` assertion (-> the new exact proveedor-de-voz text), then
+  added 6 new tests (input-width equality across all three rows with no leftover `flex-1`;
+  Canal A/Canal B description `mb-3`; Canal B legend + description placeholder; row order via
+  each fieldset's legend text; a parametrized exact-delete-copy check per provider) -- 22 of
+  55 tests failed against the pre-T11 component (renamed groups, old dialog text, new
+  structural assertions), confirmed via a full run before any component change. GREEN:
+  `VoiceCredentialSettings.test.tsx` 55/55; collateral files (`GlobalSettingsDialog.voice
+  .integration.test.tsx`, `VoiceSettingsTab.test.tsx`) 25/25; full `npm test` 211 files /
+  2278 tests; `tsc -b --noEmit` and `eslint` clean.
+
+  **Finished** (2026-09-23, same day): the user approved the Canal B description text
+  ("Consultas a distancia por Telegram: Prisma responde por mensaje, sin necesidad de mirar
+  la interfaz."). Swapped `CHANNEL_B_DESCRIPTION` from the placeholder to this exact text and
+  the same literal in the two test assertions that referenced it; re-ran
+  `VoiceCredentialSettings.test.tsx` (55/55), full `npm test` (211 files / 2278 tests),
+  `tsc -b --noEmit` and `eslint` (both clean) -- no other test needed touching, confirming the
+  placeholder-swap design worked as planned. Committed `style(admin): align credential rows
+  and rename Telegram to Canal B` (`ea99dcc`). GGA PASSED (2 non-blocking notes: Save/Delete's
+  `title` + `HoverTooltip` double-tooltip risk, already recorded pre-existing; the "Telegram
+  bot API Token" field label being English amid otherwise-Spanish copy, pre-existing, not
+  touched -- neither in scope for T11).
+
+- 2026-09-23: T12 done. `local_presentation.py` `_handle_message`: dropped "presentación"
+  and "Local" wording per the user's decision that Canal B is remote personal Telegram
+  queries, never framed around looking at a screen. Paired reply: "Prisma Local quedó
+  vinculada a este chat. Abra la HMI en modo presentación y ya puede consultar los datos
+  visibles." -> "Prisma quedó vinculada a este chat. Ya puede hacer sus consultas."; ready
+  reply: "Prisma Local está lista para responder sobre la HMI visible." -> "Prisma está lista
+  para responder sus consultas."; unidentified-bot reply: "Este bot local ya está vinculado a
+  otro chat." -> "Este bot ya está vinculado a otro chat." (dropped "local" only); `/status`
+  reply: "Prisma Local está activa. Último snapshot: ..." -> "Prisma está activa. Última
+  actualización de datos: ...". Grepped hmi-app + prisma-runtime for "presentación"/"Prisma
+  Local" in user-facing strings: every hit in hmi-app (`bindingResolver.ts`,
+  `thresholdEvaluator.ts`, `dataContract.types.ts`, `telemetry.types.ts`, `widget.types.ts`,
+  `ADMIN_CONVENTIONS.md`) is a code comment/docstring about the "presentation layer"
+  architecture term, not user-facing copy; `Topbar.test.tsx`'s "Prisma Local" is a test
+  description string, and `prismaVoiceAudioEngine.ts`'s is an internal AudioContext error
+  message (dev diagnostic, never shown to the end user) -- none touched, none in scope.
+  `paths.py`'s and `local_presentation.py`'s own module docstrings ("Prisma Local ...") are
+  also comments, not runtime output. RED: added 5 new tests to `test_telegram_lifecycle.py`
+  pinning the exact new copy for all four reply paths (plus a no-snapshot `/status`
+  variant), confirmed failing against the pre-fix source (old English/"Local"/"presentación"
+  text observed). GREEN: `test_telegram_lifecycle` 43/43; full `python -m unittest discover`
+  1168/1168. GGA: no matching files (`.py` outside its glob). Commit `5692652`.
+
+- 2026-09-23: T13 done, in three commits.
+
+  **Backend** (`6a91fab`: backend + Vite proxy + `docs/prisma/PRISMA_BROWSER_ROUTING.md`).
+  New `telegram_verification.py`: `TelegramTokenVerificationService`, shared by both channels
+  (each composed around its own credential resolver, exactly like `GeminiVerificationService`
+  composes around a `GeminiCredentialResolver`). Deliberately does NOT reuse
+  `ChannelATransport.get_me()` or `TelegramLocalBot.observe_identity()` -- both were read
+  first as the task asked, and both are production connect-time calls that intentionally
+  collapse every failure (bad token, network error, malformed response) into one generic
+  code, so neither can distinguish "invalid token" from "unreachable", which is exactly what
+  on-demand verification needs to report. Built one narrow `getMe`-only HTTP call instead,
+  with its own status classification (401 -> `invalid_token`; anything else abnormal ->
+  `unreachable`, fail-closed since the token may still be valid). Never calls `getUpdates`
+  (no offset read/consumed) and never sends a message. `channel_a_manager.py`: added a public
+  `resolver` alias (`self.resolver = self._resolver`) mirroring `TelegramLifecycleManager`'s
+  already-public `resolver` attribute, so `local_presentation.py`'s composition root can
+  build each verification service from the exact same resolver save/apply already use,
+  without reaching into a private attribute. `admin_http.py`: generalized Gemini's
+  `_provider_metadata`/reset-on-save-or-delete machinery to all three providers;
+  `telegram`/`telegram_channel_a` entries in the generic `/api/prisma/admin/credentials` GET
+  now also carry `verified`/`verification` (`{state, checkedAt, username}`); two new POST
+  routes `.../telegram/verify` and `.../telegram_channel_a/verify` (same auth/origin/CSRF
+  pattern as Gemini's, 409 on concurrent verify, 503 when no service composed). Verification
+  is deliberately independent of `channel_a_manager`'s mutation lock (busy/activation/
+  generations) -- it never touches manager state. Proxy: two new anchored routes in
+  `vite.prismaProxy.config.ts` following the existing `createRoute` pattern. RED verified
+  throughout (new tests failed against pre-change source: `test_telegram_verification.py`
+  confirmed via a temporary file move + restore since the module was new; `test_channel_a_manager.py`
+  new resolver-alias test; `test_credential_http.py` and `test_channel_a_admin_http.py` new
+  verify-route/reset assertions; `vite.prismaProxy.config.test.ts` two new declared-route
+  rows + lookalike/pattern-isolation rows). GREEN: `test_telegram_verification` 14/14; full
+  `python -m unittest discover` 1191/1191; `vite.prismaProxy.config.test.ts` 77/77. GGA
+  PASSED (2 non-blocking notes: the 503-body-builder duplication already flagged after T4c,
+  and the repeated `127.0.0.1:5057` literal already flagged then too -- neither touched).
+
+  **Frontend** (`218c203`). `adminCredential.types.ts`: added
+  `TelegramTokenVerificationState`/`TelegramTokenVerification`/
+  `TelegramFamilyCredentialProviderMetadata` (extends the base `{configured}` shape with
+  `verified`+`verification`, the `username` field distinguishing it from Gemini's own
+  verification shape); `CredentialMetadata.telegram`/`.telegram_channel_a` narrowed to the
+  new type (exact-key, closed-enum parser, same fail-closed discipline as Gemini's);
+  `parseTelegramVerificationResult`/`parseChannelAVerificationResult` for the two verify
+  endpoints' envelopes (`{ok, telegram}` / `{ok, channelA}`). `adminAuth.service.ts`:
+  `verifyTelegram()`/`verifyChannelA()` posting an empty `{}` body with the active private
+  CSRF (mirrors `verifyGemini()`); added the four new error codes to the public allowlist.
+  `usePrismaCredentialAdministration.ts`: `verifyTelegram`/`verifyChannelA` follow the same
+  `runOperation('verify-telegram'|'verify-channel-a', ...)` + `refresh()` lifecycle as every
+  other explicit action. `VoiceCredentialSettings.tsx`: added
+  `telegramTokenVerificationGlyph()` (verified -> `Check` success with a
+  "Token verificado: @<username>" tooltip; `invalid_token` -> `CircleX` critical, "Token
+  inválido"; `unreachable` -> `WifiOff` warning, "No se pudo verificar: sin conexión con
+  Telegram"; else -> `MessageCircleDashedCheck` muted, "Verificación: no realizada", reusing
+  the exact icon choices already established for Gemini's row) and a shared
+  `verifyTelegramFamily(provider)` action dispatching to the right client method. Wired
+  Verificar + its icon into the existing `ml-auto` trailing block of
+  `renderTelegramFamilyProvider`, reusing `VerifyButtonLabel` (T9d's stable-width grid stack)
+  and `StatusIcon` unchanged. Updated collateral test fixtures across
+  `VoiceCredentialSettings.test.tsx`, `GlobalSettingsDialog.voice.integration.test.tsx`,
+  `usePrismaCredentialAdministration.test.tsx`, `adminAuth.service.test.ts` and
+  `adminCredential.types.test.ts` wherever a `telegram`/`telegram_channel_a` metadata fixture
+  needed the extended shape (the exact-key parser now rejects the old bare `{configured}`
+  shape for these two providers). RED verified per layer (domain parsers: 5 new tests failed
+  against the pre-change types; service: 5 new/updated tests failed -- missing methods; hook:
+  6 new tests failed -- missing methods; component: 9 new tests failed, confirmed a second
+  time by stashing the component's own T13 diff and re-running the full file, restoring
+  after). GREEN: `VoiceCredentialSettings.test.tsx` 64/64 (68/68 after the follow-up fix
+  below); full `npm test` 211 files / 2310 tests; `tsc -b --noEmit` and `eslint` clean.
+
+  **Layout decision** (asked for explicitly): the trailing area of each Telegram-family row
+  reads, left to right: `@username` (when connected) -> execution status icon (live
+  connectivity, unchanged from T10) -> Verificar -> its own verification icon (T13, an
+  on-demand re-check of the stored token itself). Chosen so "what's happening right now"
+  reads before "check the token on demand", and because it reuses Gemini's own row ending
+  (Verificar then its icon) verbatim rather than inventing a second convention. All three
+  rows now end in a Verificar+icon pair; Gemini's stays right after Save/Delete inside its
+  own `ml-auto` block (no execution icon there), Telegram/Canal A's follows their
+  `@username`+execution icon inside the shared `ml-auto` block. Documented inline in the
+  component and covered by a new structural test asserting DOM order.
+
+  **Follow-up fix** (`21fe03a`, same day). GGA's one legitimate finding on the frontend
+  commit: `errorText()` had no entries for the four new verification error codes
+  (`TELEGRAM_VERIFICATION_IN_PROGRESS`/`_UNAVAILABLE`,
+  `PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS`/`_UNAVAILABLE`), so they fell through to the
+  generic fallback message instead of Gemini-parity specific text. Added all four (the
+  in-progress pair reuses Gemini's existing generic wording verbatim -- it names no provider
+  --; the unavailable pair gets "La verificación del Canal A/Canal B no está disponible.").
+  RED: 4 new tests (2 concurrent-verify, 2 unavailable) failed against the pre-fix map,
+  showing the generic fallback text instead of the specific one. GREEN:
+  `VoiceCredentialSettings.test.tsx` 68/68; full `npm test` 211 files / 2314 tests (one
+  unrelated full-suite-only flake reproduced once, confirmed passing on immediate re-run,
+  same class as the pre-existing `Dashboard.test.tsx` flake noted after T4b); `tsc -b
+  --noEmit` and `eslint` clean. GGA PASSED, 3 non-blocking notes (pre-existing "Telegram" in
+  some error-code copy vs the row's new "Canal B" name -- a real but out-of-scope
+  observation, since those codes belong to save/apply/delete, not this task; `border-white/10`/
+  `bg-black/10` non-token Tailwind colors, already the established admin pattern; stale
+  task-ID comments -- none touched).
+
 ## Next step
 
-All fourteen roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
-`039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
-`5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`), T9b (`5917ca6`), T9c (`43069c5`,
-`a5a2908`, `8110edb`), T9d (`d982a06`, `ffa1d31`, `c2a19cb`, `7b96b59`) and T10 (`397e838`,
-`4ad6aaf`, `beed20e`). Next step: the user manually tests T10 for Canal A and Telegram --
-save a token (bot should connect, its `@username` should appear next to the connected icon),
-delete it (bot should stop, icon should disappear since the credential is no longer
-configured) -- for both rows, plus a deliberately wrong/foreign-bot-token save on one row to
-confirm the error icon and its safe guidance text; also still pending from before T10: manual
+All seventeen roadmap items are committed. Still pending, unchanged by T11/T12/T13: manual
 re-checks of point 3 (relaunch after closing the launcher window with X), point 4 (foreign
-process on 5057, terminal + popover), T5b (Ver viewer keeps the session), and point 6's
-Chrome-specific no-autofill-prompt behavior (T9c's proof was offline/mocked only).
-
-**Product question for the user (not guessed):** Telegram's provider row has no existing
-description paragraph (grepped before writing any copy) -- Canal A now has one ("Canal
-privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.").
-Does Telegram (channel B) want a short description too, and if so what should it say, or is
-having no description there intentional/fine?
+process on 5057, terminal + popover), T5b (Ver viewer keeps the session), point 6's
+Chrome-specific no-autofill-prompt behavior (T9c's proof was offline/mocked only), and T10's
+own manual test (save/delete a Canal A and a Telegram token, plus one deliberately wrong
+token). New from T13: manual test of Verificar on both rows against real Telegram (valid
+token, deliberately wrong token, and offline/unreachable) to confirm the three verification
+states render as expected outside the mocked test suite -- this writer's Python tests mock
+every HTTP call, so the real Telegram Bot API surface (401 shape, timeout behavior) was never
+exercised end-to-end.
