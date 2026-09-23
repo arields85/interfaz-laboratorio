@@ -66,9 +66,10 @@ Lo crítico en el día a día:
 - Cero parches ad-hoc — resolver en la capa responsable.
 - Cero valores hardcodeados cuando existe token, primitive o medición runtime.
 - Scrollbars: siempre `hmi-scrollbar`.
+- Texto visible al usuario en español: siempre de **usted**, nunca voseo ni tuteo (HMI, mensajes fijos de Prisma e instrucciones de estilo a modelos).
 - `Directrices/` contiene antecedentes históricos no normativos del proyecto: no es fuente de requisitos vigentes y sus archivos no deben modificarse. Ver [`Directrices/README_directrices.md`](Directrices/README_directrices.md).
 
-Políticas completas (anti-parches, anti-hardcode, anti-hardcode dimensional): [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md).
+Políticas completas (registro de usted, anti-parches, anti-hardcode, anti-hardcode dimensional): [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md).
 
 ---
 

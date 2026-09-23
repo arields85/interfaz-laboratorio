@@ -19,6 +19,15 @@
 - Para matching jerárquico, `catalogVariableId` reemplaza a `variableKey` como identidad canónica del binding.
 - Las capacidades por tipo de widget se registran en `hmi-app/src/utils/widgetCapabilities.ts`; no hardcodear reglas dispersas por widget.
 
+## Registro del texto visible al usuario (obligatorio)
+
+Todo texto en español visible para el usuario se escribe tratando de **usted**, nunca con voseo ni tuteo. Aplica a la HMI (etiquetas, mensajes, placeholders, tooltips, `aria-label`, errores), a los mensajes fijos de Prisma (bot de Telegram, respuestas predefinidas) y a las instrucciones de estilo que se entregan a modelos de lenguaje.
+
+- Correcto: «Ingrese su usuario», «Reinicie el lanzador», «Puede consultar…».
+- Incorrecto: «Ingresá tu usuario», «Reiniciá el lanzador», «Podés consultar…», «Ingresa tu usuario».
+- Preferir formas impersonales cuando alcanzan: «No se pudo iniciar Prisma».
+- Los tests que buscan por texto o nombre accesible usan el mismo registro.
+
 ## Política anti-parches (obligatoria)
 
 - **CERO parches ad-hoc**: no aplicar fixes globales para resolver un problema local si existe un bloque/primitive responsable de ese layout o comportamiento.
