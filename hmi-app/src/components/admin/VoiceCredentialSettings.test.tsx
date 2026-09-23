@@ -837,7 +837,7 @@ describe('VoiceCredentialSettings', () => {
         expect(input.className).toMatch(/hmi-masked-text/);
     });
 
-    it('shows the Gemini credential status as a warning-tone MessageCircleWarning when not configured, CircleCheck once configured', async () => {
+    it('shows the Gemini credential status as a warning-tone MessageCircleWarning when not configured, Check once configured', async () => {
         const notConfigured = renderSettings();
         const notConfiguredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
         const notConfiguredIcon = await within(notConfiguredGroup).findByRole('img', { name: 'Credencial no configurada' });
@@ -848,7 +848,7 @@ describe('VoiceCredentialSettings', () => {
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
         const configuredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
         const configuredIcon = await within(configuredGroup).findByRole('img', { name: 'Credencial configurada' });
-        expectLucideIcon(configuredIcon, 'circle-check');
+        expectLucideIcon(configuredIcon, 'check');
         expect(within(configuredGroup).queryByText('Credencial configurada')).not.toBeInTheDocument();
     });
 

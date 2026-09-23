@@ -5,7 +5,6 @@ import type {
 import { useEffect, useRef, useState } from 'react';
 import {
     Check,
-    CircleCheck,
     CircleX,
     KeyRound,
     Loader2,
@@ -130,8 +129,9 @@ function geminiCredentialGlyph(configured: boolean): StatusGlyph {
     // T9c: the not-configured state reads as a caution (MessageCircleWarning /
     // warning token, "Estado Alerta" in DesignSettingsTab.tsx), not a hard
     // failure -- CircleX is reserved for an active verification failure below.
+    // Every "check" in the row uses the plain Check glyph, not CircleCheck.
     return configured
-        ? { Icon: CircleCheck, label: 'Credencial configurada', tone: 'success' }
+        ? { Icon: Check, label: 'Credencial configurada', tone: 'success' }
         : { Icon: MessageCircleWarning, label: 'Credencial no configurada', tone: 'warning' };
 }
 
