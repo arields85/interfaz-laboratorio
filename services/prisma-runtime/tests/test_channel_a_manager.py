@@ -1361,6 +1361,56 @@ class ChannelAManagerBackgroundRecoveryTests(ChannelAManagerTests):
         result = self.manager.apply()
         self.assertEqual(result["appliedGeneration"], 0)
 
+    def test_a_transient_background_failure_logs_one_redacted_line(self):
+        candidate, _ = self.applied()
+        with self.assertLogs('prisma_runtime.channel_a_manager', level='WARNING') as captured:
+            self.fail_in_background(candidate, POLL_FAILED)
+        self.assertEqual(len(captured.output), 1)
+        line = captured.output[0]
+        self.assertIn('Canal A background failure', line)
+        self.assertIn('code=' + POLL_FAILED, line)
+        self.assertIn('transient=true', line)
+        self.assertIn('retry_attempt=1', line)
+        self.assertIn('next_delay_s=5', line)
+        self.assertNotIn('next_delay_s=5.0', line)
+        self.assertNotIn(TOKEN, line)
+        self.assertNotIn(CANARY, line)
+
+    def test_a_permanent_background_failure_logs_one_redacted_line(self):
+        candidate, _ = self.applied()
+        with self.assertLogs('prisma_runtime.channel_a_manager', level='WARNING') as captured:
+            self.fail_in_background(candidate, UNAUTHORIZED)
+        self.assertEqual(len(captured.output), 1)
+        line = captured.output[0]
+        self.assertIn('Canal A background failure', line)
+        self.assertIn('code=' + UNAUTHORIZED, line)
+        self.assertIn('transient=false', line)
+        self.assertNotIn(TOKEN, line)
+        self.assertNotIn(CANARY, line)
+
+    def test_retry_tick_success_logs_reconnected_after_n_attempts(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        with self.assertLogs('prisma_runtime.channel_a_manager', level='WARNING') as captured:
+            timer.function()
+        messages = [line for line in captured.output if 'reconnected' in line]
+        self.assertEqual(len(messages), 1)
+        self.assertIn('Canal A reconnected after 1 attempts', messages[0])
+
+    def test_retry_tick_permanent_failure_logs_retries_stopped(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        self.credentials.secret = None  # -> CREDENTIAL_MISSING (permanent)
+        with self.assertLogs('prisma_runtime.channel_a_manager', level='WARNING') as captured:
+            timer.function()
+        messages = [line for line in captured.output if 'stopped' in line]
+        self.assertEqual(len(messages), 1)
+        self.assertIn('code=' + CREDENTIAL_MISSING, messages[0])
+        self.assertNotIn(TOKEN, messages[0])
+        self.assertNotIn(CANARY, messages[0])
+
     def test_a_transient_background_failure_is_recorded_and_schedules_one_retry(self):
         candidate, _ = self.applied()
         self.fail_in_background(candidate, POLL_FAILED)

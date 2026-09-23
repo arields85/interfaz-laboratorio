@@ -7,6 +7,7 @@ withdraws owned authority; reservation acquisition/release belongs to the runner
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from threading import Lock, Timer
 
@@ -88,6 +89,39 @@ def _retry_delay_seconds(attempt: int) -> float:
         return CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS
     delay = CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS * (CHANNEL_A_RETRY_BACKOFF_FACTOR ** (attempt - 1))
     return min(delay, CHANNEL_A_RETRY_MAX_DELAY_SECONDS)
+
+
+# T16: no `logging.basicConfig` exists anywhere in this runtime. A module
+# logger with no handler configured on it or any ancestor (root included)
+# falls back to `logging`'s own "handler of last resort", which writes a
+# WARNING-or-above record directly to `sys.stderr` -- exactly the stream the
+# launcher already redirects to `prisma-presentation-stderr.log`. Every field
+# below is a closed code, boolean or number; never a token, chat id, username
+# or raw provider/exception text.
+_logger = logging.getLogger(__name__)
+
+
+def _format_delay(delay: float | None) -> str:
+    return "none" if delay is None else f"{delay:g}"
+
+
+def _log_channel_a_background_failure(code, *, transient: bool, retry_attempt: int, next_delay: float | None) -> None:
+    _logger.warning(
+        "Canal A background failure: code=%s transient=%s retry_attempt=%s next_delay_s=%s",
+        code, "true" if transient else "false", retry_attempt, _format_delay(next_delay),
+    )
+
+
+def _log_channel_a_reconnected(attempts: int) -> None:
+    _logger.warning("Canal A reconnected after %s attempts", attempts)
+
+
+def _log_channel_a_retries_stopped(code, *, retry_attempt: int) -> None:
+    _logger.warning(
+        "Canal A retries stopped: code=%s after %s attempts", code, retry_attempt,
+    )
+
+
 _PHASES = frozenset({
     PHASE_IDLE, PHASE_PREPARING, PHASE_PREPARED, PHASE_RUNNING,
     PHASE_STOPPING, PHASE_STOPPED, PHASE_FAILED, PHASE_RETIRED,
@@ -270,6 +304,8 @@ class ChannelAManager:
                 old_timer = self._retry_timer
                 self._retry_timer = None
                 timer = None
+                transient = False
+                delay = None
             else:
                 self._retry_attempt += 1
                 self._retrying = True
@@ -278,6 +314,8 @@ class ChannelAManager:
                 timer = self._timer_factory(delay, self._retry_tick)
                 timer.daemon = True
                 self._retry_timer = timer
+                transient = True
+            attempt = self._retry_attempt
         if old_timer is not None:
             try:
                 old_timer.cancel()
@@ -285,6 +323,10 @@ class ChannelAManager:
                 pass
         if timer is not None:
             timer.start()
+        # T16 requirement 1: one redacted diagnostic line per recorded
+        # background failure, logged AFTER the staleness check above and
+        # outside the lock (logging is I/O, never performed while held).
+        _log_channel_a_background_failure(reason, transient=transient, retry_attempt=attempt, next_delay=delay)
 
     def _retry_tick(self) -> None:
         """Timer callback: attempt exactly one automatic ``apply()`` (T16).
@@ -306,26 +348,34 @@ class ChannelAManager:
             self._apply_impl()
         except ChannelAManagerError as error:
             code = error.args[0] if error.args else None
+            timer = None
+            stopped_attempt = None
             with self._lock:
                 if not self._retrying:
                     return
                 if code in _PERMANENT_RETRY_FAILURE_CODES:
                     self._retrying = False
-                    return
-                self._retry_attempt += 1
-                delay = _retry_delay_seconds(self._retry_attempt)
-                timer = self._timer_factory(delay, self._retry_tick)
-                timer.daemon = True
-                self._retry_timer = timer
-            timer.start()
+                    stopped_attempt = self._retry_attempt
+                else:
+                    self._retry_attempt += 1
+                    delay = _retry_delay_seconds(self._retry_attempt)
+                    timer = self._timer_factory(delay, self._retry_tick)
+                    timer.daemon = True
+                    self._retry_timer = timer
+            if timer is not None:
+                timer.start()
+            if stopped_attempt is not None:
+                _log_channel_a_retries_stopped(code, retry_attempt=stopped_attempt)
         except Exception:
             # A retry attempt must never crash a bare timer thread; leave the
             # recorded state as whatever the failed attempt already set.
             pass
         else:
             with self._lock:
+                attempts = self._retry_attempt
                 self._retrying = False
                 self._retry_attempt = 0
+            _log_channel_a_reconnected(attempts)
 
     def _desired(self):
         def read():
