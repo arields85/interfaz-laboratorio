@@ -105,6 +105,15 @@ function renderSettingsWithClient(client: AdminAuthClient) {
     return { ...view, controller, queryClient };
 }
 
+// Accessible name alone can't distinguish between two icons that share the
+// same tooltip copy (e.g. the "not yet verified" label stayed the same when
+// CircleDashed became MessageCircleDashedCheck in T9c); assert the actual
+// lucide icon identity via its generated `lucide-<kebab-name>` class.
+function expectLucideIcon(icon: HTMLElement, kebabName: string): void {
+    const svg = icon.querySelector('svg');
+    expect(svg).toHaveClass(`lucide-${kebabName}`);
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -808,17 +817,51 @@ describe('VoiceCredentialSettings', () => {
         ));
     });
 
-    it('shows the Gemini credential status as an icon in red when not configured and green once configured', async () => {
+    it('never renders the API Key field as a native password input, to keep Chrome from offering to generate or save one', async () => {
+        renderSettings();
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const input = await within(gemini).findByLabelText('API Key');
+
+        expect(input).not.toHaveAttribute('type', 'password');
+        expect(input).toHaveAttribute('type', 'text');
+        expect(input).toHaveAttribute('autocomplete', 'off');
+        expect(input).toHaveAttribute('spellcheck', 'false');
+        expect(input).toHaveAttribute('autocapitalize', 'off');
+        expect(input).toHaveAttribute('autocorrect', 'off');
+        expect(input).toHaveAttribute('data-1p-ignore');
+        expect(input).toHaveAttribute('data-lpignore', 'true');
+        expect(input).toHaveAttribute('data-form-type', 'other');
+        // Visually masks keystrokes via CSS (-webkit-text-security) instead of
+        // a real type="password" input, which is what triggers Chrome's
+        // generate/save-password prompts in the first place.
+        expect(input.className).toMatch(/hmi-masked-text/);
+    });
+
+    it('shows the Gemini credential status as a warning-tone MessageCircleWarning when not configured, CircleCheck once configured', async () => {
         const notConfigured = renderSettings();
         const notConfiguredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        expect(await within(notConfiguredGroup).findByRole('img', { name: 'Credencial no configurada' })).toBeInTheDocument();
+        const notConfiguredIcon = await within(notConfiguredGroup).findByRole('img', { name: 'Credencial no configurada' });
+        expectLucideIcon(notConfiguredIcon, 'message-circle-warning');
         expect(within(notConfiguredGroup).queryByText('Credencial no configurada')).not.toBeInTheDocument();
         notConfigured.unmount();
 
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
         const configuredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        expect(await within(configuredGroup).findByRole('img', { name: 'Credencial configurada' })).toBeInTheDocument();
+        const configuredIcon = await within(configuredGroup).findByRole('img', { name: 'Credencial configurada' });
+        expectLucideIcon(configuredIcon, 'circle-check');
         expect(within(configuredGroup).queryByText('Credencial configurada')).not.toBeInTheDocument();
+    });
+
+    it('shows a tooltip explaining why Verificar is disabled when Gemini is not configured', async () => {
+        const user = userEvent.setup();
+        renderSettings();
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const verify = await within(gemini).findByRole('button', { name: 'Verificar' });
+        expect(verify).toBeDisabled();
+
+        await user.hover(verify);
+
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('Configure una API key para verificarla.');
     });
 
     it('places the API Key input, credential icon, Save, Delete, Verificar and the verification icon in one row', async () => {
@@ -858,14 +901,16 @@ describe('VoiceCredentialSettings', () => {
         const verifyGemini = vi.fn(async () => GEMINI_VERIFIED);
         const { client } = renderSettings({ credentialMetadata, verifyGemini });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        expect(await within(gemini).findByRole('img', { name: 'Verificación: no realizada' })).toBeInTheDocument();
+        const notCheckedIcon = await within(gemini).findByRole('img', { name: 'Verificación: no realizada' });
+        expectLucideIcon(notCheckedIcon, 'message-circle-dashed-check');
         const verify = within(gemini).getByRole('button', { name: 'Verificar' });
         await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
         expect(client.verifyGemini).toHaveBeenCalledWith(expect.any(AbortSignal));
-        expect(await within(gemini).findByRole('img', { name: 'Verificada' })).toBeInTheDocument();
+        const verifiedIcon = await within(gemini).findByRole('img', { name: 'Verificada' });
+        expectLucideIcon(verifiedIcon, 'check');
         expect(within(gemini).queryByText('Verificada')).not.toBeInTheDocument();
     });
 
@@ -885,14 +930,16 @@ describe('VoiceCredentialSettings', () => {
         await user.click(verify);
 
         expect(await within(gemini).findByRole('button', { name: 'Verificando…' })).toBeDisabled();
-        expect(within(gemini).getByRole('img', { name: 'Verificando…' })).toBeInTheDocument();
+        const verifyingIcon = within(gemini).getByRole('img', { name: 'Verificando…' });
+        expectLucideIcon(verifyingIcon, 'loader-2');
+        expect(verifyingIcon.querySelector('svg')).toHaveClass('animate-spin');
         await act(async () => { release(GEMINI_VERIFIED); });
     });
 
     it.each([
-        ['invalid_key', 'API key inválida'],
-        ['unreachable', 'No se pudo verificar: sin conexión con Google'],
-    ])('shows the %s verification result as an icon with its safe accessible name', async (state, expectedName) => {
+        ['invalid_key', 'API key inválida', 'circle-x'],
+        ['unreachable', 'No se pudo verificar: sin conexión con Google', 'wifi-off'],
+    ])('shows the %s verification result as the %s icon with its safe accessible name', async (state, expectedName, expectedIcon) => {
         renderSettings({
             credentialMetadata: vi.fn(async () => ({
                 ...metadata,
@@ -901,7 +948,8 @@ describe('VoiceCredentialSettings', () => {
         });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
 
-        expect(await within(gemini).findByRole('img', { name: expectedName })).toBeInTheDocument();
+        const icon = await within(gemini).findByRole('img', { name: expectedName });
+        expectLucideIcon(icon, expectedIcon);
         expect(within(gemini).queryByText(expectedName)).not.toBeInTheDocument();
     });
 

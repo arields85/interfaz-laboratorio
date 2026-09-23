@@ -4,11 +4,13 @@ import type {
 } from '../../hooks/usePrismaCredentialAdministration';
 import { useEffect, useRef, useState } from 'react';
 import {
+    Check,
     CircleCheck,
-    CircleDashed,
     CircleX,
     KeyRound,
     Loader2,
+    MessageCircleDashedCheck,
+    MessageCircleWarning,
     Play,
     RefreshCw,
     Save,
@@ -125,18 +127,21 @@ interface StatusGlyph {
 // name (role="img" + aria-label) and its HoverTooltip text -- the same
 // icon-only + tooltip pattern T6 established for the Save/Delete buttons.
 function geminiCredentialGlyph(configured: boolean): StatusGlyph {
+    // T9c: the not-configured state reads as a caution (MessageCircleWarning /
+    // warning token, "Estado Alerta" in DesignSettingsTab.tsx), not a hard
+    // failure -- CircleX is reserved for an active verification failure below.
     return configured
         ? { Icon: CircleCheck, label: 'Credencial configurada', tone: 'success' }
-        : { Icon: CircleX, label: 'Credencial no configurada', tone: 'critical' };
+        : { Icon: MessageCircleWarning, label: 'Credencial no configurada', tone: 'warning' };
 }
 
 function geminiVerificationGlyph(state: GeminiVerificationState): StatusGlyph {
-    if (state === 'verified') return { Icon: CircleCheck, label: 'Verificada', tone: 'success' };
+    if (state === 'verified') return { Icon: Check, label: 'Verificada', tone: 'success' };
     if (state === 'invalid_key') return { Icon: CircleX, label: 'API key inválida', tone: 'critical' };
     if (state === 'unreachable') {
         return { Icon: WifiOff, label: 'No se pudo verificar: sin conexión con Google', tone: 'warning' };
     }
-    return { Icon: CircleDashed, label: 'Verificación: no realizada', tone: 'muted' };
+    return { Icon: MessageCircleDashedCheck, label: 'Verificación: no realizada', tone: 'muted' };
 }
 
 function StatusIcon({ Icon, label, tone }: StatusGlyph) {
@@ -340,8 +345,21 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 <div data-testid="gemini-credential-row" className="flex flex-wrap items-center gap-2">
                     <input
                         id="gemini-api-key-input"
-                        type="password"
-                        autoComplete="new-password"
+                        // Not type="password": Chrome ignores autocomplete="off" on a
+                        // password input and offers to generate/save one regardless
+                        // (autocomplete="new-password" makes it worse, actively inviting
+                        // generation). A plain text input masked with CSS
+                        // (-webkit-text-security, .hmi-masked-text) sidesteps Chrome's
+                        // password-manager heuristics entirely; the data-* attributes
+                        // below opt out third-party managers (1Password, LastPass) too.
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        data-1p-ignore="true"
+                        data-lpignore="true"
+                        data-form-type="other"
                         value={value}
                         placeholder={showsMask ? GEMINI_KEY_MASK : undefined}
                         onChange={(event) => {
@@ -349,7 +367,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             secretRevisionRef.current.gemini += 1;
                             setProviderDraft('gemini', nextValue);
                         }}
-                        className={`${ADMIN_SIDEBAR_INPUT_CLS} min-w-40 flex-1`}
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
                         disabled={disabled}
                     />
                     {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
@@ -383,14 +401,22 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                     </HoverTooltip>
                     {gemini ? (
                         <div className="ml-auto flex items-center gap-2">
-                            <HmiButton
-                                size="sm"
-                                variant="secondary"
-                                disabled={disabled || !gemini.configured}
-                                onClick={() => void verifyGemini()}
-                            >
-                                {verifying ? 'Verificando…' : 'Verificar'}
-                            </HmiButton>
+                            {gemini.configured ? (
+                                <HmiButton
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={disabled}
+                                    onClick={() => void verifyGemini()}
+                                >
+                                    {verifying ? 'Verificando…' : 'Verificar'}
+                                </HmiButton>
+                            ) : (
+                                <HoverTooltip label="Configure una API key para verificarla." position="top">
+                                    <HmiButton size="sm" variant="secondary" disabled>
+                                        Verificar
+                                    </HmiButton>
+                                </HoverTooltip>
+                            )}
                             {verifying ? (
                                 <HoverTooltip label="Verificando…" position="top">
                                     <span role="img" aria-label="Verificando…" className="text-industrial-muted">

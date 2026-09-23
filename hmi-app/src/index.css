@@ -344,6 +344,19 @@ h1, h2, h3, h4, h5, h6 {
     transparent;
 }
 
+/* ── Máscara visual para credenciales sin type="password" ─────────────────
+ * Chrome ignora autocomplete="off" en type="password" y ofrece generar o
+ * guardar la contraseña igual; un input type="text" enmascarado con
+ * -webkit-text-security evita esa detección por completo. No es un token de
+ * diseño (no colorea nada), es la técnica para ocultar el valor tecleado.
+ * Solo Chromium/Safari soportan -webkit-text-security; en Firefox el campo
+ * queda visible en texto plano (sin equivalente CSS estándar). Uso: añadir
+ * `hmi-masked-text` a un input type="text" que deba lucir como contraseña.
+ * ──────────────────────────────────────────────────────────────────────── */
+.hmi-masked-text {
+  -webkit-text-security: disc;
+}
+
 @keyframes hmi-header-widget-entrance {
   from {
     opacity: 0;
