@@ -197,6 +197,24 @@ class ChannelAManager:
 
         return _call(read, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
 
+    @staticmethod
+    def _bot_username_if_running(activation, observed):
+        """Public info (not the secret token), only while genuinely connected.
+
+        Never exposed without a running, non-restart-pending observation, and
+        any broken/foreign activation attribute closes to ``None`` instead of
+        raising -- this is a display projection, not an authority check.
+        """
+        if activation is None or observed is None:
+            return None
+        if observed.phase != PHASE_RUNNING or observed.restart_required:
+            return None
+        try:
+            username = activation.bot_username
+        except Exception:
+            return None
+        return username if isinstance(username, str) and username else None
+
     def status(self):
         """Observe metadata only; never resolve credentials or drive lifecycle."""
         try:
@@ -223,6 +241,7 @@ class ChannelAManager:
                 "activationEpoch": epoch,
                 "activation": observed,
                 "lastError": error,
+                "botUsername": self._bot_username_if_running(activation, observed),
             }
         except Exception as error:
             code = _error_code(error, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)

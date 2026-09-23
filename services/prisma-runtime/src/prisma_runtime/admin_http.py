@@ -50,6 +50,7 @@ ADMIN_TELEGRAM_STATUS_FIELDS = (
     "verified",
     "restartRequired",
     "lastError",
+    "botUsername",
 )
 
 
@@ -72,6 +73,7 @@ ADMIN_CHANNEL_A_STATUS_FIELDS = (
     "activationEpoch",
     "activation",
     "lastError",
+    "botUsername",
 )
 
 
@@ -210,8 +212,32 @@ class AdminHttpBoundary:
             return self._error(PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE, 503)
         return None
 
+    def _apply_telegram_after_save(self) -> None:
+        """Restart Telegram with the freshly saved token (T10: save applies).
+
+        Mirrors ``TelegramLifecycleManager.startup_apply()``'s non-raising
+        contract: an apply failure stays captured in the manager's own
+        lifecycle status (``lastError``) and must never fail the save
+        response -- the panel re-reads status on its next automatic refresh.
+        """
+        try:
+            self.telegram_manager.apply()
+        except TelegramLifecycleError:
+            pass
+
+    def _apply_channel_a_after_save(self) -> None:
+        """Restart Channel A with the freshly saved token (T10: save applies).
+
+        Same non-raising contract as ``_apply_telegram_after_save``: a failure
+        is already captured inside the manager's own status by ``apply()``.
+        """
+        try:
+            self.channel_a_manager.apply()
+        except ChannelAManagerError:
+            pass
+
     def _channel_a_credential_write(self, provider: str, secret: str):
-        """Save Channel A through the manager's generation accounting only."""
+        """Save Channel A through the manager, then apply the new credential."""
         unavailable = self._require_channel_a_manager()
         if unavailable:
             return unavailable
@@ -219,6 +245,7 @@ class AdminHttpBoundary:
             self.channel_a_manager.save_credential(secret)
         except ChannelAManagerError as error:
             return self._channel_a_manager_error(error)
+        self._apply_channel_a_after_save()
         response = jsonify({"ok": True, "provider": provider, "configured": True})
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -440,6 +467,7 @@ class AdminHttpBoundary:
                     raise CredentialUnavailable("CREDENTIAL_STORAGE_UNAVAILABLE")
                 if provider == "telegram" and self.telegram_manager is not None:
                     self.telegram_manager.set_secret(secret)
+                    self._apply_telegram_after_save()
                 else:
                     self.credential_service.set_secret(provider, secret)
                 self._reset_gemini_verification_if_applicable(provider)

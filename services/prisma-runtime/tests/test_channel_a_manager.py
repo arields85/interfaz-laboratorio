@@ -38,7 +38,7 @@ LIFECYCLE_UNAVAILABLE = "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE"
 COLLISION = "TELEGRAM_BOT_IDENTITY_RESERVED"
 STATUS_KEYS = {
     "configured", "desiredGeneration", "appliedGeneration",
-    "activationEpoch", "activation", "lastError",
+    "activationEpoch", "activation", "lastError", "botUsername",
 }
 
 
@@ -138,6 +138,9 @@ class FakeActivation:
         self.start_observed = status_type("running", None, False, False)
         self.fail = {}
         self.callback = None
+        # Public projection surface only; default absent, set explicitly by
+        # the botUsername-focused tests below.
+        self.bot_username = None
 
     def event(self, operation):
         self.ledger.append((self.name, operation))
@@ -235,7 +238,7 @@ class ChannelAManagerTests(unittest.TestCase):
             "credentials.status", "configuration.read",
         ) and not (len(entry) == 2 and entry[1] == "status")]
 
-    def assert_status(self, result, *, configured=True, desired=0, applied=None, epoch=None, activation=None, error=None):
+    def assert_status(self, result, *, configured=True, desired=0, applied=None, epoch=None, activation=None, error=None, bot_username=None):
         self.assertIs(type(result), dict)
         self.assertEqual(set(result), STATUS_KEYS)
         self.assertIs(result["configured"], configured)
@@ -246,6 +249,7 @@ class ChannelAManagerTests(unittest.TestCase):
         if activation is not None:
             self.assertIsInstance(activation, self.Status)
         self.assertEqual(result["lastError"], error)
+        self.assertEqual(result["botUsername"], bot_username)
         self.assertNotIn(TOKEN, repr(result))
         self.assertNotIn(CANARY, repr(result))
 
@@ -405,6 +409,34 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assertEqual(epoch, result["activationEpoch"])
         self.assertIs(reservation, self.reservation)
         self.assertNotIn(TOKEN, repr(self.manager))
+
+    def test_status_exposes_bot_username_only_while_running_without_a_pending_restart(self):
+        # No activation yet: never exposed.
+        self.assert_status(self.manager.status(), bot_username=None)
+
+        candidate, result = self.applied()
+        candidate.bot_username = "prisma_channel_a_bot"
+        self.assert_status(self.manager.status(), desired=self.store.snapshot.desired_generation,
+                            applied=self.store.snapshot.desired_generation, epoch=result["activationEpoch"],
+                            activation=candidate.observed, bot_username="prisma_channel_a_bot")
+
+        # A pending restart must not keep publishing a username for a stale run.
+        candidate.observed = self.Status("running", None, False, True)
+        self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                            epoch=result["activationEpoch"], activation=candidate.observed, bot_username=None)
+
+        # A non-running phase never exposes a username either.
+        candidate.observed = self.Status("stopped", None, True, False)
+        self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                            epoch=result["activationEpoch"], activation=candidate.observed, bot_username=None)
+
+        # A broken or empty username on the activation closes to None, not a crash.
+        candidate.observed = self.Status("running", None, False, False)
+        for broken in (None, "", 7, True):
+            with self.subTest(broken_username=broken):
+                candidate.bot_username = broken
+                self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                                    epoch=result["activationEpoch"], activation=candidate.observed, bot_username=None)
 
     def test_startup_apply_with_credential_runs_the_same_apply_path_as_admin(self):
         """PW-007: Channel A must mirror Telegram's accepted startup_apply -

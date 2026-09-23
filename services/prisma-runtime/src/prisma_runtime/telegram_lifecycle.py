@@ -189,6 +189,11 @@ class TelegramLifecycleManager:
                     result["lastError"] = poll_error
                 if not bot.thread.is_alive():
                     result.update(running=False, verified=False)
+            # Public info (not the secret token), only while genuinely
+            # connected; a missing/foreign attribute or an empty value closes
+            # to None instead of raising -- this is a display projection.
+            username = getattr(bot, "bot_username", None) if (bot is not None and result["running"]) else None
+            result["botUsername"] = username if isinstance(username, str) and username else None
             return result
 
     def _stop_owned_bot(self) -> bool:

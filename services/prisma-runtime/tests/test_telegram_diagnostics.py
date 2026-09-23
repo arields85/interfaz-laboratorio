@@ -39,9 +39,10 @@ from prisma_runtime.telegram_lifecycle import (
 CANARY = "CANARY-telegram-diagnostic-secret"
 DIAGNOSTIC_FIELDS = {"stage", "category", "httpStatus", "failureAt", "lastSuccessAt"}
 # Exact admin wire contract; hmi-app/src/domain/adminCredential.types.ts rejects any extra key.
+# T10 adds botUsername.
 ADMIN_TELEGRAM_FIELDS = {
     "source", "enabled", "configured", "desiredGeneration", "appliedGeneration",
-    "running", "verified", "restartRequired", "lastError",
+    "running", "verified", "restartRequired", "lastError", "botUsername",
 }
 
 

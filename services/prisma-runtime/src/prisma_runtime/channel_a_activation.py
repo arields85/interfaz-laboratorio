@@ -102,6 +102,17 @@ class ChannelAActivation:
             reservation=reservation,
         )
 
+    @property
+    def bot_username(self) -> str | None:
+        """The Telegram username observed for this activation's bot identity.
+
+        Public info (not the secret token): absent before a successful
+        preparation and withdrawn together with the registry on stop. The
+        manager only publishes this while the activation is actually running
+        without a pending restart (see ``ChannelAManager.status``).
+        """
+        return self._bot_username
+
     def prepare(self) -> bool:
         """Prepare once, preserving the runner's failure and cleanup semantics."""
         return self._runner.prepare()

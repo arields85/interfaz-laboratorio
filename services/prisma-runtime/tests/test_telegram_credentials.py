@@ -30,11 +30,12 @@ class FakeEvent:
 
 
 class FakeBot:
-    def __init__(self, events, stop_result=True):
+    def __init__(self, events, stop_result=True, bot_username=None):
         self.events = events
         self.stop_result = stop_result
         self.thread = FakeThread()
         self.stop_event = FakeEvent()
+        self.bot_username = bot_username
 
     def prepare(self):
         self.events.append("prepare")
@@ -175,7 +176,7 @@ class TelegramCredentialTests(unittest.TestCase):
         config = read_telegram_config({"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "token"})
         resolver = Mock(source="environment")
         resolver.resolve.return_value = "token"
-        replacement = FakeBot(events)
+        replacement = FakeBot(events, bot_username="prisma_local_bot")
         manager = TelegramLifecycleManager(config, resolver, Mock(), lambda _token: replacement)
         manager.bot = FakeBot(events)
 
@@ -185,6 +186,36 @@ class TelegramCredentialTests(unittest.TestCase):
         self.assertTrue(status["running"])
         self.assertTrue(status["verified"])
         self.assertFalse(status["restartRequired"])
+        # T10: the connected bot's public username is exposed once running.
+        self.assertEqual(status["botUsername"], "prisma_local_bot")
+
+    def test_bot_username_is_exposed_only_while_the_owned_thread_is_actually_running(self):
+        events = []
+        config = read_telegram_config({"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "token"})
+        resolver = Mock(source="environment")
+        resolver.resolve.return_value = "token"
+        manager = TelegramLifecycleManager(config, resolver, Mock(), Mock())
+
+        # No bot at all yet: never exposed.
+        self.assertIsNone(manager.status()["botUsername"])
+
+        running = FakeBot(events, bot_username="prisma_local_bot")
+        manager.bot = running
+        self.assertEqual(manager.status()["botUsername"], "prisma_local_bot")
+
+        # The owned thread died: no longer running, so no username either.
+        running.thread.alive = False
+        self.assertIsNone(manager.status()["botUsername"])
+
+        # A bot object without the attribute at all (defensive compatibility
+        # with any minimal double) closes to None instead of raising.
+        running.thread.alive = True
+        del running.bot_username
+        self.assertIsNone(manager.status()["botUsername"])
+
+        # An empty username is not a real identity either.
+        running.bot_username = ""
+        self.assertIsNone(manager.status()["botUsername"])
 
     def test_disabled_startup_does_not_resolve_or_construct(self):
         config = read_telegram_config({"PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "ignored"})

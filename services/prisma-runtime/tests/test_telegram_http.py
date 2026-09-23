@@ -17,16 +17,16 @@ from prisma_runtime.telegram_lifecycle import TelegramLifecycleError
 
 
 # Exact admin contract mirrored from hmi-app/src/domain/adminCredential.types.ts,
-# which rejects any additional key instead of ignoring it.
+# which rejects any additional key instead of ignoring it. T10 adds botUsername.
 ADMIN_TELEGRAM_FIELDS = {
     "source", "enabled", "configured", "desiredGeneration", "appliedGeneration",
-    "running", "verified", "restartRequired", "lastError",
+    "running", "verified", "restartRequired", "lastError", "botUsername",
 }
 INTERNAL_STATUS_CANARY = "CANARY-internal-telegram-diagnostic"
 
 
 def canonical_admin_status(**overrides):
-    """Realistic manager status: the exact nine admin fields plus internal-only extras."""
+    """Realistic manager status: the exact ten admin fields plus internal-only extras."""
     status = {
         "source": "protected",
         "enabled": True,
@@ -37,6 +37,7 @@ def canonical_admin_status(**overrides):
         "verified": True,
         "restartRequired": False,
         "lastError": None,
+        "botUsername": None,
         "telegramDiagnostic": {
             "stage": "poll",
             "category": "http",
@@ -122,6 +123,7 @@ class TelegramHttpTests(unittest.TestCase):
             "source": "protected", "enabled": True, "configured": True,
             "desiredGeneration": 2, "appliedGeneration": 2, "running": True,
             "verified": True, "restartRequired": False, "lastError": None,
+            "botUsername": None,
         }
         headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf"}
         environ = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
@@ -250,7 +252,9 @@ class TelegramHttpTests(unittest.TestCase):
         manager.delete_secret.assert_not_called()
         self.assertEqual(set(status), ADMIN_TELEGRAM_FIELDS | {"telegramDiagnostic", "internalFutureField"})
 
-    def test_put_is_desired_only_and_delete_timeout_reports_committed_outcome(self):
+    def test_put_applies_the_saved_secret_and_delete_timeout_reports_committed_outcome(self):
+        # T10: PUT now applies (restarts) the freshly saved credential in the
+        # same request; DELETE still only stops, never applies.
         client, credentials, manager = self.authenticated_client()
         manager.delete_secret.return_value = False
         headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf"}
@@ -270,7 +274,7 @@ class TelegramHttpTests(unittest.TestCase):
 
         self.assertEqual(saved.status_code, 200)
         manager.set_secret.assert_called_once_with("replacement")
-        manager.apply.assert_not_called()
+        manager.apply.assert_called_once_with()
         self.assertEqual(deleted.status_code, 409)
         self.assertEqual(deleted.get_json(), {"ok": False, "error": "TELEGRAM_STOP_TIMEOUT"})
         manager.delete_secret.assert_called_once_with()
@@ -325,6 +329,60 @@ class TelegramHttpTests(unittest.TestCase):
         manager.status.assert_called_once_with()
         manager.apply.assert_not_called()
         credentials.assert_not_called()
+
+    def test_public_health_exposes_the_connected_bot_username(self):
+        client, credentials, manager = self.authenticated_client()
+        manager.status.return_value = {
+            "source": "protected", "enabled": True, "configured": True,
+            "desiredGeneration": 2, "appliedGeneration": 2, "running": True,
+            "verified": True, "restartRequired": False, "lastError": None,
+            "botUsername": "prisma_channel_b_bot",
+        }
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+
+        with patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            temporary = tempfile.TemporaryDirectory()
+            self.addCleanup(temporary.cleanup)
+            boundary = AdminHttpBoundary(Mock(), credential_service=credentials, telegram_manager=manager)
+            health_client = create_app(
+                JsonFileStore(Path(temporary.name) / "snapshot.json"),
+                VoiceEventStore(),
+                None,
+                admin_http=boundary,
+                telegram_manager=manager,
+            ).test_client()
+            response = health_client.get("/health")
+
+        self.assertEqual(response.get_json()["telegramBotUsername"], "prisma_channel_b_bot")
+
+    def test_public_health_defaults_bot_username_to_none_on_an_older_status_shape(self):
+        # A manager status dict without the botUsername key (e.g. a double
+        # predating T10) must never crash the public health route.
+        client, credentials, manager = self.authenticated_client()
+        manager.status.return_value = {
+            "source": "protected", "enabled": True, "configured": True,
+            "desiredGeneration": 2, "appliedGeneration": 2, "running": True,
+            "verified": True, "restartRequired": False, "lastError": None,
+        }
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+
+        with patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            temporary = tempfile.TemporaryDirectory()
+            self.addCleanup(temporary.cleanup)
+            boundary = AdminHttpBoundary(Mock(), credential_service=credentials, telegram_manager=manager)
+            health_client = create_app(
+                JsonFileStore(Path(temporary.name) / "snapshot.json"),
+                VoiceEventStore(),
+                None,
+                admin_http=boundary,
+                telegram_manager=manager,
+            ).test_client()
+            response = health_client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.get_json()["telegramBotUsername"])
 
     def offline_health_response(self, manager, telegram_configuration):
         temporary = tempfile.TemporaryDirectory()

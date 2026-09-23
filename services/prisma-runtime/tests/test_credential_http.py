@@ -263,6 +263,41 @@ class CredentialHttpTests(unittest.TestCase):
         self.telegram_manager.delete_secret.assert_called_once_with()
         self.credentials.delete_secret.assert_not_called()
 
+    def test_telegram_save_restarts_the_bot_with_the_new_token(self) -> None:
+        """T10: a saved Telegram credential is applied (restarted) in the same
+        request, so the admin panel never needs a separate explicit apply."""
+        saved = self.client.put(
+            "/api/prisma/admin/credentials/telegram",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(
+            self.telegram_manager.mock_calls,
+            [unittest.mock.call.set_secret(SECRET), unittest.mock.call.apply()],
+        )
+
+    def test_telegram_save_response_survives_an_apply_failure(self) -> None:
+        """An apply failure after a successful save must never fail the save
+        response; it stays captured in the manager's own lifecycle status,
+        exactly like startup_apply's non-raising contract."""
+        from prisma_runtime.telegram_lifecycle import TelegramLifecycleError
+
+        self.telegram_manager.apply.side_effect = TelegramLifecycleError("TELEGRAM_PROVIDER_UNAVAILABLE")
+
+        saved = self.client.put(
+            "/api/prisma/admin/credentials/telegram",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.get_json(), {"ok": True, "provider": "telegram", "configured": True})
+        self.telegram_manager.set_secret.assert_called_once_with(SECRET)
+        self.telegram_manager.apply.assert_called_once_with()
+
     def test_storage_failures_are_sanitized_and_do_not_leak_secret(self) -> None:
         self.credentials.set_secret.side_effect = CredentialUnavailable("sensitive path and key detail")
         response = self.client.put(

@@ -21,9 +21,9 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/prisma/admin/credentials` | `GET` | Same path on `http://127.0.0.1:5057` | Metadata-only credential status |
 | `/api/prisma/admin/credentials/gemini` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Gemini credential save and deletion |
 | `/api/prisma/admin/credentials/gemini/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-generating Gemini API key verification |
-| `/api/prisma/admin/credentials/telegram` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Telegram credential save and deletion |
-| `/api/prisma/admin/credentials/telegram/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Telegram apply and restart |
-| `/api/prisma/admin/credentials/telegram_channel_a` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Channel A credential save and deletion |
+| `/api/prisma/admin/credentials/telegram` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Telegram credential save (applies/restarts the bot with the new token in the same request) and deletion (stops the bot) |
+| `/api/prisma/admin/credentials/telegram/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Telegram apply and restart, kept for callers that need to re-apply without saving a new credential |
+| `/api/prisma/admin/credentials/telegram_channel_a` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Channel A credential save (applies/restarts the bot with the new token in the same request) and deletion (stops the bot) |
 | `/api/prisma/health` | `GET` | `http://127.0.0.1:5057/health` | Passive runtime diagnostics |
 
 Browser constants live in `hmi-app/src/config/prismaAssistant.config.ts`. Development-only targets and rewrite rules live in `hmi-app/vite.prismaProxy.config.ts` and must not be imported by browser modules.
@@ -42,10 +42,12 @@ Admin and health routes strip `X-Prisma-Session-Capability`; administrator autho
 backend cookie and CSRF contract. Cookies, `Set-Cookie`, `Origin`, CSRF, response status, and
 `Cache-Control: no-store` otherwise pass through the development proxy unchanged.
 
-The Channel A credential route only writes or deletes a secret in the protected credential store. A
-`configured: true` metadata value means the store holds a Channel A credential; it does not mean the
-Channel A bot is running, verified, paired, or connected. Channel A runtime status, apply, pairing,
-and session routes are not part of this proxy yet.
+The Channel A credential route writes or deletes a secret in the protected credential store; a save
+also applies it (the manager attempts to restart the bot with the new token in the same request). A
+`configured: true` metadata value means the store holds a Channel A credential; it does not by itself
+mean the Channel A bot is running, verified, paired, or connected -- the post-save apply attempt can
+still fail (captured in the Channel A status route's `lastError`, never raised back to the save
+response). Channel A pairing and session routes are not part of this proxy yet.
 
 The Gemini verify route triggers one on-demand, non-generating key check against Google (a model
 lookup, never a generation call, so it never consumes generation quota) and reports a closed

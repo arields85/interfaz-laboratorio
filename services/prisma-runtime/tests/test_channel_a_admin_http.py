@@ -62,14 +62,19 @@ INTERNAL_CANARY = "CANARY-internal-channel-a-diagnostic"
 MANAGER_UNAVAILABLE = "PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE"
 LIFECYCLE_UNAVAILABLE = "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE"
 
-# Exact admin Channel A contract frozen by the tracker: six status keys with a
-# nested activation projection and no additional key.
+# Exact admin Channel A contract frozen by the tracker: seven status keys
+# (T10 adds botUsername) with a nested activation projection and no
+# additional key.
 ADMIN_CHANNEL_A_FIELDS = frozenset(
-    {"configured", "desiredGeneration", "appliedGeneration", "activationEpoch", "activation", "lastError"}
+    {
+        "configured", "desiredGeneration", "appliedGeneration", "activationEpoch",
+        "activation", "lastError", "botUsername",
+    }
 )
 ADMIN_CHANNEL_A_ACTIVATION_FIELDS = frozenset({"phase", "reason", "quiescent", "restartRequired"})
 
-# Frozen nine-field Channel B wire, mirrored from hmi-app/src/domain/adminCredential.types.ts.
+# Frozen ten-field Channel B wire (T10 adds botUsername), mirrored from
+# hmi-app/src/domain/adminCredential.types.ts.
 ADMIN_TELEGRAM_FIELDS = frozenset(
     {
         "source",
@@ -81,6 +86,7 @@ ADMIN_TELEGRAM_FIELDS = frozenset(
         "verified",
         "restartRequired",
         "lastError",
+        "botUsername",
     }
 )
 
@@ -146,7 +152,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
         self.headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf-token"}
 
     def channel_a_status(self, **overrides):
-        """Manager-owned status shape: exactly six keys plus optional extras."""
+        """Manager-owned status shape: exactly seven keys plus optional extras."""
         status = {
             "configured": True,
             "desiredGeneration": 4,
@@ -156,6 +162,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
                 phase=self.PHASE_RUNNING, reason=None, quiescent=False, restart_required=False
             ),
             "lastError": None,
+            "botUsername": None,
         }
         status.update(overrides)
         return status
@@ -181,9 +188,9 @@ class ChannelAAdminHttpTests(unittest.TestCase):
         self.assertEqual(saved.headers.get("Cache-Control"), "no-store")
         self.assertNotIn(SECRET, saved.get_data(as_text=True))
         self.channel_a.save_credential.assert_called_once_with(SECRET)
-        # Success is exactly the one manager mutation: no automatic apply,
-        # status probe or direct store write beyond it.
-        self.assertEqual(self.channel_a.mock_calls, [call.save_credential(SECRET)])
+        # T10: a successful save applies (restarts) the new credential in the
+        # same request; delete never applies, only save does.
+        self.assertEqual(self.channel_a.mock_calls, [call.save_credential(SECRET), call.apply()])
         self.assertEqual(self.credentials.mock_calls, [])
         self.assertEqual(self.telegram_manager.mock_calls, [])
 
@@ -193,7 +200,8 @@ class ChannelAAdminHttpTests(unittest.TestCase):
         self.assertEqual(deleted.headers.get("Cache-Control"), "no-store")
         self.channel_a.delete_credential.assert_called_once_with()
         self.assertEqual(
-            self.channel_a.mock_calls, [call.save_credential(SECRET), call.delete_credential()]
+            self.channel_a.mock_calls,
+            [call.save_credential(SECRET), call.apply(), call.delete_credential()],
         )
         self.assertEqual(self.credentials.mock_calls, [])
         self.assertEqual(self.telegram_manager.mock_calls, [])
@@ -434,6 +442,21 @@ class ChannelAAdminHttpTests(unittest.TestCase):
                 self.assertNotIn(SECRET, response.get_data(as_text=True))
                 self.channel_a.status.assert_not_called()
                 self.credentials.set_secret.assert_not_called()
+                # A save that never committed must never trigger an apply.
+                self.channel_a.apply.assert_not_called()
+
+    def test_a_save_still_succeeds_when_the_post_save_apply_fails(self) -> None:
+        """T10: an apply failure right after a successful save must never fail
+        the save response; it stays captured in the manager's own status."""
+        client = self.build_client(channel_a=self.channel_a)
+        self.channel_a.apply.side_effect = self.ChannelAManagerError("PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE")
+
+        response = client.put(A_ROUTE, json={"secret": SECRET}, headers=self.headers, environ_overrides=self.environ)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True, "provider": A_PROVIDER, "configured": True})
+        self.channel_a.save_credential.assert_called_once_with(SECRET)
+        self.channel_a.apply.assert_called_once_with()
 
     def test_a_apply_domain_errors_map_to_closed_statuses_without_a_second_status_call(self) -> None:
         client = self.build_client(channel_a=self.channel_a)
@@ -549,6 +572,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
             "verified": True,
             "restartRequired": False,
             "lastError": None,
+            "botUsername": "prisma_channel_b_bot",
             "telegramDiagnostic": {"stage": "poll", "future": INTERNAL_CANARY},
         }
         self.telegram_manager.apply.return_value = telegram_status
