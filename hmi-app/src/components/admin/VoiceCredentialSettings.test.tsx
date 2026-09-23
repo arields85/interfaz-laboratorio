@@ -421,7 +421,8 @@ describe('VoiceCredentialSettings', () => {
         expect(saveCredential).toHaveBeenCalledTimes(1);
         expect(client.applyTelegram).not.toHaveBeenCalled();
         expect(client.applyChannelA).not.toHaveBeenCalled();
-        expect(await screen.findByText('Credencial guardada. No se aplicaron cambios al proveedor.')).toBeInTheDocument();
+        // Distinct from Gemini's message: Channel A save applies on the backend.
+        expect(await screen.findByText('Credencial guardada y aplicada.')).toBeInTheDocument();
         expect(channelAInput).toHaveValue('');
         expect(geminiInput).toHaveValue('gemini-draft');
         expect(telegramInput).toHaveValue('telegram-draft');
@@ -483,7 +484,7 @@ describe('VoiceCredentialSettings', () => {
         await waitFor(() => expect(reopened).toHaveValue('newer-channel-a-draft'));
         expect(telegramInput).toHaveValue('telegram-draft');
         expect(screen.getByLabelText('API Key de Gemini')).toHaveValue('gemini-draft');
-        expect(screen.queryByText('Credencial guardada. No se aplicaron cambios al proveedor.')).not.toBeInTheDocument();
+        expect(screen.queryByText('Credencial guardada y aplicada.')).not.toBeInTheDocument();
     });
 
     it('does not let a stale channel A deletion close a fresh confirmation dialog or clear other drafts', async () => {

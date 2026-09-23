@@ -85,6 +85,15 @@ function emptySecretDrafts(): Record<CredentialProvider, string> {
     return { gemini: '', telegram: '', telegram_channel_a: '' };
 }
 
+// Gemini's save never applies or verifies (that stays an explicit, separate
+// action); Telegram and Canal A saves apply on the backend in the same
+// request (T10), so their success message must not claim otherwise.
+const SAVE_SUCCESS_TEXT: Record<CredentialProvider, string> = {
+    gemini: 'Credencial guardada. No se aplicaron cambios al proveedor.',
+    telegram: 'Credencial guardada y aplicada.',
+    telegram_channel_a: 'Credencial guardada y aplicada.',
+};
+
 // Fixed, non-secret placeholder: the real key is never sent to the browser
 // (metadata-only by design), so this mask must never be derived from it.
 // Rendered as the input's `placeholder`, not its `value`: a placeholder never
@@ -300,7 +309,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         try {
             await administration.saveCredential(provider, secret);
             if (panelGenerationRef.current === panelGeneration) {
-                setFeedback({ kind: 'success', text: 'Credencial guardada. No se aplicaron cambios al proveedor.' });
+                setFeedback({ kind: 'success', text: SAVE_SUCCESS_TEXT[provider] });
             }
         } catch (error) {
             if (panelGenerationRef.current === panelGeneration
