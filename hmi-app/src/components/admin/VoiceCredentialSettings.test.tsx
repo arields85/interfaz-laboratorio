@@ -213,7 +213,7 @@ describe('VoiceCredentialSettings', () => {
     it('shows truthful diagnostics, preserves submitted bytes, and clears the local secret after completion', async () => {
         const user = userEvent.setup();
         const { client } = renderSettings();
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const telegram = screen.getByRole('group', { name: 'Telegram' });
 
         expect(await within(gemini).findByRole('img', { name: 'Credencial no configurada' })).toBeInTheDocument();
@@ -226,7 +226,7 @@ describe('VoiceCredentialSettings', () => {
         expect(within(telegram).getByText('Origen: almacén protegido')).toBeInTheDocument();
         expect(within(telegram).getByText('Generación: 2 / 1')).toBeInTheDocument();
 
-        const input = within(gemini).getByLabelText('API Key');
+        const input = within(gemini).getByLabelText('API Key de Gemini');
         await user.type(input, '  synthetic-secret  ');
         await user.click(within(gemini).getByRole('button', { name: 'Guardar credencial' }));
 
@@ -242,20 +242,20 @@ describe('VoiceCredentialSettings', () => {
     it('clears every provider secret input when hidden or when administrator authority is revoked', async () => {
         const user = userEvent.setup();
         const { rerender, client, controller } = renderSettings();
-        const input = await screen.findByLabelText('API Key');
+        const input = await screen.findByLabelText('API Key de Gemini');
         await user.type(input, 'synthetic-secret');
         await user.type(screen.getByLabelText('Credencial Telegram'), 'synthetic-telegram-secret');
         await user.type(screen.getByLabelText('Credencial Telegram (Canal A)'), 'synthetic-channel-a-secret');
 
         rerender(<VoiceCredentialSettings active={false} client={client} controller={controller} />);
         rerender(<VoiceCredentialSettings active client={client} controller={controller} />);
-        expect(await screen.findByLabelText('API Key')).toHaveValue('');
+        expect(await screen.findByLabelText('API Key de Gemini')).toHaveValue('');
         expect(screen.getByLabelText('Credencial Telegram')).toHaveValue('');
         expect(screen.getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
 
-        await user.type(screen.getByLabelText('API Key'), 'another-secret');
+        await user.type(screen.getByLabelText('API Key de Gemini'), 'another-secret');
         useAuthStore.setState((state) => ({ session: { ...state.session, user: null, isAuthenticated: false } }));
-        await waitFor(() => expect(screen.getByLabelText('API Key')).toHaveValue(''));
+        await waitFor(() => expect(screen.getByLabelText('API Key de Gemini')).toHaveValue(''));
     });
 
     it('confirms deletion and reconciles a committed Telegram stop timeout only on explicit request', async () => {
@@ -349,8 +349,8 @@ describe('VoiceCredentialSettings', () => {
         const user = userEvent.setup();
         const saveCredential = vi.fn(async () => { throw new Error('raw-provider-detail'); });
         renderSettings({ saveCredential });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        const input = within(gemini).getByLabelText('API Key');
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const input = within(gemini).getByLabelText('API Key de Gemini');
         await waitFor(() => expect(input).toBeEnabled());
         await user.type(input, 'synthetic-secret');
 
@@ -390,8 +390,8 @@ describe('VoiceCredentialSettings', () => {
         const { client } = renderSettings({ saveCredential, deleteCredential });
         const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
         const telegram = screen.getByRole('group', { name: 'Telegram' });
-        const gemini = screen.getByRole('group', { name: 'Proveedor de voz: Gemini' });
-        const geminiInput = within(gemini).getByLabelText('API Key');
+        const gemini = screen.getByRole('group', { name: 'Proveedor de voz' });
+        const geminiInput = within(gemini).getByLabelText('API Key de Gemini');
         const telegramInput = within(telegram).getByLabelText('Credencial Telegram');
         const channelAInput = within(channelA).getByLabelText('Credencial Telegram (Canal A)');
         await waitFor(() => expect(channelAInput).toBeEnabled());
@@ -462,12 +462,12 @@ describe('VoiceCredentialSettings', () => {
         const telegramInput = within(telegram).getByLabelText('Credencial Telegram');
         await user.type(reopened, 'newer-channel-a-draft');
         await user.type(telegramInput, 'telegram-draft');
-        await user.type(screen.getByLabelText('API Key'), 'gemini-draft');
+        await user.type(screen.getByLabelText('API Key de Gemini'), 'gemini-draft');
         await act(async () => { controlled.releaseWrite(); });
 
         await waitFor(() => expect(reopened).toHaveValue('newer-channel-a-draft'));
         expect(telegramInput).toHaveValue('telegram-draft');
-        expect(screen.getByLabelText('API Key')).toHaveValue('gemini-draft');
+        expect(screen.getByLabelText('API Key de Gemini')).toHaveValue('gemini-draft');
         expect(screen.queryByText('Credencial guardada. No se aplicaron cambios al proveedor.')).not.toBeInTheDocument();
     });
 
@@ -486,7 +486,7 @@ describe('VoiceCredentialSettings', () => {
         const telegram = screen.getByRole('group', { name: 'Telegram' });
         const telegramInput = within(telegram).getByLabelText('Credencial Telegram');
         await user.type(telegramInput, 'telegram-draft');
-        await user.click(within(screen.getByRole('group', { name: 'Proveedor de voz: Gemini' })).getByRole('button', { name: 'Eliminar credencial' }));
+        await user.click(within(screen.getByRole('group', { name: 'Proveedor de voz' })).getByRole('button', { name: 'Eliminar credencial' }));
         const freshDialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
         expect(within(freshDialog).getByText(/Gemini/)).toBeInTheDocument();
         await act(async () => { controlled.releaseWrite(); });
@@ -570,15 +570,15 @@ describe('VoiceCredentialSettings', () => {
         const user = userEvent.setup();
         const controlled = await createClientWithDeferredRefresh();
         const { rerender, controller } = renderSettingsWithClient(controlled.client);
-        const input = await screen.findByLabelText('API Key');
+        const input = await screen.findByLabelText('API Key de Gemini');
         await waitFor(() => expect(input).toBeEnabled());
         await user.type(input, 'old-secret');
-        await user.click(within(screen.getByRole('group', { name: 'Proveedor de voz: Gemini' })).getByRole('button', { name: 'Guardar credencial' }));
+        await user.click(within(screen.getByRole('group', { name: 'Proveedor de voz' })).getByRole('button', { name: 'Guardar credencial' }));
         await waitFor(() => expect(controlled.metadataRequestCount()).toBe(2));
 
         rerender(<VoiceCredentialSettings active={false} client={controlled.client} controller={controller} />);
         rerender(<VoiceCredentialSettings active client={controlled.client} controller={controller} />);
-        const reopenedInput = await screen.findByLabelText('API Key');
+        const reopenedInput = await screen.findByLabelText('API Key de Gemini');
         await user.type(reopenedInput, 'new-secret');
         await act(async () => { controlled.releaseRefresh(); });
 
@@ -597,7 +597,7 @@ describe('VoiceCredentialSettings', () => {
 
         rerender(<VoiceCredentialSettings active={false} client={controlled.client} controller={controller} />);
         rerender(<VoiceCredentialSettings active client={controlled.client} controller={controller} />);
-        await user.click(within(screen.getByRole('group', { name: 'Proveedor de voz: Gemini' })).getByRole('button', { name: 'Eliminar credencial' }));
+        await user.click(within(screen.getByRole('group', { name: 'Proveedor de voz' })).getByRole('button', { name: 'Eliminar credencial' }));
         expect(screen.getByRole('dialog', { name: 'Eliminar credencial' })).toBeInTheDocument();
         await act(async () => { controlled.releaseRefresh(); });
 
@@ -720,7 +720,7 @@ describe('VoiceCredentialSettings', () => {
             }),
         });
         const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
-        const gemini = screen.getByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = screen.getByRole('group', { name: 'Proveedor de voz' });
         const telegram = screen.getByRole('group', { name: 'Telegram' });
 
         // Anchor every disablement assertion to the settled A error, not to a
@@ -732,7 +732,7 @@ describe('VoiceCredentialSettings', () => {
         expect(within(channelA).getByRole('button', { name: 'Eliminar credencial' })).toBeDisabled();
         expect(screen.queryByText('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE')).not.toBeInTheDocument();
 
-        expect(within(gemini).getByLabelText('API Key')).toBeEnabled();
+        expect(within(gemini).getByLabelText('API Key de Gemini')).toBeEnabled();
         expect(within(telegram).getByRole('button', { name: 'Aplicar cambio' })).toBeEnabled();
         expect(screen.getByRole('button', { name: 'Actualizar estado' })).toBeEnabled();
         expect(client.applyChannelA).not.toHaveBeenCalled();
@@ -771,7 +771,7 @@ describe('VoiceCredentialSettings', () => {
 
     it('renders save and delete credential actions as icon-only controls with their accessible names preserved', async () => {
         renderSettings();
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
 
         const save = within(gemini).getByRole('button', { name: 'Guardar credencial' });
         const remove = within(gemini).getByRole('button', { name: 'Eliminar credencial' });
@@ -786,8 +786,8 @@ describe('VoiceCredentialSettings', () => {
 
     it('renders a fixed non-secret mask as the API Key placeholder when a Gemini credential is configured', async () => {
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        const input = await within(gemini).findByLabelText('API Key');
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const input = await within(gemini).findByLabelText('API Key de Gemini');
 
         await waitFor(() => expect(input).toHaveAttribute('placeholder', '•'.repeat(12)));
         expect(input).toHaveValue('');
@@ -795,8 +795,8 @@ describe('VoiceCredentialSettings', () => {
 
     it('never shows the mask placeholder when no Gemini credential is configured', async () => {
         renderSettings();
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        const input = await within(gemini).findByLabelText('API Key');
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const input = await within(gemini).findByLabelText('API Key de Gemini');
 
         expect(input).not.toHaveAttribute('placeholder');
     });
@@ -804,8 +804,8 @@ describe('VoiceCredentialSettings', () => {
     it('lets typing a new Gemini key replace the mask without carrying its characters into the saved draft', async () => {
         const user = userEvent.setup();
         const { client } = renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        const input = await within(gemini).findByLabelText('API Key');
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const input = await within(gemini).findByLabelText('API Key de Gemini');
         await waitFor(() => expect(input).toHaveAttribute('placeholder', '•'.repeat(12)));
 
         await user.type(input, 'new-real-key');
@@ -819,8 +819,8 @@ describe('VoiceCredentialSettings', () => {
 
     it('never renders the API Key field as a native password input, to keep Chrome from offering to generate or save one', async () => {
         renderSettings();
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        const input = await within(gemini).findByLabelText('API Key');
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const input = await within(gemini).findByLabelText('API Key de Gemini');
 
         expect(input).not.toHaveAttribute('type', 'password');
         expect(input).toHaveAttribute('type', 'text');
@@ -837,16 +837,38 @@ describe('VoiceCredentialSettings', () => {
         expect(input.className).toMatch(/hmi-masked-text/);
     });
 
+    it('renders the Gemini legend as a floated full-width block, not the native border-notch legend', async () => {
+        renderSettings();
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const legend = gemini.querySelector('legend');
+
+        expect(legend).toHaveTextContent('Proveedor de voz');
+        // The float-left + w-full technique is what takes the legend out of the
+        // fieldset's native border-notch rendering path so the top border stays
+        // continuous; a following clearing element keeps later row content from
+        // trying to wrap beside it.
+        expect(legend).toHaveClass('float-left');
+        expect(legend).toHaveClass('w-full');
+    });
+
+    it('renames the Gemini API Key field to "API Key de Gemini"', async () => {
+        renderSettings();
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+
+        expect(await within(gemini).findByLabelText('API Key de Gemini')).toBeInTheDocument();
+        expect(within(gemini).queryByLabelText('API Key', { exact: true })).not.toBeInTheDocument();
+    });
+
     it('shows the Gemini credential status as a warning-tone MessageCircleWarning when not configured, Check once configured', async () => {
         const notConfigured = renderSettings();
-        const notConfiguredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const notConfiguredGroup = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const notConfiguredIcon = await within(notConfiguredGroup).findByRole('img', { name: 'Credencial no configurada' });
         expectLucideIcon(notConfiguredIcon, 'message-circle-warning');
         expect(within(notConfiguredGroup).queryByText('Credencial no configurada')).not.toBeInTheDocument();
         notConfigured.unmount();
 
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
-        const configuredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const configuredGroup = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const configuredIcon = await within(configuredGroup).findByRole('img', { name: 'Credencial configurada' });
         expectLucideIcon(configuredIcon, 'check');
         expect(within(configuredGroup).queryByText('Credencial configurada')).not.toBeInTheDocument();
@@ -855,7 +877,7 @@ describe('VoiceCredentialSettings', () => {
     it('shows a tooltip explaining why Verificar is disabled when Gemini is not configured', async () => {
         const user = userEvent.setup();
         renderSettings();
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const verify = await within(gemini).findByRole('button', { name: 'Verificar' });
         expect(verify).toBeDisabled();
 
@@ -866,10 +888,10 @@ describe('VoiceCredentialSettings', () => {
 
     it('places the API Key input, credential icon, Save, Delete, Verificar and the verification icon in one row', async () => {
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const row = await within(gemini).findByTestId('gemini-credential-row');
 
-        const input = within(row).getByLabelText('API Key');
+        const input = within(row).getByLabelText('API Key de Gemini');
         const credentialIcon = within(row).getByRole('img', { name: 'Credencial configurada' });
         const save = within(row).getByRole('button', { name: 'Guardar credencial' });
         const del = within(row).getByRole('button', { name: 'Eliminar credencial' });
@@ -888,7 +910,7 @@ describe('VoiceCredentialSettings', () => {
 
     it('disables Verificar until a Gemini credential is configured', async () => {
         renderSettings();
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
 
         expect(await within(gemini).findByRole('button', { name: 'Verificar' })).toBeDisabled();
     });
@@ -900,7 +922,7 @@ describe('VoiceCredentialSettings', () => {
             .mockResolvedValueOnce({ ...metadata, gemini: GEMINI_VERIFIED });
         const verifyGemini = vi.fn(async () => GEMINI_VERIFIED);
         const { client } = renderSettings({ credentialMetadata, verifyGemini });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const notCheckedIcon = await within(gemini).findByRole('img', { name: 'Verificación: no realizada' });
         expectLucideIcon(notCheckedIcon, 'message-circle-dashed-check');
         const verify = within(gemini).getByRole('button', { name: 'Verificar' });
@@ -923,7 +945,7 @@ describe('VoiceCredentialSettings', () => {
             credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })),
             verifyGemini,
         });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const verify = await within(gemini).findByRole('button', { name: 'Verificar' });
         await waitFor(() => expect(verify).toBeEnabled());
 
@@ -945,7 +967,7 @@ describe('VoiceCredentialSettings', () => {
             credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })),
             verifyGemini,
         });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const verify = await within(gemini).findByRole('button', { name: 'Verificar' });
         await waitFor(() => expect(verify).toBeEnabled());
 
@@ -965,7 +987,7 @@ describe('VoiceCredentialSettings', () => {
 
     it('renders the Gemini Delete button matching Verificar, not the red danger variant, while Save stays distinct', async () => {
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const save = await within(gemini).findByRole('button', { name: 'Guardar credencial' });
         const del = within(gemini).getByRole('button', { name: 'Eliminar credencial' });
         const verify = within(gemini).getByRole('button', { name: 'Verificar' });
@@ -988,7 +1010,7 @@ describe('VoiceCredentialSettings', () => {
                 gemini: { configured: true, verified: false, verification: { state, checkedAt: 1 } },
             })),
         });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
 
         const icon = await within(gemini).findByRole('img', { name: expectedName });
         expectLucideIcon(icon, expectedIcon);
@@ -1002,7 +1024,7 @@ describe('VoiceCredentialSettings', () => {
             credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })),
             verifyGemini,
         });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const verify = await within(gemini).findByRole('button', { name: 'Verificar' });
         await waitFor(() => expect(verify).toBeEnabled());
 
@@ -1013,7 +1035,7 @@ describe('VoiceCredentialSettings', () => {
 
     it('never renders a verification claim before Gemini metadata has loaded', async () => {
         renderSettings({ credentialMetadata: vi.fn(() => new Promise<typeof metadata>(() => undefined)) });
-        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
 
         expect(within(gemini).queryByRole('img', { name: 'Verificación: no realizada' })).not.toBeInTheDocument();
         expect(within(gemini).queryByRole('button', { name: 'Verificar' })).not.toBeInTheDocument();

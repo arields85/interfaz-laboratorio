@@ -111,7 +111,7 @@ describe('VoiceSettingsTab', () => {
             const onDirtyChange = vi.fn();
             const view = render(<VoiceSettingsTab credentialControlsActive={false} onDirtyChange={onDirtyChange} />);
             const name = screen.getByLabelText('Nombre de esta HMI');
-            const credential = screen.getByLabelText('API Key');
+            const credential = screen.getByLabelText('API Key de Gemini');
             expect(name).toBeDisabled();
             expect(screen.getByRole('button', { name: 'Guardar nombre' })).toBeDisabled();
             expect(name.compareDocumentPosition(credential) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -161,7 +161,7 @@ describe('VoiceSettingsTab', () => {
 
         expect(await screen.findByRole('heading', { name: 'Credenciales de proveedores' })).toBeInTheDocument();
         onDirtyChange.mockClear();
-        await user.type(screen.getByLabelText('API Key'), 'synthetic-canary-secret');
+        await user.type(screen.getByLabelText('API Key de Gemini'), 'synthetic-canary-secret');
 
         expect(onDirtyChange).not.toHaveBeenCalledWith(true);
         expect(localStorage.getItem('synthetic-canary-secret')).toBeNull();

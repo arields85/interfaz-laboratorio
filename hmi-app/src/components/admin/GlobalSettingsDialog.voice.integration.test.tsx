@@ -446,7 +446,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         }));
         const user = userEvent.setup();
         renderDialogHarness();
-        const geminiInput = await screen.findByLabelText('API Key');
+        const geminiInput = await screen.findByLabelText('API Key de Gemini');
         const channelAInput = screen.getByLabelText('Credencial Telegram (Canal A)');
         await waitFor(() => expect(geminiInput).toBeEnabled());
 
@@ -456,7 +456,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
         await user.click(screen.getByRole('button', { name: 'Reopen' }));
 
-        expect(await screen.findByLabelText('API Key')).toHaveValue('');
+        expect(await screen.findByLabelText('API Key de Gemini')).toHaveValue('');
         expect(screen.getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
     });
 

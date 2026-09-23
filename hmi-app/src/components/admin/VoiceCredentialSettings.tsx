@@ -356,98 +356,111 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const showsMask = value === '' && geminiConfigured === true;
 
         return (
+            // Plain block fieldset (not flex): a native <legend> is laid out
+            // through its own special "straddle the top border" algorithm,
+            // independent of the fieldset's own display/flex-direction, so a
+            // flex-column fieldset can't move the legend on its own. Floating
+            // the legend full-width takes it out of that notch algorithm
+            // entirely -- it renders as an ordinary block inside the border
+            // instead -- and the following clearing div guarantees the row
+            // content below never tries to wrap beside it. The rest of the
+            // content keeps its own flex-column wrapper, unaffected by the
+            // legend's float.
             <fieldset
-                aria-label="Proveedor de voz: Gemini"
-                className="flex flex-col gap-2 rounded border border-white/10 p-3"
+                aria-label="Proveedor de voz"
+                className="rounded border border-white/10 p-3"
             >
-                <legend className="px-0 text-industrial-text">Proveedor de voz: Gemini</legend>
-                <label htmlFor="gemini-api-key-input" className="text-industrial-muted">API Key</label>
-                <div data-testid="gemini-credential-row" className="flex flex-wrap items-center gap-2">
-                    <input
-                        id="gemini-api-key-input"
-                        // Not type="password": Chrome ignores autocomplete="off" on a
-                        // password input and offers to generate/save one regardless
-                        // (autocomplete="new-password" makes it worse, actively inviting
-                        // generation). A plain text input masked with CSS
-                        // (-webkit-text-security, .hmi-masked-text) sidesteps Chrome's
-                        // password-manager heuristics entirely; the data-* attributes
-                        // below opt out third-party managers (1Password, LastPass) too.
-                        type="text"
-                        autoComplete="off"
-                        spellCheck={false}
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                        data-1p-ignore="true"
-                        data-lpignore="true"
-                        data-form-type="other"
-                        value={value}
-                        placeholder={showsMask ? GEMINI_KEY_MASK : undefined}
-                        onChange={(event) => {
-                            const nextValue = event.target.value;
-                            secretRevisionRef.current.gemini += 1;
-                            setProviderDraft('gemini', nextValue);
-                        }}
-                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
-                        disabled={disabled}
-                    />
-                    {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
-                        <span className="text-industrial-muted">
-                            {administration.isLoading ? 'Consultando estado' : 'Estado no disponible'}
-                        </span>
-                    )}
-                    <HoverTooltip label="Guardar credencial" position="top">
-                        <HmiButton
-                            size="sm"
-                            variant="primary"
-                            aria-label="Guardar credencial"
-                            title="Guardar credencial"
-                            disabled={disabled || !value}
-                            onClick={() => void save('gemini')}
-                        >
-                            <Save size={14} aria-hidden="true" />
-                        </HmiButton>
-                    </HoverTooltip>
-                    <HoverTooltip label="Eliminar credencial" position="top">
-                        <HmiButton
-                            size="sm"
-                            variant="secondary"
-                            aria-label="Eliminar credencial"
-                            title="Eliminar credencial"
+                <legend className="float-left w-full px-0 text-industrial-text">Proveedor de voz</legend>
+                <div className="clear-both" />
+                <div className="flex flex-col gap-2">
+                    <label htmlFor="gemini-api-key-input" className="text-industrial-muted">API Key de Gemini</label>
+                    <div data-testid="gemini-credential-row" className="flex flex-wrap items-center gap-2">
+                        <input
+                            id="gemini-api-key-input"
+                            // Not type="password": Chrome ignores autocomplete="off" on a
+                            // password input and offers to generate/save one regardless
+                            // (autocomplete="new-password" makes it worse, actively inviting
+                            // generation). A plain text input masked with CSS
+                            // (-webkit-text-security, .hmi-masked-text) sidesteps Chrome's
+                            // password-manager heuristics entirely; the data-* attributes
+                            // below opt out third-party managers (1Password, LastPass) too.
+                            type="text"
+                            autoComplete="off"
+                            spellCheck={false}
+                            autoCapitalize="off"
+                            autoCorrect="off"
+                            data-1p-ignore="true"
+                            data-lpignore="true"
+                            data-form-type="other"
+                            value={value}
+                            placeholder={showsMask ? GEMINI_KEY_MASK : undefined}
+                            onChange={(event) => {
+                                const nextValue = event.target.value;
+                                secretRevisionRef.current.gemini += 1;
+                                setProviderDraft('gemini', nextValue);
+                            }}
+                            className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
                             disabled={disabled}
-                            onClick={() => updateDeleteProvider('gemini')}
-                        >
-                            <Trash2 size={14} aria-hidden="true" />
-                        </HmiButton>
-                    </HoverTooltip>
-                    {gemini ? (
-                        <div className="ml-auto flex items-center gap-2">
-                            {gemini.configured ? (
-                                <HmiButton
-                                    size="sm"
-                                    variant="secondary"
-                                    disabled={disabled}
-                                    onClick={() => void verifyGemini()}
-                                >
-                                    <VerifyButtonLabel verifying={verifying} />
-                                </HmiButton>
-                            ) : (
-                                <HoverTooltip label="Configure una API key para verificarla." position="top">
-                                    <HmiButton size="sm" variant="secondary" disabled>
-                                        <VerifyButtonLabel verifying={false} />
+                        />
+                        {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
+                            <span className="text-industrial-muted">
+                                {administration.isLoading ? 'Consultando estado' : 'Estado no disponible'}
+                            </span>
+                        )}
+                        <HoverTooltip label="Guardar credencial" position="top">
+                            <HmiButton
+                                size="sm"
+                                variant="primary"
+                                aria-label="Guardar credencial"
+                                title="Guardar credencial"
+                                disabled={disabled || !value}
+                                onClick={() => void save('gemini')}
+                            >
+                                <Save size={14} aria-hidden="true" />
+                            </HmiButton>
+                        </HoverTooltip>
+                        <HoverTooltip label="Eliminar credencial" position="top">
+                            <HmiButton
+                                size="sm"
+                                variant="secondary"
+                                aria-label="Eliminar credencial"
+                                title="Eliminar credencial"
+                                disabled={disabled}
+                                onClick={() => updateDeleteProvider('gemini')}
+                            >
+                                <Trash2 size={14} aria-hidden="true" />
+                            </HmiButton>
+                        </HoverTooltip>
+                        {gemini ? (
+                            <div className="ml-auto flex items-center gap-2">
+                                {gemini.configured ? (
+                                    <HmiButton
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={disabled}
+                                        onClick={() => void verifyGemini()}
+                                    >
+                                        <VerifyButtonLabel verifying={verifying} />
                                     </HmiButton>
-                                </HoverTooltip>
-                            )}
-                            {verifying ? (
-                                <HoverTooltip label="Verificando…" position="top">
-                                    <span role="img" aria-label="Verificando…" className="text-industrial-muted">
-                                        <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                                    </span>
-                                </HoverTooltip>
-                            ) : (
-                                <StatusIcon {...geminiVerificationGlyph(gemini.verification.state)} />
-                            )}
-                        </div>
-                    ) : null}
+                                ) : (
+                                    <HoverTooltip label="Configure una API key para verificarla." position="top">
+                                        <HmiButton size="sm" variant="secondary" disabled>
+                                            <VerifyButtonLabel verifying={false} />
+                                        </HmiButton>
+                                    </HoverTooltip>
+                                )}
+                                {verifying ? (
+                                    <HoverTooltip label="Verificando…" position="top">
+                                        <span role="img" aria-label="Verificando…" className="text-industrial-muted">
+                                            <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                                        </span>
+                                    </HoverTooltip>
+                                ) : (
+                                    <StatusIcon {...geminiVerificationGlyph(gemini.verification.state)} />
+                                )}
+                            </div>
+                        ) : null}
+                    </div>
                 </div>
             </fieldset>
         );
