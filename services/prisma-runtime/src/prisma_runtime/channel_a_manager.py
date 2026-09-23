@@ -417,6 +417,29 @@ class ChannelAManager:
         del previous_retired
         return True
 
+    def startup_apply(self):
+        """Restore an applied Channel A configuration on runtime start.
+
+        Mirrors Telegram's accepted ``startup_apply()`` semantics: once a
+        credential is configured, boot must not leave the channel requiring
+        an operator's manual Apply again. Absent a credential, this is a
+        pure no-op -- status stays exactly as the constructor left it. Any
+        apply failure is captured in status and never raised, so it can
+        never crash the runtime or block the presentation server from
+        serving.
+        """
+        try:
+            metadata = self._credentials.status()
+            present = metadata[_PROVIDER]
+        except Exception:
+            present = False
+        if type(present) is not bool or not present:
+            return self.status()
+        try:
+            return self.apply()
+        except ChannelAManagerError:
+            return self.status()
+
     def stop(self):
         with self._mutation():
             confirmed = self._settle()

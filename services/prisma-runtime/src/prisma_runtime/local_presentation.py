@@ -1136,9 +1136,11 @@ def main():
     app = create_app(snapshot_store, events, None, telegram_configuration)
     telegram_manager = app.config.get("telegram_manager")
     channel_a_manager = app.config.get("channel_a_manager")
-    # Only Channel B has an accepted startup Apply; A stays inert until an
-    # explicit operator Apply, and neither stop path claims guaranteed closure.
+    # Both channels restore their applied configuration on startup, so an
+    # operator does not need to re-apply after every restart; neither stop
+    # path claims guaranteed closure.
     if telegram_manager: telegram_manager.startup_apply()
+    if channel_a_manager: channel_a_manager.startup_apply()
     try: app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, threaded=True, use_reloader=False)
     finally:
         if channel_a_manager: channel_a_manager.stop()

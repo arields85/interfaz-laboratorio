@@ -12,14 +12,17 @@ What this file pins down
   byte bound, monotonic clocks, the desired warning lead and the accepted
   request 20 / poll 25 / read 35 / join 40 / pause 0.1 bounds.
 * Composition stays inert: no credential resolution, no ``apply``/``prepare``/
-  ``start``, no worker thread, no provider call and no startup Apply of A.
+  ``start`` and no worker thread or provider call happen during ``create_app``
+  itself (``startup_apply`` runs later, only from root ``main``).
 * ``on_outcome`` handles only ``IngressOutcome.answer_envelope`` (``None``
   ignored) through the real ``VoiceEventStore``: publication for the exact
   envelope owner, empty question, live ``is_query_envelope_current`` closure
   that is re-evaluated on every read, fail-closed on refusal or exception, no
   cross-owner service and no fallback response after revocation.
-* Root ``main`` starts B as before, stops A and B in its ``finally`` on both a
-  normal server return and a raised exit, and never applies A.
+* Root ``main`` calls ``startup_apply`` on both A and B before serving, so an
+  applied configuration is restored on every restart without a manual
+  operator Apply, and stops A and B in its ``finally`` on both a normal
+  server return and a raised exit.
 * ``RuntimePaths.channel_a_configuration`` follows the existing ``paths.py``
   conventions: a root-relative JSON policy path relocated by
   ``PRISMA_RUNTIME_STATE_DIR`` with no new override framework.
@@ -674,13 +677,13 @@ class ChannelARootRealCompositionTests(RootHarness, unittest.TestCase):
         self.assertEqual(manager.calls, [])
         self.assertEqual(self.reservation.acquired, [])
 
-    def test_main_starts_b_without_applying_a_and_stops_both_managers(self):
+    def test_main_starts_up_applies_both_channels_and_stops_both_managers(self):
         run_calls = self.invoke_main(lambda: None)
 
         channel_a_manager = self.single(self.ManagerRecorder)
         telegram_manager = self.single(self.TelegramManagerRecorder)
         self.assertEqual(telegram_manager.calls, ["startup_apply", "stop"])
-        self.assertEqual(channel_a_manager.calls, ["stop"])
+        self.assertEqual(channel_a_manager.calls, ["startup_apply", "stop"])
 
         self.assertEqual(len(run_calls), 1)
         _run_args, run_kwargs = run_calls[0]
@@ -694,7 +697,7 @@ class ChannelARootRealCompositionTests(RootHarness, unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.invoke_main(raise_from_server)
 
-        self.assertEqual(self.single(self.ManagerRecorder).calls, ["stop"])
+        self.assertEqual(self.single(self.ManagerRecorder).calls, ["startup_apply", "stop"])
         self.assertEqual(self.single(self.TelegramManagerRecorder).calls, ["startup_apply", "stop"])
 
 

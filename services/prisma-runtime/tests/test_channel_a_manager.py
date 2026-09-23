@@ -406,6 +406,39 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assertIs(reservation, self.reservation)
         self.assertNotIn(TOKEN, repr(self.manager))
 
+    def test_startup_apply_with_credential_runs_the_same_apply_path_as_admin(self):
+        """PW-007: Channel A must mirror Telegram's accepted startup_apply -
+        an applied configuration is restored on boot, without an operator
+        having to click Apply again on every launcher start."""
+        result = self.manager.startup_apply()
+        candidate = self.candidates[-1]
+        self.assertIsNotNone(result["activationEpoch"])
+        self.assert_status(result, desired=self.store.snapshot.desired_generation,
+                           applied=self.store.snapshot.desired_generation,
+                           epoch=result["activationEpoch"], activation=candidate.observed)
+        self.assertEqual(self.effects(), [
+            ("credentials.get", A), ("factory",),
+            (candidate.name, "prepare"), (candidate.name, "start"),
+        ])
+
+    def test_startup_apply_without_credential_leaves_activation_untouched(self):
+        self.credentials.metadata[A] = False
+        result = self.manager.startup_apply()
+        self.assert_status(result, configured=False)
+        self.assertEqual(self.factory_calls, [])
+        self.assertEqual(self.effects(), [])
+
+    def test_startup_apply_failure_is_captured_in_status_without_raising(self):
+        candidate = self.new_candidate()
+        candidate.prepare_result = False
+        candidate.stop_result = True
+        self.factory_result = candidate
+        result = self.manager.startup_apply()
+        self.assert_status(result, activation=None, error=LIFECYCLE_UNAVAILABLE)
+        self.assertIn((candidate.name, "stop"), self.ledger)
+        self.assertIn((candidate.name, "prepare"), self.ledger)
+        self.assertNotIn((candidate.name, "start"), self.ledger)
+
     def test_running_same_generation_apply_is_no_effect_idempotent(self):
         candidate, first = self.applied()
         self.ledger.clear()

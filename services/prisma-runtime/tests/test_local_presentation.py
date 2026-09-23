@@ -288,5 +288,30 @@ class VoiceProbeTests(unittest.TestCase):
         self.assertLessEqual(len(serialized), 1000)
 
 
+class MainStartupWiringTests(unittest.TestCase):
+    """PW-007: Channel A must restore an applied configuration at boot the
+    same way Channel B (Telegram) already does, so main() must call both
+    managers' startup_apply() and the comment must no longer claim Channel A
+    stays inert until an explicit operator Apply."""
+
+    def test_main_calls_both_channel_startup_applies_next_to_each_other(self) -> None:
+        source = (RUNTIME_ROOT / "src" / "prisma_runtime" / "local_presentation.py").read_text(encoding="utf-8")
+        main_start = source.index("\ndef main():")
+        main_body = source[main_start:source.index("\nif __name__", main_start)]
+        self.assertIn("telegram_manager.startup_apply()", main_body)
+        self.assertIn("channel_a_manager.startup_apply()", main_body)
+        self.assertLess(
+            main_body.index("telegram_manager.startup_apply()"),
+            main_body.index("app.run("),
+        )
+        self.assertLess(
+            main_body.index("channel_a_manager.startup_apply()"),
+            main_body.index("app.run("),
+        )
+        self.assertNotIn("A stays inert until an", main_body)
+        self.assertIn("if channel_a_manager: channel_a_manager.stop()", main_body)
+        self.assertIn("if telegram_manager: telegram_manager.stop()", main_body)
+
+
 if __name__ == "__main__":
     unittest.main()
