@@ -302,7 +302,7 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   character widths at 11px are typically ~6-7px, not 8px, so the true
   margin is larger in practice). Route: direct (single component + its
   tests). Commit `style(admin): unify credential verification into grouped
-  icon buttons` (`<hash>`).
+  icon buttons` (`8b2fb6e`).
 
 ## Acceptance criteria
 
@@ -1433,15 +1433,92 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   `bg-black/10` non-token Tailwind colors, already the established admin pattern; stale
   task-ID comments -- none touched).
 
+- 2026-09-23: T14 done. `VoiceCredentialSettings.tsx`: removed the dead T9d stable-width
+  grid-stacked "Verificar"/"Verificando…" label pair, `VerifyButtonLabel`,
+  `geminiVerificationGlyph`, `telegramTokenVerificationGlyph`, `telegramExecutionGlyph` and
+  `channelAExecutionGlyph`; replaced them with a new `ResultGlyph`/`ResultDisplay` pair (a
+  result now carries an optional visible `text` alongside its icon, not just an icon+tooltip),
+  a new icon-only `VerifyIconButton` (Lucide `Play`/spinning `Loader2`, grouped with
+  Save/Delete, same variant/size, `aria-label`+`HoverTooltip` for the accessible name), and
+  four pure glyph functions (`geminiVerificationResult`, `telegramTokenVerificationResult`,
+  `telegramConnectionResult`, `channelAConnectionResult`). Telegram/Canal A rows now hold a
+  `verificationResultVisible: Record<'telegram'|'telegram_channel_a', boolean>` state flag and
+  a `verificationRevertTimersRef` (one `setTimeout` id per provider): `verifyTelegramFamily`
+  clears any pending timer, calls the client, and on a successful response sets the flag true
+  and -- only when `result.verification.state === 'verified'` -- schedules a revert to false
+  after `VERIFICATION_RESULT_DISPLAY_MS`, guarded by the existing `panelGenerationRef` pattern
+  so a stale timeout can never update state after the panel was hidden/reset; `save`/`remove`
+  call a new `resetVerificationResultIfTelegramFamily` on success (clears the timer and the
+  flag immediately, since the backend already resets verification on save/delete per T13); a
+  dedicated empty-deps `useEffect` cleanup clears both timers on unmount. Gemini's row has no
+  such flag/timer -- its result area always reflects the live verification state directly
+  ("Result persists, Gemini has no live state to return to" per the brief). Icon rename:
+  `MessageCircleDashedCheck` -> `CircleDashedCheck` for every "not yet verified" state
+  (confirmed installed in the already-bumped `lucide-react@1.47.0`, both `CircleDashedCheck`
+  and `Play` present). New copy per the brief: Gemini "Verificada"->"Verificado",
+  "No se pudo verificar: sin conexión con Google"->"Sin conexión con Google"; Canal A/B
+  connection-state "Estado del bot no confirmado"->"Estado no confirmado" (all other
+  connection-state strings unchanged, now shown as visible text instead of tooltip-only).
+  Coordinator mid-task width requirement: `CREDENTIAL_INPUT_WIDTH_CLS` shrunk from T11's
+  `w-full md:w-80` to `w-full md:w-44`; new `RESULT_AREA_WIDTH_CLS = 'min-w-[33ch]'` shared by
+  all three rows' result areas (full arithmetic above in the T14 task entry).
+  RED: ran the full pre-T14 test file against the rewritten component first -- 17 of 68 tests
+  failed (button/icon/text queries against the retired separate-slot layout and the old
+  "Verificada"/"No se pudo verificar..."/"Estado del bot no confirmado" copy), confirmed
+  against the actual failing-test list before changing any test. Rewrote/removed those 17 and
+  added 8 new ones (Gemini's structural order test rewritten for the merged result area; a
+  parallel structural-order test for Canal A; a shared-result-area-width test; a 32-char
+  max-length-username no-truncation test; and, inside a new `describe('verification result
+  display duration')` block using `vi.useFakeTimers({shouldAdvanceTime:true})` +
+  `userEvent.setup({delay:null, advanceTimers:vi.advanceTimersByTime})`: the timed revert on a
+  successful verify, persistence of a failed verify past the duration, timer cleanup on
+  unmount asserted via a `console.error` spy staying uncalled, and immediate timer
+  cancellation when Save resets verification). Two intermediate fixture bugs found and fixed
+  while iterating (not scope creep): the new invalid_token/unreachable/timed-revert tests
+  originally passed a constant `credentialMetadata` mock that kept returning the pre-verify
+  metadata on the post-verify `refresh()` call, so the rendered result (sourced from
+  `credentials?.[provider].verification`, unchanged T13 contract) silently fell back to
+  "Verificación: no realizada" instead of the verified/failed state under test; fixed by
+  chaining `.mockResolvedValueOnce(configuredA).mockResolvedValue({...configuredA,
+  telegram_channel_a: <expected post-verify state>})`, matching the existing pattern already
+  used by the "verifies the bot token" tests. GREEN: `VoiceCredentialSettings.test.tsx`
+  74/74; full `npm test` 211 files / 2320 tests; `npx tsc -b --noEmit` clean; `npm run lint`
+  clean (fixed one leftover unused fixture and one unnecessary eslint-disable found by lint,
+  both pre-existing-test-shape artifacts of the rewrite, not new findings).
+  GGA: first attempt FAILED -- legitimate finding: the `CREDENTIAL_INPUT_WIDTH_CLS` comment
+  walked through the full container-width arithmetic inline in source, which GGA correctly
+  read as a "calculated dimensional estimate" under `docs/CONVENTIONS.md`'s anti-hardcode
+  policy, rather than a plain design-token choice (T11's original `w-80` had no such inline
+  derivation and was never flagged). GGA's own suggested fix (`flex-1`+`basis-40`) was not
+  applied: it would make the input's rendered width vary with each row's own leftover space
+  again, reversing T11's fix and directly violating the coordinator's explicit "keep one exact
+  shared width" requirement for this task. Instead, trimmed the inline comment to a short
+  design-token rationale (same style/precedent as T11's own accepted comment) and moved the
+  full arithmetic to this tracker entry only, per the coordinator's own instruction to "write
+  the arithmetic in the tracker" (not necessarily duplicate it in source); the token value
+  (`md:w-44`) itself was not changed. Also tightened the `RESULT_AREA_WIDTH_CLS` comment's
+  wording per GGA's minor (non-blocking) note that `ch` is a proxy from the "0" glyph, not an
+  "exact" width. Second attempt: GGA PASSED, one accepted note (min-w-[33ch] is
+  content-derived but fits the CONVENTIONS.md "fixed structural value" exception since 33 is
+  Telegram's own API limit, not a guess). Commit `8b2fb6e`.
+
 ## Next step
 
-All seventeen roadmap items are committed. Still pending, unchanged by T11/T12/T13: manual
-re-checks of point 3 (relaunch after closing the launcher window with X), point 4 (foreign
-process on 5057, terminal + popover), T5b (Ver viewer keeps the session), point 6's
-Chrome-specific no-autofill-prompt behavior (T9c's proof was offline/mocked only), and T10's
-own manual test (save/delete a Canal A and a Telegram token, plus one deliberately wrong
-token). New from T13: manual test of Verificar on both rows against real Telegram (valid
+All seventeen roadmap items were committed before T14. Still pending, unchanged by
+T11/T12/T13/T14: manual re-checks of point 3 (relaunch after closing the launcher window with
+X), point 4 (foreign process on 5057, terminal + popover), T5b (Ver viewer keeps the session),
+point 6's Chrome-specific no-autofill-prompt behavior (T9c's proof was offline/mocked only),
+and T10's own manual test (save/delete a Canal A and a Telegram token, plus one deliberately
+wrong token). New from T13: manual test of Verificar on both rows against real Telegram (valid
 token, deliberately wrong token, and offline/unreachable) to confirm the three verification
 states render as expected outside the mocked test suite -- this writer's Python tests mock
 every HTTP call, so the real Telegram Bot API surface (401 shape, timeout behavior) was never
-exercised end-to-end.
+exercised end-to-end. New from T14: manual check of the credentials panel in the real
+GlobalSettingsDialog -- confirm all three rows (Proveedor de voz, Canal A, Canal B) fit on one
+line at the dialog's normal (desktop, >= md) width with no wrap, the icon-only Verificar button
+reads clearly next to Save/Delete, the trailing result area shows the expected text+icon for
+each state (including a real long Telegram username if available), and the 5-second
+auto-revert after a successful Canal A/B verification is visually smooth and not jarring; this
+writer's test suite only proves the DOM/timer contract, not the real rendered layout (no
+browser was available to confirm the exact `md:w-44`/`min-w-[33ch]` fit against real font
+metrics -- see the arithmetic in T14's own task entry above).
