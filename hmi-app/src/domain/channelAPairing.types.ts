@@ -26,6 +26,15 @@ export interface ChannelAPairingIssue {
 // every case where a real response was read, JSON or not, ok or not.
 export type ChannelAPairingErrorKind = 'session' | 'conflict' | 'unavailable' | 'runtime_unreachable';
 
+// Optional detail carried by a runtime_unreachable error when the Prisma dev proxy answered
+// with its own structured JSON marker (T4b): the launcher detected a specific reason the
+// runtime could not start, currently only a busy port. Never present for a plain connectivity
+// failure (a rejected fetch, or the proxy's bodiless legacy error page).
+export interface ChannelARuntimeUnreachableDetail {
+    reason: 'port_in_use';
+    port: number;
+}
+
 const PAIRING_STATES: readonly string[] = ['free', 'pending', 'linked', 'unavailable'];
 
 // Exact Telegram deep link: https://t.me/<botUsername 5-32 chars, letter first>?start=<43-char

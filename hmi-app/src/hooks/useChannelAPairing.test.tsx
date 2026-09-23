@@ -595,6 +595,39 @@ describe('useChannelAPairing', () => {
         expect(statusMock).toHaveBeenCalledTimes(4);
     });
 
+    it('carries the port_in_use detail while unreachable and clears it once the runtime answers again', async () => {
+        statusMock.mockResolvedValueOnce(statusFixture('free'))
+            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable', { reason: 'port_in_use', port: 5057 }))
+            .mockResolvedValue(statusFixture('free'));
+        issueMock.mockResolvedValue(issueFixture(qrFixture(60)));
+
+        const { result } = renderHook(() => useChannelAPairing(true));
+        await settle();
+        expect(result.current.unreachableDetail).toBeNull();
+
+        await advanceTimers(CHANNEL_A_PAIRING_POLL_INTERVAL_MS);
+        expect(result.current.phase).toBe('unreachable');
+        expect(result.current.unreachableDetail).toEqual({ reason: 'port_in_use', port: 5057 });
+
+        await advanceTimers(CHANNEL_A_PAIRING_POLL_INTERVAL_MS);
+        expect(result.current.phase).toBe('free');
+        expect(result.current.unreachableDetail).toBeNull();
+    });
+
+    it('reports no detail when the runtime_unreachable error carries none', async () => {
+        statusMock.mockResolvedValueOnce(statusFixture('free'))
+            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable'))
+            .mockResolvedValue(statusFixture('free'));
+        issueMock.mockResolvedValue(issueFixture(qrFixture(60)));
+
+        const { result } = renderHook(() => useChannelAPairing(true));
+        await settle();
+
+        await advanceTimers(CHANNEL_A_PAIRING_POLL_INTERVAL_MS);
+        expect(result.current.phase).toBe('unreachable');
+        expect(result.current.unreachableDetail).toBeNull();
+    });
+
     it('returns a fully closed slot on EVERY closed render immediately, even before effect cleanup', async () => {
         statusMock.mockResolvedValue(statusFixture('free'));
         issueMock.mockResolvedValue(issueFixture(qrFixture(60)));

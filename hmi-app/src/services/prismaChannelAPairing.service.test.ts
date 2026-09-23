@@ -322,6 +322,57 @@ describe('prismaChannelAPairing error mapping', () => {
         expect((caught as PrismaChannelAPairingError).kind).toBe('unavailable');
     });
 
+    it('maps the dev proxy runtime_unreachable JSON marker to runtime_unreachable with its port_in_use detail, even though the body is valid JSON', async () => {
+        // T4b: the proxy's own structured marker takes precedence over the generic "non-2xx
+        // with valid JSON = unavailable" rule above, because this body was never produced by
+        // the Prisma runtime itself.
+        harness.client.fetch.mockResolvedValue(knownResponse(503, {
+            error: 'prisma_runtime_unreachable',
+            reason: 'port_in_use',
+            port: 5057,
+        }));
+
+        const caught = await caughtOf(prismaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(PrismaChannelAPairingError);
+        expect((caught as PrismaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as PrismaChannelAPairingError).detail).toEqual({ reason: 'port_in_use', port: 5057 });
+    });
+
+    it('maps the bare runtime_unreachable JSON marker (no failure detail detected) with no detail', async () => {
+        harness.client.fetch.mockResolvedValue(knownResponse(503, { error: 'prisma_runtime_unreachable' }));
+
+        const caught = await caughtOf(prismaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(PrismaChannelAPairingError);
+        expect((caught as PrismaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as PrismaChannelAPairingError).detail).toBeUndefined();
+    });
+
+    it.each([
+        ['an unknown reason', { error: 'prisma_runtime_unreachable', reason: 'exploded', port: 5057 }],
+        ['a non-integer port', { error: 'prisma_runtime_unreachable', reason: 'port_in_use', port: 70000 }],
+        ['a missing port', { error: 'prisma_runtime_unreachable', reason: 'port_in_use' }],
+    ])('drops the detail (but keeps runtime_unreachable) when the marker has %s', async (_label, payload) => {
+        harness.client.fetch.mockResolvedValue(knownResponse(503, payload));
+
+        const caught = await caughtOf(prismaChannelAPairing.status());
+
+        expect((caught as PrismaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as PrismaChannelAPairingError).detail).toBeUndefined();
+    });
+
+    it('never treats a 2xx body carrying the runtime_unreachable marker shape as anything but a normal parse failure', async () => {
+        // The marker only ever applies to a non-2xx response (the proxy's own error page); a
+        // successful response is parsed by the normal success path regardless of its shape.
+        harness.client.fetch.mockResolvedValue(knownResponse(200, { error: 'prisma_runtime_unreachable' }));
+
+        const caught = await caughtOf(prismaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(PrismaChannelAPairingError);
+        expect((caught as PrismaChannelAPairingError).kind).toBe('unavailable');
+    });
+
     it('keeps a 409 with malformed JSON mapped to the unavailable kind, never runtime_unreachable', async () => {
         // The 409 conflict branch is classified independently of body-parse malformation.
         harness.client.fetch.mockResolvedValue(new Response('{', { status: 409 }));

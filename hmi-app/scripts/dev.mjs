@@ -22,6 +22,25 @@ function signalExitCode(signal) {
   return signal === 'SIGINT' ? 130 : 143
 }
 
+// Minimal, documented receipt-on-failure schema written by start-local.ps1 (T1b) when a
+// foreign (non-Prisma) process blocks 5056/5057: { registered: false, failure: { reason:
+// 'port_in_use', port, processName, pid } }. Only `reason` and `port` are forwarded to Vite;
+// anything else (missing file, malformed JSON, an unknown reason, an out-of-range port) is
+// treated as "no detectable failure detail" rather than surfaced as a hard error, since the
+// launcher must still fall back to its existing generic warning either way.
+const KNOWN_STARTUP_FAILURE_REASONS = new Set(['port_in_use'])
+
+function parsePrismaStartupFailure(raw) {
+  if (typeof raw !== 'object' || raw === null) return null
+  if (raw.registered !== false) return null
+  const failure = raw.failure
+  if (typeof failure !== 'object' || failure === null) return null
+  const { reason, port } = failure
+  if (typeof reason !== 'string' || !KNOWN_STARTUP_FAILURE_REASONS.has(reason)) return null
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  return { reason, port }
+}
+
 export function createPowerShellRuntime({
   spawn = spawnChild,
   files = fileSystem,
@@ -52,13 +71,33 @@ export function createPowerShellRuntime({
       const cancellationPath = join(temporaryRoot, `prisma-dev-${operationId}.cancel`)
       acquisitions.set(ownerToken, cancellationPath)
       try {
-        await runScript('start-local.ps1', [
-          '-DevelopmentOwnerToken', ownerToken,
-          '-DevelopmentOwnerProcessId', String(process.pid),
-          '-DevelopmentReceiptPath', receiptPath,
-          '-DevelopmentCancellationPath', cancellationPath,
-          '-LockTimeoutMilliseconds', '10000',
-        ])
+        try {
+          await runScript('start-local.ps1', [
+            '-DevelopmentOwnerToken', ownerToken,
+            '-DevelopmentOwnerProcessId', String(process.pid),
+            '-DevelopmentReceiptPath', receiptPath,
+            '-DevelopmentCancellationPath', cancellationPath,
+            '-LockTimeoutMilliseconds', '10000',
+          ])
+        }
+        catch (startError) {
+          // start-local.ps1 can throw AFTER writing a structured failure receipt (T1b's
+          // port_in_use case): the exit code alone would otherwise discard that detail, so the
+          // receipt is inspected here, before the `finally` block below deletes it.
+          let failure = null
+          try {
+            failure = parsePrismaStartupFailure(JSON.parse(await files.readFile(receiptPath, 'utf8')))
+          }
+          catch {
+            failure = null
+          }
+          if (failure) {
+            const detailedError = new Error(startError instanceof Error ? startError.message : String(startError))
+            detailedError.failure = failure
+            throw detailedError
+          }
+          throw startError
+        }
         const receipt = JSON.parse(await files.readFile(receiptPath, 'utf8'))
         if (receipt.registered === false) return null
         if (receipt.registered === true && typeof receipt.generation === 'string' && receipt.generation.length > 0) {
@@ -113,11 +152,16 @@ export function createViteLauncher({
   nodeExecutable = process.execPath,
   viteCli = defaultViteCli,
 } = {}) {
-  return (viteArguments) => {
+  return (viteArguments, extraEnvironment = {}) => {
+    const hasExtraEnvironment = Object.keys(extraEnvironment).length > 0
     const child = spawn(nodeExecutable, [viteCli, ...viteArguments], {
       shell: false,
       stdio: 'inherit',
       windowsHide: false,
+      // Only overridden (never dropping the rest of the real environment) when the caller
+      // detected a startup failure worth forwarding to Vite; otherwise the child inherits
+      // process.env exactly as before.
+      ...(hasExtraEnvironment ? { env: { ...process.env, ...extraEnvironment } } : {}),
     })
     return {
       result: waitForChild(child),
@@ -143,6 +187,7 @@ export async function runDevelopment({
   let requestedSignal = null
   let terminationForwarded = false
   let released = false
+  let startupFailure = null
 
   const releaseOnce = async () => {
     if (released || !receipt) return
@@ -177,6 +222,9 @@ export async function runDevelopment({
       }
       catch (error) {
         warn(`Prisma Local is unavailable; Vite will continue: ${error instanceof Error ? error.message : String(error)}`)
+        if (error && typeof error === 'object' && 'failure' in error && error.failure) {
+          startupFailure = error.failure
+        }
       }
       if (requestedSignal) {
         await releaseOnce()
@@ -187,7 +235,8 @@ export async function runDevelopment({
     }
 
     try {
-      vite = spawnVite(viteArgs)
+      const extraEnvironment = startupFailure ? { PRISMA_STARTUP_FAILURE: JSON.stringify(startupFailure) } : {}
+      vite = spawnVite(viteArgs, extraEnvironment)
     }
     catch (error) {
       warn(`Vite could not be started: ${error instanceof Error ? error.message : String(error)}`)

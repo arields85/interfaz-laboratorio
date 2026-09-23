@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ChannelAPairingQr, ChannelAPairingState } from '../domain/channelAPairing.types';
+import type { ChannelAPairingQr, ChannelAPairingState, ChannelARuntimeUnreachableDetail } from '../domain/channelAPairing.types';
 import {
     PrismaChannelAPairingError,
     prismaChannelAPairing,
@@ -24,6 +24,9 @@ export interface UseChannelAPairingResult {
     phase: ChannelAPairingPhase;
     qr: ChannelAPairingQr | null;
     remainingSeconds: number;
+    // Only set (and only meaningful) while phase is 'unreachable' and the service detected a
+    // specific reason (currently port_in_use), so the popover can show the actual busy port.
+    unreachableDetail: ChannelARuntimeUnreachableDetail | null;
 }
 
 // Canonical closed slot, returned directly from render on every closed render so no closed
@@ -32,6 +35,7 @@ const CLOSED_RESULT: UseChannelAPairingResult = {
     phase: 'closed',
     qr: null,
     remainingSeconds: 0,
+    unreachableDetail: null,
 };
 
 // Abort and stale-session rejections are ordinary quiet cleanup: the close/unmount/reset path
@@ -53,12 +57,19 @@ function isRuntimeUnreachable(error: unknown): boolean {
     return error instanceof PrismaChannelAPairingError && error.kind === 'runtime_unreachable';
 }
 
+// Optional detail (currently only port_in_use) the service parsed from the dev proxy's own
+// structured marker; undefined/absent when the runtime was unreachable for no detected reason.
+function runtimeUnreachableDetailOf(error: unknown): ChannelARuntimeUnreachableDetail | null {
+    return error instanceof PrismaChannelAPairingError && error.detail ? error.detail : null;
+}
+
 export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
     // State is initialized from the initial open prop; prop transitions are canonicalized at
     // render time below, so the effect body never adjusts state directly.
     const [phase, setPhase] = useState<ChannelAPairingPhase>(open ? 'loading' : 'closed');
     const [qr, setQr] = useState<ChannelAPairingQr | null>(null);
     const [remainingSeconds, setRemainingSeconds] = useState(0);
+    const [unreachableDetail, setUnreachableDetail] = useState<ChannelARuntimeUnreachableDetail | null>(null);
     const [previousOpen, setPreviousOpen] = useState(open);
 
     // Prop-transition canonicalization (React-permitted conditional self-state adjustment
@@ -71,6 +82,7 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
         setPhase(open ? 'loading' : 'closed');
         setQr(null);
         setRemainingSeconds(0);
+        setUnreachableDetail(null);
     }
 
     useEffect(() => {
@@ -166,6 +178,7 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
                 if (!isCurrent(epoch, controller.signal)) return;
 
                 setPhase(status.state);
+                setUnreachableDetail(null);
                 if (status.state !== 'free') {
                     clearQr();
                     // 'unavailable' is terminal until close/reopen; pending and linked keep the
@@ -211,14 +224,17 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
                     // The Prisma runtime itself could not be reached (e.g. the dev proxy
                     // answering ECONNREFUSED with its own failure page): unlike a terminal
                     // pairing error, the routine poll keeps running on its own so the popover
-                    // recovers automatically once the runtime comes back up.
+                    // recovers automatically once the runtime comes back up. The optional
+                    // detail (currently only port_in_use) lets the popover name the busy port.
                     setPhase('unreachable');
+                    setUnreachableDetail(runtimeUnreachableDetailOf(error));
                     clearQr();
                     schedulePoll();
                     return;
                 }
                 // Honest terminal failure: hide the QR and stop polling until close/reopen.
                 setPhase('error');
+                setUnreachableDetail(null);
                 clearQr();
             }
         };
@@ -232,6 +248,7 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
             abortActiveRequest();
             clearQr();
             setPhase('loading');
+            setUnreachableDetail(null);
             void runRound(true);
         };
 
@@ -255,5 +272,5 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
 
     // Render-level normalization: while closed, the empty slot is returned immediately from the
     // render itself (before any effect runs); all hooks above already executed unconditionally.
-    return open ? { phase, qr, remainingSeconds } : CLOSED_RESULT;
+    return open ? { phase, qr, remainingSeconds, unreachableDetail } : CLOSED_RESULT;
 }

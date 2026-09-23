@@ -96,6 +96,59 @@ describe('development orchestration', () => {
     expect(runtime.release).not.toHaveBeenCalled()
   })
 
+  it('forwards a detected port_in_use startup failure to Vite as an environment variable', async () => {
+    const warn = vi.fn()
+    const failureError = new Error('Prisma could not start: port 5057 is in use by "name.exe" (PID 1234). Close it and run the launcher again.')
+    ;(failureError as Error & { failure: unknown }).failure = { reason: 'port_in_use', port: 5057 }
+    const runtime = {
+      acquire: vi.fn(async () => {
+        throw failureError
+      }),
+      cancelAcquire: vi.fn(),
+      release: vi.fn(),
+    }
+    const spawnVite = vi.fn(() => ({
+      result: Promise.resolve<ExitResult>({ code: 0, signal: null }),
+      terminate: vi.fn(),
+    }))
+
+    await expect(runDevelopment({
+      platform: 'win32',
+      viteArgs: ['--host'],
+      runtime,
+      spawnVite,
+      signals: createSignals(),
+      warn,
+    })).resolves.toBe(0)
+
+    expect(spawnVite).toHaveBeenCalledWith(['--host'], { PRISMA_STARTUP_FAILURE: JSON.stringify({ reason: 'port_in_use', port: 5057 }) })
+  })
+
+  it('never forwards a startup failure marker when acquisition fails without a detected failure', async () => {
+    const runtime = {
+      acquire: vi.fn(async () => {
+        throw new Error('owned interpreter missing')
+      }),
+      cancelAcquire: vi.fn(),
+      release: vi.fn(),
+    }
+    const spawnVite = vi.fn(() => ({
+      result: Promise.resolve<ExitResult>({ code: 0, signal: null }),
+      terminate: vi.fn(),
+    }))
+
+    await runDevelopment({
+      platform: 'win32',
+      viteArgs: [],
+      runtime,
+      spawnVite,
+      signals: createSignals(),
+      warn: vi.fn(),
+    })
+
+    expect(spawnVite).toHaveBeenCalledWith([], {})
+  })
+
   it('skips Prisma honestly on unsupported operating systems', async () => {
     const warn = vi.fn()
     const runtime = {
@@ -119,7 +172,7 @@ describe('development orchestration', () => {
 
     expect(runtime.acquire).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Windows'))
-    expect(spawnVite).toHaveBeenCalledWith(['--host'])
+    expect(spawnVite).toHaveBeenCalledWith(['--host'], {})
   })
 
   it.each(['SIGINT', 'SIGTERM'] as const)('forwards %s and releases once across signal and exit races', async (signal) => {
@@ -281,6 +334,55 @@ describe('native child adapters', () => {
     ]))
   })
 
+  it('attaches the parsed port_in_use receipt failure to the rejection when start-local.ps1 exits non-zero', async () => {
+    const spawn = vi.fn(() => {
+      const child = Object.assign(new EventEmitter(), { kill: vi.fn() })
+      queueMicrotask(() => child.emit('exit', spawn.mock.calls.length === 1 ? 9 : 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({
+        registered: false,
+        failure: { reason: 'port_in_use', port: 5057, processName: 'name.exe', pid: 1234 },
+      })),
+      writeFile: vi.fn(async () => undefined),
+      rm: vi.fn(async () => undefined),
+    }
+    const runtime = createPowerShellRuntime({ spawn, files, newId: () => 'id' })
+
+    const caught = await runtime.acquire('owner').catch((error: unknown) => error)
+
+    expect(caught).toBeInstanceOf(Error)
+    expect((caught as Error & { failure?: unknown }).failure).toEqual({ reason: 'port_in_use', port: 5057 })
+  })
+
+  it.each([
+    ['a missing receipt file', new Error('receipt missing')],
+    ['an unknown failure reason', JSON.stringify({ registered: false, failure: { reason: 'exploded', port: 5057 } })],
+    ['an out-of-range port', JSON.stringify({ registered: false, failure: { reason: 'port_in_use', port: 70000 } })],
+    ['a registered:true receipt', JSON.stringify({ registered: true, failure: { reason: 'port_in_use', port: 5057 } })],
+  ])('never attaches a failure when the receipt has %s', async (_label, readResult) => {
+    const spawn = vi.fn(() => {
+      const child = Object.assign(new EventEmitter(), { kill: vi.fn() })
+      queueMicrotask(() => child.emit('exit', spawn.mock.calls.length === 1 ? 9 : 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => {
+        if (readResult instanceof Error) throw readResult
+        return readResult
+      }),
+      writeFile: vi.fn(async () => undefined),
+      rm: vi.fn(async () => undefined),
+    }
+    const runtime = createPowerShellRuntime({ spawn, files, newId: () => 'id' })
+
+    const caught = await runtime.acquire('owner').catch((error: unknown) => error)
+
+    expect(caught).toBeInstanceOf(Error)
+    expect((caught as Error & { failure?: unknown }).failure).toBeUndefined()
+  })
+
   it('requests token-scoped recovery when the helper fails after registration', async () => {
     const spawn = vi.fn(() => {
       const child = Object.assign(new EventEmitter(), { kill: vi.fn() })
@@ -331,5 +433,23 @@ describe('native child adapters', () => {
       [String.raw`C:\repo with spaces\node_modules\vite\bin\vite.js`, '--host', '0.0.0.0'],
       expect.objectContaining({ shell: false, stdio: 'inherit' }),
     )
+  })
+
+  it('launches Vite without overriding the environment when no extra environment is given', () => {
+    const child = new EventEmitter()
+    const spawn = vi.fn(() => Object.assign(child, { kill: vi.fn() }))
+    createViteLauncher({ spawn })([])
+
+    expect(spawn.mock.calls[0]?.[2]).not.toHaveProperty('env')
+  })
+
+  it('merges a detected startup failure into the Vite child environment without dropping the rest of process.env', () => {
+    const child = new EventEmitter()
+    const spawn = vi.fn(() => Object.assign(child, { kill: vi.fn() }))
+    createViteLauncher({ spawn })([], { PRISMA_STARTUP_FAILURE: '{"reason":"port_in_use","port":5057}' })
+
+    const options = spawn.mock.calls[0]?.[2] as { env?: Record<string, string | undefined> }
+    expect(options.env?.PRISMA_STARTUP_FAILURE).toBe('{"reason":"port_in_use","port":5057}')
+    expect(options.env?.PATH ?? options.env?.Path).toBe(process.env.PATH ?? process.env.Path)
   })
 })

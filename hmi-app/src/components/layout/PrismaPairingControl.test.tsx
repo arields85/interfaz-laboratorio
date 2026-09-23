@@ -15,7 +15,8 @@
 //   role img named "Código QR para vincular Telegram", and rendered ONLY while
 //   phase is `free` with a valid qr payload and remainingSeconds > 0. No QR token ever reaches
 //   a title attribute, log or storage beyond the deep link itself.
-// - Spanish neutral copy: pending "Confirma el destino en Telegram.", linked
+// - Spanish neutral copy (formal "usted" register, user decision 2026-09-23): pending
+//   "Confirme el destino en Telegram.", linked
 //   "Teléfono vinculado", unavailable "Canal A no disponible"; loading/error stay truthful and
 //   generic (exact copy intentionally not pinned). No extra Renew/Apply/local-confirm buttons;
 //   no admin auth dependency. High-contrast token styling is checked by static source review,
@@ -24,7 +25,7 @@
 //   the saved HMI name through `readHmiName()` (service mocked at the boundary, default
 //   `{ ok: true, name: 'Panel recepción' }`), so later openings re-read instead of caching.
 //   A valid name preserves every existing behavior below. With no configured name the panel
-//   shows the actionable copy `Configurá el nombre de esta HMI en Configuración general →
+//   shows the actionable copy `Configure el nombre de esta HMI en Configuración general →
 //   Prisma antes de vincular un teléfono.`; when the read itself fails or returns an invalid
 //   result it truthfully shows `No se pudo leer el nombre guardado.` with the settings
 //   direction instead of falsely claiming the name is absent. Both blocked states pass `false`
@@ -62,9 +63,14 @@ interface PairingQr {
 const QR_LINK = `https://t.me/PrismaHmiBot?start=${'A'.repeat(43)}`;
 const DIALOG_NAME = 'Vincular teléfono con Prisma';
 const QR_IMG_NAME = 'Código QR para vincular Telegram';
-const MISSING_NAME_COPY = 'Configurá el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
+const MISSING_NAME_COPY = 'Configure el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
 const READ_FAILURE_COPY = 'No se pudo leer el nombre guardado.';
 const SETTINGS_DIRECTION_FRAGMENT = 'Configuración general';
+
+interface UnreachableDetail {
+    reason: 'port_in_use';
+    port: number;
+}
 
 // Mutable per-test fixture shaped exactly like the real hook return; the mock records every
 // `open` argument so manual open/close is asserted without any service or clock.
@@ -80,6 +86,7 @@ const pairingFixture = vi.hoisted(() => ({
         | 'unreachable',
     qr: null as { deepLink: string; expiresInSeconds: number } | null,
     remainingSeconds: 0,
+    unreachableDetail: null as { reason: 'port_in_use'; port: number } | null,
     openArguments: [] as boolean[],
 }));
 
@@ -90,6 +97,7 @@ const useChannelAPairingMock = vi.hoisted(() =>
             phase: pairingFixture.phase,
             qr: pairingFixture.qr,
             remainingSeconds: pairingFixture.remainingSeconds,
+            unreachableDetail: pairingFixture.unreachableDetail,
         };
     }),
 );
@@ -101,9 +109,10 @@ vi.mock('../../hooks/useChannelAPairing', () => ({
     CHANNEL_A_PAIRING_POLL_INTERVAL_MS: 2000,
 }));
 
-function setPairingFixture(phase: PairingPhase, qr: PairingQr | null, remainingSeconds: number): void {
+function setPairingFixture(phase: PairingPhase, qr: PairingQr | null, remainingSeconds: number, unreachableDetail: UnreachableDetail | null = null): void {
     pairingFixture.phase = phase;
     pairingFixture.qr = qr;
+    pairingFixture.unreachableDetail = unreachableDetail;
     pairingFixture.remainingSeconds = remainingSeconds;
 }
 
@@ -430,7 +439,7 @@ describe('PrismaPairingControl', () => {
 
     it('reflects pending, linked and unavailable states with their copy and never a QR', async () => {
         const stateCopy: ReadonlyArray<[PairingPhase, string]> = [
-            ['pending', 'Confirma el destino en Telegram.'],
+            ['pending', 'Confirme el destino en Telegram.'],
             ['linked', 'Teléfono vinculado'],
             ['unavailable', 'Canal A no disponible'],
         ];
@@ -459,6 +468,29 @@ describe('PrismaPairingControl', () => {
         // not a state the runtime itself answered with.
         expect(within(dialog).queryByText('Canal A no disponible')).not.toBeInTheDocument();
         expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
+    });
+
+    it('shows the detected busy port instead of the generic copy when the launcher reports port_in_use', async () => {
+        setPairingFixture('unreachable', null, 0, { reason: 'port_in_use', port: 5057 });
+
+        render(<PrismaPairingControl />);
+        const dialog = await openDialog();
+
+        expect(within(dialog).getByText('Prisma no se pudo iniciar: el puerto 5057 está en uso por otro programa.')).toBeInTheDocument();
+        expect(within(dialog).queryByText('Prisma no se pudo iniciar.')).not.toBeInTheDocument();
+        // The hint line is unrelated to T4b and stays exactly as T4 left it.
+        expect(within(dialog).getByText('Reinicie el lanzador para volver a intentarlo.')).toBeInTheDocument();
+        expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
+    });
+
+    it('falls back to the generic unreachable copy when no port detail was detected', async () => {
+        setPairingFixture('unreachable', null, 0, null);
+
+        render(<PrismaPairingControl />);
+        const dialog = await openDialog();
+
+        expect(within(dialog).getByText('Prisma no se pudo iniciar.')).toBeInTheDocument();
+        expect(within(dialog).queryByText(/el puerto/)).not.toBeInTheDocument();
     });
 
     it('never shows the QR once the countdown reaches zero or the payload is missing', async () => {
@@ -540,7 +572,7 @@ describe('PrismaPairingControl', () => {
         // by the same measured width.
         setPairingFixture('pending', null, 0);
         await emitPanelMeasurement(observer, MEASURED_WIDTH, MEASURED_SHORT_HEIGHT);
-        expect(within(dialog).getByText('Confirma el destino en Telegram.')).toBeInTheDocument();
+        expect(within(dialog).getByText('Confirme el destino en Telegram.')).toBeInTheDocument();
         expect(overlay).toHaveStyle({ top: `${TRIGGER_RECT.bottom + OVERLAY_GAP_PX}px` });
         expect(overlay.style.bottom).toBe('');
         expect(overlay).toHaveStyle({ minWidth: `${MEASURED_WIDTH}px` });

@@ -6,19 +6,30 @@ import { HmiButton } from '../ui';
 import { useChannelAPairing, type ChannelAPairingPhase } from '../../hooks/useChannelAPairing';
 import { readHmiName } from '../../services/hmiName.service';
 import type { HmiNameReadResult } from '../../domain/hmiName';
+import type { ChannelARuntimeUnreachableDetail } from '../../domain/channelAPairing.types';
 import { TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
 
 const DIALOG_LABEL = 'Vincular teléfono con Prisma';
-const MISSING_NAME_COPY = 'Configurá el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
+const MISSING_NAME_COPY = 'Configure el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
 const READ_FAILURE_COPY = 'No se pudo leer el nombre guardado.';
-const READ_FAILURE_DIRECTION_COPY = 'Revisá el nombre de esta HMI en Configuración general → Prisma.';
+const READ_FAILURE_DIRECTION_COPY = 'Revise el nombre de esta HMI en Configuración general → Prisma.';
 const QR_IMAGE_LABEL = 'Código QR para vincular Telegram';
 const TRIGGER_LABEL = 'Prisma';
 const CLOSE_LABEL = 'Cerrar';
 // Distinct from 'unavailable' (the runtime answered "Canal A no disponible"): this is shown
 // only when the Prisma runtime itself could not be reached at all.
 const RUNTIME_UNREACHABLE_COPY = 'Prisma no se pudo iniciar.';
-const RUNTIME_UNREACHABLE_HINT_COPY = 'Reiniciá el lanzador para volver a intentarlo.';
+const RUNTIME_UNREACHABLE_HINT_COPY = 'Reinicie el lanzador para volver a intentarlo.';
+
+// T4b: when the launcher detected the specific reason (currently only a busy port), name it
+// instead of the generic copy above. The port always comes from the detected data, never a
+// literal. Formal "usted" register per the current copy decision for new strings.
+function runtimeUnreachableCopy(detail: ChannelARuntimeUnreachableDetail | null): string {
+    if (detail?.reason === 'port_in_use') {
+        return `Prisma no se pudo iniciar: el puerto ${detail.port} está en uso por otro programa.`;
+    }
+    return RUNTIME_UNREACHABLE_COPY;
+}
 
 // High-contrast QR built from existing theme tokens, inverted for scanner legibility: the
 // quiet zone and background take the near-white text token and the modules take the near-black
@@ -33,10 +44,10 @@ interface PanelSize {
     height: number;
 }
 
-function pairingStatusCopy(phase: ChannelAPairingPhase): string {
+function pairingStatusCopy(phase: ChannelAPairingPhase, unreachableDetail: ChannelARuntimeUnreachableDetail | null): string {
     switch (phase) {
         case 'pending':
-            return 'Confirma el destino en Telegram.';
+            return 'Confirme el destino en Telegram.';
         case 'linked':
             return 'Teléfono vinculado';
         case 'unavailable':
@@ -46,7 +57,7 @@ function pairingStatusCopy(phase: ChannelAPairingPhase): string {
         case 'error':
             return 'No se pudo obtener el estado del emparejamiento.';
         case 'unreachable':
-            return RUNTIME_UNREACHABLE_COPY;
+            return runtimeUnreachableCopy(unreachableDetail);
         case 'free':
             return 'Generando código QR...';
         case 'closed':
@@ -71,7 +82,7 @@ export default function PrismaPairingControl() {
     // read; a stale or mocked hook result can never leak a QR past this gate.
     const nameGateOk = nameRead !== null && nameRead.ok && nameRead.name !== null;
     const hookOpen = open && nameGateOk;
-    const { phase, qr, remainingSeconds } = useChannelAPairing(hookOpen);
+    const { phase, qr, remainingSeconds, unreachableDetail } = useChannelAPairing(hookOpen);
 
     const close = () => setOpen(false);
     const qrIsLive = hookOpen && phase === 'free' && qr !== null && remainingSeconds > 0;
@@ -186,14 +197,14 @@ export default function PrismaPairingControl() {
                                     />
                                 </div>
                                 <p className="text-industrial-muted">
-                                    Escanea el código QR con el teléfono y confirma el destino en
+                                    Escanee el código QR con el teléfono y confirme el destino en
                                     Telegram.
                                 </p>
                             </>
                         ) : (
                             <>
                                 <p className="text-industrial-muted">
-                                    {pairingStatusCopy(phase)}
+                                    {pairingStatusCopy(phase, unreachableDetail)}
                                 </p>
                                 {phase === 'unreachable' ? (
                                     <p className="text-industrial-muted">

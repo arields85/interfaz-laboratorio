@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProxyOptions } from 'vite';
 
 import {
@@ -18,27 +18,49 @@ const CHANNEL_A_PAIRING_UPSTREAM_PATH = '/hmi/channel-a/pairing';
 type ProxyConfigure = NonNullable<ProxyOptions['configure']>;
 type ProxyBypass = NonNullable<ProxyOptions['bypass']>;
 type ProxyRequestHandler = (request: { removeHeader: (name: string) => void }) => void;
+type ProxyErrorHandler = (error: Error, request: IncomingMessage, response: ServerResponse) => void;
 
 function channelAProxy(browserPath: string = CHANNEL_A_CREDENTIAL_PATH) {
     const route = PRISMA_PROXY_ROUTES.find((candidate) => candidate.browserPath === browserPath);
     return { route, proxy: route ? createPrismaProxyConfig()[route.pattern] : undefined };
 }
 
-function credentialProxyRequestHandlers(configure: ProxyOptions['configure']): ProxyRequestHandler[] {
-    const handlers: ProxyRequestHandler[] = [];
+function collectProxyHandlers(configure: ProxyOptions['configure']): {
+    requestHandlers: ProxyRequestHandler[];
+    errorHandlers: ProxyErrorHandler[];
+} {
+    const requestHandlers: ProxyRequestHandler[] = [];
+    const errorHandlers: ProxyErrorHandler[] = [];
     const fakeProxy = {
-        on: (event: string, handler: ProxyRequestHandler) => {
-            if (event === 'proxyReq') handlers.push(handler);
+        on: (event: string, handler: ProxyRequestHandler | ProxyErrorHandler) => {
+            if (event === 'proxyReq') requestHandlers.push(handler as ProxyRequestHandler);
+            if (event === 'error') errorHandlers.push(handler as ProxyErrorHandler);
         },
     };
     (configure as ProxyConfigure)?.(
         fakeProxy as unknown as Parameters<ProxyConfigure>[0],
         {} as Parameters<ProxyConfigure>[1],
     );
-    return handlers;
+    return { requestHandlers, errorHandlers };
+}
+
+function credentialProxyRequestHandlers(configure: ProxyOptions['configure']): ProxyRequestHandler[] {
+    return collectProxyHandlers(configure).requestHandlers;
+}
+
+function fakeServerResponse(): ServerResponse & { writeHead: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> } {
+    return {
+        headersSent: false,
+        writeHead: vi.fn(),
+        end: vi.fn(),
+    } as unknown as ServerResponse & { writeHead: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
 }
 
 describe('Prisma Vite proxy configuration', () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
     it.each([
         ['snapshot', '/api/prisma/snapshot', '/hmi/current-snapshot', 'http://127.0.0.1:5057'],
         ['events', '/api/prisma/events/latest', '/hmi/voice/latest', 'http://127.0.0.1:5057'],
@@ -293,5 +315,67 @@ describe('Prisma Vite proxy configuration', () => {
         expect(proxy?.rewrite(CHANNEL_A_PAIRING_BROWSER_PATH)).toBe(CHANNEL_A_PAIRING_UPSTREAM_PATH);
         expect(proxy?.rewrite(`${CHANNEL_A_PAIRING_BROWSER_PATH}?value=a%2Fb%20c&next=%252F`))
             .toBe(`${CHANNEL_A_PAIRING_UPSTREAM_PATH}?value=a%2Fb%20c&next=%252F`);
+    });
+
+    describe('proxy error handling (T4b: JSON 503 instead of Vite\'s bodiless default 500)', () => {
+        it.each([
+            ['a stripSessionCapability route', CHANNEL_A_STATUS_PATH],
+            ['a non-stripSessionCapability route', CHANNEL_A_PAIRING_BROWSER_PATH],
+        ])('registers exactly one error handler on %s', (_label, browserPath) => {
+            const { proxy } = channelAProxy(browserPath);
+            const { errorHandlers } = collectProxyHandlers(proxy?.configure);
+
+            expect(errorHandlers).toHaveLength(1);
+        });
+
+        it('answers a JSON 503 with only the generic marker when no startup failure was detected', () => {
+            const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+            const { errorHandlers } = collectProxyHandlers(proxy?.configure);
+            const response = fakeServerResponse();
+
+            errorHandlers[0](new Error('ECONNREFUSED'), {} as IncomingMessage, response);
+
+            expect(response.writeHead).toHaveBeenCalledWith(503, expect.objectContaining({ 'Content-Type': 'application/json' }));
+            expect(response.end).toHaveBeenCalledWith(JSON.stringify({ error: 'prisma_runtime_unreachable' }));
+        });
+
+        it('carries the detected port_in_use reason and port from PRISMA_STARTUP_FAILURE', () => {
+            vi.stubEnv('PRISMA_STARTUP_FAILURE', JSON.stringify({ reason: 'port_in_use', port: 5057 }));
+            const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+            const { errorHandlers } = collectProxyHandlers(proxy?.configure);
+            const response = fakeServerResponse();
+
+            errorHandlers[0](new Error('ECONNREFUSED'), {} as IncomingMessage, response);
+
+            expect(response.end).toHaveBeenCalledWith(JSON.stringify({ error: 'prisma_runtime_unreachable', reason: 'port_in_use', port: 5057 }));
+        });
+
+        it.each([
+            ['malformed JSON', 'not-json'],
+            ['an unknown reason', JSON.stringify({ reason: 'exploded', port: 5057 })],
+            ['a non-integer port', JSON.stringify({ reason: 'port_in_use', port: 70000 })],
+            ['a missing port', JSON.stringify({ reason: 'port_in_use' })],
+        ])('falls back to the generic marker when PRISMA_STARTUP_FAILURE has %s', (_label, envValue) => {
+            vi.stubEnv('PRISMA_STARTUP_FAILURE', envValue);
+            const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+            const { errorHandlers } = collectProxyHandlers(proxy?.configure);
+            const response = fakeServerResponse();
+
+            errorHandlers[0](new Error('ECONNREFUSED'), {} as IncomingMessage, response);
+
+            expect(response.end).toHaveBeenCalledWith(JSON.stringify({ error: 'prisma_runtime_unreachable' }));
+        });
+
+        it('never writes to a response whose headers were already sent', () => {
+            const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+            const { errorHandlers } = collectProxyHandlers(proxy?.configure);
+            const response = fakeServerResponse();
+            (response as { headersSent: boolean }).headersSent = true;
+
+            errorHandlers[0](new Error('ECONNREFUSED'), {} as IncomingMessage, response);
+
+            expect(response.writeHead).not.toHaveBeenCalled();
+            expect(response.end).not.toHaveBeenCalled();
+        });
     });
 });

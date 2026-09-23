@@ -1,4 +1,30 @@
 import type { ProxyOptions } from 'vite';
+import type { ServerResponse } from 'node:http';
+
+// Mirrors dev.mjs's minimal PRISMA_STARTUP_FAILURE marker (T1b/T4b): { reason, port }, or the
+// env var absent/malformed when the launcher detected no specific failure. Never trusted beyond
+// this shape — an unknown reason or an out-of-range port is treated as "no detail available".
+interface PrismaStartupFailure {
+    reason: 'port_in_use';
+    port: number;
+}
+
+const KNOWN_STARTUP_FAILURE_REASONS = new Set<PrismaStartupFailure['reason']>(['port_in_use']);
+
+function readPrismaStartupFailure(): PrismaStartupFailure | null {
+    const raw = process.env.PRISMA_STARTUP_FAILURE;
+    if (!raw) return null;
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed !== 'object' || parsed === null) return null;
+        const { reason, port } = parsed as Record<string, unknown>;
+        if (typeof reason !== 'string' || !KNOWN_STARTUP_FAILURE_REASONS.has(reason as PrismaStartupFailure['reason'])) return null;
+        if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+        return { reason: reason as PrismaStartupFailure['reason'], port };
+    } catch {
+        return null;
+    }
+}
 
 interface PrismaProxyRoute {
     browserPath: string;
@@ -62,13 +88,28 @@ export function createPrismaProxyConfig(): Record<string, ProxyOptions> {
                 response.end();
                 return false;
             },
-            configure: route.stripSessionCapability
-                ? (proxy) => {
+            configure: (proxy) => {
+                if (route.stripSessionCapability) {
                     proxy.on('proxyReq', (proxyRequest) => {
                         proxyRequest.removeHeader('X-Prisma-Session-Capability');
                     });
                 }
-                : undefined,
+                // Vite's default proxy error handler (ECONNREFUSED etc.) answers a bodiless 500
+                // (vite/dist/node/chunks/config.js), which the HMI client cannot distinguish
+                // from any other server error. This answers a JSON 503 instead, carrying the
+                // detected startup failure (T1b's PRISMA_STARTUP_FAILURE env var) when present,
+                // so the pairing popover can show the actual busy port.
+                proxy.on('error', (_error, _request, response) => {
+                    const serverResponse = response as ServerResponse;
+                    if (!serverResponse || typeof serverResponse.writeHead !== 'function' || serverResponse.headersSent) return;
+                    const failure = readPrismaStartupFailure();
+                    const body = failure
+                        ? JSON.stringify({ error: 'prisma_runtime_unreachable', reason: failure.reason, port: failure.port })
+                        : JSON.stringify({ error: 'prisma_runtime_unreachable' });
+                    serverResponse.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+                    serverResponse.end(body);
+                });
+            },
             rewrite: (path: string) => path.replace(
                 new RegExp(`^${route.browserPath}(?=\\?|$)`),
                 route.upstreamPath,
