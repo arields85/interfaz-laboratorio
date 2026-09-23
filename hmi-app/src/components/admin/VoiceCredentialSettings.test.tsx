@@ -207,8 +207,10 @@ describe('VoiceCredentialSettings', () => {
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
         const telegram = screen.getByRole('group', { name: 'Telegram' });
 
-        expect(await within(gemini).findByText('Credencial no configurada')).toBeInTheDocument();
-        expect(within(gemini).getByText('Configure una API key para verificarla.')).toBeInTheDocument();
+        expect(await within(gemini).findByRole('img', { name: 'Credencial no configurada' })).toBeInTheDocument();
+        expect(within(gemini).getByRole('img', { name: 'Verificación: no realizada' })).toBeInTheDocument();
+        expect(within(gemini).queryByText('Credencial no configurada')).not.toBeInTheDocument();
+        expect(within(gemini).queryByText('Verificación: no realizada')).not.toBeInTheDocument();
         expect(await within(telegram).findByText('Cambio pendiente de aplicar')).toBeInTheDocument();
         expect(within(telegram).getByText('Ejecución activa')).toBeInTheDocument();
         expect(within(telegram).getByText('Última aplicación sin verificar')).toBeInTheDocument();
@@ -806,15 +808,39 @@ describe('VoiceCredentialSettings', () => {
         ));
     });
 
-    it('shows the Gemini credential status in red when not configured and green once configured', async () => {
+    it('shows the Gemini credential status as an icon in red when not configured and green once configured', async () => {
         const notConfigured = renderSettings();
         const notConfiguredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        expect(await within(notConfiguredGroup).findByText('Credencial no configurada')).toBeInTheDocument();
+        expect(await within(notConfiguredGroup).findByRole('img', { name: 'Credencial no configurada' })).toBeInTheDocument();
+        expect(within(notConfiguredGroup).queryByText('Credencial no configurada')).not.toBeInTheDocument();
         notConfigured.unmount();
 
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
         const configuredGroup = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        expect(await within(configuredGroup).findByText('Credencial configurada')).toBeInTheDocument();
+        expect(await within(configuredGroup).findByRole('img', { name: 'Credencial configurada' })).toBeInTheDocument();
+        expect(within(configuredGroup).queryByText('Credencial configurada')).not.toBeInTheDocument();
+    });
+
+    it('places the API Key input, credential icon, Save, Delete, Verificar and the verification icon in one row', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
+        const row = await within(gemini).findByTestId('gemini-credential-row');
+
+        const input = within(row).getByLabelText('API Key');
+        const credentialIcon = within(row).getByRole('img', { name: 'Credencial configurada' });
+        const save = within(row).getByRole('button', { name: 'Guardar credencial' });
+        const del = within(row).getByRole('button', { name: 'Eliminar credencial' });
+        const verify = within(row).getByRole('button', { name: 'Verificar' });
+        const verificationIcon = within(row).getByRole('img', { name: 'Verificada' });
+
+        // Structural: every control lives inside the single shared row container,
+        // not split across separate columns.
+        expect(row).toContainElement(input);
+        expect(row).toContainElement(credentialIcon);
+        expect(row).toContainElement(save);
+        expect(row).toContainElement(del);
+        expect(row).toContainElement(verify);
+        expect(row).toContainElement(verificationIcon);
     });
 
     it('disables Verificar until a Gemini credential is configured', async () => {
@@ -824,7 +850,7 @@ describe('VoiceCredentialSettings', () => {
         expect(await within(gemini).findByRole('button', { name: 'Verificar' })).toBeDisabled();
     });
 
-    it('verifies the Gemini credential through its explicit action and shows the result', async () => {
+    it('verifies the Gemini credential through its explicit action and shows the result as an icon', async () => {
         const user = userEvent.setup();
         const credentialMetadata = vi.fn()
             .mockResolvedValueOnce({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })
@@ -832,17 +858,18 @@ describe('VoiceCredentialSettings', () => {
         const verifyGemini = vi.fn(async () => GEMINI_VERIFIED);
         const { client } = renderSettings({ credentialMetadata, verifyGemini });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
-        expect(await within(gemini).findByText('Verificación: no realizada')).toBeInTheDocument();
+        expect(await within(gemini).findByRole('img', { name: 'Verificación: no realizada' })).toBeInTheDocument();
         const verify = within(gemini).getByRole('button', { name: 'Verificar' });
         await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
         expect(client.verifyGemini).toHaveBeenCalledWith(expect.any(AbortSignal));
-        expect(await within(gemini).findByText('Verificada')).toBeInTheDocument();
+        expect(await within(gemini).findByRole('img', { name: 'Verificada' })).toBeInTheDocument();
+        expect(within(gemini).queryByText('Verificada')).not.toBeInTheDocument();
     });
 
-    it('shows Verificando while a Gemini verification is in flight and disables the button', async () => {
+    it('shows Verificando and a spinning icon while a Gemini verification is in flight, and disables the button', async () => {
         const user = userEvent.setup();
         let release!: (value: typeof GEMINI_VERIFIED) => void;
         const pending = new Promise<typeof GEMINI_VERIFIED>((resolve) => { release = resolve; });
@@ -858,13 +885,14 @@ describe('VoiceCredentialSettings', () => {
         await user.click(verify);
 
         expect(await within(gemini).findByRole('button', { name: 'Verificando…' })).toBeDisabled();
+        expect(within(gemini).getByRole('img', { name: 'Verificando…' })).toBeInTheDocument();
         await act(async () => { release(GEMINI_VERIFIED); });
     });
 
     it.each([
         ['invalid_key', 'API key inválida'],
         ['unreachable', 'No se pudo verificar: sin conexión con Google'],
-    ])('shows the %s verification result with its safe copy', async (state, expectedText) => {
+    ])('shows the %s verification result as an icon with its safe accessible name', async (state, expectedName) => {
         renderSettings({
             credentialMetadata: vi.fn(async () => ({
                 ...metadata,
@@ -873,7 +901,8 @@ describe('VoiceCredentialSettings', () => {
         });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
 
-        expect(await within(gemini).findByText(expectedText)).toBeInTheDocument();
+        expect(await within(gemini).findByRole('img', { name: expectedName })).toBeInTheDocument();
+        expect(within(gemini).queryByText(expectedName)).not.toBeInTheDocument();
     });
 
     it('shows a safe message when a concurrent Gemini verification is rejected', async () => {
@@ -896,7 +925,7 @@ describe('VoiceCredentialSettings', () => {
         renderSettings({ credentialMetadata: vi.fn(() => new Promise<typeof metadata>(() => undefined)) });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
 
-        expect(within(gemini).queryByText('Verificación: no realizada')).not.toBeInTheDocument();
+        expect(within(gemini).queryByRole('img', { name: 'Verificación: no realizada' })).not.toBeInTheDocument();
         expect(within(gemini).queryByRole('button', { name: 'Verificar' })).not.toBeInTheDocument();
         expect(within(gemini).getByText('Consultando estado')).toBeInTheDocument();
     });

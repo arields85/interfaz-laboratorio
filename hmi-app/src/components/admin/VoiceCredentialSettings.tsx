@@ -3,12 +3,23 @@ import type {
     CredentialAdministrationController,
 } from '../../hooks/usePrismaCredentialAdministration';
 import { useEffect, useRef, useState } from 'react';
-import { KeyRound, Play, RefreshCw, Save, Trash2 } from 'lucide-react';
+import {
+    CircleCheck,
+    CircleDashed,
+    CircleX,
+    KeyRound,
+    Loader2,
+    Play,
+    RefreshCw,
+    Save,
+    Trash2,
+    WifiOff,
+    type LucideIcon,
+} from 'lucide-react';
 
 import type {
     ChannelALifecyclePhase,
     CredentialProvider,
-    GeminiVerification,
     GeminiVerificationState,
 } from '../../domain';
 import { usePrismaCredentialAdministration } from '../../hooks/usePrismaCredentialAdministration';
@@ -103,19 +114,39 @@ const STATUS_TONE_CLS: Record<StatusTone, string> = {
     muted: 'text-industrial-muted',
 };
 
-function geminiCredentialStatusCopy(configured: boolean | undefined, loading: boolean): { text: string; tone: StatusTone } {
-    if (configured === undefined) return { text: loading ? 'Consultando estado' : 'Estado no disponible', tone: 'muted' };
-    return configured
-        ? { text: 'Credencial configurada', tone: 'success' }
-        : { text: 'Credencial no configurada', tone: 'critical' };
+interface StatusGlyph {
+    Icon: LucideIcon;
+    label: string;
+    tone: StatusTone;
 }
 
-function geminiVerificationCopy(configured: boolean, state: GeminiVerificationState): { text: string; tone: StatusTone } {
-    if (!configured) return { text: 'Configure una API key para verificarla.', tone: 'muted' };
-    if (state === 'verified') return { text: 'Verificada', tone: 'success' };
-    if (state === 'invalid_key') return { text: 'API key inválida', tone: 'critical' };
-    if (state === 'unreachable') return { text: 'No se pudo verificar: sin conexión con Google', tone: 'warning' };
-    return { text: 'Verificación: no realizada', tone: 'muted' };
+// Gemini's credential/verification state is shown as a small icon (T9b: replaces
+// the earlier status-text spans), so the label doubles as the icon's accessible
+// name (role="img" + aria-label) and its HoverTooltip text -- the same
+// icon-only + tooltip pattern T6 established for the Save/Delete buttons.
+function geminiCredentialGlyph(configured: boolean): StatusGlyph {
+    return configured
+        ? { Icon: CircleCheck, label: 'Credencial configurada', tone: 'success' }
+        : { Icon: CircleX, label: 'Credencial no configurada', tone: 'critical' };
+}
+
+function geminiVerificationGlyph(state: GeminiVerificationState): StatusGlyph {
+    if (state === 'verified') return { Icon: CircleCheck, label: 'Verificada', tone: 'success' };
+    if (state === 'invalid_key') return { Icon: CircleX, label: 'API key inválida', tone: 'critical' };
+    if (state === 'unreachable') {
+        return { Icon: WifiOff, label: 'No se pudo verificar: sin conexión con Google', tone: 'warning' };
+    }
+    return { Icon: CircleDashed, label: 'Verificación: no realizada', tone: 'muted' };
+}
+
+function StatusIcon({ Icon, label, tone }: StatusGlyph) {
+    return (
+        <HoverTooltip label={label} position="top">
+            <span role="img" aria-label={label} className={STATUS_TONE_CLS[tone]}>
+                <Icon size={16} aria-hidden="true" />
+            </span>
+        </HoverTooltip>
+    );
 }
 
 export default function VoiceCredentialSettings({ active, client, controller }: VoiceCredentialSettingsProps) {
@@ -287,86 +318,89 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         setDeleteProvider(provider);
     };
 
-    // Gemini gets its own two-column layout (title/API key on the left,
-    // credential + verification status on the right), distinct from the
-    // shared Telegram/Channel A three-column row below.
+    // Gemini gets its own single-row layout (T9b): title and "API Key" label
+    // above one row holding the input, a credential-status icon, Save,
+    // Delete, and -- right-aligned -- Verificar with its own result icon.
+    // Distinct from the shared Telegram/Channel A three-column row below.
     const renderGeminiProvider = () => {
         const value = secretDrafts.gemini;
         const gemini = credentials?.gemini;
         const geminiConfigured = gemini?.configured;
         const verifying = administration.pendingAction === 'verify-gemini';
-        const credentialStatus = geminiCredentialStatusCopy(geminiConfigured, administration.isLoading);
-        const verification: GeminiVerification | undefined = gemini?.verification;
-        const verificationCopy = gemini ? geminiVerificationCopy(gemini.configured, verification!.state) : null;
+        const credentialGlyph = geminiConfigured === undefined ? null : geminiCredentialGlyph(geminiConfigured);
         const showsMask = value === '' && geminiConfigured === true;
 
         return (
             <fieldset
                 aria-label="Proveedor de voz: Gemini"
-                className="flex flex-col gap-3 rounded border border-white/10 p-3 md:flex-row md:items-start md:gap-4"
+                className="flex flex-col gap-2 rounded border border-white/10 p-3"
             >
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
-                    <legend className="px-0 text-industrial-text">Proveedor de voz: Gemini</legend>
-                    <div className="flex flex-1 items-end gap-2 md:min-w-0">
-                        <label className="flex flex-1 flex-col gap-1 text-industrial-muted">
-                            API Key
-                            <input
-                                type="password"
-                                autoComplete="new-password"
-                                value={value}
-                                placeholder={showsMask ? GEMINI_KEY_MASK : undefined}
-                                onChange={(event) => {
-                                    const nextValue = event.target.value;
-                                    secretRevisionRef.current.gemini += 1;
-                                    setProviderDraft('gemini', nextValue);
-                                }}
-                                className={ADMIN_SIDEBAR_INPUT_CLS}
-                                disabled={disabled}
-                            />
-                        </label>
-                        <div className="flex shrink-0 gap-2">
-                            <HoverTooltip label="Guardar credencial" position="top">
-                                <HmiButton
-                                    size="sm"
-                                    variant="primary"
-                                    aria-label="Guardar credencial"
-                                    title="Guardar credencial"
-                                    disabled={disabled || !value}
-                                    onClick={() => void save('gemini')}
-                                >
-                                    <Save size={14} aria-hidden="true" />
-                                </HmiButton>
-                            </HoverTooltip>
-                            <HoverTooltip label="Eliminar credencial" position="top">
-                                <HmiButton
-                                    size="sm"
-                                    variant="danger"
-                                    aria-label="Eliminar credencial"
-                                    title="Eliminar credencial"
-                                    disabled={disabled}
-                                    onClick={() => updateDeleteProvider('gemini')}
-                                >
-                                    <Trash2 size={14} aria-hidden="true" />
-                                </HmiButton>
-                            </HoverTooltip>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex flex-col gap-2 md:w-64 md:shrink-0">
-                    <span className={STATUS_TONE_CLS[credentialStatus.tone]}>{credentialStatus.text}</span>
-                    {verificationCopy ? (
-                        <>
-                            <span className={STATUS_TONE_CLS[verificationCopy.tone]}>{verificationCopy.text}</span>
+                <legend className="px-0 text-industrial-text">Proveedor de voz: Gemini</legend>
+                <label htmlFor="gemini-api-key-input" className="text-industrial-muted">API Key</label>
+                <div data-testid="gemini-credential-row" className="flex flex-wrap items-center gap-2">
+                    <input
+                        id="gemini-api-key-input"
+                        type="password"
+                        autoComplete="new-password"
+                        value={value}
+                        placeholder={showsMask ? GEMINI_KEY_MASK : undefined}
+                        onChange={(event) => {
+                            const nextValue = event.target.value;
+                            secretRevisionRef.current.gemini += 1;
+                            setProviderDraft('gemini', nextValue);
+                        }}
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} min-w-40 flex-1`}
+                        disabled={disabled}
+                    />
+                    {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
+                        <span className="text-industrial-muted">
+                            {administration.isLoading ? 'Consultando estado' : 'Estado no disponible'}
+                        </span>
+                    )}
+                    <HoverTooltip label="Guardar credencial" position="top">
+                        <HmiButton
+                            size="sm"
+                            variant="primary"
+                            aria-label="Guardar credencial"
+                            title="Guardar credencial"
+                            disabled={disabled || !value}
+                            onClick={() => void save('gemini')}
+                        >
+                            <Save size={14} aria-hidden="true" />
+                        </HmiButton>
+                    </HoverTooltip>
+                    <HoverTooltip label="Eliminar credencial" position="top">
+                        <HmiButton
+                            size="sm"
+                            variant="danger"
+                            aria-label="Eliminar credencial"
+                            title="Eliminar credencial"
+                            disabled={disabled}
+                            onClick={() => updateDeleteProvider('gemini')}
+                        >
+                            <Trash2 size={14} aria-hidden="true" />
+                        </HmiButton>
+                    </HoverTooltip>
+                    {gemini ? (
+                        <div className="ml-auto flex items-center gap-2">
                             <HmiButton
                                 size="sm"
                                 variant="secondary"
-                                disabled={disabled || !geminiConfigured}
+                                disabled={disabled || !gemini.configured}
                                 onClick={() => void verifyGemini()}
                             >
                                 {verifying ? 'Verificando…' : 'Verificar'}
                             </HmiButton>
-                        </>
+                            {verifying ? (
+                                <HoverTooltip label="Verificando…" position="top">
+                                    <span role="img" aria-label="Verificando…" className="text-industrial-muted">
+                                        <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                                    </span>
+                                </HoverTooltip>
+                            ) : (
+                                <StatusIcon {...geminiVerificationGlyph(gemini.verification.state)} />
+                            )}
+                        </div>
                     ) : null}
                 </div>
             </fieldset>
