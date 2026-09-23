@@ -360,6 +360,24 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   (`819a08f`), `style(admin): show only a success icon in the result area, with per-row
   verify and Canal A pairing/Gemini model copy` (`36ba072`).
 
+- [x] **T16** Canal A: record background failures and recover automatically (user priority,
+  2026-09-23). Evidence: in the user's live runtime the Canal A bot's background runner failed
+  silently. T15 root cause (parent-confirmed): `channel_a_lifecycle.py:608-614` `_terminal_fail()`
+  sets `phase='failed'` from the runner thread, but `channel_a_manager.py:167-169` `_record_error()`
+  (only setter of `lastError`) is never called from that path -> status shows phase failed with
+  lastError None, nothing logged, and the bot never recovers until the admin saves the token again.
+  Required: (1) record the failure with a safe classified `lastError` code and a timestamp/attempt
+  count, one redacted log line reachable from existing exception handling (no token/chat
+  ids/provider text); (2) automatic supervised restart for TRANSIENT failures with exponential
+  backoff, reusing `apply()`; PERMANENT failures never retry; retries stop on runtime shutdown;
+  expose `retrying`/`retryAttempt` in status; (3) assess whether Canal B has the same gap and either
+  apply the same fix or stop and report; (4) frontend: "Reconectando…" while retrying, specific text
+  for unauthorized/identity-conflict permanent failures, tolerant domain types; (5) docs. Route:
+  delegated in spirit but executed by this same bounded writer (backend + frontend, 2+ non-trivial
+  files). Commits (work units): `fix(prisma): record and automatically retry Canal A background
+  failures` (backend: transport/lifecycle/activation/manager/admin_http + docs),
+  `feat(admin): show Canal A reconnection state` (frontend).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
@@ -1603,14 +1621,145 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   (normal start, Canal A auto-apply, abrupt close/reuse, busy port terminal+popover, Ver viewer
   keeps session, credentials panel after T15 "todo perfecto", usted copy).
 
+- 2026-09-23: T16 done, in two commits (backend + frontend; docs bundled with the backend commit).
+
+  **Root cause** (already diagnosed in T15, fixed here): `channel_a_lifecycle.py`'s
+  `ChannelARunner._terminal_fail()` set `phase='failed'` from the runner's own background thread,
+  but `channel_a_manager.py`'s `_record_error()` (the only setter of `lastError`) was never called
+  from that path -- `_observe()` treats a valid `ChannelAStatus` with `phase='failed'` as a
+  SUCCESSFUL observation, so nothing ever recorded the cause and nothing ever retried.
+
+  **Classification table** (backend, `channel_a_lifecycle.py` + `channel_a_manager.py`):
+
+  | Code | Origin | Class | Retried? |
+  |---|---|---|---|
+  | `PRISMA_CHANNEL_A_UNAUTHORIZED` | `get_me`/`get_updates` 401 (new `ChannelATransportUnauthorized`) | PERMANENT | never |
+  | `TELEGRAM_BOT_IDENTITY_RESERVED` | local reservation conflict (existing) | PERMANENT | never |
+  | `PRISMA_CHANNEL_A_CREDENTIAL_MISSING` | resolver has no token (existing) | PERMANENT | never |
+  | `PRISMA_CHANNEL_A_CONFIGURATION_INVALID` | persisted config invalid (existing) | PERMANENT | never |
+  | `PRISMA_CHANNEL_A_POLL_FAILED` | `get_updates` raised (new; network/timeout/5xx/Telegram's own concurrent-poller 409) | TRANSIENT | yes |
+  | any other recognized manager/lifecycle code (`PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE`, busy, stop-unconfirmed, config/credential `_UNAVAILABLE`, unexpected runner exception) | various | TRANSIENT (default) | yes |
+
+  **Backoff** (new named constants in `channel_a_manager.py`): `CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS
+  = 5.0`, `CHANNEL_A_RETRY_BACKOFF_FACTOR = 2.0`, `CHANNEL_A_RETRY_MAX_DELAY_SECONDS = 300.0` (5s,
+  10s, 20s, ... capped at 5 minutes; `_retry_delay_seconds(attempt)`). Retries continue indefinitely
+  for a transient failure while the credential stays configured.
+
+  **Observer, not polling**: `ChannelARunner` gained an optional `on_terminal` callback (constructor
+  kwarg + late-bound `set_on_terminal()`), invoked exactly once per NEW terminal failure, always
+  OUTSIDE the runner's own lock (proven by a dedicated test that calls `status()`/`stop()` reentrantly
+  from inside the callback on the SAME failing thread without hanging), and any callback exception
+  (including `BaseException`) is swallowed. `ChannelAActivation.set_on_terminal()` forwards to the
+  owned runner. `ChannelAManager._new_candidate()` binds `_handle_background_failure` on every
+  candidate BEFORE `prepare()`/`start()` ever run, closing over the exact candidate object so a stale
+  activation's late failure is ignored by identity check (`self._activation is not activation`) --
+  generation/epoch authority stays with whichever activation the manager currently publishes.
+  `_handle_background_failure` never touches the mutation lock (`_busy`/`_mutation()`) and never
+  blocks; it records `lastError` and, for a transient code, schedules one `threading.Timer` (injectable
+  via a new optional `timer_factory` constructor kwarg, defaulting to the real `Timer`, so tests never
+  wait on a real clock). `_retry_tick()` calls a new internal `_apply_impl()` directly (NOT the public
+  `apply()`, which resets the attempt counter for an explicit admin action and would otherwise defeat
+  growing backoff across automatic retries): success resets `retrying`/`retryAttempt`; a transient
+  failure bumps the attempt and reschedules; a permanent failure stops. `save_credential`,
+  `delete_credential`, the public `apply()` and `stop()` all cancel any pending retry (and reset the
+  attempt counter) before their own work, per the explicit "never overlap with an admin action"
+  requirement; `main()`'s existing `finally: channel_a_manager.stop()` therefore also cancels a
+  pending retry on shutdown with no further wiring needed. Status gained `retrying: bool` and
+  `retryAttempt: int` (chose attempt count over `nextRetryAt`, both explicitly allowed by the task, to
+  avoid a monotonic-vs-wall-clock conversion for the UI).
+
+  **Canal B decision**: read `telegram_lifecycle.py` and `TelegramLocalBot`
+  (`local_presentation.py`). Same gap for automatic recovery (no retry after a background failure),
+  but NOT the same gap for recording: `TelegramLifecycleManager.status()` already reads
+  `bot.last_error` reactively on every call and surfaces `TELEGRAM_POLL_FAILED`/
+  `TELEGRAM_PREPARATION_FAILED`. Composition is substantially different from Channel A: no
+  manager/activation/runner split with a swappable candidate and generation/epoch tracking, no
+  transport module with typed exceptions, no observer seam -- `TelegramLocalBot` is one monolithic
+  object combining transport+lifecycle+diagnostics (already has its own `_telegram_diagnostic`
+  category/httpStatus classification, structured differently from Channel A's fixed codes), and
+  `TelegramLifecycleManager.apply()` has no `_new_candidate`/`_apply_impl` split to hook a retry into
+  without a comparable rewrite. Per the task's own instruction, this writer stopped and reports
+  instead of implementing: Canal B automatic retry would need its own separate design (documented as
+  a deferred item in `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §6.2 and left off the "Next step" list
+  below since it is not a regression, just an unequal feature).
+
+  **Frontend**: `adminCredential.types.ts` adds `retrying`/`retryAttempt` (required on the parsed
+  type, OPTIONAL on the wire via a new `hasKeysWithin` helper -- required+optional allowlists, unlike
+  the existing exact-match `hasExactKeys` -- so an older runtime's payload missing them still parses,
+  defaulting to `false`/`0`) and the two new codes to `ChannelAActivationReason`/`ChannelARuntimeError`.
+  `VoiceCredentialSettings.tsx`'s `channelAConnectionResult`: checks `retrying` right after `pending`
+  (before the generic `lastError` branch) -> "Reconectando…" (warning tone); then two specific
+  critical-text branches for the permanent codes (`PRISMA_CHANNEL_A_UNAUTHORIZED` -> "Token
+  inválido", `TELEGRAM_BOT_IDENTITY_RESERVED` -> "Bot en uso por el otro canal") before the existing
+  generic "No se pudo conectar el bot" fallback; also added both codes to `errorText()`'s map for
+  save/apply toasts. Tokens only (existing `text-status-warning`/`text-status-critical` classes), no
+  new copy strings elsewhere.
+
+  **RED/GREEN evidence** (backend, `services/prisma-runtime`): RED confirmed per layer before
+  implementing -- `test_channel_a_transport.py`'s two new 401 tests (`ImportError` on the new
+  symbols, then `ChannelATransportError` instead of `ChannelATransportUnauthorized`);
+  `test_channel_a_lifecycle.py`'s new classification/observer tests (`ImportError`, then wrong
+  reason codes / missing `set_on_terminal`), plus one pre-existing test
+  (`test_finalization_after_failure_is_idempotent_and_never_releases_twice`) updated from the old
+  generic code to the new `PRISMA_CHANNEL_A_POLL_FAILED`; `test_channel_a_activation.py`'s new
+  forwarding test (`AttributeError`); `test_channel_a_manager.py`'s 16 new tests plus `STATUS_KEYS`/
+  `assert_status` extended with `retrying`/`retryAttempt` (every existing status assertion in the
+  file failed on the missing keys until the manager exposed them); `test_channel_a_admin_http.py`'s
+  three affected tests (missing keys / wrong mapped code). GREEN: `test_channel_a_transport` 58/58,
+  `test_channel_a_lifecycle` 119/119, `test_channel_a_activation` 30/30, `test_channel_a_manager`
+  100/100, `test_channel_a_admin_http` 16/16; full `python -m unittest discover` 1265/1265.
+
+  **RED/GREEN evidence** (frontend, `hmi-app`): RED confirmed by stashing only the production file
+  and re-running its test file -- `adminCredential.types.ts` (5 new/updated assertions failed,
+  confirmed via `git stash push -- <file>`), `VoiceCredentialSettings.tsx` (3 new tests failed,
+  same stash method); `adminAuth.service.test.ts`'s pre-existing fixture needed `retrying`/
+  `retryAttempt` added (caught by the full suite run, not a targeted RED). GREEN:
+  `adminCredential.types.test.ts` 28/28, `VoiceCredentialSettings.test.tsx` 82/82,
+  `adminAuth.service.test.ts` 63/63; full `npm test` 211 files / 2336 tests; `npx tsc -b --noEmit`
+  clean; `npm run lint` clean. GGA: backend commit matched no GGA file pattern (`.py`, as with every
+  prior Python-only commit); frontend commit PASSED with 3 non-blocking notes (English input label
+  "Telegram bot API Token", a duplicated `4_096` byte-limit literal, dense task-ID-referencing
+  comments) -- all pre-existing patterns, none touched.
+
+  Commits: `fix(prisma): record and automatically retry Canal A background failures` (`ceb2aac`,
+  backend: `channel_a_transport.py`, `channel_a_lifecycle.py`, `channel_a_activation.py`,
+  `channel_a_manager.py`, `admin_http.py` + their tests, plus
+  `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md`); `feat(admin): show Canal A reconnection state`
+  (`952f474`, frontend: `adminCredential.types.ts`, `VoiceCredentialSettings.tsx` + their tests,
+  `adminAuth.service.test.ts` fixture fix).
+
+  **Follow-up fix** (`f78dc56`, same day). Parent spot check on `ceb2aac` found requirement 1 was
+  incomplete: no log line was ever actually written for a recorded background failure (only the
+  in-memory `lastError`/`retrying`/`retryAttempt` fields were set). Added one redacted `logging`
+  warning line in `_handle_background_failure` (after the staleness check, outside the lock) --
+  e.g. "Canal A background failure: code=PRISMA_CHANNEL_A_POLL_FAILED transient=true
+  retry_attempt=3 next_delay_s=20" -- plus "Canal A reconnected after N attempts" on a successful
+  retry and "Canal A retries stopped: code=... after N attempts" when a retry itself hits a
+  permanent code. No `logging.basicConfig` exists anywhere in this runtime, so a plain
+  `logging.getLogger(__name__)` module logger relies on `logging`'s own "handler of last resort"
+  (WARNING-or-above with no handler configured anywhere in the hierarchy writes directly to
+  `sys.stderr`), which the launcher already redirects to `prisma-presentation-stderr.log` -- no
+  `basicConfig` call was added, matching the rest of this runtime's total absence of logging
+  configuration. RED: 4 new `assertLogs`-based tests in `test_channel_a_manager.py` failed ("no
+  logs of level WARNING or higher triggered") against the pre-fix source. GREEN:
+  `test_channel_a_manager` 104/104; full `python -m unittest discover` 1269/1269. GGA: no matching
+  staged file pattern (`.py`-only commit).
+
 ## Next step
 
 Open follow-ups (not started, need user choice):
-1. Canal A background failure is not recorded in `lastError` (`channel_a_lifecycle.py:608-614`
-   vs `channel_a_manager.py:167-169`) and the bot does not recover automatically; propose
-   recording the cause and an automatic retry.
-2. Save/apply error copy still says "Telegram" for the row now named "Canal B".
-3. Launcher reuses a running Prisma even if its code is older than the checkout (dev gotcha).
-4. `.hmi-masked-text` relies on `-webkit-text-security` (not Firefox).
+1. Save/apply error copy still says "Telegram" for the row now named "Canal B".
+2. Launcher reuses a running Prisma even if its code is older than the checkout (dev gotcha).
+3. `.hmi-masked-text` relies on `-webkit-text-security` (not Firefox).
+4. Canal B (Telegram) has no automatic-retry recovery after a background failure the way Canal A
+   now does (T16); its composition is substantially different (no manager/activation/runner split,
+   no observer seam) and it stayed out of T16's scope by explicit decision. `status()` already
+   surfaces its `lastError` reactively, so it is a feature gap, not a regression.
 5. Delivery: branch not pushed; forecast far above ~400 lines → chain strategy question if a PR
    is requested (ask-on-risk). PW-003 semantic query remains parked.
+
+Next step for T16: user restarts the launcher (Ctrl+C, then start again) and observes Canal A
+over time -- a background failure (e.g. a temporary network drop) should now show "Reconectando…"
+and recover on its own without saving the token again; a genuinely revoked token or a bot reserved
+by Canal B should show "Token inválido" / "Bot en uso por el otro canal" and stay that way until
+fixed.
