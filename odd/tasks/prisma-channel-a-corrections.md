@@ -135,6 +135,30 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   carries a structured failure. Route: delegated (same writer). Commits `9ad120d` (Fix A),
   `5cd10a5` (Fix B).
 
+- [x] **T5b** Leaving admin must not end the admin session (user decision 2026-09-23).
+  `AdminSessionLifecycle.tsx`'s route-leave effect (`if (previousWasAdmin && !currentIsAdmin)
+  void controller.exit();`) ends the admin session on any `/admin` -> non-admin transition
+  (Ver viewer, browser history), reversing T5's fix at the button level. This was the
+  2026-09-18 PAC-4B design (`odd/tasks/prisma-protected-credentials.md` ~L215, ~L341); the
+  user now explicitly reverses it: viewing is not logging out. New behavior: the admin
+  session ends only via "Cerrar sesión" (and LoginOverlay's explicit exit), backend
+  expiry/revocation, or other existing non-navigation paths — never by navigating away from
+  `/admin`. Remove the route-leave exit effect (keep controller start/stop); update
+  `AdminSessionLifecycle.integration.test.tsx`; update the PAC-4B statements in
+  `odd/tasks/prisma-protected-credentials.md`. Route: direct (single file + its test).
+- [x] **T9** Gemini credential block redesign + real key verification (user request
+  2026-09-23). `VoiceCredentialSettings.tsx`'s Gemini row shows hardcoded
+  "Verificación: no realizada" (backend `gemini_credentials.py` `status()` always returns
+  `verified: False`, no verification exists). Required: two-column layout (title + API Key
+  input/actions on the left, credential/verification status + "Verificar" button on the
+  right), a fixed non-secret-derived mask when configured, and a real non-generating Gemini
+  key verification call (admin-authenticated backend endpoint, Vite proxy route, frontend
+  service/hook/UI). See full spec in the coordinator brief (routing doc, endpoint shape,
+  copy). Route: delegated in spirit but executed by this same bounded writer (backend +
+  proxy + frontend, 2+ non-trivial files). Commits (work units): `feat(prisma): verify the
+  Gemini API key on demand` (backend + proxy + routing doc), `feat(admin): redesign the
+  Gemini credential block with verification` (frontend).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
@@ -603,11 +627,157 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   Commit `5cd10a5` (GGA: no matching files -- `.mjs` is outside its `*.js` glob, `.ps1`/
   `.py` are outside its configured patterns entirely).
 
+- 2026-09-23: T5b done. Removed `AdminSessionLifecycle.tsx`'s route-leave effect
+  (`if (previousWasAdmin && !currentIsAdmin) void controller.exit();`), keeping only the
+  existing `controller.start()`/`controller.stop()` effect; the component no longer tracks
+  `previousPath` at all. Updated `AdminSessionLifecycle.integration.test.tsx`'s second test
+  (renamed to "keeps settings close authenticated and keeps the session alive across Ver
+  viewer and route history"): moved `HistoryControls` outside the routed pages (rendered
+  once, always available, matching real browser back/forward) and reversed every assertion
+  that pinned the old contract — Ver viewer, and two browser-history round-trips through
+  `/admin`, all now assert `isAuthenticated` stays `true` and zero logout calls; only
+  clicking "Cerrar sesion" ends the session (unchanged path, still calls
+  `controller.exit()` from `AdminLayout.tsx`, untouched by this task). Updated the PAC-4B
+  statements in `odd/tasks/prisma-protected-credentials.md` (~L215-218 near-verbatim
+  contract paragraph, and the ~L341 Voice-credential-block bullet) with dated
+  "Reversed 2026-09-23 (T5b)" notes, keeping the original text struck through for history
+  per the coordinator's "short dated note" instruction; grepped `docs/prisma` for
+  "Ver viewer"/"Leaving admin"/"ends local administrator" — no other file states the old
+  contract. RED: the rewritten test failed on `expect(useAuthStore.getState().session
+  .isAuthenticated).toBe(true)` right after the Ver-viewer click (got `false`) against the
+  unmodified component. GREEN: `AdminSessionLifecycle.integration.test.tsx` 2/2; full
+  `npm test` 211 files / 2235 tests; `tsc -b --noEmit` and `eslint` clean. GGA PASSED (1
+  non-blocking note: the code comment says "Cerrar sesion" without the accent — not
+  user-facing text, not touched). Commit `65c2b80`.
+
+- 2026-09-23: T9 done, in two work-unit commits.
+
+  **Backend + proxy + docs** (`ca696e9`). `gemini_credentials.py`: added
+  `GeminiVerificationService` (in-memory, thread-safe via a single `Lock`; `verify()`
+  resolves the credential through the existing `GeminiCredentialResolver`, then calls
+  `client.models.get(model=GEMINI_VERIFY_MODEL)` -- a non-generating model lookup, never a
+  generation call -- classifying the outcome into `verified` / `invalid_key`
+  (`google.genai.errors.ClientError`) / `unreachable` (`ServerError`, network/timeout, or
+  any other unexpected exception, fail-closed) / `not_configured`
+  (`GeminiCredentialUnavailable`); rejects a concurrent call with
+  `GeminiVerificationInProgress`; `reset()` clears back to `not_checked`. Added
+  `GEMINI_VERIFY_TIMEOUT_MS = 10_000` (new `timeout_ms` param on `create_gemini_client`,
+  default unchanged at 45s for TTS) and `GEMINI_VERIFY_MODEL`, pinned equal to
+  `voice_service.TTS_MODEL` by a dedicated regression test (not imported directly, to avoid
+  coupling the port-5057 module to the separate port-5056 voice service process). Verified
+  the exact google-genai API against the installed package source in `.venv`
+  (`google_genai-2.17.0`): `genai.models.Models.get(*, model, config=None)` exists and is
+  synchronous; confirmed via `inspect.signature`. Found and fixed a real mocking hazard
+  while writing the tests: `create_gemini_client`'s `from google import genai` can bind
+  through an already-real `google.genai` package attribute (set by any earlier real import
+  of a `google.genai.*` submodule elsewhere in the same test process), silently bypassing a
+  `sys.modules` patch; switched both that import and `_run_check`'s `google.genai.errors`
+  import to `importlib.import_module(...)`, which always resolves through `sys.modules`
+  and is unaffected by the parent package's attributes. `admin_http.py`:
+  `AdminHttpBoundary` takes an optional `gemini_verification_service`; the existing
+  `/api/prisma/admin/credentials` GET now embeds `verified`/`verification` on the gemini
+  entry only (telegram/telegram_channel_a keep their plain `{configured}` shape); PUT/DELETE
+  gemini reset verification on success; new `POST
+  /api/prisma/admin/credentials/gemini/verify` (same origin/session/CSRF pattern as the
+  PUT/DELETE routes; 409 `GEMINI_VERIFICATION_IN_PROGRESS` on a concurrent call; 503
+  `GEMINI_VERIFICATION_UNAVAILABLE` when no service was composed) responds with the exact
+  result just computed by `verify()`, not a re-read snapshot, so the caller's own outcome is
+  never raced by a concurrent request. `local_presentation.py`: default `create_app` wires
+  `GeminiVerificationService(GeminiCredentialResolver(os.environ, lambda: credentials))`,
+  reusing the same protected store the generic credential routes already resolve Gemini
+  through. `vite.prismaProxy.config.ts`: added the anchored POST-only route following the
+  existing admin-credential pattern (stripped session capability, 5057 target). Documented
+  the new route and its non-generating/never-persisted/reset-on-save-or-delete contract in
+  `docs/prisma/PRISMA_BROWSER_ROUTING.md`. RED verified per layer (new/updated tests failed
+  against the pre-change source: 15 `test_gemini_credentials.py`, 17 `test_credential_http.py`
+  including 2 pre-existing tests whose gemini fixture needed the new shape, 1 new
+  `vite.prismaProxy.config.test.ts` route-table row confirmed failing via `git stash` of
+  just that file). GREEN: full backend `python -m unittest discover` 1156/1156; full
+  frontend `npm test` 211 files / 2235 tests; `tsc -b --noEmit` and `eslint` clean. GGA
+  PASSED (one non-blocking note: the 503 body helper duplication pattern already flagged in
+  T4c, unrelated to this task, not touched).
+
+  **Frontend redesign** (`56d7a32`). `adminCredential.types.ts`: added
+  `GeminiVerificationState`/`GeminiVerification`/`GeminiCredentialProviderMetadata` (extends
+  the base `{configured}` metadata with `verified`+`verification`), `CredentialMetadata.gemini`
+  narrowed to the new type, `parseGeminiVerificationResult` for the verify endpoint envelope
+  -- both parsers keep the project's exact-key, closed-enum fail-closed discipline.
+  `adminAuth.service.ts`: `AdminAuthClient.verifyGemini()` posts an empty `{}` JSON body to
+  the new route with the active private CSRF (mirrors `applyChannelA`); added
+  `GEMINI_VERIFICATION_IN_PROGRESS`/`GEMINI_VERIFICATION_UNAVAILABLE` to the public error
+  allowlist so they surface instead of collapsing to the generic `AUTH_REQUEST_FAILED`.
+  `usePrismaCredentialAdministration.ts`: `verifyGemini()` follows the same
+  `runOperation('verify-gemini', ...)` + `refresh()` lifecycle as the other explicit actions
+  (pending-action mutual exclusion, abort-on-deactivation, stale-result fencing all reused
+  for free). `VoiceCredentialSettings.tsx`: Gemini gets its own `renderGeminiProvider()`
+  (the shared three-column `renderProvider` now returns early for `gemini`, Telegram/Channel
+  A untouched) -- left column: `<legend>Proveedor de voz: Gemini</legend>` (fieldset
+  `aria-label` changed to match, only for Gemini) + "API Key" input (renamed from "Credencial
+  Gemini") with the existing icon-only Save/Delete; right column: credential-status phrase
+  (`Credencial configurada` green / `Credencial no configurada` red, falling back to the
+  shared `ProviderStatus` loading/unavailable wording so the existing 3-provider exact-count
+  assertions keep holding) and, only once real metadata has loaded, the verification phrase
+  (`Configure una API key para verificarla.` when unconfigured; else
+  `Verificación: no realizada` / `Verificada` / `API key inválida` / `No se pudo verificar:
+  sin conexión con Google` from the closed state) plus a secondary `HmiButton` "Verificar"
+  ("Verificando…" while `pendingAction === 'verify-gemini'`), disabled whenever the shared
+  `disabled` flag is set or the credential isn't configured. Mask: a fixed
+  `'•'.repeat(12)` rendered as the input's `placeholder` (only when the draft is empty
+  and the credential is configured) rather than its `value` -- chosen over a value-based mask
+  because a placeholder can never merge with typed characters (the browser swaps it out on
+  the first keystroke instead of the new text splicing into existing dots at cursor
+  position, which a controlled `value` mask would risk) and is reported by screen readers as
+  hint text on a blank field, not as an actual 12-character value; the accessible name stays
+  exactly "API Key" (unchanged `<label>` text) in both states. Added
+  `GEMINI_VERIFICATION_IN_PROGRESS`/`GEMINI_VERIFICATION_UNAVAILABLE` to the component's own
+  `errorText` map for the same reason as the service layer. RED verified: 21 of 39 tests in
+  `VoiceCredentialSettings.test.tsx` failed against the pre-redesign component (legend/label
+  renames, new mask/status/verify assertions); one of my own new assertions was itself wrong
+  against the *intended* design (expected `Verificación: no realizada` for an unconfigured
+  credential, but the spec's own "Configure una API key..." message correctly takes
+  precedence there) and was corrected before GREEN, not the component. Collateral: three
+  other pre-existing test files constructed a `CredentialMetadata`/gemini fixture or queried
+  `'Credencial Gemini'` and broke at *runtime* (not caught by `tsc -b`, which excludes
+  `*.test.tsx` from its project per `tsconfig.app.json`) --
+  `GlobalSettingsDialog.voice.integration.test.tsx`, `VoiceSettingsTab.test.tsx` (both fixed:
+  gemini fixture shape + label rename) and `usePrismaCredentialAdministration.test.tsx`
+  (fixed as part of the hook's own RED/GREEN cycle above). GREEN: full `npm test` 211 files /
+  2260 tests; `tsc -b --noEmit` and `eslint` clean. GGA PASSED (three non-blocking notes: an
+  unnecessary non-null assertion on `verification!.state` inside an already-narrowed branch,
+  the pre-existing 4096-byte secret-limit duplication between `validateCredentialSecret` and
+  its error message, and `<legend>` living inside a wrapper `div` instead of directly under
+  `<fieldset>` -- same pre-existing pattern as the Telegram/Channel A cards, not introduced
+  by this task -- none touched).
+
+  **Exact Gemini API call chosen**: `client.models.get(model=GEMINI_VERIFY_MODEL)` from the
+  installed `google-genai` 2.17.0 SDK (`services/prisma-runtime/.venv/Lib/site-packages/
+  google/genai/models.py`, `Models.get(self, *, model, config=None) -> Model`) -- a metadata
+  lookup for one specific model, confirmed via `inspect.signature` against the actual
+  installed source (not guessed, no context7 call was needed since the installed package
+  source was authoritative and directly inspectable). It performs no content generation, so
+  it never consumes generation quota, matching the task's "non-generating" requirement.
+
+  **Product decisions made without further clarification** (none needed escalation): kept
+  both a flat `verified: boolean` and the nested `verification: {state, checkedAt}` object on
+  the wire (brief said "verified true/false plus a verification object") rather than
+  deriving `verified` client-side from `state === 'verified'`, for exact literal compliance;
+  chose `placeholder` over a `value`-based mask (brief explicitly allowed either and asked
+  for a justified choice); did not show a separate success-toast feedback message after a
+  successful verification, since the inline "Verificada" status already reports it and a
+  toast would be redundant (consistent with how the panel already avoids duplicate
+  positive-outcome messaging elsewhere).
+
 ## Next step
 
-T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`, `039bf14`, `02d9695`), T4c (`95d5d2a`,
-`f2ebf49`), T1c (`f34a8ad`) and T4d (`9ad120d`, `5cd10a5`) are all committed. Next step:
-the user re-runs manual test point 4 (foreign process on 5057, confirm the popover now
-shows the port through the session bootstrap AND the terminal shows exactly one clean
-red line) and re-checks point 3 (relaunch after closing the
-launcher window with X, confirm the terminal now announces the reused runtime).
+All ten roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
+`039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
+`5cd10a5`), T5b (`65c2b80`) and T9 (`ca696e9`, `56d7a32`). Next step: the user re-runs
+manual test point 4 (foreign process on 5057, confirm the popover now shows the port
+through the session bootstrap AND the terminal shows exactly one clean red line), re-checks
+point 3 (relaunch after closing the launcher window with X, confirm the terminal now
+announces the reused runtime), manually verifies T5b (enter /admin, click "Ver viewer",
+confirm the session stays active; confirm "Cerrar sesión" still ends it), and manually
+verifies T9 (Configuración general → Voz → Gemini row: layout, mask on a configured key,
+"Verificar" against a real or intentionally invalid Gemini key end to end through the
+actual dev proxy and running Prisma runtime -- this writer's proof was offline/mocked only,
+per the no-network-in-tests constraint).
