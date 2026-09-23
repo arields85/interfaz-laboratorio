@@ -410,7 +410,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                     <HoverTooltip label="Eliminar credencial" position="top">
                         <HmiButton
                             size="sm"
-                            variant="primary"
+                            variant="secondary"
                             aria-label="Eliminar credencial"
                             title="Eliminar credencial"
                             disabled={disabled}

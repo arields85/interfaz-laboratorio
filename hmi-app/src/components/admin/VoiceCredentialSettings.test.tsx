@@ -963,16 +963,19 @@ describe('VoiceCredentialSettings', () => {
         await act(async () => { release(GEMINI_VERIFIED); });
     });
 
-    it('renders the Gemini Delete button with the same styling as Save, not the red danger variant', async () => {
+    it('renders the Gemini Delete button matching Verificar, not the red danger variant, while Save stays distinct', async () => {
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz: Gemini' });
         const save = await within(gemini).findByRole('button', { name: 'Guardar credencial' });
         const del = within(gemini).getByRole('button', { name: 'Eliminar credencial' });
+        const verify = within(gemini).getByRole('button', { name: 'Verificar' });
 
         expect(del.className).not.toMatch(/status-critical/);
-        // Same variant/size contract as Save (HmiButton's class output is a pure
-        // function of variant+size+className), not a hardcoded class snapshot.
-        expect(del.className.split(' ').sort()).toEqual(save.className.split(' ').sort());
+        // Same variant/size contract as Verificar (HmiButton's class output is a
+        // pure function of variant+size+className), not a hardcoded class
+        // snapshot; Save intentionally keeps its own (primary) styling.
+        expect(del.className.split(' ').sort()).toEqual(verify.className.split(' ').sort());
+        expect(del.className.split(' ').sort()).not.toEqual(save.className.split(' ').sort());
     });
 
     it.each([
