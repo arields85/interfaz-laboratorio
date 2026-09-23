@@ -28,10 +28,12 @@ from prisma_runtime.channel_a_bot import (
 )
 from prisma_runtime.channel_a_transport import (
     CHANNEL_A_API_BASE,
+    PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED,
     PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE,
     ChannelABotIdentity,
     ChannelATransport,
     ChannelATransportError,
+    ChannelATransportUnauthorized,
 )
 from prisma_runtime.credential_store import MAX_SECRET_BYTES
 
@@ -165,6 +167,15 @@ class ChannelATransportTestCase(unittest.TestCase):
     def assert_unavailable(self, error):
         self.assertIsInstance(error, ChannelATransportError)
         self.assertEqual(str(error), PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE)
+        self.assertIsNone(error.__cause__)
+        self.assertTrue(error.__suppress_context__)
+        self.assertNotIn(CANARY, repr(error))
+
+    def assert_unauthorized(self, error):
+        """T16: a 401 is a distinct, still non-disclosing, closed error."""
+        self.assertIsInstance(error, ChannelATransportUnauthorized)
+        self.assertIsInstance(error, ChannelATransportError)
+        self.assertEqual(str(error), PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED)
         self.assertIsNone(error.__cause__)
         self.assertTrue(error.__suppress_context__)
         self.assertNotIn(CANARY, repr(error))
@@ -553,6 +564,18 @@ class GetMeTests(ChannelATransportTestCase):
                     transport.get_me()
                 self.assert_unavailable(raised.exception)
 
+    def test_get_me_raises_a_distinct_unauthorized_error_on_401(self):
+        """T16: a revoked/invalid token must be distinguishable from every
+        other transport failure, so the lifecycle layer can classify it as
+        PERMANENT instead of retrying it forever."""
+        for body in ({"ok": False, "error_code": 401, "description": "Unauthorized"}, {"ok": True, "result": {}}):
+            with self.subTest(body=body):
+                session = FakeSession(FakeResponse(401, body))
+                transport = self.build(session)
+                with self.assertRaises(ChannelATransportUnauthorized) as raised:
+                    transport.get_me()
+                self.assert_unauthorized(raised.exception)
+
 
 class GetUpdatesTests(ChannelATransportTestCase):
     def test_get_updates_posts_the_exact_payload_without_an_offset(self):
@@ -646,6 +669,16 @@ class GetUpdatesTests(ChannelATransportTestCase):
                 with self.assertRaises(ChannelATransportError) as raised:
                     transport.get_updates(poll_timeout=1, read_timeout=2)
                 self.assert_unavailable(raised.exception)
+
+    def test_get_updates_raises_a_distinct_unauthorized_error_on_401(self):
+        """T16: a token revoked mid-poll must be distinguishable from an
+        ordinary poll failure (network/5xx/malformed batch), which stays
+        the generic, retryable error."""
+        session = FakeSession(FakeResponse(401, {"ok": False, "error_code": 401, "description": "Unauthorized"}))
+        transport = self.build(session)
+        with self.assertRaises(ChannelATransportUnauthorized) as raised:
+            transport.get_updates(poll_timeout=1, read_timeout=2)
+        self.assert_unauthorized(raised.exception)
 
 
 class MappingAccessorTests(ChannelATransportTestCase):

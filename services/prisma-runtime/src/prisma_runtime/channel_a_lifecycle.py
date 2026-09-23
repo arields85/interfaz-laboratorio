@@ -79,6 +79,7 @@ from .channel_a_pairing import ChannelAPairingRegistry
 from .channel_a_transport import (
     GET_UPDATES_LIMIT,
     ChannelABotIdentity,
+    ChannelATransportUnauthorized,
 )
 
 __all__ = [
@@ -97,7 +98,9 @@ __all__ = [
     "PHASE_STOPPED",
     "PHASE_STOPPING",
     "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE",
+    "PRISMA_CHANNEL_A_POLL_FAILED",
     "PRISMA_CHANNEL_A_RESTART_REQUIRED",
+    "PRISMA_CHANNEL_A_UNAUTHORIZED",
     "SEVEN_DAY_HORIZON_SECONDS",
     "TELEGRAM_BOT_IDENTITY_RESERVED",
     "ChannelALifecycleError",
@@ -115,6 +118,16 @@ PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE = "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE
 PRISMA_CHANNEL_A_RESTART_REQUIRED = "PRISMA_CHANNEL_A_RESTART_REQUIRED"
 # Canonical Channel B code, preserved verbatim for a real reservation conflict.
 TELEGRAM_BOT_IDENTITY_RESERVED = "TELEGRAM_BOT_IDENTITY_RESERVED"
+# T16: two deliberately distinct codes carved out of the generic
+# ``PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE`` bucket, so a later manager can
+# classify a background failure instead of only ever seeing one opaque code.
+# A revoked/invalid token (never retried by a manager) at either prepare time
+# (``get_me``) or poll time (``get_updates``).
+PRISMA_CHANNEL_A_UNAUTHORIZED = "PRISMA_CHANNEL_A_UNAUTHORIZED"
+# An ordinary ``get_updates`` failure while running (network, timeout, 5xx,
+# Telegram's own concurrent-poller 409, or any other transport exception) --
+# always retryable by a later manager.
+PRISMA_CHANNEL_A_POLL_FAILED = "PRISMA_CHANNEL_A_POLL_FAILED"
 
 # The documented Telegram discontinuity horizon. Not the 600-second human idle
 # TTL: that TTL governs a *link*, while this governs one polling activation.
@@ -202,6 +215,19 @@ class _ReservedIdentity(ChannelALifecycleError):
 
     def __init__(self) -> None:
         super().__init__(TELEGRAM_BOT_IDENTITY_RESERVED)
+
+
+class _Unauthorized(ChannelALifecycleError):
+    """Internal marker for a provider-confirmed 401 on the bot token (T16).
+
+    Only this internally constructed marker may publish the canonical
+    :data:`PRISMA_CHANNEL_A_UNAUTHORIZED` code, mirroring
+    :class:`_ReservedIdentity`: a dependency that raises our own public class
+    is never a trusted source of a lifecycle code.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(PRISMA_CHANNEL_A_UNAUTHORIZED)
 
 
 def _dependency_attribute(value, name):
@@ -316,6 +342,7 @@ class ChannelARunner:
         poll_pause,
         on_outcome,
         reservation=None,
+        on_terminal=None,
     ) -> None:
         if transport is None or not _is_callable(_dependency_attribute(transport, "get_me")):
             raise _unavailable() from None
@@ -381,6 +408,12 @@ class ChannelARunner:
         # reentrant or concurrent stop never enters the same release twice.
         self._release_in_flight = False
 
+        # T16: optional, diagnostic-only observer notified on a NEW terminal
+        # failure. A non-callable value silently disables it instead of
+        # failing construction -- unlike every other dependency above, this
+        # one is never load-bearing for correctness.
+        self._on_terminal = on_terminal if _is_callable(on_terminal) else None
+
         self._activity = 0
         self._admission: object | None = None
         self._admission_thread: int | None = None
@@ -424,6 +457,11 @@ class ChannelARunner:
             # our own exact class so no caller ever observes the private marker.
             self._terminal_fail(TELEGRAM_BOT_IDENTITY_RESERVED)
             raise ChannelALifecycleError(TELEGRAM_BOT_IDENTITY_RESERVED) from None
+        except _Unauthorized:
+            # T16: a provider-confirmed 401 on the token itself, distinguished
+            # from every other dependency failure the same way.
+            self._terminal_fail(PRISMA_CHANNEL_A_UNAUTHORIZED)
+            raise ChannelALifecycleError(PRISMA_CHANNEL_A_UNAUTHORIZED) from None
         except Exception:
             # A failed preparation is terminal and must still release whatever it
             # already acquired; otherwise the identity would stay reserved. Every
@@ -551,6 +589,20 @@ class ChannelARunner:
                 restart_required=self._restart_required,
             )
 
+    def set_on_terminal(self, callback) -> None:
+        """Bind or replace the terminal-failure observer (T16).
+
+        Late-bound by a manager after construction, before ``prepare()`` or
+        ``start()`` ever runs, so the runner can never reach a terminal
+        failure before an observer exists. Not part of the ownership/
+        admission model: binding never mutates phase, activity or any
+        terminal fence. A non-callable value silently disables the observer
+        instead of raising, matching the constructor's own leniency for this
+        diagnostic-only dependency.
+        """
+        with self._lock:
+            self._on_terminal = callback if _is_callable(callback) else None
+
     # -- admission ---------------------------------------------------------
 
     def _begin_owned(self, *, phase: str, from_caller_thread: bool):
@@ -606,16 +658,43 @@ class ChannelARunner:
             return None
 
     def _terminal_fail(self, reason: str) -> None:
+        newly_terminal = False
         with self._lock:
             self._stop_requested = True
             if not self._terminal:
                 self._terminal = True
                 self._phase = PHASE_FAILED
                 self._reason = reason
+                newly_terminal = True
             # Detach the old activation's dialogue: a failed instance can never
             # reuse it, and the caller must build a new one.
             self._dialogue = None
         self._pause_event.set()
+        if newly_terminal:
+            self._notify_terminal(reason)
+
+    def _notify_terminal(self, reason: str) -> None:
+        """Invoke the bound observer exactly once per NEW terminal failure (T16).
+
+        Always outside ``self._lock`` -- never a foreign call under our own
+        lock, matching every other boundary in this module -- and any
+        callback exception is swallowed: a broken or hostile observer must
+        never crash the polling/preparation caller or corrupt lifecycle
+        state. Fire-and-forget by design: "a later manager owns automatic
+        replacement" (module docstring).
+        """
+        with self._lock:
+            callback = self._on_terminal
+        if callback is None:
+            return
+        try:
+            callback(reason)
+        except BaseException:
+            # Matches ``_run_entry``'s own catch-all for the same reason: a
+            # foreign callback invoked directly on a caller's thread (not just
+            # the managed loop) must never escape here, not even as a
+            # ``BaseException``.
+            pass
 
     def _retire(self) -> None:
         with self._lock:
@@ -716,6 +795,8 @@ class ChannelARunner:
 
         try:
             identity = self.transport.get_me()
+        except ChannelATransportUnauthorized:
+            raise _Unauthorized() from None
         except Exception:
             raise _unavailable() from None
         # Snapshot the immutable validated projection BEFORE the pre-acquire fence
@@ -915,8 +996,17 @@ class ChannelARunner:
                 read_timeout=self.read_timeout,
                 offset=offset,
             )
+        except ChannelATransportUnauthorized:
+            # T16: a token revoked mid-run, distinguished from an ordinary
+            # poll failure so a later manager never retries it.
+            return self._terminal_result(completed, PRISMA_CHANNEL_A_UNAUTHORIZED)
         except Exception:
-            return self._terminal_result(completed, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
+            # T16: distinct from PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE (used
+            # by every OTHER failure in this method) so a later manager can
+            # tell "the poll itself failed" (network/timeout/5xx/Telegram's
+            # own concurrent-poller 409 -- always retryable) apart from a
+            # local validation/dependency failure.
+            return self._terminal_result(completed, PRISMA_CHANNEL_A_POLL_FAILED)
 
         # A stop that landed during the long poll is honored before any handler,
         # leaving the returned suffix untouched.

@@ -12,7 +12,7 @@ from flask import Response, jsonify, request
 
 from .admin_auth import AuthNotConfigured, AuthUnavailable, LoginRateLimited
 from .bot_identity_reservation import TELEGRAM_BOT_IDENTITY_RESERVED
-from .channel_a_lifecycle import PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE
+from .channel_a_lifecycle import PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE, PRISMA_CHANNEL_A_UNAUTHORIZED
 from .channel_a_manager import ChannelAManagerError
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
 from .gemini_credentials import GEMINI_VERIFY_MODEL, GeminiVerificationInProgress
@@ -67,9 +67,9 @@ def project_admin_telegram_status(status: dict) -> dict:
     return {field: status[field] for field in ADMIN_TELEGRAM_STATUS_FIELDS}
 
 
-# Frozen admin Channel A wire contract: exactly eight status keys (T15 adds
-# `paired`) with a nested activation projection; no raw manager object or
-# credential is ever exposed.
+# Frozen admin Channel A wire contract: exactly ten status keys (T15 adds
+# `paired`, T16 adds `retrying`/`retryAttempt`) with a nested activation
+# projection; no raw manager object or credential is ever exposed.
 ADMIN_CHANNEL_A_STATUS_FIELDS = (
     "configured",
     "desiredGeneration",
@@ -79,11 +79,13 @@ ADMIN_CHANNEL_A_STATUS_FIELDS = (
     "lastError",
     "botUsername",
     "paired",
+    "retrying",
+    "retryAttempt",
 )
 
 
 def project_admin_channel_a_status(status: dict) -> dict:
-    """Copy only the six admin contract fields out of manager-owned status.
+    """Copy only the frozen admin contract fields out of manager-owned status.
 
     The nested activation object is projected through its four closed fields
     (or ``None``), never serialized raw; the source status is never mutated.
@@ -117,6 +119,9 @@ CHANNEL_A_MANAGER_ERROR_STATUS = {
     "PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE": 503,
     "PRISMA_CHANNEL_A_CONFIGURATION_INVALID": 503,
     PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE: 502,
+    # T16: a revoked/invalid token surfaced synchronously (e.g. an explicit
+    # admin Apply); same bucket as the generic lifecycle failure.
+    PRISMA_CHANNEL_A_UNAUTHORIZED: 502,
 }
 
 

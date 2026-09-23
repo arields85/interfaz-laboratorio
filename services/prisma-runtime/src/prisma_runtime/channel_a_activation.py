@@ -129,6 +129,11 @@ class ChannelAActivation:
         """Poll synchronously and publish through the caller's unchanged consumer."""
         return self._runner.poll_once()
 
+    def set_on_terminal(self, callback) -> None:
+        """Forward the manager's background-failure observer to the owned
+        runner (T16). A pure forwarding seam: never wrapped or inspected."""
+        self._runner.set_on_terminal(callback)
+
     def stop(self) -> bool:
         """Request the runner's sticky stop, even when settlement is uncertain."""
         # Withdraw issuance and the retained bot identity before settlement can

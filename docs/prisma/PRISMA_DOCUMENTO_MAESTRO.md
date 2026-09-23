@@ -562,6 +562,42 @@ eventos lo renueva. El primer incremento responde por texto sobre el snapshot vi
 parser determinístico existente, y presenta la misma respuesta como texto y audio en la HMI. Esta
 entrada es de solo lectura y nunca habilita comandos industriales.
 
+**Registro y recuperación automática de fallas del Canal A (2026-09-23, decisión de usuario).**
+El hilo de sondeo propio del Canal A (`channel_a_lifecycle.py`, `ChannelARunner`) podía fallar en
+segundo plano sin que el administrador ni el usuario lo notaran: la falla terminal solo se reflejaba
+como `phase: 'failed'`, pero `lastError` permanecía en `None` porque nada observaba esa transición
+desde el hilo propio del runner. El bot quedaba caído hasta que el administrador volvía a guardar el
+token manualmente. La corrección distingue dos causas por código, en vez del único código genérico
+previo:
+
+- **Permanentes** (nunca se reintentan; el estado queda fallido con su código exacto hasta una
+  acción del administrador): `PRISMA_CHANNEL_A_UNAUTHORIZED` (token rechazado por Telegram con
+  401), `TELEGRAM_BOT_IDENTITY_RESERVED` (identidad reservada por el otro canal),
+  `PRISMA_CHANNEL_A_CREDENTIAL_MISSING` (credencial ausente) y
+  `PRISMA_CHANNEL_A_CONFIGURATION_INVALID` (configuración inválida).
+- **Transitorias** (se reintentan indefinidamente mientras la credencial siga configurada):
+  `PRISMA_CHANNEL_A_POLL_FAILED` (falla del propio `getUpdates`: red, timeout, 5xx, o el 409 nativo
+  de Telegram por otro sondeo concurrente con el mismo token) y cualquier otro código no listado como
+  permanente (por ejemplo `PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE`, un administrador ocupado, o una
+  detención sin confirmar).
+
+El runner notifica la falla mediante un observador (`on_terminal`/`set_on_terminal`), ejecutado fuera
+de su propio lock, en lugar de que el administrador tenga que sondear el estado periódicamente. Para
+una causa transitoria, el `ChannelAManager` agenda un reintento con backoff exponencial —constantes
+`CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS = 5`, `CHANNEL_A_RETRY_BACKOFF_FACTOR = 2`,
+`CHANNEL_A_RETRY_MAX_DELAY_SECONDS = 300` (5 s, 10 s, 20 s, ... hasta un techo de 5 minutos)—
+reutilizando el mismo camino de `apply()` (asentar la activación vieja, publicar una candidata
+nueva) bajo la disciplina de mutación existente del administrador. Cualquier acción explícita del
+administrador (guardar, borrar o aplicar) cancela y reinicia el contador de reintentos; una
+detención del runtime (`main()`) también cancela el temporizador pendiente antes de salir. El estado
+expone `retrying`/`retryAttempt` para que el panel muestre «Reconectando…» mientras el reintento
+está en curso. Esta corrección es solo para el Canal A: el Canal B (`telegram_lifecycle.py`) ya
+refleja su propio `lastError` de forma reactiva al consultar `status()`, pero tiene una composición
+sustancialmente distinta (un objeto `TelegramLocalBot` monolítico sin el mismo seno de
+manager/activación/generación intercambiable ni un observador equivalente), así que no recibió el
+mismo reintento automático en este cambio; queda como una extensión futura separada si se decide
+extenderla.
+
 ### 6.3 Canal B — Telegram personal autónomo
 
 El Canal B recibe texto y responde texto. Debe funcionar sin navegador, snapshot o

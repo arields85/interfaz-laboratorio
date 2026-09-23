@@ -67,6 +67,12 @@ from .channel_a_bot import (
 from .credential_store import MAX_SECRET_BYTES
 
 PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE = "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE"
+# T16: the one deliberate exception to "every failure becomes the same fixed
+# code" -- a provider-confirmed 401 on the bot token itself is distinguished
+# from every other failure so the lifecycle layer can classify a genuinely
+# revoked/invalid token as PERMANENT instead of retrying it forever. Still a
+# closed, non-disclosing constant: no provider body, URL or token is attached.
+PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED = "PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED"
 
 CHANNEL_A_API_BASE = "https://api.telegram.org"
 MESSAGE_MAX_CHARS = 4096
@@ -90,10 +96,12 @@ __all__ = [
     "ChannelABotIdentity",
     "ChannelATransport",
     "ChannelATransportError",
+    "ChannelATransportUnauthorized",
     "GET_ME_METHOD",
     "GET_UPDATES_LIMIT",
     "GET_UPDATES_METHOD",
     "MESSAGE_MAX_CHARS",
+    "PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED",
     "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE",
     "SEND_MESSAGE_METHOD",
 ]
@@ -106,6 +114,19 @@ class ChannelATransportError(RuntimeError):
     ``PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE`` code. Input problems, dependency
     failures and malformed responses are all reported through this one shape so
     a caller can never distinguish — or leak — a token, URL or response body.
+    """
+
+
+class ChannelATransportUnauthorized(ChannelATransportError):
+    """The provider rejected the bot token itself (HTTP 401) on a discovery call.
+
+    Raised only by :meth:`ChannelATransport.get_me`/:meth:`get_updates` (the
+    two calls the lifecycle layer depends on); ``send_message`` and
+    ``answer_callback_query`` are unaffected and keep collapsing every non-2xx
+    status into the base error. Still the same closed, non-disclosing
+    contract: the message is always the fixed
+    ``PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED`` code, never a provider body,
+    URL or token (T16).
     """
 
 
@@ -354,6 +375,11 @@ class ChannelATransport:
 
     def _discovery(self, method: str, payload: dict[str, object], timeout: HttpTimeout) -> tuple[int, Mapping]:
         status, body = self._request(method, payload, timeout)
+        # Checked before the generic ok/status gate below (T16): a 401 is
+        # never ambiguous with a malformed response or an ordinary failure,
+        # regardless of what -- if anything -- the body otherwise contains.
+        if status == 401:
+            raise ChannelATransportUnauthorized(PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED) from None
         if not 200 <= status < 300 or _field(body, "ok") is not True:
             raise _unavailable() from None
         return status, body

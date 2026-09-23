@@ -464,7 +464,9 @@ from prisma_runtime.channel_a_lifecycle import (
     PHASE_STOPPED,
     PHASE_STOPPING,
     PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,
+    PRISMA_CHANNEL_A_POLL_FAILED,
     PRISMA_CHANNEL_A_RESTART_REQUIRED,
+    PRISMA_CHANNEL_A_UNAUTHORIZED,
     SEVEN_DAY_HORIZON_SECONDS,
     TELEGRAM_BOT_IDENTITY_RESERVED,
     ChannelALifecycleError,
@@ -473,7 +475,11 @@ from prisma_runtime.channel_a_lifecycle import (
     ChannelAStatus,
 )
 from prisma_runtime.channel_a_pairing import ChannelAPairingRegistry
-from prisma_runtime.channel_a_transport import GET_UPDATES_LIMIT, ChannelABotIdentity
+from prisma_runtime.channel_a_transport import (
+    GET_UPDATES_LIMIT,
+    ChannelABotIdentity,
+    ChannelATransportUnauthorized,
+)
 
 # Distinguishes "not supplied" from an explicit ``None`` in every builder.
 _UNSET = object()
@@ -2686,10 +2692,141 @@ class ChannelARunnerStopTest(ChannelARunnerCase):
         self.assertTrue(runner.stop())
         self.assertEqual(len(reservation.releases), 1)
         self.assertEqual(runner.status().phase, PHASE_FAILED)
-        self.assertEqual(runner.status().reason, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
+        # T16: a bare ``get_updates`` failure is now the distinct, retryable
+        # "poll failed" code, not the generic dependency-failure code.
+        self.assertEqual(runner.status().reason, PRISMA_CHANNEL_A_POLL_FAILED)
 
 
 # -- sanitizer canaries ----------------------------------------------------
+
+
+class ChannelARunnerFailureClassificationTest(ChannelARunnerCase):
+    """T16: a provider-confirmed 401 is a distinct, non-retryable code at both
+    prepare time (``get_me``) and poll time (``get_updates``); every other
+    ``get_updates`` failure is the distinct, retryable "poll failed" code
+    instead of the generic dependency-failure code."""
+
+    def test_prepare_fails_with_the_distinct_unauthorized_code_on_a_revoked_token(self) -> None:
+        transport = _FakeTransport()
+        transport.get_me_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
+        runner = self.make_rig(transport=transport)
+        with self.assertRaises(ChannelALifecycleError) as raised:
+            runner.prepare()
+        self.assertEqual(raised.exception.args, (PRISMA_CHANNEL_A_UNAUTHORIZED,))
+        status = runner.status()
+        self.assertEqual(status.phase, PHASE_FAILED)
+        self.assertEqual(status.reason, PRISMA_CHANNEL_A_UNAUTHORIZED)
+
+    def test_poll_fails_with_the_distinct_unauthorized_code_when_the_token_is_revoked_mid_run(self) -> None:
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport)
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
+        result = runner.poll_once()
+        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+        self.assertEqual(result.reason, PRISMA_CHANNEL_A_UNAUTHORIZED)
+        self.assertEqual(runner.status().reason, PRISMA_CHANNEL_A_UNAUTHORIZED)
+
+    def test_poll_fails_with_the_distinct_poll_failed_code_for_an_ordinary_transport_error(self) -> None:
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport)
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        result = runner.poll_once()
+        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+        self.assertEqual(result.reason, PRISMA_CHANNEL_A_POLL_FAILED)
+        self.assertNotIn(CANARY, repr(result))
+
+
+class ChannelARunnerTerminalObserverTest(ChannelARunnerCase):
+    """T16: an optional ``on_terminal`` observer lets a manager learn about a
+    background failure without polling ``status()``. It fires at most once
+    per runner, always outside the lifecycle lock, and a hostile or broken
+    callback can never crash the caller or corrupt lifecycle state."""
+
+    def test_on_terminal_is_invoked_exactly_once_with_the_terminal_reason(self) -> None:
+        observed: list = []
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport, on_terminal=observed.append)
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        runner.poll_once()
+        runner.poll_once()  # already terminal: must not notify again
+        self.assertEqual(observed, [PRISMA_CHANNEL_A_POLL_FAILED])
+
+    def test_on_terminal_is_invoked_for_a_reservation_conflict_too(self) -> None:
+        observed: list = []
+        reservation = _FakeReservation()
+        reservation.acquire_error = BotIdentityReservationError()
+        runner = self.make_rig(reservation=reservation, on_terminal=observed.append)
+        with self.assertRaises(ChannelALifecycleError):
+            runner.prepare()
+        self.assertEqual(observed, [TELEGRAM_BOT_IDENTITY_RESERVED])
+
+    def test_on_terminal_is_never_invoked_without_a_terminal_failure(self) -> None:
+        observed: list = []
+        runner = self.make_rig(on_terminal=observed.append)
+        self.assertTrue(runner.prepare())
+        runner.poll_once()
+        self.assertTrue(runner.stop())
+        self.assertEqual(observed, [])
+
+    def test_a_hostile_on_terminal_callback_is_swallowed(self) -> None:
+        def hostile(reason):
+            raise _Escaped("escaped-on-terminal-internal")
+
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport, on_terminal=hostile)
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        result = runner.poll_once()
+        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+        self.assertEqual(runner.status().phase, PHASE_FAILED)
+
+    def test_a_default_runner_without_on_terminal_is_unaffected(self) -> None:
+        transport = _FakeTransport()
+        transport.get_updates_error = RuntimeError(CANARY)
+        runner = self.make_rig(transport=transport)
+        self.assertTrue(runner.prepare())
+        result = runner.poll_once()
+        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+
+    def test_on_terminal_can_safely_call_back_into_the_runner_without_deadlock(self) -> None:
+        """Proves the callback runs outside the lifecycle lock: a callback that
+        reads status() and calls stop() from the SAME failing thread must
+        return promptly instead of hanging."""
+        observed: list = []
+
+        def reentrant(reason):
+            observed.append(runner.status().phase)
+            observed.append(runner.stop())  # same-thread stop: must not join itself
+
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport, on_terminal=reentrant)
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        result = runner.poll_once()
+        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+        self.assertEqual(observed, [PHASE_FAILED, False])
+
+    def test_set_on_terminal_binds_late_before_any_terminal_failure(self) -> None:
+        observed: list = []
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport)
+        runner.set_on_terminal(observed.append)
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        runner.poll_once()
+        self.assertEqual(observed, [PRISMA_CHANNEL_A_POLL_FAILED])
+
+    def test_set_on_terminal_with_a_non_callable_disables_the_observer(self) -> None:
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport)
+        runner.set_on_terminal("not-callable")
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        result = runner.poll_once()  # must not raise despite the garbage observer
+        self.assertEqual(result.disposition, DISPOSITION_FAILED)
 
 
 class ChannelARunnerSanitizerTest(ChannelARunnerCase):

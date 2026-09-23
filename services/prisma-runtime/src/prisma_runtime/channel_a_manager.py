@@ -8,7 +8,7 @@ withdraws owned authority; reservation acquisition/release belongs to the runner
 from __future__ import annotations
 
 from contextlib import contextmanager
-from threading import Lock
+from threading import Lock, Timer
 
 from .channel_a_configuration import (
     ChannelAConfiguration,
@@ -34,7 +34,9 @@ from .channel_a_lifecycle import (
     PHASE_FAILED,
     PHASE_RETIRED,
     PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,
+    PRISMA_CHANNEL_A_POLL_FAILED,
     PRISMA_CHANNEL_A_RESTART_REQUIRED,
+    PRISMA_CHANNEL_A_UNAUTHORIZED,
     TELEGRAM_BOT_IDENTITY_RESERVED,
 )
 from .channel_a_query import is_query_envelope_well_formed
@@ -53,11 +55,39 @@ _CREDENTIAL_CODES = frozenset({
 })
 _LIFECYCLE_CODES = frozenset({
     PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE, PRISMA_CHANNEL_A_RESTART_REQUIRED,
-    TELEGRAM_BOT_IDENTITY_RESERVED,
+    TELEGRAM_BOT_IDENTITY_RESERVED, PRISMA_CHANNEL_A_POLL_FAILED, PRISMA_CHANNEL_A_UNAUTHORIZED,
 })
 _ERROR_CODES = _CONFIGURATION_CODES | _CREDENTIAL_CODES | _LIFECYCLE_CODES | frozenset({
     _INVALID_CREDENTIAL, PRISMA_CHANNEL_A_MANAGER_BUSY, PRISMA_CHANNEL_A_STOP_UNCONFIRMED,
 })
+# T16: PERMANENT background/retry failures a manager must never retry -- they
+# stay failed with their exact code until the admin acts (a new token, a
+# fixed configuration, or reserving the identity for this channel again).
+# Every other recognized manager error code is TRANSIENT and always retried
+# with backoff (network errors, timeouts, Telegram 5xx, its own concurrent-
+# getUpdates 409, a busy manager, an unconfirmed stop, or any other unexpected
+# runner/manager exception).
+_PERMANENT_RETRY_FAILURE_CODES = frozenset({
+    TELEGRAM_BOT_IDENTITY_RESERVED,
+    PRISMA_CHANNEL_A_UNAUTHORIZED,
+    PRISMA_CHANNEL_A_CREDENTIAL_MISSING,
+    PRISMA_CHANNEL_A_CONFIGURATION_INVALID,
+})
+# Named backoff policy (T16): 5s, doubling every attempt, capped at 5 minutes.
+# Retries continue indefinitely for a TRANSIENT failure while the credential
+# stays configured; only an explicit admin save/delete/apply, or runtime
+# shutdown, ever stops them early.
+CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS = 5.0
+CHANNEL_A_RETRY_BACKOFF_FACTOR = 2.0
+CHANNEL_A_RETRY_MAX_DELAY_SECONDS = 300.0
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Exponential backoff for the Nth automatic retry attempt (N >= 1)."""
+    if attempt <= 1:
+        return CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS
+    delay = CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS * (CHANNEL_A_RETRY_BACKOFF_FACTOR ** (attempt - 1))
+    return min(delay, CHANNEL_A_RETRY_MAX_DELAY_SECONDS)
 _PHASES = frozenset({
     PHASE_IDLE, PHASE_PREPARING, PHASE_PREPARED, PHASE_RUNNING,
     PHASE_STOPPING, PHASE_STOPPED, PHASE_FAILED, PHASE_RETIRED,
@@ -121,7 +151,7 @@ def _call(operation, fallback):
 
 
 class ChannelAManager:
-    def __init__(self, *, credential_service, configuration_store, activation_factory, reservation):
+    def __init__(self, *, credential_service, configuration_store, activation_factory, reservation, timer_factory=None):
         self._credentials = credential_service
         self._configuration = configuration_store
         self._factory = activation_factory
@@ -141,6 +171,13 @@ class ChannelAManager:
         self._applied_generation = None
         self._activation_epoch = None
         self._last_error = None
+        # T16: automatic backoff retry after a background failure. Injectable
+        # only for tests (a fake recording start()/cancel() without a real
+        # thread); production always uses the real ``threading.Timer``.
+        self._timer_factory = timer_factory if callable(timer_factory) else Timer
+        self._retrying = False
+        self._retry_attempt = 0
+        self._retry_timer = None
 
     @contextmanager
     def _mutation(self):
@@ -167,6 +204,128 @@ class ChannelAManager:
     def _record_error(self, code):
         with self._lock:
             self._last_error = code
+
+    # -- T16: background-failure recording and automatic backoff retry -----
+
+    def _cancel_retry(self, *, reset_attempt: bool) -> None:
+        """Cancel any pending automatic retry (T16).
+
+        Called by every explicit admin-facing mutation (save, delete, the
+        public ``apply()``, and ``stop()``) BEFORE that mutation's own work,
+        so an explicit action always wins over a stale scheduled retry --
+        "never overlap with an admin save/delete/apply". The timer's own
+        ``.cancel()`` runs outside the lock: it never blocks and nothing
+        foreign runs while the manager's lock is held, matching every other
+        boundary in this module. A timer that already fired past the point of
+        cancellation is a harmless no-op: ``_retry_tick`` re-checks
+        ``_retrying`` itself under the same lock before doing any work.
+        """
+        with self._lock:
+            self._retrying = False
+            if reset_attempt:
+                self._retry_attempt = 0
+            timer = self._retry_timer
+            self._retry_timer = None
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+
+    def _bind_background_observer(self, candidate) -> None:
+        """Wire the background-failure observer onto a freshly built candidate.
+
+        Called from ``_new_candidate`` before ``prepare()``/``start()`` ever
+        run, so the runner can never reach a background failure before the
+        observer exists. A candidate whose activation predates this feature
+        (a foreign/test double without ``set_on_terminal``) is left
+        unobserved instead of raising: this is diagnostics, never an
+        activation admission gate.
+        """
+        bind = getattr(candidate, "set_on_terminal", None)
+        if not callable(bind):
+            return
+        try:
+            bind(lambda reason: self._handle_background_failure(candidate, reason))
+        except Exception:
+            pass
+
+    def _handle_background_failure(self, activation, reason) -> None:
+        """Observer invoked by the runner's OWN thread on a NEW terminal
+        failure (T16). Never touches the mutation lock (``_mutation``/
+        ``_busy``), never blocks and never raises: it records the classified
+        failure and, for a TRANSIENT reason on the activation that is STILL
+        the one this manager publishes, schedules exactly one backoff retry.
+        A stale/superseded activation (already replaced by an explicit admin
+        action, or by a previous retry) is recorded nowhere and never
+        retried: generation/epoch authority stays with whichever activation
+        the manager currently publishes, checked by identity under the lock.
+        """
+        with self._lock:
+            if self._activation is not activation:
+                return
+            self._last_error = reason
+            if reason in _PERMANENT_RETRY_FAILURE_CODES:
+                self._retrying = False
+                old_timer = self._retry_timer
+                self._retry_timer = None
+                timer = None
+            else:
+                self._retry_attempt += 1
+                self._retrying = True
+                old_timer = self._retry_timer
+                delay = _retry_delay_seconds(self._retry_attempt)
+                timer = self._timer_factory(delay, self._retry_tick)
+                timer.daemon = True
+                self._retry_timer = timer
+        if old_timer is not None:
+            try:
+                old_timer.cancel()
+            except Exception:
+                pass
+        if timer is not None:
+            timer.start()
+
+    def _retry_tick(self) -> None:
+        """Timer callback: attempt exactly one automatic ``apply()`` (T16).
+
+        Runs on the timer's own thread, never inside any lock. A busy
+        manager (an admin save/delete/apply already in flight) fails this
+        attempt harmlessly like any other transient failure -- the next
+        scheduled retry (or the next background failure) tries again. Calls
+        the internal ``_apply_impl`` directly, NOT the public ``apply()``:
+        the public entry point resets the attempt counter for an explicit
+        admin action, which would defeat growing backoff across repeated
+        automatic retries.
+        """
+        with self._lock:
+            self._retry_timer = None
+            if not self._retrying:
+                return  # an explicit action already cancelled this retry
+        try:
+            self._apply_impl()
+        except ChannelAManagerError as error:
+            code = error.args[0] if error.args else None
+            with self._lock:
+                if not self._retrying:
+                    return
+                if code in _PERMANENT_RETRY_FAILURE_CODES:
+                    self._retrying = False
+                    return
+                self._retry_attempt += 1
+                delay = _retry_delay_seconds(self._retry_attempt)
+                timer = self._timer_factory(delay, self._retry_tick)
+                timer.daemon = True
+                self._retry_timer = timer
+            timer.start()
+        except Exception:
+            # A retry attempt must never crash a bare timer thread; leave the
+            # recorded state as whatever the failed attempt already set.
+            pass
+        else:
+            with self._lock:
+                self._retrying = False
+                self._retry_attempt = 0
 
     def _desired(self):
         def read():
@@ -255,6 +414,8 @@ class ChannelAManager:
                 generation = self._applied_generation
                 epoch = self._activation_epoch
                 error = self._last_error
+                retrying = self._retrying
+                retry_attempt = self._retry_attempt
             observed = self._observe(activation)
             return {
                 "configured": present,
@@ -265,6 +426,10 @@ class ChannelAManager:
                 "lastError": error,
                 "botUsername": self._bot_username_if_running(activation, observed),
                 "paired": self._has_paired_owner(activation, observed),
+                # T16: surfaced so the admin UI can show "reconnecting" instead
+                # of a bare failure while an automatic retry is in flight.
+                "retrying": retrying,
+                "retryAttempt": retry_attempt,
             }
         except Exception as error:
             code = _error_code(error, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
@@ -423,6 +588,7 @@ class ChannelAManager:
         return self.status()
 
     def save_credential(self, secret):
+        self._cancel_retry(reset_attempt=True)
         with self._mutation():
             try:
                 _call(lambda: validate_secret(_PROVIDER, secret), _INVALID_CREDENTIAL)
@@ -483,12 +649,16 @@ class ChannelAManager:
             return self.status()
 
     def stop(self):
+        # T16: shutdown (main()'s finally) and any explicit stop must cancel a
+        # pending automatic retry promptly, before the mutation itself.
+        self._cancel_retry(reset_attempt=True)
         with self._mutation():
             confirmed = self._settle()
             self._record_error(None if confirmed else PRISMA_CHANNEL_A_STOP_UNCONFIRMED)
             return confirmed
 
     def delete_credential(self):
+        self._cancel_retry(reset_attempt=True)
         with self._mutation():
             self._reserve_generation()
             _call(lambda: self._credentials.delete_secret(_PROVIDER), PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE)
@@ -515,11 +685,25 @@ class ChannelAManager:
             token = None
         if candidate is None or candidate is retired or candidate is current:
             raise ChannelAManagerError(PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)
+        # T16: bound BEFORE publication, so the runner can never reach a
+        # background failure before the observer exists.
+        self._bind_background_observer(candidate)
         with self._lock:
             self._activation = candidate
         return candidate, epoch
 
     def apply(self):
+        """Explicit (admin or startup) apply: always cancels a pending
+        automatic retry and resets its attempt counter first (T16) -- "never
+        overlap with an admin save/delete/apply". The automatic retry timer
+        calls ``_apply_impl`` directly instead, which does NOT reset the
+        attempt counter, so backoff keeps growing across repeated automatic
+        retries.
+        """
+        self._cancel_retry(reset_attempt=True)
+        return self._apply_impl()
+
+    def _apply_impl(self):
         with self._mutation():
             desired = self._desired()
             with self._lock:

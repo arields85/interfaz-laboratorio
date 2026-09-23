@@ -1021,6 +1021,9 @@ class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
                 calls.append("stop")
                 return True
 
+            def set_on_terminal(self, callback):
+                calls.append(("set_on_terminal", callback))
+
         # Patch only the composition's constructor dependency. No private runner,
         # lease or dialogue is inspected, and Thread.start is never called.
         with patch.object(module, "ChannelARunner", LocalRunner):
@@ -1042,6 +1045,17 @@ class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
         self.assertIs(activation.status(), status)
         self.assertIs(activation.status(), status)
         self.assertEqual(calls, ["construct", "status", "status"])
+
+    def test_set_on_terminal_forwards_the_exact_callback_to_the_runner(self):
+        """T16: the activation is a pure forwarding seam for the manager's
+        background-failure observer -- it never wraps or inspects it."""
+        activation, calls, _ = self.injected_activation()
+
+        def callback(reason):
+            return reason
+
+        activation.set_on_terminal(callback)
+        self.assertEqual(calls, ["construct", ("set_on_terminal", callback)])
 
 
 from prisma_runtime.channel_a_pairing import (

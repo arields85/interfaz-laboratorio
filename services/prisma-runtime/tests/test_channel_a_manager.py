@@ -36,9 +36,12 @@ CREDENTIAL_MISSING = "PRISMA_CHANNEL_A_CREDENTIAL_MISSING"
 INVALID_CREDENTIAL = "INVALID_CREDENTIAL_REQUEST"
 LIFECYCLE_UNAVAILABLE = "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE"
 COLLISION = "TELEGRAM_BOT_IDENTITY_RESERVED"
+POLL_FAILED = "PRISMA_CHANNEL_A_POLL_FAILED"
+UNAUTHORIZED = "PRISMA_CHANNEL_A_UNAUTHORIZED"
 STATUS_KEYS = {
     "configured", "desiredGeneration", "appliedGeneration",
     "activationEpoch", "activation", "lastError", "botUsername", "paired",
+    "retrying", "retryAttempt",
 }
 
 
@@ -143,6 +146,11 @@ class FakeActivation:
         self.bot_username = None
         # T15: coarse owner-agnostic pairing signal, default unpaired.
         self.paired = False
+        # T16: the manager's background-failure observer, captured but never
+        # ledger-tracked -- every pre-existing effects()/ledger assertion in
+        # this file must stay exact even though the manager now binds this on
+        # every candidate. Tests that care about it read it directly.
+        self.on_terminal = None
 
     def event(self, operation):
         self.ledger.append((self.name, operation))
@@ -176,6 +184,12 @@ class FakeActivation:
     def has_paired_owner(self):
         self.event("has_paired_owner")
         return self.paired
+
+    def set_on_terminal(self, callback):
+        # Deliberately NOT routed through event()/ledger (T16): the manager
+        # binds this on every candidate, and every pre-existing ledger-based
+        # assertion in this file must stay unaffected.
+        self.on_terminal = callback
 
 
 class ChannelAManagerTests(unittest.TestCase):
@@ -244,7 +258,7 @@ class ChannelAManagerTests(unittest.TestCase):
             "credentials.status", "configuration.read",
         ) and not (len(entry) == 2 and entry[1] in ("status", "has_paired_owner"))]
 
-    def assert_status(self, result, *, configured=True, desired=0, applied=None, epoch=None, activation=None, error=None, bot_username=None, paired=False):
+    def assert_status(self, result, *, configured=True, desired=0, applied=None, epoch=None, activation=None, error=None, bot_username=None, paired=False, retrying=False, retry_attempt=0):
         self.assertIs(type(result), dict)
         self.assertEqual(set(result), STATUS_KEYS)
         self.assertIs(result["configured"], configured)
@@ -257,6 +271,8 @@ class ChannelAManagerTests(unittest.TestCase):
         self.assertEqual(result["lastError"], error)
         self.assertEqual(result["botUsername"], bot_username)
         self.assertIs(result["paired"], paired)
+        self.assertIs(result["retrying"], retrying)
+        self.assertEqual(result["retryAttempt"], retry_attempt)
         self.assertNotIn(TOKEN, repr(result))
         self.assertNotIn(CANARY, repr(result))
 
@@ -1245,6 +1261,250 @@ class ChannelAManagerPairingTests(unittest.TestCase):
         self.assertIsNone(final["activation"])
         self.assertIsNone(final["appliedGeneration"])
         self.assertIsNone(final["activationEpoch"])
+
+
+class FakeRetryTimer:
+    """Records start/cancel without ever running on a real thread (T16)."""
+
+    def __init__(self, delay, function):
+        self.delay = delay
+        self.function = function
+        self.started = False
+        self.cancelled = False
+        self.daemon = False
+
+    def start(self):
+        self.started = True
+
+    def cancel(self):
+        self.cancelled = True
+
+
+class FakeTimerFactory:
+    def __init__(self):
+        self.created = []
+
+    def __call__(self, delay, function):
+        timer = FakeRetryTimer(delay, function)
+        self.created.append(timer)
+        return timer
+
+
+class ChannelAManagerBackgroundRecoveryTests(ChannelAManagerTests):
+    """T16: recording a background failure and an automatic backoff retry.
+
+    Inherits the offline-dispatch guard, fakes and helpers from
+    ``ChannelAManagerTests``; only the manager under test is rebuilt with an
+    injected fake timer factory so no test ever waits on a real clock.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from prisma_runtime.channel_a_manager import (
+            CHANNEL_A_RETRY_BACKOFF_FACTOR,
+            CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS,
+            CHANNEL_A_RETRY_MAX_DELAY_SECONDS,
+        )
+
+        self.INITIAL_DELAY = CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS
+        self.BACKOFF_FACTOR = CHANNEL_A_RETRY_BACKOFF_FACTOR
+        self.MAX_DELAY = CHANNEL_A_RETRY_MAX_DELAY_SECONDS
+        self.timers = FakeTimerFactory()
+        self.manager = self.Manager(
+            credential_service=self.credentials,
+            configuration_store=self.store,
+            activation_factory=self.factory,
+            reservation=self.reservation,
+            timer_factory=self.timers,
+        )
+
+    def fail_in_background(self, candidate, code):
+        """Simulate the runner's own thread reaching a NEW terminal failure:
+        reflect it in the fake's observed status too, exactly like a real
+        ``ChannelARunner`` would before calling back."""
+        candidate.observed = self.Status("failed", code, True, False)
+        candidate.on_terminal(code)
+
+    def test_status_exposes_retrying_and_retry_attempt_at_rest(self):
+        self.assert_status(self.manager.status())
+
+    def test_observe_accepts_the_new_classified_failure_codes_without_raising(self):
+        candidate, _ = self.applied()
+        for code in (POLL_FAILED, UNAUTHORIZED):
+            with self.subTest(code=code):
+                candidate.observed = self.Status("failed", code, True, False)
+                status = self.manager.status()
+                self.assertEqual(status["activation"].reason, code)
+                # Merely observing never itself records lastError (T15's root
+                # cause): only the T16 callback below does.
+                self.assertIsNone(status["lastError"])
+
+    def test_apply_binds_a_usable_background_observer_before_prepare_and_start(self):
+        candidate, _ = self.applied()
+        self.assertTrue(callable(candidate.on_terminal))
+
+    def test_apply_tolerates_a_candidate_without_a_usable_set_on_terminal(self):
+        candidate = self.new_candidate()
+        candidate.set_on_terminal = None
+        self.factory_result = candidate
+        result = self.manager.apply()
+        self.assertEqual(result["appliedGeneration"], 0)
+
+    def test_apply_tolerates_a_set_on_terminal_that_raises(self):
+        candidate = self.new_candidate()
+
+        def hostile(callback):
+            raise RuntimeError(CANARY)
+
+        candidate.set_on_terminal = hostile
+        self.factory_result = candidate
+        result = self.manager.apply()
+        self.assertEqual(result["appliedGeneration"], 0)
+
+    def test_a_transient_background_failure_is_recorded_and_schedules_one_retry(self):
+        candidate, _ = self.applied()
+        self.fail_in_background(candidate, POLL_FAILED)
+        status = self.manager.status()
+        self.assertEqual(status["lastError"], POLL_FAILED)
+        self.assertTrue(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 1)
+        self.assertEqual(len(self.timers.created), 1)
+        timer = self.timers.created[0]
+        self.assertEqual(timer.delay, self.INITIAL_DELAY)
+        self.assertTrue(timer.started)
+        self.assertTrue(timer.daemon)
+
+    def test_permanent_background_failures_are_recorded_without_scheduling_a_retry(self):
+        for code in (UNAUTHORIZED, COLLISION):
+            with self.subTest(code=code):
+                candidate, _ = self.applied()
+                self.fail_in_background(candidate, code)
+                status = self.manager.status()
+                self.assertEqual(status["lastError"], code)
+                self.assertFalse(status["retrying"])
+                self.assertEqual(status["retryAttempt"], 0)
+                self.assertEqual(self.timers.created, [])
+                self.manager.stop()
+
+    def test_a_stale_activations_failure_is_ignored_after_being_superseded(self):
+        old, _ = self.applied()
+        old_callback = old.on_terminal
+        self.assertTrue(self.manager.stop())
+        self.applied()
+        old_callback(POLL_FAILED)
+        status = self.manager.status()
+        self.assertIsNone(status["lastError"])
+        self.assertFalse(status["retrying"])
+        self.assertEqual(self.timers.created, [])
+
+    def test_retry_tick_success_settles_the_old_candidate_and_applies_a_new_one(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        self.assertTrue(self.manager.status()["retrying"])
+        timer = self.timers.created[-1]
+        self.assertEqual(len(self.candidates), 1)
+        timer.function()
+        self.assertEqual(len(self.candidates), 2)
+        new = self.candidates[-1]
+        status = self.manager.status()
+        self.assertFalse(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 0)
+        self.assertIs(status["activation"], new.observed)
+        self.assertEqual([entry for entry in self.ledger if entry == (old.name, "stop")], [(old.name, "stop")])
+
+    def test_retry_tick_failure_reschedules_with_growing_backoff(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        first_timer = self.timers.created[-1]
+        self.assertEqual(first_timer.delay, self.INITIAL_DELAY)
+
+        failing = self.new_candidate()
+        failing.prepare_result = False
+        self.factory_result = failing
+        first_timer.function()
+
+        status = self.manager.status()
+        self.assertTrue(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 2)
+        self.assertEqual(status["lastError"], LIFECYCLE_UNAVAILABLE)
+        self.assertEqual(len(self.timers.created), 2)
+        second_timer = self.timers.created[-1]
+        self.assertEqual(second_timer.delay, self.INITIAL_DELAY * self.BACKOFF_FACTOR)
+
+    def test_retry_tick_permanent_failure_stops_retrying(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        self.credentials.secret = None  # resolver.resolve() -> CREDENTIAL_MISSING (permanent)
+        timer.function()
+        status = self.manager.status()
+        self.assertFalse(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 1)
+        self.assertEqual(len(self.timers.created), 1)
+        self.assertEqual(status["lastError"], CREDENTIAL_MISSING)
+
+    def test_save_credential_cancels_a_pending_retry(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        self.manager.save_credential(TOKEN)
+        self.assertTrue(timer.cancelled)
+        status = self.manager.status()
+        self.assertFalse(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 0)
+
+    def test_delete_credential_cancels_a_pending_retry(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        self.manager.delete_credential()
+        self.assertTrue(timer.cancelled)
+        status = self.manager.status()
+        self.assertFalse(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 0)
+
+    def test_explicit_apply_cancels_a_pending_retry_before_reapplying(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        self.manager.apply()
+        self.assertTrue(timer.cancelled)
+        status = self.manager.status()
+        self.assertFalse(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 0)
+
+    def test_stop_cancels_a_pending_retry(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        self.manager.stop()
+        self.assertTrue(timer.cancelled)
+        self.assertFalse(self.manager.status()["retrying"])
+
+    def test_a_timer_that_already_fired_past_cancellation_is_a_harmless_no_op(self):
+        old, _ = self.applied()
+        self.fail_in_background(old, POLL_FAILED)
+        timer = self.timers.created[-1]
+        self.manager.stop()
+        self.ledger.clear()
+        timer.function()  # simulates the real-Timer race: already running
+        self.assertEqual(self.effects(), [])
+        self.assertFalse(self.manager.status()["retrying"])
+
+    def test_backoff_constants_match_the_documented_policy(self):
+        self.assertEqual(self.INITIAL_DELAY, 5.0)
+        self.assertEqual(self.MAX_DELAY, 300.0)
+        self.assertEqual(self.BACKOFF_FACTOR, 2.0)
+
+    def test_backoff_delay_grows_then_caps(self):
+        from prisma_runtime.channel_a_manager import _retry_delay_seconds
+
+        self.assertEqual(_retry_delay_seconds(1), 5.0)
+        self.assertEqual(_retry_delay_seconds(2), 10.0)
+        self.assertEqual(_retry_delay_seconds(3), 20.0)
+        self.assertEqual(_retry_delay_seconds(6), 160.0)
+        self.assertEqual(_retry_delay_seconds(7), 300.0)
+        self.assertEqual(_retry_delay_seconds(20), 300.0)
 
 
 if __name__ == "__main__":
