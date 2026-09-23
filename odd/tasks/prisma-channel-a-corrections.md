@@ -78,18 +78,28 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   with `aria-label` (`VoiceCredentialSettings.tsx`, `HmiButton` aria passthrough if needed,
   tests). Route: delegated (frontend writer). Commit `2d954d8`.
 
-- [ ] **T1b** Launcher always starts Prisma (user decision 2026-09-23, supersedes T1's
+- [x] **T1b** Launcher always starts Prisma (user decision 2026-09-23, supersedes T1's
   fail-closed refusal): reuse a verified healthy runtime of this repo; otherwise stop any
   verified leftover Prisma processes of this repo on 5056/5057 (never owner PIDs, never
   non-Prisma processes), discard the old manifest regardless of owner state, start fresh.
   If a non-Prisma process holds a port: clear terminal message naming port, process name
   and PID, and a structured failure (`port_in_use` + detected port) in the dev receipt.
-  Route: delegated (writer). Trigger: 2+ non-trivial files.
-- [ ] **T4b** Pairing popover shows the detected busy port: `dev.mjs` passes the receipt
+  Route: delegated (writer). Trigger: 2+ non-trivial files. Commit `5bf9fa4`.
+- [x] **T4b** Pairing popover shows the detected busy port: `dev.mjs` passes the receipt
   failure to Vite; the Prisma proxy answers unreachable requests with a JSON failure
   (reason + port); service/hook/popover show "Prisma no se pudo iniciar: el puerto <port>
-  está en uso por otro programa." Port comes from data, never a UI literal.
-  Route: delegated (same writer, after T1b).
+  está en uso por otro programa." Port comes from data, never a UI literal. Also converted
+  the 5 pre-existing voseo/tuteo strings in `PrismaPairingControl.tsx` to usted per the
+  2026-09-23 decision. Route: delegated (same writer, after T1b). Commit `c4cf0f1`.
+
+- [ ] **T8** (prisma-runtime committed; hmi-app implemented/GREEN but commit blocked —
+  see Progress) Convert all user-facing Spanish copy to formal usted (user decision
+  2026-09-23; rule now in `AGENTS.md` §5 / `docs/CONVENTIONS.md`, commit `c53e97a`). Sweep
+  hmi-app/src (labels, placeholders, tooltips, aria-labels, errors, empty states, toasts)
+  and their tests, Prisma runtime fixed user-facing messages (Telegram bot replies,
+  channel A messages) and their Python tests, and any LLM prompt instructing/exemplifying
+  voseo. Never touch non-user-facing code/identifiers/comments/docs or `Directrices/`.
+  Route: delegated (same writer). Commit `4a6b4a5` (prisma-runtime); hmi-app blocked.
 
 ## Acceptance criteria
 
@@ -233,6 +243,168 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   start Prisma "si o si" (T1b); popover must show the detected busy port (T4b); ports
   5056/5057 stay fixed across the stack (no configurable-ports task).
 
+- 2026-09-23: T1b done. `process-ownership.ps1`: removed T1's now-redundant
+  `Test-PrismaStaleDevelopmentManifest` (owner liveness is no longer relevant to the
+  recovery decision at all); added `Resolve-PrismaPortState` (one Get-NetTCPConnection
+  call per port, classifies `free` / `ours` (verified this repo's Prisma module,
+  stoppable) / `foreign` (never a stop target)) and `Test-PrismaDevelopmentRuntimeHealthy`
+  (single-attempt /health check on both ports, no retry loop, distinct from
+  Wait-VoiceReady/Wait-PresentationReady's polling). `start-local.ps1`'s
+  `Invoke-PrismaStartTransaction`: dev-owned canonical manifest is now reused only when
+  BOTH `Test-PrismaDevelopmentRuntimeIdentity` AND `Test-PrismaDevelopmentRuntimeHealthy`
+  pass (previously identity alone, and an identity mismatch threw instead of recovering);
+  manual (no `developmentOwnership`) manifests keep today's unconditional reuse. Every
+  other case (missing/partial/ambiguous/unhealthy/identity-mismatched manifest, or no
+  manifest at all) now recovers instead of refusing or throwing: scans 5056/5057 first
+  (before touching anything) for a non-Prisma occupant -- if found, throws a message
+  naming port/process-name(or "another program")/PID and writes a structured
+  `{registered:false, failure:{reason:'port_in_use', port, processName, pid}}` dev receipt
+  (documented inline; consumed by dev.mjs in T4b) -- otherwise stops only verified Prisma
+  listeners of this repo, waits briefly for the ports to free, discards the old manifest
+  regardless of owner state, and warns once. Owner liveness (dead/unknown/alive) plays no
+  role in this decision anymore (test still proves no owner pid is ever a stop target).
+  Tests: removed the now-obsolete `Test-PrismaStaleDevelopmentManifest` unit test; reversed
+  `test_start_local_still_refuses_when_owner_liveness_is_not_provably_dead` into
+  `test_start_local_always_recovers_a_dev_owned_manifest_regardless_of_owner_liveness`
+  (dead/alive/unknown, parametrized); rewrote the partial-manifest refusal test into
+  `test_partial_owned_manifest_now_recovers_instead_of_refusing`; added
+  `test_start_local_stops_leftover_verified_listeners_with_no_manifest_and_recovers`,
+  `test_start_local_reuses_a_healthy_verified_runtime_without_stopping_or_starting`,
+  `test_start_local_recovers_an_identity_verified_but_unhealthy_runtime`,
+  `test_start_local_reports_and_never_stops_a_foreign_process_holding_a_port`,
+  `test_start_local_reports_another_program_when_the_occupant_name_cannot_be_resolved`;
+  added a healthy `Invoke-RestMethod` stub to the 3 pre-existing dev-reuse tests that now
+  exercise the new health check (`_assert_failed_receipt_handoff_rolls_back`,
+  `test_concurrent_acquisitions_...`, `test_warm_acquisition_...`). RED observed via actual
+  failing runs while iterating (3 then 1 genuine failures from miscounted
+  Get-NetTCPConnection call budgets across the new port-state/health-check paths, fixed by
+  recomputing exact call counts per scenario, never by loosening an assertion). GREEN: full
+  `test_runtime_safety` + `test_operations` 53/53; full repo `unittest discover` 1138/1138.
+  Commit `5bf9fa4`.
+- 2026-09-23: T4b implemented and GREEN, but NOT committed -- see "T4b commit blocked"
+  below for the exact conflict needing a decision.
+  `hmi-app/scripts/dev.mjs`: `acquire()` now inspects the dev receipt (before the
+  `finally` block deletes it) when `start-local.ps1` exits non-zero, via
+  `parsePrismaStartupFailure()` (validates `registered===false`, `reason` in a known set,
+  `port` an integer 1-65535); a valid failure is attached as `.failure` on the thrown
+  Error. `runDevelopment` reads `.failure` off a caught acquisition error and forwards
+  `{PRISMA_STARTUP_FAILURE: JSON.stringify(...)}` as `extraEnvironment` to `spawnVite`;
+  `createViteLauncher` only overrides the child's `env` (merged with `process.env`) when
+  `extraEnvironment` is non-empty, otherwise unchanged inheritance. `vite.prismaProxy.
+  config.ts`: every route's `configure` now also registers `proxy.on('error', ...)`
+  (previously only `stripSessionCapability` routes had a `configure` at all), answering a
+  JSON 503 `{error:'prisma_runtime_unreachable'[, reason, port]}` (reading
+  `PRISMA_STARTUP_FAILURE` via `readPrismaStartupFailure()`, same validation as dev.mjs)
+  instead of Vite's bodiless default 500, guarded on `headersSent`. Domain/service: added
+  `ChannelARuntimeUnreachableDetail` to `channelAPairing.types.ts`; `PrismaChannelAPairingError`
+  gets an optional `.detail`; `requestPairing()` recognizes the proxy's JSON marker
+  (`isRuntimeUnreachableMarker`) and maps it to `runtime_unreachable` with
+  `parseRuntimeUnreachableDetail()` BEFORE the 409/unavailable branches, so it takes
+  precedence over T4's "non-2xx with valid JSON = unavailable" rule as required. Hook:
+  `useChannelAPairing` adds `unreachableDetail` state (set from
+  `runtimeUnreachableDetailOf(error)` alongside phase `'unreachable'`; cleared on every
+  other phase transition and on session reset) and returns it. Component: `pairingStatusCopy`
+  takes the detail and calls `runtimeUnreachableCopy()`, which renders "Prisma no se pudo
+  iniciar: el puerto {port} está en uso por otro programa." only when
+  `detail?.reason === 'port_in_use'` (port always from data), else keeps T4's generic copy;
+  T4's hint line and retry-polling behavior are unchanged. Audited every other
+  `/api/prisma/*` consumer (session bootstrap, voice events poll, TTS live, snapshot,
+  voice-config adapter, admin auth/credentials) for the 500-bodiless -> 503-JSON change:
+  all either check `!response.ok` before ever touching the body, or (session bootstrap)
+  end up throwing the same generic error regardless of body shape -- no regressions.
+  RED verified per file by stashing only that file's implementation (git stash push -- <file>,
+  run its test file, git stash pop) and observing the exact new/updated tests fail for
+  `dev.mjs` (5), `vite.prismaProxy.config.ts` (9), `prismaChannelAPairing.service.ts` (5),
+  `useChannelAPairing.ts` (2), `PrismaPairingControl.tsx` (1) -- domain type additions have
+  no independent RED (structural). GREEN: full `npm test` 209 files / 2224 tests pass;
+  `npx tsc -b --noEmit` clean; `npm run lint` clean.
+
+  **T4b commit blocked (needs a decision):** `git commit` for T4b was refused by the
+  repo's GGA pre-commit hook (Claude-provider code review against `AGENTS.md`), which
+  reviews each staged file's FULL current content, not just the diff. It flagged 5
+  PRE-EXISTING voseo/tuteo strings in `PrismaPairingControl.tsx` that T4/T1b never touched
+  ("Configurá...", "Revisá...", "Reiniciá el lanzador...", "Confirma el destino...",
+  "Escanea el código QR..."), citing AGENTS.md's usted-register rule. The new T4b string
+  ("Prisma no se pudo iniciar: el puerto...") is already correct usted per the 2026-09-23
+  coordinator instruction, which also explicitly said NOT to rewrite the pre-existing
+  voseo strings in this file (a separate task owns that conversion, to avoid overlap).
+  Fixing the hook's finding would mean rewriting those 5 strings against that explicit
+  instruction; leaving them means the commit stays blocked. No `--no-verify` was used (not
+  authorized). All T4b files remain staged, uncommitted, working tree otherwise clean.
+  **Needs a decision:** (a) authorize fixing the 5 pre-existing strings in this file as
+  part of the T4b commit (overrides the "leave voseo alone" instruction for this one
+  file), or (b) run the separate voseo-conversion task first then retry this commit, or
+  (c) some other resolution (e.g. hook scope/config change) -- out of this writer's
+  authority to decide.
+
+- 2026-09-23: T4b committed (`c4cf0f1`) after the coordinator decided option (a): fixed
+  the 5 pre-existing voseo/tuteo strings in `PrismaPairingControl.tsx` as part of the T4b
+  commit ("Configurá"->"Configure", "Revisá"->"Revise", "Reiniciá el lanzador..."->
+  "Reinicie el lanzador...", "Confirma el destino..."->"Confirme el destino...",
+  "Escanea...confirma..."->"Escanee...confirme..."), updated the 5 matching test
+  assertions (RED confirmed against the unfixed source, then GREEN). Full `npm test`
+  209/2224 pass (one unrelated Dashboard.test.tsx flake reproduced only under full-suite
+  parallelism, confirmed passing in isolation and on suite re-run); `tsc -b --noEmit` and
+  `eslint` clean. GGA PASSED with 2 non-blocking notes (pre-existing `PrismaStartupFailure`
+  type/range-check duplication between the Vite proxy and the service; pre-existing fixed
+  `QRCodeSVG size={256}` that `className="h-auto w-full"` already overrides) -- neither
+  touched, out of scope.
+
+- 2026-09-23: T8 started. Swept hmi-app/src and services/prisma-runtime/src for voseo
+  (vos/-és/-á imperatives, "sos", "vos") and tuteo (tú conjugations, "tu/tus/te") in
+  user-facing Spanish, using layered ripgrep passes (curated verb lists, word-final
+  á/é/í case-sensitive AND case-insensitive, tú-conjugation list, "¿...querés/podés/
+  tenés/deseás...?" questions) plus manual review of every hit to exclude JSDoc/code
+  comments, names ("José", "Rodó"), demonstratives ("estas reglas"), nouns ("haces" =
+  beams), and infinitives (already-correct impersonal forms like "Dejar vacío para
+  deshabilitar."). Fixed 27 hmi-app source files (dialogs, admin panels, EPPI viewer
+  mock fixtures, HierarchyPage, DashboardBuilderPage/DashboardManagerPage, LoginOverlay,
+  ErrorState, hierarchyResolver's empty-reason copy, adminSession rate-limit message,
+  templateAspectMismatch) and their test files where a test pinned the literal old text
+  (LoginOverlay, Dashboard, EppiViewer, VoiceCredentialSettings +
+  GlobalSettingsDialog.voice.integration, TemporalSettingsTab, NodeTypeConfigDialog,
+  PropertyDock -- 8 test files updated in total); most other hits (HierarchyPage,
+  DashboardManagerPage, DashboardBuilderPage, LoaderOptionsSettingsTab, ErrorState,
+  adminSession.controller, templateAspectMismatch, hierarchyResolver, ADMIN_CONVENTIONS.md)
+  had no test pinning the literal string (source-only fix). Fixed 3 services/prisma-runtime
+  Python files (`channel_a_bot.py`'s `CONFIRMATION_PROMPT_TEMPLATE`/`WELCOME_TEMPLATE`/
+  `COPY_DESTINATION_UNAVAILABLE`/`COPY_ACTION_REFUSED`/`COPY_INACTIVITY_WARNING`,
+  `channel_a_query.py`'s `COPY_QUERY_UNAVAILABLE`, `local_presentation.py`'s two Telegram
+  `/start`/`/help` replies); every Python test referencing these messages imports the
+  constant rather than hardcoding the literal, so no test needed changes (verified before
+  editing). Searched for an LLM/Gemini system prompt instructing or exemplifying voseo:
+  none found -- `voice_service.py`'s `build_tts_prompt` is an English audio-synthesis
+  instruction to the TTS model, and the local Q&A answers (`answer_from_snapshot`) are
+  deterministic Python string templates, not an LLM call. Prisma runtime GREEN: full
+  `python -m unittest discover` 1138/1138 (no test needed updating, but full suite run
+  as a safety check anyway). Commit `4a6b4a5`.
+
+  hmi-app commit **also blocked** by the same class of pre-existing-content GGA finding
+  as T4b's first attempt, but on a NEW set of files: `ErrorState.tsx` (line 29,
+  `bg-[#1a0b0f]` raw hex instead of a token), `DashboardManagerPage.tsx` (default
+  Tailwind palette `hover:bg-violet-500/20`/`hover:text-violet-400` and
+  `hover:bg-red-500/20`/`hover:text-red-400` on two action buttons instead of the
+  project's `--color-status-critical` token already used elsewhere in the same file for
+  an equivalent button), and `PropertyDock.tsx` (`group-hover:drop-shadow-[0_0_5px_rgba(
+  255,255,255,0.4)]` hardcoded in every legacy toggle, instead of reusing the file's own
+  token-based `TREND_CHART_V2_TOGGLE_LABEL_CLS` pattern). GGA confirmed the usted
+  conversion itself is correct in all 18 reviewed files and flagged no remaining voseo/
+  tuteo. Per this task's explicit instruction ("fix only register issues; if it flags
+  other unrelated pre-existing issues in a file you touched only for copy, stop and
+  report the exact output instead of expanding scope"), none of these 3 hardcoded-color
+  findings were touched -- they predate this task and are unrelated to register. All 27
+  hmi-app files remain staged, uncommitted. GGA also left 2 non-blocking notes (missing
+  accents on some pre-existing words like "Duracion"/"Miercoles"/"Todavia"/"Cerrar
+  sesion", and fixed default dates in `EppiLabelDialog.tsx`'s `FIELD_SETS`) -- also
+  pre-existing, also untouched.
+
+- 2026-09-23 (parent): committed 23 of the 27 staged hmi-app T8 files as `039bf14`
+  (GGA PASSED; notes: missing accents in some strings, English info-card defaults — both
+  outside register scope). Held back, still unstaged-modified with usted changes:
+  `ErrorState.tsx`, `DashboardManagerPage.tsx`, `PropertyDock.tsx` + test, because GGA
+  flags pre-existing hardcoded colors there. T4b checked (`c4cf0f1`).
+
 ## Next step
 
-Writer: T1b then T4b. Afterwards the user verifies manually with the real launcher.
+User decision: fix the 3 pre-existing hardcoded-color spots so the last 4 T8 files can be
+committed. Then manual verification with the real launcher.
