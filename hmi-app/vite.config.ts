@@ -8,6 +8,11 @@ export default defineConfig(({ mode }) => {
   const enforceCoverageThresholds = mode !== 'coverage-focused'
 
   return {
+    // T4c: Vite clears the terminal on dev server start by default, which erases the
+    // launcher's own pre-Vite messages (e.g. start-local.ps1's "Prisma could not start:
+    // port ... is in use by ..." warning, printed by dev.mjs before it ever spawns Vite).
+    // See https://vite.dev/config/shared-options.html#clearscreen.
+    clearScreen: false,
     server: {
       proxy: createPrismaProxyConfig(),
     },
