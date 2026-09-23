@@ -92,14 +92,14 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   the 5 pre-existing voseo/tuteo strings in `PrismaPairingControl.tsx` to usted per the
   2026-09-23 decision. Route: delegated (same writer, after T1b). Commit `c4cf0f1`.
 
-- [ ] **T8** (prisma-runtime committed; hmi-app implemented/GREEN but commit blocked —
-  see Progress) Convert all user-facing Spanish copy to formal usted (user decision
+- [x] **T8** Convert all user-facing Spanish copy to formal usted (user decision
   2026-09-23; rule now in `AGENTS.md` §5 / `docs/CONVENTIONS.md`, commit `c53e97a`). Sweep
   hmi-app/src (labels, placeholders, tooltips, aria-labels, errors, empty states, toasts)
   and their tests, Prisma runtime fixed user-facing messages (Telegram bot replies,
   channel A messages) and their Python tests, and any LLM prompt instructing/exemplifying
   voseo. Never touch non-user-facing code/identifiers/comments/docs or `Directrices/`.
-  Route: delegated (same writer). Commit `4a6b4a5` (prisma-runtime); hmi-app blocked.
+  Route: delegated (same writer). Commits `4a6b4a5` (prisma-runtime), `039bf14` (23 of 27
+  hmi-app files, parent-committed), `02d9695` (remaining 4 hmi-app files + color-token fix).
 
 ## Acceptance criteria
 
@@ -404,7 +404,40 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   `ErrorState.tsx`, `DashboardManagerPage.tsx`, `PropertyDock.tsx` + test, because GGA
   flags pre-existing hardcoded colors there. T4b checked (`c4cf0f1`).
 
+- 2026-09-23: T8 finished (user authorized fixing the 3 pre-existing hardcoded-color
+  spots). Chose the token for each by intent, reusing existing `--color-*` tokens only
+  (no new token added):
+  - `ErrorState.tsx`: `bg-[#1a0b0f]` -> `bg-accent-ruby/10`. Verified this is not a
+    cosmetic swap: `#ef4444` (accent-ruby) alpha-blended at 10% over `--color-industrial-bg`
+    (`#05070a`) computes to ~`#1c0d10`, matching the documented literal `#1a0b0f` within
+    rounding — the same token+opacity pattern `bg-accent-ruby/10`/`bg-accent-cyan/10`
+    already used for status tints elsewhere (`AlertsPage.tsx`). `docs/DESIGN_SYSTEM.md`
+    (root) explicitly names raw hex as the theming-break problem GGA flagged; the
+    per-status hex table in `hmi-app/src/styles/design-system.md` documents the
+    *resulting* color, not a mandate to hardcode it.
+  - `DashboardManagerPage.tsx`: "Guardar como Template" `hover:bg-violet-500/20
+    hover:text-violet-400` -> `hover:bg-accent-pink/20 hover:text-accent-pink` (matches
+    the TEMPLATE `AdminTag`'s own `variant="pink"` color, right next to this button in the
+    same row). "Eliminar" `hover:bg-red-500/20 hover:text-red-400` -> `hover:bg-white/10
+    hover:[color:var(--color-status-critical)]`, mirroring the sibling "Eliminar template"
+    button in the same file exactly (the pattern GGA cited as proof a token exists).
+  - `PropertyDock.tsx`: all 14 occurrences of `group-hover:drop-shadow-[0_0_5px_rgba(
+    255,255,255,0.4)]` -> `group-hover:drop-shadow-[0_0_5px_var(--color-industrial-text)]`,
+    same structure as the file's own token-based `TREND_CHART_V2_TOGGLE_LABEL_CLS`
+    (`drop-shadow-[0_0_5px_var(--color-admin-accent)]`), just swapping the token to match
+    these toggles' existing white-family text color instead of extracting a new shared
+    constant (kept the fix minimal, no unrequested refactor).
+  Reasoned that true hunk-level two-commit splitting (color-only then usted-only) was not
+  achievable without GGA re-flagging the *other* unfixed axis at the intermediate commit
+  (GGA reviews full staged file content fresh each time, not a diff), so used the
+  coordinator-authorized single-commit fallback for these 4 files. Focused
+  `PropertyDock.test.tsx` + `DashboardManagerPage.test.tsx` 94/94; full `npm test`
+  209 files / 2224 tests; `tsc -b --noEmit` and `eslint` clean. GGA PASSED (2 non-blocking
+  notes: `hover:[color:var(...)]` vs the more common `hover:text-status-critical` form,
+  and pre-existing English info-card copy in `PropertyDock.tsx` — neither touched).
+  Commit `02d9695`.
+
 ## Next step
 
-User decision: fix the 3 pre-existing hardcoded-color spots so the last 4 T8 files can be
-committed. Then manual verification with the real launcher.
+T1b (`5bf9fa4`), T4b (`c4cf0f1`) and T8 (`4a6b4a5`, `039bf14`, `02d9695`) are all
+committed. Next step: manual verification with the real launcher (user).
