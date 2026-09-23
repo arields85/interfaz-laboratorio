@@ -1050,6 +1050,49 @@ describe('VoiceCredentialSettings', () => {
         expect(await screen.findByRole('alert')).toHaveTextContent('Ya hay una verificación en curso. Espere a que finalice.');
     });
 
+    it.each([
+        ['Canal A' as const, 'verifyChannelA' as const, 'PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS', 'Ya hay una verificación en curso. Espere a que finalice.'],
+        ['Canal B' as const, 'verifyTelegram' as const, 'TELEGRAM_VERIFICATION_IN_PROGRESS', 'Ya hay una verificación en curso. Espere a que finalice.'],
+    ])('shows a safe message when a concurrent %s verification is rejected', async (groupName, clientMethod, code, expectedText) => {
+        const user = userEvent.setup();
+        renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => channelARunning),
+            [clientMethod]: vi.fn(async () => { throw new AdminAuthError(code, 409, false); }),
+        });
+        const group = await screen.findByRole('group', { name: groupName });
+        await within(group).findByRole('img', { name: 'Verificación: no realizada' });
+        const verify = within(group).getByRole('button', { name: 'Verificar' });
+        expect(verify).toBeEnabled();
+
+        await user.click(verify);
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(expectedText);
+    });
+
+    it.each([
+        ['Canal A' as const, 'verifyChannelA' as const, 'PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE', 'La verificación del Canal A no está disponible.'],
+        ['Canal B' as const, 'verifyTelegram' as const, 'TELEGRAM_VERIFICATION_UNAVAILABLE', 'La verificación del Canal B no está disponible.'],
+    ])('shows the exact safe message when %s verification is reported unavailable, never the raw code', async (
+        groupName, clientMethod, code, expectedText,
+    ) => {
+        const user = userEvent.setup();
+        renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => channelARunning),
+            [clientMethod]: vi.fn(async () => { throw new AdminAuthError(code, 503, false); }),
+        });
+        const group = await screen.findByRole('group', { name: groupName });
+        await within(group).findByRole('img', { name: 'Verificación: no realizada' });
+        const verify = within(group).getByRole('button', { name: 'Verificar' });
+        expect(verify).toBeEnabled();
+
+        await user.click(verify);
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(expectedText);
+        expect(screen.queryByText(code)).not.toBeInTheDocument();
+    });
+
     it('never renders a verification claim before Gemini metadata has loaded', async () => {
         renderSettings({ credentialMetadata: vi.fn(() => new Promise<typeof metadata>(() => undefined)) });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });

@@ -70,6 +70,10 @@ function errorText(error: unknown): string {
         INVALID_CREDENTIAL_REQUEST: 'La solicitud de credencial es inválida.',
         GEMINI_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
         GEMINI_VERIFICATION_UNAVAILABLE: 'La verificación de Gemini no está disponible.',
+        TELEGRAM_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
+        TELEGRAM_VERIFICATION_UNAVAILABLE: 'La verificación del Canal B no está disponible.',
+        PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
+        PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE: 'La verificación del Canal A no está disponible.',
     }[code] ?? 'No se pudo completar la operación con el servicio local.';
 }
 
