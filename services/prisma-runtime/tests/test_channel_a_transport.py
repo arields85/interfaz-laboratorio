@@ -78,10 +78,17 @@ class FakeResponse:
 
 
 class FakeSession:
-    """An owned session whose ``post`` records the exact URL and keyword arguments."""
+    """An owned, T7-reused session whose ``post`` records the exact URL and
+    keyword arguments of every call made against it (not just the first).
 
-    def __init__(self, response=None, *, post_error=None, close_error=None, before_post=None):
+    ``responses``, when given, hands out one queued response per call instead
+    of the single fixed ``response`` -- used to exercise several distinct Bot
+    API calls sharing the one reused session.
+    """
+
+    def __init__(self, response=None, *, post_error=None, close_error=None, before_post=None, responses=None):
         self.response = response
+        self.responses = list(responses) if responses is not None else None
         self.post_error = post_error
         self.close_error = close_error
         self.before_post = before_post
@@ -94,6 +101,8 @@ class FakeSession:
             self.before_post()
         if self.post_error is not None:
             raise self.post_error
+        if self.responses:
+            return self.responses.pop(0)
         return self.response
 
     def close(self):
@@ -590,20 +599,20 @@ class GetUpdatesTests(ChannelATransportTestCase):
         )
 
     def test_only_get_updates_uses_the_two_value_http_timeout(self):
+        """T7: all four calls share the one reused session."""
         bodies = (
             {"ok": True, "result": {"message_id": 1}},
             {"ok": True},
             {"ok": True, "result": {"id": 1, "is_bot": True, "username": "prisma_bot"}},
             {"ok": True, "result": []},
         )
-        sessions = [FakeSession(FakeResponse(200, body)) for body in bodies]
-        factory = SessionFactory(*sessions)
-        transport = ChannelATransport(TOKEN, request_timeout=2, session_factory=factory)
+        session = FakeSession(responses=[FakeResponse(200, body) for body in bodies])
+        transport = ChannelATransport(TOKEN, request_timeout=2, session_factory=SessionFactory(session))
         transport.send_message(chat_id=CHAT_ID, text="hola")
         transport.answer_callback_query(callback_query_id=CALLBACK_ID)
         transport.get_me()
         transport.get_updates(poll_timeout=5, read_timeout=7)
-        self.assertEqual([session.calls[0][1]["timeout"] for session in sessions], [2, 2, 2, (2, 7)])
+        self.assertEqual([call[1]["timeout"] for call in session.calls], [2, 2, 2, (2, 7)])
 
     def test_get_updates_includes_a_valid_offset_and_omits_an_absent_one(self):
         for offset in (0, MAX_TELEGRAM_ID + 1):
@@ -693,7 +702,7 @@ class MappingAccessorTests(ChannelATransportTestCase):
                 with self.assertRaises(ChannelATransportError) as raised:
                     transport.send_message(chat_id=CHAT_ID, text="hola")
                 self.assert_unavailable(raised.exception)
-                self.assertEqual(session.close_calls, 1)
+                self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
 
     def test_two_hundred_effect_body_is_returned_by_identity_without_touching_accessors(self):
         body = ThrowingGetMapping({"ok": False}, RuntimeError(CANARY))
@@ -701,7 +710,7 @@ class MappingAccessorTests(ChannelATransportTestCase):
         transport = self.build(session)
         self.assertIs(transport.send_message(chat_id=CHAT_ID, text="hola"), body)
         self.assertEqual(body.get_calls, 0)
-        self.assertEqual(session.close_calls, 1)
+        self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
 
     def test_discovery_normalizes_a_throwing_outer_get(self):
         for error in (RuntimeError(CANARY), ChannelATransportError(CANARY)):
@@ -712,7 +721,7 @@ class MappingAccessorTests(ChannelATransportTestCase):
                     with self.assertRaises(ChannelATransportError) as raised:
                         call(transport)
                     self.assert_unavailable(raised.exception)
-                    self.assertEqual(session.close_calls, 1)
+                    self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
 
     def test_discovery_normalizes_a_throwing_result_extraction(self):
         for error in (RuntimeError(CANARY), ChannelATransportError(CANARY)):
@@ -729,7 +738,7 @@ class MappingAccessorTests(ChannelATransportTestCase):
                     self.assertEqual(body.keys_seen, ["ok", "result"])
                     self.assertEqual(body.get_calls, 2)
                     self.assertEqual(response.close_calls, 1)
-                    self.assertEqual(session.close_calls, 1)
+                    self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
 
     def test_identity_fields_normalize_a_throwing_nested_get(self):
         for field in ("id", "is_bot", "username"):
@@ -743,7 +752,7 @@ class MappingAccessorTests(ChannelATransportTestCase):
                     with self.assertRaises(ChannelATransportError) as raised:
                         transport.get_me()
                     self.assert_unavailable(raised.exception)
-                    self.assertEqual(session.close_calls, 1)
+                    self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
 
 
 class TransportBoundaryTests(ChannelATransportTestCase):
@@ -798,7 +807,7 @@ class TransportBoundaryTests(ChannelATransportTestCase):
                     transport.send_message(chat_id=CHAT_ID, text="hola")
                 self.assert_unavailable(raised.exception)
                 self.assertNotIn(CANARY, str(raised.exception))
-                self.assertEqual(session.close_calls, 1)
+                self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
 
     def test_same_class_dependency_errors_are_normalized_instead_of_rethrown(self):
         cases = (
@@ -813,7 +822,7 @@ class TransportBoundaryTests(ChannelATransportTestCase):
                     transport.send_message(chat_id=CHAT_ID, text="hola")
                 self.assert_unavailable(raised.exception)
                 self.assertNotIn(CANARY, str(raised.exception))
-                self.assertEqual(session.close_calls, 1)
+                self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
 
     def test_factory_failure_is_sanitized_and_closes_nothing(self):
         def factory():
@@ -830,7 +839,8 @@ class TransportBoundaryTests(ChannelATransportTestCase):
         self.assertNotIn(TOKEN, repr(transport))
         self.assertNotIn(TOKEN, str(transport))
 
-    def test_response_and_session_are_closed_once_per_call(self):
+    def test_response_is_closed_once_per_call_and_the_session_survives_it(self):
+        """T7: the response is still closed every call; the owned session is not."""
         for response in (FakeResponse(200, {"ok": True}), FakeResponse(500, {"ok": False})):
             with self.subTest(status=response.status_code):
                 session = FakeSession(response)
@@ -840,6 +850,8 @@ class TransportBoundaryTests(ChannelATransportTestCase):
                 except ChannelATransportError:
                     pass
                 self.assertEqual(response.close_calls, 1)
+                self.assertEqual(session.close_calls, 0)
+                transport.close()
                 self.assertEqual(session.close_calls, 1)
 
     def test_cleanup_failures_never_mask_a_result(self):
@@ -848,6 +860,7 @@ class TransportBoundaryTests(ChannelATransportTestCase):
         transport = self.build(session)
         self.assertIs(transport.send_message(chat_id=CHAT_ID, text="hola"), response._body)
         self.assertEqual(response.close_calls, 1)
+        transport.close()  # must not raise despite the session's close_error
         self.assertEqual(session.close_calls, 1)
 
     def test_cleanup_failures_never_mask_the_fixed_error(self):
@@ -858,6 +871,7 @@ class TransportBoundaryTests(ChannelATransportTestCase):
             transport.send_message(chat_id=CHAT_ID, text="hola")
         self.assert_unavailable(raised.exception)
         self.assertEqual(response.close_calls, 1)
+        transport.close()  # must not raise despite the session's close_error
         self.assertEqual(session.close_calls, 1)
 
     def test_cleanup_attempts_are_independent(self):
@@ -866,6 +880,7 @@ class TransportBoundaryTests(ChannelATransportTestCase):
         transport = self.build(session)
         transport.send_message(chat_id=CHAT_ID, text="hola")
         self.assertEqual(response.close_calls, 1)
+        transport.close()
         self.assertEqual(session.close_calls, 1)
 
     def test_source_declares_no_webhook_offset_loop_sleep_or_environment_read(self):
@@ -990,21 +1005,42 @@ class ConcurrencyTests(ChannelATransportTestCase):
             )
         )
 
-    def test_concurrent_send_and_poll_hold_owned_sessions_without_a_shared_lock(self):
+    def test_concurrent_send_and_poll_share_the_reused_session_without_serializing(self):
+        """T7: send and poll now run over the SAME reused session, concurrently.
+
+        The one owned session is warmed up first with a synchronous call --
+        exactly how a real activation always calls ``get_me()`` in ``prepare()``
+        before any concurrent send/poll can start -- so the lazy-creation race
+        this transport deliberately does not lock against is never reached
+        here. After that, ``before_post`` only ever fires for the concurrent
+        send and poll below, proving the shared session's ``post`` is not
+        serialized by anything this transport itself holds.
+        """
         send_entered = threading.Event()
         release_send = threading.Event()
-        send_response = FakeResponse(200, {"ok": True, "result": {"message_id": 1}})
-        poll_response = FakeResponse(200, ok_body([{"update_id": 7}]))
+        warmup_response = FakeResponse(200, ok_body({"id": 987654321, "is_bot": True, "username": "prisma_bot"}))
         release_observed = []
+        call_count = {"n": 0}
 
-        def enter_post():
-            send_entered.set()
-            release_observed.append(release_send.wait(5))
+        def before_post():
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                # Exactly the concurrent send call (1 = the warm-up get_me, 3 =
+                # the poll running on the main thread, which must never itself
+                # wait on the release it is the one about to set).
+                send_entered.set()
+                release_observed.append(release_send.wait(5))
 
-        send_session = FakeSession(send_response, before_post=enter_post)
-        poll_session = FakeSession(poll_response)
-        factory = SessionFactory(send_session, poll_session)
+        # A single response shape valid for both a send's pass-through result
+        # and getUpdates' list-of-mappings validation (the empty list).
+        session = FakeSession(
+            FakeResponse(200, {"ok": True, "result": []}),
+            responses=[warmup_response],
+            before_post=before_post,
+        )
+        factory = SessionFactory(session)
         transport = ChannelATransport(TOKEN, request_timeout=TIMEOUT, session_factory=factory)
+        transport.get_me()  # warm-up: single-threaded session creation
         results = {}
         worker_errors = []
 
@@ -1087,46 +1123,51 @@ class ConcurrencyTests(ChannelATransportTestCase):
             self.fail(
                 f"the send and poll case did not complete cleanly: {'; '.join(body_causes + other_causes)}"
             )
-        self.assertIs(results["send"], send_response._body)
-        self.assertEqual(results["updates"], ({"update_id": 7},))
-        self.assertIsNot(send_session, poll_session)
-        self.assertEqual(len(send_session.calls), 1)
-        self.assertEqual(len(poll_session.calls), 1)
-        self.assertEqual(send_session.calls[0][1]["json"], {"chat_id": CHAT_ID, "text": "hola"})
+        self.assertEqual(results["send"], {"ok": True, "result": []})
+        self.assertEqual(results["updates"], ())
+        send_call = next(call for call in session.calls if "chat_id" in call[1]["json"])
+        poll_call = next(call for call in session.calls if "timeout" in call[1]["json"])
+        self.assertEqual(send_call[1]["json"], {"chat_id": CHAT_ID, "text": "hola"})
         self.assertEqual(
-            poll_session.calls[0][1]["json"],
+            poll_call[1]["json"],
             {"timeout": 1, "limit": 100, "allowed_updates": ["message", "callback_query"]},
         )
-        self.assertEqual(poll_session.calls[0][1]["timeout"], (TIMEOUT, 2))
-        self.assertEqual((send_session.close_calls, poll_session.close_calls), (1, 1))
-        self.assertEqual((send_response.close_calls, poll_response.close_calls), (1, 1))
-        self.assertEqual(len(factory.calls), 2)
+        self.assertEqual(poll_call[1]["timeout"], (TIMEOUT, 2))
+        # T7: one call recorded the warm-up get_me, plus the concurrent send and poll.
+        self.assertEqual(len(session.calls), 3)
+        self.assertEqual(session.close_calls, 0)  # never closed per call
+        self.assertEqual(len(factory.calls), 1)  # the one session, reused throughout
+        transport.close()
+        self.assertEqual(session.close_calls, 1)
 
-    def test_concurrent_sends_are_not_serialized_by_a_transport_lock(self):
+    def test_concurrent_sends_share_the_reused_session_without_serializing(self):
+        """T7: two concurrent sends now run over the SAME reused session.
+
+        Warmed up first (see the sibling send/poll test above for why), then
+        both sends rendezvous at a two-party barrier before either may post,
+        so neither can complete unless both are genuinely in flight at once --
+        proving nothing this transport holds serializes them.
+        """
         barrier = threading.Barrier(2)
         results = []
         worker_errors = []
         rendezvous = []
+        call_count = {"n": 0}
 
-        def wait_for_peer(index):
-            """The rendezvous one session must complete before it posts."""
+        def before_post():
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return  # the synchronous warm-up get_me call: no rendezvous
+            # The party position is kept next to the worker that met it, so an
+            # incomplete rendezvous can never be read as a complete one.
+            rendezvous.append((call_count["n"] - 1, barrier.wait(5)))
 
-            def enter_post():
-                # The party position is kept next to the worker that met it, so an
-                # incomplete rendezvous can never be read as a complete one.
-                rendezvous.append((index, barrier.wait(5)))
-
-            return enter_post
-
-        sessions = [
-            FakeSession(
-                FakeResponse(200, {"ok": True, "result": {"message_id": index}}),
-                before_post=wait_for_peer(index),
-            )
-            for index in (1, 2)
-        ]
-        factory = SessionFactory(*sessions)
+        warmup_response = FakeResponse(200, ok_body({"id": 987654321, "is_bot": True, "username": "prisma_bot"}))
+        send_responses = [FakeResponse(200, {"ok": True, "result": {"message_id": index}}) for index in (1, 2)]
+        session = FakeSession(responses=[warmup_response, *send_responses], before_post=before_post)
+        factory = SessionFactory(session)
         transport = ChannelATransport(TOKEN, request_timeout=TIMEOUT, session_factory=factory)
+        transport.get_me()  # warm-up: single-threaded session creation
 
         def send(index):
             try:
@@ -1225,8 +1266,10 @@ class ConcurrencyTests(ChannelATransportTestCase):
         )
         self.assertEqual([type(result).__name__ for result in results], ["dict", "dict"])
         self.assertEqual(sorted(result["result"]["message_id"] for result in results), [1, 2])
-        self.assertEqual([session.close_calls for session in sessions], [1, 1])
-        self.assertEqual(len(factory.calls), 2)
+        self.assertEqual(session.close_calls, 0)  # T7: never closed per call
+        self.assertEqual(len(factory.calls), 1)  # the one session, reused for both sends
+        transport.close()
+        self.assertEqual(session.close_calls, 1)
 
 
 if __name__ == "__main__":

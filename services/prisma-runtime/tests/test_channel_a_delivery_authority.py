@@ -73,6 +73,9 @@ class Transport:
     def button(self, row):
         return self.sent[-1]["reply_markup"]["inline_keyboard"][row][0]["callback_data"]
 
+    def close(self):
+        """T7: the real transport's one owned session, closed on teardown."""
+
 
 def message(update, text):
     return {"update_id": update, "message": {"message_id": update,

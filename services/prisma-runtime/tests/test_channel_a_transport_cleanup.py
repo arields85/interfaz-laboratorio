@@ -90,8 +90,8 @@ POLL_METHOD_PATH = "/getUpdates"
 PROBE_URL = "https://channel-a-probe.invalid/getMe"
 
 # The two existing methods this module runs unchanged.
-SEND_AND_POLL_METHOD = "test_concurrent_send_and_poll_hold_owned_sessions_without_a_shared_lock"
-CONCURRENT_SENDS_METHOD = "test_concurrent_sends_are_not_serialized_by_a_transport_lock"
+SEND_AND_POLL_METHOD = "test_concurrent_send_and_poll_share_the_reused_session_without_serializing"
+CONCURRENT_SENDS_METHOD = "test_concurrent_sends_share_the_reused_session_without_serializing"
 
 
 class InertWorkerBaseException(BaseException):
@@ -1028,8 +1028,10 @@ class InertCleanupRegressionTests(CleanupHarnessTestCase):
         self.assertEqual(self.recorded_outcomes(result), "", "the inert instrument must satisfy the real method")
         self.assertTrue(result.wasSuccessful())
         self.assert_facade_contract(facade)
-        self.assertEqual([len(session.calls) for session in factory.sessions], [1, 1])
-        self.assertEqual([session.close_calls for session in factory.sessions], [1, 1])
+        # T7: one reused session across the warm-up get_me plus the concurrent send
+        # and poll; the clean method reaches its own trailing `transport.close()`.
+        self.assertEqual([len(session.calls) for session in factory.sessions], [3])
+        self.assertEqual([session.close_calls for session in factory.sessions], [1])
         self.assertEqual(factory.injections, [])
         self.assertEqual(len(facade.events), 2)
         send_entered, release_send = facade.events
@@ -1073,11 +1075,16 @@ class InertCleanupRegressionTests(CleanupHarnessTestCase):
         self.assertEqual(self.recorded_outcomes(result), "", "the inert instrument must satisfy the real method")
         self.assertTrue(result.wasSuccessful())
         self.assert_facade_contract(facade)
-        # Complete results and close counts, asserted independently of the run.
-        self.assertEqual([response.json()["result"]["message_id"] for response in factory.responses], [1, 2])
-        self.assertEqual([len(session.calls) for session in factory.sessions], [1, 1])
-        self.assertEqual([session.close_calls for session in factory.sessions], [1, 1])
-        self.assertEqual(len(factory.creation_kwargs), 2)
+        # T7: one reused session; the two send results are queued through its
+        # `responses` construction kwarg instead of two distinct `FakeSession`s.
+        queued_responses = factory.creation_kwargs[0]["responses"]
+        self.assertEqual(
+            [response.json()["result"]["message_id"] for response in queued_responses[1:]], [1, 2]
+        )
+        self.assertEqual([len(session.calls) for session in factory.sessions], [3])
+        # The clean method reaches its own trailing `transport.close()`.
+        self.assertEqual([session.close_calls for session in factory.sessions], [1])
+        self.assertEqual(len(factory.creation_kwargs), 1)
         self.assertEqual(factory.injections, [])
         # Both owned workers were joined with a bounded timeout and no survivor.
         self.assertTrue(all(thread.join_calls >= 1 for thread in facade.threads), "both workers must be joined")
@@ -1118,9 +1125,14 @@ class InertCleanupRegressionTests(CleanupHarnessTestCase):
         # Differential evidence first: the pair differs only in the liveness policy,
         # and the results are complete, so a survivor cannot come from empty output.
         self.assert_facade_contract(facade)
-        self.assertEqual([response.json()["result"]["message_id"] for response in factory.responses], [1, 2])
-        self.assertEqual([len(session.calls) for session in factory.sessions], [1, 1])
-        self.assertEqual([session.close_calls for session in factory.sessions], [1, 1])
+        # T7: one reused session; the two send results are queued through its
+        # `responses` construction kwarg instead of two distinct `FakeSession`s.
+        queued_responses = factory.creation_kwargs[0]["responses"]
+        self.assertEqual(
+            [response.json()["result"]["message_id"] for response in queued_responses[1:]], [1, 2]
+        )
+        self.assertEqual([len(session.calls) for session in factory.sessions], [3])
+        self.assertEqual([session.close_calls for session in factory.sessions], [0])
         self.assertEqual(factory.injections, [])
         self.assertEqual(facade.uncaught_errors, [])
         self.assertTrue(all(thread.join_calls >= 1 for thread in facade.threads), "both workers must be joined")
@@ -1207,11 +1219,13 @@ class InertCleanupRegressionTests(CleanupHarnessTestCase):
         self.assertTrue(injected_url.endswith(SEND_METHOD_PATH))
         self.assertIs(injected_error, injected)
         self.assertIn(INJECTED_WORKER_MARKER, str(injected_error))
-        # The transport's own cleanup still ran on that path: one session per call,
-        # each closed once, each with its single recorded post.
-        self.assertEqual(len(factory.sessions), 2)
-        self.assertEqual([len(session.calls) for session in factory.sessions], [1, 1])
-        self.assertEqual([session.close_calls for session in factory.sessions], [1, 1])
+        # T7: the transport's own cleanup still ran on that path -- the one reused
+        # session recorded the warm-up, the send that raised, and the poll that
+        # still ran afterward on the main thread; never closed per call (the
+        # method under test never closes it).
+        self.assertEqual(len(factory.sessions), 1)
+        self.assertEqual([len(session.calls) for session in factory.sessions], [3])
+        self.assertEqual([session.close_calls for session in factory.sessions], [0])
         # Observation 2: the owned worker was released, joined with a bounded wait, and
         # every join and liveness check precedes the outcome the run actually reported.
         # The owned primitives are counted before anything is unpacked or indexed, so a
@@ -1287,8 +1301,10 @@ class InertCleanupRegressionTests(CleanupHarnessTestCase):
         injected_url, injected_error = factory.injections[0]
         self.assertTrue(injected_url.endswith(POLL_METHOD_PATH))
         self.assertIs(injected_error, injected)
-        self.assertEqual([len(session.calls) for session in factory.sessions], [1, 1])
-        self.assertEqual([session.close_calls for session in factory.sessions], [1, 1])
+        # T7: one reused session recorded the warm-up, the successful send, and the
+        # poll that failed; never closed per call.
+        self.assertEqual([len(session.calls) for session in factory.sessions], [3])
+        self.assertEqual([session.close_calls for session in factory.sessions], [0])
         # Then the observations the method really made: the send entered post, the
         # release preceded a bounded join, and that join was followed by a liveness
         # check that saw the worker still alive.
@@ -1472,9 +1488,11 @@ class InertCleanupRegressionTests(CleanupHarnessTestCase):
         self.assertEqual(len(poll_script.injections), 1, "the poll failure must be injected exactly once")
         self.assertTrue(poll_script.injections[0][0].endswith(POLL_METHOD_PATH))
         self.assertIs(poll_script.injections[0][1], poll_error)
-        # Both real sessions are used once and closed once through the nested wrappers.
-        self.assertEqual([len(session.calls) for session in send_script.sessions], [1, 1])
-        self.assertEqual([session.close_calls for session in send_script.sessions], [1, 1])
+        # T7: the one real reused session recorded the warm-up, the send that
+        # raised and the poll that raised, through the nested wrappers; never
+        # closed per call.
+        self.assertEqual([len(session.calls) for session in send_script.sessions], [3])
+        self.assertEqual([session.close_calls for session in send_script.sessions], [0])
         # The worker failure was caught by the owning case and never left to the thread
         # hook. Both recorded event waits are counted and read before any bound, and the
         # release still precedes the join it exists to unblock.

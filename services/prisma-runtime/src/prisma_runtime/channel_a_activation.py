@@ -57,6 +57,9 @@ class ChannelAActivation:
         self._dialogue: ChannelAPairingDialogue | None = None
         self._bot_username: str | None = None
         self._sessions = sessions
+        # T7: this activation owns the transport's one reused HTTP session and
+        # closes it exactly once, on its own teardown (see `stop()`).
+        self._transport = transport
         # The same monotonic clock the coordinator uses for the captured
         # deadline: both domains are one, so no wall-clock mixing is possible.
         self._query_clock = query_clock
@@ -141,7 +144,15 @@ class ChannelAActivation:
         self._dialogue = None
         self._registry = None
         self._bot_username = None
-        return self._runner.stop()
+        confirmed = self._runner.stop()
+        # T7: close the one reused HTTP session on activation teardown. Safe
+        # here even when settlement itself is uncertain: `stop()` only returns
+        # without having joined the owned thread when called reentrantly from
+        # that thread's own admission, which this activation's own callers
+        # never do (the manager always stops from an external thread), so by
+        # the time this runs the owned polling/send activity has quiesced.
+        self._transport.close()
+        return confirmed
 
     def _capture_delivery_witness(self, envelope):
         """Capture ephemeral references before callbacks; this is not admission."""

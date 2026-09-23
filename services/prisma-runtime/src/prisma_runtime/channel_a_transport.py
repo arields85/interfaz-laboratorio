@@ -1,4 +1,4 @@
-"""Standalone Channel A transport: raw Bot API over one fresh owned HTTPS session.
+"""Standalone Channel A transport: raw Bot API over one owned, reused HTTPS session.
 
 Scope (RCA-5a)
 --------------
@@ -13,12 +13,20 @@ frozen contract declares.
 
 Boundary rules that deliberately stay here:
 
-* One fresh **owned** session per method call, including sends that run
-  concurrently with a poll. There is no shared session, no process global and no
-  transport lock; two overlapping calls can never observe or close each other's
-  session. The lazy default constructs ``requests.Session()`` with
-  ``trust_env = False`` and default TLS verification, so no proxy environment
-  variable can redirect a bot token.
+* T7: one owned session, lazily built on the first call and reused (keep-alive)
+  for every later ``sendMessage``/``answerCallbackQuery``/``getMe``/
+  ``getUpdates`` call of this transport's activation, including sends that run
+  concurrently with a poll -- ``requests.Session`` is safe for concurrent use by
+  multiple threads. There is still no process global and no transport lock: this
+  session is owned by, and private to, one transport instance, and a fresh
+  activation always gets its own fresh transport (see
+  ``local_presentation.build_channel_a_activation``). It is closed exactly once,
+  explicitly, by :meth:`ChannelATransport.close` on activation teardown -- never
+  implicitly and never per call. A session the lazy default factory obtained but
+  could not configure (`trust_env`) is closed immediately and never cached, so a
+  later call may still build a fresh one. The lazy default constructs
+  ``requests.Session()`` with ``trust_env = False`` and default TLS verification,
+  so no proxy environment variable can redirect a bot token.
 * The host is the fixed ``https://api.telegram.org`` with the token used only as
   a path segment. There is no configurable host, no environment fallback, no
   redirect following, no webhook mutation, no retry, no offset bookkeeping and no
@@ -42,8 +50,9 @@ Boundary rules that deliberately stay here:
   No provider exception, token, URL or body can reach a caller's ``repr``, log or
   error message, and the transport object's own ``repr`` never includes the
   token.
-* A response and its session are each closed exactly once, independently, and a
-  cleanup failure can never mask an observed result or the primary failure.
+* A response is closed exactly once per call; the owned session is closed
+  exactly once, on ``close()``. A cleanup failure can never mask an observed
+  result or the primary failure.
 
 Deliberately absent: parse mode, message editing or deletion, file or voice
 upload, webhooks, retries, environment or configuration overrides, offset state,
@@ -287,9 +296,11 @@ class ChannelATransport:
     ``token`` is the protected Channel A bot token. ``request_timeout`` is the
     required bounded HTTP timeout; there is deliberately no default product
     timing. ``session_factory`` may be supplied for tests and ownership seams: it
-    is a trusted callable that must return a new owned session per call, and an
-    explicit ``None`` selects the lazy default factory instead of replacing a
-    falsy callable.
+    is a trusted callable that returns one new owned session; an explicit
+    ``None`` selects the lazy default factory instead of replacing a falsy
+    callable. T7: the factory is invoked at most once per transport instance --
+    the returned session is cached and reused (keep-alive) for every call of
+    this transport's activation, and released only by :meth:`close`.
     """
 
     def __init__(
@@ -302,6 +313,7 @@ class ChannelATransport:
         self._token = _validated_token(token)
         self.request_timeout: int | float = _validated_timeout(request_timeout)
         self.session_factory = _default_session if session_factory is None else session_factory
+        self._session: object | None = None
 
     def send_message(self, *, chat_id: int, text: str, reply_markup: object = None) -> object:
         """Deliver one text message and return the raw Bot API response body."""
@@ -375,14 +387,24 @@ class ChannelATransport:
     def _url(self, method: str) -> str:
         return f"{CHANNEL_A_API_BASE}/bot{self._token}/{method}"
 
-    def _open_session(self) -> object:
+    def _ensure_session(self) -> object:
+        """Return the one owned session, building it lazily on the first call.
+
+        Nothing is cached on failure: a factory that raises, or a lazy default
+        session whose ``trust_env`` setup fails, leaves ``self._session`` unset
+        so a later call may still build a fresh one instead of staying stuck.
+        """
+        if self._session is not None:
+            return self._session
         try:
-            return self.session_factory()
+            session = self.session_factory()
         except Exception:
             raise _unavailable() from None
+        self._session = session
+        return session
 
     def _request(self, method: str, payload: dict[str, object], timeout: HttpTimeout) -> tuple[int, Mapping]:
-        session = self._open_session()
+        session = self._ensure_session()
         response = None
         try:
             response = session.post(
@@ -396,7 +418,16 @@ class ChannelATransport:
             raise _unavailable() from None
         finally:
             _close_quietly(response)
-            _close_quietly(session)
+
+    def close(self) -> None:
+        """Close the owned session exactly once, on activation teardown (T7).
+
+        Idempotent and never raises: a cleanup failure can never mask the
+        caller's own teardown. Never called per request -- only here.
+        """
+        session = self._session
+        self._session = None
+        _close_quietly(session)
 
     def _effect(self, method: str, payload: dict[str, object], timeout: HttpTimeout) -> object:
         status, body = self._request(method, payload, timeout)

@@ -117,8 +117,35 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
 - [ ] **T6 — Live repro and confirmation (user manual).** Tail the presentation log and watch the
   admin reconnecting indicator during a QR pairing and voice queries; check VPN state and stray
   processes polling the same token.
-- [ ] **T7 — Reuse one HTTP session per activation.** Port back the old behavior: one
+- [x] **T7 — Reuse one HTTP session per activation.** Port back the old behavior: one
   `requests.Session` reused for all Bot API calls of an activation, closed on teardown.
+  Evidence (2026-09-23): `channel_a_transport.py` — `ChannelATransport` now builds its session
+  lazily on the first call (`_ensure_session`) and caches it in `self._session`; every later
+  `sendMessage`/`answerCallbackQuery`/`getMe`/`getUpdates` call reuses it (no more
+  open+close per call); a session the lazy default obtained but could not configure
+  (`trust_env` failure) is still closed immediately and never cached, so a later call can
+  retry. New `ChannelATransport.close()` closes the owned session exactly once, idempotent,
+  never raises. `channel_a_activation.py` — `ChannelAActivation` now stores the transport it
+  was given and calls `transport.close()` in `stop()` right after `self._runner.stop()`
+  (activation teardown); safe because `runner.stop()` only returns without having joined the
+  owned thread when called reentrantly from that thread's own admission, which this
+  activation's callers (the manager) never do. Timeouts, error classification (401 →
+  `ChannelATransportUnauthorized`) and redaction are unchanged; `session_factory` semantics
+  preserved (still invoked at most once now instead of once per call). Preserved but adapted
+  concurrency proof: `requests.Session` is documented as safe for concurrent use, so
+  `test_concurrent_send_and_poll_share_the_reused_session_without_serializing` and
+  `test_concurrent_sends_share_the_reused_session_without_serializing` now warm the session up
+  with one synchronous `get_me()` (mirroring the real `prepare()`-before-`start()` sequencing,
+  which is why no lock was added to the lazy-creation path) then prove the shared session
+  still isn't serialized by anything the transport holds. RED confirmed via `git stash` of the
+  2 source files: transport suite 27 failures/4 errors, cleanup-harness suite 11 failures;
+  GREEN after restore. Updated ~14 existing transport tests whose assertions assumed one fresh
+  session per call (now `close_calls=0` mid-call, `1` after explicit `close()`); updated the
+  `test_channel_a_transport_cleanup.py` meta-harness (6 tests) and 2 fake-transport test
+  doubles (`test_channel_a_activation.py`, `test_channel_a_delivery_authority.py`) to add
+  `close()`. Full suite:
+  `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+  -p "test_*.py"` → 1276 passed. Commit: `fix(prisma): reuse Channel A HTTP session per activation`.
 - [ ] **T8 — In-place poll retry.** Port back the old behavior: a transient `getUpdates` failure
   retries in place after a flat 5 s within the same activation (status surfaces "reconnecting");
   terminal failures (e.g. invalid token) still end the activation; the manager backoff remains only

@@ -365,6 +365,7 @@ class ScriptedChannelATransport:
         self.acknowledged: list = []
         self.fail_get_me = fail_get_me
         self._message_id = 9000
+        self.close_calls = 0
 
     def get_me(self):
         self.get_me_calls += 1
@@ -391,6 +392,10 @@ class ScriptedChannelATransport:
                 "from": {"id": self.bot_id, "is_bot": True},
             },
         }
+
+    def close(self):
+        """T7: the real transport's one owned session, closed on teardown."""
+        self.close_calls += 1
 
     def answer_callback_query(self, *, callback_query_id, text=None):
         self.acknowledged.append(callback_query_id)
