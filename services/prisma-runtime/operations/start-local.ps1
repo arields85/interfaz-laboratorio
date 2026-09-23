@@ -184,7 +184,7 @@ function Invoke-PrismaStartTransaction {
         }
         Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $manifest
         $startupComplete = $true
-        Write-Host 'Prisma Local presentation is ready at http://127.0.0.1:5057.' -ForegroundColor Green
+        Write-Host 'Prisma is ready at http://127.0.0.1:5057.' -ForegroundColor Green
         return [ordered]@{ registered = $isDevelopment; generation = $generation; reused = $false }
     }
     finally {

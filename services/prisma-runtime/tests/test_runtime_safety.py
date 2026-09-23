@@ -767,6 +767,12 @@ catch {{ Write-Output "partial=True;started=$global:started;stopped=$global:stop
         self.assertIn("partial=True;started=0;stopped=0", result.stdout)
         self.assertEqual(final, original)
 
+    def test_launcher_presentation_ready_message_drops_the_internal_service_name(self) -> None:
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("Prisma is ready at http://127.0.0.1:5057.", source)
+        self.assertNotIn("Prisma Local presentation is ready", source)
+        self.assertIn("Prisma voice is ready at http://127.0.0.1:5056.", source)
+
     def test_stale_development_manifest_helper_requires_all_owners_provably_dead_and_no_listener(self) -> None:
         """A stale manifest is one left by an abrupt shutdown: every recorded
         development owner must be proven `dead`, no recorded runtime process
