@@ -213,6 +213,17 @@ class ChannelAPairingChallengeTests(ChannelAPairingTestCase):
         self.assert_error(ChannelAPairingUnauthorized, PRISMA_CHANNEL_A_TICKET_REQUIRED, registry.confirm, ticket, PHONE)
         self.assertIsNone(registry.owner_link(OWNER2))
 
+    def test_has_any_link_reflects_whether_any_owner_is_currently_linked(self):
+        """T15 item 4: a coarse, owner-agnostic "is anyone paired at all" read,
+        used by the admin status projection to distinguish a healthy running
+        bot with no chat paired yet from one that already has a link."""
+        registry = self.registry()
+        self.assertFalse(registry.has_any_link())
+        self.pair(registry)
+        self.assertTrue(registry.has_any_link())
+        registry.unlink_phone(PHONE, registry.owner_link(OWNER).generation)
+        self.assertFalse(registry.has_any_link())
+
 
 class ChannelAPairingExclusivityTests(ChannelAPairingTestCase):
     def test_one_phone_per_owner_and_one_owner_per_phone_are_enforced(self):

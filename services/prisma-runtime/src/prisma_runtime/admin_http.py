@@ -15,7 +15,7 @@ from .bot_identity_reservation import TELEGRAM_BOT_IDENTITY_RESERVED
 from .channel_a_lifecycle import PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE
 from .channel_a_manager import ChannelAManagerError
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
-from .gemini_credentials import GeminiVerificationInProgress
+from .gemini_credentials import GEMINI_VERIFY_MODEL, GeminiVerificationInProgress
 from .telegram_lifecycle import TelegramLifecycleError
 from .telegram_verification import TelegramTokenVerificationInProgress
 
@@ -67,8 +67,9 @@ def project_admin_telegram_status(status: dict) -> dict:
     return {field: status[field] for field in ADMIN_TELEGRAM_STATUS_FIELDS}
 
 
-# Frozen admin Channel A wire contract: exactly six status keys with a nested
-# activation projection; no raw manager object or credential is ever exposed.
+# Frozen admin Channel A wire contract: exactly eight status keys (T15 adds
+# `paired`) with a nested activation projection; no raw manager object or
+# credential is ever exposed.
 ADMIN_CHANNEL_A_STATUS_FIELDS = (
     "configured",
     "desiredGeneration",
@@ -77,6 +78,7 @@ ADMIN_CHANNEL_A_STATUS_FIELDS = (
     "activation",
     "lastError",
     "botUsername",
+    "paired",
 )
 
 
@@ -204,6 +206,15 @@ class AdminHttpBoundary:
     def _provider_metadata(self, provider: str, configured: bool) -> dict:
         if provider == "gemini":
             verification = self._gemini_verification_snapshot()
+            # T15: the exact TTS model this key is verified/verifies against
+            # (never hardcoded on the frontend), so the admin panel's resting
+            # display can name it instead of a generic "not checked" copy.
+            return {
+                "configured": configured,
+                "verified": verification["state"] == "verified",
+                "verification": verification,
+                "model": GEMINI_VERIFY_MODEL,
+            }
         elif provider == "telegram":
             verification = self._telegram_family_verification_snapshot(self.telegram_verification_service)
         elif provider == CHANNEL_A_PROVIDER:
@@ -563,7 +574,12 @@ class AdminHttpBoundary:
             verification = {"state": result.state, "checkedAt": result.checked_at}
             response = jsonify({
                 "ok": True,
-                "gemini": {"configured": configured, "verified": result.state == "verified", "verification": verification},
+                "gemini": {
+                    "configured": configured,
+                    "verified": result.state == "verified",
+                    "verification": verification,
+                    "model": GEMINI_VERIFY_MODEL,
+                },
             })
             response.headers["Cache-Control"] = "no-store"
             return response

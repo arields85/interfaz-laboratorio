@@ -10,7 +10,7 @@ sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from prisma_runtime.admin_http import AdminHttpBoundary
 from prisma_runtime.credential_store import CredentialUnavailable
-from prisma_runtime.gemini_credentials import GeminiVerification, GeminiVerificationInProgress
+from prisma_runtime.gemini_credentials import GEMINI_VERIFY_MODEL, GeminiVerification, GeminiVerificationInProgress
 from prisma_runtime.local_presentation import JsonFileStore, VoiceEventStore, create_app
 from prisma_runtime.telegram_verification import TelegramTokenVerification, TelegramTokenVerificationInProgress
 
@@ -102,6 +102,7 @@ class CredentialHttpTests(unittest.TestCase):
                         "configured": True,
                         "verified": False,
                         "verification": {"state": "not_checked", "checkedAt": None},
+                        "model": GEMINI_VERIFY_MODEL,
                     },
                     "telegram": {
                         "configured": False,
@@ -155,7 +156,11 @@ class CredentialHttpTests(unittest.TestCase):
         status = client.get("/api/prisma/admin/credentials", environ_overrides=self.environ)
         self.assertEqual(
             status.get_json()["providers"]["gemini"],
-            {"configured": False, "verified": False, "verification": {"state": "not_checked", "checkedAt": None}},
+            {
+                "configured": False, "verified": False,
+                "verification": {"state": "not_checked", "checkedAt": None},
+                "model": GEMINI_VERIFY_MODEL,
+            },
         )
 
         saved = client.put(
@@ -402,6 +407,7 @@ class GeminiVerifyHttpTests(unittest.TestCase):
                     "configured": True,
                     "verified": True,
                     "verification": {"state": "verified", "checkedAt": 123.5},
+                    "model": GEMINI_VERIFY_MODEL,
                 },
             },
         )

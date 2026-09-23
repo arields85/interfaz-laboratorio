@@ -464,6 +464,21 @@ class ChannelAPairingRegistry:
                 return "pending"
             return "free"
 
+    def has_any_link(self) -> bool:
+        """Whether ANY owner is currently linked, independent of which one.
+
+        A coarse, owner-agnostic technical read (T15): purges the same
+        expirations as :meth:`owner_state` under the existing lock, then
+        reports only whether the link table is non-empty. Never discloses an
+        owner or phone identity -- just a boolean the admin status projection
+        uses to distinguish a healthy running bot with no chat paired yet
+        from one that already has a link.
+        """
+        with self.lock:
+            now = self._now()
+            self._purge_locked(now)
+            return bool(self._links)
+
     def challenge_remaining_seconds(self, challenge: QrChallenge) -> float | None:
         """Remaining seconds of one issued challenge, or ``None`` when not live.
 

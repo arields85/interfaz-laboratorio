@@ -220,6 +220,23 @@ class ChannelAManager:
             return None
         return username if isinstance(username, str) and username else None
 
+    @staticmethod
+    def _has_paired_owner(activation, observed):
+        """Coarse, owner-agnostic pairing signal (T15), gated exactly like
+        ``_bot_username_if_running``: never published without a running,
+        non-restart-pending observation, and any broken/foreign activation
+        method closes to ``False`` instead of raising -- a display
+        projection, not an authority check.
+        """
+        if activation is None or observed is None:
+            return False
+        if observed.phase != PHASE_RUNNING or observed.restart_required:
+            return False
+        try:
+            return bool(activation.has_paired_owner())
+        except Exception:
+            return False
+
     def status(self):
         """Observe metadata only; never resolve credentials or drive lifecycle."""
         try:
@@ -247,6 +264,7 @@ class ChannelAManager:
                 "activation": observed,
                 "lastError": error,
                 "botUsername": self._bot_username_if_running(activation, observed),
+                "paired": self._has_paired_owner(activation, observed),
             }
         except Exception as error:
             code = _error_code(error, PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE)

@@ -286,6 +286,20 @@ class ChannelAActivation:
             return False
         return self._registry is registry
 
+    def has_paired_owner(self) -> bool:
+        """Whether ANY owner is currently linked (T15), gated like every other
+        pairing projection: an inactive phase, a restart fence, a withdrawn
+        registry or any failed observation reports False, never raises.
+        """
+        registry = self._registry
+        if registry is None or not self._pairing_gate_open(registry):
+            return False
+        try:
+            linked = registry.has_any_link()
+        except Exception:
+            return False
+        return linked if self._pairing_gate_open(registry) else False
+
     def pairing_status(self, owner_id: str) -> str:
         """Observe one owner's pairing state through the live registry.
 

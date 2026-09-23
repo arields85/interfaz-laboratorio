@@ -1095,6 +1095,37 @@ class ChannelAActivationPairingViewTests(ActivationHarnessTestCase):
         self.assertEqual(fixture.activation.pairing_status(owner), "linked")
         self.assertEqual(fixture.activation.pairing_status(UNKNOWN_PAIRING_OWNER), "free")
 
+    def test_has_paired_owner_is_false_until_any_owner_links_then_true_regardless_of_who_asks(self):
+        """T15 item 4: a coarse, owner-agnostic pairing signal so the admin
+        status can distinguish a healthy running-but-unpaired bot from one
+        that already has a link, without needing a specific owner id."""
+        owner = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+
+        # No registry exists before a successful preparation: False, same
+        # fail-closed default as pairing_status's "unavailable".
+        self.assertFalse(fixture.activation.has_paired_owner())
+
+        self.assertTrue(fixture.activation.prepare())
+        self.assertFalse(fixture.activation.has_paired_owner())
+
+        challenge = fixture.activation.issue_pairing_challenge(owner)
+        self.assertIsNotNone(challenge)
+        fixture.transport.batches.append((start_update(1, PHONE_A, challenge.token),))
+        prompt = fixture.activation.poll_once()
+        self.assertEqual([outcome.kind for outcome in prompt.outcomes], [PAIRING_PROMPT_DELIVERED])
+        # Still only pending, not yet linked.
+        self.assertFalse(fixture.activation.has_paired_owner())
+
+        confirm_data = callback_data_for(fixture.transport, PHONE_A, BUTTON_CONFIRM)
+        fixture.transport.batches.append((callback_update(2, PHONE_A, confirm_data),))
+        confirmed = fixture.activation.poll_once()
+        self.assertEqual([outcome.kind for outcome in confirmed.outcomes], [PAIRING_CONFIRMED])
+        self.assertTrue(fixture.activation.has_paired_owner())
+
+        self.assertTrue(fixture.activation.stop())
+        self.assertFalse(fixture.activation.has_paired_owner())
+
     def test_issue_pairing_challenge_view_returns_the_exact_backend_view(self):
         owner = self.new_owner(SNAPSHOT_A, LABEL_A)
         fixture = self.activate()

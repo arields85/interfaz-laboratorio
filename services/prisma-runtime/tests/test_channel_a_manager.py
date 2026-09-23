@@ -38,7 +38,7 @@ LIFECYCLE_UNAVAILABLE = "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE"
 COLLISION = "TELEGRAM_BOT_IDENTITY_RESERVED"
 STATUS_KEYS = {
     "configured", "desiredGeneration", "appliedGeneration",
-    "activationEpoch", "activation", "lastError", "botUsername",
+    "activationEpoch", "activation", "lastError", "botUsername", "paired",
 }
 
 
@@ -141,6 +141,8 @@ class FakeActivation:
         # Public projection surface only; default absent, set explicitly by
         # the botUsername-focused tests below.
         self.bot_username = None
+        # T15: coarse owner-agnostic pairing signal, default unpaired.
+        self.paired = False
 
     def event(self, operation):
         self.ledger.append((self.name, operation))
@@ -170,6 +172,10 @@ class FakeActivation:
         if self.stop_result is True:
             self.observed = self.Status("stopped", None, True, False)
         return self.stop_result
+
+    def has_paired_owner(self):
+        self.event("has_paired_owner")
+        return self.paired
 
 
 class ChannelAManagerTests(unittest.TestCase):
@@ -236,9 +242,9 @@ class ChannelAManagerTests(unittest.TestCase):
         """Ignore observational reads, not secret resolution or lifecycle effects."""
         return [entry for entry in self.ledger if entry[0] not in (
             "credentials.status", "configuration.read",
-        ) and not (len(entry) == 2 and entry[1] == "status")]
+        ) and not (len(entry) == 2 and entry[1] in ("status", "has_paired_owner"))]
 
-    def assert_status(self, result, *, configured=True, desired=0, applied=None, epoch=None, activation=None, error=None, bot_username=None):
+    def assert_status(self, result, *, configured=True, desired=0, applied=None, epoch=None, activation=None, error=None, bot_username=None, paired=False):
         self.assertIs(type(result), dict)
         self.assertEqual(set(result), STATUS_KEYS)
         self.assertIs(result["configured"], configured)
@@ -250,6 +256,7 @@ class ChannelAManagerTests(unittest.TestCase):
             self.assertIsInstance(activation, self.Status)
         self.assertEqual(result["lastError"], error)
         self.assertEqual(result["botUsername"], bot_username)
+        self.assertIs(result["paired"], paired)
         self.assertNotIn(TOKEN, repr(result))
         self.assertNotIn(CANARY, repr(result))
 
@@ -445,6 +452,70 @@ class ChannelAManagerTests(unittest.TestCase):
                 candidate.bot_username = broken
                 self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
                                     epoch=result["activationEpoch"], activation=candidate.observed, bot_username=None)
+
+    def test_status_exposes_paired_only_while_running_without_a_pending_restart(self):
+        """T15 item 4: a coarse owner-agnostic pairing signal, gated exactly
+        like botUsername (never inferred while not genuinely running)."""
+        self.assert_status(self.manager.status(), paired=False)
+
+        candidate, result = self.applied()
+        self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                            epoch=result["activationEpoch"], activation=candidate.observed, paired=False)
+
+        candidate.paired = True
+        self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                            epoch=result["activationEpoch"], activation=candidate.observed, paired=True)
+
+        # A pending restart must not keep publishing a stale run's pairing state.
+        candidate.observed = self.Status("running", None, False, True)
+        self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                            epoch=result["activationEpoch"], activation=candidate.observed, paired=False)
+
+        # A non-running phase never reports paired either.
+        candidate.observed = self.Status("stopped", None, True, False)
+        self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                            epoch=result["activationEpoch"], activation=candidate.observed, paired=False)
+
+        # A raising accessor closes to False, never a crash.
+        candidate.observed = self.Status("running", None, False, False)
+
+        def broken():
+            raise RuntimeError(CANARY)
+
+        candidate.has_paired_owner = broken
+        self.assert_status(self.manager.status(), applied=self.store.snapshot.desired_generation,
+                            epoch=result["activationEpoch"], activation=candidate.observed, paired=False)
+
+    def test_a_background_activation_failure_is_not_reflected_in_manager_last_error(self):
+        """T15 item 4 root-cause reproduction (diagnostic, not a regression
+        assertion on desired behavior -- this documents the EXISTING
+        disconnect the frontend fix works around).
+
+        ``ChannelARunner``'s own managed-loop thread flips phase to 'failed'
+        directly (channel_a_lifecycle.py:608-614 ``_terminal_fail``, called
+        from ``_terminal_result``/``_poll_iteration`` on the runner's OWN
+        background thread), never through the manager. ``manager._last_error``
+        is set ONLY by ``_record_error`` (channel_a_manager.py:167-169),
+        called ONLY from ``_mutation()``'s except path (line 161) and
+        ``status()``'s own exception handler (line 253) -- neither of which
+        ever observes a background async failure, since ``_observe()``
+        (line 183-203) treats a valid ``ChannelAStatus`` with phase='failed'
+        as a SUCCESSFUL observation (no exception). So a genuinely, terminally
+        failed activation (this module's own documented "no retry, no
+        backoff, no reactivation" design, channel_a_lifecycle.py:32-34) is
+        reported with ``lastError: None`` alongside ``activation.phase ==
+        'failed'``. Pre-T15, the frontend's ``channelAConnectionResult``
+        checked ``lastError`` first and then treated a bare 'failed' phase as
+        the same ambiguous "Estado no confirmado" bucket as a genuinely
+        unknown state, instead of recognizing 'failed' as an already-confirmed
+        failure -- T15 fixes this on the frontend side (channel_a_manager.py
+        itself is not changed: the manager/activation separation is correct,
+        the frontend was reading the wrong signal)."""
+        candidate, _ = self.applied()
+        candidate.observed = self.Status("failed", LIFECYCLE_UNAVAILABLE, True, False)
+        result = self.manager.status()
+        self.assertEqual(result["activation"].phase, "failed")
+        self.assertIsNone(result["lastError"])
 
     def test_startup_apply_with_credential_runs_the_same_apply_path_as_admin(self):
         """PW-007: Channel A must mirror Telegram's accepted startup_apply -

@@ -62,13 +62,13 @@ INTERNAL_CANARY = "CANARY-internal-channel-a-diagnostic"
 MANAGER_UNAVAILABLE = "PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE"
 LIFECYCLE_UNAVAILABLE = "PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE"
 
-# Exact admin Channel A contract frozen by the tracker: seven status keys
-# (T10 adds botUsername) with a nested activation projection and no
-# additional key.
+# Exact admin Channel A contract frozen by the tracker: eight status keys
+# (T10 adds botUsername, T15 adds paired) with a nested activation
+# projection and no additional key.
 ADMIN_CHANNEL_A_FIELDS = frozenset(
     {
         "configured", "desiredGeneration", "appliedGeneration", "activationEpoch",
-        "activation", "lastError", "botUsername",
+        "activation", "lastError", "botUsername", "paired",
     }
 )
 ADMIN_CHANNEL_A_ACTIVATION_FIELDS = frozenset({"phase", "reason", "quiescent", "restartRequired"})
@@ -164,6 +164,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
             ),
             "lastError": None,
             "botUsername": None,
+            "paired": False,
         }
         status.update(overrides)
         return status
