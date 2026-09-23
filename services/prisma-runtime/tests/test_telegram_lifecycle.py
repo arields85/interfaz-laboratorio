@@ -425,6 +425,51 @@ class TelegramLifecycleTests(unittest.TestCase):
         self.assertNotIn("offset", poll_payloads[1])
         self.assertNotIn("secret-token", str(bot.last_error))
 
+    def test_first_pairing_reply_never_mentions_a_screen_or_presentation_mode(self):
+        bot = self.prepared_bot()
+        bot.send_message = Mock()
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
+
+        bot.send_message.assert_called_once_with(7, "Prisma quedó vinculada a este chat. Ya puede hacer sus consultas.")
+
+    def test_ready_reply_for_an_already_paired_chat_never_mentions_a_screen(self):
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
+        bot = self.prepared_bot(state)
+        bot.send_message = Mock()
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
+
+        bot.send_message.assert_called_once_with(7, "Prisma está lista para responder sus consultas.")
+
+    def test_unidentified_bot_start_reply_drops_local_wording(self):
+        bot = self.build_bot()
+        bot.send_message = Mock()
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
+
+        bot.send_message.assert_called_once_with(7, "Este bot ya está vinculado a otro chat.")
+
+    def test_status_reply_never_mentions_a_snapshot_or_presentation(self):
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
+        bot = self.prepared_bot(state)
+        bot.send_message = Mock()
+        bot.snapshot_store.read = Mock(return_value={"timestamp": "2026-09-23T10:00:00Z"})
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/status"})
+
+        bot.send_message.assert_called_once_with(7, "Prisma está activa. Última actualización de datos: 2026-09-23T10:00:00Z.")
+
+    def test_status_reply_without_a_snapshot_reports_no_data(self):
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
+        bot = self.prepared_bot(state)
+        bot.send_message = Mock()
+        bot.snapshot_store.read = Mock(return_value=None)
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/status"})
+
+        bot.send_message.assert_called_once_with(7, "Prisma está activa. Última actualización de datos: sin datos.")
+
     def test_legacy_allowlists_do_not_authorize_first_migrating_bot(self):
         state = {"allowedChatIds": [7]}
         with patch.dict(os.environ, {"PRISMA_LOCAL_ALLOWED_CHAT_IDS": "7"}, clear=True):
