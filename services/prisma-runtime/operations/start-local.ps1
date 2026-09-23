@@ -110,10 +110,12 @@ function Invoke-PrismaStartTransaction {
     $canonical = Get-PrismaCanonicalManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -RequireCompleteRuntime
     if ($isDevelopment -and $canonical) {
         $ownershipProperty = $canonical.PSObject.Properties['developmentOwnership']
-        if ($ownershipProperty) {
-            if (-not (Test-PrismaDevelopmentRuntimeIdentity -Manifest $canonical)) {
-                throw 'Prisma Local development runtime identity no longer matches its canonical manifest; it was not reused or stopped.'
-            }
+        if (-not $ownershipProperty) {
+            # Manual (non-development) runtime: reused as-is, exactly like today. Never
+            # registered, stopped or health-checked.
+            return [ordered]@{ registered = $false; generation = ''; reused = $true }
+        }
+        if ((Test-PrismaDevelopmentRuntimeIdentity -Manifest $canonical) -and (Test-PrismaDevelopmentRuntimeHealthy)) {
             $generation = [string]$ownershipProperty.Value.generation
             $reap = Invoke-PrismaDevelopmentOwnerReap -Ownership $ownershipProperty.Value -ExcludedOwnerToken $DevelopmentOwnerToken
             Add-PrismaDevelopmentOwner -Manifest $canonical -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration $generation -OwnerIdentity $ownerIdentity
@@ -121,15 +123,64 @@ function Invoke-PrismaStartTransaction {
             Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
             return [ordered]@{ registered = $true; generation = $generation; reused = $true }
         }
-        return [ordered]@{ registered = $false; generation = ''; reused = $true }
+        # Identity mismatch or an unhealthy runtime: never reused. Falls through to the
+        # always-start recovery below, exactly like a missing/partial/ambiguous manifest.
     }
-    if ($isDevelopment -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        if (Test-PrismaStaleDevelopmentManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -Ports @(5056, 5057)) {
-            Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
-            Write-Warning 'Removed stale Prisma Local manifest left by an abrupt shutdown.' -WarningAction Continue
+
+    if ($isDevelopment) {
+        # User decision: the launcher must always start Prisma, however the previous run
+        # ended (Ctrl+C, the window closed, or a shutdown). Owner liveness is irrelevant here
+        # (only a reuse decision above cares about it); every case that did not already reuse
+        # above recovers instead of refusing. Only a listener VERIFIED as this repository's
+        # own Prisma module is ever stopped; a foreign process holding a port blocks the
+        # attempt with a clear terminal message and a structured receipt failure instead.
+        $portChecks = @(
+            [pscustomobject]@{ port = 5056; module = (Get-PrismaExpectedModule -Service 'prisma-voice') }
+            [pscustomobject]@{ port = 5057; module = (Get-PrismaExpectedModule -Service 'prisma-local-presentation') }
+        )
+        $portStates = foreach ($check in $portChecks) {
+            [pscustomobject]@{ port = $check.port; result = (Resolve-PrismaPortState -Port $check.port -ExpectedModule $check.module) }
         }
-        else {
-            throw 'Prisma Local development acquisition found a partial or ambiguous manifest; it was preserved without repair or pruning.'
+        $foreign = $portStates | Where-Object { $_.result.state -eq 'foreign' } | Select-Object -First 1
+        if ($foreign) {
+            $occupantName = if ([string]::IsNullOrWhiteSpace([string]$foreign.result.processName)) { 'another program' } else { '"' + $foreign.result.processName + '"' }
+            $message = "Prisma could not start: port $($foreign.port) is in use by $occupantName (PID $($foreign.result.pid)). Close it and run the launcher again."
+            # Minimal, documented receipt-on-failure schema so dev.mjs (T4b) can read it even
+            # though this transaction throws: { registered: false, failure: { reason:
+            # 'port_in_use', port, processName (string or null), pid } }.
+            Save-PrismaDevelopmentReceipt -Receipt ([ordered]@{
+                registered = $false
+                failure = [ordered]@{
+                    reason = 'port_in_use'
+                    port = [int]$foreign.port
+                    processName = $(if ([string]::IsNullOrWhiteSpace([string]$foreign.result.processName)) { $null } else { [string]$foreign.result.processName })
+                    pid = [int]$foreign.result.pid
+                }
+            })
+            throw $message
+        }
+
+        $recoveredPorts = @()
+        foreach ($entry in $portStates) {
+            if ($entry.result.state -ne 'ours') { continue }
+            try {
+                Stop-Process -Id ([int]$entry.result.pid) -Force -ErrorAction Stop
+                $recoveredPorts += $entry.port
+            }
+            catch {
+            }
+        }
+        foreach ($port in $recoveredPorts) {
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                if (@(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).Count -eq 0) { break }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+
+        $hadManifest = Test-Path -LiteralPath $manifestPath -PathType Leaf
+        if ($hadManifest) { Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue }
+        if ($hadManifest -or $recoveredPorts.Count -gt 0) {
+            Write-Warning 'Recovered Prisma Local development state left by an abrupt shutdown.' -WarningAction Continue
         }
     }
 

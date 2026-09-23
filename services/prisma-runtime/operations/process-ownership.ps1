@@ -547,68 +547,67 @@ function Invoke-PrismaDevelopmentReleaseTransaction {
     Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
 }
 
-function Test-PrismaStaleDevelopmentManifest {
+function Resolve-PrismaPortState {
     <#
     .SYNOPSIS
-        Fail-closed detection of a development manifest abandoned by an abrupt
-        shutdown (owner process killed before it could release ownership).
+        Classifies a local port for the always-start launcher recovery path
+        with exactly one Get-NetTCPConnection call.
 
     .DESCRIPTION
-        Returns $true only when every one of the following holds; any other
-        outcome, including a parse error or a foreign repository root, returns
-        $false and leaves the manifest untouched:
-          - the manifest belongs to this repository root and carries a
-            `developmentOwnership` record with at least one owner;
-          - EVERY recorded owner resolves to the tri-state `dead` via
-            `Get-PrismaDevelopmentOwnerState`. An owner with no identity
-            metadata is `unknown`, not `dead`, and refuses the classification;
-          - none of the manifest's recorded runtime processes resolves to a
-            verified live listener (`Resolve-PrismaVerifiedListener`);
-          - none of the given ports has any listener at all, verified or not.
-
-        Owner process ids are liveness data only; this function never stops a
-        process and never mutates the manifest. The caller removes the file
-        under the same manifest lock this check already ran inside.
+        Returns a pscustomobject with `state` one of:
+          - 'free': no listener at all.
+          - 'ours': a single listener verified (by path + `-m <module>`
+            command line) as this repository's Prisma module; safe to stop.
+          - 'foreign': a listener present but not verified as ours; NEVER a
+            stop target. `pid` and (when resolvable) `processName` are set.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)] [string]$ManifestPath,
-        [Parameter(Mandatory = $true)] [string]$RepositoryRoot,
-        [int[]]$Ports = @(5056, 5057)
+        [Parameter(Mandatory = $true)] [int]$Port,
+        [Parameter(Mandatory = $true)] [string]$ExpectedModule
     )
 
-    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { return $false }
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) { return [pscustomobject]@{ state = 'free'; pid = 0; processName = '' } }
+
+    $ownerPid = [int]$listeners[0].OwningProcess
+    $identity = Get-PrismaProcessIdentity -ProcessId $ownerPid
+    if ($identity -and (Test-PrismaProcessIdentity -ProcessIdentity $identity -ExpectedModule $ExpectedModule)) {
+        return [pscustomobject]@{ state = 'ours'; pid = $ownerPid; processName = '' }
+    }
+
+    $processName = ''
+    if ($identity -and -not [string]::IsNullOrWhiteSpace([string]$identity.executable)) {
+        $processName = [IO.Path]::GetFileName([string]$identity.executable)
+    }
+    return [pscustomobject]@{ state = 'foreign'; pid = $ownerPid; processName = $processName }
+}
+
+function Test-PrismaDevelopmentRuntimeHealthy {
+    <#
+    .SYNOPSIS
+        Single-attempt health check (no retry loop) for a warm-reuse decision;
+        distinct from Wait-VoiceReady/Wait-PresentationReady in start-local.ps1,
+        which poll while actively starting a fresh process.
+    #>
+    [CmdletBinding()]
+    param()
+
     try {
-        $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+        $voiceHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:5056/health' -TimeoutSec 2
     }
     catch {
         return $false
     }
-    if (-not $manifest.repositoryRoot) { return $false }
-    $manifestRoot = [IO.Path]::GetFullPath([string]$manifest.repositoryRoot)
-    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($manifestRoot, [IO.Path]::GetFullPath($RepositoryRoot))) { return $false }
+    if (-not ($voiceHealth.ok -eq $true -and $voiceHealth.ready -eq $true -and $voiceHealth.service -eq 'prisma-voice' -and $voiceHealth.mode -eq 'local')) { return $false }
 
-    $ownership = $manifest.PSObject.Properties['developmentOwnership']
-    if (-not $ownership) { return $false }
-    $owners = @($ownership.Value.owners | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-    if ($owners.Count -eq 0) { return $false }
-
-    foreach ($owner in $owners) {
-        $identity = Get-PrismaDevelopmentOwnerIdentity -Ownership $ownership.Value -OwnerToken ([string]$owner)
-        if (-not $identity) { return $false }
-        if ((Get-PrismaDevelopmentOwnerState -OwnerIdentity $identity) -ne 'dead') { return $false }
+    try {
+        $presentationHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:5057/health' -TimeoutSec 2
     }
-
-    foreach ($record in @($manifest.processes)) {
-        $module = Get-PrismaExpectedModule -Service ([string]$record.service)
-        $listener = if ($module) { Resolve-PrismaVerifiedListener -Port ([int]$record.port) -ExpectedModule $module } else { $null }
-        if ($listener) { return $false }
+    catch {
+        return $false
     }
-
-    foreach ($port in $Ports) {
-        $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-        if ($listeners.Count -gt 0) { return $false }
-    }
+    if (-not ($presentationHealth.ok -eq $true -and $presentationHealth.ready -eq $true -and $presentationHealth.service -eq 'prisma-local-presentation' -and $presentationHealth.mode -eq 'local' -and $presentationHealth.prismaVoiceReady -eq $true)) { return $false }
 
     return $true
 }
