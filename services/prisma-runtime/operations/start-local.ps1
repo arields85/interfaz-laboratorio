@@ -124,7 +124,13 @@ function Invoke-PrismaStartTransaction {
         return [ordered]@{ registered = $false; generation = ''; reused = $true }
     }
     if ($isDevelopment -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        throw 'Prisma Local development acquisition found a partial or ambiguous manifest; it was preserved without repair or pruning.'
+        if (Test-PrismaStaleDevelopmentManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -Ports @(5056, 5057)) {
+            Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
+            Write-Warning 'Removed stale Prisma Local manifest left by an abrupt shutdown.' -WarningAction Continue
+        }
+        else {
+            throw 'Prisma Local development acquisition found a partial or ambiguous manifest; it was preserved without repair or pruning.'
+        }
     }
 
     Prune-PrismaProcessManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot

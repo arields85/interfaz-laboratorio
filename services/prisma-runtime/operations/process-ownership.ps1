@@ -547,6 +547,72 @@ function Invoke-PrismaDevelopmentReleaseTransaction {
     Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
 }
 
+function Test-PrismaStaleDevelopmentManifest {
+    <#
+    .SYNOPSIS
+        Fail-closed detection of a development manifest abandoned by an abrupt
+        shutdown (owner process killed before it could release ownership).
+
+    .DESCRIPTION
+        Returns $true only when every one of the following holds; any other
+        outcome, including a parse error or a foreign repository root, returns
+        $false and leaves the manifest untouched:
+          - the manifest belongs to this repository root and carries a
+            `developmentOwnership` record with at least one owner;
+          - EVERY recorded owner resolves to the tri-state `dead` via
+            `Get-PrismaDevelopmentOwnerState`. An owner with no identity
+            metadata is `unknown`, not `dead`, and refuses the classification;
+          - none of the manifest's recorded runtime processes resolves to a
+            verified live listener (`Resolve-PrismaVerifiedListener`);
+          - none of the given ports has any listener at all, verified or not.
+
+        Owner process ids are liveness data only; this function never stops a
+        process and never mutates the manifest. The caller removes the file
+        under the same manifest lock this check already ran inside.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$ManifestPath,
+        [Parameter(Mandatory = $true)] [string]$RepositoryRoot,
+        [int[]]$Ports = @(5056, 5057)
+    )
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { return $false }
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        return $false
+    }
+    if (-not $manifest.repositoryRoot) { return $false }
+    $manifestRoot = [IO.Path]::GetFullPath([string]$manifest.repositoryRoot)
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($manifestRoot, [IO.Path]::GetFullPath($RepositoryRoot))) { return $false }
+
+    $ownership = $manifest.PSObject.Properties['developmentOwnership']
+    if (-not $ownership) { return $false }
+    $owners = @($ownership.Value.owners | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($owners.Count -eq 0) { return $false }
+
+    foreach ($owner in $owners) {
+        $identity = Get-PrismaDevelopmentOwnerIdentity -Ownership $ownership.Value -OwnerToken ([string]$owner)
+        if (-not $identity) { return $false }
+        if ((Get-PrismaDevelopmentOwnerState -OwnerIdentity $identity) -ne 'dead') { return $false }
+    }
+
+    foreach ($record in @($manifest.processes)) {
+        $module = Get-PrismaExpectedModule -Service ([string]$record.service)
+        $listener = if ($module) { Resolve-PrismaVerifiedListener -Port ([int]$record.port) -ExpectedModule $module } else { $null }
+        if ($listener) { return $false }
+    }
+
+    foreach ($port in $Ports) {
+        $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+        if ($listeners.Count -gt 0) { return $false }
+    }
+
+    return $true
+}
+
 function Prune-PrismaProcessManifest {
     [CmdletBinding()]
     param(
