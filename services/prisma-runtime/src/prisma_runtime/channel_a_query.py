@@ -78,7 +78,7 @@ PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID = "PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID"
 # snapshot or any freshness detail, and it is sent only while the binding is
 # still current.
 COPY_QUERY_UNAVAILABLE = (
-    "No se pudo leer el documento del HMI en este momento. Intenta de nuevo en unos segundos."
+    "No se pudo leer el documento del HMI en este momento. Intente de nuevo en unos segundos."
 )
 
 # An explicit upper bound on injected numeric policies: a caller must choose a

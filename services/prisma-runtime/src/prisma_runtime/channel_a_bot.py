@@ -155,30 +155,30 @@ CONFIRMATION_PROMPT_TEMPLATE = (
     "Un teléfono quiere conectarse con:\n"
     "{label}\n"
     "\n"
-    "Confirma para recibir en este teléfono las respuestas de ese documento."
+    "Confirme para recibir en este teléfono las respuestas de ese documento."
 )
 WELCOME_TEMPLATE = (
     "Vinculación confirmada con:\n"
     "{label}\n"
     "\n"
-    "Usa los botones para seguir conectado o desvincular este teléfono."
+    "Use los botones para seguir conectado o desvincular este teléfono."
 )
 COPY_REFUSED = (
     "No se pudo iniciar la vinculación: el código no es válido, ya venció o este teléfono ya está vinculado."
 )
 COPY_DESTINATION_UNAVAILABLE = (
-    "Ese documento del HMI ya no está disponible. Genera un código nuevo desde la pantalla."
+    "Ese documento del HMI ya no está disponible. Genere un código nuevo desde la pantalla."
 )
 COPY_CANCELLED = "Vinculación cancelada."
 COPY_CONFIRMED = "Vinculación confirmada."
 COPY_KEEP_CONNECTED = "Listo, seguimos conectados."
 COPY_UNLINKED = "Este teléfono quedó desvinculado."
 COPY_ACTION_REFUSED = (
-    "Ese botón ya no es válido. Genera un código nuevo desde la pantalla del HMI."
+    "Ese botón ya no es válido. Genere un código nuevo desde la pantalla del HMI."
 )
 COPY_INACTIVITY_WARNING = (
     "La vinculación con este documento se va a cerrar por inactividad.\n"
-    "Usa los botones para seguir conectado o desvincular este teléfono."
+    "Use los botones para seguir conectado o desvincular este teléfono."
 )
 
 # One warning reservation is one *attempt*. A skipped, rejected or unknown
