@@ -57,6 +57,23 @@ export function usePrismaCredentialAdministration(options: {
     const operationRef = useRef<{ generation: number; controller: AbortController } | null>(null);
     const generationRef = useRef(0);
     const [pendingAction, setPendingAction] = useState<string | null>(null);
+    // T15: verification is read-only per provider and must never block the
+    // other rows' Save/Delete/Verify (unlike save/delete/apply, which stay
+    // behind the single global `operationRef` above, since those really are
+    // mutations). Each provider gets its own in-flight controller and its
+    // own generation counter; a same-row save/delete bumps that provider's
+    // verify generation so a still-in-flight verify's result is discarded
+    // (never applied) once it resolves, the same staleness pattern
+    // `runOperation` already uses globally.
+    const verifyOperationsRef = useRef<Record<CredentialProvider, AbortController | null>>({
+        gemini: null, telegram: null, telegram_channel_a: null,
+    });
+    const verifyGenerationRef = useRef<Record<CredentialProvider, number>>({
+        gemini: 0, telegram: 0, telegram_channel_a: 0,
+    });
+    const [verifyingProviders, setVerifyingProviders] = useState<Record<CredentialProvider, boolean>>({
+        gemini: false, telegram: false, telegram_channel_a: false,
+    });
     const enabled = active && authenticated;
 
     // Separate metadata-only query so a channel A status failure never poisons
@@ -95,12 +112,24 @@ export function usePrismaCredentialAdministration(options: {
         },
     });
 
+    // Abort and reset every in-flight per-provider verify, independent of
+    // the global mutation operation reset below.
+    const resetVerifyOperations = useCallback(() => {
+        for (const provider of ['gemini', 'telegram', 'telegram_channel_a'] as const) {
+            verifyGenerationRef.current[provider] += 1;
+            verifyOperationsRef.current[provider]?.abort();
+            verifyOperationsRef.current[provider] = null;
+        }
+        setVerifyingProviders({ gemini: false, telegram: false, telegram_channel_a: false });
+    }, []);
+
     useEffect(() => {
         if (active && authenticated) return;
         generationRef.current += 1;
         operationRef.current?.controller.abort();
         operationRef.current = null;
         setPendingAction(null);
+        resetVerifyOperations();
         // The channel A status query is cancelled as soon as the panel is not
         // active; its cache is additionally purged when authority is revoked.
         void queryClient.cancelQueries({ queryKey: PRISMA_CHANNEL_A_STATUS_QUERY_KEY, exact: true });
@@ -109,17 +138,18 @@ export function usePrismaCredentialAdministration(options: {
             queryClient.removeQueries({ queryKey: PRISMA_CREDENTIAL_METADATA_QUERY_KEY, exact: true });
             queryClient.removeQueries({ queryKey: PRISMA_CHANNEL_A_STATUS_QUERY_KEY, exact: true });
         }
-    }, [active, authenticated, queryClient]);
+    }, [active, authenticated, queryClient, resetVerifyOperations]);
 
     useEffect(() => () => {
         generationRef.current += 1;
         operationRef.current?.controller.abort();
         operationRef.current = null;
+        resetVerifyOperations();
         void queryClient.cancelQueries({ queryKey: PRISMA_CREDENTIAL_METADATA_QUERY_KEY, exact: true });
         queryClient.removeQueries({ queryKey: PRISMA_CREDENTIAL_METADATA_QUERY_KEY, exact: true });
         void queryClient.cancelQueries({ queryKey: PRISMA_CHANNEL_A_STATUS_QUERY_KEY, exact: true });
         queryClient.removeQueries({ queryKey: PRISMA_CHANNEL_A_STATUS_QUERY_KEY, exact: true });
-    }, [queryClient]);
+    }, [queryClient, resetVerifyOperations]);
 
     const refresh = useCallback(async () => {
         if (!active || !useAuthStore.getState().session.isAuthenticated) return;
@@ -160,6 +190,9 @@ export function usePrismaCredentialAdministration(options: {
     }, [controller]);
 
     const saveCredential = useCallback(async (provider: CredentialProvider, secret: string) => {
+        // T15: a same-row verify still in flight must never apply its
+        // (now-stale) result once the credential has changed underneath it.
+        verifyGenerationRef.current[provider] += 1;
         await runOperation(`save-${provider}`, async (signal) => {
             await client.saveCredential(provider, secret, signal);
             await refresh();
@@ -167,6 +200,10 @@ export function usePrismaCredentialAdministration(options: {
     }, [client, refresh, runOperation]);
 
     const deleteCredential = useCallback(async (provider: CredentialProvider) => {
+        // T15: same staleness reasoning as saveCredential above -- delete
+        // resets verification on the backend, so a still-in-flight verify's
+        // result must never be applied afterwards either.
+        verifyGenerationRef.current[provider] += 1;
         return runOperation(`delete-${provider}`, async (signal) => {
             try {
                 await client.deleteCredential(provider, signal);
@@ -200,29 +237,63 @@ export function usePrismaCredentialAdministration(options: {
         });
     }, [client, refresh, runOperation]);
 
+    // T15: verify runs OUTSIDE the global mutation lock (`runOperation`
+    // above), with its own per-provider in-flight tracking -- the backend
+    // already 409s a concurrent same-provider verify, and verification is
+    // read-only, so it must never disable another row's Save/Delete/Verify.
+    // A same-row Save/Delete IS allowed while its own verify is in flight
+    // (see saveCredential/deleteCredential's generation bump above); this
+    // guard is what discards the verify's result if it resolves afterwards.
+    const runVerify = useCallback(async <T,>(provider: CredentialProvider, execute: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+        if (verifyOperationsRef.current[provider]) throw new Error('ADMIN_CREDENTIAL_VERIFY_OPERATION_PENDING');
+        const requestController = new AbortController();
+        const generation = verifyGenerationRef.current[provider] + 1;
+        verifyGenerationRef.current[provider] = generation;
+        verifyOperationsRef.current[provider] = requestController;
+        setVerifyingProviders((previous) => ({ ...previous, [provider]: true }));
+        try {
+            const result = await execute(requestController.signal);
+            if (requestController.signal.aborted || verifyGenerationRef.current[provider] !== generation) {
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            }
+            return result;
+        } catch (error) {
+            if (requestController.signal.aborted || verifyGenerationRef.current[provider] !== generation) {
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            }
+            if (!isAbort(error)) await controller.handleProtectedRequestError(error);
+            throw error;
+        } finally {
+            if (verifyOperationsRef.current[provider] === requestController) {
+                verifyOperationsRef.current[provider] = null;
+                setVerifyingProviders((previous) => ({ ...previous, [provider]: false }));
+            }
+        }
+    }, [controller]);
+
     const verifyGemini = useCallback(async () => {
-        return runOperation('verify-gemini', async (signal) => {
+        return runVerify('gemini', async (signal) => {
             const result = await client.verifyGemini(signal);
             await refresh();
             return result;
         });
-    }, [client, refresh, runOperation]);
+    }, [client, refresh, runVerify]);
 
     const verifyTelegram = useCallback(async () => {
-        return runOperation('verify-telegram', async (signal) => {
+        return runVerify('telegram', async (signal) => {
             const result = await client.verifyTelegram(signal);
             await refresh();
             return result;
         });
-    }, [client, refresh, runOperation]);
+    }, [client, refresh, runVerify]);
 
     const verifyChannelA = useCallback(async () => {
-        return runOperation('verify-channel-a', async (signal) => {
+        return runVerify('telegram_channel_a', async (signal) => {
             const result = await client.verifyChannelA(signal);
             await refresh();
             return result;
         });
-    }, [client, refresh, runOperation]);
+    }, [client, refresh, runVerify]);
 
     return {
         data: query.data ?? null,
@@ -232,6 +303,7 @@ export function usePrismaCredentialAdministration(options: {
         channelAError: channelAQuery.error,
         isChannelALoading: channelAQuery.isLoading,
         pendingAction,
+        verifyingProviders,
         refresh,
         saveCredential,
         deleteCredential,

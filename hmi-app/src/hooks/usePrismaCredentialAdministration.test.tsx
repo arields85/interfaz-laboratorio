@@ -12,8 +12,9 @@ import type { ChannelAAdministrationStatus, GeminiCredentialProviderMetadata } f
 import { useAuthStore } from '../store/auth.store';
 import RequirePermission from '../components/auth/RequirePermission';
 
+const GEMINI_MODEL = 'gemini-3.1-flash-tts-preview';
 const GEMINI_NOT_CHECKED = {
-    configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null },
+    configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null }, model: GEMINI_MODEL,
 } as const;
 const TELEGRAM_TOKEN_NOT_CHECKED = { state: 'not_checked', checkedAt: null, username: null } as const;
 const metadata = {
@@ -42,6 +43,7 @@ const channelAIdle = {
     activation: null,
     lastError: null,
     botUsername: null,
+    paired: false,
 } as const;
 const channelARunning = {
     configured: true,
@@ -51,6 +53,7 @@ const channelARunning = {
     activation: { phase: 'running', reason: null, quiescent: false, restartRequired: false },
     lastError: null,
     botUsername: 'prisma_channel_a_bot',
+    paired: false,
 } as const;
 const geminiVerified = {
     configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 },
@@ -586,18 +589,21 @@ describe('usePrismaCredentialAdministration', () => {
         expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
     });
 
-    it('verifies the Gemini credential through the pending-action lifecycle and refreshes metadata', async () => {
+    it('verifies the Gemini credential through its own per-provider in-flight flag and refreshes metadata', async () => {
         const { result, client } = setup();
         await waitFor(() => expect(result.current.data).not.toBeNull());
 
         let operation!: Promise<void>;
         act(() => { operation = result.current.verifyGemini(); });
-        await waitFor(() => expect(result.current.pendingAction).toBe('verify-gemini'));
+        await waitFor(() => expect(result.current.verifyingProviders.gemini).toBe(true));
+        // T15: verification never sets the global pendingAction -- it must
+        // never disable another row's Save/Delete/Verify.
+        expect(result.current.pendingAction).toBeNull();
         await act(async () => { await operation; });
 
         expect(client.verifyGemini).toHaveBeenCalledWith(expect.any(AbortSignal));
         expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
-        expect(result.current.pendingAction).toBeNull();
+        expect(result.current.verifyingProviders.gemini).toBe(false);
     });
 
     it('rejects a second concurrent Gemini verification while one is already pending', async () => {
@@ -607,9 +613,9 @@ describe('usePrismaCredentialAdministration', () => {
 
         let first!: Promise<void>;
         act(() => { first = result.current.verifyGemini(); });
-        await waitFor(() => expect(result.current.pendingAction).toBe('verify-gemini'));
+        await waitFor(() => expect(result.current.verifyingProviders.gemini).toBe(true));
 
-        await expect(result.current.verifyGemini()).rejects.toThrow('ADMIN_CREDENTIAL_OPERATION_PENDING');
+        await expect(result.current.verifyGemini()).rejects.toThrow('ADMIN_CREDENTIAL_VERIFY_OPERATION_PENDING');
         void first.catch(() => undefined);
     });
 
@@ -627,38 +633,59 @@ describe('usePrismaCredentialAdministration', () => {
     });
 
     it.each([
-        ['telegram', 'verifyTelegram', 'verify-telegram'] as const,
-        ['telegram_channel_a', 'verifyChannelA', 'verify-channel-a'] as const,
-    ])('verifies the %s bot token through the pending-action lifecycle and refreshes metadata', async (
-        _provider, method, action,
+        ['telegram', 'verifyTelegram'] as const,
+        ['telegram_channel_a', 'verifyChannelA'] as const,
+    ])('verifies the %s bot token through its own per-provider in-flight flag and refreshes metadata', async (
+        provider, method,
     ) => {
         const { result, client } = setup();
         await waitFor(() => expect(result.current.data).not.toBeNull());
 
         let operation!: Promise<unknown>;
         act(() => { operation = result.current[method](); });
-        await waitFor(() => expect(result.current.pendingAction).toBe(action));
+        await waitFor(() => expect(result.current.verifyingProviders[provider]).toBe(true));
+        // T15: another row's verify (Gemini here) must stay usable while
+        // this one is in flight -- no shared/global in-flight flag.
+        expect(result.current.verifyingProviders.gemini).toBe(false);
+        expect(result.current.pendingAction).toBeNull();
         await act(async () => { await operation; });
 
         expect(client[method]).toHaveBeenCalledWith(expect.any(AbortSignal));
         expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
-        expect(result.current.pendingAction).toBeNull();
+        expect(result.current.verifyingProviders[provider]).toBe(false);
     });
 
     it.each([
-        ['telegram', 'verifyTelegram', 'verify-telegram'] as const,
-        ['telegram_channel_a', 'verifyChannelA', 'verify-channel-a'] as const,
-    ])('rejects a second concurrent %s verification while one is already pending', async (_provider, method, action) => {
+        ['telegram', 'verifyTelegram'] as const,
+        ['telegram_channel_a', 'verifyChannelA'] as const,
+    ])('rejects a second concurrent %s verification while one is already pending', async (provider, method) => {
         const pending = new Promise<never>(() => undefined);
         const { result } = setup({ [method]: vi.fn(() => pending) });
         await waitFor(() => expect(result.current.data).not.toBeNull());
 
         let first!: Promise<unknown>;
         act(() => { first = result.current[method](); });
-        await waitFor(() => expect(result.current.pendingAction).toBe(action));
+        await waitFor(() => expect(result.current.verifyingProviders[provider]).toBe(true));
 
-        await expect(result.current[method]()).rejects.toThrow('ADMIN_CREDENTIAL_OPERATION_PENDING');
+        await expect(result.current[method]()).rejects.toThrow('ADMIN_CREDENTIAL_VERIFY_OPERATION_PENDING');
         void first.catch(() => undefined);
+    });
+
+    it('verifying one provider never disables another row\'s save/delete (no shared global lock)', async () => {
+        const pending = new Promise<never>(() => undefined);
+        const { result } = setup({ verifyChannelA: vi.fn(() => pending) });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let verifying!: Promise<unknown>;
+        act(() => { verifying = result.current.verifyChannelA(); });
+        await waitFor(() => expect(result.current.verifyingProviders.telegram_channel_a).toBe(true));
+
+        // The global mutation lock (pendingAction, used by save/delete/apply)
+        // stays untouched by a verify, so another row's save/delete is free.
+        expect(result.current.pendingAction).toBeNull();
+        await act(async () => { await result.current.saveCredential('gemini', 'unrelated-secret'); });
+
+        void verifying.catch(() => undefined);
     });
 
     it.each([
@@ -674,6 +701,28 @@ describe('usePrismaCredentialAdministration', () => {
         });
 
         expect(client.credentialMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('discards a same-row verify result that resolves after a save has already reset it (T15 staleness guard)', async () => {
+        let releaseVerify!: (value: typeof channelAVerified) => void;
+        const pendingVerify = new Promise<typeof channelAVerified>((resolve) => { releaseVerify = resolve; });
+        const verifyChannelA = vi.fn(() => pendingVerify);
+        const { result } = setup({ verifyChannelA });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let verifying!: Promise<unknown>;
+        act(() => { verifying = result.current.verifyChannelA(); });
+        await waitFor(() => expect(result.current.verifyingProviders.telegram_channel_a).toBe(true));
+        void verifying.catch(() => undefined);
+
+        // Allowed: a same-row save while its own verify is still in flight.
+        await act(async () => { await result.current.saveCredential('telegram_channel_a', 'new-channel-a-secret'); });
+
+        // The verify call now resolves late; its result must never be applied.
+        await act(async () => { releaseVerify(channelAVerified); });
+
+        await expect(verifying).rejects.toMatchObject({ name: 'AbortError' });
+        expect(result.current.verifyingProviders.telegram_channel_a).toBe(false);
     });
 
     it('treats a committed channel A stop-unconfirmed deletion as committed and refreshes without auto-apply', async () => {
