@@ -4,7 +4,7 @@ export function buildTemplateAspectMismatchMessage(
     templateAspect: DashboardAspect,
     dashboardAspect: DashboardAspect,
 ): string {
-    return `Este template es ${templateAspect}, no coincide con el aspect ${dashboardAspect} del dashboard. Cambiá el aspect del dashboard o elegí otro template.`;
+    return `Este template es ${templateAspect}, no coincide con el aspect ${dashboardAspect} del dashboard. Cambie el aspect del dashboard o elija otro template.`;
 }
 
 interface TemplateAspectMismatchErrorOptions {

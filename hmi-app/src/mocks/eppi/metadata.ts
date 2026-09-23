@@ -1691,7 +1691,7 @@ export const eppiDeviceCards = [
 export const eppiAuditCapture = {
     route: '/403',
     title: 'Acceso no autorizado',
-    message: 'No tienes permiso para acceder a este recurso. Por favor, verifica tus credenciales o contacta al administrador si crees que esto es un error.',
+    message: 'No tiene permiso para acceder a este recurso. Por favor, verifique sus credenciales o contacte al administrador si cree que esto es un error.',
     returnLabel: 'Volver a inicio',
     returnRoute: '/app/orders',
 } as const;

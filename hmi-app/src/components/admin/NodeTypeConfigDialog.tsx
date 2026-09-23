@@ -370,7 +370,7 @@ export default function NodeTypeConfigDialog({
 
                                 {usageCount > 0 && (
                                     <p className="text-status-warning">
-                                        Este tipo está asignado a {usageCount} nodo{usageCount !== 1 ? 's' : ''}. Si lo eliminás, esos nodos conservarán la key pero quedarán sin definición visual explícita.
+                                        Este tipo está asignado a {usageCount} nodo{usageCount !== 1 ? 's' : ''}. Si lo elimina, esos nodos conservarán la key pero quedarán sin definición visual explícita.
                                     </p>
                                 )}
                             </div>
@@ -380,7 +380,7 @@ export default function NodeTypeConfigDialog({
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-white/10 bg-black/10 p-4">
                         <div>
                             <p className="uppercase text-white">Agregar tipo</p>
-                            <p className="text-industrial-muted">Creá una nueva definición editable por el admin.</p>
+                            <p className="text-industrial-muted">Cree una nueva definición editable por el admin.</p>
                         </div>
                         <AdminActionButton variant="primary" onClick={() => setDraftTypes((current) => [...current, buildNewNodeType()])}>
                             <Plus size={12} /> Agregar tipo
@@ -389,7 +389,7 @@ export default function NodeTypeConfigDialog({
 
                     {(hasInvalidRows || hasDuplicateKeys) && (
                         <p className="text-status-warning">
-                            Revisá los tipos antes de guardar: cada fila necesita label, ícono y color, y las keys internas deben seguir siendo únicas.
+                            Revise los tipos antes de guardar: cada fila necesita label, ícono y color, y las keys internas deben seguir siendo únicas.
                         </p>
                     )}
                 </div>
@@ -400,10 +400,10 @@ export default function NodeTypeConfigDialog({
                 title="TIPO DE NODO EN USO"
                 onClose={() => setPendingDeleteState(null)}
                 onConfirm={handleConfirmDelete}
-                warningMessage="Este tipo está siendo usado por nodos de la jerarquía. Si seguís adelante, esos nodos mantendrán su key actual pero perderán la definición administrable de label, ícono y color."
+                warningMessage="Este tipo está siendo usado por nodos de la jerarquía. Si sigue adelante, esos nodos mantendrán su key actual pero perderán la definición administrable de label, ícono y color."
                 affectedLabel="Tipo afectado"
                 affectedItems={pendingDeleteType ? [{ id: pendingDeleteType.key, name: `${pendingDeleteType.label} · ${pendingDeleteCount} nodo(s)` }] : []}
-                confirmMessage="¿Querés eliminar el tipo igualmente?"
+                confirmMessage="¿Quiere eliminar el tipo igualmente?"
                 actionLabel="Eliminar igual"
             />
         </>

@@ -36,7 +36,7 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
         event.preventDefault();
 
         if (!username.trim() || password.length === 0) {
-            setError('Ingresá usuario y contraseña.');
+            setError('Ingrese usuario y contraseña.');
             return;
         }
 
@@ -100,7 +100,7 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
                                 value={username}
                                 onChange={(event) => setUsername(event.target.value)}
                                 className="rounded border border-industrial-border bg-industrial-hover px-2 py-1 text-industrial-text outline-none transition-colors placeholder:text-industrial-muted focus:border-admin-accent"
-                                placeholder="Ingresá tu usuario"
+                                placeholder="Ingrese su usuario"
                                 autoComplete="username"
                                 disabled={isSubmitting}
                             />
@@ -116,7 +116,7 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
                                 value={password}
                                 onChange={(event) => setPassword(event.target.value)}
                                 className="rounded border border-industrial-border bg-industrial-hover px-2 py-1 text-industrial-text outline-none transition-colors placeholder:text-industrial-muted focus:border-admin-accent"
-                                placeholder="Ingresá tu contraseña"
+                                placeholder="Ingrese su contraseña"
                                 autoComplete="current-password"
                                 disabled={isSubmitting}
                             />

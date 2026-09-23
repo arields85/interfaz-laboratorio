@@ -140,7 +140,7 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, onSaveStatusCh
             <header>
                 <h4 className="uppercase text-white">Opciones</h4>
                 <p className={`mt-1 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                    Configura loaders visuales de la HMI sin cambios sobre la planta.
+                    Configure loaders visuales de la HMI sin cambios sobre la planta.
                 </p>
             </header>
 

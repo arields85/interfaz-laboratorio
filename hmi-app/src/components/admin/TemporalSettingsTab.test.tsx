@@ -82,7 +82,7 @@ describe('TemporalSettingsTab', () => {
             saveRef.current?.();
         });
 
-        expect(screen.getByRole('alert')).toHaveTextContent('Completa todos los campos de cada turno antes de guardar.');
+        expect(screen.getByRole('alert')).toHaveTextContent('Complete todos los campos de cada turno antes de guardar.');
         expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toBeNull();
         expect(eventSpy).not.toHaveBeenCalled();
         expect(dirtySpy).not.toHaveBeenCalledWith(false);
@@ -110,7 +110,7 @@ describe('TemporalSettingsTab', () => {
             saveRef.current?.();
         });
 
-        expect(screen.getByRole('alert')).toHaveTextContent('Selecciona al menos un dia para cada turno antes de guardar.');
+        expect(screen.getByRole('alert')).toHaveTextContent('Seleccione al menos un dia para cada turno antes de guardar.');
         expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toBeNull();
     });
 
@@ -301,7 +301,7 @@ describe('TemporalSettingsTab save status projection', () => {
             saveRef.current?.();
         });
 
-        expect(screen.getByRole('alert')).toHaveTextContent('Selecciona al menos un dia para cada turno antes de guardar.');
+        expect(screen.getByRole('alert')).toHaveTextContent('Seleccione al menos un dia para cada turno antes de guardar.');
         expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
         expect(handleSaveStatusChange).not.toHaveBeenCalledWith('error');
         expect(localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY)).toBeNull();

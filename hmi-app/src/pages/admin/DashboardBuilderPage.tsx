@@ -388,7 +388,7 @@ export default function DashboardBuilderPage() {
         const trimmedName = viewNameDraft.trim();
 
         if (!trimmedName) {
-            setDialogMessage('Definí un nombre para la nueva vista.');
+            setDialogMessage('Defina un nombre para la nueva vista.');
             return;
         }
 
@@ -419,7 +419,7 @@ export default function DashboardBuilderPage() {
         const trimmedName = viewNameDraft.trim();
 
         if (!trimmedName) {
-            setDialogMessage('Definí un nombre para la vista.');
+            setDialogMessage('Defina un nombre para la vista.');
             return;
         }
 
@@ -1250,7 +1250,7 @@ export default function DashboardBuilderPage() {
             const normalizedUnit = unit.trim();
 
             if (!draft || !selectedWidgetId || !normalizedName || !normalizedUnit) {
-                setDialogMessage('Definí una unidad válida antes de crear una variable de catálogo.');
+                setDialogMessage('Defina una unidad válida antes de crear una variable de catálogo.');
                 return;
             }
 
@@ -1345,7 +1345,7 @@ export default function DashboardBuilderPage() {
             if (widgetRequiringCatalogVariable) {
                 const widgetTitle = widgetRequiringCatalogVariable.title || widgetRequiringCatalogVariable.id;
                 const unit = widgetRequiringCatalogVariable.binding?.unit;
-                setDialogMessage(`El widget "${widgetTitle}" tiene unidad ${unit} que requiere variable. Seleccioná una variable del catálogo.`);
+                setDialogMessage(`El widget "${widgetTitle}" tiene unidad ${unit} que requiere variable. Seleccione una variable del catálogo.`);
                 return null;
             }
 
@@ -1825,7 +1825,7 @@ export default function DashboardBuilderPage() {
             >
                 <div className="flex items-start gap-2 rounded-md border border-status-warning bg-status-warning/10 px-3 py-2.5">
                     <AlertTriangle size={16} className="shrink-0 text-status-warning" />
-                    <p className="text-industrial-muted">Tenés cambios sin guardar en este dashboard. Si salís ahora, los cambios se perderán.</p>
+                    <p className="text-industrial-muted">Tiene cambios sin guardar en este dashboard. Si sale ahora, los cambios se perderán.</p>
                 </div>
             </AdminDialog>
 

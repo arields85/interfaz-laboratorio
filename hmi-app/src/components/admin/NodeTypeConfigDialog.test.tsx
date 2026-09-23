@@ -83,13 +83,13 @@ describe('NodeTypeConfigDialog', () => {
         await user.click(screen.getByRole('button', { name: /agregar tipo/i }));
 
         expect(getSaveButton()).toBeDisabled();
-        expect(screen.getByText(/revisá los tipos antes de guardar/i)).toBeInTheDocument();
+        expect(screen.getByText(/revise los tipos antes de guardar/i)).toBeInTheDocument();
 
         const labelInputs = screen.getAllByRole('textbox');
         await user.type(labelInputs[labelInputs.length - 1], 'Bomba');
 
         expect(getSaveButton()).toBeEnabled();
-        expect(screen.queryByText(/revisá los tipos antes de guardar/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/revise los tipos antes de guardar/i)).not.toBeInTheDocument();
     });
 
     it('generates a derived key on label blur when possible', async () => {
@@ -198,6 +198,6 @@ describe('NodeTypeConfigDialog', () => {
         });
 
         expect(getSaveButton()).toBeDisabled();
-        expect(screen.getByText(/revisá los tipos antes de guardar/i)).toBeInTheDocument();
+        expect(screen.getByText(/revise los tipos antes de guardar/i)).toBeInTheDocument();
     });
 });

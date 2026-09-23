@@ -578,7 +578,7 @@ describe('EppiViewer', () => {
 
         await user.click(screen.getByRole('button', { name: 'Generar rótulo' }));
         let dialog = screen.getByRole('dialog', { name: 'Seleccionar tipo de rótulo' });
-        expect(within(dialog).getByText('Elegí la plantilla que querés completar e imprimir.')).toBeInTheDocument();
+        expect(within(dialog).getByText('Elija la plantilla que quiere completar e imprimir.')).toBeInTheDocument();
         expect(within(dialog).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim())).toEqual([
             'Cerrar', 'Limpio', 'Para limpiar', 'En proceso', 'En proceso (en campaña)',
         ]);
@@ -659,6 +659,6 @@ describe('EppiViewer', () => {
         renderViewer('/eppi/audit');
 
         expect(screen.getByRole('heading', { name: 'Acceso no autorizado' })).toBeInTheDocument();
-        expect(screen.getByText(/no tienes permiso/i)).toBeInTheDocument();
+        expect(screen.getByText(/no tiene permiso/i)).toBeInTheDocument();
     });
 });

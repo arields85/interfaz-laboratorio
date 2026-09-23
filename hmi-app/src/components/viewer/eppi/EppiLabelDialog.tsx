@@ -96,7 +96,7 @@ export default function EppiLabelDialog({ kind, onClose, onSelect }: EppiLabelDi
             {selectedKind === null ? (
                 <div>
                     <p className="pb-5 font-system text-industrial-muted">
-                        Elegí la plantilla que querés completar e imprimir.
+                        Elija la plantilla que quiere completar e imprimir.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
                         {LABEL_KINDS.map((labelKind) => (

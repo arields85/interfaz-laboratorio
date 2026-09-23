@@ -375,7 +375,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await userEvent.click(apply);
 
         expect(await screen.findByRole('alert')).toHaveTextContent(
-            'Este bot ya está en uso por el otro canal. Configurá un bot distinto.',
+            'Este bot ya está en uso por el otro canal. Configure un bot distinto.',
         );
         expect(screen.queryByText('Cambio de Telegram aplicado y estado actualizado.')).not.toBeInTheDocument();
         // A collision is a plain failure, not a committed deletion awaiting a retry.

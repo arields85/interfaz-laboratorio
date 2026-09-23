@@ -65,7 +65,7 @@ function errorMessage(error: unknown): string {
         return {
             AUTH_NOT_CONFIGURED: 'El acceso administrador requiere aprovisionamiento local.',
             INVALID_CREDENTIALS: 'Credenciales inválidas.',
-            LOGIN_RATE_LIMITED: 'Demasiados intentos. Intentá nuevamente más tarde.',
+            LOGIN_RATE_LIMITED: 'Demasiados intentos. Intente nuevamente más tarde.',
             AUTH_TRANSPORT_UNAVAILABLE: 'No se pudo confirmar la sesión con el servicio local.',
             AUTH_STORAGE_UNAVAILABLE: 'El servicio de autenticación no está disponible.',
         }[error.code] ?? 'No se pudo validar la sesión de administrador.';

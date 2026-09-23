@@ -462,7 +462,7 @@ describe('Dashboard page layout', () => {
         });
 
         expect(root).toHaveAttribute(CONTENT_READY_ATTRIBUTE, 'true');
-        expect(screen.getByText('Reintentá desde el navegador o contactá a un administrador si el problema persiste.')).toBeInTheDocument();
+        expect(screen.getByText('Reintente desde el navegador o contacte a un administrador si el problema persiste.')).toBeInTheDocument();
         expect(consoleErrorSpy).toHaveBeenCalledWith('Error cargando dashboards públicos:', expect.any(Error));
     });
 

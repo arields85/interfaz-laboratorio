@@ -188,7 +188,7 @@ export default function TemporalSettingsTab({ onDirtyChange, onSaveStatusChange,
 
             if (!saved.ok) {
                 setSaveError(saved.error.message === 'Each shift must apply to at least one weekday.'
-                    ? 'Selecciona al menos un dia para cada turno antes de guardar.'
+                    ? 'Seleccione al menos un dia para cada turno antes de guardar.'
                     : saved.error.message === 'Shift windows cannot overlap after weekly expansion.'
                         ? 'Los turnos configurados no pueden superponerse en la semana.'
                         : 'No se pudieron guardar los ajustes temporales.');
@@ -212,7 +212,7 @@ export default function TemporalSettingsTab({ onDirtyChange, onSaveStatusChange,
             <header>
                 <h4 className="uppercase text-industrial-text">Ajustes</h4>
                 <p className={`mt-1 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                    Configura reglas temporales de visualizacion sin emitir escrituras operativas.
+                    Configure reglas temporales de visualizacion sin emitir escrituras operativas.
                 </p>
                 {saveError ? (
                     <p role="alert" className="mt-2 text-sm text-status-critical">
@@ -250,7 +250,7 @@ export default function TemporalSettingsTab({ onDirtyChange, onSaveStatusChange,
                     <div>
                         <h5 className="uppercase text-industrial-text">Turnos</h5>
                         <p className={`mt-1 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                            Define turnos globales, incluyendo cruces de medianoche.
+                            Defina turnos globales, incluyendo cruces de medianoche.
                         </p>
                     </div>
 
@@ -372,14 +372,14 @@ function validateTemporalSettingsDraft(draft: TemporalSettingsDraft): string | n
     });
 
     if (hasInvalidShift) {
-        return 'Completa todos los campos de cada turno antes de guardar.';
+        return 'Complete todos los campos de cada turno antes de guardar.';
     }
 
     const weeklyValidation = validateWeeklyShiftSchedule(draft.shifts);
 
     if (!weeklyValidation.ok) {
         if (weeklyValidation.error === 'Each shift must apply to at least one weekday.') {
-            return 'Selecciona al menos un dia para cada turno antes de guardar.';
+            return 'Seleccione al menos un dia para cada turno antes de guardar.';
         }
 
         if (weeklyValidation.error === 'Shift windows cannot overlap after weekly expansion.') {

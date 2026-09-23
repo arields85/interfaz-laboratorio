@@ -318,7 +318,7 @@ describe('VoiceCredentialSettings', () => {
         await user.click(apply);
 
         expect(await screen.findByRole('alert')).toHaveTextContent(
-            'Este bot ya está en uso por el otro canal. Configurá un bot distinto.',
+            'Este bot ya está en uso por el otro canal. Configure un bot distinto.',
         );
         expect(screen.queryByText('Cambio de Telegram aplicado y estado actualizado.')).not.toBeInTheDocument();
         expect(within(telegram).getByRole('button', { name: 'Aplicar cambio' })).toBeEnabled();

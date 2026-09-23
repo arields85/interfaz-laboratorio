@@ -151,7 +151,7 @@ interface AdminDialogProps {
     </>
   )}
 >
-  <p className="text-xs text-industrial-muted">¿Seguro que querés continuar?</p>
+  <p className="text-xs text-industrial-muted">¿Seguro que quiere continuar?</p>
 </AdminDialog>
 ```
 

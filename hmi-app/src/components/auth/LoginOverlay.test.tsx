@@ -126,7 +126,7 @@ describe('LoginOverlay', () => {
         await user.click(screen.getByRole('button', { name: 'Ingresar' }));
 
         expect(authStoreMock.store.getState().login).not.toHaveBeenCalled();
-        expect(screen.getByText('Ingresá usuario y contraseña.')).toBeInTheDocument();
+        expect(screen.getByText('Ingrese usuario y contraseña.')).toBeInTheDocument();
     });
 
     it('shows the authenticated user info instead of the form', () => {

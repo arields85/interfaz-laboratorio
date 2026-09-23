@@ -34,7 +34,7 @@ function HmiNameForm({ enabled }: { enabled: boolean }) {
         const result = saveHmiName(draft);
         if (!result.ok) {
             setFeedback(result.error === 'invalid'
-                ? `No se pudo guardar: ingresá un nombre válido de hasta ${MAX_HMI_NAME_CHARACTERS} caracteres.`
+                ? `No se pudo guardar: ingrese un nombre válido de hasta ${MAX_HMI_NAME_CHARACTERS} caracteres.`
                 : 'No se pudo guardar el nombre en este navegador.');
             return;
         }
@@ -59,7 +59,7 @@ function HmiNameForm({ enabled }: { enabled: boolean }) {
             />
             <p id={hintId} className={`text-xs ${ADMIN_SIDEBAR_HINT_CLS}`}>
                 Se guarda en este navegador y se usa al confirmar esta HMI desde el teléfono.
-                Dejalo vacío para quitar el nombre.
+                Déjelo vacío para quitar el nombre.
             </p>
             <AdminActionButton type="button" variant="secondary" disabled={!enabled} onClick={save}>
                 Guardar nombre

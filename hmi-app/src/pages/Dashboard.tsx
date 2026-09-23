@@ -402,7 +402,7 @@ export default function Dashboard() {
             </div>
             <h2 className="text-white">No se pudieron cargar los dashboards públicos.</h2>
             <p className="text-center max-w-sm">
-                Reintentá desde el navegador o contactá a un administrador si el problema persiste.
+                Reintente desde el navegador o contacte a un administrador si el problema persiste.
             </p>
         </div>
     );

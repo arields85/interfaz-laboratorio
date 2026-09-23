@@ -69,7 +69,7 @@ function NodeDetailPanel({
             <div className="flex-1 px-8 py-6">
                 <AdminEmptyState
                     icon={Network}
-                    message="Seleccioná un nodo para ver y editar sus detalles"
+                    message="Seleccione un nodo para ver y editar sus detalles"
                 />
             </div>
         );
@@ -396,7 +396,7 @@ export default function HierarchyPage() {
 
         const success = await hierarchyStorage.deleteNode(targetId);
         if (!success) {
-            setDialogMessage('No se puede eliminar un nodo que contiene sub-nodos. Elimina primero a los hijos o muévelos.');
+            setDialogMessage('No se puede eliminar un nodo que contiene sub-nodos. Elimine primero a los hijos o muévalos.');
             return;
         }
 
@@ -563,7 +563,7 @@ export default function HierarchyPage() {
                     </div>
                 ) : (
                     <div className="flex h-full w-full items-center px-4 uppercase text-industrial-muted">
-                        Seleccioná un nodo para ver acciones contextualizadas
+                        Seleccione un nodo para ver acciones contextualizadas
                     </div>
                 )
             }
@@ -677,7 +677,7 @@ export default function HierarchyPage() {
                         )}
                     >
                         <p className="text-industrial-muted">
-                            ¿Bajo qué nodo padre querés mover "{selectedNode.name}"?
+                            ¿Bajo qué nodo padre quiere mover "{selectedNode.name}"?
                         </p>
 
                         <select
@@ -765,7 +765,7 @@ export default function HierarchyPage() {
                         </>
                     )}
                 >
-                    <p className="text-industrial-muted">¿Seguro que deseás eliminar el nodo seleccionado?</p>
+                    <p className="text-industrial-muted">¿Seguro que desea eliminar el nodo seleccionado?</p>
                 </AdminDialog>
 
                 <AdminDialog

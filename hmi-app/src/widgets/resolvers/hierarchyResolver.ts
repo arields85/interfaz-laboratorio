@@ -67,7 +67,7 @@ const EMPTY_REASON_MESSAGES: Record<HierarchyTraceEmptyReason, { title: string; 
     },
     'missing-catalog-variable': {
         title: 'Falta variable de catálogo.',
-        description: 'Asigná una variable de catálogo antes de calcular la agregación jerárquica.',
+        description: 'Asigne una variable de catálogo antes de calcular la agregación jerárquica.',
     },
     'no-descendants': {
         title: 'Sin descendientes configurados.',

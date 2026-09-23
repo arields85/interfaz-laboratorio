@@ -176,7 +176,7 @@ function AuditScreen() {
                 </h2>
                 <div className="my-4 border-t border-industrial-border" />
                 <p className="text-industrial-muted">
-                    No tienes permiso para acceder a este recurso. Verifica tus credenciales o contacta al administrador si crees que esto es un error.
+                    No tiene permiso para acceder a este recurso. Verifique sus credenciales o contacte al administrador si cree que esto es un error.
                 </p>
             </article>
         </div>
