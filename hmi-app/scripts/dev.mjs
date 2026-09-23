@@ -41,6 +41,16 @@ function parsePrismaStartupFailure(raw) {
   return { reason, port }
 }
 
+// T4d: a detected startup failure (currently only port_in_use) is thrown by
+// Invoke-PrismaStartTransaction's earliest guard, before any process is started or any
+// development owner is ever registered in the manifest -- there is nothing to recover, and
+// start-local.ps1 already printed its own single, clear terminal line for this case. Both
+// call sites below treat any OTHER rejection exactly as before (recovery attempted, generic
+// warning printed).
+function hasPrismaStartupFailure(error) {
+  return Boolean(error && typeof error === 'object' && 'failure' in error && error.failure)
+}
+
 export function createPowerShellRuntime({
   spawn = spawnChild,
   files = fileSystem,
@@ -106,15 +116,17 @@ export function createPowerShellRuntime({
         throw new Error('Prisma Local acquisition returned an invalid ownership receipt.')
       }
       catch (error) {
-        try {
-          await runScript('release-dev-local.ps1', [
-            '-DevelopmentOwnerToken', ownerToken,
-            '-RecoverRegisteredOwner',
-            '-LockTimeoutMilliseconds', '10000',
-          ])
-        }
-        catch (recoveryError) {
-          warn(`Prisma Local ownership recovery could not be proven: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`)
+        if (!hasPrismaStartupFailure(error)) {
+          try {
+            await runScript('release-dev-local.ps1', [
+              '-DevelopmentOwnerToken', ownerToken,
+              '-RecoverRegisteredOwner',
+              '-LockTimeoutMilliseconds', '10000',
+            ])
+          }
+          catch (recoveryError) {
+            warn(`Prisma Local ownership recovery could not be proven: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`)
+          }
         }
         throw error
       }
@@ -221,9 +233,13 @@ export async function runDevelopment({
         receipt = await runtime.acquire(ownerToken)
       }
       catch (error) {
-        warn(`Prisma Local is unavailable; Vite will continue: ${error instanceof Error ? error.message : String(error)}`)
-        if (error && typeof error === 'object' && 'failure' in error && error.failure) {
+        if (hasPrismaStartupFailure(error)) {
+          // start-local.ps1 already printed its own single, clear terminal line for this
+          // case (T4c/T4d); the generic warning here would be a redundant second line.
           startupFailure = error.failure
+        }
+        else {
+          warn(`Prisma Local is unavailable; Vite will continue: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
       if (requestedSignal) {

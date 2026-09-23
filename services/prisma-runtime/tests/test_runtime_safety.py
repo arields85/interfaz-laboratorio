@@ -1063,16 +1063,23 @@ catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stopped
         """T1b acceptance (d): a non-Prisma process holding 5057 must never be
         stopped. The terminal message names the port, the process name and
         the PID, and the dev receipt carries a structured port_in_use
-        failure so dev.mjs (T4b) can read it even though this throws."""
+        failure so dev.mjs (T4b) can read it even though this throws.
+
+        T4d: the terminal shows exactly this one clean line -- no PowerShell
+        uncaught-error record (message + "At line X char Y" + CategoryInfo +
+        FullyQualifiedErrorId) -- and the process exits non-zero directly, so
+        the invocation below is NOT wrapped in the caller's own try/catch
+        (start-local.ps1 now exits via its own top-level handler, which a
+        wrapping try/catch could never observe)."""
         start_script = OPERATIONS_ROOT / "start-local.ps1"
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary)
             (state / "run").mkdir()
             receipt = state / "receipt.json"
+            stopped_marker = state / "stopped.txt"
             command = fr"""
 $ErrorActionPreference = 'Stop'
 $env:PRISMA_RUNTIME_STATE_DIR = '{state}'
-$global:stopped = @()
 function global:Get-NetTCPConnection {{
     param([int]$LocalPort, [string]$State)
     if ($LocalPort -eq 5056) {{ return @() }}
@@ -1083,16 +1090,17 @@ function global:Get-CimInstance {{
     if ($Filter -match '4321') {{ return [pscustomobject]@{{ ProcessId = 4321; ExecutablePath = 'C:\Other\name.exe'; CommandLine = 'name.exe --serve' }} }}
     return @()
 }}
-function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
-try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
-catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stopped -join ',')" }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) Add-Content -LiteralPath '{stopped_marker}' -Value $Id }}
+& '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'
 """
             result = self.run_powershell(command)
             receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
-        self.assertEqual(result.returncode, 0, result.stderr)
+            stopped_content = stopped_marker.read_text(encoding="utf-8") if stopped_marker.exists() else ""
+        self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn('Prisma could not start: port 5057 is in use by "name.exe" (PID 4321). Close it and run the launcher again.', result.stdout)
-        self.assertIn("stopped=", result.stdout)
-        self.assertNotIn("stopped=4321", result.stdout)
+        self.assertNotIn("FullyQualifiedErrorId", result.stderr)
+        self.assertNotIn("CategoryInfo", result.stderr)
+        self.assertEqual(stopped_content, "")
         self.assertIsNotNone(receipt_value)
         self.assertEqual(receipt_value["registered"], False)
         self.assertEqual(receipt_value["failure"], {"reason": "port_in_use", "port": 5057, "processName": "name.exe", "pid": 4321})
@@ -1116,13 +1124,14 @@ function global:Get-NetTCPConnection {{
     return @([pscustomobject]@{{ LocalPort = 5057; OwningProcess = 4321 }})
 }}
 function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) return @() }}
-try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
-catch {{ Write-Output "message=$($_.Exception.Message)" }}
+& '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'
 """
             result = self.run_powershell(command)
             receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn('Prisma could not start: port 5057 is in use by another program (PID 4321). Close it and run the launcher again.', result.stdout)
+        self.assertNotIn("FullyQualifiedErrorId", result.stderr)
+        self.assertNotIn("CategoryInfo", result.stderr)
         self.assertIsNotNone(receipt_value)
         self.assertIsNone(receipt_value["failure"]["processName"])
         self.assertEqual(receipt_value["failure"]["port"], 5057)

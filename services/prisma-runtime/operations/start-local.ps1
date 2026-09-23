@@ -164,6 +164,10 @@ function Invoke-PrismaStartTransaction {
                     pid = [int]$foreign.result.pid
                 }
             })
+            # T4d: this is a normal, expected outcome (another program owns the port), not an
+            # unexpected failure -- the top-level handler recognizes this exact flag and prints
+            # exactly one clean line instead of the default uncaught-error record.
+            $script:portInUseTerminalMessage = $message
             throw $message
         }
 
@@ -266,16 +270,31 @@ $template = Get-PrismaConfigurationTemplate -RuntimeRoot $runtimeRoot
 Initialize-PrismaRuntimeState -StateRoot $stateRoot -Template $template | Out-Null
 . (Join-Path $PSScriptRoot 'startup-preflight.ps1')
 $script:developmentReceipt = $null
-Invoke-PrismaManifestLock -LockPath $manifestLockPath -TimeoutMilliseconds $LockTimeoutMilliseconds -Action {
-    $script:developmentReceipt = Invoke-PrismaStartTransaction
-    try {
-        Assert-PrismaDevelopmentNotCancelled
-        Save-PrismaDevelopmentReceipt -Receipt $script:developmentReceipt
-    }
-    catch {
-        if ($script:developmentReceipt.registered -eq $true) {
-            Invoke-PrismaDevelopmentReleaseTransaction -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration ([string]$script:developmentReceipt.generation)
+$script:portInUseTerminalMessage = $null
+try {
+    Invoke-PrismaManifestLock -LockPath $manifestLockPath -TimeoutMilliseconds $LockTimeoutMilliseconds -Action {
+        $script:developmentReceipt = Invoke-PrismaStartTransaction
+        try {
+            Assert-PrismaDevelopmentNotCancelled
+            Save-PrismaDevelopmentReceipt -Receipt $script:developmentReceipt
         }
-        throw
+        catch {
+            if ($script:developmentReceipt.registered -eq $true) {
+                Invoke-PrismaDevelopmentReleaseTransaction -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration ([string]$script:developmentReceipt.generation)
+            }
+            throw
+        }
     }
+}
+catch {
+    # T4d: a port_in_use failure is a normal, expected outcome (another program owns the
+    # port) that already exited through the ordinary exception path above -- unlike every
+    # other failure, it does not need the default uncaught-error record (message, "At line
+    # X char Y", CategoryInfo, FullyQualifiedErrorId). Print exactly the one clean line
+    # already prepared and exit non-zero directly, so dev.mjs still sees a failed launch.
+    if ($null -ne $script:portInUseTerminalMessage) {
+        Write-Host $script:portInUseTerminalMessage -ForegroundColor Red
+        exit 1
+    }
+    throw
 }

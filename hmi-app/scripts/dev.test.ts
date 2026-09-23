@@ -122,9 +122,13 @@ describe('development orchestration', () => {
     })).resolves.toBe(0)
 
     expect(spawnVite).toHaveBeenCalledWith(['--host'], { PRISMA_STARTUP_FAILURE: JSON.stringify({ reason: 'port_in_use', port: 5057 }) })
+    // T4d Fix B: start-local.ps1 already printed its own single clear line for this case;
+    // the generic "Prisma Local is unavailable" warning would be a redundant second line.
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Prisma Local is unavailable'))
   })
 
   it('never forwards a startup failure marker when acquisition fails without a detected failure', async () => {
+    const warn = vi.fn()
     const runtime = {
       acquire: vi.fn(async () => {
         throw new Error('owned interpreter missing')
@@ -143,10 +147,13 @@ describe('development orchestration', () => {
       runtime,
       spawnVite,
       signals: createSignals(),
-      warn: vi.fn(),
+      warn,
     })
 
     expect(spawnVite).toHaveBeenCalledWith([], {})
+    // Regression check for the T4d skip above: an ordinary (non-startup-failure) rejection
+    // must still print the generic warning exactly as before.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Prisma Local is unavailable'))
   })
 
   it('skips Prisma honestly on unsupported operating systems', async () => {
@@ -354,6 +361,9 @@ describe('native child adapters', () => {
 
     expect(caught).toBeInstanceOf(Error)
     expect((caught as Error & { failure?: unknown }).failure).toEqual({ reason: 'port_in_use', port: 5057 })
+    // T4d Fix B: a port_in_use failure is thrown before any development owner is ever
+    // registered, so there is nothing to recover -- release-dev-local.ps1 must never run.
+    expect(spawn).toHaveBeenCalledTimes(1)
   })
 
   it.each([
@@ -381,6 +391,9 @@ describe('native child adapters', () => {
 
     expect(caught).toBeInstanceOf(Error)
     expect((caught as Error & { failure?: unknown }).failure).toBeUndefined()
+    // Regression check for the T4d skip above: with no detected startup failure, recovery
+    // must still be attempted exactly as before.
+    expect(spawn).toHaveBeenCalledTimes(2)
   })
 
   it('requests token-scoped recovery when the helper fails after registration', async () => {
