@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CredentialAdministrationClient, CredentialAdministrationController } from '../../hooks/usePrismaCredentialAdministration';
 import { AdminAuthClient, AdminAuthError } from '../../services/adminAuth.service';
@@ -35,14 +35,6 @@ const CHANNEL_A_VERIFIED = {
     configured: true, verified: true,
     verification: { state: 'verified', checkedAt: 1_700_000_003, username: 'prisma_channel_a_bot' },
 } as const;
-// configuredA with both Telegram-family rows already token-verified, so a
-// single fixture covers "credential configured AND token verified" for both
-// rows without re-deriving it per test.
-const configuredAndVerified = {
-    gemini: metadata.gemini,
-    telegram: TELEGRAM_VERIFIED,
-    telegram_channel_a: CHANNEL_A_VERIFIED,
-};
 const health = {
     enabled: true, configured: true, running: true, verified: false,
     desiredGeneration: 2, appliedGeneration: 1, restartRequired: true,
@@ -686,7 +678,7 @@ describe('VoiceCredentialSettings', () => {
         expect(within(channelA).queryByRole('img', { name: 'Bot conectado' })).not.toBeInTheDocument();
         expect(within(channelA).queryByRole('img', { name: 'Bot detenido' })).not.toBeInTheDocument();
         expect(within(channelA).queryByRole('img', { name: 'No se pudo conectar el bot' })).not.toBeInTheDocument();
-        expect(within(channelA).queryByRole('img', { name: 'Estado del bot no confirmado' })).not.toBeInTheDocument();
+        expect(within(channelA).queryByRole('img', { name: 'Estado no confirmado' })).not.toBeInTheDocument();
     });
 
     // Regression: the non-quiescent 'stopping' and 'failed' phases must not
@@ -695,7 +687,7 @@ describe('VoiceCredentialSettings', () => {
     // (failed/retired/running-with-restart) gets the neutral unconfirmed icon.
     it.each([
         { phase: 'stopping' as const, expectedName: 'Conectando…', expectedIcon: 'loader-2' },
-        { phase: 'failed' as const, expectedName: 'Estado del bot no confirmado', expectedIcon: 'circle-dashed' },
+        { phase: 'failed' as const, expectedName: 'Estado no confirmado', expectedIcon: 'circle-dashed' },
     ])('does not render a non-running channel A activation phase ($phase) as stopped', async ({ phase, expectedName, expectedIcon }) => {
         const status = {
             ...channelARunning,
@@ -903,7 +895,10 @@ describe('VoiceCredentialSettings', () => {
         expect(await screen.findByRole('tooltip')).toHaveTextContent('Configure una API key para verificarla.');
     });
 
-    it('places the API Key input, credential icon, Save, Delete, Verificar and the verification icon in one row', async () => {
+    // T14 (2026-09-23): unified verify UX -- Verificar is now an icon-only
+    // button grouped with Save/Delete, and the separate verification icon is
+    // replaced by one trailing result area (text + icon).
+    it('places the API Key input, credential icon, Save, Delete, Verificar and the result area in one row, in that order', async () => {
         renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: GEMINI_VERIFIED })) });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const row = await within(gemini).findByTestId('gemini-credential-row');
@@ -913,16 +908,15 @@ describe('VoiceCredentialSettings', () => {
         const save = within(row).getByRole('button', { name: 'Guardar credencial' });
         const del = within(row).getByRole('button', { name: 'Eliminar credencial' });
         const verify = within(row).getByRole('button', { name: 'Verificar' });
-        const verificationIcon = within(row).getByRole('img', { name: 'Verificada' });
+        const resultArea = within(row).getByTestId('gemini-verification-result');
+        const resultText = within(resultArea).getByText('Verificado');
+        const resultIcon = within(resultArea).getByRole('img', { name: 'Verificado' });
 
         // Structural: every control lives inside the single shared row container,
-        // not split across separate columns.
-        expect(row).toContainElement(input);
-        expect(row).toContainElement(credentialIcon);
-        expect(row).toContainElement(save);
-        expect(row).toContainElement(del);
-        expect(row).toContainElement(verify);
-        expect(row).toContainElement(verificationIcon);
+        // not split across separate columns, in T14's canonical order.
+        const order = [input, credentialIcon, save, del, verify, resultText, resultIcon].map((element) =>
+            Array.from(row.querySelectorAll('*')).indexOf(element));
+        expect(order).toEqual([...order].sort((a, b) => a - b));
     });
 
     it('disables Verificar until a Gemini credential is configured', async () => {
@@ -932,7 +926,7 @@ describe('VoiceCredentialSettings', () => {
         expect(await within(gemini).findByRole('button', { name: 'Verificar' })).toBeDisabled();
     });
 
-    it('verifies the Gemini credential through its explicit action and shows the result as an icon', async () => {
+    it('verifies the Gemini credential through its explicit action and shows the result as text plus an icon', async () => {
         const user = userEvent.setup();
         const credentialMetadata = vi.fn()
             .mockResolvedValueOnce({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })
@@ -940,17 +934,20 @@ describe('VoiceCredentialSettings', () => {
         const verifyGemini = vi.fn(async () => GEMINI_VERIFIED);
         const { client } = renderSettings({ credentialMetadata, verifyGemini });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        // T14: Gemini has no live connection state, so before verifying it
+        // shows the not-yet-checked icon only (no visible text), tooltip-only.
         const notCheckedIcon = await within(gemini).findByRole('img', { name: 'Verificación: no realizada' });
-        expectLucideIcon(notCheckedIcon, 'message-circle-dashed-check');
+        expectLucideIcon(notCheckedIcon, 'circle-dashed-check');
+        expect(within(gemini).queryByText('Verificación: no realizada')).not.toBeInTheDocument();
         const verify = within(gemini).getByRole('button', { name: 'Verificar' });
         await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
         expect(client.verifyGemini).toHaveBeenCalledWith(expect.any(AbortSignal));
-        const verifiedIcon = await within(gemini).findByRole('img', { name: 'Verificada' });
+        expect(await within(gemini).findByText('Verificado')).toBeInTheDocument();
+        const verifiedIcon = within(gemini).getByRole('img', { name: 'Verificado' });
         expectLucideIcon(verifiedIcon, 'check');
-        expect(within(gemini).queryByText('Verificada')).not.toBeInTheDocument();
     });
 
     it('shows Verificando and a spinning icon while a Gemini verification is in flight, and disables the button', async () => {
@@ -975,31 +972,16 @@ describe('VoiceCredentialSettings', () => {
         await act(async () => { release(GEMINI_VERIFIED); });
     });
 
-    it('keeps the Verificar button width stable across Verificar/Verificando by grid-stacking both labels', async () => {
-        const user = userEvent.setup();
-        let release!: (value: typeof GEMINI_VERIFIED) => void;
-        const pending = new Promise<typeof GEMINI_VERIFIED>((resolve) => { release = resolve; });
-        const verifyGemini = vi.fn(() => pending);
-        renderSettings({
-            credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })),
-            verifyGemini,
-        });
+    // T14 (2026-09-23): Verificar is now an icon-only button (Play/Loader2),
+    // grouped with Save/Delete -- T9d's stable-width grid-stacked label pair
+    // is dead code now that there is no text label to keep from reflowing.
+    it('renders Verificar as an icon-only button with no visible text label', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => ({ ...metadata, gemini: { ...GEMINI_NOT_CHECKED, configured: true } })) });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
         const verify = await within(gemini).findByRole('button', { name: 'Verificar' });
-        await waitFor(() => expect(verify).toBeEnabled());
 
-        // Both labels always exist in the DOM (grid-stacked in the same cell),
-        // so the button's intrinsic width never changes; only the inactive one
-        // is aria-hidden, which is what keeps the accessible name exact.
-        expect(within(verify).getByText('Verificar')).not.toHaveAttribute('aria-hidden', 'true');
-        expect(within(verify).getByText('Verificando…')).toHaveAttribute('aria-hidden', 'true');
-
-        await user.click(verify);
-
-        const verifying = await within(gemini).findByRole('button', { name: 'Verificando…' });
-        expect(within(verifying).getByText('Verificando…')).not.toHaveAttribute('aria-hidden', 'true');
-        expect(within(verifying).getByText('Verificar')).toHaveAttribute('aria-hidden', 'true');
-        await act(async () => { release(GEMINI_VERIFIED); });
+        expect(verify.textContent?.trim()).toBe('');
+        expect(verify).toHaveAccessibleName('Verificar');
     });
 
     it('renders the Gemini Delete button matching Verificar, not the red danger variant, while Save stays distinct', async () => {
@@ -1017,10 +999,13 @@ describe('VoiceCredentialSettings', () => {
         expect(del.className.split(' ').sort()).not.toEqual(save.className.split(' ').sort());
     });
 
+    // T14: invalid_key/unreachable are now shown as visible text next to the
+    // icon (not icon-only + tooltip); "unreachable" copy also dropped its
+    // "No se pudo verificar:" prefix.
     it.each([
         ['invalid_key', 'API key inválida', 'circle-x'],
-        ['unreachable', 'No se pudo verificar: sin conexión con Google', 'wifi-off'],
-    ])('shows the %s verification result as the %s icon with its safe accessible name', async (state, expectedName, expectedIcon) => {
+        ['unreachable', 'Sin conexión con Google', 'wifi-off'],
+    ])('shows the %s verification result as visible text plus the %s icon', async (state, expectedText, expectedIcon) => {
         renderSettings({
             credentialMetadata: vi.fn(async () => ({
                 ...metadata,
@@ -1029,9 +1014,9 @@ describe('VoiceCredentialSettings', () => {
         });
         const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
 
-        const icon = await within(gemini).findByRole('img', { name: expectedName });
+        expect(await within(gemini).findByText(expectedText)).toBeInTheDocument();
+        const icon = within(gemini).getByRole('img', { name: expectedText });
         expectLucideIcon(icon, expectedIcon);
-        expect(within(gemini).queryByText(expectedName)).not.toBeInTheDocument();
     });
 
     it('shows a safe message when a concurrent Gemini verification is rejected', async () => {
@@ -1061,9 +1046,8 @@ describe('VoiceCredentialSettings', () => {
             [clientMethod]: vi.fn(async () => { throw new AdminAuthError(code, 409, false); }),
         });
         const group = await screen.findByRole('group', { name: groupName });
-        await within(group).findByRole('img', { name: 'Verificación: no realizada' });
-        const verify = within(group).getByRole('button', { name: 'Verificar' });
-        expect(verify).toBeEnabled();
+        const verify = await within(group).findByRole('button', { name: 'Verificar' });
+        await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
@@ -1083,9 +1067,8 @@ describe('VoiceCredentialSettings', () => {
             [clientMethod]: vi.fn(async () => { throw new AdminAuthError(code, 503, false); }),
         });
         const group = await screen.findByRole('group', { name: groupName });
-        await within(group).findByRole('img', { name: 'Verificación: no realizada' });
-        const verify = within(group).getByRole('button', { name: 'Verificar' });
-        expect(verify).toBeEnabled();
+        const verify = await within(group).findByRole('button', { name: 'Verificar' });
+        await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
@@ -1207,11 +1190,14 @@ describe('VoiceCredentialSettings', () => {
         expect(await screen.findByRole('tooltip')).toHaveTextContent('Configure un token para verificarlo.');
     });
 
+    // T14 (2026-09-23): Telegram/Canal A's result area shows the LIVE
+    // CONNECTION state by default (not a "not yet verified" placeholder), so
+    // there is nothing to pre-check before clicking Verificar any more.
     it.each([
-        ['Canal A' as const, 'telegram_channel_a' as const, 'verifyChannelA' as const],
-        ['Canal B' as const, 'telegram' as const, 'verifyTelegram' as const],
-    ])('verifies the %s bot token through its own explicit action and shows the result as an icon', async (
-        groupName, provider, clientMethod,
+        ['Canal A' as const, 'telegram_channel_a' as const, 'verifyChannelA' as const, 'prisma_channel_a_bot'],
+        ['Canal B' as const, 'telegram' as const, 'verifyTelegram' as const, 'prisma_bot'],
+    ])('verifies the %s bot token through its own explicit action and shows the result as text plus an icon', async (
+        groupName, provider, clientMethod, expectedUsername,
     ) => {
         const user = userEvent.setup();
         const credentialMetadata = vi.fn()
@@ -1219,15 +1205,14 @@ describe('VoiceCredentialSettings', () => {
             .mockResolvedValueOnce({ ...configuredA, [provider]: (provider === 'telegram' ? TELEGRAM_VERIFIED : CHANNEL_A_VERIFIED) });
         const { client } = renderSettings({ credentialMetadata, channelAStatus: vi.fn(async () => channelARunning) });
         const group = await screen.findByRole('group', { name: groupName });
-        const notCheckedIcon = await within(group).findByRole('img', { name: 'Verificación: no realizada' });
-        expectLucideIcon(notCheckedIcon, 'message-circle-dashed-check');
-        const verify = within(group).getByRole('button', { name: 'Verificar' });
+        const verify = await within(group).findByRole('button', { name: 'Verificar' });
         await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
         expect(client[clientMethod]).toHaveBeenCalledWith(expect.any(AbortSignal));
-        const verifiedIcon = await within(group).findByRole('img', { name: /Token verificado/ });
+        expect(await within(group).findByText(`@${expectedUsername}`)).toBeInTheDocument();
+        const verifiedIcon = within(group).getByRole('img', { name: /Token verificado/ });
         expectLucideIcon(verifiedIcon, 'check');
     });
 
@@ -1238,9 +1223,8 @@ describe('VoiceCredentialSettings', () => {
             channelAStatus: vi.fn(async () => channelARunning),
         });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
-        await within(channelA).findByRole('img', { name: 'Verificación: no realizada' });
-        const verify = within(channelA).getByRole('button', { name: 'Verificar' });
-        expect(verify).toBeEnabled();
+        const verify = await within(channelA).findByRole('button', { name: 'Verificar' });
+        await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
@@ -1259,9 +1243,8 @@ describe('VoiceCredentialSettings', () => {
             verifyTelegram: vi.fn(() => pending),
         });
         const channelB = await screen.findByRole('group', { name: 'Canal B' });
-        await within(channelB).findByRole('img', { name: 'Verificación: no realizada' });
-        const verify = within(channelB).getByRole('button', { name: 'Verificar' });
-        expect(verify).toBeEnabled();
+        const verify = await within(channelB).findByRole('button', { name: 'Verificar' });
+        await waitFor(() => expect(verify).toBeEnabled());
 
         await user.click(verify);
 
@@ -1272,38 +1255,202 @@ describe('VoiceCredentialSettings', () => {
         await act(async () => { release(TELEGRAM_VERIFIED); });
     });
 
+    // T14: a failed verification result REPLACES the live connection state
+    // in the one shared result area (they are the same slot now, not
+    // distinct icons), so "Bot conectado" is no longer expected alongside it.
     it.each([
         ['invalid_token', 'Token inválido', 'circle-x'],
-        ['unreachable', 'No se pudo verificar: sin conexión con Telegram', 'wifi-off'],
-    ])('shows the %s verification result as the %s icon on Canal A, distinct from the execution icon', async (state, expectedName, expectedIcon) => {
+        ['unreachable', 'Sin conexión con Telegram', 'wifi-off'],
+    ])('shows the %s verification result as text plus the %s icon on Canal A, replacing the connection state', async (state, expectedText, expectedIcon) => {
+        const user = userEvent.setup();
+        const failedVerification = { configured: true, verified: false, verification: { state, checkedAt: 1, username: null } };
+        const verifyChannelA = vi.fn(async () => failedVerification);
+        // The rendered result reads from the refreshed metadata (T13's
+        // pre-existing `credentials?.[provider].verification` contract), so
+        // the second credentialMetadata call (triggered by verify's own
+        // internal refresh()) must reflect the same failed state the verify
+        // call itself returned.
+        const credentialMetadata = vi.fn()
+            .mockResolvedValueOnce(configuredA)
+            .mockResolvedValue({ ...configuredA, telegram_channel_a: failedVerification });
         renderSettings({
-            credentialMetadata: vi.fn(async () => ({
-                ...configuredA,
-                telegram_channel_a: { configured: true, verified: false, verification: { state, checkedAt: 1, username: null } },
-            })),
+            credentialMetadata,
             channelAStatus: vi.fn(async () => channelARunning),
+            verifyChannelA,
         });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
+        expect(await within(channelA).findByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
+        const verify = within(channelA).getByRole('button', { name: 'Verificar' });
+        await waitFor(() => expect(verify).toBeEnabled());
 
-        const icon = await within(channelA).findByRole('img', { name: expectedName });
+        await user.click(verify);
+
+        const icon = await within(channelA).findByRole('img', { name: expectedText });
         expectLucideIcon(icon, expectedIcon);
-        // The execution icon (live connectivity) still reads "Bot conectado"
-        // from the running fixture, independent of the token check result.
-        expect(within(channelA).getByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
+        expect(within(channelA).getByText(expectedText)).toBeInTheDocument();
+        expect(within(channelA).queryByRole('img', { name: 'Bot conectado' })).not.toBeInTheDocument();
     });
 
-    it('places Verificar and its verification icon after the execution icon, in the same trailing row as @username', async () => {
-        renderSettings({ credentialMetadata: vi.fn(async () => configuredAndVerified), channelAStatus: vi.fn(async () => channelARunning) });
+    it('places the credential input, credential icon, Save, Delete, Verificar and the result area in one row for Canal A, in that order', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
         const row = await within(channelA).findByTestId('telegram_channel_a-credential-row');
 
-        const username = within(row).getByText('@prisma_channel_a_bot');
-        const executionIcon = within(row).getByRole('img', { name: 'Bot conectado' });
+        const input = within(row).getByLabelText('Telegram bot API Token');
+        const credentialIcon = within(row).getByRole('img', { name: 'Credencial configurada' });
+        const save = within(row).getByRole('button', { name: 'Guardar credencial' });
+        const del = within(row).getByRole('button', { name: 'Eliminar credencial' });
         const verify = within(row).getByRole('button', { name: 'Verificar' });
-        const verificationIcon = within(row).getByRole('img', { name: /Token verificado/ });
+        const resultArea = within(row).getByTestId('telegram_channel_a-verification-result');
+        const resultText = within(resultArea).getByText('@prisma_channel_a_bot');
+        const resultIcon = within(resultArea).getByRole('img', { name: 'Bot conectado' });
 
-        const order = [username, executionIcon, verify, verificationIcon].map((element) =>
+        const order = [input, credentialIcon, save, del, verify, resultText, resultIcon].map((element) =>
             Array.from(row.querySelectorAll('*')).indexOf(element));
         expect(order).toEqual([...order].sort((a, b) => a - b));
+    });
+
+    // T14 (coordinator instruction, 2026-09-23): width arithmetic for the
+    // grouped-button/result-area layout, verified structurally.
+    it('gives the Gemini, Canal A and Canal B result areas the exact same minimum width', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const channelA = screen.getByRole('group', { name: 'Canal A' });
+        const channelB = screen.getByRole('group', { name: 'Canal B' });
+
+        const geminiResult = await within(gemini).findByTestId('gemini-verification-result');
+        const channelAResult = within(channelA).getByTestId('telegram_channel_a-verification-result');
+        const channelBResult = within(channelB).getByTestId('telegram-verification-result');
+
+        const widthClasses = (element: HTMLElement) =>
+            element.className.split(' ').filter((cls) => /^(min-w-|w-)/.test(cls)).sort();
+        expect(widthClasses(geminiResult)).toEqual(widthClasses(channelAResult));
+        expect(widthClasses(channelAResult)).toEqual(widthClasses(channelBResult));
+        expect(widthClasses(geminiResult).length).toBeGreaterThan(0);
+    });
+
+    // Telegram usernames are capped at 32 characters by the Telegram Bot API
+    // (5-32, https://core.telegram.org/bots/api). This pins the exact worst
+    // case the result area must render without truncating, at the panel's
+    // normal (>= md) width.
+    it('renders a maximum-length (32-char) Telegram username in full, with no truncation classes', async () => {
+        const maxLengthUsername = `${'a'.repeat(28)}_bot`;
+        expect(maxLengthUsername).toHaveLength(32);
+        const longUsernameRunning = { ...channelARunning, botUsername: maxLengthUsername };
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => longUsernameRunning) });
+        const channelA = await screen.findByRole('group', { name: 'Canal A' });
+
+        const usernameText = await within(channelA).findByText(`@${maxLengthUsername}`);
+        expect(usernameText.className).not.toMatch(/truncate|overflow-hidden|text-ellipsis|whitespace-nowrap/);
+        const resultArea = within(channelA).getByTestId('telegram_channel_a-verification-result');
+        expect(resultArea).toContainElement(usernameText);
+        expect(resultArea.className).not.toMatch(/truncate|overflow-hidden|text-ellipsis/);
+    });
+
+    // T14: a successful verification result stays visible for
+    // VERIFICATION_RESULT_DISPLAY_MS, then reverts to the live connection
+    // state; a failed one never reverts on its own.
+    describe('verification result display duration', () => {
+        beforeEach(() => {
+            vi.useFakeTimers({ shouldAdvanceTime: true });
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('reverts a successful Canal A verification back to the connection state after the display duration', async () => {
+            const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
+            const credentialMetadata = vi.fn()
+                .mockResolvedValueOnce(configuredA)
+                .mockResolvedValue({ ...configuredA, telegram_channel_a: CHANNEL_A_VERIFIED });
+            renderSettings({ credentialMetadata, channelAStatus: vi.fn(async () => channelARunning) });
+            const channelA = await screen.findByRole('group', { name: 'Canal A' });
+            const verify = await within(channelA).findByRole('button', { name: 'Verificar' });
+            await waitFor(() => expect(verify).toBeEnabled());
+
+            await user.click(verify);
+
+            expect(await within(channelA).findByRole('img', { name: /Token verificado/ })).toBeInTheDocument();
+
+            // shouldAdvanceTime (required for findBy/waitFor to keep working
+            // under fake timers) lets the clock also tick with real elapsed
+            // time, so this only asserts the two end states -- immediately
+            // after a successful verify, and once VERIFICATION_RESULT_DISPLAY_MS
+            // has unambiguously elapsed -- rather than a precise "one ms
+            // before" boundary, which would be flaky against that auto-tick.
+            await act(async () => { vi.advanceTimersByTime(5_000); });
+            await waitFor(() => expect(within(channelA).queryByRole('img', { name: /Token verificado/ })).not.toBeInTheDocument());
+            expect(within(channelA).getByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
+        });
+
+        it('never reverts a failed Canal A verification, even long after the display duration', async () => {
+            const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
+            const failedVerification = {
+                configured: true, verified: false, verification: { state: 'invalid_token' as const, checkedAt: 1, username: null },
+            };
+            const verifyChannelA = vi.fn(async () => failedVerification);
+            const credentialMetadata = vi.fn()
+                .mockResolvedValueOnce(configuredA)
+                .mockResolvedValue({ ...configuredA, telegram_channel_a: failedVerification });
+            renderSettings({ credentialMetadata, channelAStatus: vi.fn(async () => channelARunning), verifyChannelA });
+            const channelA = await screen.findByRole('group', { name: 'Canal A' });
+            const verify = await within(channelA).findByRole('button', { name: 'Verificar' });
+            await waitFor(() => expect(verify).toBeEnabled());
+
+            await user.click(verify);
+
+            expect(await within(channelA).findByText('Token inválido')).toBeInTheDocument();
+
+            await act(async () => { vi.advanceTimersByTime(60_000); });
+
+            expect(within(channelA).getByText('Token inválido')).toBeInTheDocument();
+            expect(within(channelA).queryByRole('img', { name: 'Bot conectado' })).not.toBeInTheDocument();
+        });
+
+        it('clears the pending revert timer on unmount, with no stale update afterwards', async () => {
+            const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
+            const credentialMetadata = vi.fn()
+                .mockResolvedValueOnce(configuredA)
+                .mockResolvedValue({ ...configuredA, telegram_channel_a: CHANNEL_A_VERIFIED });
+            const { unmount } = renderSettings({ credentialMetadata, channelAStatus: vi.fn(async () => channelARunning) });
+            const channelA = await screen.findByRole('group', { name: 'Canal A' });
+            const verify = await within(channelA).findByRole('button', { name: 'Verificar' });
+            await waitFor(() => expect(verify).toBeEnabled());
+
+            await user.click(verify);
+            expect(await within(channelA).findByRole('img', { name: /Token verificado/ })).toBeInTheDocument();
+
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+            unmount();
+            await act(async () => { vi.advanceTimersByTime(10_000); });
+
+            expect(errorSpy).not.toHaveBeenCalled();
+            errorSpy.mockRestore();
+        });
+
+        it('clears a pending revert timer immediately when Save resets verification', async () => {
+            const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
+            const saveCredential = vi.fn(async () => ({ provider: 'telegram_channel_a' as const, configured: true }));
+            const credentialMetadata = vi.fn()
+                .mockResolvedValueOnce(configuredA)
+                .mockResolvedValue({ ...configuredA, telegram_channel_a: CHANNEL_A_VERIFIED });
+            renderSettings({ credentialMetadata, channelAStatus: vi.fn(async () => channelARunning), saveCredential });
+            const channelA = await screen.findByRole('group', { name: 'Canal A' });
+            const verify = await within(channelA).findByRole('button', { name: 'Verificar' });
+            await waitFor(() => expect(verify).toBeEnabled());
+            await user.click(verify);
+            expect(await within(channelA).findByRole('img', { name: /Token verificado/ })).toBeInTheDocument();
+
+            const input = within(channelA).getByLabelText('Telegram bot API Token');
+            await user.type(input, 'new-channel-a-secret');
+            await user.click(within(channelA).getByRole('button', { name: 'Guardar credencial' }));
+
+            await waitFor(() => expect(within(channelA).queryByRole('img', { name: /Token verificado/ })).not.toBeInTheDocument());
+            // No leftover timer either: advancing well past the display
+            // duration must not resurrect or otherwise touch the result.
+            await act(async () => { vi.advanceTimersByTime(10_000); });
+            expect(within(channelA).queryByRole('img', { name: /Token verificado/ })).not.toBeInTheDocument();
+        });
     });
 });

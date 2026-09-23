@@ -262,6 +262,48 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   Canal B` (`218c203`, frontend), `fix(admin): add safe messages for Telegram and Canal A
   verification errors` (`21fe03a`, GGA follow-up).
 
+- [x] **T14** Unified verify UX across the three rows (user decisions
+  2026-09-23). Problem: in Canal A and Canal B the trailing content
+  (`@username` + execution icon + "Verificar" text button + verification
+  icon) wrapped to a second line under the input. Fix: harmonize all three
+  rows onto ONE line: `[input] (credential icon) [Save] [Delete] [Verify ▶]
+  <single result area>`. (1) Verificar is now an icon-only button (Lucide
+  `Play`; `Loader2` spin while verifying), grouped with Save/Delete, same
+  variant/size; accessible name "Verificar"/"Verificando…" via aria-label +
+  HoverTooltip, disabled-with-tooltip when no credential. (2) ONE trailing
+  result area (text + icon) replaces the old separate verification icon and,
+  for Canal A/B, the separate `@username` + execution icon: Gemini shows its
+  verification result directly (no live state to fall back to); Canal A/B
+  show the live connection state by default and switch to the on-demand
+  verification result after Verificar is clicked, with a successful result
+  auto-reverting after `VERIFICATION_RESULT_DISPLAY_MS` (5000ms, new named
+  constant -- no existing feedback/toast duration constant was semantically
+  equivalent) while a failed result persists until the next verify, save, or
+  delete. Not-yet-verified icon renamed `MessageCircleDashedCheck` ->
+  `CircleDashedCheck` everywhere. (3) Coordinator mid-task addition: the
+  three inputs keep one exact shared width and the result area reserves
+  `min-w-[33ch]` (Telegram's 32-char username limit + "@"), sized so
+  everything fits on one line at the panel's normal width. Width arithmetic
+  (container chain read from each component's own source, no live browser
+  available to this writer): AdminDialog panel `max-w-3xl` (768px) minus
+  `p-6` (24px*2) = 720px; GlobalSettingsDialog content region minus `pr-2`
+  (8px, right side only) = 712px; `VoiceCredentialSettings` section minus
+  `p-4` (16px*2) = 680px; `CredentialFieldset` minus `p-3` (12px*2) = 656px
+  row content width. Row items (6: input, credential icon, Save, Delete,
+  Verify, result area; `gap-2` = 8px between each -> 5 gaps = 40px):
+  credential icon ~18px; Save/Delete/Verify (`HmiButton size="sm"`,
+  icon-only: `px-3*2` 24px + 14px icon + `border` 1px*2 = 40px each, 120px
+  total); result area worst case, a pessimistic 8px/character estimate
+  (body font-size is `--font-size-system` = 11px, `index.css`) for 33
+  characters = 264px, plus its own `gap-1` (4px) and a 16px status icon =
+  284px, rounded up to 290px for margin. Total non-input: 40 + 18 + 120 +
+  290 = 468px -> 656 - 468 = 188px left for the input; chose `md:w-44`
+  (176px), a 12px safety margin against this pessimistic estimate (real
+  character widths at 11px are typically ~6-7px, not 8px, so the true
+  margin is larger in practice). Route: direct (single component + its
+  tests). Commit `style(admin): unify credential verification into grouped
+  icon buttons` (`<hash>`).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
