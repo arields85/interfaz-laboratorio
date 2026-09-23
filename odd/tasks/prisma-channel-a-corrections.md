@@ -1,6 +1,8 @@
 # Prisma channel A corrections — ODD feature tracker
 
-> ODD feature task (not SDD). Branch: `fix/prisma-channel-a-corrections` (from `main` c14fdaa).
+> ODD feature task (not SDD). **CLOSED 2026-09-23** — integrated into local `main` by fast-forward
+> (c14fdaa → ea1a900, 62 commits); branch deleted; NOT pushed (user decision: no GitHub push).
+> Originally developed on `fix/prisma-channel-a-corrections` (from `main` c14fdaa).
 > PW-003 semantic query work is parked by user decision (2026-09-23).
 
 ## Objective
@@ -1747,19 +1749,19 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
 
 ## Next step
 
-Open follow-ups (not started, need user choice):
-1. Save/apply error copy still says "Telegram" for the row now named "Canal B".
-2. Launcher reuses a running Prisma even if its code is older than the checkout (dev gotcha).
-3. `.hmi-masked-text` relies on `-webkit-text-security` (not Firefox).
-4. Canal B (Telegram) has no automatic-retry recovery after a background failure the way Canal A
-   now does (T16); its composition is substantially different (no manager/activation/runner split,
-   no observer seam) and it stayed out of T16's scope by explicit decision. `status()` already
-   surfaces its `lastError` reactively, so it is a feature gap, not a regression.
-5. Delivery: branch not pushed; forecast far above ~400 lines → chain strategy question if a PR
-   is requested (ask-on-risk). PW-003 semantic query remains parked.
+**Feature closed.** User manual acceptance 1–7 + T16 recovery done. Local `main` holds everything;
+only remaining local branch is `feat/prisma-local-runtime-complete` (kept on purpose by the user:
+2 unintegrated draft commits from 2026-08-29). The temp worktree
+`AppData/Local/Temp/opencode/prisma-runtime-cutover` (detached, older session) was left untouched.
 
-Next step for T16: user restarts the launcher (Ctrl+C, then start again) and observes Canal A
-over time -- a background failure (e.g. a temporary network drop) should now show "Reconectando…"
-and recover on its own without saving the token again; a genuinely revoked token or a bot reserved
-by Canal B should show "Token inválido" / "Bot en uso por el otro canal" and stay that way until
-fixed.
+**NEXT SESSION — return point:**
+1. Resume: read `docs/PENDING_WORK.md`, Engram `backlog/prisma-channel-a-responsiveness` (PW-006)
+   and `backlog/hmi-responsive-scaling` (PW-007).
+2. Start PW-006 (Prisma Telegram/HMI responsiveness): root-cause diagnosis with real measurements
+   first (≈1 min Telegram lag, orb/audio misses), then approved UX items: confirmation copy
+   "Está a un paso: confirme y Prisma responderá sus consultas en este chat.", pinned message vs
+   persistent keyboard options for keep/unlink buttons, Telegram "typing…" indicator.
+3. Then PW-007 (responsive scaling between ~1440×900 and ~2560×1440 CSS px).
+Remaining minor follow-ups from this feature: Canal B errors still say "Telegram"; Canal B has no
+auto-retry (different composition, documented); launcher reuses an older running runtime in dev;
+`.hmi-masked-text` not supported in Firefox. PW-003 stays parked.
