@@ -17,10 +17,10 @@
 > después de PW-005 ni pruebas en este cierre documental. Límites y cronología: §11.1.
 >
 > **Próximo paso:** diseño semántico acordado y [documentado](PRISMA_SEMANTIC_QUERY_SERVICE.md);
-> prueba acotada pendiente, sin implementación autorizada. Ahora corresponde revisión documental
-> y respaldo estable por el padre: commit, integración fast-forward a main y push a `origin/main`
-> autorizados. No iniciar pruebas, servicios ni proveedores. PW-002/PW-004 no cambian; PW-003
-> conserva el trabajo amplio. Hash y entrega se registrarán tras observarlos; no se hereda omisión de hooks.
+> prueba acotada pendiente, sin implementación autorizada. Respaldo inicial confirmado en `173bd86`:
+> documentación integrada por fast-forward y publicada en `origin/main`. El próximo paso de producto
+> requiere autorización explícita nueva. No iniciar pruebas, servicios ni proveedores; PW-002/PW-004
+> no cambian. El commit final de esta evidencia y su push aún no se afirman realizados.
 
 ## 1. Objetivo y estado general
 
@@ -999,10 +999,14 @@ El cierre estable observado por el padre es `19adf7d`. CL (preguntas ejercitadas
 orbe) y PW-005 (Ctrl+C normal) permanecen aceptados con los límites y cronología de 2.0.20 debajo;
 no se repiten ni se afirma una suite completa nueva. Esta actualización es exclusivamente documental.
 
-**Siguiente acción:** revisión estática del padre y respaldo autorizado con documentación: commit,
-fast-forward de la rama existente a main y push a `origin/main` con autenticación Git configurada.
-Solo el padre ejecuta esas operaciones. Entrega y hash siguen pendientes de observación; no hay PR
-solicitado ni permiso heredado para omitir GGA o cambiar hooks/configuración.
+**Respaldo observado:** DOC-1 cerrado en `173bd8640aaba588da609e3caabc43f9f3708209`, integrado
+por fast-forward y publicado por el padre; main y origin/main coinciden, solo `.gga` sin rastrear.
+Los checks documental y staged aprobaron (331 líneas autorales); evaluación nativa pasiva, sin review
+ni receipt y con RDD desactivado. El permiso nuevo de omitir GGA se limita a los dos commits de este
+respaldo, sin cambios persistentes ni herencia futura. El primero ya se realizó; el segundo registra
+esta evidencia y su hash/push se informarán tras observarlos. Sin PR ni nuevas pruebas funcionales.
+**Próximo paso de producto:** autorización explícita nueva para la prueba acotada; no otra integración
+ni repetición de CL/Ctrl+C. Solo el padre realiza el commit/push final de evidencia pendiente.
 
 **Checkpoint histórico 2.0.20 (2026-09-22) — CL aceptado y PW-005 cerrado; permisos y próximos pasos sustituidos por 2.0.21.**
 
@@ -1536,8 +1540,8 @@ incrustar un SHA autorreferencial. Esta versión documental no afirma que ese co
 
 - Diseño semántico acordado documentado con alternativas, límites y cuatro pruebas futuras;
   sin implementación autorizada ni cambios funcionales. PW-003 conserva el roadmap amplio.
-- Cierre estable `19adf7d`, CL y Ctrl+C preservados; revisión y respaldo a main autorizados al padre,
-  pendientes de observación, sin heredar omisión de hooks ni afirmar nuevas pruebas.
+- Cierre estable `19adf7d`, CL y Ctrl+C preservados; respaldo inicial `173bd86` confirmado en main
+  y origin/main. Registro final de evidencia pendiente de commit/push, sin afirmar nuevas pruebas.
 
 ### 2.0.20 — 2026-09-22
 
