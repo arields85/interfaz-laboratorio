@@ -31,6 +31,8 @@ const FRESH_SESSION = {
 const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
 const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
 const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
+const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
+const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
 
 const GEMINI_VERIFIED = {
     ok: true,
@@ -39,6 +41,24 @@ const GEMINI_VERIFIED = {
 
 const GEMINI_NOT_CHECKED = {
     configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null },
+} as const;
+
+const TELEGRAM_TOKEN_NOT_CHECKED = { state: 'not_checked', checkedAt: null, username: null } as const;
+
+const TELEGRAM_VERIFIED = {
+    ok: true,
+    telegram: {
+        configured: true, verified: true,
+        verification: { state: 'verified', checkedAt: 1_700_000_000, username: 'prisma_bot' },
+    },
+} as const;
+
+const CHANNEL_A_VERIFIED = {
+    ok: true,
+    channelA: {
+        configured: true, verified: true,
+        verification: { state: 'verified', checkedAt: 1_700_000_001, username: 'prisma_channel_a_bot' },
+    },
 } as const;
 
 const CHANNEL_A_STATUS = {
@@ -370,6 +390,59 @@ describe('AdminAuthClient', () => {
         expect(JSON.stringify(failure)).not.toContain(canary);
     });
 
+    it.each([
+        ['Telegram (Canal B)', 'verifyTelegram', TELEGRAM_VERIFY_ROUTE, TELEGRAM_VERIFIED, 'telegram'] as const,
+        ['Canal A', 'verifyChannelA', CHANNEL_A_VERIFY_ROUTE, CHANNEL_A_VERIFIED, 'channelA'] as const,
+    ])('verifies the %s bot token on its exact route with an empty JSON body and the active private CSRF', async (
+        _label, method, route, verified, key,
+    ) => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse(verified));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client[method]()).resolves.toEqual(verified[key]);
+
+        expect(fetcher.mock.calls[1]?.[0]).toBe(route);
+        expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+            method: 'POST',
+            credentials: 'same-origin',
+            body: '{}',
+            headers: expect.objectContaining({
+                'X-CSRF-Token': SESSION.csrfToken,
+                'Content-Type': 'application/json',
+            }),
+        }));
+    });
+
+    it.each([
+        ['Telegram (Canal B)', 'verifyTelegram', TELEGRAM_VERIFY_ROUTE, 'TELEGRAM_VERIFICATION_IN_PROGRESS'] as const,
+        ['Canal A', 'verifyChannelA', CHANNEL_A_VERIFY_ROUTE, 'PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS'] as const,
+    ])('keeps a concurrent %s verification as an uncommitted 409 failure without leaking provider text', async (
+        _label, method, _route, code,
+    ) => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: code }, 409));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client[method]()).rejects.toMatchObject({ code, status: 409 });
+    });
+
+    it('never calls the other Telegram-family verify route when verifying one channel', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse(TELEGRAM_VERIFIED));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await client.verifyTelegram();
+
+        expect(fetcher.mock.calls.map(([path]) => path)).not.toContain(CHANNEL_A_VERIFY_ROUTE);
+    });
+
     it('keeps a channel identity collision as an uncommitted apply failure on its exact route', async () => {
         const fetcher = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(SESSION))
@@ -397,8 +470,8 @@ describe('AdminAuthClient', () => {
                 ok: true,
                 providers: {
                     gemini: GEMINI_NOT_CHECKED,
-                    telegram: { configured: true },
-                    telegram_channel_a: { configured: false },
+                    telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+                    telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
                 },
             }))
             .mockResolvedValueOnce(jsonResponse({ ok: true, provider: 'gemini', configured: true }))
@@ -492,8 +565,8 @@ describe('AdminAuthClient', () => {
                 ok: true,
                 providers: {
                     gemini: GEMINI_NOT_CHECKED,
-                    telegram: { configured: true },
-                    telegram_channel_a: { configured: false },
+                    telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+                    telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
                 },
             }))
             .mockResolvedValueOnce(jsonResponse({ ok: true, provider: 'telegram_channel_a', configured: true }));
@@ -502,8 +575,8 @@ describe('AdminAuthClient', () => {
 
         await expect(client.credentialMetadata()).resolves.toEqual({
             gemini: GEMINI_NOT_CHECKED,
-            telegram: { configured: true },
-            telegram_channel_a: { configured: false },
+            telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+            telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
         });
         await expect(client.saveCredential('telegram_channel_a', secret)).resolves.toEqual({
             provider: 'telegram_channel_a', configured: true,

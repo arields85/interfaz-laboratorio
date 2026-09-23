@@ -4,6 +4,7 @@ import type {
     CredentialProvider,
     GeminiCredentialProviderMetadata,
     TelegramAdministrationStatus,
+    TelegramFamilyCredentialProviderMetadata,
     TelegramPassiveHealth,
 } from '../domain';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,6 +32,8 @@ export interface CredentialAdministrationClient {
     channelAStatus(signal?: AbortSignal): Promise<ChannelAAdministrationStatus>;
     applyChannelA(signal?: AbortSignal): Promise<ChannelAAdministrationStatus>;
     verifyGemini(signal?: AbortSignal): Promise<GeminiCredentialProviderMetadata>;
+    verifyTelegram(signal?: AbortSignal): Promise<TelegramFamilyCredentialProviderMetadata>;
+    verifyChannelA(signal?: AbortSignal): Promise<TelegramFamilyCredentialProviderMetadata>;
 }
 
 export interface CredentialAdministrationController {
@@ -205,6 +208,22 @@ export function usePrismaCredentialAdministration(options: {
         });
     }, [client, refresh, runOperation]);
 
+    const verifyTelegram = useCallback(async () => {
+        return runOperation('verify-telegram', async (signal) => {
+            const result = await client.verifyTelegram(signal);
+            await refresh();
+            return result;
+        });
+    }, [client, refresh, runOperation]);
+
+    const verifyChannelA = useCallback(async () => {
+        return runOperation('verify-channel-a', async (signal) => {
+            const result = await client.verifyChannelA(signal);
+            await refresh();
+            return result;
+        });
+    }, [client, refresh, runOperation]);
+
     return {
         data: query.data ?? null,
         error: query.error,
@@ -219,5 +238,7 @@ export function usePrismaCredentialAdministration(options: {
         applyTelegram,
         applyChannelA,
         verifyGemini,
+        verifyTelegram,
+        verifyChannelA,
     };
 }

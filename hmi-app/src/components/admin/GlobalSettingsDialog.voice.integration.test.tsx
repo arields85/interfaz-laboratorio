@@ -326,8 +326,14 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     ok: true,
                     providers: {
                         gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
-                        telegram: { configured: true },
-                        telegram_channel_a: { configured: false },
+                        telegram: {
+                            configured: true, verified: false,
+                            verification: { state: 'not_checked', checkedAt: null, username: null },
+                        },
+                        telegram_channel_a: {
+                            configured: false, verified: false,
+                            verification: { state: 'not_checked', checkedAt: null, username: null },
+                        },
                     },
                 }, 200);
             }

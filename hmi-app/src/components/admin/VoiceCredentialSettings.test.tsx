@@ -15,14 +15,34 @@ const GEMINI_NOT_CHECKED = {
 const GEMINI_VERIFIED = {
     configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 },
 } as const;
+const TELEGRAM_TOKEN_NOT_CHECKED = { state: 'not_checked', checkedAt: null, username: null } as const;
 const metadata = {
     gemini: GEMINI_NOT_CHECKED,
-    telegram: { configured: true },
-    telegram_channel_a: { configured: false },
+    telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+    telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
 };
 // Shared metadata snapshot for scenarios whose channel A status reports a
 // configured credential, so UI gating and status never contradict each other.
-const configuredA = { ...metadata, telegram_channel_a: { configured: true } };
+const configuredA = {
+    ...metadata,
+    telegram_channel_a: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+};
+const TELEGRAM_VERIFIED = {
+    configured: true, verified: true,
+    verification: { state: 'verified', checkedAt: 1_700_000_002, username: 'prisma_bot' },
+} as const;
+const CHANNEL_A_VERIFIED = {
+    configured: true, verified: true,
+    verification: { state: 'verified', checkedAt: 1_700_000_003, username: 'prisma_channel_a_bot' },
+} as const;
+// configuredA with both Telegram-family rows already token-verified, so a
+// single fixture covers "credential configured AND token verified" for both
+// rows without re-deriving it per test.
+const configuredAndVerified = {
+    gemini: metadata.gemini,
+    telegram: TELEGRAM_VERIFIED,
+    telegram_channel_a: CHANNEL_A_VERIFIED,
+};
 const health = {
     enabled: true, configured: true, running: true, verified: false,
     desiredGeneration: 2, appliedGeneration: 1, restartRequired: true,
@@ -88,6 +108,8 @@ function renderSettings(clientOverrides: Partial<CredentialAdministrationClient>
         channelAStatus: vi.fn(async () => channelAIdle),
         applyChannelA: vi.fn(async () => channelARunning),
         verifyGemini: vi.fn(async () => GEMINI_VERIFIED),
+        verifyTelegram: vi.fn(async () => TELEGRAM_VERIFIED),
+        verifyChannelA: vi.fn(async () => CHANNEL_A_VERIFIED),
         ...clientOverrides,
     };
     const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
@@ -1119,5 +1141,126 @@ describe('VoiceCredentialSettings', () => {
 
         const dialog = screen.getByRole('dialog', { name: 'Eliminar credencial' });
         expect(within(dialog).getByText(expectedText)).toBeInTheDocument();
+    });
+
+    // T13: "Verificar" (non-sending token check) for Canal A and Canal B,
+    // same UX as Gemini's row -- stable-width label stack, secondary variant,
+    // a dedicated verification icon distinct from the execution icon, and a
+    // tooltip when disabled.
+    it.each(['Canal A' as const, 'Canal B' as const])('shows a tooltip explaining why %s\'s Verificar is disabled when no token is configured', async (groupName) => {
+        const user = userEvent.setup();
+        renderSettings({
+            credentialMetadata: vi.fn(async () => ({
+                ...metadata,
+                telegram: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+            })),
+        });
+        const group = await screen.findByRole('group', { name: groupName });
+        const verify = await within(group).findByRole('button', { name: 'Verificar' });
+        expect(verify).toBeDisabled();
+
+        await user.hover(verify);
+
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('Configure un token para verificarlo.');
+    });
+
+    it.each([
+        ['Canal A' as const, 'telegram_channel_a' as const, 'verifyChannelA' as const],
+        ['Canal B' as const, 'telegram' as const, 'verifyTelegram' as const],
+    ])('verifies the %s bot token through its own explicit action and shows the result as an icon', async (
+        groupName, provider, clientMethod,
+    ) => {
+        const user = userEvent.setup();
+        const credentialMetadata = vi.fn()
+            .mockResolvedValueOnce(configuredA)
+            .mockResolvedValueOnce({ ...configuredA, [provider]: (provider === 'telegram' ? TELEGRAM_VERIFIED : CHANNEL_A_VERIFIED) });
+        const { client } = renderSettings({ credentialMetadata, channelAStatus: vi.fn(async () => channelARunning) });
+        const group = await screen.findByRole('group', { name: groupName });
+        const notCheckedIcon = await within(group).findByRole('img', { name: 'Verificación: no realizada' });
+        expectLucideIcon(notCheckedIcon, 'message-circle-dashed-check');
+        const verify = within(group).getByRole('button', { name: 'Verificar' });
+        await waitFor(() => expect(verify).toBeEnabled());
+
+        await user.click(verify);
+
+        expect(client[clientMethod]).toHaveBeenCalledWith(expect.any(AbortSignal));
+        const verifiedIcon = await within(group).findByRole('img', { name: /Token verificado/ });
+        expectLucideIcon(verifiedIcon, 'check');
+    });
+
+    it('never calls the other channel\'s verify action when verifying Canal A', async () => {
+        const user = userEvent.setup();
+        const { client } = renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => channelARunning),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Canal A' });
+        await within(channelA).findByRole('img', { name: 'Verificación: no realizada' });
+        const verify = within(channelA).getByRole('button', { name: 'Verificar' });
+        expect(verify).toBeEnabled();
+
+        await user.click(verify);
+
+        expect(client.verifyChannelA).toHaveBeenCalledTimes(1);
+        expect(client.verifyTelegram).not.toHaveBeenCalled();
+        expect(client.verifyGemini).not.toHaveBeenCalled();
+    });
+
+    it('shows Verificando and a spinning icon while a Canal B verification is in flight, and disables the button', async () => {
+        const user = userEvent.setup();
+        let release!: (value: typeof TELEGRAM_VERIFIED) => void;
+        const pending = new Promise<typeof TELEGRAM_VERIFIED>((resolve) => { release = resolve; });
+        renderSettings({
+            credentialMetadata: vi.fn(async () => configuredA),
+            channelAStatus: vi.fn(async () => channelARunning),
+            verifyTelegram: vi.fn(() => pending),
+        });
+        const channelB = await screen.findByRole('group', { name: 'Canal B' });
+        await within(channelB).findByRole('img', { name: 'Verificación: no realizada' });
+        const verify = within(channelB).getByRole('button', { name: 'Verificar' });
+        expect(verify).toBeEnabled();
+
+        await user.click(verify);
+
+        expect(await within(channelB).findByRole('button', { name: 'Verificando…' })).toBeDisabled();
+        const verifyingIcon = within(channelB).getByRole('img', { name: 'Verificando…' });
+        expectLucideIcon(verifyingIcon, 'loader-2');
+        expect(verifyingIcon.querySelector('svg')).toHaveClass('animate-spin');
+        await act(async () => { release(TELEGRAM_VERIFIED); });
+    });
+
+    it.each([
+        ['invalid_token', 'Token inválido', 'circle-x'],
+        ['unreachable', 'No se pudo verificar: sin conexión con Telegram', 'wifi-off'],
+    ])('shows the %s verification result as the %s icon on Canal A, distinct from the execution icon', async (state, expectedName, expectedIcon) => {
+        renderSettings({
+            credentialMetadata: vi.fn(async () => ({
+                ...configuredA,
+                telegram_channel_a: { configured: true, verified: false, verification: { state, checkedAt: 1, username: null } },
+            })),
+            channelAStatus: vi.fn(async () => channelARunning),
+        });
+        const channelA = await screen.findByRole('group', { name: 'Canal A' });
+
+        const icon = await within(channelA).findByRole('img', { name: expectedName });
+        expectLucideIcon(icon, expectedIcon);
+        // The execution icon (live connectivity) still reads "Bot conectado"
+        // from the running fixture, independent of the token check result.
+        expect(within(channelA).getByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
+    });
+
+    it('places Verificar and its verification icon after the execution icon, in the same trailing row as @username', async () => {
+        renderSettings({ credentialMetadata: vi.fn(async () => configuredAndVerified), channelAStatus: vi.fn(async () => channelARunning) });
+        const channelA = await screen.findByRole('group', { name: 'Canal A' });
+        const row = await within(channelA).findByTestId('telegram_channel_a-credential-row');
+
+        const username = within(row).getByText('@prisma_channel_a_bot');
+        const executionIcon = within(row).getByRole('img', { name: 'Bot conectado' });
+        const verify = within(row).getByRole('button', { name: 'Verificar' });
+        const verificationIcon = within(row).getByRole('img', { name: /Token verificado/ });
+
+        const order = [username, executionIcon, verify, verificationIcon].map((element) =>
+            Array.from(row.querySelectorAll('*')).indexOf(element));
+        expect(order).toEqual([...order].sort((a, b) => a - b));
     });
 });

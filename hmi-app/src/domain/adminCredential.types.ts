@@ -16,10 +16,27 @@ export interface GeminiCredentialProviderMetadata extends CredentialProviderMeta
     verification: GeminiVerification;
 }
 
+// T13: on-demand, non-sending bot token verification shared by Telegram
+// (Canal B) and Canal A -- the same closed-classification shape as Gemini's,
+// plus the bot's own public username once verified (never the token itself).
+export type TelegramTokenVerificationState =
+    | 'not_checked' | 'verified' | 'invalid_token' | 'unreachable' | 'not_configured';
+
+export interface TelegramTokenVerification {
+    state: TelegramTokenVerificationState;
+    checkedAt: number | null;
+    username: string | null;
+}
+
+export interface TelegramFamilyCredentialProviderMetadata extends CredentialProviderMetadata {
+    verified: boolean;
+    verification: TelegramTokenVerification;
+}
+
 export interface CredentialMetadata {
     gemini: GeminiCredentialProviderMetadata;
-    telegram: CredentialProviderMetadata;
-    telegram_channel_a: CredentialProviderMetadata;
+    telegram: TelegramFamilyCredentialProviderMetadata;
+    telegram_channel_a: TelegramFamilyCredentialProviderMetadata;
 }
 
 export type TelegramCredentialSource = 'protected' | 'environment' | null;
@@ -159,10 +176,6 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
     return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-function isProviderMetadata(value: unknown): value is CredentialProviderMetadata {
-    return isObject(value) && hasExactKeys(value, ['configured']) && typeof value.configured === 'boolean';
-}
-
 const GEMINI_VERIFICATION_STATES = new Set<GeminiVerificationState>([
     'not_checked', 'verified', 'invalid_key', 'unreachable', 'not_configured',
 ]);
@@ -177,6 +190,24 @@ function isGeminiProviderMetadata(value: unknown): value is GeminiCredentialProv
     return isObject(value) && hasExactKeys(value, ['configured', 'verified', 'verification'])
         && typeof value.configured === 'boolean' && typeof value.verified === 'boolean'
         && isGeminiVerification(value.verification);
+}
+
+const TELEGRAM_TOKEN_VERIFICATION_STATES = new Set<TelegramTokenVerificationState>([
+    'not_checked', 'verified', 'invalid_token', 'unreachable', 'not_configured',
+]);
+
+function isTelegramTokenVerification(value: unknown): value is TelegramTokenVerification {
+    return isObject(value) && hasExactKeys(value, ['state', 'checkedAt', 'username'])
+        && typeof value.state === 'string'
+        && TELEGRAM_TOKEN_VERIFICATION_STATES.has(value.state as TelegramTokenVerificationState)
+        && (value.checkedAt === null || (typeof value.checkedAt === 'number' && Number.isFinite(value.checkedAt)))
+        && isBotUsername(value.username);
+}
+
+function isTelegramFamilyProviderMetadata(value: unknown): value is TelegramFamilyCredentialProviderMetadata {
+    return isObject(value) && hasExactKeys(value, ['configured', 'verified', 'verification'])
+        && typeof value.configured === 'boolean' && typeof value.verified === 'boolean'
+        && isTelegramTokenVerification(value.verification);
 }
 
 function isProvider(value: unknown): value is CredentialProvider {
@@ -206,8 +237,9 @@ export function parseCredentialMetadata(value: unknown): CredentialMetadata {
     if (!isObject(value) || !hasExactKeys(value, ['ok', 'providers']) || value.ok !== true
         || !isObject(value.providers)
         || !hasExactKeys(value.providers, ['gemini', 'telegram', 'telegram_channel_a'])
-        || !isGeminiProviderMetadata(value.providers.gemini) || !isProviderMetadata(value.providers.telegram)
-        || !isProviderMetadata(value.providers.telegram_channel_a)) {
+        || !isGeminiProviderMetadata(value.providers.gemini)
+        || !isTelegramFamilyProviderMetadata(value.providers.telegram)
+        || !isTelegramFamilyProviderMetadata(value.providers.telegram_channel_a)) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     return {
@@ -223,6 +255,22 @@ export function parseGeminiVerificationResult(value: unknown): GeminiCredentialP
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     return value.gemini;
+}
+
+export function parseTelegramVerificationResult(value: unknown): TelegramFamilyCredentialProviderMetadata {
+    if (!isObject(value) || !hasExactKeys(value, ['ok', 'telegram']) || value.ok !== true
+        || !isTelegramFamilyProviderMetadata(value.telegram)) {
+        throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    }
+    return value.telegram;
+}
+
+export function parseChannelAVerificationResult(value: unknown): TelegramFamilyCredentialProviderMetadata {
+    if (!isObject(value) || !hasExactKeys(value, ['ok', 'channelA']) || value.ok !== true
+        || !isTelegramFamilyProviderMetadata(value.channelA)) {
+        throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    }
+    return value.channelA;
 }
 
 export function parseCredentialMutation(value: unknown): CredentialMutationResult {

@@ -15,10 +15,11 @@ import RequirePermission from '../components/auth/RequirePermission';
 const GEMINI_NOT_CHECKED = {
     configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null },
 } as const;
+const TELEGRAM_TOKEN_NOT_CHECKED = { state: 'not_checked', checkedAt: null, username: null } as const;
 const metadata = {
     gemini: GEMINI_NOT_CHECKED,
-    telegram: { configured: true },
-    telegram_channel_a: { configured: false },
+    telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+    telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
 };
 const health = {
     enabled: true, configured: true, running: true, verified: false,
@@ -54,6 +55,14 @@ const channelARunning = {
 const geminiVerified = {
     configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 },
 } as const;
+const telegramVerified = {
+    configured: true, verified: true,
+    verification: { state: 'verified', checkedAt: 1_700_000_000, username: 'prisma_bot' },
+} as const;
+const channelAVerified = {
+    configured: true, verified: true,
+    verification: { state: 'verified', checkedAt: 1_700_000_001, username: 'prisma_channel_a_bot' },
+} as const;
 
 function authenticated() {
     useAuthStore.setState({
@@ -79,6 +88,8 @@ function setup(clientOverrides: Partial<CredentialAdministrationClient> = {}) {
         channelAStatus: vi.fn(async () => channelAIdle),
         applyChannelA: vi.fn(async () => channelARunning),
         verifyGemini: vi.fn(async () => geminiVerified),
+        verifyTelegram: vi.fn(async () => telegramVerified),
+        verifyChannelA: vi.fn(async () => channelAVerified),
         ...clientOverrides,
     };
     const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
@@ -105,6 +116,8 @@ function setupWithActiveFlag(clientOverrides: Partial<CredentialAdministrationCl
         channelAStatus: vi.fn(async () => channelAIdle),
         applyChannelA: vi.fn(async () => channelARunning),
         verifyGemini: vi.fn(async () => geminiVerified),
+        verifyTelegram: vi.fn(async () => telegramVerified),
+        verifyChannelA: vi.fn(async () => channelAVerified),
         ...clientOverrides,
     };
     const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
@@ -382,8 +395,8 @@ describe('usePrismaCredentialAdministration', () => {
                         ok: true,
                         providers: {
                             gemini: GEMINI_NOT_CHECKED,
-                            telegram: { configured: true },
-                            telegram_channel_a: { configured: false },
+                            telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+                            telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
                         },
                     }));
                 }
@@ -392,8 +405,8 @@ describe('usePrismaCredentialAdministration', () => {
                     ok: true,
                     providers: {
                         gemini: { ...GEMINI_NOT_CHECKED, configured: true },
-                        telegram: { configured: true },
-                        telegram_channel_a: { configured: false },
+                        telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+                        telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
                     },
                 }));
             }
@@ -430,8 +443,8 @@ describe('usePrismaCredentialAdministration', () => {
                 ok: true,
                 providers: {
                     gemini: GEMINI_NOT_CHECKED,
-                    telegram: { configured: true },
-                    telegram_channel_a: { configured: false },
+                    telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+                    telegram_channel_a: { configured: false, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
                 },
             }));
             await lateMetadata;
@@ -460,6 +473,8 @@ describe('usePrismaCredentialAdministration', () => {
             channelAStatus: vi.fn(async () => channelAIdle),
             applyChannelA: vi.fn(async () => channelARunning),
         verifyGemini: vi.fn(async () => geminiVerified),
+        verifyTelegram: vi.fn(async () => telegramVerified),
+        verifyChannelA: vi.fn(async () => channelAVerified),
         };
         const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -606,6 +621,56 @@ describe('usePrismaCredentialAdministration', () => {
 
         await act(async () => {
             await expect(result.current.verifyGemini()).rejects.toBe(failure);
+        });
+
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ['telegram', 'verifyTelegram', 'verify-telegram'] as const,
+        ['telegram_channel_a', 'verifyChannelA', 'verify-channel-a'] as const,
+    ])('verifies the %s bot token through the pending-action lifecycle and refreshes metadata', async (
+        _provider, method, action,
+    ) => {
+        const { result, client } = setup();
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let operation!: Promise<unknown>;
+        act(() => { operation = result.current[method](); });
+        await waitFor(() => expect(result.current.pendingAction).toBe(action));
+        await act(async () => { await operation; });
+
+        expect(client[method]).toHaveBeenCalledWith(expect.any(AbortSignal));
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
+        expect(result.current.pendingAction).toBeNull();
+    });
+
+    it.each([
+        ['telegram', 'verifyTelegram', 'verify-telegram'] as const,
+        ['telegram_channel_a', 'verifyChannelA', 'verify-channel-a'] as const,
+    ])('rejects a second concurrent %s verification while one is already pending', async (_provider, method, action) => {
+        const pending = new Promise<never>(() => undefined);
+        const { result } = setup({ [method]: vi.fn(() => pending) });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let first!: Promise<unknown>;
+        act(() => { first = result.current[method](); });
+        await waitFor(() => expect(result.current.pendingAction).toBe(action));
+
+        await expect(result.current[method]()).rejects.toThrow('ADMIN_CREDENTIAL_OPERATION_PENDING');
+        void first.catch(() => undefined);
+    });
+
+    it.each([
+        ['telegram', 'verifyTelegram', 'TELEGRAM_VERIFICATION_IN_PROGRESS'] as const,
+        ['telegram_channel_a', 'verifyChannelA', 'PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS'] as const,
+    ])('propagates a %s verification failure without refreshing metadata', async (_provider, method, code) => {
+        const failure = new AdminAuthError(code, 409, false);
+        const { result, client } = setup({ [method]: vi.fn(async () => { throw failure; }) });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        await act(async () => {
+            await expect(result.current[method]()).rejects.toBe(failure);
         });
 
         expect(client.credentialMetadata).toHaveBeenCalledTimes(1);

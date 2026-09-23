@@ -1,10 +1,12 @@
 import {
     parseChannelAAdministrationStatus,
+    parseChannelAVerificationResult,
     parseCredentialMetadata,
     parseCredentialMutation,
     parseGeminiVerificationResult,
     parseTelegramAdministrationStatus,
     parseTelegramPassiveHealth,
+    parseTelegramVerificationResult,
     validateCredentialSecret,
     type AdminAuthStatus,
     type AdministratorIdentity,
@@ -14,6 +16,7 @@ import {
     type CredentialProvider,
     type GeminiCredentialProviderMetadata,
     type TelegramAdministrationStatus,
+    type TelegramFamilyCredentialProviderMetadata,
     type TelegramPassiveHealth,
 } from '../domain';
 
@@ -21,6 +24,8 @@ const AUTH_ROOT = '/api/prisma/admin/auth';
 const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
 const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
 const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
+const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
+const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
 const CSRF_TOKEN_LENGTH = 43;
 const PUBLIC_ERROR_CODES = new Set([
     'ADMIN_CREDENTIAL_BLANK',
@@ -51,6 +56,8 @@ const PUBLIC_ERROR_CODES = new Set([
     'PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE',
     'PRISMA_CHANNEL_A_RESTART_REQUIRED',
     'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+    'PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS',
+    'PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE',
     'PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING',
     'TELEGRAM_CREDENTIAL_MISSING',
     'TELEGRAM_DISABLED',
@@ -60,6 +67,8 @@ const PUBLIC_ERROR_CODES = new Set([
     'TELEGRAM_APPLY_REQUEST_TOO_LARGE',
     'TELEGRAM_BOT_IDENTITY_RESERVED',
     'TELEGRAM_STOP_TIMEOUT',
+    'TELEGRAM_VERIFICATION_IN_PROGRESS',
+    'TELEGRAM_VERIFICATION_UNAVAILABLE',
 ]);
 
 export class AdminAuthError extends Error {
@@ -279,6 +288,32 @@ export class AdminAuthClient {
                 signal: requestSignal,
             });
             return this.parseResponse(response, parseGeminiVerificationResult);
+        });
+    }
+
+    // T13: non-sending bot token verification (one getMe call, never a send
+    // or getUpdates) -- same empty-JSON-body/CSRF pattern as verifyGemini.
+    async verifyTelegram(signal?: AbortSignal): Promise<TelegramFamilyCredentialProviderMetadata> {
+        return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
+            const response = await this.request(TELEGRAM_VERIFY_ROUTE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: '{}',
+                signal: requestSignal,
+            });
+            return this.parseResponse(response, parseTelegramVerificationResult);
+        });
+    }
+
+    async verifyChannelA(signal?: AbortSignal): Promise<TelegramFamilyCredentialProviderMetadata> {
+        return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
+            const response = await this.request(CHANNEL_A_VERIFY_ROUTE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: '{}',
+                signal: requestSignal,
+            });
+            return this.parseResponse(response, parseChannelAVerificationResult);
         });
     }
 

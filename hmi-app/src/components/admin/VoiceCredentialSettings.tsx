@@ -23,6 +23,7 @@ import type {
     CredentialProvider,
     GeminiVerificationState,
     TelegramPassiveHealth,
+    TelegramTokenVerification,
 } from '../../domain';
 import { usePrismaCredentialAdministration } from '../../hooks/usePrismaCredentialAdministration';
 import { AdminAuthError } from '../../services/adminAuth.service';
@@ -164,6 +165,25 @@ function geminiVerificationGlyph(state: GeminiVerificationState): StatusGlyph {
     if (state === 'invalid_key') return { Icon: CircleX, label: 'API key inválida', tone: 'critical' };
     if (state === 'unreachable') {
         return { Icon: WifiOff, label: 'No se pudo verificar: sin conexión con Google', tone: 'warning' };
+    }
+    return { Icon: MessageCircleDashedCheck, label: 'Verificación: no realizada', tone: 'muted' };
+}
+
+// T13: Telegram/Canal A on-demand token verification (a non-sending getMe
+// check, distinct from the execution icon's connectivity read). The verified
+// tooltip carries the observed @username so a stale/never-connected row can
+// still confirm which bot the token belongs to.
+function telegramTokenVerificationGlyph(verification: TelegramTokenVerification): StatusGlyph {
+    if (verification.state === 'verified') {
+        return {
+            Icon: Check,
+            label: verification.username ? `Token verificado: @${verification.username}` : 'Token verificado',
+            tone: 'success',
+        };
+    }
+    if (verification.state === 'invalid_token') return { Icon: CircleX, label: 'Token inválido', tone: 'critical' };
+    if (verification.state === 'unreachable') {
+        return { Icon: WifiOff, label: 'No se pudo verificar: sin conexión con Telegram', tone: 'warning' };
     }
     return { Icon: MessageCircleDashedCheck, label: 'Verificación: no realizada', tone: 'muted' };
 }
@@ -392,6 +412,21 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         }
     };
 
+    // T13: same non-sending verify action for Telegram and Canal A, dispatched
+    // to whichever provider's own endpoint the row belongs to.
+    const verifyTelegramFamily = async (provider: 'telegram' | 'telegram_channel_a') => {
+        const panelGeneration = panelGenerationRef.current;
+        setFeedback(null);
+        try {
+            await (provider === 'telegram_channel_a' ? administration.verifyChannelA() : administration.verifyTelegram());
+        } catch (error) {
+            if (panelGenerationRef.current === panelGeneration
+                && !(error instanceof DOMException && error.name === 'AbortError')) {
+                setFeedback({ kind: 'error', text: errorText(error) });
+            }
+        }
+    };
+
     // One generalized retry for the approved stop-unconfirmed warning: it
     // targets exactly the provider that produced the warning, never the other
     // channel, and needs no configured credential (it was already deleted).
@@ -524,9 +559,12 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
 
     // Telegram (channel B) and Canal A share the exact Gemini-approved row
     // design (T10): masked input, credential icon, Save, Delete (secondary,
-    // never the red danger variant) and, right-aligned, one execution status
-    // icon (no Verificar for these rows) plus the connected bot's @username
-    // when known.
+    // never the red danger variant) and, right-aligned: the connected bot's
+    // @username when known, one execution status icon (live connectivity),
+    // then Verificar and its own verification icon (T13: an on-demand,
+    // non-sending re-check of the stored token itself) -- in that order, so
+    // "what's happening now" reads before "check the token on demand",
+    // matching Gemini's own Verificar-then-icon tail.
     const renderTelegramFamilyProvider = (provider: 'telegram' | 'telegram_channel_a') => {
         const isChannelA = provider === 'telegram_channel_a';
         const value = secretDrafts[provider];
@@ -547,6 +585,13 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const runtimeErrorCode = isChannelA
             ? channelA?.lastError ?? null
             : (telegram?.lastError ?? telegram?.configurationError ?? null);
+        // T13: on-demand token verification, independent of the execution
+        // icon above (that reads live connectivity; this re-checks the
+        // stored token itself). Same pending-action/disabled/tooltip pattern
+        // as Gemini's Verificar.
+        const verifyAction = isChannelA ? 'verify-channel-a' : 'verify-telegram';
+        const verifying = administration.pendingAction === verifyAction;
+        const verification = credentials?.[provider].verification ?? null;
 
         return (
             <CredentialFieldset
@@ -612,6 +657,27 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                     <div className="ml-auto flex items-center gap-2">
                         {botUsername ? <span className="text-industrial-muted">@{botUsername}</span> : null}
                         {executionGlyph ? <StatusIcon {...executionGlyph} /> : null}
+                        {providerConfigured ? (
+                            <HmiButton
+                                size="sm"
+                                variant="secondary"
+                                disabled={providerDisabled}
+                                onClick={() => void verifyTelegramFamily(provider)}
+                            >
+                                <VerifyButtonLabel verifying={verifying} />
+                            </HmiButton>
+                        ) : (
+                            <HoverTooltip label="Configure un token para verificarlo." position="top">
+                                <HmiButton size="sm" variant="secondary" disabled>
+                                    <VerifyButtonLabel verifying={false} />
+                                </HmiButton>
+                            </HoverTooltip>
+                        )}
+                        {verifying ? (
+                            <StatusIcon Icon={Loader2} label="Verificando…" tone="muted" spin />
+                        ) : verification ? (
+                            <StatusIcon {...telegramTokenVerificationGlyph(verification)} />
+                        ) : null}
                     </div>
                 </div>
                 <RuntimeErrorNotice code={runtimeErrorCode} />

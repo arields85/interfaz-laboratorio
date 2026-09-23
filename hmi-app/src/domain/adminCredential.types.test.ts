@@ -2,21 +2,24 @@ import { describe, expect, it } from 'vitest';
 
 import {
     parseChannelAAdministrationStatus,
+    parseChannelAVerificationResult,
     parseCredentialMetadata,
     parseCredentialMutation,
     parseGeminiVerificationResult,
     parseTelegramAdministrationStatus,
     parseTelegramPassiveHealth,
+    parseTelegramVerificationResult,
     validateCredentialSecret,
     type ChannelAAdministrationStatus,
 } from './adminCredential.types';
 
 describe('admin credential domain', () => {
     const notCheckedVerification = { state: 'not_checked', checkedAt: null } as const;
+    const notCheckedTokenVerification = { state: 'not_checked', checkedAt: null, username: null } as const;
     const exactProviders = {
         gemini: { configured: false, verified: false, verification: notCheckedVerification },
-        telegram: { configured: true },
-        telegram_channel_a: { configured: false },
+        telegram: { configured: true, verified: false, verification: notCheckedTokenVerification },
+        telegram_channel_a: { configured: false, verified: false, verification: notCheckedTokenVerification },
     };
 
     it('parses exact three-provider metadata and mutation envelopes', () => {
@@ -71,6 +74,67 @@ describe('admin credential domain', () => {
             expect(parseGeminiVerificationResult({ ok: true, gemini })).toEqual(gemini);
             expect(() => parseGeminiVerificationResult({ ok: false, gemini })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
             expect(() => parseGeminiVerificationResult({ ok: true, gemini, extra: 1 }))
+                .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+        });
+    });
+
+    describe('telegram-family (Telegram and Canal A) token verification metadata', () => {
+        it('accepts every canonical verification state with a numeric-or-null timestamp and a nullable username', () => {
+            for (const state of ['not_checked', 'verified', 'invalid_token', 'unreachable', 'not_configured'] as const) {
+                for (const checkedAt of [null, 0, 1_699_999_999.5]) {
+                    for (const username of [null, 'prisma_channel_a_bot']) {
+                        const providers = {
+                            ...exactProviders,
+                            telegram_channel_a: {
+                                configured: true, verified: state === 'verified',
+                                verification: { state, checkedAt, username },
+                            },
+                        };
+                        expect(parseCredentialMetadata({ ok: true, providers }).telegram_channel_a)
+                            .toEqual(providers.telegram_channel_a);
+                    }
+                }
+            }
+        });
+
+        it('rejects an unknown state, extra keys, a missing username key, or a non-boolean verified flag', () => {
+            const malformed = [
+                { configured: true, verified: false, verification: { state: 'invalid_key', checkedAt: null, username: null } },
+                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null, username: null }, extra: 1 },
+                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null } },
+                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null, username: '' } },
+                { configured: true, verified: 'yes', verification: notCheckedTokenVerification },
+                { configured: true, verified: false, verification: null },
+            ];
+            for (const telegram of malformed) {
+                expect(() => parseCredentialMetadata({ ok: true, providers: { ...exactProviders, telegram } }))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            }
+        });
+
+        it('parses the Telegram verify endpoint envelope with the username the check observed', () => {
+            const telegram = {
+                configured: true, verified: true,
+                verification: { state: 'verified', checkedAt: 42, username: 'prisma_bot' },
+            } as const;
+            expect(parseTelegramVerificationResult({ ok: true, telegram })).toEqual(telegram);
+            expect(() => parseTelegramVerificationResult({ ok: false, telegram })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            expect(() => parseTelegramVerificationResult({ ok: true, telegram, extra: 1 }))
+                .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+        });
+
+        it('parses the Channel A verify endpoint envelope under its own "channelA" key', () => {
+            const channelA = {
+                configured: true, verified: false,
+                verification: { state: 'invalid_token', checkedAt: 1, username: null },
+            } as const;
+            expect(parseChannelAVerificationResult({ ok: true, channelA })).toEqual(channelA);
+            expect(() => parseChannelAVerificationResult({ ok: false, channelA })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            expect(() => parseChannelAVerificationResult({ ok: true, channelA, extra: 1 }))
+                .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            // The two channels' verify envelopes are shaped identically apart from
+            // their key name -- reusing the wrong parser for the wrong key must fail.
+            expect(() => parseChannelAVerificationResult({ ok: true, telegram: channelA }))
                 .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
         });
     });
