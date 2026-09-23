@@ -2,15 +2,15 @@ import type {
     CredentialAdministrationClient,
     CredentialAdministrationController,
 } from '../../hooks/usePrismaCredentialAdministration';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
     Check,
+    CircleDashed,
     CircleX,
     KeyRound,
     Loader2,
     MessageCircleDashedCheck,
     MessageCircleWarning,
-    Play,
     RefreshCw,
     Save,
     Trash2,
@@ -19,9 +19,10 @@ import {
 } from 'lucide-react';
 
 import type {
-    ChannelALifecyclePhase,
+    ChannelAAdministrationStatus,
     CredentialProvider,
     GeminiVerificationState,
+    TelegramPassiveHealth,
 } from '../../domain';
 import { usePrismaCredentialAdministration } from '../../hooks/usePrismaCredentialAdministration';
 import { AdminAuthError } from '../../services/adminAuth.service';
@@ -71,13 +72,9 @@ function errorText(error: unknown): string {
     }[code] ?? 'No se pudo completar la operación con el servicio local.';
 }
 
-function ProviderStatus({ configured, loading }: { configured?: boolean; loading: boolean }) {
-    if (configured === undefined) return <span>{loading ? 'Consultando estado' : 'Estado no disponible'}</span>;
-    return <span>{configured ? 'Configurada' : 'Sin configurar'}</span>;
-}
-
-// Single presentation mapping for the credential providers, reused by the card
-// legends, the accessible input names and the deletion confirmation body.
+// Single presentation mapping for the credential providers, reused by the
+// deletion confirmation dialog body (the fieldset's own accessible group name
+// is set per-row below, e.g. Channel A's is the shorter "Canal A").
 const PROVIDER_LABELS: Record<CredentialProvider, string> = {
     gemini: 'Gemini',
     telegram: 'Telegram',
@@ -88,15 +85,6 @@ function emptySecretDrafts(): Record<CredentialProvider, string> {
     return { gemini: '', telegram: '', telegram_channel_a: '' };
 }
 
-// Channel A execution label must never infer quiescence from "not running":
-// only the canonical lifecycle phase decides what the card shows.
-function channelAExecutionLabel(phase: ChannelALifecyclePhase | null): string {
-    if (phase === 'running') return 'Ejecución activa';
-    if (phase === 'stopping') return 'Detención en curso';
-    if (phase === null || phase === 'idle' || phase === 'stopped') return 'Ejecución detenida';
-    return 'Estado de ejecución no confirmado';
-}
-
 // Fixed, non-secret placeholder: the real key is never sent to the browser
 // (metadata-only by design), so this mask must never be derived from it.
 // Rendered as the input's `placeholder`, not its `value`: a placeholder never
@@ -104,7 +92,8 @@ function channelAExecutionLabel(phase: ChannelALifecyclePhase | null): string {
 // keystroke instead of splicing into it), and screen readers announce it as
 // hint text on an empty field rather than as a value -- the field is
 // correctly reported as blank, not as already holding 12 known characters.
-const GEMINI_KEY_MASK = '•'.repeat(12);
+// Shared by every credential row (Gemini, Telegram, Canal A).
+const CREDENTIAL_KEY_MASK = '•'.repeat(12);
 
 type StatusTone = 'success' | 'critical' | 'warning' | 'muted';
 
@@ -119,17 +108,15 @@ interface StatusGlyph {
     Icon: LucideIcon;
     label: string;
     tone: StatusTone;
+    spin?: boolean;
 }
 
-// Gemini's credential/verification state is shown as a small icon (T9b: replaces
-// the earlier status-text spans), so the label doubles as the icon's accessible
-// name (role="img" + aria-label) and its HoverTooltip text -- the same
-// icon-only + tooltip pattern T6 established for the Save/Delete buttons.
-function geminiCredentialGlyph(configured: boolean): StatusGlyph {
-    // T9c: the not-configured state reads as a caution (MessageCircleWarning /
-    // warning token, "Estado Alerta" in DesignSettingsTab.tsx), not a hard
-    // failure -- CircleX is reserved for an active verification failure below.
-    // Every "check" in the row uses the plain Check glyph, not CircleCheck.
+// Credential-presence icon shared by every row (Gemini, Telegram, Canal A):
+// the label doubles as the icon's accessible name (role="img" + aria-label)
+// and its HoverTooltip text -- the same icon-only + tooltip pattern T6
+// established for the Save/Delete buttons. The not-configured state reads as
+// a caution (MessageCircleWarning / warning token), not a hard failure.
+function credentialConfiguredGlyph(configured: boolean): StatusGlyph {
     return configured
         ? { Icon: Check, label: 'Credencial configurada', tone: 'success' }
         : { Icon: MessageCircleWarning, label: 'Credencial no configurada', tone: 'warning' };
@@ -144,11 +131,53 @@ function geminiVerificationGlyph(state: GeminiVerificationState): StatusGlyph {
     return { Icon: MessageCircleDashedCheck, label: 'Verificación: no realizada', tone: 'muted' };
 }
 
-function StatusIcon({ Icon, label, tone }: StatusGlyph) {
+// Telegram/Canal A execution status, mapped from the existing status fields
+// only (Telegram: running/restartRequired/lastError; Channel A:
+// activation.phase/restartRequired/lastError) -- never from a derived
+// "not running" guess. `pending` covers the client-side window while a
+// save (which now applies/restarts inline) or a delete (which stops) is
+// in flight, since neither health payload has its own "connecting" state.
+// `restartRequired` is not read here: T10 makes save apply immediately, so a
+// genuinely running bot reported by health is the freshly applied one; a
+// stale desired/applied mismatch (legacy source, startup race) still leaves
+// a real, currently-answering bot, which "Bot conectado" honestly reports --
+// unlike Channel A, Telegram's health has no extra transitional phase to
+// fall back to for this case.
+function telegramExecutionGlyph(telegram: TelegramPassiveHealth | null, pending: boolean): StatusGlyph | null {
+    if (!telegram || !telegram.configured) return null;
+    if (pending) return { Icon: Loader2, label: 'Conectando…', tone: 'muted', spin: true };
+    if (telegram.lastError) return { Icon: CircleX, label: 'No se pudo conectar el bot', tone: 'critical' };
+    if (telegram.running) return { Icon: Check, label: 'Bot conectado', tone: 'success' };
+    return { Icon: MessageCircleWarning, label: 'Bot detenido', tone: 'warning' };
+}
+
+// Channel A execution status must never infer quiescence from "not running":
+// only the canonical lifecycle phase decides between "stopped" (confirmed
+// quiescent) and "unconfirmed" (a transitional or broken phase whose real
+// state is not known).
+function channelAExecutionGlyph(channelA: ChannelAAdministrationStatus | null, pending: boolean): StatusGlyph | null {
+    if (!channelA || !channelA.configured) return null;
+    if (pending) return { Icon: Loader2, label: 'Conectando…', tone: 'muted', spin: true };
+    if (channelA.lastError) return { Icon: CircleX, label: 'No se pudo conectar el bot', tone: 'critical' };
+    const phase = channelA.activation?.phase ?? null;
+    const restartRequired = channelA.activation?.restartRequired ?? false;
+    if (phase === 'running' && !restartRequired) return { Icon: Check, label: 'Bot conectado', tone: 'success' };
+    if (phase === null || phase === 'idle' || phase === 'stopped') {
+        return { Icon: MessageCircleWarning, label: 'Bot detenido', tone: 'warning' };
+    }
+    if (phase === 'preparing' || phase === 'prepared' || phase === 'stopping') {
+        return { Icon: Loader2, label: 'Conectando…', tone: 'muted', spin: true };
+    }
+    // 'failed', 'retired', or a running phase with a pending restart: the
+    // real state is not confidently known either way.
+    return { Icon: CircleDashed, label: 'Estado del bot no confirmado', tone: 'muted' };
+}
+
+function StatusIcon({ Icon, label, tone, spin }: StatusGlyph) {
     return (
         <HoverTooltip label={label} position="top">
             <span role="img" aria-label={label} className={STATUS_TONE_CLS[tone]}>
-                <Icon size={16} aria-hidden="true" />
+                <Icon size={16} className={spin ? 'animate-spin' : undefined} aria-hidden="true" />
             </span>
         </HoverTooltip>
     );
@@ -172,6 +201,47 @@ function VerifyButtonLabel({ verifying }: { verifying: boolean }) {
             </span>
         </span>
     );
+}
+
+// Shared block-fieldset shell for every provider row (Gemini, Telegram,
+// Canal A): a plain block fieldset (not flex) with a floated full-width
+// legend + clearing div. A native <legend> is laid out through its own
+// special "straddle the top border" algorithm, independent of the
+// fieldset's own display/flex-direction, so a flex-column fieldset can't
+// move it on its own; floating it full-width takes it out of that notch
+// algorithm entirely -- it renders as an ordinary block inside the border
+// instead -- and the following clearing div guarantees the row content
+// below never tries to wrap beside it.
+function CredentialFieldset({
+    legend,
+    groupLabel = legend,
+    description,
+    children,
+}: {
+    legend: string;
+    groupLabel?: string;
+    description?: string;
+    children: ReactNode;
+}) {
+    return (
+        <fieldset aria-label={groupLabel} className="rounded border border-white/10 p-3">
+            <legend className="float-left mb-3 w-full px-0 text-industrial-text">{legend}</legend>
+            <div className="clear-both" />
+            <div className="flex flex-col gap-2">
+                {description ? <p className="text-industrial-muted">{description}</p> : null}
+                {children}
+            </div>
+        </fieldset>
+    );
+}
+
+// Runtime error detail, shown below a Telegram/Canal A row's credential row
+// when the manager has a specific sanitized code for it. Distinct from the
+// execution icon's short generic tooltip (never raw provider text): this
+// paragraph carries the more specific safe guidance text.
+function RuntimeErrorNotice({ code }: { code: string | null }) {
+    if (!code) return null;
+    return <p className="text-status-warning">{errorText(new AdminAuthError(code, null))}</p>;
 }
 
 export default function VoiceCredentialSettings({ active, client, controller }: VoiceCredentialSettingsProps) {
@@ -269,38 +339,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         }
     };
 
-    const applyTelegram = async () => {
-        const panelGeneration = panelGenerationRef.current;
-        setFeedback(null);
-        try {
-            await administration.applyTelegram();
-            if (panelGenerationRef.current === panelGeneration) {
-                setFeedback({ kind: 'success', text: 'Cambio de Telegram aplicado y estado actualizado.' });
-            }
-        } catch (error) {
-            if (panelGenerationRef.current === panelGeneration
-                && !(error instanceof DOMException && error.name === 'AbortError')) {
-                setFeedback({ kind: 'error', text: errorText(error) });
-            }
-        }
-    };
-
-    const applyChannelA = async () => {
-        const panelGeneration = panelGenerationRef.current;
-        setFeedback(null);
-        try {
-            await administration.applyChannelA();
-            if (panelGenerationRef.current === panelGeneration) {
-                setFeedback({ kind: 'success', text: 'Cambio del Canal A aplicado y estado actualizado.' });
-            }
-        } catch (error) {
-            if (panelGenerationRef.current === panelGeneration
-                && !(error instanceof DOMException && error.name === 'AbortError')) {
-                setFeedback({ kind: 'error', text: errorText(error) });
-            }
-        }
-    };
-
     const verifyGemini = async () => {
         const panelGeneration = panelGenerationRef.current;
         setFeedback(null);
@@ -342,272 +380,210 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         setDeleteProvider(provider);
     };
 
-    // Gemini gets its own single-row layout (T9b): title and "API Key" label
-    // above one row holding the input, a credential-status icon, Save,
-    // Delete, and -- right-aligned -- Verificar with its own result icon.
-    // Distinct from the shared Telegram/Channel A three-column row below.
+    // Gemini keeps its own single-row layout (T9b/T9c/T9d, approved and
+    // unchanged by T10): title and "API Key" label above one row holding the
+    // input, a credential-status icon, Save, Delete, and -- right-aligned --
+    // Verificar with its own result icon.
     const renderGeminiProvider = () => {
         const value = secretDrafts.gemini;
         const gemini = credentials?.gemini;
         const geminiConfigured = gemini?.configured;
         const verifying = administration.pendingAction === 'verify-gemini';
-        const credentialGlyph = geminiConfigured === undefined ? null : geminiCredentialGlyph(geminiConfigured);
+        const credentialGlyph = geminiConfigured === undefined ? null : credentialConfiguredGlyph(geminiConfigured);
         const showsMask = value === '' && geminiConfigured === true;
 
         return (
-            // Plain block fieldset (not flex): a native <legend> is laid out
-            // through its own special "straddle the top border" algorithm,
-            // independent of the fieldset's own display/flex-direction, so a
-            // flex-column fieldset can't move the legend on its own. Floating
-            // the legend full-width takes it out of that notch algorithm
-            // entirely -- it renders as an ordinary block inside the border
-            // instead -- and the following clearing div guarantees the row
-            // content below never tries to wrap beside it. The rest of the
-            // content keeps its own flex-column wrapper, unaffected by the
-            // legend's float.
-            <fieldset
-                aria-label="Proveedor de voz"
-                className="rounded border border-white/10 p-3"
-            >
-                <legend className="float-left mb-3 w-full px-0 text-industrial-text">Proveedor de voz</legend>
-                <div className="clear-both" />
-                <div className="flex flex-col gap-2">
-                    <label htmlFor="gemini-api-key-input" className="text-industrial-muted">API Key de Gemini</label>
-                    <div data-testid="gemini-credential-row" className="flex flex-wrap items-center gap-2">
-                        <input
-                            id="gemini-api-key-input"
-                            // Not type="password": Chrome ignores autocomplete="off" on a
-                            // password input and offers to generate/save one regardless
-                            // (autocomplete="new-password" makes it worse, actively inviting
-                            // generation). A plain text input masked with CSS
-                            // (-webkit-text-security, .hmi-masked-text) sidesteps Chrome's
-                            // password-manager heuristics entirely; the data-* attributes
-                            // below opt out third-party managers (1Password, LastPass) too.
-                            type="text"
-                            autoComplete="off"
-                            spellCheck={false}
-                            autoCapitalize="off"
-                            autoCorrect="off"
-                            data-1p-ignore="true"
-                            data-lpignore="true"
-                            data-form-type="other"
-                            value={value}
-                            placeholder={showsMask ? GEMINI_KEY_MASK : undefined}
-                            onChange={(event) => {
-                                const nextValue = event.target.value;
-                                secretRevisionRef.current.gemini += 1;
-                                setProviderDraft('gemini', nextValue);
-                            }}
-                            className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
+            <CredentialFieldset legend="Proveedor de voz">
+                <label htmlFor="gemini-api-key-input" className="text-industrial-muted">API Key de Gemini</label>
+                <div data-testid="gemini-credential-row" className="flex flex-wrap items-center gap-2">
+                    <input
+                        id="gemini-api-key-input"
+                        // Not type="password": Chrome ignores autocomplete="off" on a
+                        // password input and offers to generate/save one regardless
+                        // (autocomplete="new-password" makes it worse, actively inviting
+                        // generation). A plain text input masked with CSS
+                        // (-webkit-text-security, .hmi-masked-text) sidesteps Chrome's
+                        // password-manager heuristics entirely; the data-* attributes
+                        // below opt out third-party managers (1Password, LastPass) too.
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        data-1p-ignore="true"
+                        data-lpignore="true"
+                        data-form-type="other"
+                        value={value}
+                        placeholder={showsMask ? CREDENTIAL_KEY_MASK : undefined}
+                        onChange={(event) => {
+                            const nextValue = event.target.value;
+                            secretRevisionRef.current.gemini += 1;
+                            setProviderDraft('gemini', nextValue);
+                        }}
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
+                        disabled={disabled}
+                    />
+                    {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
+                        <span className="text-industrial-muted">
+                            {administration.isLoading ? 'Consultando estado' : 'Estado no disponible'}
+                        </span>
+                    )}
+                    <HoverTooltip label="Guardar credencial" position="top">
+                        <HmiButton
+                            size="sm"
+                            variant="primary"
+                            aria-label="Guardar credencial"
+                            title="Guardar credencial"
+                            disabled={disabled || !value}
+                            onClick={() => void save('gemini')}
+                        >
+                            <Save size={14} aria-hidden="true" />
+                        </HmiButton>
+                    </HoverTooltip>
+                    <HoverTooltip label="Eliminar credencial" position="top">
+                        <HmiButton
+                            size="sm"
+                            variant="secondary"
+                            aria-label="Eliminar credencial"
+                            title="Eliminar credencial"
                             disabled={disabled}
-                        />
-                        {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
-                            <span className="text-industrial-muted">
-                                {administration.isLoading ? 'Consultando estado' : 'Estado no disponible'}
-                            </span>
-                        )}
-                        <HoverTooltip label="Guardar credencial" position="top">
-                            <HmiButton
-                                size="sm"
-                                variant="primary"
-                                aria-label="Guardar credencial"
-                                title="Guardar credencial"
-                                disabled={disabled || !value}
-                                onClick={() => void save('gemini')}
-                            >
-                                <Save size={14} aria-hidden="true" />
-                            </HmiButton>
-                        </HoverTooltip>
-                        <HoverTooltip label="Eliminar credencial" position="top">
-                            <HmiButton
-                                size="sm"
-                                variant="secondary"
-                                aria-label="Eliminar credencial"
-                                title="Eliminar credencial"
-                                disabled={disabled}
-                                onClick={() => updateDeleteProvider('gemini')}
-                            >
-                                <Trash2 size={14} aria-hidden="true" />
-                            </HmiButton>
-                        </HoverTooltip>
-                        {gemini ? (
-                            <div className="ml-auto flex items-center gap-2">
-                                {gemini.configured ? (
-                                    <HmiButton
-                                        size="sm"
-                                        variant="secondary"
-                                        disabled={disabled}
-                                        onClick={() => void verifyGemini()}
-                                    >
-                                        <VerifyButtonLabel verifying={verifying} />
+                            onClick={() => updateDeleteProvider('gemini')}
+                        >
+                            <Trash2 size={14} aria-hidden="true" />
+                        </HmiButton>
+                    </HoverTooltip>
+                    {gemini ? (
+                        <div className="ml-auto flex items-center gap-2">
+                            {gemini.configured ? (
+                                <HmiButton
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={disabled}
+                                    onClick={() => void verifyGemini()}
+                                >
+                                    <VerifyButtonLabel verifying={verifying} />
+                                </HmiButton>
+                            ) : (
+                                <HoverTooltip label="Configure una API key para verificarla." position="top">
+                                    <HmiButton size="sm" variant="secondary" disabled>
+                                        <VerifyButtonLabel verifying={false} />
                                     </HmiButton>
-                                ) : (
-                                    <HoverTooltip label="Configure una API key para verificarla." position="top">
-                                        <HmiButton size="sm" variant="secondary" disabled>
-                                            <VerifyButtonLabel verifying={false} />
-                                        </HmiButton>
-                                    </HoverTooltip>
-                                )}
-                                {verifying ? (
-                                    <HoverTooltip label="Verificando…" position="top">
-                                        <span role="img" aria-label="Verificando…" className="text-industrial-muted">
-                                            <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                                        </span>
-                                    </HoverTooltip>
-                                ) : (
-                                    <StatusIcon {...geminiVerificationGlyph(gemini.verification.state)} />
-                                )}
-                            </div>
-                        ) : null}
-                    </div>
+                                </HoverTooltip>
+                            )}
+                            {verifying ? (
+                                <StatusIcon Icon={Loader2} label="Verificando…" tone="muted" spin />
+                            ) : (
+                                <StatusIcon {...geminiVerificationGlyph(gemini.verification.state)} />
+                            )}
+                        </div>
+                    ) : null}
                 </div>
-            </fieldset>
+            </CredentialFieldset>
         );
     };
 
-    const renderProvider = (provider: CredentialProvider) => {
-        if (provider === 'gemini') return renderGeminiProvider();
-        const label = PROVIDER_LABELS[provider];
-        const value = secretDrafts[provider];
+    // Telegram (channel B) and Canal A share the exact Gemini-approved row
+    // design (T10): masked input, credential icon, Save, Delete (secondary,
+    // never the red danger variant) and, right-aligned, one execution status
+    // icon (no Verificar for these rows) plus the connected bot's @username
+    // when known.
+    const renderTelegramFamilyProvider = (provider: 'telegram' | 'telegram_channel_a') => {
         const isChannelA = provider === 'telegram_channel_a';
+        const value = secretDrafts[provider];
+        const inputId = `${provider}-credential-input`;
+        const providerConfigured = credentials?.[provider].configured;
         const channelA = isChannelA ? administration.channelA : null;
         // A channel A status failure disables only that channel's controls;
         // Gemini and Telegram keep working from their own metadata.
         const channelAUnavailable = isChannelA && Boolean(administration.channelAError);
         const providerDisabled = disabled || channelAUnavailable;
-        // Full-width horizontal row per provider: identity/state on the left, the credential
-        // input with icon-only actions in the middle, and the apply status/action (Telegram and
-        // Channel A only) on the right — wrapping to a stacked column below the md breakpoint.
+        const showsMask = value === '' && providerConfigured === true;
+        const credentialGlyph = providerConfigured === undefined ? null : credentialConfiguredGlyph(providerConfigured);
+        const pending = administration.pendingAction === `save-${provider}` || administration.pendingAction === `delete-${provider}`;
+        const executionGlyph = isChannelA
+            ? channelAExecutionGlyph(channelA, pending)
+            : telegramExecutionGlyph(telegram ?? null, pending);
+        const botUsername = isChannelA ? channelA?.botUsername ?? null : telegram?.botUsername ?? null;
+        const runtimeErrorCode = isChannelA
+            ? channelA?.lastError ?? null
+            : (telegram?.lastError ?? telegram?.configurationError ?? null);
+
         return (
-            <fieldset
-                aria-label={label}
-                className="flex flex-col gap-3 rounded border border-white/10 p-3 md:flex-row md:items-start md:gap-4"
+            <CredentialFieldset
+                legend={isChannelA ? 'Canal A' : 'Telegram'}
+                description={isChannelA
+                    ? 'Canal privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.'
+                    : undefined}
             >
-                <div className="flex min-w-0 flex-col gap-2 md:w-56 md:shrink-0">
-                    <legend className="px-0 text-industrial-text">{label}</legend>
-                    <div className="flex items-center gap-2 text-industrial-muted">
-                        <span>Credencial</span>
-                        <ProviderStatus configured={credentials?.[provider].configured} loading={administration.isLoading} />
-                    </div>
-                    {provider === 'telegram_channel_a' ? (
-                        <p className="text-industrial-muted">Bot dedicado para consultas remotas de la HMI. Guardar la credencial no inicia ni verifica el bot.</p>
-                    ) : null}
-                </div>
-
-                <div className="flex flex-1 items-end gap-2 md:min-w-0">
-                    <label className="flex flex-1 flex-col gap-1 text-industrial-muted">
-                        Credencial {label}
-                        <input
-                            type="password"
-                            autoComplete="new-password"
-                            value={value}
-                            onChange={(event) => {
-                                const nextValue = event.target.value;
-                                secretRevisionRef.current[provider] += 1;
-                                setProviderDraft(provider, nextValue);
-                            }}
-                            className={ADMIN_SIDEBAR_INPUT_CLS}
+                <label htmlFor={inputId} className="text-industrial-muted">Telegram bot API Token</label>
+                <div data-testid={`${provider}-credential-row`} className="flex flex-wrap items-center gap-2">
+                    <input
+                        id={inputId}
+                        // Same Chrome password-manager workaround as Gemini's field
+                        // (see its comment): a plain text input masked with CSS
+                        // instead of type="password".
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        data-1p-ignore="true"
+                        data-lpignore="true"
+                        data-form-type="other"
+                        value={value}
+                        placeholder={showsMask ? CREDENTIAL_KEY_MASK : undefined}
+                        onChange={(event) => {
+                            const nextValue = event.target.value;
+                            secretRevisionRef.current[provider] += 1;
+                            setProviderDraft(provider, nextValue);
+                        }}
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text min-w-40 flex-1`}
+                        disabled={providerDisabled}
+                    />
+                    {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
+                        <span className="text-industrial-muted">
+                            {administration.isLoading ? 'Consultando estado' : 'Estado no disponible'}
+                        </span>
+                    )}
+                    <HoverTooltip label="Guardar credencial" position="top">
+                        <HmiButton
+                            size="sm"
+                            variant="primary"
+                            aria-label="Guardar credencial"
+                            title="Guardar credencial"
+                            disabled={providerDisabled || !value}
+                            onClick={() => void save(provider)}
+                        >
+                            <Save size={14} aria-hidden="true" />
+                        </HmiButton>
+                    </HoverTooltip>
+                    <HoverTooltip label="Eliminar credencial" position="top">
+                        <HmiButton
+                            size="sm"
+                            variant="secondary"
+                            aria-label="Eliminar credencial"
+                            title="Eliminar credencial"
                             disabled={providerDisabled}
-                        />
-                    </label>
-                    <div className="flex shrink-0 gap-2">
-                        <HoverTooltip label="Guardar credencial" position="top">
-                            <HmiButton
-                                size="sm"
-                                variant="primary"
-                                aria-label="Guardar credencial"
-                                title="Guardar credencial"
-                                disabled={providerDisabled || !value}
-                                onClick={() => void save(provider)}
-                            >
-                                <Save size={14} aria-hidden="true" />
-                            </HmiButton>
-                        </HoverTooltip>
-                        <HoverTooltip label="Eliminar credencial" position="top">
-                            <HmiButton
-                                size="sm"
-                                variant="danger"
-                                aria-label="Eliminar credencial"
-                                title="Eliminar credencial"
-                                disabled={providerDisabled}
-                                onClick={() => updateDeleteProvider(provider)}
-                            >
-                                <Trash2 size={14} aria-hidden="true" />
-                            </HmiButton>
-                        </HoverTooltip>
+                            onClick={() => updateDeleteProvider(provider)}
+                        >
+                            <Trash2 size={14} aria-hidden="true" />
+                        </HmiButton>
+                    </HoverTooltip>
+                    <div className="ml-auto flex items-center gap-2">
+                        {botUsername ? <span className="text-industrial-muted">@{botUsername}</span> : null}
+                        {executionGlyph ? <StatusIcon {...executionGlyph} /> : null}
                     </div>
                 </div>
-
-                {provider === 'telegram' || isChannelA ? (
-                    <div className="flex flex-col gap-2 md:w-64 md:shrink-0">
-                        {provider === 'telegram' && telegram ? (
-                            <>
-                                <div className="flex flex-wrap gap-x-4 gap-y-1 rounded border border-white/10 p-3 text-industrial-muted">
-                                    <span>{telegram?.restartRequired ? 'Cambio pendiente de aplicar' : 'Sin cambios pendientes'}</span>
-                                    <span>{telegram?.running ? 'Ejecución activa' : 'Ejecución detenida'}</span>
-                                    <span>{telegram?.verified ? 'Última aplicación verificada' : 'Última aplicación sin verificar'}</span>
-                                    <span>{telegram?.enabled ? 'Habilitada' : 'Deshabilitada'}</span>
-                                    <span>
-                                        Origen: {credentials?.telegram.configured ? 'almacén protegido' : telegram?.configured ? 'entorno local' : 'sin credencial'}
-                                    </span>
-                                    <span>
-                                        Generación: {telegram?.desiredGeneration ?? '—'} / {telegram?.appliedGeneration ?? '—'}
-                                    </span>
-                                </div>
-                                {telegram?.configurationError || telegram?.lastError ? (
-                                    <p className="text-status-warning">
-                                        {errorText(new AdminAuthError(telegram.lastError ?? telegram.configurationError ?? '', null))}
-                                    </p>
-                                ) : null}
-                                <HmiButton
-                                    size="sm"
-                                    variant="primary"
-                                    disabled={disabled || !credentials?.telegram.configured}
-                                    onClick={() => void applyTelegram()}
-                                >
-                                    <Play size={14} aria-hidden="true" />
-                                    Aplicar cambio
-                                </HmiButton>
-                            </>
+                <RuntimeErrorNotice code={runtimeErrorCode} />
+                {isChannelA && administration.channelAError ? (
+                    <>
+                        {channelA ? (
+                            <p className="text-status-warning">Último estado conocido; la actualización falló.</p>
                         ) : null}
-                        {isChannelA && channelA ? (
-                            <>
-                                <div className="flex flex-wrap gap-x-4 gap-y-1 rounded border border-white/10 p-3 text-industrial-muted">
-                                    <span>
-                                        {channelA.appliedGeneration !== null
-                                            && channelA.appliedGeneration === channelA.desiredGeneration
-                                            ? 'Sin cambios pendientes'
-                                            : 'Cambio pendiente de aplicar'}
-                                    </span>
-                                    <span>{channelAExecutionLabel(channelA.activation?.phase ?? null)}</span>
-                                </div>
-                                {channelA.lastError ? (
-                                    <p className="text-status-warning">
-                                        {errorText(new AdminAuthError(channelA.lastError, null))}
-                                    </p>
-                                ) : null}
-                                {administration.channelAError ? (
-                                    <p className="text-status-warning">Último estado conocido; la actualización falló.</p>
-                                ) : null}
-                            </>
-                        ) : null}
-                        {isChannelA && administration.channelAError ? (
-                            <p className="text-status-warning">{errorText(administration.channelAError)}</p>
-                        ) : null}
-                        {isChannelA ? (
-                            <HmiButton
-                                size="sm"
-                                variant="primary"
-                                disabled={providerDisabled || !credentials?.telegram_channel_a.configured || !channelA}
-                                onClick={() => void applyChannelA()}
-                            >
-                                <Play size={14} aria-hidden="true" />
-                                Aplicar cambio
-                            </HmiButton>
-                        ) : null}
-                    </div>
+                        <p className="text-status-warning">{errorText(administration.channelAError)}</p>
+                    </>
                 ) : null}
-            </fieldset>
+            </CredentialFieldset>
         );
     };
 
@@ -617,19 +593,16 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 <KeyRound size={14} aria-hidden="true" />
                 Credenciales de proveedores
             </h3>
-            <p className="mb-3 text-industrial-muted">
-                Guardar una credencial no la aplica, no reinicia proveedores y no verifica conectividad.
-            </p>
             {administration.isLoading ? <p className="text-industrial-muted">Cargando metadatos protegidos...</p> : null}
             {administration.error ? <p role="alert" className="mb-3 text-status-critical">{errorText(administration.error)}</p> : null}
             {stale ? <p className="mb-3 text-status-warning">Último estado conocido; la actualización falló.</p> : null}
             {/* No manual refresh control: administration.refresh() still runs
-                automatically after every save/delete/apply/verify (inside the
-                hook), which is what keeps this metadata current. */}
+                automatically after every save/delete/verify (inside the hook),
+                which is what keeps this metadata current. */}
             <div className="mt-3 flex flex-col gap-3">
-                {renderProvider('gemini')}
-                {renderProvider('telegram')}
-                {renderProvider('telegram_channel_a')}
+                {renderGeminiProvider()}
+                {renderTelegramFamilyProvider('telegram')}
+                {renderTelegramFamilyProvider('telegram_channel_a')}
             </div>
             {feedback ? (
                 <div

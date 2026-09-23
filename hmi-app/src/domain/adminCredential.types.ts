@@ -90,6 +90,9 @@ export interface ChannelAAdministrationStatus {
     activationEpoch: number | null;
     activation: ChannelAActivation | null;
     lastError: ChannelARuntimeError;
+    // The connected bot's Telegram username (public info, never the secret
+    // token); non-null only while actually running without a pending restart.
+    botUsername: string | null;
 }
 
 export interface CredentialMutationResult {
@@ -107,6 +110,9 @@ export interface TelegramPassiveHealth {
     restartRequired: boolean;
     configurationError: TelegramRuntimeError;
     lastError: TelegramRuntimeError;
+    // The connected bot's Telegram username (public info, never the secret
+    // token); non-null only while actually running.
+    botUsername: string | null;
 }
 
 const TELEGRAM_ERRORS = new Set<Exclude<TelegramRuntimeError, null>>([
@@ -179,6 +185,13 @@ function isProvider(value: unknown): value is CredentialProvider {
 
 function isGeneration(value: unknown): value is number {
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+// Public info (never the secret token): null, or a non-empty string. An
+// empty string is never a real Telegram username, so it is rejected rather
+// than silently accepted as an equivalent of null.
+function isBotUsername(value: unknown): value is string | null {
+    return value === null || (typeof value === 'string' && value.length > 0);
 }
 
 function parseTelegramError(value: unknown): TelegramRuntimeError {
@@ -278,14 +291,15 @@ export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdmin
     if (!isObject(value) || !hasExactKeys(value, ['ok', 'channelA']) || value.ok !== true
         || !isObject(value.channelA) || !hasExactKeys(value.channelA, [
             'configured', 'desiredGeneration', 'appliedGeneration',
-            'activationEpoch', 'activation', 'lastError',
+            'activationEpoch', 'activation', 'lastError', 'botUsername',
         ])) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     const status = value.channelA;
     if (typeof status.configured !== 'boolean' || !isGeneration(status.desiredGeneration)
         || (status.appliedGeneration !== null && !isGeneration(status.appliedGeneration))
-        || (status.activationEpoch !== null && !isGeneration(status.activationEpoch))) {
+        || (status.activationEpoch !== null && !isGeneration(status.activationEpoch))
+        || !isBotUsername(status.botUsername)) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     return {
@@ -295,6 +309,7 @@ export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdmin
         activationEpoch: status.activationEpoch,
         activation: parseChannelAActivation(status.activation),
         lastError: parseChannelAError(status.lastError),
+        botUsername: status.botUsername,
     };
 }
 
@@ -304,7 +319,8 @@ export function parseTelegramPassiveHealth(value: unknown): TelegramPassiveHealt
         || typeof value.telegramConnected !== 'boolean' || typeof value.telegramVerified !== 'boolean'
         || typeof value.telegramRestartRequired !== 'boolean'
         || (value.telegramDesiredGeneration !== null && !isGeneration(value.telegramDesiredGeneration))
-        || (value.telegramAppliedGeneration !== null && !isGeneration(value.telegramAppliedGeneration))) {
+        || (value.telegramAppliedGeneration !== null && !isGeneration(value.telegramAppliedGeneration))
+        || !isBotUsername(value.telegramBotUsername)) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     return {
@@ -317,6 +333,7 @@ export function parseTelegramPassiveHealth(value: unknown): TelegramPassiveHealt
         restartRequired: value.telegramRestartRequired,
         configurationError: parseTelegramError(value.telegramConfigurationError),
         lastError: parseTelegramError(value.telegramLastError),
+        botUsername: value.telegramBotUsername,
     };
 }
 

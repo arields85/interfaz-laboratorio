@@ -101,11 +101,11 @@ describe('VoiceSettingsTab', () => {
         const health = vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
             enabled: true, configured: false, running: false, verified: false,
             configurationError: 'TELEGRAM_CREDENTIAL_MISSING', lastError: null,
-            desiredGeneration: 1, appliedGeneration: 1, restartRequired: false,
+            desiredGeneration: 1, appliedGeneration: 1, restartRequired: false, botUsername: null,
         });
         const channelAStatus = vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
             configured: false, desiredGeneration: 1, appliedGeneration: null,
-            activationEpoch: null, activation: null, lastError: null,
+            activationEpoch: null, activation: null, lastError: null, botUsername: null,
         });
         try {
             const onDirtyChange = vi.fn();

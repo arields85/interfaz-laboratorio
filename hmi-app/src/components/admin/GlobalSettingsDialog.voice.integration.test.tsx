@@ -174,11 +174,11 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
             enabled: true, configured: false, running: false, verified: false,
             configurationError: 'TELEGRAM_CREDENTIAL_MISSING', lastError: null,
-            desiredGeneration: 1, appliedGeneration: 1, restartRequired: false,
+            desiredGeneration: 1, appliedGeneration: 1, restartRequired: false, botUsername: null,
         });
         vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
             configured: false, desiredGeneration: 1, appliedGeneration: null,
-            activationEpoch: null, activation: null, lastError: null,
+            activationEpoch: null, activation: null, lastError: null, botUsername: null,
         });
         const fetchMock = vi.fn(async () => envelope());
         vi.stubGlobal('fetch', fetchMock);
@@ -194,13 +194,10 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
         expect(singletonNetwork.requests).toEqual([]);
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
-        // Frozen card contract renders exactly two Apply controls in this
-        // unconfigured fixture: Telegram (B) and Telegram (Canal A), both
-        // disabled without a configured credential. Name saving must not add a
-        // third Apply.
-        await waitFor(() => expect(screen.getAllByRole('button', { name: /^Aplicar/ })).toHaveLength(2));
-        expect(within(screen.getByRole('group', { name: 'Telegram' })).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
-        expect(within(screen.getByRole('group', { name: 'Telegram (Canal A)' })).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
+        // T10: there is no "Aplicar cambio" button any more (save applies on
+        // the backend instead); name saving must not add one either.
+        await waitFor(() => expect(screen.getByRole('group', { name: 'Canal A' })).toBeInTheDocument());
+        expect(screen.queryByRole('button', { name: /^Aplicar/ })).not.toBeInTheDocument();
         expect(localStorage.getItem('hmi:prisma-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
         fireEvent.change(input, { target: { value: 'Discard on tab switch' } });
         fireEvent.click(screen.getByRole('button', { name: 'Conexion' }));
@@ -320,7 +317,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         });
         expect(adminAuthClient).toBeInstanceOf(AdminAuthClient);
 
-        singletonNetwork.setHandler(async (path, init) => {
+        singletonNetwork.setHandler(async (path) => {
             if (path === '/api/prisma/admin/auth/session') {
                 return json({ ok: true, administrator: { username: 'admin' }, csrfToken, absoluteExpiresAt: 2_000_000_000 }, 200);
             }
@@ -335,6 +332,9 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                 }, 200);
             }
             if (path === '/api/prisma/health') {
+                // T10: save applies on the backend now, so a collision from an
+                // earlier save surfaces directly in health's lastError, with no
+                // "Aplicar cambio" button left to click in the UI.
                 return json({
                     ok: true,
                     telegramEnabled: true,
@@ -342,10 +342,11 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     telegramConnected: false,
                     telegramVerified: false,
                     telegramConfigurationError: null,
-                    telegramLastError: null,
+                    telegramLastError: 'TELEGRAM_BOT_IDENTITY_RESERVED',
                     telegramDesiredGeneration: 2,
                     telegramAppliedGeneration: 0,
                     telegramRestartRequired: true,
+                    telegramBotUsername: null,
                 }, 200);
             }
             if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
@@ -353,12 +354,9 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     ok: true,
                     channelA: {
                         configured: false, desiredGeneration: 1, appliedGeneration: null,
-                        activationEpoch: null, activation: null, lastError: null,
+                        activationEpoch: null, activation: null, lastError: null, botUsername: null,
                     },
                 }, 200);
-            }
-            if (path === '/api/prisma/admin/credentials/telegram/apply' && init?.method === 'POST') {
-                return json({ ok: false, error: 'TELEGRAM_BOT_IDENTITY_RESERVED' }, 409);
             }
             // Any other path stays refused and is asserted in afterEach.
             throw new Error('TEST_SINGLETON_FETCH_REFUSED');
@@ -366,24 +364,18 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await adminAuthClient.session();
         vi.stubGlobal('fetch', vi.fn(async () => envelope()));
         renderDialog();
-        // Two Apply controls exist under the frozen card contract (B + A); the
-        // collision case exercises the Telegram (B) one specifically.
         const telegramCard = await screen.findByRole('group', { name: 'Telegram' });
-        const apply = await within(telegramCard).findByRole('button', { name: 'Aplicar cambio' });
-        await waitFor(() => expect(apply).toBeEnabled());
 
-        await userEvent.click(apply);
-
-        expect(await screen.findByRole('alert')).toHaveTextContent(
+        const icon = await within(telegramCard).findByRole('img', { name: 'No se pudo conectar el bot' });
+        expect(icon).toBeInTheDocument();
+        expect(within(telegramCard).getByText(
             'Este bot ya está en uso por el otro canal. Configure un bot distinto.',
-        );
-        expect(screen.queryByText('Cambio de Telegram aplicado y estado actualizado.')).not.toBeInTheDocument();
+        )).toBeInTheDocument();
         // A collision is a plain failure, not a committed deletion awaiting a retry.
         expect(screen.queryByRole('button', { name: 'Reintentar detención' })).not.toBeInTheDocument();
         expect(singletonNetwork.requests).toContain('GET /api/prisma/admin/auth/session');
         expect(singletonNetwork.requests).toContain('GET /api/prisma/admin/credentials');
         expect(singletonNetwork.requests).toContain('GET /api/prisma/health');
-        expect(singletonNetwork.requests).toContain('POST /api/prisma/admin/credentials/telegram/apply');
         expect(singletonNetwork.refusals).toEqual([]);
     });
 
@@ -412,10 +404,11 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             desiredGeneration: 1,
             appliedGeneration: 1,
             restartRequired: false,
+            botUsername: null,
         });
         vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
             configured: false, desiredGeneration: 1, appliedGeneration: null,
-            activationEpoch: null, activation: null, lastError: null,
+            activationEpoch: null, activation: null, lastError: null, botUsername: null,
         });
         vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
             if (input === '/api/prisma/admin/credentials') {
@@ -440,6 +433,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     telegramDesiredGeneration: 1,
                     telegramAppliedGeneration: 1,
                     telegramRestartRequired: false,
+                    telegramBotUsername: null,
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
             return envelope();
@@ -447,7 +441,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         const user = userEvent.setup();
         renderDialogHarness();
         const geminiInput = await screen.findByLabelText('API Key de Gemini');
-        const channelAInput = screen.getByLabelText('Credencial Telegram (Canal A)');
+        const channelAInput = within(screen.getByRole('group', { name: 'Canal A' })).getByLabelText('Telegram bot API Token');
         await waitFor(() => expect(geminiInput).toBeEnabled());
 
         await user.type(geminiInput, 'synthetic-secret');
@@ -457,7 +451,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await user.click(screen.getByRole('button', { name: 'Reopen' }));
 
         expect(await screen.findByLabelText('API Key de Gemini')).toHaveValue('');
-        expect(screen.getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
+        expect(within(screen.getByRole('group', { name: 'Canal A' })).getByLabelText('Telegram bot API Token')).toHaveValue('');
     });
 
     it('records every refused singleton dispatch exactly once, including a configured handler refusal', async () => {

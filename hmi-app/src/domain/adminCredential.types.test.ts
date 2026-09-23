@@ -124,7 +124,8 @@ describe('admin credential domain', () => {
             telegramDesiredGeneration: 2,
             telegramAppliedGeneration: 0,
             telegramRestartRequired: true,
-        })).toMatchObject({ lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED' });
+            telegramBotUsername: null,
+        })).toMatchObject({ lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED', botUsername: null });
         expect(() => parseTelegramAdministrationStatus({
             ok: true, telegram: { ...status, lastError: 'TELEGRAM_BOT_IDENTITY_RELEASED' },
         })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
@@ -143,6 +144,7 @@ describe('admin credential domain', () => {
             telegramDesiredGeneration: 3,
             telegramAppliedGeneration: 2,
             telegramRestartRequired: true,
+            telegramBotUsername: null,
         })).toEqual({
             enabled: true,
             configured: false,
@@ -153,7 +155,29 @@ describe('admin credential domain', () => {
             desiredGeneration: 3,
             appliedGeneration: 2,
             restartRequired: true,
+            botUsername: null,
         });
+    });
+
+    it('exposes the connected Telegram bot username and rejects a non-string, non-null or empty one', () => {
+        const base = {
+            ok: true,
+            telegramEnabled: true,
+            telegramConfigured: true,
+            telegramConnected: true,
+            telegramVerified: true,
+            telegramConfigurationError: null,
+            telegramLastError: null,
+            telegramDesiredGeneration: 2,
+            telegramAppliedGeneration: 2,
+            telegramRestartRequired: false,
+        };
+        expect(parseTelegramPassiveHealth({ ...base, telegramBotUsername: 'prisma_channel_b_bot' }))
+            .toMatchObject({ botUsername: 'prisma_channel_b_bot' });
+        for (const telegramBotUsername of [42, '', false]) {
+            expect(() => parseTelegramPassiveHealth({ ...base, telegramBotUsername }))
+                .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+        }
     });
 
     describe('channel A administration status', () => {
@@ -164,6 +188,7 @@ describe('admin credential domain', () => {
             activationEpoch: null,
             activation: null,
             lastError: null,
+            botUsername: null,
         } as const;
 
         const runningActivation = {
@@ -173,7 +198,7 @@ describe('admin credential domain', () => {
             restartRequired: false,
         } as const;
 
-        it('parses the exact six-field status with null activation, epoch and lastError', () => {
+        it('parses the exact seven-field status with null activation, epoch, lastError and botUsername', () => {
             const parsed: ChannelAAdministrationStatus =
                 parseChannelAAdministrationStatus({ ok: true, channelA: nullChannelA });
             expect(parsed).toEqual(nullChannelA);
@@ -189,9 +214,11 @@ describe('admin credential domain', () => {
                     activationEpoch: 7,
                     activation: runningActivation,
                     lastError: null,
+                    botUsername: 'prisma_channel_a_bot',
                 },
             });
             expect(running.activation).toEqual({ phase: 'running', reason: null, quiescent: false, restartRequired: false });
+            expect(running.botUsername).toBe('prisma_channel_a_bot');
 
             const restartRequired = parseChannelAAdministrationStatus({
                 ok: true,
@@ -207,6 +234,7 @@ describe('admin credential domain', () => {
                         restartRequired: true,
                     },
                     lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+                    botUsername: null,
                 },
             });
             expect(restartRequired.activation?.reason).toBe('PRISMA_CHANNEL_A_RESTART_REQUIRED');
@@ -226,6 +254,7 @@ describe('admin credential domain', () => {
                         restartRequired: false,
                     },
                     lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED',
+                    botUsername: null,
                 },
             });
             expect(reserved.activation?.phase).toBe('failed');
@@ -245,6 +274,7 @@ describe('admin credential domain', () => {
                         activationEpoch: 1,
                         activation: { phase, reason: null, quiescent: true, restartRequired: false },
                         lastError: null,
+                        botUsername: null,
                     },
                 });
                 expect(parsed.activation?.phase).toBe(phase);
@@ -273,9 +303,21 @@ describe('admin credential domain', () => {
                         activationEpoch: 1,
                         activation: { phase: 'failed', reason: null, quiescent: true, restartRequired: false },
                         lastError,
+                        botUsername: null,
                     },
                 });
                 expect(parsed.lastError).toBe(lastError);
+            }
+        });
+
+        it('rejects a non-string, non-null or empty botUsername', () => {
+            const missingBotUsername = Object.fromEntries(
+                Object.entries(nullChannelA).filter(([key]) => key !== 'botUsername'),
+            );
+            for (const payload of [42, '', false].map((botUsername) => ({ ...nullChannelA, botUsername }))
+                .concat([missingBotUsername])) {
+                expect(() => parseChannelAAdministrationStatus({ ok: true, channelA: payload }))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
             }
         });
 

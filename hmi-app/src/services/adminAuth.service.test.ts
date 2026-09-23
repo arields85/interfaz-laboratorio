@@ -52,6 +52,7 @@ const CHANNEL_A_STATUS = {
             phase: 'running', reason: null, quiescent: false, restartRequired: false,
         },
         lastError: null,
+        botUsername: 'prisma_channel_a_bot',
     },
 } as const;
 
@@ -471,6 +472,7 @@ describe('AdminAuthClient', () => {
             telegramDesiredGeneration: 3,
             telegramAppliedGeneration: 3,
             telegramRestartRequired: false,
+            telegramBotUsername: null,
         }));
         const client = new AdminAuthClient(fetcher);
 

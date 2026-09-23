@@ -23,15 +23,16 @@ const metadata = {
 const health = {
     enabled: true, configured: true, running: true, verified: false,
     desiredGeneration: 2, appliedGeneration: 1, restartRequired: true,
-    configurationError: null, lastError: null,
+    configurationError: null, lastError: null, botUsername: null,
 } as const;
 const applied = {
     source: 'protected', enabled: true, configured: true,
     desiredGeneration: 2, appliedGeneration: 2, running: true,
-    verified: true, restartRequired: false, lastError: null,
+    verified: true, restartRequired: false, lastError: null, botUsername: null,
 } as const;
-// Canonical six-key channel A status with nullable generations/activation and
-// lowercase backend phases; mirrors the frozen domain parser contract.
+// Canonical seven-key channel A status (T10 adds botUsername) with nullable
+// generations/activation and lowercase backend phases; mirrors the frozen
+// domain parser contract.
 const channelAIdle = {
     configured: false,
     desiredGeneration: 1,
@@ -39,6 +40,7 @@ const channelAIdle = {
     activationEpoch: null,
     activation: null,
     lastError: null,
+    botUsername: null,
 } as const;
 const channelARunning = {
     configured: true,
@@ -47,6 +49,7 @@ const channelARunning = {
     activationEpoch: 2,
     activation: { phase: 'running', reason: null, quiescent: false, restartRequired: false },
     lastError: null,
+    botUsername: 'prisma_channel_a_bot',
 } as const;
 const geminiVerified = {
     configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 },
@@ -135,6 +138,7 @@ function healthResponse(): Response {
         telegramDesiredGeneration: 2,
         telegramAppliedGeneration: 1,
         telegramRestartRequired: true,
+        telegramBotUsername: null,
     });
 }
 
