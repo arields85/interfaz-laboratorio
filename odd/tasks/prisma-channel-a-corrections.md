@@ -185,6 +185,14 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   `type="password"`); apply to the Gemini input only (Telegram/Canal A use a separate input
   block, not shared — confirm and note). Route: direct (single file + its test + a
   dependency bump commit).
+- [x] **T9d** Gemini row: stable Verificar width + neutral Delete (user manual-test
+  feedback, 2026-09-23). (1) "Verificar"/"Verificando…" currently reflow the row width;
+  stack both labels in the same CSS grid cell (`grid-area:1/1`), inactive one
+  `invisible`+`aria-hidden`, so the button's intrinsic width is always the longer label's
+  width — no hardcoded pixel width (anti-hardcode dimensional policy). Accessible name
+  stays the active label only; icon/spinner placement unchanged. (2) Delete-credential
+  button (Gemini row only; Telegram/Canal A come in T10) must not use the red danger
+  variant — same styling as Save. Route: direct (single file + its test).
 
 ## Acceptance criteria
 
@@ -886,12 +894,40 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   test` 211/2263, `tsc -b --noEmit`, `eslint` clean. GGA PASSED (1 non-blocking note,
   unrelated 4096-byte message constant, not touched). Commit `8110edb`.
 
+- 2026-09-23: T9d done. (1) Extracted `VerifyButtonLabel({ verifying })`: both "Verificar"
+  and "Verificando…" spans render always, stacked in the same CSS grid cell
+  (`[grid-area:1/1]`); the inactive one gets `invisible` (keeps its layout box so the grid
+  cell doesn't collapse to the shorter label) and `aria-hidden` (excluded from the button's
+  accessible name, which stays exactly the active label). No hardcoded pixel width and no
+  runtime measurement -- the grid cell's intrinsic size is simply the wider of its two
+  overlapping children, satisfying the anti-hardcode dimensional policy natively. Used by
+  both the enabled/configured Verificar button and the disabled/unconfigured
+  `HoverTooltip`-wrapped one, so both share identical width regardless of state; icon/
+  spinner placement (the separate `StatusIcon`/`Loader2` slot after the button) unchanged.
+  (2) Gemini's Delete button: `variant="danger"` → `variant="primary"` (Save's exact
+  variant), scoped to the Gemini row only -- Telegram/Canal A's Delete buttons (in the
+  separate, non-shared `renderProvider` block) still use `variant="danger"`, unchanged,
+  left for T10. RED: the width test failed with `getByText('Verificando…')` not found at
+  all (old code rendered only one label, swapped via ternary) against the pre-fix
+  component; the styling test failed on the literal `status-critical` classes still
+  present. GREEN: `VoiceCredentialSettings.test.tsx` 44/44 (comparing Delete's and Save's
+  full `className` strings directly, rather than hardcoding either variant's class list, so
+  the test tracks the actual `HmiButton` variant+size contract instead of a fixed
+  snapshot); full `npm test` 211 files / 2265 tests; `tsc -b --noEmit` and `eslint` clean.
+  GGA PASSED (3 non-blocking notes: Gemini's Delete now differs from Telegram/Canal A's
+  Delete variant -- intentional, scoped per this task, T10 will reconcile; pre-existing
+  "Consultando estado"/"Estado no disponible" text duplicated inline instead of reusing
+  `ProviderStatus`; pre-existing double-tooltip risk from `HoverTooltip` + native `title`
+  on Save/Delete -- none touched, all pre-existing or explicitly in-scope-as-is). Commit
+  `d982a06`.
+
 ## Next step
 
-All twelve roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
+All thirteen roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
 `039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
-`5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`), T9b (`5917ca6`) and T9c (`43069c5`,
-`a5a2908`, `8110edb`). Next step: the user re-runs manual test point 4 (foreign process on 5057,
+`5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`), T9b (`5917ca6`), T9c (`43069c5`,
+`a5a2908`, `8110edb`) and T9d (`d982a06`). Next step: the user re-runs manual test point 4
+(foreign process on 5057,
 confirm the popover now shows the port through the session bootstrap AND the terminal shows
 exactly one clean red line), re-checks point 3 (relaunch after closing the launcher window
 with X, confirm the terminal now announces the reused runtime), manually verifies T5b (enter
