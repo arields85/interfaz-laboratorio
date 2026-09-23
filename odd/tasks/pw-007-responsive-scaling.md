@@ -126,6 +126,27 @@ end together with PW-006; NO push.
     Manual checks to prioritize: overlays/popovers/dialogs position correctly at non-1920 widths,
     admin drag/resize handles track the pointer accurately, the shader background canvas still fills
     the screen, and 1920×1080 is pixel-identical to before this change.
+- [ ] **T3b — Zoom coordinate-space corrections (reopens T3's "no changes needed" claim).**
+  Parent measurement in headless Chrome (local `chrome.exe`, `zoom:1.25` on `<html>`, window
+  1600×900, 2026-09-23) refuted the "vh is divided back out" assumption:
+  - `height:100vh` → rect height 1001 px vs viewport 801 px (document scrolls): `h-screen` and every
+    `calc(100vh …)`/`100vw` length overflows at zoom > 1 and underfills at zoom < 1.
+    `height: calc(100vh / zoom)` fills exactly (801 px).
+  - `position:fixed; top:100px` renders at 125 px: any value read from `getBoundingClientRect()`
+    (visual, zoomed px) and written back into a CSS length is multiplied twice.
+  - `getBoundingClientRect()` returns visual px (500 for a 400px box); `clientWidth`, `offsetHeight`
+    and `ResizeObserver` `contentRect`/`borderBoxSize` return layout px (400).
+    `devicePixelContentBoxSize` = 500 (device px at DPR 1).
+  - `position:fixed; inset:0` fills the viewport correctly (percentages/insets are not multiplied).
+  Required: expose the applied zoom as a CSS custom property next to `zoom` and derive viewport
+  lengths from it (`MainLayout`/`AdminLayout` `h-screen`, `PrismaOrbOverlay`, `anchoredOverlayStyle`,
+  `EppiTopbarNavigation`, `ShaderSettingsPanel`, `GlobalSettingsDialog`, `RuntimeDialog`); convert
+  `getBoundingClientRect()`/pointer values to layout px (÷ effective zoom, `currentCSSZoom`) wherever
+  they are written back into CSS lengths or mixed with layout-px measurements (`anchoredOverlayStyle`,
+  `HoverTooltip`, `PrismaPairingControl`, trend chart interaction layers, `TrendChartV2Widget`,
+  `BuilderCanvas`/`widgetInteraction` drag/resize, vendor `leda-orb.js`). Ratio-only uses
+  (visual/visual) stay as they are. `EventHorizonBackground` uses `clientWidth × dpr` (layout px) for
+  a canvas under zoom — verify it renders at full resolution (use device-pixel sizing if not).
 - [ ] **T4 — Per-device fine-tune.** Per-browser factor (default 100%, fine steps) combined with the
   automatic zoom; UI placement to be agreed with the user.
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
