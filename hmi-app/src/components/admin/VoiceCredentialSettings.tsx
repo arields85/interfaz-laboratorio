@@ -10,6 +10,7 @@ import { usePrismaCredentialAdministration } from '../../hooks/usePrismaCredenti
 import { AdminAuthError } from '../../services/adminAuth.service';
 import { useAuthStore } from '../../store/auth.store';
 import HmiButton from '../ui/HmiButton';
+import HoverTooltip from '../ui/HoverTooltip';
 import AdminDialog from './AdminDialog';
 import { ADMIN_SIDEBAR_INPUT_CLS, ADMIN_SIDEBAR_SECTION_HEADER_CLS } from './adminSidebarStyles';
 
@@ -242,106 +243,138 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         // Gemini and Telegram keep working from their own metadata.
         const channelAUnavailable = isChannelA && Boolean(administration.channelAError);
         const providerDisabled = disabled || channelAUnavailable;
+        // Full-width horizontal row per provider: identity/state on the left, the credential
+        // input with icon-only actions in the middle, and the apply status/action (Telegram and
+        // Channel A only) on the right — wrapping to a stacked column below the md breakpoint.
         return (
-            <fieldset aria-label={label} className="space-y-3 rounded border border-white/10 p-3">
-                <legend className="px-1 text-industrial-text">{label}</legend>
-                <div className="flex items-center justify-between gap-3 text-industrial-muted">
-                    <span>Credencial</span>
-                    <ProviderStatus configured={credentials?.[provider].configured} loading={administration.isLoading} />
+            <fieldset
+                aria-label={label}
+                className="flex flex-col gap-3 rounded border border-white/10 p-3 md:flex-row md:items-start md:gap-4"
+            >
+                <div className="flex min-w-0 flex-col gap-2 md:w-56 md:shrink-0">
+                    <legend className="px-0 text-industrial-text">{label}</legend>
+                    <div className="flex items-center gap-2 text-industrial-muted">
+                        <span>Credencial</span>
+                        <ProviderStatus configured={credentials?.[provider].configured} loading={administration.isLoading} />
+                    </div>
+                    {provider === 'gemini' && credentials ? <p className="text-industrial-muted">Verificación: no realizada</p> : null}
+                    {provider === 'telegram_channel_a' ? (
+                        <p className="text-industrial-muted">Bot dedicado para consultas remotas de la HMI. Guardar la credencial no inicia ni verifica el bot.</p>
+                    ) : null}
                 </div>
-                {provider === 'gemini' && credentials ? <p className="text-industrial-muted">Verificación: no realizada</p> : null}
-                {provider === 'telegram_channel_a' ? (
-                    <p className="text-industrial-muted">Bot dedicado para consultas remotas de la HMI. Guardar la credencial no inicia ni verifica el bot.</p>
-                ) : null}
-                <label className="flex flex-col gap-1 text-industrial-muted">
-                    Credencial {label}
-                    <input
-                        type="password"
-                        autoComplete="new-password"
-                        value={value}
-                        onChange={(event) => {
-                            const nextValue = event.target.value;
-                            secretRevisionRef.current[provider] += 1;
-                            setProviderDraft(provider, nextValue);
-                        }}
-                        className={ADMIN_SIDEBAR_INPUT_CLS}
-                        disabled={providerDisabled}
-                    />
-                </label>
-                <div className="flex flex-wrap gap-2">
-                    <HmiButton size="sm" variant="primary" disabled={providerDisabled || !value} onClick={() => void save(provider)}>
-                        <Save size={14} aria-hidden="true" />
-                        Guardar credencial
-                    </HmiButton>
-                    <HmiButton size="sm" variant="danger" disabled={providerDisabled} onClick={() => updateDeleteProvider(provider)}>
-                        <Trash2 size={14} aria-hidden="true" />
-                        Eliminar credencial
-                    </HmiButton>
+
+                <div className="flex flex-1 items-end gap-2 md:min-w-0">
+                    <label className="flex flex-1 flex-col gap-1 text-industrial-muted">
+                        Credencial {label}
+                        <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={value}
+                            onChange={(event) => {
+                                const nextValue = event.target.value;
+                                secretRevisionRef.current[provider] += 1;
+                                setProviderDraft(provider, nextValue);
+                            }}
+                            className={ADMIN_SIDEBAR_INPUT_CLS}
+                            disabled={providerDisabled}
+                        />
+                    </label>
+                    <div className="flex shrink-0 gap-2">
+                        <HoverTooltip label="Guardar credencial" position="top">
+                            <HmiButton
+                                size="sm"
+                                variant="primary"
+                                aria-label="Guardar credencial"
+                                title="Guardar credencial"
+                                disabled={providerDisabled || !value}
+                                onClick={() => void save(provider)}
+                            >
+                                <Save size={14} aria-hidden="true" />
+                            </HmiButton>
+                        </HoverTooltip>
+                        <HoverTooltip label="Eliminar credencial" position="top">
+                            <HmiButton
+                                size="sm"
+                                variant="danger"
+                                aria-label="Eliminar credencial"
+                                title="Eliminar credencial"
+                                disabled={providerDisabled}
+                                onClick={() => updateDeleteProvider(provider)}
+                            >
+                                <Trash2 size={14} aria-hidden="true" />
+                            </HmiButton>
+                        </HoverTooltip>
+                    </div>
                 </div>
-                {provider === 'telegram' && telegram ? (
-                    <>
-                        <div className="grid grid-cols-2 gap-2 rounded border border-white/10 p-3 text-industrial-muted">
-                            <span>{telegram?.restartRequired ? 'Cambio pendiente de aplicar' : 'Sin cambios pendientes'}</span>
-                            <span>{telegram?.running ? 'Ejecución activa' : 'Ejecución detenida'}</span>
-                            <span>{telegram?.verified ? 'Última aplicación verificada' : 'Última aplicación sin verificar'}</span>
-                            <span>{telegram?.enabled ? 'Habilitada' : 'Deshabilitada'}</span>
-                            <span>
-                                Origen: {credentials?.telegram.configured ? 'almacén protegido' : telegram?.configured ? 'entorno local' : 'sin credencial'}
-                            </span>
-                            <span>
-                                Generación: {telegram?.desiredGeneration ?? '—'} / {telegram?.appliedGeneration ?? '—'}
-                            </span>
-                        </div>
-                        {telegram?.configurationError || telegram?.lastError ? (
-                            <p className="text-status-warning">
-                                {errorText(new AdminAuthError(telegram.lastError ?? telegram.configurationError ?? '', null))}
-                            </p>
+
+                {provider === 'telegram' || isChannelA ? (
+                    <div className="flex flex-col gap-2 md:w-64 md:shrink-0">
+                        {provider === 'telegram' && telegram ? (
+                            <>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 rounded border border-white/10 p-3 text-industrial-muted">
+                                    <span>{telegram?.restartRequired ? 'Cambio pendiente de aplicar' : 'Sin cambios pendientes'}</span>
+                                    <span>{telegram?.running ? 'Ejecución activa' : 'Ejecución detenida'}</span>
+                                    <span>{telegram?.verified ? 'Última aplicación verificada' : 'Última aplicación sin verificar'}</span>
+                                    <span>{telegram?.enabled ? 'Habilitada' : 'Deshabilitada'}</span>
+                                    <span>
+                                        Origen: {credentials?.telegram.configured ? 'almacén protegido' : telegram?.configured ? 'entorno local' : 'sin credencial'}
+                                    </span>
+                                    <span>
+                                        Generación: {telegram?.desiredGeneration ?? '—'} / {telegram?.appliedGeneration ?? '—'}
+                                    </span>
+                                </div>
+                                {telegram?.configurationError || telegram?.lastError ? (
+                                    <p className="text-status-warning">
+                                        {errorText(new AdminAuthError(telegram.lastError ?? telegram.configurationError ?? '', null))}
+                                    </p>
+                                ) : null}
+                                <HmiButton
+                                    size="sm"
+                                    variant="primary"
+                                    disabled={disabled || !credentials?.telegram.configured}
+                                    onClick={() => void applyTelegram()}
+                                >
+                                    <Play size={14} aria-hidden="true" />
+                                    Aplicar cambio
+                                </HmiButton>
+                            </>
                         ) : null}
-                        <HmiButton
-                            size="sm"
-                            variant="primary"
-                            disabled={disabled || !credentials?.telegram.configured}
-                            onClick={() => void applyTelegram()}
-                        >
-                            <Play size={14} aria-hidden="true" />
-                            Aplicar cambio
-                        </HmiButton>
-                    </>
-                ) : null}
-                {isChannelA && channelA ? (
-                    <>
-                        <div className="grid grid-cols-2 gap-2 rounded border border-white/10 p-3 text-industrial-muted">
-                            <span>
-                                {channelA.appliedGeneration !== null
-                                    && channelA.appliedGeneration === channelA.desiredGeneration
-                                    ? 'Sin cambios pendientes'
-                                    : 'Cambio pendiente de aplicar'}
-                            </span>
-                            <span>{channelAExecutionLabel(channelA.activation?.phase ?? null)}</span>
-                        </div>
-                        {channelA.lastError ? (
-                            <p className="text-status-warning">
-                                {errorText(new AdminAuthError(channelA.lastError, null))}
-                            </p>
+                        {isChannelA && channelA ? (
+                            <>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 rounded border border-white/10 p-3 text-industrial-muted">
+                                    <span>
+                                        {channelA.appliedGeneration !== null
+                                            && channelA.appliedGeneration === channelA.desiredGeneration
+                                            ? 'Sin cambios pendientes'
+                                            : 'Cambio pendiente de aplicar'}
+                                    </span>
+                                    <span>{channelAExecutionLabel(channelA.activation?.phase ?? null)}</span>
+                                </div>
+                                {channelA.lastError ? (
+                                    <p className="text-status-warning">
+                                        {errorText(new AdminAuthError(channelA.lastError, null))}
+                                    </p>
+                                ) : null}
+                                {administration.channelAError ? (
+                                    <p className="text-status-warning">Último estado conocido; la actualización falló.</p>
+                                ) : null}
+                            </>
                         ) : null}
-                        {administration.channelAError ? (
-                            <p className="text-status-warning">Último estado conocido; la actualización falló.</p>
+                        {isChannelA && administration.channelAError ? (
+                            <p className="text-status-warning">{errorText(administration.channelAError)}</p>
                         ) : null}
-                    </>
-                ) : null}
-                {isChannelA && administration.channelAError ? (
-                    <p className="text-status-warning">{errorText(administration.channelAError)}</p>
-                ) : null}
-                {isChannelA ? (
-                    <HmiButton
-                        size="sm"
-                        variant="primary"
-                        disabled={providerDisabled || !credentials?.telegram_channel_a.configured || !channelA}
-                        onClick={() => void applyChannelA()}
-                    >
-                        <Play size={14} aria-hidden="true" />
-                        Aplicar cambio
-                    </HmiButton>
+                        {isChannelA ? (
+                            <HmiButton
+                                size="sm"
+                                variant="primary"
+                                disabled={providerDisabled || !credentials?.telegram_channel_a.configured || !channelA}
+                                onClick={() => void applyChannelA()}
+                            >
+                                <Play size={14} aria-hidden="true" />
+                                Aplicar cambio
+                            </HmiButton>
+                        ) : null}
+                    </div>
                 ) : null}
             </fieldset>
         );
@@ -363,7 +396,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 <RefreshCw size={14} aria-hidden="true" />
                 Actualizar estado
             </HmiButton>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="flex flex-col gap-3">
                 {renderProvider('gemini')}
                 {renderProvider('telegram')}
                 {renderProvider('telegram_channel_a')}

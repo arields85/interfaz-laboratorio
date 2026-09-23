@@ -750,6 +750,21 @@ describe('VoiceCredentialSettings', () => {
             .toBeInTheDocument();
     });
 
+    it('renders save and delete credential actions as icon-only controls with their accessible names preserved', async () => {
+        renderSettings();
+        const gemini = await screen.findByRole('group', { name: 'Gemini' });
+
+        const save = within(gemini).getByRole('button', { name: 'Guardar credencial' });
+        const remove = within(gemini).getByRole('button', { name: 'Eliminar credencial' });
+
+        // Icon-only: no visible text node, but the accessible name (via aria-label) is unchanged,
+        // so every existing getByRole('button', { name: ... }) query keeps working.
+        expect(save.textContent?.trim()).toBe('');
+        expect(save).toHaveAccessibleName('Guardar credencial');
+        expect(remove.textContent?.trim()).toBe('');
+        expect(remove).toHaveAccessibleName('Eliminar credencial');
+    });
+
     it('shows the channel A lastError as safe guidance without raw internal codes', async () => {
         renderSettings({ channelAStatus: vi.fn(async () => channelAStopUnconfirmed) });
         const channelA = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
