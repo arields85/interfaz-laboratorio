@@ -75,12 +75,28 @@ export const PRISMA_PROXY_ROUTES: readonly PrismaProxyRoute[] = Object.freeze([
 ]);
 
 export function createPrismaProxyConfig(): Record<string, ProxyOptions> {
+    // Read once, at config build time (T4c): a foreign process holding 5056/5057 IS a real
+    // listener, so the proxy would otherwise forward to it successfully and the on('error')
+    // handler below would never fire. When the launcher already reported a specific startup
+    // failure, Prisma itself never started this session, so nothing on those ports is ours —
+    // every Prisma route answers the same failure JSON directly, without ever forwarding.
+    const startupFailure = readPrismaStartupFailure();
+
     return Object.fromEntries(PRISMA_PROXY_ROUTES.map((route) => [
         route.pattern,
         {
             target: route.target,
             changeOrigin: true,
             bypass: (request, response) => {
+                if (startupFailure) {
+                    if (!response) return false;
+                    const body = JSON.stringify({ error: 'prisma_runtime_unreachable', reason: startupFailure.reason, port: startupFailure.port });
+                    response.statusCode = 503;
+                    response.setHeader('Content-Type', 'application/json');
+                    response.setHeader('Cache-Control', 'no-store');
+                    response.end(body);
+                    return false;
+                }
                 if (route.methods.includes(request.method ?? 'GET')) return;
                 if (!response) return false;
                 response.statusCode = 405;

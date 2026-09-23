@@ -378,4 +378,72 @@ describe('Prisma Vite proxy configuration', () => {
             expect(response.end).not.toHaveBeenCalled();
         });
     });
+
+    describe('T4c: never forwards when the launcher already reported a startup failure', () => {
+        // A foreign process holding 5056/5057 IS a real listener, so the proxy would
+        // otherwise forward to it successfully (observed live: a plain HTTP server answered
+        // 404, and the on('error') handler above never fired). When PRISMA_STARTUP_FAILURE is
+        // present, bypass must short-circuit BEFORE any proxying is attempted, for every
+        // route and every method — Vite's own middleware (node_modules/vite/dist/node/chunks/
+        // config.js, viteProxyMiddleware) never calls proxy.web() when bypass returns false;
+        // it trusts bypass to have already written the response, exactly as the pre-existing
+        // 405 case above already does.
+        it.each([
+            ['the pairing route', CHANNEL_A_PAIRING_BROWSER_PATH, 'GET'],
+            ['the pairing route on its other allowed method', CHANNEL_A_PAIRING_BROWSER_PATH, 'POST'],
+            ['a stripSessionCapability admin route', CHANNEL_A_STATUS_PATH, 'GET'],
+            ['the channel A credential route', CHANNEL_A_CREDENTIAL_PATH, 'PUT'],
+        ])('answers 503 with the detected failure and never proxies on %s', (_label, browserPath, method) => {
+            vi.stubEnv('PRISMA_STARTUP_FAILURE', JSON.stringify({ reason: 'port_in_use', port: 5057 }));
+            const { proxy } = channelAProxy(browserPath);
+            const bypass = proxy?.bypass as ProxyBypass;
+            const response = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
+
+            const result = bypass(
+                { method } as unknown as IncomingMessage,
+                response as unknown as ServerResponse,
+                {} as Parameters<ProxyBypass>[2],
+            );
+
+            // `false` is the exact signal that tells Vite's middleware to skip proxy.web()
+            // entirely (verified against its source above); an allowed method would
+            // otherwise return `undefined` here and fall through to forwarding.
+            expect(result).toBe(false);
+            expect(response.statusCode).toBe(503);
+            expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'application/json');
+            expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+            expect(response.end).toHaveBeenCalledWith(JSON.stringify({ error: 'prisma_runtime_unreachable', reason: 'port_in_use', port: 5057 }));
+        });
+
+        it('answers 503 even for a method that route would otherwise reject with 405', () => {
+            vi.stubEnv('PRISMA_STARTUP_FAILURE', JSON.stringify({ reason: 'port_in_use', port: 5057 }));
+            const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+            const bypass = proxy?.bypass as ProxyBypass;
+            const response = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
+
+            const result = bypass(
+                { method: 'DELETE' } as unknown as IncomingMessage,
+                response as unknown as ServerResponse,
+                {} as Parameters<ProxyBypass>[2],
+            );
+
+            expect(result).toBe(false);
+            expect(response.statusCode).toBe(503);
+            expect(response.end).toHaveBeenCalledWith(JSON.stringify({ error: 'prisma_runtime_unreachable', reason: 'port_in_use', port: 5057 }));
+        });
+
+        it('still applies the ordinary method allowlist (405) when no startup failure is present', () => {
+            const { proxy } = channelAProxy(CHANNEL_A_PAIRING_BROWSER_PATH);
+            const bypass = proxy?.bypass as ProxyBypass;
+            const response = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
+
+            const allowed = bypass({ method: 'GET' } as unknown as IncomingMessage, response as unknown as ServerResponse, {} as Parameters<ProxyBypass>[2]);
+            expect(allowed).toBeUndefined();
+            expect(response.statusCode).toBe(200);
+
+            const denied = bypass({ method: 'DELETE' } as unknown as IncomingMessage, response as unknown as ServerResponse, {} as Parameters<ProxyBypass>[2]);
+            expect(denied).toBe(false);
+            expect(response.statusCode).toBe(405);
+        });
+    });
 });
