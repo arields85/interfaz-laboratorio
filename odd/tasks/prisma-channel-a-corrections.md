@@ -932,12 +932,66 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   mentioning task IDs will go stale once this tracker is archived -- none touched).
   Commit `ffa1d31`.
 
+  **Follow-up 2** (2026-09-23, same day; user approved the row, last details). (1) Legend
+  border-notch: grepped the codebase first for an existing fix (Telegram/Canal A's shared
+  `renderProvider` legend has the identical issue, unfixed, left for T10) -- none found, so
+  applied the user's preferred `float-left w-full` technique. Root cause: a native
+  `<legend>` is positioned via its own browser "straddle the top border" algorithm that is
+  independent of the fieldset's `display`/`flex-direction` (a flex-column fieldset alone
+  can't move it); the fieldset's `className` was changed from `flex flex-col gap-2 ...` to
+  plain block (`rounded border ... p-3`), the legend got `float-left w-full px-0 ...` (this
+  removes it from the notch algorithm entirely, rendering it as an ordinary block inside
+  the border) with a `<div className="clear-both" />` immediately after, and everything
+  else that was directly in the fieldset (label + credential row) moved into its own
+  `flex flex-col gap-2` wrapper div, unaffected by the legend's float. (2) Copy: legend/
+  `aria-label` "Proveedor de voz: Gemini" → "Proveedor de voz" (group accessible name);
+  input label "API Key" → "API Key de Gemini" (input's accessible name too); all other
+  copy (tooltips, "Configure una API key para verificarla.", etc.) unchanged. Global
+  find-replace across `VoiceCredentialSettings.test.tsx` (24 + 17 occurrences) plus two
+  other pre-existing test files that queried the old group/label names at runtime only
+  (`GlobalSettingsDialog.voice.integration.test.tsx`, `VoiceSettingsTab.test.tsx` -- same
+  `tsconfig.app.json` test-file exclusion from `tsc` as earlier T9 collateral, fixed
+  proactively this time before running the full suite). RED: 2 new structural tests failed
+  against the pre-fix component (legend missing `float-left`/`w-full` classes; "API Key de
+  Gemini" label not found). GREEN: `VoiceCredentialSettings.test.tsx` 46/46; the two
+  collateral files 25/25; full `npm test` 211 files / 2267 tests; `tsc -b --noEmit` and
+  `eslint` clean. GGA PASSED (2 non-blocking notes, both already recorded: the Gemini/
+  Telegram Delete-variant split, and the pre-existing double-tooltip risk from `title` +
+  `HoverTooltip` on every icon button -- neither touched). Commit `c2a19cb`.
+
+  **Follow-up 3** (2026-09-23, same day; user decision): removed the standalone "Actualizar
+  estado" button and its `refreshDisabled` gating. `administration.refresh()` itself is
+  untouched and still runs automatically inside the hook after every save/delete/apply/
+  verify (`usePrismaCredentialAdministration.ts`'s `saveCredential`/`deleteCredential`/
+  `applyTelegram`/`applyChannelA`/`verifyGemini` each call it post-operation) -- the
+  component no longer calls it directly anywhere. Checked reachability of the stale/error
+  notices as asked: both stay reachable, since they derive from `administration.error`/
+  `administration.data`, which the automatic refetches (initial load, or any of those
+  five operations) still populate the same way a manual refresh did; verified this by
+  rewriting the two tests that used to click the button to instead trigger the identical
+  refetch-failure path through Telegram's and Channel A's own "Aplicar cambio" buttons --
+  both still show "Último estado conocido; la actualización falló." and disable the same
+  controls. Also removed two standalone "button stays enabled" assertions that only tested
+  the button itself, and added one explicit regression test asserting the button is gone.
+  Spacing: gave the provider-fieldset list its own `mt-3` (previously relied entirely on
+  the description paragraph's `mb-3`, with the removed button's row providing incidental
+  extra separation) so the first (Gemini) frame doesn't sit flush under the section
+  header/description now that the button's row is gone. RED: the new "button is gone"
+  test failed against the still-present button (the two rewritten refresh-path tests
+  already passed pre-removal, since `applyTelegram`/`applyChannelA` already triggered the
+  same internal `refresh()` before this task -- confirming they test the underlying
+  behavior independent of the button). GREEN: `VoiceCredentialSettings.test.tsx` 47/47;
+  full `npm test` 211 files / 2268 tests; `tsc -b --noEmit` and `eslint` clean. GGA PASSED
+  (2 non-blocking notes, both already recorded: stale task-ID comments, double-tooltip
+  risk -- neither touched). Commit `7b96b59`.
+
 ## Next step
 
 All thirteen roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
 `039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
 `5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`), T9b (`5917ca6`), T9c (`43069c5`,
-`a5a2908`, `8110edb`) and T9d (`d982a06`, `ffa1d31`). Next step: the user re-runs manual test point 4
+`a5a2908`, `8110edb`) and T9d (`d982a06`, `ffa1d31`, `c2a19cb`, `7b96b59`). Next step: the
+user re-runs manual test point 4
 (foreign process on 5057,
 confirm the popover now shows the port through the session bootstrap AND the terminal shows
 exactly one clean red line), re-checks point 3 (relaunch after closing the launcher window
