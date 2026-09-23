@@ -188,7 +188,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     const dialogRevisionRef = useRef(0);
     const unavailable = Boolean(administration.error);
     const disabled = !authenticated || !administration.data || unavailable || administration.pendingAction !== null;
-    const refreshDisabled = !authenticated || administration.pendingAction !== null;
     const retryDisabled = !authenticated || administration.pendingAction !== null;
     const credentials = administration.data?.credentials;
     const telegram = administration.data?.telegram;
@@ -624,11 +623,10 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
             {administration.isLoading ? <p className="text-industrial-muted">Cargando metadatos protegidos...</p> : null}
             {administration.error ? <p role="alert" className="mb-3 text-status-critical">{errorText(administration.error)}</p> : null}
             {stale ? <p className="mb-3 text-status-warning">Último estado conocido; la actualización falló.</p> : null}
-            <HmiButton size="sm" disabled={refreshDisabled} onClick={() => void administration.refresh()}>
-                <RefreshCw size={14} aria-hidden="true" />
-                Actualizar estado
-            </HmiButton>
-            <div className="flex flex-col gap-3">
+            {/* No manual refresh control: administration.refresh() still runs
+                automatically after every save/delete/apply/verify (inside the
+                hook), which is what keeps this metadata current. */}
+            <div className="mt-3 flex flex-col gap-3">
                 {renderProvider('gemini')}
                 {renderProvider('telegram')}
                 {renderProvider('telegram_channel_a')}

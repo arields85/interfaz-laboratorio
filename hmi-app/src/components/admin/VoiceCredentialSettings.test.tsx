@@ -210,6 +210,13 @@ async function createClientWithDeferredRefresh() {
 describe('VoiceCredentialSettings', () => {
     beforeEach(authenticated);
 
+    it('has no manual "Actualizar estado" refresh button', async () => {
+        renderSettings();
+        await screen.findByRole('group', { name: 'Proveedor de voz' });
+
+        expect(screen.queryByRole('button', { name: 'Actualizar estado' })).not.toBeInTheDocument();
+    });
+
     it('shows truthful diagnostics, preserves submitted bytes, and clears the local secret after completion', async () => {
         const user = userEvent.setup();
         const { client } = renderSettings();
@@ -508,7 +515,6 @@ describe('VoiceCredentialSettings', () => {
         expect(screen.queryByText('Sin configurar')).not.toBeInTheDocument();
         expect(screen.queryByText('Ejecución detenida')).not.toBeInTheDocument();
         expect(screen.queryByText('Deshabilitada')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Actualizar estado' })).toBeEnabled();
     });
 
     it('renders initial and malformed responses as unavailable rather than negative facts', async () => {
@@ -522,29 +528,34 @@ describe('VoiceCredentialSettings', () => {
         expect(screen.queryByText('Sin configurar')).not.toBeInTheDocument();
         expect(screen.queryByText('Ejecución detenida')).not.toBeInTheDocument();
         expect(screen.queryByText('synthetic-secret-canary')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Actualizar estado' })).toBeEnabled();
     });
 
-    it('marks retained facts as last known after a failed refresh and keeps only refresh enabled', async () => {
+    it('marks retained facts as last known after the automatic post-apply refresh fails', async () => {
+        // No manual "Actualizar estado" button exists any more; drive the same
+        // refetch-failure path through an operation that triggers an automatic
+        // refresh internally (every save/delete/apply/verify does).
         const user = userEvent.setup();
         const credentialMetadata = vi.fn()
             .mockResolvedValueOnce(metadata)
             .mockRejectedValueOnce(new AdminAuthError('CREDENTIAL_STORAGE_UNAVAILABLE', 503));
         renderSettings({ credentialMetadata });
         expect(await screen.findByText('Ejecución activa')).toBeInTheDocument();
+        const telegram = screen.getByRole('group', { name: 'Telegram' });
+        const apply = within(telegram).getByRole('button', { name: 'Aplicar cambio' });
+        await waitFor(() => expect(apply).toBeEnabled());
 
-        await user.click(screen.getByRole('button', { name: 'Actualizar estado' }));
+        await user.click(apply);
 
         expect(await screen.findByText('Último estado conocido; la actualización falló.')).toBeInTheDocument();
         expect(screen.getByText('Ejecución activa')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Actualizar estado' })).toBeEnabled();
-        expect(within(screen.getByRole('group', { name: 'Telegram' })).getByRole('button', { name: 'Aplicar cambio' }))
-            .toBeDisabled();
+        expect(within(telegram).getByRole('button', { name: 'Aplicar cambio' })).toBeDisabled();
         expect(screen.getAllByRole('button', { name: 'Guardar credencial' })).toSatisfy((buttons: HTMLButtonElement[]) =>
             buttons.every((button) => button.disabled));
     });
 
-    it('retains the last known channel A status and labels the card after a failed manual refresh', async () => {
+    it('retains the last known channel A status and labels the card after the automatic post-apply refresh fails', async () => {
+        // Same rationale as above: drive the refetch failure through Channel A's
+        // own explicit "Aplicar cambio" instead of the removed refresh button.
         const user = userEvent.setup();
         const statusFailure = new AdminAuthError('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
         const channelAStatus = vi.fn(async () => channelARunning)
@@ -553,8 +564,10 @@ describe('VoiceCredentialSettings', () => {
         renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus });
         const initialCard = await screen.findByRole('group', { name: 'Telegram (Canal A)' });
         expect(await within(initialCard).findByText('Ejecución activa')).toBeInTheDocument();
+        const apply = within(initialCard).getByRole('button', { name: 'Aplicar cambio' });
+        await waitFor(() => expect(apply).toBeEnabled());
 
-        await user.click(screen.getByRole('button', { name: 'Actualizar estado' }));
+        await user.click(apply);
 
         const channelACard = screen.getByRole('group', { name: 'Telegram (Canal A)' });
         expect(await within(channelACard).findByText('Último estado conocido; la actualización falló.')).toBeInTheDocument();
@@ -734,7 +747,6 @@ describe('VoiceCredentialSettings', () => {
 
         expect(within(gemini).getByLabelText('API Key de Gemini')).toBeEnabled();
         expect(within(telegram).getByRole('button', { name: 'Aplicar cambio' })).toBeEnabled();
-        expect(screen.getByRole('button', { name: 'Actualizar estado' })).toBeEnabled();
         expect(client.applyChannelA).not.toHaveBeenCalled();
     });
 
