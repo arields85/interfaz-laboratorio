@@ -16,8 +16,9 @@ import {
 describe('admin credential domain', () => {
     const notCheckedVerification = { state: 'not_checked', checkedAt: null } as const;
     const notCheckedTokenVerification = { state: 'not_checked', checkedAt: null, username: null } as const;
+    const MODEL = 'gemini-3.1-flash-tts-preview';
     const exactProviders = {
-        gemini: { configured: false, verified: false, verification: notCheckedVerification },
+        gemini: { configured: false, verified: false, verification: notCheckedVerification, model: MODEL },
         telegram: { configured: true, verified: false, verification: notCheckedTokenVerification },
         telegram_channel_a: { configured: false, verified: false, verification: notCheckedTokenVerification },
     };
@@ -47,7 +48,7 @@ describe('admin credential domain', () => {
                 for (const checkedAt of [null, 0, 1_699_999_999.5]) {
                     const providers = {
                         ...exactProviders,
-                        gemini: { configured: true, verified: state === 'verified', verification: { state, checkedAt } },
+                        gemini: { configured: true, verified: state === 'verified', verification: { state, checkedAt }, model: MODEL },
                     };
                     expect(parseCredentialMetadata({ ok: true, providers }).gemini).toEqual(providers.gemini);
                 }
@@ -56,12 +57,12 @@ describe('admin credential domain', () => {
 
         it('rejects an unknown state, extra keys, or a non-boolean verified flag', () => {
             const malformed = [
-                { configured: true, verified: false, verification: { state: 'pending', checkedAt: null } },
-                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null }, extra: 1 },
-                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null, extra: 1 } },
-                { configured: true, verified: 'yes', verification: { state: 'not_checked', checkedAt: null } },
-                { configured: true, verified: false, verification: { state: 'not_checked', checkedAt: 'now' } },
-                { configured: true, verified: false, verification: null },
+                { configured: true, verified: false, verification: { state: 'pending', checkedAt: null }, model: MODEL },
+                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null }, model: MODEL, extra: 1 },
+                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null, extra: 1 }, model: MODEL },
+                { configured: true, verified: 'yes', verification: { state: 'not_checked', checkedAt: null }, model: MODEL },
+                { configured: true, verified: false, verification: { state: 'not_checked', checkedAt: 'now' }, model: MODEL },
+                { configured: true, verified: false, verification: null, model: MODEL },
             ];
             for (const gemini of malformed) {
                 expect(() => parseCredentialMetadata({ ok: true, providers: { ...exactProviders, gemini } }))
@@ -69,8 +70,16 @@ describe('admin credential domain', () => {
             }
         });
 
+        it('rejects a missing, non-string or empty model', () => {
+            for (const model of [undefined, 42, '', null]) {
+                const gemini = { configured: true, verified: false, verification: notCheckedVerification, model };
+                expect(() => parseCredentialMetadata({ ok: true, providers: { ...exactProviders, gemini } }))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            }
+        });
+
         it('parses the verify endpoint envelope with the same gemini metadata shape', () => {
-            const gemini = { configured: true, verified: true, verification: { state: 'verified', checkedAt: 42 } } as const;
+            const gemini = { configured: true, verified: true, verification: { state: 'verified', checkedAt: 42 }, model: MODEL } as const;
             expect(parseGeminiVerificationResult({ ok: true, gemini })).toEqual(gemini);
             expect(() => parseGeminiVerificationResult({ ok: false, gemini })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
             expect(() => parseGeminiVerificationResult({ ok: true, gemini, extra: 1 }))
@@ -253,6 +262,7 @@ describe('admin credential domain', () => {
             activation: null,
             lastError: null,
             botUsername: null,
+            paired: false,
         } as const;
 
         const runningActivation = {
@@ -262,7 +272,7 @@ describe('admin credential domain', () => {
             restartRequired: false,
         } as const;
 
-        it('parses the exact seven-field status with null activation, epoch, lastError and botUsername', () => {
+        it('parses the exact eight-field status with null activation, epoch, lastError and botUsername', () => {
             const parsed: ChannelAAdministrationStatus =
                 parseChannelAAdministrationStatus({ ok: true, channelA: nullChannelA });
             expect(parsed).toEqual(nullChannelA);
@@ -279,10 +289,12 @@ describe('admin credential domain', () => {
                     activation: runningActivation,
                     lastError: null,
                     botUsername: 'prisma_channel_a_bot',
+                    paired: true,
                 },
             });
             expect(running.activation).toEqual({ phase: 'running', reason: null, quiescent: false, restartRequired: false });
             expect(running.botUsername).toBe('prisma_channel_a_bot');
+            expect(running.paired).toBe(true);
 
             const restartRequired = parseChannelAAdministrationStatus({
                 ok: true,
@@ -299,6 +311,7 @@ describe('admin credential domain', () => {
                     },
                     lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
                     botUsername: null,
+                    paired: false,
                 },
             });
             expect(restartRequired.activation?.reason).toBe('PRISMA_CHANNEL_A_RESTART_REQUIRED');
@@ -319,6 +332,7 @@ describe('admin credential domain', () => {
                     },
                     lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED',
                     botUsername: null,
+                    paired: false,
                 },
             });
             expect(reserved.activation?.phase).toBe('failed');
@@ -339,6 +353,7 @@ describe('admin credential domain', () => {
                         activation: { phase, reason: null, quiescent: true, restartRequired: false },
                         lastError: null,
                         botUsername: null,
+                        paired: false,
                     },
                 });
                 expect(parsed.activation?.phase).toBe(phase);
@@ -368,9 +383,17 @@ describe('admin credential domain', () => {
                         activation: { phase: 'failed', reason: null, quiescent: true, restartRequired: false },
                         lastError,
                         botUsername: null,
+                        paired: false,
                     },
                 });
                 expect(parsed.lastError).toBe(lastError);
+            }
+        });
+
+        it('rejects a non-boolean paired flag', () => {
+            for (const paired of ['yes', 1, null, undefined]) {
+                expect(() => parseChannelAAdministrationStatus({ ok: true, channelA: { ...nullChannelA, paired } }))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
             }
         });
 
@@ -410,6 +433,7 @@ describe('admin credential domain', () => {
                 { ok: true, channelA: { ...nullChannelA, activation: { ...runningActivation, quiescent: 'yes' } } },
                 { ok: true, channelA: { ...nullChannelA, lastError: 'internal diagnostic detail' } },
                 { ok: true, channelA: { ...nullChannelA, lastError: 'PRISMA_CHANNEL_A_FUTURE_UNKNOWN' } },
+                { ok: true, channelA: { ...nullChannelA, paired: 'yes' } },
             ];
             for (const payload of malformed) {
                 expect(() => parseChannelAAdministrationStatus(payload))

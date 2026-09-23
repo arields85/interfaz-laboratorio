@@ -34,13 +34,19 @@ const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
 const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
 const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
 
+const GEMINI_MODEL = 'gemini-3.1-flash-tts-preview';
+
 const GEMINI_VERIFIED = {
     ok: true,
-    gemini: { configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 } },
+    gemini: {
+        configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 },
+        model: GEMINI_MODEL,
+    },
 } as const;
 
 const GEMINI_NOT_CHECKED = {
     configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null },
+    model: GEMINI_MODEL,
 } as const;
 
 const TELEGRAM_TOKEN_NOT_CHECKED = { state: 'not_checked', checkedAt: null, username: null } as const;
@@ -73,6 +79,7 @@ const CHANNEL_A_STATUS = {
         },
         lastError: null,
         botUsername: 'prisma_channel_a_bot',
+        paired: false,
     },
 } as const;
 

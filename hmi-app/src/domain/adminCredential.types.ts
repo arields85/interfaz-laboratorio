@@ -14,6 +14,10 @@ export interface GeminiVerification {
 export interface GeminiCredentialProviderMetadata extends CredentialProviderMetadata {
     verified: boolean;
     verification: GeminiVerification;
+    // T15: the exact Gemini TTS model this key is verified/speaks with
+    // (backend-sourced, never hardcoded on the frontend), shown as the
+    // result area's resting text before the first verification.
+    model: string;
 }
 
 // T13: on-demand, non-sending bot token verification shared by Telegram
@@ -110,6 +114,10 @@ export interface ChannelAAdministrationStatus {
     // The connected bot's Telegram username (public info, never the secret
     // token); non-null only while actually running without a pending restart.
     botUsername: string | null;
+    // T15: whether any chat is currently paired to this bot (coarse,
+    // owner-agnostic); only meaningful while actually running without a
+    // pending restart, false otherwise -- same gating as botUsername.
+    paired: boolean;
 }
 
 export interface CredentialMutationResult {
@@ -187,9 +195,10 @@ function isGeminiVerification(value: unknown): value is GeminiVerification {
 }
 
 function isGeminiProviderMetadata(value: unknown): value is GeminiCredentialProviderMetadata {
-    return isObject(value) && hasExactKeys(value, ['configured', 'verified', 'verification'])
+    return isObject(value) && hasExactKeys(value, ['configured', 'verified', 'verification', 'model'])
         && typeof value.configured === 'boolean' && typeof value.verified === 'boolean'
-        && isGeminiVerification(value.verification);
+        && isGeminiVerification(value.verification)
+        && typeof value.model === 'string' && value.model.length > 0;
 }
 
 const TELEGRAM_TOKEN_VERIFICATION_STATES = new Set<TelegramTokenVerificationState>([
@@ -339,7 +348,7 @@ export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdmin
     if (!isObject(value) || !hasExactKeys(value, ['ok', 'channelA']) || value.ok !== true
         || !isObject(value.channelA) || !hasExactKeys(value.channelA, [
             'configured', 'desiredGeneration', 'appliedGeneration',
-            'activationEpoch', 'activation', 'lastError', 'botUsername',
+            'activationEpoch', 'activation', 'lastError', 'botUsername', 'paired',
         ])) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
@@ -347,7 +356,8 @@ export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdmin
     if (typeof status.configured !== 'boolean' || !isGeneration(status.desiredGeneration)
         || (status.appliedGeneration !== null && !isGeneration(status.appliedGeneration))
         || (status.activationEpoch !== null && !isGeneration(status.activationEpoch))
-        || !isBotUsername(status.botUsername)) {
+        || !isBotUsername(status.botUsername)
+        || typeof status.paired !== 'boolean') {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
     return {
@@ -358,6 +368,7 @@ export function parseChannelAAdministrationStatus(value: unknown): ChannelAAdmin
         activation: parseChannelAActivation(status.activation),
         lastError: parseChannelAError(status.lastError),
         botUsername: status.botUsername,
+        paired: status.paired,
     };
 }
 

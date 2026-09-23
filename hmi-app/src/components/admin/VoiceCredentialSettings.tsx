@@ -5,17 +5,12 @@ import type {
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
     Check,
-    CircleDashed,
-    CircleDashedCheck,
-    CircleX,
     KeyRound,
-    Loader2,
     MessageCircleWarning,
     Play,
     RefreshCw,
     Save,
     Trash2,
-    WifiOff,
     type LucideIcon,
 } from 'lucide-react';
 
@@ -124,17 +119,19 @@ const CREDENTIAL_INPUT_WIDTH_CLS = 'w-full md:w-44';
 // still grows beyond it for a wider real rendering of those 33 characters,
 // never shrinks below it for shorter content, and a maximally long username
 // is never truncated. Every row uses the same class so their result areas
-// stay the same width (Gemini and short connection states just leave the
-// extra space empty). No `truncate`/`overflow-hidden`/`whitespace-nowrap` is
-// ever applied to the text inside it: if an even narrower viewport
-// disagrees, the row's own `flex-wrap` lets it wrap instead of clipping.
+// stay the same width (T15: the Gemini model name, 28 characters, also fits
+// inside it). No `truncate`/`overflow-hidden`/`whitespace-nowrap` is ever
+// applied to the text inside it: if an even narrower viewport disagrees, the
+// row's own `flex-wrap` lets it wrap instead of clipping.
 const RESULT_AREA_WIDTH_CLS = 'min-w-[33ch]';
 
-// T14: how long a successful Telegram/Canal A on-demand verification result
-// stays visible in the trailing result area before it reverts to the live
-// connection state. A failed result (invalid_token/unreachable) never
-// reverts automatically -- it stays until the next verify, a save, or a
-// delete (which already resets verification on the backend). No pre-existing
+// T14/T15: how long a successful on-demand verification's transient message
+// stays visible in the trailing result area before it reverts to the row's
+// resting display (Gemini: the model name, still shown with the success
+// tone/icon since the credential stays verified; Canal A/B: the live
+// connection state). A failed result (invalid/unreachable) never reverts
+// automatically -- it stays until the next verify, a save, or a delete
+// (which already resets verification on the backend). No pre-existing
 // feedback/toast duration constant in the codebase is semantically
 // equivalent (PRISMA_ORB_FADE_DURATION_MS and the BOOT_SHIELD_*_MS family
 // are animation/boot timings, not a "leave a result on screen" duration), so
@@ -180,59 +177,88 @@ interface StatusGlyph {
     Icon: LucideIcon;
     label: string;
     tone: StatusTone;
-    spin?: boolean;
 }
 
-// T14: a result glyph extends a plain status glyph with an optional visible
-// text part -- the shared shape behind the single trailing result area
-// (connection state, on-demand verification result, or the "in flight"
-// state), rendered by ResultDisplay below.
-interface ResultGlyph extends StatusGlyph {
-    text: string | null;
+// T15 (user decision, 2026-09-23): the trailing result area shows an icon
+// ONLY for a success state (the green `Check`); every other state is text
+// only, tinted by its tone so meaning isn't lost. `Icon` is therefore
+// optional -- present only for `tone: 'success'` -- and `text` is always
+// shown (there is no more icon-only+tooltip case in this area). `iconLabel`
+// lets a success icon carry a more descriptive accessible name than the
+// visible text (e.g. Canal A/B's "Token verificado: @user" vs the shown
+// "@user"); it defaults to `text` when omitted.
+interface ResultGlyph {
+    text: string;
+    tone: StatusTone;
+    Icon?: LucideIcon;
+    iconLabel?: string;
 }
 
 // Credential-presence icon shared by every row (Gemini, Telegram, Canal A):
-// the label doubles as the icon's accessible name (role="img" + aria-label)
-// and its HoverTooltip text -- the same icon-only + tooltip pattern T6
-// established for the Save/Delete buttons. The not-configured state reads as
-// a caution (MessageCircleWarning / warning token), not a hard failure.
+// unaffected by T15's result-area icon removal (this is the separate icon
+// between the input and Save, T6's icon-only + tooltip pattern). The
+// not-configured state reads as a caution (MessageCircleWarning / warning
+// token), not a hard failure.
 function credentialConfiguredGlyph(configured: boolean): StatusGlyph {
     return configured
         ? { Icon: Check, label: 'Credencial configurada', tone: 'success' }
         : { Icon: MessageCircleWarning, label: 'Credencial no configurada', tone: 'warning' };
 }
 
-// T14: Gemini has no live connection state to return to, so its result area
-// always reflects the last verification outcome directly (no revert timer).
-function geminiVerificationResult(state: GeminiVerificationState): ResultGlyph {
-    if (state === 'verified') return { text: 'Verificado', Icon: Check, label: 'Verificado', tone: 'success' };
-    if (state === 'invalid_key') return { text: 'API key inválida', Icon: CircleX, label: 'API key inválida', tone: 'critical' };
-    if (state === 'unreachable') {
-        return { text: 'Sin conexión con Google', Icon: WifiOff, label: 'Sin conexión con Google', tone: 'warning' };
-    }
-    return { text: null, Icon: CircleDashedCheck, label: 'Verificación: no realizada', tone: 'muted' };
+function StatusIcon({ Icon, label, tone }: StatusGlyph) {
+    return (
+        <HoverTooltip label={label} position="top">
+            <span role="img" aria-label={label} className={STATUS_TONE_CLS[tone]}>
+                <Icon size={16} aria-hidden="true" />
+            </span>
+        </HoverTooltip>
+    );
 }
 
-// T14: Telegram/Canal A on-demand token verification result (a non-sending
+// T15: Gemini's RESTING result (not currently showing the transient
+// "Verificado" message below) -- the model name once verified (still
+// green/Check, since the credential stays verified until the next
+// save/delete/verify) or as a not-yet-verified idle label; invalid_key and
+// unreachable persist here directly, since Gemini's metadata already is the
+// only source of truth (no separate live connection state to prefer over a
+// stale result the way Canal A/B's connection state is).
+function geminiRestingResult(state: GeminiVerificationState, model: string): ResultGlyph {
+    if (state === 'verified') return { text: model, tone: 'success', Icon: Check, iconLabel: 'Verificado' };
+    if (state === 'invalid_key') return { text: 'API key inválida', tone: 'critical' };
+    if (state === 'unreachable') return { text: 'Sin conexión con Google', tone: 'warning' };
+    return { text: model, tone: 'muted' };
+}
+
+// T15: Telegram/Canal A on-demand token verification result (a non-sending
 // getMe check, distinct from the live connection state below). Shown only
 // while the row's own `verificationResultVisible` flag is set -- see the
-// component body for the show/revert lifecycle.
+// component body for the show/revert lifecycle. Canal A's own 'verified'
+// case is overridden by the caller with `channelAVerifiedResultText` instead
+// of this generic one (see renderTelegramFamilyProvider).
 function telegramTokenVerificationResult(verification: TelegramTokenVerification): ResultGlyph {
     if (verification.state === 'verified') {
+        const text = verification.username ? `@${verification.username}` : 'Token verificado';
         return {
-            text: verification.username ? `@${verification.username}` : null,
-            Icon: Check,
-            label: verification.username ? `Token verificado: @${verification.username}` : 'Token verificado',
+            text,
             tone: 'success',
+            Icon: Check,
+            iconLabel: verification.username ? `Token verificado: @${verification.username}` : 'Token verificado',
         };
     }
-    if (verification.state === 'invalid_token') {
-        return { text: 'Token inválido', Icon: CircleX, label: 'Token inválido', tone: 'critical' };
-    }
-    if (verification.state === 'unreachable') {
-        return { text: 'Sin conexión con Telegram', Icon: WifiOff, label: 'Sin conexión con Telegram', tone: 'warning' };
-    }
-    return { text: null, Icon: CircleDashedCheck, label: 'Verificación: no realizada', tone: 'muted' };
+    if (verification.state === 'invalid_token') return { text: 'Token inválido', tone: 'critical' };
+    if (verification.state === 'unreachable') return { text: 'Sin conexión con Telegram', tone: 'warning' };
+    return { text: 'Verificación: no realizada', tone: 'muted' };
+}
+
+// T15: Canal A's post-Verificar "success" message. Distinct from the live
+// connection display (@username + Check) -- for a readable period,
+// Verificar's own outcome is shown instead: whether the just-verified token
+// is already linked to a chat or not. Kept as a single function so the exact
+// copy can be adjusted (e.g. to also name the bot) without touching the
+// surrounding wiring -- the parent is still deciding the final unpaired
+// wording.
+function channelAVerifiedResultText(paired: boolean): string {
+    return paired ? 'Bot vinculado' : 'Bot disponible, sin vincular';
 }
 
 // Telegram's live connection state, mapped from the existing status fields
@@ -242,84 +268,69 @@ function telegramTokenVerificationResult(verification: TelegramTokenVerification
 // health payload has no own "connecting" state.
 function telegramConnectionResult(telegram: TelegramPassiveHealth | null, pending: boolean): ResultGlyph | null {
     if (!telegram || !telegram.configured) return null;
-    if (pending) return { text: 'Conectando…', Icon: Loader2, label: 'Conectando…', tone: 'muted', spin: true };
-    if (telegram.lastError) return { text: 'No se pudo conectar el bot', Icon: CircleX, label: 'No se pudo conectar el bot', tone: 'critical' };
+    if (pending) return { text: 'Conectando…', tone: 'muted' };
+    if (telegram.lastError) return { text: 'No se pudo conectar el bot', tone: 'critical' };
     if (telegram.running) {
-        return { text: telegram.botUsername ? `@${telegram.botUsername}` : null, Icon: Check, label: 'Bot conectado', tone: 'success' };
+        return { text: telegram.botUsername ? `@${telegram.botUsername}` : 'Bot conectado', tone: 'success', Icon: Check, iconLabel: 'Bot conectado' };
     }
-    return { text: 'Bot detenido', Icon: MessageCircleWarning, label: 'Bot detenido', tone: 'warning' };
+    return { text: 'Bot detenido', tone: 'warning' };
 }
 
 // Channel A's live connection state must never infer quiescence from "not
 // running": only the canonical lifecycle phase decides between "stopped"
-// (confirmed quiescent) and "unconfirmed" (a transitional or broken phase
-// whose real state is not known).
+// (confirmed quiescent) and "unconfirmed" (a genuinely unknown phase).
+// T15: a genuinely FAILED phase is a CONFIRMED failure -- this module's own
+// backend design is "no retry, no backoff, no reactivation" once failed
+// (channel_a_lifecycle.py), so it is promoted to the same critical text a
+// manager-level lastError already uses, instead of being lumped into the
+// ambiguous "unconfirmed" bucket below (see T15 root-cause diagnosis in the
+// tracker: a background poll-loop failure never updates the manager's own
+// lastError, so `phase === 'failed'` must be checked independently of it).
+// Only 'retired' (the 7-day idle horizon) or a running phase with a pending
+// restart stays genuinely unknown.
 function channelAConnectionResult(channelA: ChannelAAdministrationStatus | null, pending: boolean): ResultGlyph | null {
     if (!channelA || !channelA.configured) return null;
-    if (pending) return { text: 'Conectando…', Icon: Loader2, label: 'Conectando…', tone: 'muted', spin: true };
-    if (channelA.lastError) return { text: 'No se pudo conectar el bot', Icon: CircleX, label: 'No se pudo conectar el bot', tone: 'critical' };
+    if (pending) return { text: 'Conectando…', tone: 'muted' };
+    if (channelA.lastError) return { text: 'No se pudo conectar el bot', tone: 'critical' };
     const phase = channelA.activation?.phase ?? null;
     const restartRequired = channelA.activation?.restartRequired ?? false;
     if (phase === 'running' && !restartRequired) {
-        return { text: channelA.botUsername ? `@${channelA.botUsername}` : null, Icon: Check, label: 'Bot conectado', tone: 'success' };
+        return { text: channelA.botUsername ? `@${channelA.botUsername}` : 'Bot conectado', tone: 'success', Icon: Check, iconLabel: 'Bot conectado' };
     }
-    if (phase === null || phase === 'idle' || phase === 'stopped') {
-        return { text: 'Bot detenido', Icon: MessageCircleWarning, label: 'Bot detenido', tone: 'warning' };
-    }
-    if (phase === 'preparing' || phase === 'prepared' || phase === 'stopping') {
-        return { text: 'Conectando…', Icon: Loader2, label: 'Conectando…', tone: 'muted', spin: true };
-    }
-    // 'failed', 'retired', or a running phase with a pending restart: the
-    // real state is not confidently known either way.
-    return { text: 'Estado no confirmado', Icon: CircleDashed, label: 'Estado no confirmado', tone: 'muted' };
+    if (phase === null || phase === 'idle' || phase === 'stopped') return { text: 'Bot detenido', tone: 'warning' };
+    if (phase === 'preparing' || phase === 'prepared' || phase === 'stopping') return { text: 'Conectando…', tone: 'muted' };
+    if (phase === 'failed') return { text: 'No se pudo conectar el bot', tone: 'critical' };
+    // 'retired', or a running phase with a pending restart: the real state
+    // is not confidently known either way.
+    return { text: 'Estado no confirmado', tone: 'muted' };
 }
 
-function StatusIcon({ Icon, label, tone, spin }: StatusGlyph) {
-    return (
-        <HoverTooltip label={label} position="top">
-            <span role="img" aria-label={label} className={STATUS_TONE_CLS[tone]}>
-                <Icon size={16} className={spin ? 'animate-spin' : undefined} aria-hidden="true" />
-            </span>
-        </HoverTooltip>
-    );
-}
-
-// T14: the single trailing result area for every row (replaces T9b-T13's
-// separate verification icon and, for Telegram/Canal A, the separate
-// @username + execution icon slots). When `text` is present it renders as
-// visible text next to the icon; when absent, the icon alone carries the
-// HoverTooltip (the pre-existing icon-only pattern). An identity string
-// (an "@username", never a status claim) stays neutral/muted regardless of
-// the icon's tone; every other text matches its icon's severity tone.
-// RESULT_AREA_WIDTH_CLS keeps every row's result area the same width so the
-// three rows line up, and reserves enough room for the longest possible
-// Telegram username without truncating (see its own comment above).
-function ResultDisplay({ text, Icon, label, tone, spin, testId }: ResultGlyph & { testId: string }) {
-    const containerCls = `ml-auto flex items-center gap-1 ${RESULT_AREA_WIDTH_CLS}`;
-    if (!text) {
-        return (
-            <div data-testid={testId} className={containerCls}>
-                <StatusIcon Icon={Icon} label={label} tone={tone} spin={spin} />
-            </div>
-        );
-    }
+// T15: the single trailing result area for every row (replaces T9b-T14's
+// per-state icon). Only a `tone: 'success'` glyph carries an icon (the
+// green Check); every other state is text only, tinted by its tone so
+// meaning isn't lost. An identity string ("@username", never a status
+// claim) stays neutral/muted regardless of tone. RESULT_AREA_WIDTH_CLS
+// keeps every row's result area the same width so the three rows line up.
+function ResultDisplay({ text, tone, Icon, iconLabel, testId }: ResultGlyph & { testId: string }) {
     const isIdentityText = text.startsWith('@');
     return (
-        <div data-testid={testId} className={containerCls}>
+        <div data-testid={testId} className={`ml-auto flex items-center gap-1 ${RESULT_AREA_WIDTH_CLS}`}>
             <span className={isIdentityText ? 'text-industrial-muted' : STATUS_TONE_CLS[tone]}>{text}</span>
-            <span role="img" aria-label={label} className={STATUS_TONE_CLS[tone]}>
-                <Icon size={16} className={spin ? 'animate-spin' : undefined} aria-hidden="true" />
-            </span>
+            {Icon ? (
+                <span role="img" aria-label={iconLabel ?? text} className={STATUS_TONE_CLS[tone]}>
+                    <Icon size={16} aria-hidden="true" />
+                </span>
+            ) : null}
         </div>
     );
 }
 
-// T14: icon-only Verificar button, grouped with Save/Delete (same
+// T15: icon-only Verificar button, grouped with Save/Delete (same
 // variant/size/styling), immediately to their right. Accessible name is
-// "Verificar" (or "Verificando…" while a verification is in flight) via
-// aria-label, with a matching HoverTooltip; when no credential is
-// configured yet, the button is disabled and its tooltip explains why
-// instead.
+// "Verificar" (or "Verificando…" while a verification is in flight, purely
+// textual -- the icon always stays `Play`, never swaps to a spinner) via
+// aria-label, with a matching HoverTooltip; when no credential is configured
+// yet, the button is disabled and its tooltip explains why instead.
 function VerifyIconButton({
     configured,
     verifying,
@@ -350,10 +361,10 @@ function VerifyIconButton({
                 variant="secondary"
                 aria-label={label}
                 title={label}
-                disabled={disabled}
+                disabled={disabled || verifying}
                 onClick={onVerify}
             >
-                {verifying ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
+                <Play size={14} aria-hidden="true" />
             </HmiButton>
         </HoverTooltip>
     );
@@ -412,17 +423,14 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     // Provider whose stop-unconfirmed deletion an explicit retry targets; it
     // keeps the approved retry anchored to its originating channel only.
     const [stopRetryProvider, setStopRetryProvider] = useState<CredentialProvider | null>(null);
-    // T14: whether each Telegram-family row's result area is currently
-    // showing an on-demand verification result instead of the live
-    // connection state. Gemini has no live state to fall back to, so it
-    // needs no equivalent flag.
-    const [verificationResultVisible, setVerificationResultVisible] = useState<Record<'telegram' | 'telegram_channel_a', boolean>>({
-        telegram: false,
-        telegram_channel_a: false,
+    // T14/T15: whether each row's result area is currently showing an
+    // on-demand verification's transient message instead of its resting
+    // display (Gemini: model name; Canal A/B: live connection state).
+    const [verificationResultVisible, setVerificationResultVisible] = useState<Record<CredentialProvider, boolean>>({
+        gemini: false, telegram: false, telegram_channel_a: false,
     });
-    const verificationRevertTimersRef = useRef<Record<'telegram' | 'telegram_channel_a', ReturnType<typeof setTimeout> | null>>({
-        telegram: null,
-        telegram_channel_a: null,
+    const verificationRevertTimersRef = useRef<Record<CredentialProvider, ReturnType<typeof setTimeout> | null>>({
+        gemini: null, telegram: null, telegram_channel_a: null,
     });
     const panelGenerationRef = useRef(0);
     const secretRevisionRef = useRef<Record<CredentialProvider, number>>({ gemini: 0, telegram: 0, telegram_channel_a: 0 });
@@ -434,7 +442,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     const telegram = administration.data?.telegram;
     const stale = unavailable && administration.data !== null;
 
-    const clearVerificationRevertTimer = (provider: 'telegram' | 'telegram_channel_a') => {
+    const clearVerificationRevertTimer = (provider: CredentialProvider) => {
         const timer = verificationRevertTimersRef.current[provider];
         if (timer !== null) {
             clearTimeout(timer);
@@ -445,6 +453,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     // T14: clear any pending revert timer on unmount, so a stale timeout
     // never fires a setState against an unmounted component.
     useEffect(() => () => {
+        clearVerificationRevertTimer('gemini');
         clearVerificationRevertTimer('telegram');
         clearVerificationRevertTimer('telegram_channel_a');
     }, []);
@@ -478,12 +487,11 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         setSecretDrafts((previous) => (previous[provider] === '' ? previous : { ...previous, [provider]: '' }));
     };
 
-    // T14: a save or a delete resets verification on the backend (T13), so
-    // the row's result area must drop back to the live connection state
+    // T14/T15: a save or a delete resets verification on the backend (T13),
+    // so the row's result area must drop back to its resting display
     // immediately instead of waiting for the refreshed metadata to carry a
-    // not_checked state through the still-visible verification result.
-    const resetVerificationResultIfTelegramFamily = (provider: CredentialProvider) => {
-        if (provider === 'gemini') return;
+    // not_checked state through the still-visible transient message.
+    const resetVerificationResult = (provider: CredentialProvider) => {
         clearVerificationRevertTimer(provider);
         setVerificationResultVisible((previous) => ({ ...previous, [provider]: false }));
     };
@@ -492,12 +500,16 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const secret = secretDrafts[provider];
         const panelGeneration = panelGenerationRef.current;
         const secretRevision = secretRevisionRef.current[provider];
+        // T15: a same-row verify still in flight must never apply its
+        // (now-stale) result once the credential has changed underneath it
+        // -- the hook's own verify generation is bumped inside
+        // saveCredential, this just also resets the local transient display.
+        resetVerificationResult(provider);
         setFeedback(null);
         try {
             await administration.saveCredential(provider, secret);
             if (panelGenerationRef.current === panelGeneration) {
                 setFeedback({ kind: 'success', text: SAVE_SUCCESS_TEXT[provider] });
-                resetVerificationResultIfTelegramFamily(provider);
             }
         } catch (error) {
             if (panelGenerationRef.current === panelGeneration
@@ -513,6 +525,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const panelGeneration = panelGenerationRef.current;
         const dialogRevision = dialogRevisionRef.current;
         const secretRevision = secretRevisionRef.current[provider];
+        resetVerificationResult(provider);
         setFeedback(null);
         try {
             const outcome = await administration.deleteCredential(provider);
@@ -521,7 +534,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 setFeedback(outcome.stopUnconfirmed
                     ? { kind: 'warning', text: 'La credencial fue eliminada, pero la detención no pudo confirmarse.' }
                     : { kind: 'success', text: 'Credencial eliminada.' });
-                resetVerificationResultIfTelegramFamily(provider);
             }
         } catch (error) {
             if (panelGenerationRef.current === panelGeneration
@@ -537,33 +549,26 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         }
     };
 
-    const verifyGemini = async () => {
-        const panelGeneration = panelGenerationRef.current;
-        setFeedback(null);
-        try {
-            await administration.verifyGemini();
-        } catch (error) {
-            if (panelGenerationRef.current === panelGeneration
-                && !(error instanceof DOMException && error.name === 'AbortError')) {
-                setFeedback({ kind: 'error', text: errorText(error) });
-            }
-        }
-    };
-
-    // T13/T14: same non-sending verify action for Telegram and Canal A,
-    // dispatched to whichever provider's own endpoint the row belongs to. A
-    // successful call (verified/invalid_token/unreachable are all "success"
-    // responses, never thrown) switches the row's result area to the
-    // verification result; a verified result schedules the revert back to
-    // the live connection state after VERIFICATION_RESULT_DISPLAY_MS, while
-    // invalid_token/unreachable persist until the next verify, save, or
-    // delete. Re-verifying always clears a still-pending revert timer first.
-    const verifyTelegramFamily = async (provider: 'telegram' | 'telegram_channel_a') => {
+    // T15: verify runs through the hook's own per-provider in-flight
+    // tracking (`verifyingProviders`), never the global mutation lock, so
+    // verifying one row never disables another row's Save/Delete/Verify. A
+    // successful call (verified/invalid/unreachable are all "success"
+    // responses, never thrown) switches the row's result area to its
+    // transient message; a verified result schedules the revert back to the
+    // resting display after VERIFICATION_RESULT_DISPLAY_MS, while a failed
+    // one persists until the next verify, save, or delete. Re-verifying
+    // always clears a still-pending revert timer first. Shared across all
+    // three providers since the shape (`{verification: {state}}`) and
+    // show/revert lifecycle are identical; only which client method to call
+    // differs.
+    const verifyProvider = async (provider: CredentialProvider) => {
         const panelGeneration = panelGenerationRef.current;
         setFeedback(null);
         clearVerificationRevertTimer(provider);
         try {
-            const result = await (provider === 'telegram_channel_a' ? administration.verifyChannelA() : administration.verifyTelegram());
+            const result = provider === 'gemini' ? await administration.verifyGemini()
+                : provider === 'telegram_channel_a' ? await administration.verifyChannelA()
+                    : await administration.verifyTelegram();
             if (panelGenerationRef.current !== panelGeneration) return;
             setVerificationResultVisible((previous) => ({ ...previous, [provider]: true }));
             if (result.verification.state === 'verified') {
@@ -613,18 +618,22 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     // unchanged by T10): title and "API Key" label above one row holding the
     // input, a credential-status icon, Save, Delete, Verificar (T14:
     // icon-only, grouped with Save/Delete) and -- right-aligned -- the
-    // single result area (T14: replaces the separate verification icon).
+    // single result area (T15: model name at rest, "Verificado" transiently
+    // after a successful verify).
     const renderGeminiProvider = () => {
         const value = secretDrafts.gemini;
         const gemini = credentials?.gemini;
         const geminiConfigured = gemini?.configured;
-        const verifying = administration.pendingAction === 'verify-gemini';
+        const verifying = administration.verifyingProviders.gemini;
         const credentialGlyph = geminiConfigured === undefined ? null : credentialConfiguredGlyph(geminiConfigured);
         const showsMask = value === '' && geminiConfigured === true;
+        const showingJustVerified = verificationResultVisible.gemini && gemini?.verification.state === 'verified';
         const resultGlyph: ResultGlyph | null = gemini
             ? (verifying
-                ? { text: 'Verificando…', Icon: Loader2, label: 'Verificando…', tone: 'muted', spin: true }
-                : geminiVerificationResult(gemini.verification.state))
+                ? { text: 'Verificando…', tone: 'muted' }
+                : showingJustVerified
+                    ? { text: 'Verificado', tone: 'success', Icon: Check }
+                    : geminiRestingResult(gemini.verification.state, gemini.model))
             : null;
 
         return (
@@ -693,7 +702,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             verifying={verifying}
                             disabled={disabled}
                             disabledTooltip="Configure una API key para verificarla."
-                            onVerify={() => void verifyGemini()}
+                            onVerify={() => void verifyProvider('gemini')}
                         />
                     ) : null}
                     {resultGlyph ? <ResultDisplay {...resultGlyph} testId="gemini-verification-result" /> : null}
@@ -703,10 +712,11 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     };
 
     // Telegram (channel B) and Canal A share the exact Gemini-approved row
-    // design (T10/T14): masked input, credential icon, Save, Delete,
+    // design (T10/T14/T15): masked input, credential icon, Save, Delete,
     // Verificar (icon-only, grouped) and -- right-aligned -- one combined
     // result area that shows the live connection state by default and the
-    // on-demand token verification result after Verificar is clicked (T14).
+    // on-demand token verification's transient message after Verificar is
+    // clicked.
     const renderTelegramFamilyProvider = (provider: 'telegram' | 'telegram_channel_a') => {
         const isChannelA = provider === 'telegram_channel_a';
         const value = secretDrafts[provider];
@@ -723,18 +733,24 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const runtimeErrorCode = isChannelA
             ? channelA?.lastError ?? null
             : (telegram?.lastError ?? telegram?.configurationError ?? null);
-        // T13/T14: on-demand token verification, independent of the live
+        // T13/T14/T15: on-demand token verification, independent of the live
         // connection state (that reads live connectivity; this re-checks the
-        // stored token itself). Same pending-action/disabled/tooltip pattern
-        // as Gemini's Verificar.
-        const verifyAction = isChannelA ? 'verify-channel-a' : 'verify-telegram';
-        const verifying = administration.pendingAction === verifyAction;
+        // stored token itself). Same in-flight/disabled/tooltip pattern as
+        // Gemini's Verificar, driven by the hook's per-provider flag.
+        const verifying = administration.verifyingProviders[provider];
         const verification = credentials?.[provider].verification ?? null;
         const showingVerificationResult = verificationResultVisible[provider] && verification !== null;
         const resultGlyph: ResultGlyph | null = verifying
-            ? { text: 'Verificando…', Icon: Loader2, label: 'Verificando…', tone: 'muted', spin: true }
-            : showingVerificationResult
-                ? telegramTokenVerificationResult(verification)
+            ? { text: 'Verificando…', tone: 'muted' }
+            : (showingVerificationResult && verification)
+                ? (isChannelA && verification.state === 'verified'
+                    // T15 (user decision): Canal A's post-Verificar success message
+                    // names whether the token is already paired to a chat, instead
+                    // of jumping straight to "@username" like the live connection
+                    // state does; it reverts to that connection state after the
+                    // display duration (see verifyProvider's timer above).
+                    ? { text: channelAVerifiedResultText(Boolean(channelA?.paired)), tone: 'muted' }
+                    : telegramTokenVerificationResult(verification))
                 : (isChannelA ? channelAConnectionResult(channelA, pending) : telegramConnectionResult(telegram ?? null, pending));
 
         return (
@@ -803,7 +819,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                         verifying={verifying}
                         disabled={providerDisabled}
                         disabledTooltip="Configure un token para verificarlo."
-                        onVerify={() => void verifyTelegramFamily(provider)}
+                        onVerify={() => void verifyProvider(provider)}
                     />
                     {resultGlyph ? <ResultDisplay {...resultGlyph} testId={`${provider}-verification-result`} /> : null}
                 </div>

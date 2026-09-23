@@ -10,6 +10,8 @@ import { adminAuthClient, AdminAuthClient } from '../../services/adminAuth.servi
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 import GlobalSettingsDialog from './GlobalSettingsDialog';
 
+const GEMINI_MODEL = 'gemini-3.1-flash-tts-preview';
+
 const nameBoundary = vi.hoisted(() => {
     const storage = (): Storage => {
         const bytes = new Map<string, string>();
@@ -169,7 +171,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } } },
         });
         vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
-            gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } }, telegram: { configured: false }, telegram_channel_a: { configured: false },
+            gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null }, model: GEMINI_MODEL }, telegram: { configured: false }, telegram_channel_a: { configured: false },
         });
         vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
             enabled: true, configured: false, running: false, verified: false,
@@ -178,7 +180,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         });
         vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
             configured: false, desiredGeneration: 1, appliedGeneration: null,
-            activationEpoch: null, activation: null, lastError: null, botUsername: null,
+            activationEpoch: null, activation: null, lastError: null, botUsername: null, paired: false,
         });
         const fetchMock = vi.fn(async () => envelope());
         vi.stubGlobal('fetch', fetchMock);
@@ -325,7 +327,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                 return json({
                     ok: true,
                     providers: {
-                        gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
+                        gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null }, model: GEMINI_MODEL },
                         telegram: {
                             configured: true, verified: false,
                             verification: { state: 'not_checked', checkedAt: null, username: null },
@@ -360,7 +362,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     ok: true,
                     channelA: {
                         configured: false, desiredGeneration: 1, appliedGeneration: null,
-                        activationEpoch: null, activation: null, lastError: null, botUsername: null,
+                        activationEpoch: null, activation: null, lastError: null, botUsername: null, paired: false,
                     },
                 }, 200);
             }
@@ -372,8 +374,8 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         renderDialog();
         const telegramCard = await screen.findByRole('group', { name: 'Canal B' });
 
-        const icon = await within(telegramCard).findByRole('img', { name: 'No se pudo conectar el bot' });
-        expect(icon).toBeInTheDocument();
+        // T15: critical connection states are text only (no icon).
+        expect(await within(telegramCard).findByText('No se pudo conectar el bot')).toBeInTheDocument();
         expect(within(telegramCard).getByText(
             'Este bot ya está en uso por el otro canal. Configure un bot distinto.',
         )).toBeInTheDocument();
@@ -396,7 +398,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             isHydrated: true,
         });
         vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
-            gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
+            gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null }, model: GEMINI_MODEL },
             telegram: { configured: false },
             telegram_channel_a: { configured: false },
         });
@@ -414,14 +416,14 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         });
         vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
             configured: false, desiredGeneration: 1, appliedGeneration: null,
-            activationEpoch: null, activation: null, lastError: null, botUsername: null,
+            activationEpoch: null, activation: null, lastError: null, botUsername: null, paired: false,
         });
         vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
             if (input === '/api/prisma/admin/credentials') {
                 return new Response(JSON.stringify({
                     ok: true,
                     providers: {
-                        gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
+                        gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null }, model: GEMINI_MODEL },
                         telegram: { configured: false },
                         telegram_channel_a: { configured: false },
                     },
