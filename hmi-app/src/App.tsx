@@ -6,6 +6,7 @@
 // =============================================================================
 import AppRouter from './app/router';
 import PrismaOrbOverlay from './components/PrismaOrbOverlay';
+import { useAutomaticViewportZoom } from './hooks/useAutomaticViewportZoom';
 import { useBootShield } from './hooks/useBootShield';
 import { usePrismaOrbPresentation } from './hooks/usePrismaOrbPresentation';
 import { usePrismaOrbVisualConfig } from './hooks/usePrismaOrbVisualConfig';
@@ -21,6 +22,7 @@ export default function App() {
     const prismaOrb = usePrismaOrbPresentation();
     const prismaOrbVisualConfig = usePrismaOrbVisualConfig();
 
+    useAutomaticViewportZoom();
     useBootShield();
     useReloadShield();
     useVoiceEventListener((event) => {
