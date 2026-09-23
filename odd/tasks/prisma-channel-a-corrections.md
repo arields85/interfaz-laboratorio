@@ -169,6 +169,23 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   Each icon needs the former text as accessible name + `HoverTooltip` (T6 pattern). Only the
   Gemini row; tokens only. Route: direct (single file + its test).
 
+- [x] **T9c** Gemini row refinements (user approved T9b's layout "quedó muy bueno";
+  2026-09-23 follow-up feedback). (1) The disabled "Verificar" button (no credential
+  configured) must show a `HoverTooltip` "Configure una API key para verificarla." on
+  hover. (2) Icon changes: credential-not-configured icon `CircleX`→`MessageCircleWarning`
+  (`text-status-warning`, "Estado Alerta" token, confirmed same as `--color-status-warning`
+  via `DesignSettingsTab.tsx`); verification-verified icon `CircleCheck`→`Check`; verification
+  not-yet-checked icon `CircleDashed`→`MessageCircleDashedCheck`; invalid_key/unreachable/
+  verifying icons unchanged. `MessageCircleDashedCheck` requires `lucide-react` >= 1.47.0
+  (installed 1.8.0 doesn't have it); upgrade within the same major
+  (`npm install lucide-react@^1.47.0`), full suite + `tsc` + `lint` + `build` to catch any
+  renamed/removed icon across the app, as its own commit before the UI commit. (3) Stop
+  Chrome's password-manager generation/save prompts on the Gemini API Key input: research
+  the reliable approach (`autocomplete="off"` alone is ignored by Chrome for
+  `type="password"`); apply to the Gemini input only (Telegram/Canal A use a separate input
+  block, not shared — confirm and note). Route: direct (single file + its test + a
+  dependency bump commit).
+
 ## Acceptance criteria
 
 1. After an abrupt close, relaunching starts Prisma normally with no proxy errors.
@@ -807,16 +824,79 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   --noEmit` and `eslint` clean. GGA PASSED (1 non-blocking note: the pre-existing 4096-byte
   secret-limit duplication already flagged after T9, not touched). Commit `5917ca6`.
 
+- 2026-09-23: T9c done, in two commits (dependency bump separate from the UI change, as
+  instructed).
+
+  **Dependency bump** (`43069c5`, `package.json`/`package-lock.json` only).
+  `MessageCircleDashedCheck` does not exist in the installed `lucide-react` 1.8.0; confirmed
+  present in 1.47.0 via `node_modules/lucide-react/dist/esm/icons/message-circle-dashed-
+  check.mjs` after `npm install lucide-react@^1.47.0` (same major, satisfies the existing
+  `^1.8.0` range's caret only if the range itself is bumped -- updated the `package.json`
+  range to `^1.47.0`). Verified no other icon import broke across the app: full `npm test`
+  211/2263 (2 more than the prior count -- the two new T9c tests below), `npx tsc -b
+  --noEmit`, `npm run lint`, and `npm run build` all clean/succeeded unchanged.
+
+  **UI change** (`a5a2908`). (1) Wrapped the disabled "Verificar" button (unconfigured
+  credential) in a `HoverTooltip` "Configure una API key para verificarla." -- confirmed
+  this works without extra plumbing: `HoverTooltip` attaches its mouse/focus listeners to
+  its own wrapping `<div>`, and a browser still fires `mouseenter` on that ancestor div when
+  the pointer is over a `disabled` descendant button (only the disabled element's own event
+  dispatch is suppressed, not its ancestors'), which is exactly the same pattern already
+  used for the Save/Delete tooltips. (2) Icon changes: credential-not-configured
+  `CircleX`→`MessageCircleWarning` (kept `text-status-warning`, confirmed identical to the
+  "Estado Alerta" `--color-status-warning` token labeled in `DesignSettingsTab.tsx:181`);
+  verification-verified `CircleCheck`→`Check`; verification-not-yet-checked
+  `CircleDashed`→`MessageCircleDashedCheck` (muted, unchanged tone). Credential-configured
+  (`CircleCheck`/success) and verification invalid_key/unreachable/verifying icons kept as
+  T9b, per this writer's reading of the brief: the enumerated list's first two bullets read
+  as *value changes to the existing two icon slots* (credential icon's not-configured case;
+  verification icon's verified case), not a new merged single-icon design -- flagging this
+  interpretation explicitly since the brief's phrasing was compact enough to admit the
+  alternative reading. (3) Stopped Chrome's password-generation/save prompts on the Gemini
+  API Key field: changed `type="password"` + `autoComplete="new-password"` to `type="text"`
+  masked via a new `.hmi-masked-text` CSS utility (`-webkit-text-security: disc`, added to
+  `hmi-app/src/index.css` next to `.hmi-scrollbar`, same "reusable utility class, not a
+  token" convention) plus `autoComplete="off"`, `spellCheck={false}`, `autoCapitalize="off"`,
+  `autoCorrect="off"`, `data-1p-ignore="true"`, `data-lpignore="true"`,
+  `data-form-type="other"`; confirmed no `<form>` wraps this panel anywhere in
+  `hmi-app/src/pages/admin` or `hmi-app/src/components/admin` (grepped), so there was no
+  login-form heuristic to defeat beyond the field's own type/autocomplete. Known limitation
+  (documented in the new CSS comment, not hidden): `-webkit-text-security` is Chromium/
+  Safari-only; Firefox has no standard-CSS equivalent, so the field renders as plain
+  visible text there -- accepted per the user's explicit Chrome-focused request, but noted
+  since it's a real cross-browser trade-off, not chosen silently. Telegram and Canal A
+  credential inputs use a separate inline `<input type="password" autoComplete="new-
+  password">` in the shared `renderProvider` function (`VoiceCredentialSettings.tsx:469-
+  470`), not the same input component as Gemini's -- confirmed via grep and left untouched,
+  per the brief's "only if they share the same input component" condition.
+  RED: 4 of the (then) 40 `VoiceCredentialSettings.test.tsx` tests failed against the
+  pre-T9c component (rewrote two existing icon assertions to check the actual lucide
+  `class="lucide-<kebab-name>"` identity, since accessible-name text stayed the same across
+  the CircleX→MessageCircleWarning and CircleDashed→MessageCircleDashedCheck swaps and
+  couldn't by itself catch a reverted icon choice; added the disabled-tooltip test and the
+  input-hardening test). GREEN: `VoiceCredentialSettings.test.tsx` 42/42; full `npm test`
+  211 files / 2263 tests; `tsc -b --noEmit`, `eslint`, and `npm run build` all clean. GGA
+  PASSED (1 non-blocking note: "API key" vs the field's own "API Key" label casing --
+  pre-existing string from T9, reused verbatim in the new tooltip, not touched).
+
+  **Correction** (2026-09-23, same day): the user's "use `Check`" applied to every check in
+  the row, including credential-configured (still `CircleCheck` above). Switched it to
+  `Check` too (same success token); updated the lucide-class test assertion (RED against
+  the pre-fix icon, then GREEN), removed the now-unused `CircleCheck` import. Full `npm
+  test` 211/2263, `tsc -b --noEmit`, `eslint` clean. GGA PASSED (1 non-blocking note,
+  unrelated 4096-byte message constant, not touched). Commit `8110edb`.
+
 ## Next step
 
-All eleven roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
+All twelve roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
 `039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
-`5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`) and T9b (`5917ca6`). Next step: the
-user re-runs manual test point 4 (foreign process on 5057, confirm the popover now shows
-the port through the session bootstrap AND the terminal shows exactly one clean red line),
-re-checks point 3 (relaunch after closing the launcher window with X, confirm the terminal
-now announces the reused runtime), manually verifies T5b (enter /admin, click "Ver viewer",
-confirm the session stays active; confirm "Cerrar sesión" still ends it), re-checks point 6
-against T9b's icon layout (this writer's proof was offline/mocked only -- no network, no
-launcher/runtime started, per constraint), and then T10 applies the same approved Gemini
+`5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`), T9b (`5917ca6`) and T9c (`43069c5`,
+`a5a2908`, `8110edb`). Next step: the user re-runs manual test point 4 (foreign process on 5057,
+confirm the popover now shows the port through the session bootstrap AND the terminal shows
+exactly one clean red line), re-checks point 3 (relaunch after closing the launcher window
+with X, confirm the terminal now announces the reused runtime), manually verifies T5b (enter
+/admin, click "Ver viewer", confirm the session stays active; confirm "Cerrar sesión" still
+ends it), re-checks point 6 against T9c's icon/tooltip/no-password-prompt refinements (this
+writer's proof was offline/mocked only -- no network, no launcher/runtime, no real Chrome
+autofill behavior observed, per constraint), and then T10 applies the same approved Gemini
 row design (single row, icons, HoverTooltip) to the Telegram and Canal A provider rows.
