@@ -158,6 +158,16 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   proxy + frontend, 2+ non-trivial files). Commits (work units): `feat(prisma): verify the
   Gemini API key on demand` (backend + proxy + routing doc), `feat(admin): redesign the
   Gemini credential block with verification` (frontend).
+- [x] **T9b** Gemini row: icons instead of status text, single-row layout (user feedback on
+  T9 manual test, 2026-09-23). Current row (`56d7a32`) has "Credencial configurada" and
+  "Verificada" as text, and "Verificar" full-width sitting lower than save/delete. New:
+  single row `[API Key input] (credential icon) [save][delete]  ...  [Verificar] (verify
+  icon)`, items-center, Verificar same height as save/delete. Credential icon:
+  `CircleCheck`/`CircleX` (configured/not). Verification icon: `CircleCheck` (verified),
+  `CircleX` (invalid_key), `WifiOff` (unreachable, warning token), `CircleDashed` (not
+  verified yet, muted), `Loader2` spinning (verifying, button text stays "Verificando…").
+  Each icon needs the former text as accessible name + `HoverTooltip` (T6 pattern). Only the
+  Gemini row; tokens only. Route: direct (single file + its test).
 
 ## Acceptance criteria
 
@@ -767,17 +777,46 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   toast would be redundant (consistent with how the panel already avoids duplicate
   positive-outcome messaging elsewhere).
 
+- 2026-09-23: T9b done. Replaced the Gemini row's two status TEXT spans
+  ("Credencial configurada/no configurada", "Verificada"/"API key inválida"/"No se pudo
+  verificar..."/"Verificación: no realizada") with Lucide icons carrying the former copy as
+  `role="img"` `aria-label` plus a `HoverTooltip` (same icon+tooltip pattern T6 used for
+  Save/Delete): credential icon `CircleCheck`/`CircleX` (`text-status-normal`/
+  `text-status-critical`); verification icon `CircleCheck` (verified, `text-status-normal`),
+  `CircleX` (invalid_key, `text-status-critical`), `WifiOff` (unreachable,
+  `text-status-warning` -- confirmed this token exists in `hmi-app/src/index.css` and is
+  already used elsewhere in this same file for Telegram/Channel A warnings), `CircleDashed`
+  (not yet verified / not_configured, `text-industrial-muted`); a spinning `Loader2`
+  (`animate-spin`) with `aria-label="Verificando…"` replaces the verification icon slot
+  while `pendingAction === 'verify-gemini'`, and the button text stays "Verificando…"
+  unchanged. Collapsed the row into one `flex flex-wrap items-center gap-2` container
+  (`data-testid="gemini-credential-row"`) holding, in order: the API Key input (label text
+  now sits above the row instead of wrapping it, associated via explicit `htmlFor`/`id`),
+  the credential icon, Save, Delete, and (`ml-auto`, so it stays right-aligned) a
+  non-full-width `Verificar` `HmiButton` plus its result icon -- both at the button's own
+  `size="sm"` height, matching Save/Delete, per the user's ASCII layout. Dropped the earlier
+  "Configure una API key para verificarla." not-configured message (not in the user's
+  6-string tooltip list); the disabled Verificar button alone now communicates that state,
+  with `CircleDashed`/"Verificación: no realizada" shown regardless of configured status
+  once metadata has loaded (Verificar itself stays disabled until configured). RED: 7 of 40
+  `VoiceCredentialSettings.test.tsx` tests failed against the pre-icon component (rewritten
+  to query `getByRole('img', {name})` instead of `getByText`, plus one new structural test
+  asserting every row control via `toContainElement` against the shared
+  `gemini-credential-row` testid). GREEN: `VoiceCredentialSettings.test.tsx` 40/40; full
+  `npm test` 211 files / 2261 tests (no collateral breakage elsewhere this time); `tsc -b
+  --noEmit` and `eslint` clean. GGA PASSED (1 non-blocking note: the pre-existing 4096-byte
+  secret-limit duplication already flagged after T9, not touched). Commit `5917ca6`.
+
 ## Next step
 
-All ten roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
+All eleven roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
 `039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
-`5cd10a5`), T5b (`65c2b80`) and T9 (`ca696e9`, `56d7a32`). Next step: the user re-runs
-manual test point 4 (foreign process on 5057, confirm the popover now shows the port
-through the session bootstrap AND the terminal shows exactly one clean red line), re-checks
-point 3 (relaunch after closing the launcher window with X, confirm the terminal now
-announces the reused runtime), manually verifies T5b (enter /admin, click "Ver viewer",
-confirm the session stays active; confirm "Cerrar sesión" still ends it), and manually
-verifies T9 (Configuración general → Voz → Gemini row: layout, mask on a configured key,
-"Verificar" against a real or intentionally invalid Gemini key end to end through the
-actual dev proxy and running Prisma runtime -- this writer's proof was offline/mocked only,
-per the no-network-in-tests constraint).
+`5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`) and T9b (`5917ca6`). Next step: the
+user re-runs manual test point 4 (foreign process on 5057, confirm the popover now shows
+the port through the session bootstrap AND the terminal shows exactly one clean red line),
+re-checks point 3 (relaunch after closing the launcher window with X, confirm the terminal
+now announces the reused runtime), manually verifies T5b (enter /admin, click "Ver viewer",
+confirm the session stays active; confirm "Cerrar sesión" still ends it), re-checks point 6
+against T9b's icon layout (this writer's proof was offline/mocked only -- no network, no
+launcher/runtime started, per constraint), and then T10 applies the same approved Gemini
+row design (single row, icons, HoverTooltip) to the Telegram and Canal A provider rows.
