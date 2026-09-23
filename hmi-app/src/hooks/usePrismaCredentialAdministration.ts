@@ -2,6 +2,7 @@ import type {
     ChannelAAdministrationStatus,
     CredentialMetadata,
     CredentialProvider,
+    GeminiCredentialProviderMetadata,
     TelegramAdministrationStatus,
     TelegramPassiveHealth,
 } from '../domain';
@@ -29,6 +30,7 @@ export interface CredentialAdministrationClient {
     applyTelegram(signal?: AbortSignal): Promise<TelegramAdministrationStatus>;
     channelAStatus(signal?: AbortSignal): Promise<ChannelAAdministrationStatus>;
     applyChannelA(signal?: AbortSignal): Promise<ChannelAAdministrationStatus>;
+    verifyGemini(signal?: AbortSignal): Promise<GeminiCredentialProviderMetadata>;
 }
 
 export interface CredentialAdministrationController {
@@ -195,6 +197,14 @@ export function usePrismaCredentialAdministration(options: {
         });
     }, [client, refresh, runOperation]);
 
+    const verifyGemini = useCallback(async () => {
+        return runOperation('verify-gemini', async (signal) => {
+            const result = await client.verifyGemini(signal);
+            await refresh();
+            return result;
+        });
+    }, [client, refresh, runOperation]);
+
     return {
         data: query.data ?? null,
         error: query.error,
@@ -208,5 +218,6 @@ export function usePrismaCredentialAdministration(options: {
         deleteCredential,
         applyTelegram,
         applyChannelA,
+        verifyGemini,
     };
 }

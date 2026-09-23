@@ -2,6 +2,7 @@ import {
     parseChannelAAdministrationStatus,
     parseCredentialMetadata,
     parseCredentialMutation,
+    parseGeminiVerificationResult,
     parseTelegramAdministrationStatus,
     parseTelegramPassiveHealth,
     validateCredentialSecret,
@@ -11,6 +12,7 @@ import {
     type CredentialMetadata,
     type CredentialMutationResult,
     type CredentialProvider,
+    type GeminiCredentialProviderMetadata,
     type TelegramAdministrationStatus,
     type TelegramPassiveHealth,
 } from '../domain';
@@ -18,6 +20,7 @@ import {
 const AUTH_ROOT = '/api/prisma/admin/auth';
 const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
 const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
+const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
 const CSRF_TOKEN_LENGTH = 43;
 const PUBLIC_ERROR_CODES = new Set([
     'ADMIN_CREDENTIAL_BLANK',
@@ -31,6 +34,8 @@ const PUBLIC_ERROR_CODES = new Set([
     'CREDENTIAL_REQUEST_TOO_LARGE',
     'CREDENTIAL_STORAGE_UNAVAILABLE',
     'CSRF_VALIDATION_FAILED',
+    'GEMINI_VERIFICATION_IN_PROGRESS',
+    'GEMINI_VERIFICATION_UNAVAILABLE',
     'INVALID_CREDENTIALS',
     'INVALID_CREDENTIAL_REQUEST',
     'INVALID_LOGIN_REQUEST',
@@ -262,6 +267,18 @@ export class AdminAuthClient {
                 signal: requestSignal,
             });
             return this.parseResponse(response, parseTelegramAdministrationStatus);
+        });
+    }
+
+    async verifyGemini(signal?: AbortSignal): Promise<GeminiCredentialProviderMetadata> {
+        return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
+            const response = await this.request(GEMINI_VERIFY_ROUTE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: '{}',
+                signal: requestSignal,
+            });
+            return this.parseResponse(response, parseGeminiVerificationResult);
         });
     }
 

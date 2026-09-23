@@ -30,6 +30,16 @@ const FRESH_SESSION = {
 
 const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
 const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
+const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
+
+const GEMINI_VERIFIED = {
+    ok: true,
+    gemini: { configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 } },
+} as const;
+
+const GEMINI_NOT_CHECKED = {
+    configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null },
+} as const;
 
 const CHANNEL_A_STATUS = {
     ok: true,
@@ -307,6 +317,58 @@ describe('AdminAuthClient', () => {
         await expect(apply).rejects.toMatchObject({ name: 'AbortError' });
     });
 
+    it('verifies the Gemini credential on its exact route with an empty JSON body and the active private CSRF', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse(GEMINI_VERIFIED));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.verifyGemini()).resolves.toEqual(GEMINI_VERIFIED.gemini);
+
+        expect(fetcher.mock.calls[1]?.[0]).toBe(GEMINI_VERIFY_ROUTE);
+        expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+            method: 'POST',
+            credentials: 'same-origin',
+            body: '{}',
+            headers: expect.objectContaining({
+                'X-CSRF-Token': SESSION.csrfToken,
+                'Content-Type': 'application/json',
+            }),
+        }));
+    });
+
+    it('keeps a concurrent Gemini verification as an uncommitted 409 failure without leaking provider text', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: 'GEMINI_VERIFICATION_IN_PROGRESS' }, 409));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.verifyGemini()).rejects.toMatchObject({
+            code: 'GEMINI_VERIFICATION_IN_PROGRESS', status: 409,
+        });
+    });
+
+    it('replaces an unknown Gemini verify error with a fixed public code without leaking the raw value', async () => {
+        const canary = 'synthetic-gemini-verify-canary';
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: canary, details: { cause: canary } }, 500));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        let failure: unknown;
+        try {
+            await client.verifyGemini();
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).toMatchObject({ code: 'AUTH_REQUEST_FAILED', status: 500 });
+        expect(JSON.stringify(failure)).not.toContain(canary);
+    });
+
     it('keeps a channel identity collision as an uncommitted apply failure on its exact route', async () => {
         const fetcher = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(SESSION))
@@ -333,7 +395,7 @@ describe('AdminAuthClient', () => {
             .mockResolvedValueOnce(jsonResponse({
                 ok: true,
                 providers: {
-                    gemini: { configured: false },
+                    gemini: GEMINI_NOT_CHECKED,
                     telegram: { configured: true },
                     telegram_channel_a: { configured: false },
                 },
@@ -352,7 +414,7 @@ describe('AdminAuthClient', () => {
         await client.session();
 
         await expect(client.credentialMetadata()).resolves.toMatchObject({
-            gemini: { configured: false }, telegram: { configured: true }, telegram_channel_a: { configured: false },
+            gemini: GEMINI_NOT_CHECKED, telegram: { configured: true }, telegram_channel_a: { configured: false },
         });
         await client.saveCredential('gemini', secret);
         await client.deleteCredential('gemini');
@@ -387,7 +449,7 @@ describe('AdminAuthClient', () => {
         releaseMetadata(jsonResponse({
             ok: true,
             providers: {
-                gemini: { configured: true },
+                gemini: { ...GEMINI_NOT_CHECKED, configured: true },
                 telegram: { configured: true },
                 telegram_channel_a: { configured: false },
             },
@@ -427,7 +489,7 @@ describe('AdminAuthClient', () => {
             .mockResolvedValueOnce(jsonResponse({
                 ok: true,
                 providers: {
-                    gemini: { configured: false },
+                    gemini: GEMINI_NOT_CHECKED,
                     telegram: { configured: true },
                     telegram_channel_a: { configured: false },
                 },
@@ -437,7 +499,7 @@ describe('AdminAuthClient', () => {
         await client.session();
 
         await expect(client.credentialMetadata()).resolves.toEqual({
-            gemini: { configured: false },
+            gemini: GEMINI_NOT_CHECKED,
             telegram: { configured: true },
             telegram_channel_a: { configured: false },
         });

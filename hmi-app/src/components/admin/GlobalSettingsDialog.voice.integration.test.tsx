@@ -169,7 +169,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } } },
         });
         vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
-            gemini: { configured: false }, telegram: { configured: false }, telegram_channel_a: { configured: false },
+            gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } }, telegram: { configured: false }, telegram_channel_a: { configured: false },
         });
         vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
             enabled: true, configured: false, running: false, verified: false,
@@ -328,7 +328,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                 return json({
                     ok: true,
                     providers: {
-                        gemini: { configured: false },
+                        gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
                         telegram: { configured: true },
                         telegram_channel_a: { configured: false },
                     },
@@ -398,7 +398,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             isHydrated: true,
         });
         vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
-            gemini: { configured: false },
+            gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
             telegram: { configured: false },
             telegram_channel_a: { configured: false },
         });
@@ -422,7 +422,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                 return new Response(JSON.stringify({
                     ok: true,
                     providers: {
-                        gemini: { configured: false },
+                        gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
                         telegram: { configured: false },
                         telegram_channel_a: { configured: false },
                     },
@@ -446,7 +446,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         }));
         const user = userEvent.setup();
         renderDialogHarness();
-        const geminiInput = await screen.findByLabelText('Credencial Gemini');
+        const geminiInput = await screen.findByLabelText('API Key');
         const channelAInput = screen.getByLabelText('Credencial Telegram (Canal A)');
         await waitFor(() => expect(geminiInput).toBeEnabled());
 
@@ -456,7 +456,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
         await user.click(screen.getByRole('button', { name: 'Reopen' }));
 
-        expect(await screen.findByLabelText('Credencial Gemini')).toHaveValue('');
+        expect(await screen.findByLabelText('API Key')).toHaveValue('');
         expect(screen.getByLabelText('Credencial Telegram (Canal A)')).toHaveValue('');
     });
 

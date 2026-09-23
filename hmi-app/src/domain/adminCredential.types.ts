@@ -4,8 +4,20 @@ export interface CredentialProviderMetadata {
     configured: boolean;
 }
 
+export type GeminiVerificationState = 'not_checked' | 'verified' | 'invalid_key' | 'unreachable' | 'not_configured';
+
+export interface GeminiVerification {
+    state: GeminiVerificationState;
+    checkedAt: number | null;
+}
+
+export interface GeminiCredentialProviderMetadata extends CredentialProviderMetadata {
+    verified: boolean;
+    verification: GeminiVerification;
+}
+
 export interface CredentialMetadata {
-    gemini: CredentialProviderMetadata;
+    gemini: GeminiCredentialProviderMetadata;
     telegram: CredentialProviderMetadata;
     telegram_channel_a: CredentialProviderMetadata;
 }
@@ -145,6 +157,22 @@ function isProviderMetadata(value: unknown): value is CredentialProviderMetadata
     return isObject(value) && hasExactKeys(value, ['configured']) && typeof value.configured === 'boolean';
 }
 
+const GEMINI_VERIFICATION_STATES = new Set<GeminiVerificationState>([
+    'not_checked', 'verified', 'invalid_key', 'unreachable', 'not_configured',
+]);
+
+function isGeminiVerification(value: unknown): value is GeminiVerification {
+    return isObject(value) && hasExactKeys(value, ['state', 'checkedAt'])
+        && typeof value.state === 'string' && GEMINI_VERIFICATION_STATES.has(value.state as GeminiVerificationState)
+        && (value.checkedAt === null || (typeof value.checkedAt === 'number' && Number.isFinite(value.checkedAt)));
+}
+
+function isGeminiProviderMetadata(value: unknown): value is GeminiCredentialProviderMetadata {
+    return isObject(value) && hasExactKeys(value, ['configured', 'verified', 'verification'])
+        && typeof value.configured === 'boolean' && typeof value.verified === 'boolean'
+        && isGeminiVerification(value.verification);
+}
+
 function isProvider(value: unknown): value is CredentialProvider {
     return value === 'gemini' || value === 'telegram' || value === 'telegram_channel_a';
 }
@@ -165,7 +193,7 @@ export function parseCredentialMetadata(value: unknown): CredentialMetadata {
     if (!isObject(value) || !hasExactKeys(value, ['ok', 'providers']) || value.ok !== true
         || !isObject(value.providers)
         || !hasExactKeys(value.providers, ['gemini', 'telegram', 'telegram_channel_a'])
-        || !isProviderMetadata(value.providers.gemini) || !isProviderMetadata(value.providers.telegram)
+        || !isGeminiProviderMetadata(value.providers.gemini) || !isProviderMetadata(value.providers.telegram)
         || !isProviderMetadata(value.providers.telegram_channel_a)) {
         throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
     }
@@ -174,6 +202,14 @@ export function parseCredentialMetadata(value: unknown): CredentialMetadata {
         telegram: value.providers.telegram,
         telegram_channel_a: value.providers.telegram_channel_a,
     };
+}
+
+export function parseGeminiVerificationResult(value: unknown): GeminiCredentialProviderMetadata {
+    if (!isObject(value) || !hasExactKeys(value, ['ok', 'gemini']) || value.ok !== true
+        || !isGeminiProviderMetadata(value.gemini)) {
+        throw new Error('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    }
+    return value.gemini;
 }
 
 export function parseCredentialMutation(value: unknown): CredentialMutationResult {

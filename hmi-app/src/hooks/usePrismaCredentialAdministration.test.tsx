@@ -8,12 +8,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CredentialAdministrationClient, CredentialAdministrationController } from './usePrismaCredentialAdministration';
 import { PRISMA_CHANNEL_A_STATUS_QUERY_KEY, PRISMA_CREDENTIAL_METADATA_QUERY_KEY, usePrismaCredentialAdministration } from './usePrismaCredentialAdministration';
 import { AdminAuthClient, AdminAuthError } from '../services/adminAuth.service';
-import type { ChannelAAdministrationStatus } from '../domain';
+import type { ChannelAAdministrationStatus, GeminiCredentialProviderMetadata } from '../domain';
 import { useAuthStore } from '../store/auth.store';
 import RequirePermission from '../components/auth/RequirePermission';
 
+const GEMINI_NOT_CHECKED = {
+    configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null },
+} as const;
 const metadata = {
-    gemini: { configured: false },
+    gemini: GEMINI_NOT_CHECKED,
     telegram: { configured: true },
     telegram_channel_a: { configured: false },
 };
@@ -45,6 +48,9 @@ const channelARunning = {
     activation: { phase: 'running', reason: null, quiescent: false, restartRequired: false },
     lastError: null,
 } as const;
+const geminiVerified = {
+    configured: true, verified: true, verification: { state: 'verified', checkedAt: 1_700_000_000 },
+} as const;
 
 function authenticated() {
     useAuthStore.setState({
@@ -69,6 +75,7 @@ function setup(clientOverrides: Partial<CredentialAdministrationClient> = {}) {
         applyTelegram: vi.fn(async () => applied),
         channelAStatus: vi.fn(async () => channelAIdle),
         applyChannelA: vi.fn(async () => channelARunning),
+        verifyGemini: vi.fn(async () => geminiVerified),
         ...clientOverrides,
     };
     const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
@@ -94,6 +101,7 @@ function setupWithActiveFlag(clientOverrides: Partial<CredentialAdministrationCl
         applyTelegram: vi.fn(async () => applied),
         channelAStatus: vi.fn(async () => channelAIdle),
         applyChannelA: vi.fn(async () => channelARunning),
+        verifyGemini: vi.fn(async () => geminiVerified),
         ...clientOverrides,
     };
     const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
@@ -369,7 +377,7 @@ describe('usePrismaCredentialAdministration', () => {
                     return Promise.resolve(jsonResponse({
                         ok: true,
                         providers: {
-                            gemini: { configured: false },
+                            gemini: GEMINI_NOT_CHECKED,
                             telegram: { configured: true },
                             telegram_channel_a: { configured: false },
                         },
@@ -379,7 +387,7 @@ describe('usePrismaCredentialAdministration', () => {
                 return Promise.resolve(jsonResponse({
                     ok: true,
                     providers: {
-                        gemini: { configured: true },
+                        gemini: { ...GEMINI_NOT_CHECKED, configured: true },
                         telegram: { configured: true },
                         telegram_channel_a: { configured: false },
                     },
@@ -417,7 +425,7 @@ describe('usePrismaCredentialAdministration', () => {
             releaseLate(jsonResponse({
                 ok: true,
                 providers: {
-                    gemini: { configured: false },
+                    gemini: GEMINI_NOT_CHECKED,
                     telegram: { configured: true },
                     telegram_channel_a: { configured: false },
                 },
@@ -447,6 +455,7 @@ describe('usePrismaCredentialAdministration', () => {
             applyTelegram: vi.fn(async () => applied),
             channelAStatus: vi.fn(async () => channelAIdle),
             applyChannelA: vi.fn(async () => channelARunning),
+        verifyGemini: vi.fn(async () => geminiVerified),
         };
         const controller: CredentialAdministrationController = { handleProtectedRequestError: vi.fn(async () => undefined) };
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -556,6 +565,46 @@ describe('usePrismaCredentialAdministration', () => {
         expect(client.applyTelegram).not.toHaveBeenCalled();
         expect(client.channelAStatus).toHaveBeenCalledTimes(2);
         expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
+    });
+
+    it('verifies the Gemini credential through the pending-action lifecycle and refreshes metadata', async () => {
+        const { result, client } = setup();
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let operation!: Promise<void>;
+        act(() => { operation = result.current.verifyGemini(); });
+        await waitFor(() => expect(result.current.pendingAction).toBe('verify-gemini'));
+        await act(async () => { await operation; });
+
+        expect(client.verifyGemini).toHaveBeenCalledWith(expect.any(AbortSignal));
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(2);
+        expect(result.current.pendingAction).toBeNull();
+    });
+
+    it('rejects a second concurrent Gemini verification while one is already pending', async () => {
+        const pending = new Promise<GeminiCredentialProviderMetadata>(() => undefined);
+        const { result } = setup({ verifyGemini: vi.fn(() => pending) });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let first!: Promise<void>;
+        act(() => { first = result.current.verifyGemini(); });
+        await waitFor(() => expect(result.current.pendingAction).toBe('verify-gemini'));
+
+        await expect(result.current.verifyGemini()).rejects.toThrow('ADMIN_CREDENTIAL_OPERATION_PENDING');
+        void first.catch(() => undefined);
+    });
+
+    it('propagates a Gemini verification failure without refreshing metadata', async () => {
+        const failure = new AdminAuthError('GEMINI_VERIFICATION_IN_PROGRESS', 409, false);
+        const verifyGemini = vi.fn(async () => { throw failure; });
+        const { result, client } = setup({ verifyGemini });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        await act(async () => {
+            await expect(result.current.verifyGemini()).rejects.toBe(failure);
+        });
+
+        expect(client.credentialMetadata).toHaveBeenCalledTimes(1);
     });
 
     it('treats a committed channel A stop-unconfirmed deletion as committed and refreshes without auto-apply', async () => {

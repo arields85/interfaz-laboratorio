@@ -95,7 +95,8 @@ describe('VoiceSettingsTab', () => {
                     role: { id: 'admin', name: 'Admin', permissions: ['admin:access'] } } },
         });
         const metadata = vi.spyOn(adminAuthClient, 'credentialMetadata').mockResolvedValue({
-            gemini: { configured: false }, telegram: { configured: false }, telegram_channel_a: { configured: false },
+            gemini: { configured: false, verified: false, verification: { state: 'not_checked', checkedAt: null } },
+            telegram: { configured: false }, telegram_channel_a: { configured: false },
         });
         const health = vi.spyOn(adminAuthClient, 'telegramHealth').mockResolvedValue({
             enabled: true, configured: false, running: false, verified: false,
@@ -110,7 +111,7 @@ describe('VoiceSettingsTab', () => {
             const onDirtyChange = vi.fn();
             const view = render(<VoiceSettingsTab credentialControlsActive={false} onDirtyChange={onDirtyChange} />);
             const name = screen.getByLabelText('Nombre de esta HMI');
-            const credential = screen.getByLabelText('Credencial Gemini');
+            const credential = screen.getByLabelText('API Key');
             expect(name).toBeDisabled();
             expect(screen.getByRole('button', { name: 'Guardar nombre' })).toBeDisabled();
             expect(name.compareDocumentPosition(credential) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -160,7 +161,7 @@ describe('VoiceSettingsTab', () => {
 
         expect(await screen.findByRole('heading', { name: 'Credenciales de proveedores' })).toBeInTheDocument();
         onDirtyChange.mockClear();
-        await user.type(screen.getByLabelText('Credencial Gemini'), 'synthetic-canary-secret');
+        await user.type(screen.getByLabelText('API Key'), 'synthetic-canary-secret');
 
         expect(onDirtyChange).not.toHaveBeenCalledWith(true);
         expect(localStorage.getItem('synthetic-canary-secret')).toBeNull();

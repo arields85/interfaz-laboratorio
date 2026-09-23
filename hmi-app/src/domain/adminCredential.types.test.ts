@@ -4,6 +4,7 @@ import {
     parseChannelAAdministrationStatus,
     parseCredentialMetadata,
     parseCredentialMutation,
+    parseGeminiVerificationResult,
     parseTelegramAdministrationStatus,
     parseTelegramPassiveHealth,
     validateCredentialSecret,
@@ -11,8 +12,9 @@ import {
 } from './adminCredential.types';
 
 describe('admin credential domain', () => {
+    const notCheckedVerification = { state: 'not_checked', checkedAt: null } as const;
     const exactProviders = {
-        gemini: { configured: false },
+        gemini: { configured: false, verified: false, verification: notCheckedVerification },
         telegram: { configured: true },
         telegram_channel_a: { configured: false },
     };
@@ -34,6 +36,43 @@ describe('admin credential domain', () => {
         })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
         expect(() => parseCredentialMutation({ ok: true, provider: 'unknown', configured: true }))
             .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+    });
+
+    describe('gemini verification metadata', () => {
+        it('accepts every canonical verification state with a numeric or null timestamp', () => {
+            for (const state of ['not_checked', 'verified', 'invalid_key', 'unreachable', 'not_configured'] as const) {
+                for (const checkedAt of [null, 0, 1_699_999_999.5]) {
+                    const providers = {
+                        ...exactProviders,
+                        gemini: { configured: true, verified: state === 'verified', verification: { state, checkedAt } },
+                    };
+                    expect(parseCredentialMetadata({ ok: true, providers }).gemini).toEqual(providers.gemini);
+                }
+            }
+        });
+
+        it('rejects an unknown state, extra keys, or a non-boolean verified flag', () => {
+            const malformed = [
+                { configured: true, verified: false, verification: { state: 'pending', checkedAt: null } },
+                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null }, extra: 1 },
+                { configured: true, verified: false, verification: { state: 'verified', checkedAt: null, extra: 1 } },
+                { configured: true, verified: 'yes', verification: { state: 'not_checked', checkedAt: null } },
+                { configured: true, verified: false, verification: { state: 'not_checked', checkedAt: 'now' } },
+                { configured: true, verified: false, verification: null },
+            ];
+            for (const gemini of malformed) {
+                expect(() => parseCredentialMetadata({ ok: true, providers: { ...exactProviders, gemini } }))
+                    .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            }
+        });
+
+        it('parses the verify endpoint envelope with the same gemini metadata shape', () => {
+            const gemini = { configured: true, verified: true, verification: { state: 'verified', checkedAt: 42 } } as const;
+            expect(parseGeminiVerificationResult({ ok: true, gemini })).toEqual(gemini);
+            expect(() => parseGeminiVerificationResult({ ok: false, gemini })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+            expect(() => parseGeminiVerificationResult({ ok: true, gemini, extra: 1 }))
+                .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
+        });
     });
 
     it('fails closed on missing, extra, or nonboolean channel A metadata', () => {

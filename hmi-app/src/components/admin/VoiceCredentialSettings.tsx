@@ -5,7 +5,12 @@ import type {
 import { useEffect, useRef, useState } from 'react';
 import { KeyRound, Play, RefreshCw, Save, Trash2 } from 'lucide-react';
 
-import type { ChannelALifecyclePhase, CredentialProvider } from '../../domain';
+import type {
+    ChannelALifecyclePhase,
+    CredentialProvider,
+    GeminiVerification,
+    GeminiVerificationState,
+} from '../../domain';
 import { usePrismaCredentialAdministration } from '../../hooks/usePrismaCredentialAdministration';
 import { AdminAuthError } from '../../services/adminAuth.service';
 import { useAuthStore } from '../../store/auth.store';
@@ -49,6 +54,8 @@ function errorText(error: unknown): string {
         PRISMA_CHANNEL_A_RESTART_REQUIRED: 'El Canal A requiere un reinicio para aplicar el cambio.',
         PRISMA_CHANNEL_A_STOP_UNCONFIRMED: 'No se pudo confirmar la detención del Canal A.',
         INVALID_CREDENTIAL_REQUEST: 'La solicitud de credencial es inválida.',
+        GEMINI_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
+        GEMINI_VERIFICATION_UNAVAILABLE: 'La verificación de Gemini no está disponible.',
     }[code] ?? 'No se pudo completar la operación con el servicio local.';
 }
 
@@ -76,6 +83,39 @@ function channelAExecutionLabel(phase: ChannelALifecyclePhase | null): string {
     if (phase === 'stopping') return 'Detención en curso';
     if (phase === null || phase === 'idle' || phase === 'stopped') return 'Ejecución detenida';
     return 'Estado de ejecución no confirmado';
+}
+
+// Fixed, non-secret placeholder: the real key is never sent to the browser
+// (metadata-only by design), so this mask must never be derived from it.
+// Rendered as the input's `placeholder`, not its `value`: a placeholder never
+// merges with typed characters (the browser swaps it out on the first
+// keystroke instead of splicing into it), and screen readers announce it as
+// hint text on an empty field rather than as a value -- the field is
+// correctly reported as blank, not as already holding 12 known characters.
+const GEMINI_KEY_MASK = '•'.repeat(12);
+
+type StatusTone = 'success' | 'critical' | 'warning' | 'muted';
+
+const STATUS_TONE_CLS: Record<StatusTone, string> = {
+    success: 'text-status-normal',
+    critical: 'text-status-critical',
+    warning: 'text-status-warning',
+    muted: 'text-industrial-muted',
+};
+
+function geminiCredentialStatusCopy(configured: boolean | undefined, loading: boolean): { text: string; tone: StatusTone } {
+    if (configured === undefined) return { text: loading ? 'Consultando estado' : 'Estado no disponible', tone: 'muted' };
+    return configured
+        ? { text: 'Credencial configurada', tone: 'success' }
+        : { text: 'Credencial no configurada', tone: 'critical' };
+}
+
+function geminiVerificationCopy(configured: boolean, state: GeminiVerificationState): { text: string; tone: StatusTone } {
+    if (!configured) return { text: 'Configure una API key para verificarla.', tone: 'muted' };
+    if (state === 'verified') return { text: 'Verificada', tone: 'success' };
+    if (state === 'invalid_key') return { text: 'API key inválida', tone: 'critical' };
+    if (state === 'unreachable') return { text: 'No se pudo verificar: sin conexión con Google', tone: 'warning' };
+    return { text: 'Verificación: no realizada', tone: 'muted' };
 }
 
 export default function VoiceCredentialSettings({ active, client, controller }: VoiceCredentialSettingsProps) {
@@ -206,6 +246,19 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         }
     };
 
+    const verifyGemini = async () => {
+        const panelGeneration = panelGenerationRef.current;
+        setFeedback(null);
+        try {
+            await administration.verifyGemini();
+        } catch (error) {
+            if (panelGenerationRef.current === panelGeneration
+                && !(error instanceof DOMException && error.name === 'AbortError')) {
+                setFeedback({ kind: 'error', text: errorText(error) });
+            }
+        }
+    };
+
     // One generalized retry for the approved stop-unconfirmed warning: it
     // targets exactly the provider that produced the warning, never the other
     // channel, and needs no configured credential (it was already deleted).
@@ -234,7 +287,94 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         setDeleteProvider(provider);
     };
 
+    // Gemini gets its own two-column layout (title/API key on the left,
+    // credential + verification status on the right), distinct from the
+    // shared Telegram/Channel A three-column row below.
+    const renderGeminiProvider = () => {
+        const value = secretDrafts.gemini;
+        const gemini = credentials?.gemini;
+        const geminiConfigured = gemini?.configured;
+        const verifying = administration.pendingAction === 'verify-gemini';
+        const credentialStatus = geminiCredentialStatusCopy(geminiConfigured, administration.isLoading);
+        const verification: GeminiVerification | undefined = gemini?.verification;
+        const verificationCopy = gemini ? geminiVerificationCopy(gemini.configured, verification!.state) : null;
+        const showsMask = value === '' && geminiConfigured === true;
+
+        return (
+            <fieldset
+                aria-label="Proveedor de voz: Gemini"
+                className="flex flex-col gap-3 rounded border border-white/10 p-3 md:flex-row md:items-start md:gap-4"
+            >
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <legend className="px-0 text-industrial-text">Proveedor de voz: Gemini</legend>
+                    <div className="flex flex-1 items-end gap-2 md:min-w-0">
+                        <label className="flex flex-1 flex-col gap-1 text-industrial-muted">
+                            API Key
+                            <input
+                                type="password"
+                                autoComplete="new-password"
+                                value={value}
+                                placeholder={showsMask ? GEMINI_KEY_MASK : undefined}
+                                onChange={(event) => {
+                                    const nextValue = event.target.value;
+                                    secretRevisionRef.current.gemini += 1;
+                                    setProviderDraft('gemini', nextValue);
+                                }}
+                                className={ADMIN_SIDEBAR_INPUT_CLS}
+                                disabled={disabled}
+                            />
+                        </label>
+                        <div className="flex shrink-0 gap-2">
+                            <HoverTooltip label="Guardar credencial" position="top">
+                                <HmiButton
+                                    size="sm"
+                                    variant="primary"
+                                    aria-label="Guardar credencial"
+                                    title="Guardar credencial"
+                                    disabled={disabled || !value}
+                                    onClick={() => void save('gemini')}
+                                >
+                                    <Save size={14} aria-hidden="true" />
+                                </HmiButton>
+                            </HoverTooltip>
+                            <HoverTooltip label="Eliminar credencial" position="top">
+                                <HmiButton
+                                    size="sm"
+                                    variant="danger"
+                                    aria-label="Eliminar credencial"
+                                    title="Eliminar credencial"
+                                    disabled={disabled}
+                                    onClick={() => updateDeleteProvider('gemini')}
+                                >
+                                    <Trash2 size={14} aria-hidden="true" />
+                                </HmiButton>
+                            </HoverTooltip>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex flex-col gap-2 md:w-64 md:shrink-0">
+                    <span className={STATUS_TONE_CLS[credentialStatus.tone]}>{credentialStatus.text}</span>
+                    {verificationCopy ? (
+                        <>
+                            <span className={STATUS_TONE_CLS[verificationCopy.tone]}>{verificationCopy.text}</span>
+                            <HmiButton
+                                size="sm"
+                                variant="secondary"
+                                disabled={disabled || !geminiConfigured}
+                                onClick={() => void verifyGemini()}
+                            >
+                                {verifying ? 'Verificando…' : 'Verificar'}
+                            </HmiButton>
+                        </>
+                    ) : null}
+                </div>
+            </fieldset>
+        );
+    };
+
     const renderProvider = (provider: CredentialProvider) => {
+        if (provider === 'gemini') return renderGeminiProvider();
         const label = PROVIDER_LABELS[provider];
         const value = secretDrafts[provider];
         const isChannelA = provider === 'telegram_channel_a';
@@ -257,7 +397,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                         <span>Credencial</span>
                         <ProviderStatus configured={credentials?.[provider].configured} loading={administration.isLoading} />
                     </div>
-                    {provider === 'gemini' && credentials ? <p className="text-industrial-muted">Verificación: no realizada</p> : null}
                     {provider === 'telegram_channel_a' ? (
                         <p className="text-industrial-muted">Bot dedicado para consultas remotas de la HMI. Guardar la credencial no inicia ni verifica el bot.</p>
                     ) : null}
