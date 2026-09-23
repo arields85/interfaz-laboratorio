@@ -921,12 +921,23 @@ Work-unit commits on this branch; `.gga` stays untracked. Pre-commit runs GGA.
   on Save/Delete -- none touched, all pre-existing or explicitly in-scope-as-is). Commit
   `d982a06`.
 
+  **Follow-up** (2026-09-23, same day): user manual test found Delete's new `primary`
+  variant looked too highlighted when enabled. Switched to `variant="secondary"`, matching
+  Verificar exactly (Save keeps `primary`, unchanged); RED confirmed against the pre-fix
+  `primary` classes (test rewritten to compare Delete's className against Verificar's, and
+  assert it now differs from Save's), then GREEN. `VoiceCredentialSettings.test.tsx` 44/44;
+  full `npm test` 211/2265; `tsc -b --noEmit` and `eslint` clean. GGA PASSED (3
+  non-blocking notes: Gemini Delete vs Telegram/Canal A Delete variant mismatch --
+  intentional/scoped, T10 will reconcile; pre-existing double-tooltip risk; comments
+  mentioning task IDs will go stale once this tracker is archived -- none touched).
+  Commit `ffa1d31`.
+
 ## Next step
 
 All thirteen roadmap items are committed: T1b (`5bf9fa4`), T4b (`c4cf0f1`), T8 (`4a6b4a5`,
 `039bf14`, `02d9695`), T4c (`95d5d2a`, `f2ebf49`), T1c (`f34a8ad`), T4d (`9ad120d`,
 `5cd10a5`), T5b (`65c2b80`), T9 (`ca696e9`, `56d7a32`), T9b (`5917ca6`), T9c (`43069c5`,
-`a5a2908`, `8110edb`) and T9d (`d982a06`). Next step: the user re-runs manual test point 4
+`a5a2908`, `8110edb`) and T9d (`d982a06`, `ffa1d31`). Next step: the user re-runs manual test point 4
 (foreign process on 5057,
 confirm the popover now shows the port through the session bootstrap AND the terminal shows
 exactly one clean red line), re-checks point 3 (relaunch after closing the launcher window
