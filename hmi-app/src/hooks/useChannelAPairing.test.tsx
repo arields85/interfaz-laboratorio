@@ -564,6 +564,37 @@ describe('useChannelAPairing', () => {
         expect(result.current.qr).toBeNull();
     });
 
+    it('on a runtime_unreachable error shows the unreachable phase but keeps polling and recovers when the runtime answers again', async () => {
+        statusMock.mockResolvedValueOnce(statusFixture('free'))
+            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable'))
+            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable'))
+            .mockResolvedValue(statusFixture('free'));
+        issueMock.mockResolvedValue(issueFixture(qrFixture(60)));
+
+        const { result } = renderHook(() => useChannelAPairing(true));
+        await settle();
+
+        expect(result.current.phase).toBe('free');
+        expect(statusMock).toHaveBeenCalledTimes(1);
+
+        // Poll #1 fails as runtime_unreachable: distinct phase, QR hidden, but unlike the
+        // generic 'error' phase the routine poll keeps running on its own.
+        await advanceTimers(CHANNEL_A_PAIRING_POLL_INTERVAL_MS);
+        expect(result.current.phase).toBe('unreachable');
+        expect(result.current.qr).toBeNull();
+        expect(statusMock).toHaveBeenCalledTimes(2);
+
+        // Poll #2 still fails: stays unreachable, polling still not stopped.
+        await advanceTimers(CHANNEL_A_PAIRING_POLL_INTERVAL_MS);
+        expect(result.current.phase).toBe('unreachable');
+        expect(statusMock).toHaveBeenCalledTimes(3);
+
+        // Poll #3: the runtime answers again on its own, no close/reopen needed.
+        await advanceTimers(CHANNEL_A_PAIRING_POLL_INTERVAL_MS);
+        expect(result.current.phase).toBe('free');
+        expect(statusMock).toHaveBeenCalledTimes(4);
+    });
+
     it('returns a fully closed slot on EVERY closed render immediately, even before effect cleanup', async () => {
         statusMock.mockResolvedValue(statusFixture('free'));
         issueMock.mockResolvedValue(issueFixture(qrFixture(60)));

@@ -20,7 +20,11 @@ export interface ChannelAPairingIssue {
     qr: ChannelAPairingQr;
 }
 
-export type ChannelAPairingErrorKind = 'session' | 'conflict' | 'unavailable';
+// `runtime_unreachable` is distinct from `unavailable`: it means the Prisma runtime itself
+// could not be reached (a fetch rejection, or a non-2xx response with no valid JSON body — the
+// dev proxy's own failure page, never a body the runtime produced), while `unavailable` covers
+// every case where a real response was read, JSON or not, ok or not.
+export type ChannelAPairingErrorKind = 'session' | 'conflict' | 'unavailable' | 'runtime_unreachable';
 
 const PAIRING_STATES: readonly string[] = ['free', 'pending', 'linked', 'unavailable'];
 

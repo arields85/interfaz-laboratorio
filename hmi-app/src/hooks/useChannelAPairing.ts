@@ -15,8 +15,10 @@ export const CHANNEL_A_PAIRING_POLL_INTERVAL_MS = 2000;
 const COUNTDOWN_TICK_INTERVAL_MS = 1000;
 
 // UI-only ephemeral phase for the pairing panel. This is client UI state, not an industrial
-// domain type, so it lives with the hook that owns it.
-export type ChannelAPairingPhase = 'closed' | 'loading' | 'error' | ChannelAPairingState;
+// domain type, so it lives with the hook that owns it. 'unreachable' is distinct from 'error':
+// it means the Prisma runtime itself could not be reached (dev proxy failure), so unlike a
+// generic terminal 'error' the routine poll keeps retrying on its own until the runtime answers.
+export type ChannelAPairingPhase = 'closed' | 'loading' | 'error' | 'unreachable' | ChannelAPairingState;
 
 export interface UseChannelAPairingResult {
     phase: ChannelAPairingPhase;
@@ -43,6 +45,12 @@ function isQuietCleanupError(error: unknown): boolean {
 // never conflicts.
 function isPairingConflict(error: unknown): boolean {
     return error instanceof PrismaChannelAPairingError && error.kind === 'conflict';
+}
+
+// A runtime_unreachable error means the Prisma runtime itself could not be reached (fetch
+// rejection or the dev proxy's own non-JSON failure response), never a runtime-decided state.
+function isRuntimeUnreachable(error: unknown): boolean {
+    return error instanceof PrismaChannelAPairingError && error.kind === 'runtime_unreachable';
 }
 
 export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
@@ -197,6 +205,16 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
                     // issuance may only come from the routine poll it schedules.
                     clearQr();
                     await runRound(false);
+                    return;
+                }
+                if (isRuntimeUnreachable(error)) {
+                    // The Prisma runtime itself could not be reached (e.g. the dev proxy
+                    // answering ECONNREFUSED with its own failure page): unlike a terminal
+                    // pairing error, the routine poll keeps running on its own so the popover
+                    // recovers automatically once the runtime comes back up.
+                    setPhase('unreachable');
+                    clearQr();
+                    schedulePoll();
                     return;
                 }
                 // Honest terminal failure: hide the QR and stop polling until close/reopen.

@@ -289,13 +289,46 @@ describe('prismaChannelAPairing error mapping', () => {
         expect((caught as PrismaChannelAPairingError).kind).toBe('unavailable');
     });
 
-    it('maps a generic network rejection to the safe unavailable kind', async () => {
-        harness.client.fetch.mockRejectedValue(new Error('NETWORK_DOWN'));
+    it('maps a rejected fetch (the runtime itself unreachable) to the runtime_unreachable kind', async () => {
+        harness.client.fetch.mockRejectedValue(new TypeError('NETWORK_DOWN'));
+
+        const caught = await caughtOf(prismaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(PrismaChannelAPairingError);
+        expect((caught as PrismaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as PrismaChannelAPairingError).message).not.toContain('NETWORK_DOWN');
+    });
+
+    it.each([
+        ['a 500 with an empty body (Vite dev proxy default error page on ECONNREFUSED)', new Response('', { status: 500 })],
+        ['a 502 with a plain-text body', new Response('Bad Gateway', { status: 502, headers: { 'Content-Type': 'text/plain' } })],
+    ])('maps %s to the runtime_unreachable kind instead of the runtime-reported unavailable kind', async (_name, response) => {
+        harness.client.fetch.mockResolvedValue(response);
+
+        const caught = await caughtOf(prismaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(PrismaChannelAPairingError);
+        expect((caught as PrismaChannelAPairingError).kind).toBe('runtime_unreachable');
+    });
+
+    it('still maps a non-2xx response carrying a valid (if unexpected) JSON body to the unavailable kind, never runtime_unreachable', async () => {
+        // A real runtime-produced JSON error body proves the runtime WAS reached; only a
+        // missing/invalid JSON body signals the dev proxy's own failure response.
+        harness.client.fetch.mockResolvedValue(knownResponse(503, { ok: false, error: 'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE' }));
 
         const caught = await caughtOf(prismaChannelAPairing.status());
 
         expect(caught).toBeInstanceOf(PrismaChannelAPairingError);
         expect((caught as PrismaChannelAPairingError).kind).toBe('unavailable');
-        expect((caught as PrismaChannelAPairingError).message).not.toContain('NETWORK_DOWN');
+    });
+
+    it('keeps a 409 with malformed JSON mapped to the unavailable kind, never runtime_unreachable', async () => {
+        // The 409 conflict branch is classified independently of body-parse malformation.
+        harness.client.fetch.mockResolvedValue(new Response('{', { status: 409 }));
+
+        const caught = await caughtOf(prismaChannelAPairing.issue());
+
+        expect(caught).toBeInstanceOf(PrismaChannelAPairingError);
+        expect((caught as PrismaChannelAPairingError).kind).toBe('unavailable');
     });
 });

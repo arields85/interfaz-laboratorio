@@ -51,7 +51,8 @@ type PairingPhase =
     | 'pending'
     | 'linked'
     | 'unavailable'
-    | 'error';
+    | 'error'
+    | 'unreachable';
 
 interface PairingQr {
     deepLink: string;
@@ -75,7 +76,8 @@ const pairingFixture = vi.hoisted(() => ({
         | 'pending'
         | 'linked'
         | 'unavailable'
-        | 'error',
+        | 'error'
+        | 'unreachable',
     qr: null as { deepLink: string; expiresInSeconds: number } | null,
     remainingSeconds: 0,
     openArguments: [] as boolean[],
@@ -444,6 +446,19 @@ describe('PrismaPairingControl', () => {
 
             unmount();
         }
+    });
+
+    it('shows the clear runtime-unreachable copy and never a QR when the Prisma runtime could not be reached', async () => {
+        setPairingFixture('unreachable', liveQr(), 30);
+
+        render(<PrismaPairingControl />);
+        const dialog = await openDialog();
+
+        expect(within(dialog).getByText('Prisma no se pudo iniciar.')).toBeInTheDocument();
+        // Distinct from the runtime-reported unavailable copy: this is a connectivity failure,
+        // not a state the runtime itself answered with.
+        expect(within(dialog).queryByText('Canal A no disponible')).not.toBeInTheDocument();
+        expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
     });
 
     it('never shows the QR once the countdown reaches zero or the payload is missing', async () => {

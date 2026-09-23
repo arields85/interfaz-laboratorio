@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pyramid } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import AnchoredOverlay from '../ui/AnchoredOverlay';
+import { HmiButton } from '../ui';
 import { useChannelAPairing, type ChannelAPairingPhase } from '../../hooks/useChannelAPairing';
 import { readHmiName } from '../../services/hmiName.service';
 import type { HmiNameReadResult } from '../../domain/hmiName';
@@ -14,6 +15,10 @@ const READ_FAILURE_DIRECTION_COPY = 'Revisá el nombre de esta HMI en Configurac
 const QR_IMAGE_LABEL = 'Código QR para vincular Telegram';
 const TRIGGER_LABEL = 'Prisma';
 const CLOSE_LABEL = 'Cerrar';
+// Distinct from 'unavailable' (the runtime answered "Canal A no disponible"): this is shown
+// only when the Prisma runtime itself could not be reached at all.
+const RUNTIME_UNREACHABLE_COPY = 'Prisma no se pudo iniciar.';
+const RUNTIME_UNREACHABLE_HINT_COPY = 'Reiniciá el lanzador para volver a intentarlo.';
 
 // High-contrast QR built from existing theme tokens, inverted for scanner legibility: the
 // quiet zone and background take the near-white text token and the modules take the near-black
@@ -40,6 +45,8 @@ function pairingStatusCopy(phase: ChannelAPairingPhase): string {
             return 'Consultando el estado del emparejamiento...';
         case 'error':
             return 'No se pudo obtener el estado del emparejamiento.';
+        case 'unreachable':
+            return RUNTIME_UNREACHABLE_COPY;
         case 'free':
             return 'Generando código QR...';
         case 'closed':
@@ -150,15 +157,15 @@ export default function PrismaPairingControl() {
                             // read failure with the settings direction in its own paragraph.
                             nameRead !== null && !nameRead.ok ? (
                                 <>
-                                    <p className="text-sm text-industrial-text-soft">
+                                    <p className="text-industrial-muted">
                                         {READ_FAILURE_COPY}
                                     </p>
-                                    <p className="text-sm text-industrial-text-soft">
+                                    <p className="text-industrial-muted">
                                         {READ_FAILURE_DIRECTION_COPY}
                                     </p>
                                 </>
                             ) : (
-                                <p className="text-sm text-industrial-text-soft">
+                                <p className="text-industrial-muted">
                                     {MISSING_NAME_COPY}
                                 </p>
                             )
@@ -178,23 +185,30 @@ export default function PrismaPairingControl() {
                                         className="h-auto w-full"
                                     />
                                 </div>
-                                <p className="text-sm text-industrial-text-soft">
+                                <p className="text-industrial-muted">
                                     Escanea el código QR con el teléfono y confirma el destino en
                                     Telegram.
                                 </p>
                             </>
                         ) : (
-                            <p className="text-sm text-industrial-text-soft">
-                                {pairingStatusCopy(phase)}
-                            </p>
+                            <>
+                                <p className="text-industrial-muted">
+                                    {pairingStatusCopy(phase)}
+                                </p>
+                                {phase === 'unreachable' ? (
+                                    <p className="text-industrial-muted">
+                                        {RUNTIME_UNREACHABLE_HINT_COPY}
+                                    </p>
+                                ) : null}
+                            </>
                         )}
-                        <button
-                            type="button"
+                        <HmiButton
+                            variant="primary"
+                            fullWidth
                             onClick={close}
-                            className="rounded-lg border border-industrial-border px-3 py-1.5 text-sm text-industrial-text transition-colors hover:bg-industrial-hover"
                         >
                             {CLOSE_LABEL}
-                        </button>
+                        </HmiButton>
                     </div>
                 </div>
             </AnchoredOverlay>
