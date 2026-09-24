@@ -206,6 +206,62 @@ end together with PW-006; NO push.
 - [ ] **T4 — Per-device fine-tune. DEFERRED by the user (2026-09-23):** build it only if T5 manual
   acceptance on the laptop and the 4K monitor shows the automatic curve is not enough. Per-browser factor (default 100%, fine steps) combined with the
   automatic zoom; UI placement to be agreed with the user.
+- [x] **T5b — Minimum layout width floor (user-approved 2026-09-24).** Evidence from T5 manual
+  screenshots: 4K (2560×1440 CSS, zoom ≈1.19) OK; 1920×1080 identical to before; laptop
+  (1440×900, zoom ≈0.84 → ~1714 px layout width) OK except T5c; TV (1920×1080 at Windows 150% →
+  1280×720 CSS, below the planned range; zoom ≈0.78 → ~1633 px layout width) truncates labels
+  ("ACTIVIDAD DE MÁQUI…", "PRODUCC…"), wraps "RENDIMIENTO DIARIO (ÚLTIMOS 7 DÍAS)" and shows the
+  T5c overlap. Fix: `zoom = min(damped, viewportWidth / MIN_LAYOUT_WIDTH_PX)` with a single named
+  constant (initial proposal ~1760 px) so the layout is never narrower than that; no change at
+  ≥1920 CSS px. Calibrate the constant with automated headless screenshots of the running HMI at
+  1280/1440/1920 widths before asking the user to re-check.
+  Route: direct inline (single already-understood pure function, 2 files). Findings (2026-09-24):
+  - Chose `MIN_LAYOUT_WIDTH_PX = 1760` (the initial proposal), calibrated primarily from the
+    user's own already-measured evidence recorded above (1633 px layout width truncated labels;
+    1714 px layout width was clean apart from T5c) — 1760 sits comfortably above both, and the
+    floor formula (`zoom = viewportWidth / MIN_LAYOUT_WIDTH_PX` once it's the smaller term) makes
+    the resulting layout width exactly `MIN_LAYOUT_WIDTH_PX` at any width where the floor is
+    active, e.g. both 1280 and 1440 resolve to exactly 1760 px of layout width.
+  - Screenshot calibration: local headless Chrome (`chrome.exe --headless=new`, isolated
+    throwaway `--user-data-dir`, `--use-angle=swiftshader --enable-unsafe-swiftshader` — plain
+    `--disable-gpu` crashed the renderer on this app's WebGL shader background) screenshotted the
+    running dev server (`http://localhost:5173/`, not restarted) at 1280×720, 1440×900, 1920×1080
+    and 2560×1440 CSS px. The fresh headless profile has no admin-published dashboard (mock
+    `localStorage`-backed admin persistence, per `AGENTS.md` §7 — a fresh browser profile starts
+    with none), so it renders the app shell's "Sin Vistas Publicadas" empty state rather than the
+    user's specific Activity Analysis widget instance; reproducing that widget would need either
+    the user's own authenticated/configured browser profile (out of reach and out of scope to
+    touch) or fabricating a throwaway dashboard config, which risked not matching the user's real
+    layout. The screenshots still gave real, useful evidence: the app shell (topbar branding,
+    icons, search bar, shader background) rendered with no truncation, wrapping or horizontal
+    overflow at any of the four widths, confirming the automatic zoom (T3/T3b) plus the new floor
+    introduce no layout regression at the chrome level. The widget-specific truncation numbers
+    (1633/1714 px) are the user's own prior measurements already recorded in this tracker; T5b's
+    constant is calibrated from that evidence rather than re-derived from a fresh widget
+    screenshot. Screenshots saved under the session scratchpad
+    (`…/scratchpad/pw007/shot-*.png`), not committed.
+  - Files changed: `hmi-app/src/utils/viewportScale.ts` (`MIN_LAYOUT_WIDTH_PX = 1760` constant;
+    `computeDampedViewportZoom` now returns `Math.min(dampedZoom, viewportWidth /
+    MIN_LAYOUT_WIDTH_PX)` — the optional `factor` composes *before* the floor caps the result, so
+    a per-device fine-tune factor (T4, deferred) can never push the effective layout width below
+    the floor; documented in the function's docstring and the module header).
+  - Tests: `hmi-app/src/utils/viewportScale.test.ts` (11 → 15 tests): replaced the pre-floor
+    1440px assertion with a floor-aware one (asserts `zoom < pureDampedZoom` and `1440/zoom ≈
+    MIN_LAYOUT_WIDTH_PX`), added a 1280px floor test, a "never applies at/above 1920" test, a
+    `MIN_LAYOUT_WIDTH_PX` existence test, and a factor/floor composition test (factor=1.5 at 1440
+    is fully clamped by the floor). Moved the factor-composition test to 2560 (unaffected by the
+    floor) so it isolates pure multiplication. RED observed by `git stash`-ing the implementation
+    change only (keeping the updated tests) and running against the pre-floor code: 4 new/changed
+    tests failed as expected; `git stash pop` restored the floor implementation → GREEN (15/15).
+  - No change at 2560/1920 confirmed by both the unit tests and the headless screenshots (shell
+    renders identically in proportion, no floor-driven layout shift since 1920/1760 > 1 and
+    2560/1760 > damped zoom there).
+  - Verification: `npm test` 215 files / 2388 tests passed; `npx tsc -b` clean; `npm run lint`
+    clean (T5c not yet applied at this point).
+- [ ] **T5c — "sin comparación" labels overlap (widget defect).** In the Activity Analysis widget's
+  best/worst ("MEJOR"/"PEOR") columns, the two "sin comparación" labels run into each other
+  ("comparacióncomparación") at the laptop and TV widths; they must wrap or fit within their
+  column instead of overlapping. Independent of zoom.
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
   2560×1440 CSS px; calibrate `k`.
 
@@ -236,10 +292,24 @@ end together with PW-006; NO push.
   backing-store size); left ratio-only/already-correct code documented in place. All checks green
   (215 files / 2372 tests, tsc, eslint); no-op confirmed at zoom 1.
 
+- 2026-09-24: T5b done (route: direct inline). Added `MIN_LAYOUT_WIDTH_PX = 1760` as a hard floor
+  on `computeDampedViewportZoom`'s result (`zoom = min(dampedZoom * factor, viewportWidth /
+  MIN_LAYOUT_WIDTH_PX)`), calibrated from the user's own previously-recorded truncation evidence
+  (1633 px failed, 1714 px passed) and corroborated with headless-Chrome screenshots of the
+  running dev server at 1280/1440/1920/2560 CSS px (general app-shell layout, no regression; the
+  widget-specific screenshot needs the user's own configured dashboard, out of reach from a fresh
+  browser profile — see T5b findings). TDD: RED confirmed via `git stash` of the implementation
+  with tests updated, then GREEN. All checks green: `npm test` 215 files / 2388 tests, `npx tsc -b`
+  clean, `npm run lint` clean. T5c (the "sin comparación" overlap) is next.
+
 ## Next step
 
-T4 per-device fine-tune — needs a user decision on UI placement (where the per-browser factor
-control lives: admin settings page vs. a viewer-accessible control). T5 manual acceptance and `k`
-calibration follows T4 (or can run against the current automatic-only zoom first, at the user's
-choice) — T5 should also cover T3b's manual-check list above (overlay/tooltip positioning, drag
-tracking, trend chart selection, shader sharpness) at non-1920 widths.
+T5c — the Activity Analysis widget's "sin comparación" caption overlap (see the T5c task entry
+above). After that, resume T4 (needs a user decision on UI placement for the per-browser
+fine-tune factor: admin settings page vs. a viewer-accessible control) and T5 (full manual
+acceptance and `k` calibration across 1440×900, 1920×1080, 2560×1440 CSS px, plus T3b's
+manual-check list: overlay/tooltip positioning, drag tracking, trend chart selection, shader
+sharpness at non-1920 widths). The user should also re-check the TV (1280×720 CSS) no longer
+truncates/wraps widget titles now that T5b's floor is in place; if 1760 px still isn't enough,
+increase `MIN_LAYOUT_WIDTH_PX` in `hmi-app/src/utils/viewportScale.ts` (recalibration never
+requires touching call sites).
