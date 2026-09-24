@@ -322,7 +322,32 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   tests plus every inherited base-class test re-run under the new `ChannelAManagerPollRetryTests`
   fixture, matching the project's existing T16 fixture-extension convention).
   Commit: `fix(prisma): separate Channel A poll retry state from reconnect backoff`.
-- [ ] **T9+ — Further fixes.** From T5/T6 evidence (HMI voice orb/audio).
+- [x] **T9 — Orb/audio misses: closed by T6.** In the T6 live test the orb and audio appeared on
+  every voice answer; no separate fix needed.
+- [ ] **T10 — HMI voice first-audio latency, part 1 (user-approved plan, 2026-09-23).** User goal:
+  spoken answers as close to instant as possible. Current path (read-only map): event published in
+  0 ms → HMI 1 s poll → orb shown → POST `/prisma/speak-live` → new `genai.Client` per request
+  (`gemini_credentials.py:84-98`) → `client.interactions.create(stream=True)` with
+  `gemini-3.1-flash-tts-preview` and ~45 lines of inline style notes (`build_tts_prompt`,
+  `voice_service.py:305-351`) → first chunk 2.3–6.7 s (first request slowest). The old `C:\hmi_tts`
+  local mode was identical (no warm-up, no prefetch). Scope: split timing (credential resolve /
+  client build / Gemini time-to-first-byte / our processing; event publish vs speak-live received),
+  persistent warm client + boot warm-up (invalidate on credential change), server-side synthesis
+  started at answer time keyed by event id (reuse `AudioCoordinator`, `event_audio.py`), exact-text
+  audio cache, push events to the HMI instead of 1 s polling.
+- [ ] **T11 — Near-instant voice, part 2 (research done; benchmark awaits user authorization).**
+  Research (2026-09-23, sources in the session report): community reports that
+  `gemini-3.1-flash-tts-preview` via `interactions.create(stream=True)` is much slower than
+  `generate_content_stream` and delivers audio in a burst
+  (https://discuss.ai.google.dev/t/3-1-flash-tts-preview-streaming-latency/176050, unconfirmed by
+  Google); `gemini-3.8-flash-tts` / `gemini-3.8-flash-lite-tts` released as stable on 2026-09-23
+  (verbatim transcript by default, style in `speech_metadata.style`); Gemini Live has no verbatim
+  guarantee and had 16–26 s first-audio reports in the EU in 2026-09 — not a safer bet; the old
+  `PrismaLiveManager` targets the deprecated 3.1 Live model and has no measurements. Proposed
+  benchmark (needs the user's Gemini key and authorization): 5–10 short fixed-sentence requests per
+  variant — 3.1 via `interactions.create` (baseline) vs `generate_content_stream`, and 3.8 lite
+  with both — recording only time to first PCM byte. Later options needing user decisions: fixed
+  prefix + synthesized value, local TTS (voice identity change).
 
 ## Acceptance criteria
 
@@ -352,9 +377,8 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
 
 ## Next step
 
-T9+ (HMI voice orb/audio root-cause fixes) remains open and unstarted — no further diagnosis was
-done this session. Next: **user manual check of T2/T3/T4 in Telegram**, since these are UX changes
-best confirmed live:
+Next: T10 writer (voice latency part 1); T11 benchmark once the user authorizes it. In parallel,
+**user manual check of T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
 - **T2**: pair a phone via QR; the confirmation prompt should read "Está a un paso: confirme y
   Prisma responderá sus consultas en este chat." (no "documento").
 - **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
@@ -364,6 +388,3 @@ best confirmed live:
   minutes) should show only "Seguir conectado" now, not a second inline "Desvincular".
 - **T4**: send an ordinary question; Telegram should show "Prisma está escribiendo…" briefly before
   the answer arrives.
-
-After that manual check, resume T9+ using the T5 timing logs and T6-style live observation for the
-still-unexplained HMI voice orb/audio misses.
