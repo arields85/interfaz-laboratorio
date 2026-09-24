@@ -49,7 +49,7 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
 4. **Modes (General Settings → Prisma tab).** `Automático` (default) and `Manual` (seconds chosen
    by the user). Mode and manual value live in the shared Prisma voice configuration
    (HMI `domain/prismaVoiceConfig.ts` + runtime `voice_service.py` `validate_prisma_voice_config`),
-   like the rest of the tab. Manual range proposed: 0.1–3.0 s, step 0.1 s, default 0.2 s
+   like the rest of the tab. Manual range **decided by the user (2026-09-24): 0.1–3.0 s, step 0.1 s, default 0.2 s**
    (revises T15's 0.3–3.0 s / default 1.0 s, since 0.2 s is now the proven baseline).
    Manual answers are still measured and logged, but do not change the manual value.
 5. **Fixed, not adaptive:** `latencyHint: 'playback'` stays fixed — device-level underruns are not
@@ -100,12 +100,73 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
   `backlog/prisma-voice-minor-followups` (PW-011), verified with `mem_search`; PW-006 row removed
   from `docs/PENDING_WORK.md`; docs commit `docs: close PW-006 and open PW-010/PW-011` on the fix
   branch, then local `main` fast-forwarded to it (no push).
-- [ ] **T1 — Measure the needed prebuffer per answer.** Pure function over (arrival ms, block
+- [x] **T1 — Measure the needed prebuffer per answer.** Pure function over (arrival ms, block
   duration) samples + engine wiring in `playProgressiveLive`/`schedulePcmBlock`
   (`hmi-app/src/services/prismaVoiceAudioEngine.ts`); new `playback-ended` fields via schema +
   generator + runtime validator. Tests: `prismaVoiceAudioEngine.test.ts`,
   `prismaAudioMetric.types.test.ts`, `test_voice_timeline_diagnostics.py`. Route: delegated writer
   (multi-file across `schemas/`, `hmi-app`, `services/prisma-runtime`).
+
+  **Evidence (2026-09-24, delegated writer, strict TDD):**
+  - Files: new `hmi-app/src/services/prismaPrebufferNeedTracker.ts` (+ co-located
+    `.test.ts`) with `PrismaPrebufferNeedTracker` and the named
+    `PRISMA_PREBUFFER_SCHEDULING_MARGIN_MS` (25 ms) constant; wiring in
+    `hmi-app/src/services/prismaVoiceAudioEngine.ts` (`ActivePlayback.prebufferNeedTracker`,
+    new private `handleProgressiveBlock` shared by the streaming loop and the final
+    flushed block, `completeLiveIfFinished`); schema
+    `schemas/prisma-audio-record.v1.schema.json` (`playback-ended` gains optional
+    `prebuffer_ms`, `needed_prebuffer_ms`, `prebuffer_mode` with enum
+    `fixed | automatic | manual`, required-fields list unchanged); regenerated
+    `hmi-app/src/domain/prismaAudioMetric.generated.ts` and
+    `services/prisma-runtime/src/prisma_runtime/audio_record_types.py` via
+    `schemas/generate_prisma_audio_bindings.py` (never hand-edited); tests extended in
+    `prismaVoiceAudioEngine.test.ts`, `prismaAudioMetric.types.test.ts`,
+    `test_voice_timeline_diagnostics.py`.
+  - Design decisions: arrival `a_i` captured with `this.now()` inside the new
+    `handleProgressiveBlock` helper, at the moment each block becomes available
+    (before scheduling), reused for both the tracker and the first-audio elapsed
+    log (one clock read per block, not two). `needed = max(0, max_i(a_i - t0 - D_i)
+    + margin)`, rounded with `Math.round`; the tracker's running max starts at 0,
+    which is always correct because the first block's own term is exactly 0 by
+    construction. `neededPrebufferMs()` returns 0 if no block was ever recorded
+    (defensive; never hit in practice). `prebuffer_ms` reports the lead actually
+    used (`PRISMA_PCM_PLAYBACK_LEAD_SECONDS * 1000`, unchanged at 200 ms) and
+    `prebuffer_mode` is always the literal `'fixed'` for this task. Non-progressive
+    handling: the `buffer-before-playback` worklet transport (out of scope, D5)
+    cannot measure per-block arrival, so its `playback-ended` simply omits the
+    three fields rather than reporting a fabricated value; they are optional (not
+    in `x-required-payload-fields`) in the schema for exactly this reason, locked
+    in by a dedicated test asserting the fields are absent there.
+  - RED evidence: `prismaPrebufferNeedTracker.test.ts` — `Failed to resolve import
+    "./prismaPrebufferNeedTracker" ... Does the file exist?` before the module
+    existed. `prismaVoiceAudioEngine.test.ts` — both the extended underflow test and
+    the new "measures the needed prebuffer..." test failed with `expected {
+    record_type: 'playback-ended', …(7) } to match object { …(1) }` (missing
+    `prebuffer_ms`/`needed_prebuffer_ms`/`prebuffer_mode`) before the engine wiring.
+    `prismaAudioMetric.types.test.ts` — new round-trip test failed with `Prisma
+    audio metric violates the browser allowlist` before the schema/generator update.
+    `test_voice_timeline_diagnostics.py` — new
+    `test_accepts_a_progressive_playback_ended_record_with_t1_prebuffer_fields`
+    raised `ValueError: VOICE_TIMELINE_RECORD_INVALID` before the schema/generator
+    update. All four RED failures observed by running the exact target suites, then
+    GREEN after each implementation step.
+  - Checks (repo root unless noted): `cd hmi-app && npx vitest run` → 220 files /
+    2476 tests passed (baseline 219/2467 + 9 new: 6 tracker + 1 engine + 2 domain
+    type). `cd hmi-app && npx tsc -b` → clean, no output. `cd hmi-app && npm run
+    lint` → clean, no findings. `services/prisma-runtime/.venv/Scripts/python.exe -m
+    unittest discover -s services/prisma-runtime -p "test_*.py"` → 1522 tests OK
+    (baseline 1519 + 3 new), including the pre-existing
+    `test_audio_bindings_generation.py` drift checker confirming the regenerated
+    projections match the schema exactly.
+  - Commits (branch `feat/prisma-adaptive-voice-buffer`, GGA review passed on each):
+    `a2e6a33` feat(hmi): measure the needed voice prebuffer per progressive answer;
+    `bc2b911` refactor(hmi): dedupe the progressive prebuffer block handling;
+    `15e72d8` refactor(hmi): reuse the captured block-arrival clock reading (both
+    refactor commits address GGA review nits from the feat commit: comment
+    direction/wording, block-handling duplication, redundant clock read).
+  - Route: delegated writer (confirmed; touched `schemas/`, `hmi-app/src/domain/`,
+    `hmi-app/src/services/`, `services/prisma-runtime/src/` and
+    `services/prisma-runtime/tests/`).
 - [ ] **T2 — Continuous estimator and browser history.** New pure module (window N=10, max +
   safety, clamp, 12 h staleness) and a safe `localStorage` wrapper. Fully deterministic tests
   with injected clock and storage. Route: delegated writer.
@@ -145,7 +206,6 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
 
 - Delete the unused 2.5 s `buffer-before-playback` worklet transport, or keep it? (Not needed by
   this feature; user decision.)
-- Manual range/default (0.1–3.0 s, 0.2 s) proposed above; confirm or adjust.
 
 ## Progress
 
@@ -154,6 +214,14 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
 
 - 2026-09-24: T0 done (PW-006 closed, fix integrated into local `main`).
 
+- 2026-09-24: T1 done (delegated writer, strict TDD; RED observed for the pure tracker, the
+  engine wiring and both the HMI and runtime schema-projection tests before each GREEN). Every
+  progressive `playback-ended` now carries `prebuffer_ms`, `needed_prebuffer_ms` and
+  `prebuffer_mode: 'fixed'`; the non-progressive worklet transport omits the (schema-optional)
+  fields. hmi-app (220 files / 2476 tests), `tsc -b`, lint and prisma-runtime (1522 tests) all
+  green. Three commits on `feat/prisma-adaptive-voice-buffer`: `a2e6a33`, `bc2b911`, `15e72d8`.
+
 ## Next step
 
-Create `feat/prisma-adaptive-voice-buffer` from `main` and start T1 (delegated writer, strict TDD).
+Start T2 (continuous estimator: window N=10, max + safety, clamp, 12 h staleness, safe
+`localStorage` wrapper; delegated writer, strict TDD).
