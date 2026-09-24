@@ -485,11 +485,21 @@ def _iter_interaction_audio_deltas(stream, on_activity=lambda: None):
 
 
 def _create_interactions_tts_job(text, event_id=None, telegram_chat_id=None, voice_config=None):
+    # T10: times the whole job-creation step, including the conditional
+    # TelegramOpusStreamEncoder subprocess spin-up (ffmpeg) and recording
+    # indicator thread start -- both skipped, and this staying near-zero, for
+    # a plain HMI voice query with no Telegram chat attached.
+    create_start = time.monotonic()
     config = clone_json(voice_config if voice_config is not None else prisma_voice_config_store.get()); valid_chat = telegram_chat_id if _valid_telegram_chat_id(telegram_chat_id) else None
     job = {"text": text, "cancelled": threading.Event(), "voice_config": config, "dsp": PrismaStreamingDSP(config), "event_id": str(event_id).strip() if event_id is not None and str(event_id).strip() else None, "telegram_chat_id": valid_chat, "telegram_pcm_parts": [], "telegram_pcm_bytes": 0, "telegram_delivery_queued": False, "telegram_encoder": None, "telegram_chat_action_stop": threading.Event()}
     prisma_audio_sink.emit("backend", "receipt", {})
     if valid_chat is not None and _telegram_token(): job["telegram_encoder"] = TelegramOpusStreamEncoder(job["event_id"])
     if valid_chat is not None: _start_telegram_recording_indicator(job)
+    _logger.warning(
+        "Prisma TTS job create: elapsed_ms=%d telegram=%s",
+        round((time.monotonic() - create_start) * 1000),
+        valid_chat is not None,
+    )
     return job
 
 
@@ -597,6 +607,12 @@ def resolve_voice_event(event_id, capability="", http=None):
     session = http or voice_event_http
     session.trust_env = False
     response = None
+    # T10: this internal HTTP round-trip to the presentation process (5057)
+    # runs up to 3 times per HMI voice query (once in the /prisma/speak-live
+    # route handler, once in AudioCoordinator.subscribe's admission
+    # validation, once again in its worker thread right before generation),
+    # so its own elapsed time is logged on every call, success or failure.
+    resolve_start = time.monotonic()
     try:
         request_options = {
             "timeout": 2,
@@ -632,6 +648,10 @@ def resolve_voice_event(event_id, capability="", http=None):
         if response is not None:
             try: response.close()
             except Exception: pass
+        _logger.warning(
+            "Prisma voice event resolve: elapsed_ms=%d",
+            round((time.monotonic() - resolve_start) * 1000),
+        )
 
 
 def _generate_event_audio(event, voice_config, secret, control):

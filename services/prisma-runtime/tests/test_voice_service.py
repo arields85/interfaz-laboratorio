@@ -90,6 +90,36 @@ class VoiceServiceTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(response.get_json()["error"], "INVALID_VOICE_EVENT_REQUEST")
 
+    def test_event_lookup_logs_elapsed_ms_without_the_event_id(self):
+        """T10: resolve_voice_event is called up to 3 times per HMI voice
+        query (route handler, AudioCoordinator.subscribe, and again inside
+        its worker before generation) -- each call's own network elapsed
+        time must be individually visible."""
+        event_id = str(uuid.uuid4())
+        owner_id = str(uuid.uuid4())
+        response = Mock(status_code=200)
+        response.iter_content.return_value = [
+            b'{"id":"' + event_id.encode() + b'","ownerId":"' + owner_id.encode() + b'","text":"answer","question":"q","timestamp":"2026-09-17T12:00:00Z","expiresAt":9999999999}'
+        ]
+        http = Mock()
+        http.get.return_value = response
+
+        with self.assertLogs(service._logger, level="WARNING") as observed:
+            service.resolve_voice_event(event_id, "test-capability", http=http)
+
+        lines = [line for line in observed.output if "Prisma voice event resolve" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("elapsed_ms=", lines[0])
+        self.assertNotIn(event_id, lines[0])
+
+    def test_event_lookup_logs_elapsed_ms_even_on_failure(self):
+        http = Mock()
+        http.get.side_effect = RuntimeError("boom")
+        with self.assertLogs(service._logger, level="WARNING") as observed:
+            with self.assertRaises(RuntimeError):
+                service.resolve_voice_event(str(uuid.uuid4()), "cap", http=http)
+        self.assertTrue(any("Prisma voice event resolve" in line for line in observed.output))
+
     def test_event_lookup_is_fixed_proxy_disabled_bounded_and_no_redirect(self):
         event_id = str(uuid.uuid4())
         response = Mock(status_code=200)
@@ -277,6 +307,14 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertEqual(live.status_code, 400)
         self.assertEqual(live.get_json(), {"ok": False, "error": "INVALID_VOICE_EVENT_REQUEST"})
         get_client.assert_not_called()
+
+    def test_job_creation_logs_elapsed_ms(self):
+        with self.assertLogs(service._logger, level="WARNING") as observed:
+            service._create_interactions_tts_job("Some transcript")
+        lines = [line for line in observed.output if "Prisma TTS job create" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("elapsed_ms=", lines[0])
+        self.assertNotIn("Some transcript", lines[0])
 
     def test_tts_request_uses_streaming_interactions_contract(self):
         stream = FakeStream([])

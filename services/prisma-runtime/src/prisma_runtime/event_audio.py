@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import copy
 import inspect
+import logging
 import queue
 import threading
 import time
 from collections import OrderedDict, deque
+
+
+# T10: same no-`logging.basicConfig`-anywhere convention as voice_service.py
+# and the other T5 timing lines -- WARNING is the lowest level Python's
+# handler of last resort surfaces to stderr. Only elapsed milliseconds are
+# ever logged here, never an event id, owner id, question, or answer text.
+_logger = logging.getLogger(__name__)
 
 
 class AudioCoordinatorError(RuntimeError):
@@ -260,10 +268,15 @@ class AudioCoordinator:
     def subscribe(self, event, config):
         if self.event_validator is not None:
             validation_event = copy.deepcopy(event)
+            validate_start = self.clock()
             try:
                 self.event_validator(validation_event)
             finally:
                 validation_event.pop("_capability", None)
+                _logger.warning(
+                    "AudioCoordinator subscribe: validate_elapsed_ms=%d",
+                    round((self.clock() - validate_start) * 1000),
+                )
         event_id = event["id"]
         owner_id = event.get("ownerId")
         state_key = (owner_id, event_id) if owner_id is not None else event_id
@@ -327,7 +340,14 @@ class AudioCoordinator:
             self.total_subscribers += 1
 
         try:
-            self.resolve_credential()
+            credential_gate_start = self.clock()
+            try:
+                self.resolve_credential()
+            finally:
+                _logger.warning(
+                    "AudioCoordinator subscribe: credential_gate_elapsed_ms=%d",
+                    round((self.clock() - credential_gate_start) * 1000),
+                )
             with self.lock:
                 if self.closed:
                     raise AudioCapacityError("VOICE_COORDINATOR_CLOSED")
@@ -412,6 +432,10 @@ class AudioCoordinator:
                     state.started_at = self.clock()
                     state.control = GenerationControl()
                     self.active_state = state
+                    _logger.warning(
+                        "AudioCoordinator generate: queue_wait_ms=%d",
+                        round((state.started_at - state.queued_at) * 1000),
+                    )
             if expired:
                 self._fail(state, AudioRetryUnavailable("VOICE_QUEUE_TIMEOUT"))
                 continue
@@ -422,6 +446,7 @@ class AudioCoordinator:
                     validation_event = copy.deepcopy(state.event)
                     if state.capability is not None:
                         validation_event["_capability"] = state.capability
+                validate_start = self.clock()
                 try:
                     if self.event_validator is not None:
                         self.event_validator(validation_event)
@@ -429,10 +454,19 @@ class AudioCoordinator:
                     validation_event.pop("_capability", None)
                     with self.lock:
                         self._clear_authority_locked(state)
+                    _logger.warning(
+                        "AudioCoordinator generate: validate_elapsed_ms=%d",
+                        round((self.clock() - validate_start) * 1000),
+                    )
                 with self.lock:
                     if state.status != "active":
                         continue
+                credential_start = self.clock()
                 secret = self.resolve_credential()
+                _logger.warning(
+                    "AudioCoordinator generate: credential_elapsed_ms=%d",
+                    round((self.clock() - credential_start) * 1000),
+                )
                 generation_event = copy.deepcopy(state.event)
                 generation_event.pop("_capability", None)
                 args = (generation_event, copy.deepcopy(state.config), secret)

@@ -8,6 +8,7 @@ from unittest.mock import Mock
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
+from prisma_runtime import event_audio as event_audio_module
 from prisma_runtime.event_audio import AudioCapacityError, AudioCoordinator, AudioRetryUnavailable
 
 
@@ -562,6 +563,75 @@ class AudioCoordinatorTests(unittest.TestCase):
         self.assertEqual(generated, ["active"])
         release.set()
         self.assertEqual(list(first), [b"ok"])
+
+
+class AudioCoordinatorTimingTests(unittest.TestCase):
+    """T10: the human-reported first-audio gap turned out to be mostly
+    outside Gemini itself (a standalone benchmark measured ~1.3s median
+    Gemini TTFB against 2.3-6.7s observed end to end), so every synchronous
+    step this coordinator performs before generation starts needs its own
+    timing, not just the provider call. Never logs event id, text, or
+    question -- only elapsed milliseconds."""
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.credentials = Mock(return_value="key-one")
+
+    def tearDown(self):
+        if hasattr(self, "coordinator"):
+            self.coordinator.close()
+
+    def test_subscribe_logs_validate_and_credential_gate_elapsed_ms(self):
+        def generate(_event, _config, _secret):
+            yield b"ok"
+
+        self.coordinator = AudioCoordinator(
+            self.credentials, generate, clock=self.clock, wall_clock=self.clock, event_validator=lambda _event: None,
+        )
+        event = {"id": "timing-one", "text": "a", "expiresAt": 200.0}
+
+        with self.assertLogs(event_audio_module._logger, level="WARNING") as observed:
+            self.assertEqual(list(self.coordinator.subscribe(event, {})), [b"ok"])
+
+        validate_lines = [line for line in observed.output if "validate_elapsed_ms" in line]
+        credential_lines = [line for line in observed.output if "credential_gate_elapsed_ms" in line]
+        self.assertGreaterEqual(len(validate_lines), 1)
+        self.assertGreaterEqual(len(credential_lines), 1)
+        self.assertNotIn("timing-one", validate_lines[0])
+        self.assertNotIn("timing-one", credential_lines[0])
+
+    def test_subscribe_logs_validate_elapsed_ms_even_when_validation_raises(self):
+        def raising_validator(_event):
+            raise LookupError("VOICE_EVENT_NOT_FOUND")
+
+        self.coordinator = AudioCoordinator(
+            self.credentials, lambda *_args: iter(()), clock=self.clock, wall_clock=self.clock, event_validator=raising_validator,
+        )
+        event = {"id": "timing-fail", "text": "a", "expiresAt": 200.0}
+
+        with self.assertLogs(event_audio_module._logger, level="WARNING") as observed:
+            with self.assertRaises(LookupError):
+                self.coordinator.subscribe(event, {})
+
+        self.assertTrue(any("validate_elapsed_ms" in line for line in observed.output))
+
+    def test_generation_start_logs_queue_wait_validate_and_credential_elapsed_ms(self):
+        def generate(_event, _config, _secret):
+            yield b"ok"
+
+        self.coordinator = AudioCoordinator(
+            self.credentials, generate, clock=self.clock, wall_clock=self.clock, event_validator=lambda _event: None,
+        )
+        event = {"id": "timing-two", "text": "a", "expiresAt": 200.0}
+
+        with self.assertLogs(event_audio_module._logger, level="WARNING") as observed:
+            self.assertEqual(list(self.coordinator.subscribe(event, {})), [b"ok"])
+
+        self.assertTrue(any("queue_wait_ms" in line for line in observed.output))
+        generate_validate = [line for line in observed.output if "AudioCoordinator generate" in line and "validate_elapsed_ms" in line]
+        generate_credential = [line for line in observed.output if "credential_elapsed_ms" in line]
+        self.assertGreaterEqual(len(generate_validate), 1)
+        self.assertGreaterEqual(len(generate_credential), 1)
 
 
 if __name__ == "__main__":
