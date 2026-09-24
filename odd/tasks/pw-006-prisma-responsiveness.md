@@ -1320,6 +1320,63 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   **Next step (user, live check):** ask Prisma a voice question and confirm all three motions now
   read as one smooth interpolation end to end: appearing (fade in from nothing), growing when speech
   starts (no snap), and fading out at the end (opacity and size easing together, not size-then-fade).
+- [x] **T19 — Launcher progress indicator (user request).** Between "Stopped previous Prisma
+  runtime..." and "Prisma voice is ready..." the terminal showed nothing for several seconds
+  although real work was happening (mostly `Wait-VoiceReady`'s health-poll loop; the same gap exists
+  between "Prisma voice is ready..." and "Prisma is ready..." via `Wait-PresentationReady`). Route:
+  direct inline (one new small library file + a two-line wiring change in an already-understood
+  script, no unresolved design work).
+  **Where the wait happens:** `hmi-app/scripts/dev.mjs`'s `runScript` spawns `start-local.ps1` with
+  `stdio: 'inherit'`, so the PowerShell process's own console output IS the real terminal directly --
+  Node never sees it as data to relay or interleave with. The fix therefore belongs in
+  `start-local.ps1` itself (the process that actually owns the terminal during the silent gap), not
+  in `dev.mjs`, which has no visibility into PowerShell's internal progress and could not safely
+  interleave a second writer on the same terminal anyway.
+  **Implementation** (commit `<pending>`):
+  - New `services/prisma-runtime/operations/console-progress.ps1`, dot-sourced from `start-local.ps1`
+    next to its existing `runtime-environment.ps1`/`process-ownership.ps1` libraries (same
+    convention: functions only, no top-level execution, so it dot-sources cleanly in isolation for
+    tests). `$script:prismaConsoleIsInteractive = -not [Console]::IsOutputRedirected` (the standard
+    .NET TTY check) computed once. `Start-PrismaWaitIndicator -Label` prints one plain line
+    ("Starting Prisma voice...") and nothing more when output is NOT a TTY (a redirected/piped stream
+    has no cursor to move -- a `\r`-based spinner would just leave literal `\r` bytes and duplicate
+    text). `Update-PrismaWaitIndicator -Label -FrameIndex` overwrites a single line in place with
+    animated dots (`.`/`..`/`...`, cycling by attempt index) via `\r` + pad, only when interactive.
+    `Clear-PrismaWaitIndicator` restores that line to blank, only when interactive.
+  - `start-local.ps1`'s `Wait-VoiceReady`/`Wait-PresentationReady` each start the indicator before
+    their loop, tick it once per attempt (in step with the loop's existing 1-second `Start-Sleep`, no
+    new timing complexity), and clear it in a `finally` block wrapping the whole loop -- so cleanup
+    happens whether the wait succeeds, times out, or is interrupted by cancellation. Labels:
+    "Starting Prisma voice" (mirroring "Prisma voice is ready..."), "Starting Prisma" (mirroring
+    "Prisma is ready...").
+  - Never touches the structured JSON receipt (`Save-PrismaDevelopmentReceipt`) or any existing
+    `Write-Host`/`Write-Warning` line's text -- the indicator only ever writes to the same line it
+    started on and always clears before returning, so the next real line prints clean.
+  **TDD.** RED confirmed by stashing only `start-local.ps1`'s wiring and the new
+  `console-progress.ps1` file, then running the 3 new tests against the pre-fix script: the static
+  wiring check failed (no `console-progress.ps1` reference in the source) and both functional tests
+  failed with `CommandNotFoundException` (the dot-sourced file did not exist yet) -- exactly the
+  expected reasons. New tests in `services/prisma-runtime/tests/test_runtime_safety.py`
+  (`RuntimeOwnershipTests`): one static-source check that both `Wait-VoiceReady`/`Wait-PresentationReady`
+  call `Start-PrismaWaitIndicator`/`Update-PrismaWaitIndicator` with the right label and clear the
+  indicator inside a `finally` block; one functional test dot-sourcing `console-progress.ps1` in
+  isolation and asserting the non-TTY path prints the label exactly once with **no** `\r` anywhere in
+  raw output (captured as raw bytes, not Python's `text=True` mode, which silently normalizes every
+  lone `\r` to `\n` and would have hidden the exact behavior under test); one functional test forcing
+  `$script:prismaConsoleIsInteractive = $true` (a test runner's own captured stdout is never a real
+  TTY, so this is the only way to exercise that branch) and asserting the three ticks each overwrite
+  the same line, the very first byte is a bare `\r` (proving `Start-PrismaWaitIndicator` writes
+  nothing under an interactive console), and the final segment after `Clear-PrismaWaitIndicator` is
+  blank right before the next real output line. The real launcher was never started (forbidden by
+  this writer's brief) -- both existing files this task named (`hmi-app/scripts/dev.test.ts`,
+  untouched since `dev.mjs` itself did not change; `test_runtime_safety.py`, extended above) still
+  pass.
+  **Checks:** `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
+  services\prisma-runtime -p "test_*.py"` -> 1515 passed (was 1512; +3 new). `cd hmi-app && npx
+  vitest run scripts/dev.test.ts` -> 23 passed (unaffected, `dev.mjs` untouched).
+  **Next step (user, live check):** run the dev launcher from a real interactive terminal and confirm
+  an animated "Starting Prisma voice..." line fills the previously silent gap, then disappears
+  cleanly right as "Prisma voice is ready..." prints (and again for "Prisma is ready...").
 
 ## Progress
 

@@ -29,6 +29,7 @@ $env:TELEGRAM_BOT_TOKEN = if ($env:PRISMA_LOCAL_TELEGRAM_ENABLED -eq '1') { $tel
 $env:PYTHONPATH = "$runtimeRoot\src" + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { '' })
 
 . (Join-Path $PSScriptRoot 'process-ownership.ps1')
+. (Join-Path $PSScriptRoot 'console-progress.ps1')
 
 function Test-PrismaDevelopmentCancellation {
     if ([string]::IsNullOrWhiteSpace($DevelopmentCancellationPath)) { return $false }
@@ -56,32 +57,48 @@ function New-ProcessRecord {
 
 function Wait-VoiceReady {
     param([System.Diagnostics.Process]$Process)
-    for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        if (Test-PrismaDevelopmentCancellation) { return $false }
-        Start-Sleep -Seconds 1
-        try {
-            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5056/health' -TimeoutSec 2
-            if ($health.ok -eq $true -and $health.ready -eq $true -and $health.service -eq 'prisma-voice' -and $health.mode -eq 'local') { return $true }
-        } catch {
-            if ($Process.HasExited) { return $false }
+    $label = 'Starting Prisma voice'
+    Start-PrismaWaitIndicator -Label $label
+    try {
+        for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            if (Test-PrismaDevelopmentCancellation) { return $false }
+            Update-PrismaWaitIndicator -Label $label -FrameIndex $attempt
+            Start-Sleep -Seconds 1
+            try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5056/health' -TimeoutSec 2
+                if ($health.ok -eq $true -and $health.ready -eq $true -and $health.service -eq 'prisma-voice' -and $health.mode -eq 'local') { return $true }
+            } catch {
+                if ($Process.HasExited) { return $false }
+            }
         }
+        return $false
     }
-    return $false
+    finally {
+        Clear-PrismaWaitIndicator
+    }
 }
 
 function Wait-PresentationReady {
     param([System.Diagnostics.Process]$Process)
-    for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        if (Test-PrismaDevelopmentCancellation) { return $false }
-        Start-Sleep -Seconds 1
-        try {
-            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5057/health' -TimeoutSec 2
-            if ($health.ok -eq $true -and $health.ready -eq $true -and $health.service -eq 'prisma-local-presentation' -and $health.mode -eq 'local' -and $health.prismaVoiceReady -eq $true) { return $true }
-        } catch {
-            if ($Process.HasExited) { return $false }
+    $label = 'Starting Prisma'
+    Start-PrismaWaitIndicator -Label $label
+    try {
+        for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            if (Test-PrismaDevelopmentCancellation) { return $false }
+            Update-PrismaWaitIndicator -Label $label -FrameIndex $attempt
+            Start-Sleep -Seconds 1
+            try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5057/health' -TimeoutSec 2
+                if ($health.ok -eq $true -and $health.ready -eq $true -and $health.service -eq 'prisma-local-presentation' -and $health.mode -eq 'local' -and $health.prismaVoiceReady -eq $true) { return $true }
+            } catch {
+                if ($Process.HasExited) { return $false }
+            }
         }
+        return $false
     }
-    return $false
+    finally {
+        Clear-PrismaWaitIndicator
+    }
 }
 
 function Stop-PrismaLaunchedProcess {

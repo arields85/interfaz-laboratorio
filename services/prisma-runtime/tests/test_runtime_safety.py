@@ -1012,6 +1012,93 @@ try {{
         self.assertRegex(result.stdout, r"stopped=\d+")
         self.assertIn("receipt=False", result.stdout)
 
+    def test_start_local_wires_the_progress_indicator_around_both_health_waits(self) -> None:
+        """T19 (user request): a progress indicator must cover the silent gap
+        while Prisma starts. Structural check (the functional cases below
+        exercise the indicator's own behavior in isolation): both health-wait
+        loops start/tick/clear the indicator, and clearing happens in a
+        `finally` block so it runs whether the wait succeeds, times out, or
+        is cancelled."""
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("console-progress.ps1", source)
+        for function_name, label in (("Wait-VoiceReady", "Starting Prisma voice"), ("Wait-PresentationReady", "Starting Prisma")):
+            start = source.index(f"function {function_name} {{")
+            end = source.index("\n}", start)
+            body = source[start:end]
+            self.assertIn(f"Start-PrismaWaitIndicator -Label $label", body)
+            self.assertIn(f"'{label}'", body)
+            self.assertIn("Update-PrismaWaitIndicator -Label $label -FrameIndex $attempt", body)
+            finally_index = body.index("finally {")
+            self.assertIn("Clear-PrismaWaitIndicator", body[finally_index:])
+
+    def test_wait_indicator_prints_one_plain_line_when_output_is_not_a_tty(self) -> None:
+        """T19: a redirected/piped stdout (this test's own subprocess capture,
+        matching an unattended CI run) has no cursor to move, so the
+        indicator must print the label exactly once and never touch the
+        line again -- no carriage-return-driven overwrite, no duplicate
+        lines from repeated ticks."""
+        helper = OPERATIONS_ROOT / "console-progress.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+Start-PrismaWaitIndicator -Label 'Starting Prisma voice'
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 0
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 1
+Clear-PrismaWaitIndicator
+Write-Output 'Prisma voice is ready at http://127.0.0.1:5056.'
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(result.stdout.__contains__("\r"), result.stdout)
+        self.assertEqual(result.stdout.count("Starting Prisma voice"), 1, result.stdout)
+        self.assertIn("Starting Prisma voice...", result.stdout)
+        self.assertIn("Prisma voice is ready at http://127.0.0.1:5056.", result.stdout)
+
+    def test_wait_indicator_overwrites_a_single_line_and_clears_it_when_the_console_is_interactive(self) -> None:
+        """T19: on a real interactive console the indicator must animate in
+        place (carriage-return overwrites, no scrolling spam) and leave the
+        line blank once cleared, so the next real output line starts clean.
+        `$script:prismaConsoleIsInteractive` is forced true here because a
+        test runner's own captured stdout is never a real TTY."""
+        helper = OPERATIONS_ROOT / "console-progress.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$script:prismaConsoleIsInteractive = $true
+Start-PrismaWaitIndicator -Label 'Starting Prisma voice'
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 0
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 1
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 2
+Clear-PrismaWaitIndicator
+Write-Output '###END###'
+"""
+        # Raw bytes, not `self.run_powershell`'s text mode: Python's
+        # universal-newline translation silently turns every lone `\r` into
+        # `\n`, which would hide the exact overwrite behavior this test
+        # exists to prove.
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        raw = subprocess.run(
+            [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=False, check=False,
+        )
+        stdout = raw.stdout.decode("utf-8", errors="replace")
+        self.assertEqual(raw.returncode, 0, raw.stderr)
+        segments = stdout.split("\r")
+        # Interactive mode never prints the plain "once" line from
+        # Start-PrismaWaitIndicator -- the string before the very first
+        # carriage return is empty, confirming Start-PrismaWaitIndicator
+        # wrote nothing at all under an interactive console.
+        self.assertEqual(segments[0], "")
+        self.assertIn("Starting Prisma voice.", segments[1])
+        self.assertIn("Starting Prisma voice..", segments[2])
+        self.assertIn("Starting Prisma voice...", segments[3])
+        # The final overwrite (Clear-PrismaWaitIndicator) leaves the line
+        # blank right before the real "###END###" output.
+        cleared_segment = segments[4]
+        self.assertNotIn("Starting Prisma voice", cleared_segment)
+        self.assertTrue(cleared_segment.split("\n")[0].strip() == "", stdout)
+        self.assertIn("###END###", stdout)
+
 
 class ConcurrentFreshStateSeedingTests(unittest.TestCase):
     """PW-002: seeding the effective configuration happens before the manifest
