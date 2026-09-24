@@ -29,7 +29,10 @@ Root cause is unknown; diagnosis with real measurements comes first.
 - User-facing Spanish always uses formal "usted"; no "presentación" wording.
 - Fixed ports 5056/5057/5173; single Prisma runtime and launcher; no git worktrees.
 - Approved UX decisions:
-  - Confirmation copy: "Está a un paso: confirme y Prisma responderá sus consultas en este chat."
+  - Confirmation copy (revised by the user 2026-09-23, replacing the first approved text): "Confirme
+    para hacerle preguntas a Prisma desde aquí; le responderá en pantalla y con voz." Rationale:
+    Channel A makes the phone a remote input for the HMI session (answers shown and spoken on the
+    HMI, `PRISMA_DOCUMENTO_MAESTRO.md` §6.2), not a Telegram answer channel.
   - Keep/unlink buttons: evaluate pinning the message (`pinChatMessage`) and a persistent reply
     keyboard with "Desvincular"; show both options to the user before implementing.
   - Telegram "typing…" chat action (`sendChatAction`) while preparing an answer.
@@ -84,6 +87,9 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   so it needed no change. RED confirmed (old copy did not contain the new sentence). Full suite:
   `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
   -p "test_*.py"` → 1353 passed. Commit: `fix(prisma): clarify Channel A pairing confirmation copy`.
+  Revision (2026-09-23, user): sentence replaced with "Confirme para hacerle preguntas a Prisma desde
+  aquí; le responderá en pantalla y con voz." (route: inline, one mechanical file + its test). RED
+  observed on the updated copy test, then GREEN; full suite 1402 passed.
 - [x] **T3 — Keep/unlink buttons reachable.** Decided by the user (2026-09-23): persistent reply
   keyboard (`is_persistent`) with a "Desvincular" button, always visible under the input. Tapping it
   sends "Desvincular" as a user message; Prisma answers asking for confirmation with an inline
@@ -435,7 +441,14 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     voice-orb path that cannot be verified end-to-end by this writer. Recommended next step: a
     follow-up pass that runs with the launcher available, implements the SSE endpoint + listener with
     the same TDD rigor as units 1-4, and does one live proxy check before calling it done.
-- [ ] **T11 — Near-instant voice, part 2 (research done; benchmark awaits user authorization).**
+- [ ] **T11 — Near-instant voice, part 2.** Benchmark authorized and run (2026-09-23; results in
+  Engram `odd/pw-006-prisma-responsiveness/t11-benchmark`): Gemini TTFB for the current call 1.31 s
+  median vs 2.3–6.7 s in the runtime; `gemini-3.8-flash-lite-tts` + `generate_content_stream`
+  0.61 s. **User decision (2026-09-23): adopt `gemini-3.8-flash-lite-tts`** — the user listened to
+  the raw samples and prefers its voice (Leda) over the current one. Pending implementation: switch
+  model and call style (`generate_content_stream`), move style out of the inline transcript prompt,
+  keep verification model in sync (`GEMINI_VERIFY_MODEL`), re-check DSP on the new audio.
+  Original research notes:
   Research (2026-09-23, sources in the session report): community reports that
   `gemini-3.1-flash-tts-preview` via `interactions.create(stream=True)` is much slower than
   `generate_content_stream` and delivers audio in a burst

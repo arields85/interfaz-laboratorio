@@ -998,7 +998,7 @@ class ChannelAClaimTests(ChannelABotTestCase):
         """T2: the explanatory sentence must be exactly the approved copy,
         never mentioning "documento" (AGENTS.md forbids "presentación")."""
         self.assertIn(
-            "Está a un paso: confirme y Prisma responderá sus consultas en este chat.",
+            "Confirme para hacerle preguntas a Prisma desde aquí; le responderá en pantalla y con voz.",
             CONFIRMATION_PROMPT_TEMPLATE,
         )
         self.assertNotIn("documento", CONFIRMATION_PROMPT_TEMPLATE)
