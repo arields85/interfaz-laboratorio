@@ -320,6 +320,16 @@ end together with PW-006; NO push.
   assertion); `git stash pop` restored the fix → GREEN, then the centering-contract test's now-stale
   `justify-items-center` assertion was found and updated too.
   Verification: `npm test` 215 files / 2393 tests passed; `npx tsc -b` clean; `npm run lint` clean.
+- [x] **T5d — Captions truncate like widget titles (user decision 2026-09-24).** The second T5c fix
+  removed the overlap but broke the word as "comparaci / ón" in ~60 px columns. The user asked the
+  captions to behave like widget titles (`WidgetHeader.tsx:153`, `min-w-0 flex-1 truncate`): one line
+  ending in "…" when it does not fit ("sin comp…"). `ComparisonRow` captions now use
+  `w-full min-w-0 truncate` (removed `break-words`, `hyphens-auto`, `lang="es"`); the grid keeps
+  `justify-items-stretch` so the ellipsis has a bounded width. On wide screens "sin comparación" now
+  shows on one line instead of two. Route: inline (one mechanical component file + its test).
+  RED observed on the updated regression test, then GREEN (150/150); `tsc -b` and eslint clean.
+  Visual check on the T5c reproduction (132 px comparison column, headless Chrome): "sin comp…" in
+  both columns, no overlap.
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
   2560×1440 CSS px; calibrate `k`.
 

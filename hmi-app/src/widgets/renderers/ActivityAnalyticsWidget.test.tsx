@@ -7865,10 +7865,10 @@ describe('ActivityAnalyticsWidget', () => {
         // to take its track's actual resolved width; `min-w-0` on the row and
         // `w-full` on the caption then let the caption's own box shrink to
         // that width instead of reverting to the row's shrink-to-fit
-        // max-content size. `break-words` remains a hard fallback and
-        // `hyphens-auto` (with `lang="es"`) prefers a syllable break
-        // ("compara-ción") over an arbitrary mid-word one when a single word
-        // still doesn't fit.
+        // max-content size. T5d (user decision): captions behave like widget
+        // titles (`WidgetHeader` uses `min-w-0 truncate`) — a single line that
+        // ends in an ellipsis ("sin comp…") when it does not fit, instead of
+        // breaking words across lines.
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -7917,9 +7917,10 @@ describe('ActivityAnalyticsWidget', () => {
         expect(percentValues.length + metricValues.length).toBeGreaterThan(0);
         [...percentValues, ...metricValues].forEach((node) => {
             expect(node).toHaveClass('w-full');
-            expect(node).toHaveClass('break-words');
-            expect(node).toHaveClass('hyphens-auto');
-            expect(node).toHaveAttribute('lang', 'es');
+            expect(node).toHaveClass('min-w-0');
+            expect(node).toHaveClass('truncate');
+            expect(node).not.toHaveClass('break-words');
+            expect(node).not.toHaveClass('hyphens-auto');
         });
     });
 
