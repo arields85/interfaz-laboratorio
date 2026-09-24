@@ -10,16 +10,25 @@ interface VoiceEventListenerOptions {
     onEvent: (event: VoiceEvent) => void;
     intervalMs?: number;
     fetchImpl?: typeof fetch;
-    /** T13 unit (c) / T10 unit 5: push voice events (SSE) instead of
-     * polling every intervalMs. Attempted only in real production usage
-     * (fetchImpl === undefined, matching every existing test/injected-
-     * transport seam in this module) and only when a native EventSource
-     * is available; falls back to the polling loop above on any error,
-     * on stream end, or when unsupported. */
+    /** T13 unit (c) / T10 unit 5, revised by T13b: push voice events (SSE)
+     * instead of polling every intervalMs. Attempted only in real
+     * production usage (fetchImpl === undefined, matching every existing
+     * test/injected-transport seam in this module). Read with a
+     * fetch-based reader through prismaSessionClient.fetch -- the same
+     * transport polling uses -- so the session capability travels in the
+     * ordinary request header, never in the stream URL (T13b's blocking
+     * finding: a native EventSource cannot set custom headers, so an
+     * earlier revision put the capability in `?capability=`, which
+     * Werkzeug's dev server then logged to disk). Falls back to the
+     * polling loop above on any connection/stream error, on an
+     * unsupported/non-streaming response, or when the stream ends. */
     streamUrl?: string | null;
-    /** Test seam for the SSE path, mirroring fetchImpl's role for polling. */
-    eventSourceImpl?: typeof EventSource;
 }
+
+/** Guards a single unterminated SSE frame from growing forever if the
+ * server (or a proxy) never sends the closing blank line. Well above any
+ * real voice-event payload. */
+const MAX_SSE_BUFFERED_CHARS = 64 * 1024;
 
 let activeVoiceEventListener: { stop: () => void } | null = null;
 
@@ -29,7 +38,6 @@ export function startVoiceEventListener({
     intervalMs = DEFAULT_VOICE_POLL_INTERVAL_MS,
     fetchImpl,
     streamUrl = null,
-    eventSourceImpl,
 }: VoiceEventListenerOptions): () => void {
     activeVoiceEventListener?.stop();
 
@@ -108,30 +116,71 @@ export function startVoiceEventListener({
         void poll();
     };
 
-    const startSse = async () => {
-        let capability: string;
+    const handleSseFrame = (frame: string) => {
+        const data = extractSseFrameData(frame);
+        if (data === null) {
+            return;
+        }
 
+        let payload: unknown;
         try {
-            capability = await prismaSessionClient.capability();
+            payload = JSON.parse(data);
         } catch {
-            startPolling();
+            return;
+        }
+
+        const event = normalizeVoiceEvent(payload);
+        if (!event) {
+            return;
+        }
+
+        const eventKey = getVoiceEventDedupeKey(event);
+        if (eventKey === lastProcessedKey) {
+            return;
+        }
+
+        lastProcessedKey = eventKey;
+        if (!prismaSessionClient.acceptVoiceEvent(eventKey)) {
+            return;
+        }
+        onEvent(event);
+    };
+
+    const startSse = async () => {
+        if (stopped || usingPolling || !streamUrl) {
+            return;
+        }
+
+        let response: Response;
+        try {
+            response = await prismaSessionClient.fetch(streamUrl, {
+                method: 'GET',
+                headers: { Accept: 'text/event-stream' },
+            });
+        } catch {
+            if (!stopped && !usingPolling) {
+                startPolling();
+            }
             return;
         }
 
         if (stopped || usingPolling) {
+            void response.body?.cancel().catch(() => undefined);
             return;
         }
 
-        const EventSourceCtor = eventSourceImpl
-            ?? (typeof EventSource === 'function' ? EventSource : undefined);
-        if (!EventSourceCtor || !streamUrl) {
+        if (
+            !response.ok
+            || response.body === null
+            || typeof response.body.getReader !== 'function'
+            || !prismaSessionClient.isCurrentResponse(response)
+        ) {
+            void response.body?.cancel().catch(() => undefined);
             startPolling();
             return;
         }
 
-        const source = new EventSourceCtor(
-            `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}capability=${encodeURIComponent(capability)}`,
-        );
+        const reader = response.body.getReader();
         let closed = false;
         const stopSse = () => {
             if (closed) {
@@ -139,51 +188,52 @@ export function startVoiceEventListener({
             }
 
             closed = true;
-            source.close();
+            void reader.cancel().catch(() => undefined);
         };
-
-        if (stopped || usingPolling) {
-            stopSse();
-            return;
-        }
-
         activeSse = { stop: stopSse };
 
-        source.onmessage = (message: MessageEvent<string>) => {
-            if (stopped || closed) {
-                return;
-            }
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-            let payload: unknown;
-            try {
-                payload = JSON.parse(message.data);
-            } catch {
-                return;
-            }
+        try {
+            while (!closed) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    break;
+                }
 
-            const event = normalizeVoiceEvent(payload);
-            if (!event) {
-                return;
-            }
+                buffer += decoder.decode(value, { stream: true });
+                if (buffer.length > MAX_SSE_BUFFERED_CHARS) {
+                    // An unterminated frame this large is not a well-formed
+                    // SSE stream; drop it rather than buffering forever.
+                    buffer = '';
+                }
 
-            const eventKey = getVoiceEventDedupeKey(event);
-            if (eventKey === lastProcessedKey) {
-                return;
+                let boundary = buffer.indexOf('\n\n');
+                while (boundary !== -1) {
+                    handleSseFrame(buffer.slice(0, boundary));
+                    buffer = buffer.slice(boundary + 2);
+                    boundary = buffer.indexOf('\n\n');
+                }
             }
+        } catch {
+            // A read rejected (network error mid-stream); fall through to
+            // the same fallback the natural stream end takes below.
+        } finally {
+            closed = true;
+        }
 
-            lastProcessedKey = eventKey;
-            if (!prismaSessionClient.acceptVoiceEvent(eventKey)) {
-                return;
-            }
-            onEvent(event);
-        };
+        if (activeSse?.stop === stopSse) {
+            activeSse = null;
+        }
 
-        source.onerror = () => {
-            stopSse();
-            if (!stopped) {
-                startPolling();
-            }
-        };
+        // Reaching here means the stream ended -- naturally (`done`) or via
+        // a rejected read -- without this listener having been stopped or
+        // already switched to polling by another path. Either way, fall
+        // back to polling.
+        if (!stopped && !usingPolling) {
+            startPolling();
+        }
     };
 
     const owner = { stop: () => undefined as void };
@@ -213,8 +263,7 @@ export function startVoiceEventListener({
 
     const canAttemptSse = fetchImpl === undefined
         && !!streamUrl
-        && streamUrl.trim() !== ''
-        && (eventSourceImpl !== undefined || typeof EventSource === 'function');
+        && streamUrl.trim() !== '';
 
     if (canAttemptSse) {
         void startSse();
@@ -223,6 +272,32 @@ export function startVoiceEventListener({
     }
 
     return stop;
+}
+
+/**
+ * Extracts the `data:` payload of one SSE frame (the text between two
+ * consecutive `\n\n` separators, decoded and reassembled from the stream
+ * before this is called). Returns null for a frame that carries no `data:`
+ * line at all -- a comment/heartbeat (`: keep-alive`) or a blank frame --
+ * so the caller can skip it without attempting to parse anything. Multiple
+ * `data:` lines in one frame are joined with `\n`, per the SSE spec; this
+ * server only ever sends a single line, but the join is forward-compatible.
+ * Other SSE fields (`event:`, `id:`, `retry:`) are not produced by this
+ * server and are ignored here rather than rejected.
+ */
+function extractSseFrameData(frame: string): string | null {
+    const dataLines: string[] = [];
+    for (const rawLine of frame.split('\n')) {
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+        if (line === '' || line.startsWith(':')) {
+            continue;
+        }
+        if (line.startsWith('data:')) {
+            const value = line.slice('data:'.length);
+            dataLines.push(value.startsWith(' ') ? value.slice(1) : value);
+        }
+    }
+    return dataLines.length === 0 ? null : dataLines.join('\n');
 }
 
 function normalizeVoiceEvent(value: unknown): VoiceEvent | null {

@@ -1,6 +1,7 @@
 import {
     PRISMA_ASK_URL,
     PRISMA_CHANNEL_A_PAIRING_URL,
+    PRISMA_EVENTS_STREAM_URL,
     PRISMA_EVENTS_URL,
     PRISMA_SESSION_URL,
     PRISMA_SNAPSHOT_URL,
@@ -14,6 +15,10 @@ const AUTHORIZED_PATHS = new Set([
     PRISMA_SESSION_URL,
     PRISMA_SNAPSHOT_URL,
     PRISMA_EVENTS_URL,
+    // T13b: the voice-events SSE stream now authorizes through this same
+    // header-based fetch path, like every other route -- no more capability
+    // in the URL (see voiceEventListener.service.ts).
+    PRISMA_EVENTS_STREAM_URL,
     PRISMA_ASK_URL,
     PRISMA_TTS_LIVE_URL,
     PRISMA_CHANNEL_A_PAIRING_URL,
@@ -161,24 +166,6 @@ export class PrismaSessionClient {
         });
         this.#bootstrap = operation;
         return operation;
-    }
-
-    /**
-     * T13 unit (c): a native browser EventSource cannot set a custom
-     * header, so the voice-events SSE listener needs the raw capability
-     * string to embed as a `?capability=` query parameter on its own
-     * connection URL -- bootstrap the session the same way fetch() does,
-     * but return the capability itself instead of issuing a request.
-     */
-    async capability(signal?: AbortSignal): Promise<string> {
-        const requestEpoch = this.#epoch;
-        throwIfAborted(signal);
-        await this.#waitForBootstrap(signal);
-        throwIfAborted(signal);
-        if (requestEpoch !== this.#epoch) throw new PrismaStaleSessionResponse();
-        const capability = this.#capability;
-        if (capability === null) throw new PrismaStaleSessionResponse();
-        return capability;
     }
 
     async fetch(path: string, init: RequestInit = {}): Promise<Response> {

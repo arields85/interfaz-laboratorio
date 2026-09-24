@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
-import { PRISMA_CHANNEL_A_PAIRING_URL } from '../config/prismaAssistant.config';
+import { PRISMA_CHANNEL_A_PAIRING_URL, PRISMA_EVENTS_STREAM_URL } from '../config/prismaAssistant.config';
 
 const external = vi.hoisted(() => {
     const refused: string[] = [];
@@ -152,36 +152,6 @@ describe('PrismaSessionClient', () => {
         expect(JSON.stringify(client)).not.toContain(capability);
     });
 
-    it('T13 unit (c): capability() bootstraps and returns the raw capability for a native EventSource URL', async () => {
-        const capability = canonicalCapability();
-        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(sessionResponse(capability));
-        const client = new PrismaSessionClient(fetchMock);
-
-        const returned = await client.capability();
-
-        expect(returned).toBe(capability);
-        expect(fetchMock).toHaveBeenCalledOnce();
-    });
-
-    it('T13 unit (c): capability() rejects when bootstrap fails', async () => {
-        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 500 }));
-        const client = new PrismaSessionClient(fetchMock);
-
-        await expect(client.capability()).rejects.toThrow();
-    });
-
-    it('T13 unit (c): capability() rejects a stale caller after a reset mid-bootstrap', async () => {
-        const request = deferred<Response>();
-        const fetchMock = vi.fn<typeof fetch>().mockReturnValue(request.promise);
-        const client = new PrismaSessionClient(fetchMock);
-
-        const pending = client.capability();
-        client.reset({ close: false });
-        request.resolve(sessionResponse());
-
-        await expect(pending).rejects.toBeInstanceOf(PrismaStaleSessionResponse);
-    });
-
     it('rejects non-Prisma and absolute URLs before bootstrapping', async () => {
         const fetchMock = vi.fn<typeof fetch>();
         const client = new PrismaSessionClient(fetchMock);
@@ -203,6 +173,20 @@ describe('PrismaSessionClient', () => {
         const [, request] = fetchMock.mock.calls[1];
         expect(new Headers(request?.headers).get('X-Prisma-Session-Capability')).toBe(canonicalCapability());
         expect(request?.redirect).toBe('error');
+    });
+
+    it('T13b: authorizes the voice-events stream route and attaches the capability as a header, never as a URL query string', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse())
+            .mockResolvedValueOnce(new Response(null, { status: 200 }));
+        const client = new PrismaSessionClient(fetchMock);
+
+        await client.fetch(PRISMA_EVENTS_STREAM_URL);
+
+        const [path, request] = fetchMock.mock.calls[1];
+        expect(path).toBe(PRISMA_EVENTS_STREAM_URL);
+        expect(String(path)).not.toContain('capability=');
+        expect(new Headers(request?.headers).get('X-Prisma-Session-Capability')).toBe(canonicalCapability());
     });
 
     it('fences a stale completion after reset and never replays the old operation', async () => {

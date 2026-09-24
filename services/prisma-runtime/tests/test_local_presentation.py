@@ -291,19 +291,30 @@ class VoiceEventsStreamTests(unittest.TestCase):
         self.assertEqual(via_header.status_code, 401)
         self.assertEqual(via_query.status_code, 401)
 
-    def test_accepts_a_valid_capability_via_query_for_native_eventsource(self) -> None:
-        """EventSource cannot set custom headers, so this route must also
-        accept ?capability= for a real browser EventSource client."""
+    def test_query_string_capability_no_longer_authorizes(self) -> None:
+        """T13b blocking finding: a real, valid capability travelled in the
+        URL (`?capability=...`) and Werkzeug's dev server logs the full
+        request line, leaking the session capability to
+        prisma-presentation-stderr.log. The HMI now reads this stream with a
+        header-based fetch reader (like every other authorized route), so
+        the query-string fallback is removed entirely -- a valid capability
+        offered ONLY via the query string must no longer authorize."""
         client, _events = self._client()
         headers = session_headers(client)
         capability = headers["X-Prisma-Session-Capability"]
+        response = client.get(f"/hmi/voice/events?capability={capability}")
+        self.assertEqual(response.status_code, 401)
+
+    def test_accepts_a_valid_capability_via_header_only(self) -> None:
+        client, _events = self._client()
+        headers = session_headers(client)
         # Publish first: Werkzeug's test client pulls the stream's first
         # chunk as part of client.get() itself (to conform to WSGI, it
         # eagerly runs the generator up to its first yield before
         # returning), so an already-existing event avoids this test
         # blocking on the route's own keep-alive interval.
         client.post("/local/ask", json={"question": "status"}, headers=headers)
-        response = client.get(f"/hmi/voice/events?capability={capability}")
+        response = client.get("/hmi/voice/events", headers=headers)
         try:
             self.assertEqual(response.status_code, 200)
         finally:

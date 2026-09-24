@@ -1142,18 +1142,21 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     @app.route("/hmi/voice/events", methods=["GET", "OPTIONS"])
     def voice_events_stream():
         """T13 unit (c) / T10 unit 5: push voice events to the HMI instead of
-        the previous 1s polling. Same session-capability authorization as
-        /hmi/voice/latest -- a native browser EventSource cannot set a
-        custom header, so this route also accepts the capability as a
-        `?capability=` query parameter (used only by this one same-origin,
-        dev-proxied, local endpoint; never logged -- this runtime has no
-        logging.basicConfig anywhere -- and never recorded in browser
-        history, since EventSource issues a background request, not a page
-        navigation). The ordinary header-based path stays available and is
-        tried first.
+        the previous 1s polling. Same header-only session-capability
+        authorization as every other HMI route (/hmi/voice/latest, etc.).
+
+        T13b blocking finding: an earlier revision of this route also
+        accepted the capability as a `?capability=` query parameter, because
+        a native browser EventSource cannot set a custom header. Werkzeug's
+        dev server logs the full request line (including the query string)
+        to prisma-presentation-stderr.log, so that fallback leaked the
+        session capability to disk. The frontend now reads this stream with
+        a fetch-based reader that sends the capability in the same header
+        every other request uses, so the query-string fallback is removed
+        entirely -- header-only, like every other route.
         """
         if request.method == "OPTIONS": return Response(status=204)
-        capability = request.headers.get(CAPABILITY_HEADER, "") or request.args.get("capability", "")
+        capability = request.headers.get(CAPABILITY_HEADER, "")
         try:
             owner_id = session_registry.authorize(capability)
         except HmiSessionUnauthorized:
