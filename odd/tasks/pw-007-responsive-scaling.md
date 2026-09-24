@@ -262,39 +262,64 @@ end together with PW-006; NO push.
   best/worst ("MEJOR"/"PEOR") columns, the two "sin comparación" labels run into each other
   ("comparacióncomparación") at the laptop and TV widths; they must wrap or fit within their
   column instead of overlapping. Independent of zoom.
-  Route: direct inline (single already-understood component, 1 file + its test). Root cause
-  (found via `mcp__codegraph__codegraph_explore` + direct read of
-  `hmi-app/src/widgets/renderers/ActivityAnalyticsWidget.tsx`): the "Mejor"/"Peor" comparison
-  columns are CSS Grid items (`grid grid-cols-2` in `ComparisonPanel`) wrapped in a container whose
-  own CSS width can shrink to as little as 132 px total for both columns combined
-  (`COMPARISON_LAYOUT_RULES.externalWidthPx.min`, ≈61 px per column after the gap) — narrower than
-  the unbroken word "comparación" at `--font-size-mono`. Grid items default to `min-width: auto`,
-  which floors a grid item's shrink at its content's min-content width (here, the longest
-  unbreakable word) instead of the track's actual computed width; combined with
-  `justify-items-center`, the overflowing text bleeds symmetrically past both sides of its own
-  column and visually runs into the neighboring column's overflowing text — the "comparacióncomparación"
-  the user saw. This reproduces with any long caption at a narrow-enough column width, not only the
-  fallback label (the productivity-percent slot renders the same fallback text).
-  Fix (`ComparisonRow` in the same file): added `min-w-0` to the row's root class list (lets the
-  grid item actually shrink to its track's computed width instead of overflowing) and `break-words`
-  to both text slots that can render long captions (`activity-analytics-comparison-percent` and
-  `activity-analytics-metric-value`, i.e. the productivity percent and the bucket/fallback label) so
-  a caption that still doesn't fit its column breaks mid-word and wraps onto multiple centered lines
-  instead of overflowing horizontally. Tokens-only change (Tailwind utility classes), no
-  hardcoded px; resolved in the widget's own responsible layer, not a generic wrapper (anti-parches
-  policy).
-  Tests: `hmi-app/src/widgets/renderers/ActivityAnalyticsWidget.test.tsx` (+1 regression test,
-  "keeps each Mejor/Peor caption confined to its own column at narrow widths"): jsdom has no real
-  layout engine so it cannot assert pixel-level overlap directly; the test instead asserts the
-  structural fix — every `activity-analytics-comparison-row` has the `min-w-0` class, and every
-  `activity-analytics-comparison-percent`/`activity-analytics-metric-value` node has `break-words`.
-  RED confirmed against the unmodified component (missing classes), then GREEN after the two class
-  additions; full suite 150/150 passed, no regressions.
-  Visual confirmation: the general-chrome headless screenshots at 1440×900 and 1280×720 (see T5b)
-  show no other layout regression from this change, but this specific widget's actual before/after
-  pixels were not re-screenshotted (same fresh-profile/no-dashboard limitation as T5b) — the user
-  should re-check the "ANÁLISIS DE ACTIVIDAD" widget specifically on next visual pass.
-  Verification: `npm test` 215 files / 2389 tests passed; `npx tsc -b` clean; `npm run lint` clean.
+  **Reopened 2026-09-24 09:42** — the user's live re-check on the laptop (1440×900 CSS,
+  zoom ≈0.82) and TV (1280×720 CSS, zoom ≈0.73) showed commit `a718bfc` (`min-w-0` on the row +
+  `break-words` on the caption slots) did **not** fix the overlap: both the top pair
+  (productivity-percent slot) and the bottom pair (label slot) still rendered
+  "comparacióncomparación". 4K and 1920 continued to wrap correctly ("sin" / "comparación").
+  Corrected root cause (this pass), verified with a faithful standalone reproduction (exact JSX
+  structure, computed Tailwind classes and `--font-mono`/`--font-system` tokens from
+  `hmi-app/src/index.css`, at the real-world resolved `comparisonColumnWidth` for this scenario —
+  132 px total / ≈60 px per column, per `resolveTopRegionComparisonColumnWidth` /
+  `resolveComparisonGridColumnGap` in the widget — rendered with local headless Chrome at 4×
+  device-scale and at 1440×900/1280×720 with the app's own `zoom` mechanism applied to `<html>`):
+  the grid (`grid grid-cols-2 ... justify-items-center` in `ComparisonPanel`) had
+  `justify-items-center`. A non-`stretch` `justify-items`/`justify-self` value makes a grid item's
+  *used* width resolve via its own shrink-to-fit/max-content size instead of being clamped to its
+  `minmax(0, 1fr)` track's resolved size — `min-w-0` only removes the item's automatic
+  *minimum*-width floor, it does not force the item to actually take the track's width when the
+  item isn't stretched. So each `ComparisonRow` kept sizing itself to fit "comparación" unbroken
+  (~90–100 px) and, being centered within its own ≈60 px track, visually overflowed by roughly a
+  third on each side — the two centered, overflowing captions collided in the middle, reading as
+  "comparacióncomparación". Screenshot evidence: BEFORE (unmodified `justify-items-center`) shows
+  the two "comparación" words touching/merging with zero gap at 132 px column width; AFTER
+  (`justify-items-stretch`) shows each caption fully confined to its own column, wrapping "sin" /
+  "comparaci" / "ón" with no overlap, at both the zoomed-in close-up and the 1440×900/1280×720
+  shots. Reproduction files kept under the session scratchpad
+  (`scratchpad/t5c/repro-before.html`, `repro-after.html` + `before-*.png`/`after-*.png`), not
+  committed (scratch, not part of the app).
+  Fix (`ComparisonPanel`/`ComparisonRow` in `ActivityAnalyticsWidget.tsx`): replaced
+  `justify-items-center` with `justify-items-stretch` on the comparison grid so each row actually
+  takes its track's resolved width (the row's own `items-center`/`justify-center`/`text-center` and
+  the panel's `items-center`/`justify-center` still center the row's *content* within that width —
+  the visual "centering contract" is unchanged, only the row's outer box now matches its track
+  instead of overflowing it). Added `w-full` to the two caption slots
+  (`activity-analytics-comparison-percent`, `activity-analytics-metric-value`) so they inherit the
+  row's now-correct width instead of reverting to their own shrink-to-fit sizing. Kept
+  `break-words` as the hard fallback and added `hyphens-auto` + `lang="es"` (the document root is
+  `lang="en"`; hyphenation needs its own explicit language) so a single word that still doesn't fit
+  prefers a syllable break ("compara-ción") over an arbitrary mid-word one, per the task's
+  preference for readable breaks. Caveat: local headless Chrome (swiftshader software rendering)
+  did not render a visible hyphen character in the AFTER screenshot — it broke at a syllable
+  boundary but without inserting "-", suggesting that build's hyphenation-dictionary data may be
+  unavailable; this is a rendering-environment limitation of the verification tool, not something
+  disprovable from here, so the hyphenation *character* itself is unverified (the wrap/containment
+  fix, which is the actual regression, is fully verified). Tokens-only change (Tailwind utility
+  classes), no hardcoded px; resolved in the widget's own responsible layer (anti-parches policy).
+  Tests: `hmi-app/src/widgets/renderers/ActivityAnalyticsWidget.test.tsx` — updated the T5c
+  regression test (jsdom has no layout engine, so it asserts the structural fix, not pixels):
+  `activity-analytics-comparison-grid` has `justify-items-stretch` and not `justify-items-center`;
+  every `activity-analytics-comparison-row` keeps `min-w-0`; every
+  `activity-analytics-comparison-percent`/`activity-analytics-metric-value` node has `w-full`,
+  `break-words`, `hyphens-auto` and `lang="es"`. Also updated the pre-existing "exposes the
+  Mejor/Peor centering layout contract" test, which had locked in `justify-items-center` as part of
+  the centering contract — that assertion changed to `justify-items-stretch` (the rest of the
+  contract, row/panel-level centering classes, is untouched). RED confirmed by stashing only the
+  source fix (`git stash push --keep-index -- ActivityAnalyticsWidget.tsx`) and running the T5c
+  test against the unmodified component (failed as expected on the new `justify-items-stretch`
+  assertion); `git stash pop` restored the fix → GREEN, then the centering-contract test's now-stale
+  `justify-items-center` assertion was found and updated too.
+  Verification: `npm test` 215 files / 2393 tests passed; `npx tsc -b` clean; `npm run lint` clean.
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
   2560×1440 CSS px; calibrate `k`.
 
@@ -343,10 +368,28 @@ end together with PW-006; NO push.
   confirmed against the unmodified component, then GREEN. All checks green: `npm test` 215 files /
   2389 tests, `npx tsc -b` clean, `npm run lint` clean.
 
+- 2026-09-24: T5c reopened and fixed again (route: direct inline). The user's live re-check showed
+  the first T5c fix (`min-w-0` + `break-words`) did not fix the overlap on the laptop/TV. Built a
+  faithful standalone reproduction (exact classes/DOM/tokens, real-world resolved
+  `comparisonColumnWidth` ≈132 px) and confirmed with local headless Chrome screenshots that
+  `justify-items-center` — not the item's min-width floor — was the actual cause: a non-stretched
+  grid item sizes to its own max-content width regardless of its track's resolved size, so each
+  "comparación" caption overflowed its ≈60 px track and the two overflowing, centered captions
+  collided. Fix: `justify-items-stretch` on the grid (clamps each row to its track), `w-full` on
+  the caption slots (so they inherit that width instead of reverting to shrink-to-fit), and
+  `hyphens-auto` + `lang="es"` as a readable fallback for a single word that still doesn't fit.
+  Screenshot BEFORE reproduced the exact "comparacióncomparación" collision; AFTER showed both
+  captions fully confined to their own columns at 132 px, 1440×900 (zoom 0.82) and 1280×720
+  (zoom 0.73). Updated the T5c regression test plus a pre-existing centering-contract test that had
+  locked in `justify-items-center`. TDD: RED confirmed by stashing only the source fix, then GREEN.
+  All checks green: `npm test` 215 files / 2393 tests, `npx tsc -b` clean, `npm run lint` clean.
+
 ## Next step
 
-User re-check needed on both the laptop and the TV: (1) the Activity Analysis widget's "MEJOR"/
-"PEOR" columns no longer overlap ("sin comparación" or any other caption), and (2) the TV
+User re-check needed on both the laptop and the TV — this is T5c's **second** fix attempt after the
+first (`min-w-0` + `break-words` alone) failed the user's live re-check, so please verify directly
+rather than assuming it's fixed: (1) the Activity Analysis widget's "MEJOR"/"PEOR" columns no
+longer overlap ("sin comparación" or any other caption), and (2) the TV
 (1280×720 CSS) no longer truncates/wraps widget titles ("ACTIVIDAD DE MÁQUINA", "PRODUCCIÓN",
 "RENDIMIENTO DIARIO (ÚLTIMOS 7 DÍAS)"). If the 1760 px floor still isn't enough on the real TV,
 increase `MIN_LAYOUT_WIDTH_PX` in `hmi-app/src/utils/viewportScale.ts` — recalibration never

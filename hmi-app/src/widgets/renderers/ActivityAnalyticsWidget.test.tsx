@@ -7779,7 +7779,15 @@ describe('ActivityAnalyticsWidget', () => {
             });
             expect(comparisonPanel.style.height).toBeTruthy();
             expect(comparisonGrid).toHaveClass('w-fit');
-            expect(comparisonGrid).toHaveClass('justify-items-center');
+            // PW-007 T5c (reopened): `justify-items-center` let each
+            // ComparisonRow size to its own max-content width and overflow
+            // into the neighboring column at narrow widths instead of being
+            // clamped to its `minmax(0, 1fr)` track. `justify-items-stretch`
+            // fills the track and keeps the centering contract at the row
+            // level (`items-center`/`justify-center`/`text-center` on
+            // ComparisonPanel and each ComparisonRow, asserted above/below).
+            expect(comparisonGrid).toHaveClass('justify-items-stretch');
+            expect(comparisonGrid).not.toHaveClass('justify-items-center');
             expect(comparisonGrid.style.alignSelf).toBe('center');
             expect(comparisonGrid).not.toHaveAttribute('data-content-center-delta');
             expect(Number.parseFloat(comparisonColumn.getAttribute('data-comparison-column-width-px') ?? '0')).toBeGreaterThan(0);
@@ -7846,14 +7854,21 @@ describe('ActivityAnalyticsWidget', () => {
 
     it('keeps each Mejor/Peor caption confined to its own column at narrow widths (regression, PW-007 T5c)', () => {
         // jsdom has no real layout engine, so this cannot assert pixel overlap
-        // directly. It instead asserts the structural fix: grid items default
-        // to `min-width: auto`, which keeps a row from shrinking below its
-        // longest unbreakable word and lets it overflow into the neighboring
-        // "Mejor"/"Peor" column at narrow widths (observed as "sin
-        // comparación" captions running together, "comparacióncomparación").
-        // `min-w-0` lets the row shrink to its actual grid-track width, and
-        // `break-words` lets a caption that still doesn't fit break mid-word
-        // instead of overflowing horizontally.
+        // directly. It instead asserts the structural fix, verified visually
+        // against a standalone reproduction (see odd/tasks/pw-007-responsive-scaling.md
+        // T5c): `justify-items-center` on the comparison grid let each
+        // ComparisonRow size to its own (unclamped) max-content width and
+        // overflow into the neighboring "Mejor"/"Peor" column at narrow
+        // widths, instead of being clamped to its `minmax(0, 1fr)` track —
+        // observed as "sin comparación" captions running together into
+        // "comparacióncomparación". `justify-items-stretch` forces each row
+        // to take its track's actual resolved width; `min-w-0` on the row and
+        // `w-full` on the caption then let the caption's own box shrink to
+        // that width instead of reverting to the row's shrink-to-fit
+        // max-content size. `break-words` remains a hard fallback and
+        // `hyphens-auto` (with `lang="es"`) prefers a syllable break
+        // ("compara-ción") over an arbitrary mid-word one when a single word
+        // still doesn't fit.
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
             isLoading: false,
@@ -7887,6 +7902,10 @@ describe('ActivityAnalyticsWidget', () => {
             emitActivityAnalyticsLayoutSize({ bodyWidth: 520, bodyHeight: 420 });
         });
 
+        const comparisonGrid = screen.getByTestId('activity-analytics-comparison-grid');
+        expect(comparisonGrid).toHaveClass('justify-items-stretch');
+        expect(comparisonGrid).not.toHaveClass('justify-items-center');
+
         const comparisonRows = screen.getAllByTestId('activity-analytics-comparison-row');
         expect(comparisonRows).toHaveLength(2);
         comparisonRows.forEach((row) => {
@@ -7897,7 +7916,10 @@ describe('ActivityAnalyticsWidget', () => {
         const metricValues = screen.getAllByTestId('activity-analytics-metric-value');
         expect(percentValues.length + metricValues.length).toBeGreaterThan(0);
         [...percentValues, ...metricValues].forEach((node) => {
+            expect(node).toHaveClass('w-full');
             expect(node).toHaveClass('break-words');
+            expect(node).toHaveClass('hyphens-auto');
+            expect(node).toHaveAttribute('lang', 'es');
         });
     });
 

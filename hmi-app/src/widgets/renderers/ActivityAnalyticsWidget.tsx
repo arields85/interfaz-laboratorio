@@ -1276,7 +1276,7 @@ const ComparisonPanel = memo(function ComparisonPanel({
             data-testid="activity-analytics-comparison"
         >
             <div
-                className="grid h-full w-fit max-w-full flex-1 grid-cols-2 items-stretch justify-items-center content-center box-border"
+                className="grid h-full w-fit max-w-full flex-1 grid-cols-2 items-stretch justify-items-stretch content-center box-border"
                 style={{
                     alignSelf: 'center',
                     columnGap: `${columnGapPx}px`,
@@ -4128,7 +4128,7 @@ const ComparisonRow = memo(function ComparisonRow({
 
     return (
         <div className="flex h-full min-h-0 min-w-0 flex-col items-center justify-center gap-1 text-center" data-testid="activity-analytics-comparison-row">
-            <div className="break-words text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-comparison-percent">{entry.productivityLabel}</div>
+            <div className="w-full break-words hyphens-auto text-industrial-text" lang="es" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-comparison-percent">{entry.productivityLabel}</div>
             <div
                 className="flex shrink-0 items-end justify-center self-stretch"
                 style={{ height: `${COMPARISON_LAYOUT_RULES.trackHeightPx}px` }}
@@ -4152,7 +4152,7 @@ const ComparisonRow = memo(function ComparisonRow({
                 </div>
             </div>
             <div className="uppercase text-industrial-muted" style={GENERAL_TYPOGRAPHY_STYLE}>{entry.heading}</div>
-            <div className="break-words text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-metric-value">{entry.label}</div>
+            <div className="w-full break-words hyphens-auto text-industrial-muted" lang="es" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-metric-value">{entry.label}</div>
         </div>
     );
 });
