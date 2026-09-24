@@ -167,9 +167,51 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
   - Route: delegated writer (confirmed; touched `schemas/`, `hmi-app/src/domain/`,
     `hmi-app/src/services/`, `services/prisma-runtime/src/` and
     `services/prisma-runtime/tests/`).
-- [ ] **T2 — Continuous estimator and browser history.** New pure module (window N=10, max +
+- [x] **T2 — Continuous estimator and browser history.** New pure module (window N=10, max +
   safety, clamp, 12 h staleness) and a safe `localStorage` wrapper. Fully deterministic tests
   with injected clock and storage. Route: delegated writer.
+
+  **Evidence (2026-09-24, delegated writer, strict TDD):**
+  - Files: domain `hmi-app/src/domain/prismaVoicePrebufferHistory.types.ts` (+ `.test.ts`) —
+    `PrismaVoicePrebufferMeasurement` / `PrismaVoicePrebufferHistory` and the strict shape guard
+    `isPrismaVoicePrebufferMeasurement`; service `hmi-app/src/services/prismaVoicePrebufferEstimator.ts`
+    (+ `.test.ts`) — pure `estimateNextPrismaVoicePrebufferMs(history, nowMs)` and
+    `appendPrismaVoicePrebufferMeasurement(history, measurement)`, with the six named constants
+    (`PRISMA_PREBUFFER_HISTORY_WINDOW_SIZE=10`, `PRISMA_PREBUFFER_HISTORY_MAX_AGE_MS=12h`,
+    `PRISMA_PREBUFFER_ESTIMATE_SAFETY_MS=50`, `_MIN_MS=100`, `_MAX_MS=3000`, `_DEFAULT_MS=200`)
+    all in this one module; service `hmi-app/src/services/prismaVoicePrebufferHistoryStorage.ts`
+    (+ `.test.ts`) — `PrismaVoicePrebufferHistoryStorage` class under key
+    `hmi-prisma-voice-prebuffer-history`, `SafeAdminStorage`-style (injectable
+    `Storage | (() => Storage) | null`, every access try/catch, `createBrowser...()` factory);
+    service `hmi-app/src/services/prismaVoicePrebufferController.ts` (+ `.test.ts`) — the optional
+    facade (built, since it keeps T3 simple), `getNextPrebufferMs()` / `recordMeasurement(ms)`,
+    combining the estimator and storage with an injectable clock (defaults to `Date.now`).
+  - Design decisions (public API T3 should call): `PrismaVoicePrebufferController` (or the
+    lower-level `estimateNextPrismaVoicePrebufferMs`/`appendPrismaVoicePrebufferMeasurement` +
+    `PrismaVoicePrebufferHistoryStorage` directly, if T3's DI pattern needs finer control).
+    Estimator defensively re-applies both the 12h staleness filter and the last-10 cap on read
+    (not just on append), so a raw/unpruned history is still handled correctly. Storage: a
+    non-array or unparseable top-level payload is treated as fully corrupted (empty history);
+    within a valid array, individual invalid entries are dropped rather than discarding the whole
+    read — a single malformed entry (future schema change, manual tampering) should not throw away
+    otherwise-valid recent measurements next to it. GGA review (passed) flagged one minor,
+    non-blocking note: a measurement timestamped in the future (system clock moved backwards)
+    reads as "fresh"; impact is bounded because the result is still clamped to
+    `PRISMA_PREBUFFER_ESTIMATE_MAX_MS`. Left as-is (no reported case of this happening; T3/T6 will
+    surface it live if it ever matters).
+  - RED evidence: `prismaVoicePrebufferHistory.types.test.ts`,
+    `prismaVoicePrebufferEstimator.test.ts`, `prismaVoicePrebufferHistoryStorage.test.ts` and
+    `prismaVoicePrebufferController.test.ts` each failed first with
+    `Failed to resolve import "./<module>" ... Does the file exist?` (module not yet created),
+    run individually via `npx vitest run <file>`, before each module was implemented and the same
+    run turned GREEN (8, 13, 10, 5 tests respectively).
+  - Checks: `cd hmi-app && npx vitest run` → 224 files / 2512 tests passed (baseline 220/2476 + 36
+    new: 8 domain + 13 estimator + 10 storage + 5 controller). `cd hmi-app && npx tsc -b` → clean,
+    no output. `cd hmi-app && npm run lint` → clean, no findings.
+  - Commits (branch `feat/prisma-adaptive-voice-buffer`, GGA review passed): `013795f` feat(hmi):
+    add the continuous prebuffer estimator and its browser history.
+  - Route: delegated writer (confirmed; 8 new files across `hmi-app/src/domain/` and
+    `hmi-app/src/services/`).
 - [ ] **T3 — Feed the estimator into playback.** Engine takes the prebuffer per answer (per-answer
   `play()` option or a `resolvePrebufferSeconds` dependency, decided by the writer against the
   existing DI pattern) and reports the measurement back; wire in
@@ -226,7 +268,17 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
   fields. hmi-app (220 files / 2476 tests), `tsc -b`, lint and prisma-runtime (1522 tests) all
   green. Three commits on `feat/prisma-adaptive-voice-buffer`: `a2e6a33`, `bc2b911`, `15e72d8`.
 
+- 2026-09-24: T2 done (delegated writer, strict TDD; RED observed for each of the four new
+  modules before its GREEN). New pure continuous estimator
+  (`prismaVoicePrebufferEstimator.ts`), safe `localStorage` history
+  (`prismaVoicePrebufferHistoryStorage.ts`, key `hmi-prisma-voice-prebuffer-history`) and an
+  optional facade (`prismaVoicePrebufferController.ts`) with domain types
+  (`domain/prismaVoicePrebufferHistory.types.ts`) — not yet wired into playback. hmi-app (224
+  files / 2512 tests), `tsc -b` and lint all green. One commit on
+  `feat/prisma-adaptive-voice-buffer`: `013795f` (GGA review passed).
+
 ## Next step
 
-Start T2 (continuous estimator: window N=10, max + safety, clamp, 12 h staleness, safe
-`localStorage` wrapper; delegated writer, strict TDD).
+Start T3 (feed the estimator into playback: engine takes the prebuffer per answer and reports
+the measurement back via `PrismaVoicePrebufferController`, wire in
+`hmi-app/src/hooks/usePrismaOrbPresentation.ts`; delegated writer, strict TDD).
