@@ -155,7 +155,7 @@ CONFIRMATION_PROMPT_TEMPLATE = (
     "Un teléfono quiere conectarse con:\n"
     "{label}\n"
     "\n"
-    "Confirme para recibir en este teléfono las respuestas de ese documento."
+    "Está a un paso: confirme y Prisma responderá sus consultas en este chat."
 )
 WELCOME_TEMPLATE = (
     "Vinculación confirmada con:\n"

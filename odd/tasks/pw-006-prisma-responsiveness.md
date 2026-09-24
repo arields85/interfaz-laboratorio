@@ -73,7 +73,17 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     `channel_a_bot.py:151-152`, `_keyboard()` 485-491, attached at 1096-1097 and 1409-1410;
     typing needs `send_chat_action` on `ChannelATextTransport` (`channel_a_bot.py:313-326`) and
     `ChannelATransport` (`channel_a_transport.py`), call site `_handle_query` (~874).
-- [ ] **T2 — Confirmation copy.** Replace the pairing confirmation text with the approved copy.
+- [x] **T2 — Confirmation copy.** Replace the pairing confirmation text with the approved copy.
+  Evidence (2026-09-23): `channel_a_bot.py` — `CONFIRMATION_PROMPT_TEMPLATE`'s explanatory sentence
+  changed to exactly "Está a un paso: confirme y Prisma responderá sus consultas en este chat.";
+  the "Un teléfono quiere conectarse con:\n{label}" header is unchanged. New
+  `test_confirmation_prompt_copy_matches_the_approved_wording` in `ChannelAClaimTests`
+  (`test_channel_a_bot.py`) asserts the exact sentence and the absence of "documento"/
+  "presentación"; the existing `test_live_token_sends_the_prompt_with_separate_ticket_buttons`
+  already asserted the delivered payload equals `CONFIRMATION_PROMPT_TEMPLATE.format(...)` verbatim,
+  so it needed no change. RED confirmed (old copy did not contain the new sentence). Full suite:
+  `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+  -p "test_*.py"` → 1353 passed. Commit: `fix(prisma): clarify Channel A pairing confirmation copy`.
 - [ ] **T3 — Keep/unlink buttons reachable.** Decided by the user (2026-09-23): persistent reply
   keyboard (`is_persistent`) with a "Desvincular" button, always visible under the input. Tapping it
   sends "Desvincular" as a user message; Prisma answers asking for confirmation with an inline

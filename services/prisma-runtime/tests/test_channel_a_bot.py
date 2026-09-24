@@ -968,6 +968,16 @@ class ChannelAClaimTests(ChannelABotTestCase):
         self.assertEqual(rows[0][0]["callback_data"], CALLBACK_CONFIRM + ":" + ticket)
         self.assertEqual(rows[1][0]["callback_data"], CALLBACK_CANCEL + ":" + ticket)
 
+    def test_confirmation_prompt_copy_matches_the_approved_wording(self):
+        """T2: the explanatory sentence must be exactly the approved copy,
+        never mentioning "documento" (AGENTS.md forbids "presentación")."""
+        self.assertIn(
+            "Está a un paso: confirme y Prisma responderá sus consultas en este chat.",
+            CONFIRMATION_PROMPT_TEMPLATE,
+        )
+        self.assertNotIn("documento", CONFIRMATION_PROMPT_TEMPLATE)
+        self.assertNotIn("presentación", CONFIRMATION_PROMPT_TEMPLATE)
+
     def test_every_callback_payload_stays_within_the_telegram_byte_limit(self):
         self.prompted(4)
         for row in (0, 1):
