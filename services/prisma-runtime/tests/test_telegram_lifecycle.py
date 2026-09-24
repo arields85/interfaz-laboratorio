@@ -20,7 +20,12 @@ from prisma_runtime.bot_identity_reservation import (
     process_bot_identity_reservation,
 )
 from prisma_runtime.hmi_sessions import HmiSessionRegistry
-from prisma_runtime.local_presentation import TELEGRAM_STOPPING, TelegramLocalBot, build_telegram_bot
+from prisma_runtime.local_presentation import (
+    CHANNEL_B_VOICE_QUEUE_MAX_PENDING,
+    TELEGRAM_STOPPING,
+    TelegramLocalBot,
+    build_telegram_bot,
+)
 from prisma_runtime.telegram_config import TelegramConfig
 from prisma_runtime.telegram_lifecycle import (
     TelegramLifecycleError,
@@ -1345,33 +1350,117 @@ class ChannelBVoiceReplyTests(unittest.TestCase):
 
         fire.assert_not_called()
 
-    def test_second_overlapping_request_for_the_same_chat_is_dropped_not_queued(self):
+    def test_overlapping_requests_for_the_same_chat_are_queued_and_processed_in_order(self):
+        """B1b (user decision): a chat that asks again before its previous
+        voice note finished no longer loses that voice note -- both are
+        delivered, sequentially, each as a reply to its own question."""
         import prisma_runtime.local_presentation as local_presentation_module
 
-        release = threading.Event()
-        entered = threading.Event()
-        calls = []
+        release_first = threading.Event()
+        entered_first = threading.Event()
+        fire_calls = []
 
         def blocking_fire(local_http, voice_url, token):
-            calls.append(token)
-            entered.set()
-            release.wait(2)
+            fire_calls.append(token)
+            if len(fire_calls) == 1:
+                entered_first.set()
+                release_first.wait(2)
 
         events = VoiceEventStore()
         bot = self.build_bot(voice_events=events, local_http=Mock())
         try:
             with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=blocking_fire):
                 bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 10, "text": "¿Cuál es el OEE?"})
-                self.assertTrue(entered.wait(2), "first voice request never started")
+                self.assertTrue(entered_first.wait(2), "first voice request never started")
                 bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 11, "text": "¿Qué lote está activo?"})
+                # Release and drain the queue while the patch is still active:
+                # the second (queued) item's own dispatch call must still
+                # resolve to this test's mocked _fire_channel_b_voice_reply.
+                release_first.set()
+                for worker in threading.enumerate():
+                    if worker.name == "PrismaChannelBVoiceReply":
+                        worker.join(timeout=2)
         finally:
-            release.set()
-            for worker in threading.enumerate():
-                if worker.name == "PrismaChannelBVoiceReply":
-                    worker.join(timeout=2)
+            release_first.set()
 
-        self.assertEqual(len(calls), 1, "an overlapping request must be dropped, not queued")
+        self.assertEqual(len(fire_calls), 2, "both overlapping requests must be delivered, not dropped")
+        payloads = [events.resolve_channel_b_reply_token(token) for token in fire_calls]
+        self.assertEqual(payloads, [
+            {"chatId": 7, "text": "El OEE actual es 88,6 %.", "replyToMessageId": 10},
+            {"chatId": 7, "text": "El lote activo es BT-2407.", "replyToMessageId": 11},
+        ])
         self.assertEqual(bot.send_message.call_count, 2, "both text answers must still be sent")
+
+    def test_a_fourth_overlapping_request_when_three_are_already_pending_goes_text_only(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        self.assertEqual(CHANNEL_B_VOICE_QUEUE_MAX_PENDING, 3)
+        release_first = threading.Event()
+        entered_first = threading.Event()
+        fire_calls = []
+
+        def blocking_fire(local_http, voice_url, token):
+            fire_calls.append(token)
+            if len(fire_calls) == 1:
+                entered_first.set()
+                release_first.wait(2)
+
+        events = VoiceEventStore()
+        bot = self.build_bot(voice_events=events, local_http=Mock())
+        try:
+            with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=blocking_fire):
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 20, "text": "¿Cuál es el OEE?"})
+                self.assertTrue(entered_first.wait(2), "first voice request never started")
+                # Two more fit within the 3-pending bound (the in-flight one
+                # plus two queued).
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 21, "text": "¿Qué lote está activo?"})
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 22, "text": "¿Cuál es el OEE?"})
+                # A fourth overlapping question exceeds the bound: text-only,
+                # no voice request queued.
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 23, "text": "¿Qué lote está activo?"})
+                release_first.set()
+                for worker in threading.enumerate():
+                    if worker.name == "PrismaChannelBVoiceReply":
+                        worker.join(timeout=2)
+        finally:
+            release_first.set()
+
+        self.assertEqual(len(fire_calls), 3, "only the 3 bounded pending voice notes must be delivered")
+        self.assertEqual(bot.send_message.call_count, 4, "every question still receives its text answer")
+
+    def test_a_failing_item_in_the_middle_of_the_queue_never_blocks_the_rest(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        release_first = threading.Event()
+        entered_first = threading.Event()
+        fire_calls = []
+
+        def fire(local_http, voice_url, token):
+            fire_calls.append(token)
+            if len(fire_calls) == 1:
+                entered_first.set()
+                release_first.wait(2)
+                return
+            if len(fire_calls) == 2:
+                raise RuntimeError("boom")
+
+        events = VoiceEventStore()
+        bot = self.build_bot(voice_events=events, local_http=Mock())
+        try:
+            with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=fire):
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 30, "text": "¿Cuál es el OEE?"})
+                self.assertTrue(entered_first.wait(2), "first voice request never started")
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 31, "text": "¿Qué lote está activo?"})
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 32, "text": "¿Cuál es el OEE?"})
+                release_first.set()
+                for worker in threading.enumerate():
+                    if worker.name == "PrismaChannelBVoiceReply":
+                        worker.join(timeout=2)
+        finally:
+            release_first.set()
+
+        self.assertEqual(len(fire_calls), 3, "a failing item must not block the rest of the queue")
+        self.assertEqual(bot.send_message.call_count, 3)
 
     def test_mint_or_dispatch_failure_never_raises_or_touches_the_text_reply(self):
         import prisma_runtime.local_presentation as local_presentation_module

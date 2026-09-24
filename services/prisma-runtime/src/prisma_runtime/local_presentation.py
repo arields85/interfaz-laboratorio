@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+from collections import deque
 from pathlib import Path
 import unicodedata
 from dataclasses import dataclass
@@ -103,6 +104,12 @@ CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS = 15.0
 # voice_service.py), not just admission into a stream the browser reads
 # separately.
 CHANNEL_B_VOICE_REPLY_TIMEOUT_SECONDS = 45
+
+# B1b (user decision): a per-chat FIFO bound. Up to this many Channel B voice
+# notes may be pending (queued or actively being synthesized) for the same
+# chat at once; a newer question arriving once the bound is reached still
+# gets its text answer, just no voice note (logged, silent to the user).
+CHANNEL_B_VOICE_QUEUE_MAX_PENDING = 3
 
 
 def utc_now_iso() -> str:
@@ -535,7 +542,12 @@ class TelegramLocalBot:
         # _active_snapshot.
         self.session_registry = session_registry
         self._channel_b_voice_lock = threading.Lock()
-        self._channel_b_voice_in_flight: set[int] = set()
+        # B1b (user decision): per-chat FIFO of pending voice notes (queued or
+        # actively being synthesized), bounded by CHANNEL_B_VOICE_QUEUE_MAX_
+        # PENDING. A single background worker drains one chat's queue at a
+        # time, in order; see _request_channel_b_voice_reply/_drain_channel_
+        # b_voice_queue.
+        self._channel_b_voice_queues: dict[int, deque] = {}
         self.stop_event, self.thread = threading.Event(), None
         self.last_error, self.bot_username, self.bot_id = None, None, None
         self._state = None
@@ -798,40 +810,68 @@ class TelegramLocalBot:
         return self.snapshot_store.read()
 
     def _request_channel_b_voice_reply(self, chat_id, reply_to_message_id, answer_text):
-        """B1: after the text answer above, request a same-text voice note
-        for the same chat from the voice process -- never for /start,
+        """B1/B1b: after the text answer above, request a same-text voice
+        note for the same chat from the voice process -- never for /start,
         /status or /help (this is only ever reached from the final
-        answer_from_snapshot branch of _handle_message). Bounded to at most
-        one synthesis in flight per chat: a chat that asks a new question
-        before its previous voice note finished drops the newer request
-        instead of queuing it (Channel B is a single paired human; losing an
-        occasional voice note under overlap is preferable to an unbounded
-        queue or delaying the receive loop for every later poll). Minting
-        and dispatch both happen off this thread's return path except for
-        the cheap in-memory in-flight check/reservation, which must be
-        synchronous so a second overlapping call can observe it
-        immediately. Never raises: a mint or dispatch failure is logged
-        (redacted -- no answer text, chat id or token) and stays silent to
-        the chat; the already-sent text answer is never affected."""
+        answer_from_snapshot branch of _handle_message). B1b (user
+        decision): a chat that asks a new question before its previous
+        voice note finished no longer loses that voice note -- it is
+        enqueued (per-chat FIFO, order preserved) and generated
+        sequentially by a single background worker, bounded to at most
+        CHANNEL_B_VOICE_QUEUE_MAX_PENDING pending items per chat (Channel B
+        is a single paired human; a small bound keeps this from growing
+        unbounded under a burst). Once the bound is reached, a newer
+        question still gets its text answer -- just no voice note this
+        time (logged, silent to the user). Enqueueing (and deciding whether
+        a worker must be started) is a cheap synchronous in-memory
+        operation so overlapping calls observe each other immediately;
+        minting and dispatch always happen off this thread's return path,
+        on the queue's own worker. Never raises: a mint or dispatch failure
+        is logged (redacted -- no answer text, chat id or token), never
+        blocks the rest of that chat's queue, and never touches the
+        already-sent text answer."""
         if not self.voice_url or self.local_http is None:
             return
         with self._channel_b_voice_lock:
-            if chat_id in self._channel_b_voice_in_flight:
-                _logger.warning("Prisma channel B voice reply: dropped, already in flight for this chat")
+            queue = self._channel_b_voice_queues.setdefault(chat_id, deque())
+            if len(queue) >= CHANNEL_B_VOICE_QUEUE_MAX_PENDING:
+                _logger.warning("Prisma channel B voice reply: queue full for this chat, answering text-only")
                 return
-            self._channel_b_voice_in_flight.add(chat_id)
+            queue.append((reply_to_message_id, answer_text))
+            start_worker = len(queue) == 1
 
-        def worker():
+        if start_worker:
+            threading.Thread(
+                target=self._drain_channel_b_voice_queue, args=(chat_id,),
+                name="PrismaChannelBVoiceReply", daemon=True,
+            ).start()
+
+    def _drain_channel_b_voice_queue(self, chat_id):
+        """B1b: the single worker for one chat's queue. Processes items in
+        FIFO order, one at a time; an item stays counted against the
+        CHANNEL_B_VOICE_QUEUE_MAX_PENDING bound (peeked, not popped) while
+        it is being synthesized, and is only removed once it settles
+        (delivered or failed) -- so a failing or slow item is isolated and
+        never blocks the ones queued behind it. Exits (and lets a later
+        call start a fresh worker) once the chat's queue is empty."""
+        while True:
+            with self._channel_b_voice_lock:
+                queue = self._channel_b_voice_queues.get(chat_id)
+                if not queue:
+                    return
+                reply_to_message_id, answer_text = queue[0]
             try:
                 token = self.voice_events.mint_channel_b_reply_token(chat_id, answer_text, reply_to_message_id)
                 _fire_channel_b_voice_reply(self.local_http, self.voice_url, token)
             except Exception:
                 _logger.warning("Prisma channel B voice reply: mint or dispatch failed")
-            finally:
-                with self._channel_b_voice_lock:
-                    self._channel_b_voice_in_flight.discard(chat_id)
-
-        threading.Thread(target=worker, name="PrismaChannelBVoiceReply", daemon=True).start()
+            with self._channel_b_voice_lock:
+                queue = self._channel_b_voice_queues.get(chat_id)
+                if queue:
+                    queue.popleft()
+                if not queue:
+                    self._channel_b_voice_queues.pop(chat_id, None)
+                    return
 
     def run(self):
         """Claim the single runner slot, then poll under owned activity.
