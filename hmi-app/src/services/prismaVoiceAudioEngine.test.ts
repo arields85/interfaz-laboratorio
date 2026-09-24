@@ -357,17 +357,17 @@ describe('PrismaVoiceAudioEngine', () => {
             [1_800, 24_000],
             [1_800, 24_000],
         ]);
-        expect(audio.sources[0]?.start).toHaveBeenCalledWith(1.025);
-        expect(audio.sources[1]?.start.mock.calls[0]?.[0]).toBeCloseTo(1.1);
+        expect(audio.sources[0]?.start).toHaveBeenCalledWith(1.2);
+        expect(audio.sources[1]?.start.mock.calls[0]?.[0]).toBeCloseTo(1.275);
         expect(audio.sources.every(({ connect }) => connect.mock.calls[0]?.[0] === audio.analyser)).toBe(true);
         expect(audio.analyserConnect).toHaveBeenCalledTimes(1);
         expect(audio.analyserConnect).toHaveBeenCalledWith(audio.context.destination);
-        expect(audio.createAudioContext.mock.calls).toEqual([[]]);
+        expect(audio.createAudioContext.mock.calls).toEqual([[{ latencyHint: 'playback' }]]);
         expect(target.setSpeaking).not.toHaveBeenCalledWith(true);
         expect(log).toHaveBeenCalledWith('Prisma Live request started');
         expect(log).toHaveBeenCalledWith('Prisma Live first audio: 42 ms');
         expect(log).toHaveBeenCalledWith('Prisma Live stream completed');
-        expect(timers.delays()[0]).toBeCloseTo(25);
+        expect(timers.delays()[0]).toBeCloseTo(200);
         expect(diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 record_type: 'canonical-decode',
@@ -897,7 +897,7 @@ describe('PrismaVoiceAudioEngine', () => {
         expect(audio.decodeAudioData).toHaveBeenCalledTimes(1);
         expect(audio.sources).toHaveLength(1);
         expect(audio.sources[0]?.start).toHaveBeenCalledTimes(1);
-        expect(audio.createAudioContext.mock.calls).toEqual([[]]);
+        expect(audio.createAudioContext.mock.calls).toEqual([[{ latencyHint: 'playback' }]]);
         expect(lifecycle.onStarted).toHaveBeenCalledTimes(1);
         expect(lifecycle.onError).not.toHaveBeenCalled();
         expect(log).toHaveBeenCalledWith('Prisma Live failed, using WAV fallback');
@@ -969,7 +969,7 @@ describe('PrismaVoiceAudioEngine', () => {
 
         createEngine().play(createLiveSource(reader, loadWav), createTarget(), lifecycle);
         await settlePlayback();
-        audio.setCurrentTime(1.03);
+        audio.setCurrentTime(1.21);
         secondRead.reject(new Error('stream disconnected after audio start'));
         await settlePlayback();
 

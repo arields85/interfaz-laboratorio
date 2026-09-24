@@ -30,7 +30,10 @@ export const PRISMA_LOCAL_PCM_MAX_BYTES = PRISMA_PCM_SAMPLE_RATE
     * PRISMA_PCM_AUDIO_FORMAT.channels
     * PRISMA_PCM_AUDIO_FORMAT.bytesPerSample
     * PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS;
-const PRISMA_PCM_PLAYBACK_LEAD_SECONDS = 0.025;
+// Prebuffer before the first block (and after any underflow) so bursty Live chunks do not starve playback.
+const PRISMA_PCM_PLAYBACK_LEAD_SECONDS = 0.2;
+// Larger device buffer: voice playback tolerates latency better than render-thread underruns under UI load.
+const PRISMA_PLAYBACK_CONTEXT_OPTIONS: AudioContextOptions = { latencyHint: 'playback' };
 
 export type PrismaVoicePlaybackTransport = 'progressive' | 'buffer-before-playback';
 
@@ -952,7 +955,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
     private getAudioContext(): AudioContext {
         if (!this.context || this.context.state === 'closed') {
-            this.context = this.createAudioContext();
+            this.context = this.createAudioContext(PRISMA_PLAYBACK_CONTEXT_OPTIONS);
         }
 
         return this.context;

@@ -1377,6 +1377,30 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   **Next step (user, live check):** run the dev launcher from a real interactive terminal and confirm
   an animated "Starting Prisma voice..." line fills the previously silent gap, then disappears
   cleanly right as "Prisma voice is ready..." prints (and again for "Prisma is ready...").
+- [ ] **T22 — Voice micro-cuts (live test 2026-09-24 ~14:55 and ~15:05).** User heard micro-cuts
+  in some answers ("hard to tell"). Timeline: first run 1 underflow in 3 answers; retest (4
+  answers, Q1 and Q4 same text) `underflow_count` 1/0/0/1 while the user perceived cuts in Q3 and
+  Q4, not Q1. Q4 was regenerated, not served from the audio cache (first audio 572 ms, different
+  PCM size), so the planned cache-vs-network discrimination did not happen.
+  Hypothesis "per-block resampling clicks" (one `AudioBufferSourceNode` per 1,800-sample 24 kHz
+  block on a default-rate context) **refuted**: headless Chrome `OfflineAudioContext` reproduction
+  of `schedulePcmBlock` chaining (48 kHz, 44.1 kHz, 24 kHz; aligned and unaligned first start),
+  39 seams each, max error vs a single-buffer reference 0.0001 (~-80 dB), none above 0.01.
+  Remaining causes: (A) real gaps with the 25 ms lead (counted as underflow); (C) device-level
+  render underruns under UI load with the default `latencyHint: 'interactive'` (invisible to the
+  counter; unverified); (D) artifacts in the Gemini audio itself.
+  **User decision (2026-09-24):** apply the two small mitigations, then retest.
+  Evidence (branch `fix/prisma-voice-playback-buffer`): `prismaVoiceAudioEngine.ts` —
+  `PRISMA_PCM_PLAYBACK_LEAD_SECONDS` 0.025 → 0.2 (first block and any post-underflow block), and
+  the main playback `AudioContext` is created with `{ latencyHint: 'playback' }` (the 24 kHz local
+  worklet context is unchanged). Expected cost: ~175 ms more before the first audio plus the
+  larger device buffer. Strict TDD: RED observed (2 tests: first start `1.2`, second `1.275`,
+  speaking timer 200 ms, `createAudioContext` called with `{ latencyHint: 'playback' }`), then
+  GREEN; the "clock passed start" fixture moved from 1.03 to 1.21 to keep its intent. Checks:
+  `cd hmi-app && npx vitest run` → 219 files / 2467 tests passed; `npx tsc -b` clean; `eslint` on
+  both files clean. Route: direct inline (one understood source file plus its test).
+  **Next step (user, live check):** relaunch and ask 3–4 voice questions; report which ones cut.
+  If cuts persist with `underflow_count=0`, cause D (source audio) becomes the lead suspect.
 
 ## Progress
 
@@ -1477,6 +1501,10 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   real live voice test — see Next step).
 
 ## Next step
+
+**Update 2026-09-24 afternoon:** the live test of T18–T21 passed (latency targets met; pairing
+modal and launcher as designed) except for audible micro-cuts, now tracked as T22 on branch
+`fix/prisma-voice-playback-buffer`. PW-006 closes only after the T22 retest.
 
 **Session closed 2026-09-24 — return point for the next session.** Branch
 `feat/prisma-responsiveness-and-scaling` integrated into local `main` by fast-forward (no push).
