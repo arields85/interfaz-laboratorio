@@ -20,6 +20,13 @@ class VoiceEventCapacity(RuntimeError):
     pass
 
 
+class VoiceEventStreamCapacity(RuntimeError):
+    """T13b should-fix: raised by subscribe_owner() when a new SSE
+    subscription would exceed the per-owner or global stream-subscriber
+    cap. A rejected caller never holds a slot -- the check runs before the
+    new waiter is appended."""
+
+
 def validate_voice_event(payload, expected_id, *, now=time.time, max_text_bytes=16 * 1024, require_owner=False):
     """Validate an event returned by the canonical in-process registry boundary."""
     required = {"id", "timestamp", "expiresAt", "text", "question"}
@@ -77,6 +84,8 @@ class VoiceEventStore:
         max_total_events=256,
         prefetch_token_ttl_seconds=60.0,
         max_prefetch_tokens=64,
+        max_stream_subscribers_per_owner=4,
+        max_stream_subscribers_total=32,
     ):
         self.clock = clock
         self.ttl_seconds = ttl_seconds
@@ -84,6 +93,14 @@ class VoiceEventStore:
         self.max_total_events = max_total_events
         self.prefetch_token_ttl_seconds = prefetch_token_ttl_seconds
         self.max_prefetch_tokens = max_prefetch_tokens
+        # T13b should-fix: an open SSE stream holds one Werkzeug thread for
+        # as long as the connection lives, with no explicit cap of its own
+        # before this -- only the 64-session HMI registry indirectly bounded
+        # it. Both caps stay comfortably below that: a small per-owner limit
+        # (a real tab plus a brief reconnect overlap) and a global limit well
+        # below 64 concurrent sessions.
+        self.max_stream_subscribers_per_owner = max_stream_subscribers_per_owner
+        self.max_stream_subscribers_total = max_stream_subscribers_total
         self.lock = threading.RLock()
         self._events = OrderedDict()
         self._latest = {}
@@ -138,10 +155,21 @@ class VoiceEventStore:
         threading.Event set by every later successful publish() for this
         exact owner (a guard-refused publish never sets it); the caller
         blocks on ``flag.wait(timeout)`` instead of polling. ``unsubscribe``
-        is idempotent and must always be called when the caller is done."""
+        is idempotent and must always be called when the caller is done.
+
+        T13b should-fix: raises VoiceEventStreamCapacity when this
+        subscription would exceed the per-owner or global stream-subscriber
+        cap. The check runs before the new waiter is appended, so a
+        rejected caller never holds a slot."""
         owner_id = str(owner_id)
         flag = threading.Event()
         with self.lock:
+            owner_waiters = self._owner_waiters.get(owner_id, [])
+            if len(owner_waiters) >= self.max_stream_subscribers_per_owner:
+                raise VoiceEventStreamCapacity("VOICE_EVENT_STREAM_SUBSCRIBER_LIMIT")
+            total_waiters = sum(len(waiters) for waiters in self._owner_waiters.values())
+            if total_waiters >= self.max_stream_subscribers_total:
+                raise VoiceEventStreamCapacity("VOICE_EVENT_STREAM_CAPACITY")
             self._owner_waiters.setdefault(owner_id, []).append(flag)
 
         def unsubscribe():

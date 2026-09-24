@@ -46,7 +46,7 @@ from .telegram_config import TelegramConfig, read_telegram_config
 from .telegram_credentials import TelegramCredentialResolver
 from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, project_telegram_diagnostic, validate_telegram_state
 from .telegram_verification import TelegramTokenVerificationService
-from .voice_events import VoiceEventCapacity, VoiceEventStore
+from .voice_events import VoiceEventCapacity, VoiceEventStore, VoiceEventStreamCapacity
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -1163,9 +1163,20 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         except HmiSessionUnauthorized:
             return session_error()
 
+        # T13b should-fix: bound concurrent SSE streams well below the
+        # session registry's own 64-session capacity. Acquired here, in the
+        # view function, rather than inside generate() below -- Flask
+        # commits the streaming response's 200 status as soon as the view
+        # function returns, before the generator ever yields its first
+        # chunk, so a capacity error raised only once the generator starts
+        # could no longer become a clean rejection.
+        try:
+            flag, unsubscribe = voice_events.subscribe_owner(owner_id)
+        except VoiceEventStreamCapacity as error:
+            return jsonify({"ok": False, "error": str(error)}), 429
+
         def generate():
             last_sent_id = None
-            flag, unsubscribe = voice_events.subscribe_owner(owner_id)
             try:
                 while True:
                     # Re-authorize (and touch) every pass instead of only at

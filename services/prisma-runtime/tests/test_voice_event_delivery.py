@@ -4,7 +4,9 @@ import gc
 import unittest
 import weakref
 
-from prisma_runtime.voice_events import VoiceEventCapacity, VoiceEventStore, validate_voice_event
+from prisma_runtime.voice_events import (
+    VoiceEventCapacity, VoiceEventStore, VoiceEventStreamCapacity, validate_voice_event,
+)
 
 
 OWNER = "00000000-0000-4000-8000-000000000001"
@@ -307,6 +309,84 @@ class VoiceEventOwnerNotificationTests(unittest.TestCase):
             self.assertFalse(flag.wait(0.1))
         finally:
             unsubscribe()
+
+
+class VoiceEventStreamCapacityTests(unittest.TestCase):
+    """T13b should-fix: bound concurrent SSE streams well below the HMI
+    session registry's own 64-session capacity, and release a slot on
+    unsubscribe so a reconnect (or another owner) can take it."""
+
+    def setUp(self):
+        self.now = 10.0
+        self.store = VoiceEventStore(
+            clock=lambda: self.now, ttl_seconds=300,
+            max_stream_subscribers_per_owner=2, max_stream_subscribers_total=3,
+        )
+
+    def test_rejects_a_subscription_past_the_per_owner_limit(self):
+        _flag_one, unsubscribe_one = self.store.subscribe_owner(OWNER)
+        _flag_two, unsubscribe_two = self.store.subscribe_owner(OWNER)
+        try:
+            with self.assertRaises(VoiceEventStreamCapacity):
+                self.store.subscribe_owner(OWNER)
+        finally:
+            unsubscribe_one()
+            unsubscribe_two()
+
+    def test_per_owner_limit_does_not_affect_a_different_owner(self):
+        _flag_one, unsubscribe_one = self.store.subscribe_owner(OWNER)
+        _flag_two, unsubscribe_two = self.store.subscribe_owner(OWNER)
+        try:
+            flag_other, unsubscribe_other = self.store.subscribe_owner(OTHER)
+            try:
+                self.assertFalse(flag_other.is_set())
+            finally:
+                unsubscribe_other()
+        finally:
+            unsubscribe_one()
+            unsubscribe_two()
+
+    def test_rejects_a_subscription_past_the_global_limit_even_across_owners(self):
+        owners = ["00000000-0000-4000-8000-0000000000%02d" % index for index in range(3)]
+        unsubscribes = [self.store.subscribe_owner(owner)[1] for owner in owners]
+        try:
+            with self.assertRaises(VoiceEventStreamCapacity):
+                self.store.subscribe_owner(OWNER)
+        finally:
+            for unsubscribe in unsubscribes:
+                unsubscribe()
+
+    def test_unsubscribe_releases_the_per_owner_slot_for_a_later_subscription(self):
+        _flag_one, unsubscribe_one = self.store.subscribe_owner(OWNER)
+        _flag_two, unsubscribe_two = self.store.subscribe_owner(OWNER)
+        unsubscribe_one()
+        _flag_three, unsubscribe_three = self.store.subscribe_owner(OWNER)  # must not raise
+        unsubscribe_two()
+        unsubscribe_three()
+
+    def test_unsubscribe_releases_the_global_slot_for_a_later_subscription(self):
+        owners = ["00000000-0000-4000-8000-0000000000%02d" % index for index in range(3)]
+        unsubscribes = [self.store.subscribe_owner(owner)[1] for owner in owners]
+        unsubscribes[0]()
+        _flag, unsubscribe = self.store.subscribe_owner(OWNER)  # must not raise
+        unsubscribe()
+        for release in unsubscribes[1:]:
+            release()
+
+    def test_a_rejected_subscription_never_holds_a_slot(self):
+        """The capacity check must fail before appending the new flag to the
+        waiter list, so a rejected caller (which never receives a working
+        unsubscribe) cannot itself occupy a slot."""
+        _flag_one, unsubscribe_one = self.store.subscribe_owner(OWNER)
+        _flag_two, unsubscribe_two = self.store.subscribe_owner(OWNER)
+        try:
+            with self.assertRaises(VoiceEventStreamCapacity):
+                self.store.subscribe_owner(OWNER)
+            with self.assertRaises(VoiceEventStreamCapacity):
+                self.store.subscribe_owner(OWNER)
+        finally:
+            unsubscribe_one()
+            unsubscribe_two()
 
 
 class VoiceEventPrefetchTokenTests(unittest.TestCase):

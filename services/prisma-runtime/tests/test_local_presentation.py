@@ -276,16 +276,20 @@ class VoiceEventsStreamTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         events = events if events is not None else VoiceEventStore()
-        client = create_app(JsonFileStore(Path(temporary.name) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
-        return client, events
+        registry = HmiSessionRegistry()
+        client = create_app(
+            JsonFileStore(Path(temporary.name) / "snapshot.json"), events, None,
+            session_registry=registry, **DISABLED_HTTP_OPTIONS,
+        ).test_client()
+        return client, events, registry
 
     def test_requires_authorization(self) -> None:
-        client, _events = self._client()
+        client, _events, _registry = self._client()
         response = client.get("/hmi/voice/events")
         self.assertEqual(response.status_code, 401)
 
     def test_rejects_an_unknown_capability_via_header_or_query(self) -> None:
-        client, _events = self._client()
+        client, _events, _registry = self._client()
         via_header = client.get("/hmi/voice/events", headers={"X-Prisma-Session-Capability": "not-a-real-capability"})
         via_query = client.get("/hmi/voice/events?capability=not-a-real-capability")
         self.assertEqual(via_header.status_code, 401)
@@ -299,14 +303,14 @@ class VoiceEventsStreamTests(unittest.TestCase):
         header-based fetch reader (like every other authorized route), so
         the query-string fallback is removed entirely -- a valid capability
         offered ONLY via the query string must no longer authorize."""
-        client, _events = self._client()
+        client, _events, _registry = self._client()
         headers = session_headers(client)
         capability = headers["X-Prisma-Session-Capability"]
         response = client.get(f"/hmi/voice/events?capability={capability}")
         self.assertEqual(response.status_code, 401)
 
     def test_accepts_a_valid_capability_via_header_only(self) -> None:
-        client, _events = self._client()
+        client, _events, _registry = self._client()
         headers = session_headers(client)
         # Publish first: Werkzeug's test client pulls the stream's first
         # chunk as part of client.get() itself (to conform to WSGI, it
@@ -321,7 +325,7 @@ class VoiceEventsStreamTests(unittest.TestCase):
             response.close()
 
     def test_response_headers_avoid_buffering(self) -> None:
-        client, _events = self._client()
+        client, _events, _registry = self._client()
         headers = session_headers(client)
         client.post("/local/ask", json={"question": "status"}, headers=headers)  # see note above
         response = client.get("/hmi/voice/events", headers=headers)
@@ -334,7 +338,7 @@ class VoiceEventsStreamTests(unittest.TestCase):
             response.close()
 
     def test_sends_the_existing_latest_event_immediately_on_connect(self) -> None:
-        client, _events = self._client()
+        client, _events, _registry = self._client()
         headers = session_headers(client)
         client.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": demo_snapshot()}, headers=headers)
         ask_response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=headers)
@@ -357,7 +361,7 @@ class VoiceEventsStreamTests(unittest.TestCase):
         lazy iteration afterward) -- so client.get() itself must run on its
         own thread here, or it would block the test on the route's own
         keep-alive interval instead of on the publish this test is after."""
-        client, events = self._client()
+        client, events, _registry = self._client()
         headers = session_headers(client)
         result: dict = {}
 
@@ -392,7 +396,7 @@ class VoiceEventsStreamTests(unittest.TestCase):
             consumer.join(timeout=2)
 
     def test_closing_the_response_unsubscribes_from_the_store(self) -> None:
-        client, events = self._client()
+        client, events, _registry = self._client()
         headers = session_headers(client)
         # Publish first so the generator's first pass resolves immediately
         # (an already-existing latest event) instead of blocking on
@@ -404,6 +408,42 @@ class VoiceEventsStreamTests(unittest.TestCase):
         response.close()
         for waiters in events._owner_waiters.values():
             self.assertEqual(len(waiters), 0)
+
+    def test_rejects_a_connection_past_the_stream_subscriber_cap_with_a_clean_429(self) -> None:
+        """T13b should-fix: the capacity check must run in the view
+        function itself, before Flask commits the streaming response's 200
+        status -- otherwise a capacity error raised only once the generator
+        starts could no longer become a clean rejection."""
+        events = VoiceEventStore(max_stream_subscribers_total=1)
+        client, _events, registry = self._client(events)
+        headers = session_headers(client)
+        capability = headers["X-Prisma-Session-Capability"]
+        owner_id = registry.authorize(capability, touch=False)
+        _flag, unsubscribe = events.subscribe_owner(owner_id)
+        try:
+            response = client.get("/hmi/voice/events", headers=headers)
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(response.get_json()["ok"], False)
+        finally:
+            unsubscribe()
+
+    def test_releasing_a_slot_lets_a_later_connection_through(self) -> None:
+        events = VoiceEventStore(max_stream_subscribers_total=1)
+        client, _events, registry = self._client(events)
+        headers = session_headers(client)
+        capability = headers["X-Prisma-Session-Capability"]
+        owner_id = registry.authorize(capability, touch=False)
+        _flag, unsubscribe = events.subscribe_owner(owner_id)
+        rejected = client.get("/hmi/voice/events", headers=headers)
+        self.assertEqual(rejected.status_code, 429)
+
+        unsubscribe()
+        client.post("/local/ask", json={"question": "status"}, headers=headers)  # see note above
+        accepted = client.get("/hmi/voice/events", headers=headers)
+        try:
+            self.assertEqual(accepted.status_code, 200)
+        finally:
+            accepted.close()
 
 
 class LocalAskRevisionTests(unittest.TestCase):
