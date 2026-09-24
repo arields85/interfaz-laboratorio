@@ -468,11 +468,91 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
   (4 + 1 cached): `prebuffer_ms=500` every time, measurements still recorded (e.g. 31 ms). No
   errors in the log. User: "salió perfecto" (no audible cuts). Admin section verified by the
   user's screenshot (above "Efectos de voz de Prisma").
-- [ ] **T7 — Delete the unused 2.5 s `buffer-before-playback` transport (user decision 2026-09-24).**
+- [x] **T7 — Delete the unused 2.5 s `buffer-before-playback` transport (user decision 2026-09-24).**
   Only after T6 passes, so a fallback exists until the adaptive prebuffer is proven live. Remove
   `prismaLocalAudioPlayback.ts` (2.5 s policy), `PrismaPcmWorkletBuffer`, `playLocalWorklet`, the PCM
   audio worklet and the local worklet context, plus their tests; the `playback-ended` optional-field
   handling for that transport goes with it. Route: delegated writer.
+
+  **Evidence (2026-09-24, delegated writer, strict TDD deletion):**
+  - Files removed entirely: `hmi-app/src/services/prismaLocalAudioPlayback.ts` (+ `.test.ts`,
+    the 2.5 s `PRISMA_LOCAL_BUFFERING_POLICY`/`decidePrismaLocalPlaybackStart`/
+    `PcmS16LeChunkParser`/`PrismaLocalPlaybackError`), `hmi-app/src/services/prismaPcmWorkletBuffer.ts`
+    (+ `.test.ts`, `PrismaPcmWorkletBuffer`/`PRISMA_PCM_WORKLET_PROCESSOR_NAME`),
+    `hmi-app/src/services/prismaPcmAudioWorklet.ts` (the `AudioWorkletProcessor`, loaded via
+    `?worker&url`), `hmi-app/src/services/prismaVoiceAudioEngine.localWorklet.test.ts` (7 tests).
+  - Symbols removed from `hmi-app/src/services/prismaVoiceAudioEngine.ts`: `playLocalWorklet`,
+    `prepareLocalWorklet`, `ensureLocalWorkletModule`, `enqueueLocalSamples`, `sendLocalStart`,
+    `handleLocalWorkletStarted`, `handleLocalWorkletEnded`, `getLocalWorkletContext`, the
+    `localWorkletContext`/`workletModuleContext`/`workletModulePromise` engine fields, the
+    `createAudioWorkletNode` dependency, `ActivePlayback.workletNode`/
+    `workletProcessorErrorHandler`/`localStartCommandSent`, `PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS`/
+    `PRISMA_LOCAL_PCM_MAX_BYTES`. The `playLive()` transport-branch wrapper was removed (only one
+    transport is left to branch on); `startPlayback()` now calls `playProgressiveLive` directly, and
+    `play()` calls `warmAudioContext()` unconditionally instead of gating it on
+    `source.playbackTransport === 'progressive'`.
+  - Transport-type decision (asked for by the task): removed the `PrismaVoicePlaybackTransport`
+    type and the `playbackTransport` field on `PrismaVoiceAudioSource` entirely, rather than
+    narrowing the type to the single literal `'progressive'`. Justification: a discriminated field
+    with exactly one possible value discriminates nothing — every read site (`play()`'s
+    `if (source.playbackTransport === 'progressive')`, `playLive()`'s
+    `if (source.playbackTransport === 'buffer-before-playback')`) would become permanently-true or
+    permanently-false dead conditionals if the field were kept, which is worse than removing it.
+    `emitCanonicalDecode`'s `transport` parameter was dropped the same way (only one call site, one
+    possible value) and the diagnostic payloads keep their `transport: 'progressive'` string
+    literals, typed against the (unchanged) generated domain enum. This touched 6 call sites across
+    `prismaVoiceTtsAudioSource.ts` and 4 test files (see below) but keeps no vestigial discriminant.
+  - Schema decision (asked for by the task): **no change** to
+    `schemas/prisma-audio-record.v1.schema.json`. The `transport` enum keeps both `"progressive"`
+    and `"buffer-before-playback"`, and `prebuffer_ms`/`needed_prebuffer_ms`/`prebuffer_mode` stay
+    optional (unchanged from T1). Justification: narrowing the enum or tightening the required
+    fields is an unforced schema edit with no functional benefit going forward (the engine only
+    ever emits `'progressive'` now, and only from the one `completeLiveIfFinished()` call site that
+    already reports all three prebuffer fields) but a real backward-compatibility risk — it would
+    reject any already-persisted `buffer-before-playback` log record still on a machine's disk from
+    before this deletion. This is the "prefer the minimal safe change" branch the task asked for;
+    `schemas/generate_prisma_audio_bindings.py` was not run and
+    `prismaAudioMetric.generated.ts`/`audio_record_types.py` are untouched.
+    `hmi-app/src/domain/prismaAudioMetric.types.test.ts` and
+    `services/prisma-runtime/tests/test_voice_timeline_diagnostics.py` (which assert the schema
+    still accepts `buffer-before-playback` records) needed no changes as a direct consequence.
+  - Other test/source updates: `hmi-app/src/services/prismaVoiceTtsAudioSource.ts` drops the now
+    dead `playbackTransport: 'progressive'` field from the source object it returns; its `.test.ts`
+    drops the matching assertion. `hmi-app/src/hooks/usePrismaOrbPresentation.test.ts` and
+    `hmi-app/src/components/PrismaOrbOverlay.test.tsx` drop the field from their fake `SOURCE`.
+    `hmi-app/src/services/prismaVoiceAudioEngine.test.ts`: removed the `WorkletRecord`
+    interface/harness plumbing (`createAudioWorkletNode`, `audio.worklets`, the fake
+    `audioWorklet.addModule`), the 3rd `playbackTransport` parameter of the local `createLiveSource`
+    helper, and 4 worklet/buffer-before-playback-specific tests ("starts Local at the fixed target
+    regardless of delivery rate...", "preserves exact PCM samples when Local chunk boundaries split
+    16-bit values", "cancels Local fetch and reader during buffering...", and the 4-case
+    `it.each(...)('treats %s as non-fatal before playback...')`).
+  - Honest test-coverage note: the removed `it.each` covered "empty stream", "invalid metadata",
+    "odd trailing PCM byte" and "Local PCM limit exceeded" only through the worklet path's own
+    checks (`playLocalWorklet`'s metadata/limit guards, `PcmS16LeChunkParser.finish()`'s
+    incomplete-sample throw) — these do not have progressive-path equivalents in the suite (the
+    progressive path silently drops a trailing odd byte instead of throwing, and never had a
+    dedicated "invalid metadata"/"empty stream" test of its own). This gap already existed before
+    T7 for the progressive path; T7 removes dead-path coverage, it does not add new progressive
+    coverage, which was out of scope for a behavior-preserving deletion.
+  - Documentation grep: `docs/`, `hmi-app/src/**/*.md`, and `Directrices/` have no mention of the
+    2.5 s buffer or the worklet transport, so no doc updates were needed. `odd/tasks/pw-006-*.md` is
+    a historical record (left untouched, per repo policy on past ODD/PW documents).
+  - Checks: `cd hmi-app && npx vitest run` → 221 files / 2529 tests passed (baseline 224/2554 − 25
+    removed: 8 from `prismaLocalAudioPlayback.test.ts` + 3 from `prismaPcmWorkletBuffer.test.ts` + 7
+    from `prismaVoiceAudioEngine.localWorklet.test.ts` + 7 from the 4 tests removed inside
+    `prismaVoiceAudioEngine.test.ts`; no test added). `cd hmi-app && npx tsc -b` → clean, no output.
+    `cd hmi-app && npm run lint` → clean, no findings. `cd hmi-app && npm run build` → succeeded, no
+    dangling `?worker&url` asset reference (the prior worklet JS chunk is gone from `dist/assets/`).
+    `services/prisma-runtime/.venv/Scripts/python.exe -m unittest discover -s
+    services/prisma-runtime -p "test_*.py"` → 1532 tests OK (unchanged from baseline, as expected
+    since `schemas/` and `services/prisma-runtime` were not touched).
+  - Commit (branch `feat/prisma-adaptive-voice-buffer`, GGA review passed): `50ade65` refactor(hmi):
+    remove the unused buffered voice playback transport (12 files changed, 28 insertions(+), 1659
+    deletions(-)).
+  - Route: delegated writer (confirmed; touched 6 non-trivial source files plus 4 test files, and
+    deleted 6 files, across `hmi-app/src/services/`, `hmi-app/src/hooks/`,
+    `hmi-app/src/components/`).
 
 ## Acceptance criteria
 
@@ -536,8 +616,16 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
 - 2026-09-24: T5 approved by the user (copy change + section order) and committed.
 - 2026-09-24: T6 live test found the per-block prebuffer bug; T6b fixed it (inline). T6 to repeat.
 - 2026-09-24: T6 passed after T6b (11 answers, 0 underflows, user heard no cuts).
+- 2026-09-24: T7 done (delegated writer, strict TDD deletion). The unused 2.5 s
+  `buffer-before-playback` transport is fully removed from `hmi-app` (worklet modules, engine
+  methods/fields/dependency, the `PrismaVoicePlaybackTransport` discriminant, and their tests).
+  The audio-record schema and runtime validator are deliberately left unchanged (kept accepting
+  historical `buffer-before-playback` records) rather than narrowed. hmi-app (221 files / 2529
+  tests, 25 fewer than baseline, all from removed dead-path tests), `tsc -b`, lint and `npm run
+  build` all green; prisma-runtime (1532 tests) unchanged. One commit on
+  `feat/prisma-adaptive-voice-buffer`: `50ade65` (GGA review passed).
 
 ## Next step
 
-T7: delete the legacy 2.5 s `buffer-before-playback` transport (delegated writer), then integrate
-`feat/prisma-adaptive-voice-buffer` into local `main` (user confirmation) and close PW-010.
+Integrate `feat/prisma-adaptive-voice-buffer` into local `main` (user confirmation) and close
+PW-010.
