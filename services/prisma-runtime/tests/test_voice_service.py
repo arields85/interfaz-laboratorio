@@ -284,6 +284,112 @@ class VoiceServiceTests(unittest.TestCase):
                 self.assertEqual(response.status_code, expected_status)
                 self.assertEqual(response.get_json()["error"], expected_body)
 
+    def test_channel_b_voice_reply_requires_a_capability(self):
+        response = service.app.test_client().post("/internal/prisma/channel-b/telegram-voice-reply")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "PRISMA_SESSION_REQUIRED")
+
+    def test_channel_b_voice_reply_resolves_the_token_then_delivers_and_never_touches_voice_events(self):
+        """B1: the new internal call never reaches AudioCoordinator or the
+        shared voice_events store -- only _create_interactions_tts_job +
+        _generate_tts_audio, the exact same pipeline Channel A's
+        telegramChatId path already exercises."""
+        payload = {"chatId": 995701520, "text": "El OEE actual es 88,6 %.", "replyToMessageId": 55}
+        captured = {}
+
+        def fake_generate(job):
+            captured["job"] = job
+            yield b"pcm-chunk"
+
+        # Job creation starts the "record_voice" chat-action indicator as
+        # soon as a valid chat id is present, independent of the mocked
+        # generator below -- _telegram_post and the token must both be
+        # controlled here so this test never resolves or dispatches a real
+        # Telegram credential (see PRISMA_LOCAL_TELEGRAM_BOT_TOKEN).
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}), \
+                patch.object(service, "_telegram_post"), \
+                patch.object(service, "_resolve_channel_b_voice_reply_payload", return_value=payload) as resolve, \
+                patch.object(service, "_generate_tts_audio", side_effect=fake_generate), \
+                patch.object(service, "audio_coordinator") as coordinator:
+            response = service.app.test_client().post(
+                "/internal/prisma/channel-b/telegram-voice-reply",
+                headers={"X-Prisma-Session-Capability": "channel-b-token"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True})
+        resolve.assert_called_once_with("channel-b-token")
+        coordinator.subscribe.assert_not_called()
+        self.assertEqual(captured["job"]["text"], "El OEE actual es 88,6 %.")
+        self.assertEqual(captured["job"]["telegram_chat_id"], 995701520)
+        self.assertEqual(captured["job"]["telegram_reply_to_message_id"], 55)
+
+    def test_channel_b_voice_reply_maps_resolve_failures(self):
+        cases = (
+            (service.VoiceSessionUnauthorized("PRISMA_SESSION_REQUIRED"), 401, "PRISMA_SESSION_REQUIRED"),
+            (RuntimeError("CHANNEL_B_VOICE_REPLY_LOOKUP_UNAVAILABLE"), 503, "CHANNEL_B_VOICE_REPLY_LOOKUP_UNAVAILABLE"),
+        )
+        for error, expected_status, expected_body in cases:
+            with self.subTest(error=type(error).__name__):
+                with patch.object(service, "_resolve_channel_b_voice_reply_payload", side_effect=error):
+                    response = service.app.test_client().post(
+                        "/internal/prisma/channel-b/telegram-voice-reply",
+                        headers={"X-Prisma-Session-Capability": "channel-b-token"},
+                    )
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.get_json()["error"], expected_body)
+
+    def test_channel_b_voice_reply_swallows_a_synthesis_failure_without_sending_anything(self):
+        """A synthesis/delivery failure is a fire-and-forget background call
+        from presentation: it must never crash the route, and the chat must
+        never receive a voice message or an error reply -- delivery only
+        ever happens inside _generate_tts_audio's own success path, which we
+        never reach here (the chat-action indicator legitimately still
+        fires -- see _start_telegram_recording_indicator -- so only the
+        absence of a sendVoice/sendDocument call is asserted)."""
+        payload = {"chatId": 995701520, "text": "answer", "replyToMessageId": None}
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}), \
+                patch.object(service, "_resolve_channel_b_voice_reply_payload", return_value=payload), \
+                patch.object(service, "_generate_tts_audio", side_effect=service.PrismaTtsProviderError("boom")), \
+                patch.object(service, "_telegram_post") as telegram_post:
+            response = service.app.test_client().post(
+                "/internal/prisma/channel-b/telegram-voice-reply",
+                headers={"X-Prisma-Session-Capability": "channel-b-token"},
+            )
+        self.assertEqual(response.status_code, 502)
+        delivery_calls = [call for call in telegram_post.call_args_list if "sendVoice" in call.args[0] or "sendDocument" in call.args[0]]
+        self.assertEqual(delivery_calls, [])
+
+    def test_resolve_channel_b_voice_reply_payload_round_trip(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"chatId": 995701520, "text": "answer", "replyToMessageId": 55}
+        http = Mock()
+        http.get.return_value = response
+
+        payload = service._resolve_channel_b_voice_reply_payload("channel-b-token", http=http)
+
+        self.assertEqual(payload, {"chatId": 995701520, "text": "answer", "replyToMessageId": 55})
+        http.get.assert_called_once_with(
+            "http://127.0.0.1:5057/internal/prisma/channel-b/voice-reply",
+            headers={"X-Prisma-Session-Capability": "channel-b-token"},
+            timeout=2,
+            allow_redirects=False,
+        )
+        response.close.assert_called_once_with()
+
+    def test_resolve_channel_b_voice_reply_payload_rejects_unauthorized_and_malformed(self):
+        unauthorized = Mock(status_code=401)
+        http = Mock(get=Mock(return_value=unauthorized))
+        with self.assertRaises(service.VoiceSessionUnauthorized):
+            service._resolve_channel_b_voice_reply_payload("bad-token", http=http)
+
+        for body in ({"chatId": "not-an-int", "text": "a"}, {"chatId": 7, "text": ""}, {"chatId": 7, "text": "a", "replyToMessageId": "x"}, []):
+            with self.subTest(body=body):
+                response = Mock(status_code=200)
+                response.json.return_value = body
+                http = Mock(get=Mock(return_value=response))
+                with self.assertRaises(RuntimeError):
+                    service._resolve_channel_b_voice_reply_payload("token", http=http)
+
     def test_http_response_close_releases_unstarted_audio_subscription(self):
         stream = Mock()
         stream.__iter__ = Mock(return_value=iter(()))
@@ -334,6 +440,47 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertTrue(telegram_post.call_args_list[2].args[0].endswith("/sendDocument"))
         with wave.open(BytesIO(wav_upload), "rb") as wav_file:
             self.assertEqual(wav_file.readframes(wav_file.getnframes()), processed_pcm)
+
+    def test_telegram_delivery_replies_to_the_question_message_when_present(self):
+        """B1: Channel B's voice note must reply to the user's question
+        message so text and audio stay paired under overlapping questions."""
+        encoder = Mock()
+        encoder.finish_and_get.return_value = b"ogg-bytes"
+        job = {
+            "telegram_chat_id": 995701520,
+            "telegram_reply_to_message_id": 55,
+            "telegram_encoder": encoder,
+            "telegram_pcm_parts": [b"pcm"],
+            "cancelled": Mock(is_set=Mock(return_value=False)),
+            "event_id": "same-audio",
+        }
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}), \
+                patch.object(service, "_telegram_post", return_value=Mock(ok=True, status_code=200)) as telegram_post:
+            service._send_same_prisma_audio_to_telegram(job)
+        self.assertEqual(telegram_post.call_args_list[0].kwargs["data"]["reply_to_message_id"], 55)
+
+    def test_telegram_delivery_omits_reply_to_message_id_when_absent(self):
+        encoder = Mock()
+        encoder.finish_and_get.return_value = b"ogg-bytes"
+        job = {
+            "telegram_chat_id": 995701520,
+            "telegram_encoder": encoder,
+            "telegram_pcm_parts": [b"pcm"],
+            "cancelled": Mock(is_set=Mock(return_value=False)),
+            "event_id": "same-audio",
+        }
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}), \
+                patch.object(service, "_telegram_post", return_value=Mock(ok=True, status_code=200)) as telegram_post:
+            service._send_same_prisma_audio_to_telegram(job)
+        self.assertNotIn("reply_to_message_id", telegram_post.call_args_list[0].kwargs["data"])
+
+    def test_job_creation_validates_and_stores_the_reply_to_message_id(self):
+        valid = service._create_interactions_tts_job("text", telegram_reply_to_message_id=55)
+        self.assertEqual(valid["telegram_reply_to_message_id"], 55)
+        for invalid in (0, -1, True, "55", None):
+            with self.subTest(value=invalid):
+                job = service._create_interactions_tts_job("text", telegram_reply_to_message_id=invalid)
+                self.assertIsNone(job["telegram_reply_to_message_id"])
 
     def test_local_health_is_ready_but_provider_is_unconfigured_without_key(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(service, "get_gemini_client") as get_client:

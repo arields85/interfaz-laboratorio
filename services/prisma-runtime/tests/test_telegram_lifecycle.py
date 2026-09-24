@@ -27,6 +27,7 @@ from prisma_runtime.telegram_lifecycle import (
     TelegramStateRepository,
     TelegramStateUnavailable,
 )
+from prisma_runtime.voice_events import VoiceEventStore
 
 
 class MemoryStateStore:
@@ -1270,6 +1271,144 @@ class TelegramLifecycleTests(unittest.TestCase):
         self.assertEqual(recorded["floor"], [])
         self.assertEqual(recorded["bot"].last_error, "TELEGRAM_PREPARATION_FAILED")
         self.assertIsNone(recorded["bot"].bot_id)
+
+
+def channel_b_snapshot():
+    """Minimal snapshot exercising the same widget shapes as
+    test_local_presentation.demo_snapshot(), trimmed to the two answers these
+    tests need."""
+    return {
+        "widgets": [
+            {"id": "oee", "title": "OEE", "type": "metric-card", "value": 88.6, "unit": "%"},
+            {"id": "lote", "title": "Lote: BT-2407", "type": "text-title", "value": "Lote: BT-2407"},
+        ]
+    }
+
+
+class ChannelBVoiceReplyTests(unittest.TestCase):
+    """B1: after TelegramLocalBot answers a Channel B question with text, it
+    must also request a same-text voice note for the same chat, as a reply to
+    the question message, from the voice process -- without ever publishing
+    through the shared HMI voice_events store (Channel B has no HMI owner and
+    must never reach the orb; see channel_a_on_outcome for the HMI-owned
+    counterpart this deliberately does not reuse)."""
+
+    def setUp(self):
+        install_offline_dispatch_guard(self)
+
+    def build_bot(self, *, voice_events=None, voice_url="http://127.0.0.1:5056", local_http=None):
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
+        bot = TelegramLocalBot(
+            "secret-token", Mock(), MemoryStateStore(state),
+            voice_events if voice_events is not None else VoiceEventStore(),
+            reservation=BotIdentityReservation(), voice_url=voice_url, local_http=local_http,
+        )
+        bot._call = identity_transport()
+        bot.prepare()
+        bot.snapshot_store.read = Mock(return_value=channel_b_snapshot())
+        bot.send_message = Mock()
+        return bot
+
+    def test_answer_triggers_exactly_one_voice_request_for_the_same_text_chat_and_question(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        fired = threading.Event()
+        captured = {}
+
+        def fake_fire(local_http, voice_url, token):
+            captured["voice_url"] = voice_url
+            captured["token"] = token
+            fired.set()
+
+        events = VoiceEventStore()
+        bot = self.build_bot(voice_events=events, local_http=Mock())
+        with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=fake_fire) as fire:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 55, "text": "¿Cuál es el OEE?"})
+
+        self.assertTrue(fired.wait(2), "channel B voice reply was never fired")
+        fire.assert_called_once()
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+        self.assertEqual(captured["voice_url"], "http://127.0.0.1:5056")
+        payload = events.resolve_channel_b_reply_token(captured["token"])
+        self.assertEqual(payload, {"chatId": 7, "text": "El OEE actual es 88,6 %.", "replyToMessageId": 55})
+
+    def test_informational_replies_never_trigger_a_voice_request(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        events = VoiceEventStore()
+        bot = self.build_bot(voice_events=events, local_http=Mock())
+        with patch.object(local_presentation_module, "_fire_channel_b_voice_reply") as fire:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 1, "text": "/start"})
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 2, "text": "/status"})
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 3, "text": "/help"})
+
+        fire.assert_not_called()
+
+    def test_second_overlapping_request_for_the_same_chat_is_dropped_not_queued(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        release = threading.Event()
+        entered = threading.Event()
+        calls = []
+
+        def blocking_fire(local_http, voice_url, token):
+            calls.append(token)
+            entered.set()
+            release.wait(2)
+
+        events = VoiceEventStore()
+        bot = self.build_bot(voice_events=events, local_http=Mock())
+        try:
+            with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=blocking_fire):
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 10, "text": "¿Cuál es el OEE?"})
+                self.assertTrue(entered.wait(2), "first voice request never started")
+                bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 11, "text": "¿Qué lote está activo?"})
+        finally:
+            release.set()
+            for worker in threading.enumerate():
+                if worker.name == "PrismaChannelBVoiceReply":
+                    worker.join(timeout=2)
+
+        self.assertEqual(len(calls), 1, "an overlapping request must be dropped, not queued")
+        self.assertEqual(bot.send_message.call_count, 2, "both text answers must still be sent")
+
+    def test_mint_or_dispatch_failure_never_raises_or_touches_the_text_reply(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        events = VoiceEventStore()
+        bot = self.build_bot(voice_events=events, local_http=Mock())
+        fired = threading.Event()
+
+        def failing_fire(local_http, voice_url, token):
+            fired.set()
+            raise RuntimeError("boom")
+
+        with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=failing_fire):
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 12, "text": "¿Cuál es el OEE?"})
+
+        self.assertTrue(fired.wait(2), "dispatch was never attempted")
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+
+    def test_channel_b_never_publishes_an_hmi_voice_event(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        events = VoiceEventStore()
+        bot = self.build_bot(voice_events=events, local_http=Mock())
+        fired = threading.Event()
+        with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=lambda *a, **k: fired.set()), \
+                patch.object(events, "publish", wraps=events.publish) as publish:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 13, "text": "¿Cuál es el OEE?"})
+            self.assertTrue(fired.wait(2), "voice reply was never fired")
+
+        publish.assert_not_called()
+        self.assertIsNone(events.latest("any-owner"))
+
+    def test_missing_voice_wiring_never_raises(self):
+        bot = self.build_bot(voice_url=None, local_http=None)
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 14, "text": "¿Cuál es el OEE?"})
+
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
 
 
 if __name__ == "__main__":

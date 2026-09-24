@@ -66,6 +66,13 @@ _TELEGRAM_HTTP_SESSION = requests.Session()
 _TELEGRAM_HTTP_LOCK = threading.Lock()
 _VOICE_EVENT_URL = "http://127.0.0.1:5057/internal/prisma/voice-events"
 _VOICE_EVENT_MAX_BYTES = 32 * 1024
+# B1: Channel B (the remote personal Telegram bot) has no HMI owner and no
+# published voice event -- resolving its own bearer token round-trips to this
+# dedicated presentation route instead of /internal/prisma/voice-events/<id>,
+# so it can never reach the shared voice_events store (see
+# VoiceEventStore.mint_channel_b_reply_token's own docstring).
+_CHANNEL_B_VOICE_REPLY_URL = "http://127.0.0.1:5057/internal/prisma/channel-b/voice-reply"
+_CHANNEL_B_VOICE_REPLY_MAX_TEXT_BYTES = 16 * 1024
 gemini_credentials = GeminiCredentialResolver()
 # T10 unit 2: one warm Gemini client reused across requests instead of one
 # new client per request; see WarmGeminiClient's docstring for the
@@ -214,18 +221,26 @@ def _send_same_prisma_audio_to_telegram(job):
     token, encoder = _telegram_token(), job.get("telegram_encoder")
     if not token: _cancel_telegram_job(job); return
     ogg_data = encoder.finish_and_get(timeout=15) if encoder else None; base = os.environ.get("TELEGRAM_BOT_API_BASE", "https://api.telegram.org").rstrip("/"); chat_id = job["telegram_chat_id"]; event_id = _safe_event_id(job.get("event_id"))
+    # B1: reply to the question message when one was bound at job creation
+    # (Channel B), so text and audio stay visually paired under overlapping
+    # questions. Absent for every other caller (Channel A, HMI prefetch),
+    # which never set telegram_reply_to_message_id -- omitted entirely
+    # rather than sent as null, matching Telegram's own optional-field
+    # convention for every other field here.
+    reply_to = job.get("telegram_reply_to_message_id")
+    reply_data = {"reply_to_message_id": reply_to} if reply_to else {}
     if ogg_data:
         try:
-            response = _telegram_post(f"{base}/bot{token}/sendVoice", data={"chat_id": str(chat_id)}, files={"voice": (f"prisma_{event_id}.ogg", ogg_data, "audio/ogg")}, timeout=15)
+            response = _telegram_post(f"{base}/bot{token}/sendVoice", data={"chat_id": str(chat_id), **reply_data}, files={"voice": (f"prisma_{event_id}.ogg", ogg_data, "audio/ogg")}, timeout=15)
             if 200 <= response.status_code < 300: return
         except Exception: pass
         try:
-            response = _telegram_post(f"{base}/bot{token}/sendDocument", data={"chat_id": str(chat_id), "caption": "Respuesta por voz de Prisma"}, files={"document": (f"prisma_{event_id}.ogg", ogg_data, "audio/ogg")}, timeout=15)
+            response = _telegram_post(f"{base}/bot{token}/sendDocument", data={"chat_id": str(chat_id), "caption": "Respuesta por voz de Prisma", **reply_data}, files={"document": (f"prisma_{event_id}.ogg", ogg_data, "audio/ogg")}, timeout=15)
             if 200 <= response.status_code < 300: return
         except Exception: pass
     pcm = b"".join(job.get("telegram_pcm_parts") or [])
     if pcm:
-        try: _telegram_post(f"{base}/bot{token}/sendDocument", data={"chat_id": str(chat_id), "caption": "Respuesta por voz de Prisma"}, files={"document": (f"prisma_{event_id}.wav", pcm_to_wav(pcm), "audio/wav")}, timeout=15)
+        try: _telegram_post(f"{base}/bot{token}/sendDocument", data={"chat_id": str(chat_id), "caption": "Respuesta por voz de Prisma", **reply_data}, files={"document": (f"prisma_{event_id}.wav", pcm_to_wav(pcm), "audio/wav")}, timeout=15)
         except Exception: pass
 
 
@@ -608,14 +623,21 @@ def _voice_audio_cache_key(job):
     return hashlib.sha256(payload).hexdigest()
 
 
-def _create_interactions_tts_job(text, event_id=None, telegram_chat_id=None, voice_config=None):
+def _create_interactions_tts_job(text, event_id=None, telegram_chat_id=None, voice_config=None, telegram_reply_to_message_id=None):
     # T10: times the whole job-creation step, including the conditional
     # TelegramOpusStreamEncoder subprocess spin-up (ffmpeg) and recording
     # indicator thread start -- both skipped, and this staying near-zero, for
     # a plain HMI voice query with no Telegram chat attached.
     create_start = time.monotonic()
     config = clone_json(voice_config if voice_config is not None else prisma_voice_config_store.get()); valid_chat = telegram_chat_id if _valid_telegram_chat_id(telegram_chat_id) else None
-    job = {"text": text, "cancelled": threading.Event(), "voice_config": config, "dsp": PrismaStreamingDSP(config), "event_id": str(event_id).strip() if event_id is not None and str(event_id).strip() else None, "telegram_chat_id": valid_chat, "telegram_pcm_parts": [], "telegram_pcm_bytes": 0, "telegram_delivery_queued": False, "telegram_encoder": None, "telegram_chat_action_stop": threading.Event()}
+    # B1: validated once here, exactly like valid_chat above, then trusted
+    # verbatim by _send_same_prisma_audio_to_telegram.
+    valid_reply_to = (
+        telegram_reply_to_message_id
+        if isinstance(telegram_reply_to_message_id, int) and not isinstance(telegram_reply_to_message_id, bool) and telegram_reply_to_message_id > 0
+        else None
+    )
+    job = {"text": text, "cancelled": threading.Event(), "voice_config": config, "dsp": PrismaStreamingDSP(config), "event_id": str(event_id).strip() if event_id is not None and str(event_id).strip() else None, "telegram_chat_id": valid_chat, "telegram_reply_to_message_id": valid_reply_to, "telegram_pcm_parts": [], "telegram_pcm_bytes": 0, "telegram_delivery_queued": False, "telegram_encoder": None, "telegram_chat_action_stop": threading.Event()}
     prisma_audio_sink.emit("backend", "receipt", {})
     if valid_chat is not None and _telegram_token(): job["telegram_encoder"] = TelegramOpusStreamEncoder(job["event_id"])
     if valid_chat is not None: _start_telegram_recording_indicator(job)
@@ -815,6 +837,73 @@ def resolve_voice_event(event_id, capability="", http=None):
         )
 
 
+def _resolve_channel_b_voice_reply_payload(token, http=None):
+    """B1: resolve a Channel-B voice-reply bearer token (minted by
+    VoiceEventStore.mint_channel_b_reply_token) into its bound chat id,
+    answer text and question message id. Same shape as resolve_voice_event
+    (fixed target, disabled proxy, bounded, no redirect), but against the
+    dedicated presentation route -- Channel B never resolves through
+    /internal/prisma/voice-events/<id> and never reaches the shared
+    voice_events store."""
+    session = http or voice_event_http
+    session.trust_env = False
+    response = None
+    resolve_start = time.monotonic()
+    try:
+        response = session.get(
+            _CHANNEL_B_VOICE_REPLY_URL,
+            headers={CAPABILITY_HEADER: token},
+            timeout=2,
+            allow_redirects=False,
+        )
+        if response.status_code == 401:
+            raise VoiceSessionUnauthorized("PRISMA_SESSION_REQUIRED")
+        if response.status_code != 200:
+            raise RuntimeError("CHANNEL_B_VOICE_REPLY_LOOKUP_UNAVAILABLE")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("CHANNEL_B_VOICE_REPLY_LOOKUP_UNAVAILABLE")
+        chat_id, text, reply_to = payload.get("chatId"), payload.get("text"), payload.get("replyToMessageId")
+        if (
+            not _valid_telegram_chat_id(chat_id)
+            or not isinstance(text, str)
+            or not text.strip()
+            or len(text.encode("utf-8")) > _CHANNEL_B_VOICE_REPLY_MAX_TEXT_BYTES
+            or not (reply_to is None or (isinstance(reply_to, int) and not isinstance(reply_to, bool) and reply_to > 0))
+        ):
+            raise RuntimeError("CHANNEL_B_VOICE_REPLY_LOOKUP_UNAVAILABLE")
+        return {"chatId": chat_id, "text": text, "replyToMessageId": reply_to}
+    except VoiceSessionUnauthorized:
+        raise
+    except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError):
+        raise RuntimeError("CHANNEL_B_VOICE_REPLY_LOOKUP_UNAVAILABLE") from None
+    finally:
+        if response is not None:
+            try: response.close()
+            except Exception: pass
+        _logger.warning(
+            "Prisma channel B voice reply resolve: elapsed_ms=%d",
+            round((time.monotonic() - resolve_start) * 1000),
+        )
+
+
+def _deliver_channel_b_voice_reply(payload):
+    """B1: the exact same Gemini TTS + Opus + Telegram delivery pipeline
+    Channel A's telegramChatId path already exercises (_create_interactions_
+    tts_job -> _generate_tts_audio -> _queue_same_prisma_audio_to_telegram on
+    completion), but reached directly -- never through AudioCoordinator or
+    the shared voice_events store, since Channel B has no HMI owner and no
+    published voice event. The generator is drained for its Telegram-delivery
+    side effect only; nothing streams back over HTTP here."""
+    job = _create_interactions_tts_job(
+        payload["text"],
+        telegram_chat_id=payload["chatId"],
+        telegram_reply_to_message_id=payload.get("replyToMessageId"),
+    )
+    for _chunk in _generate_tts_audio(job):
+        pass
+
+
 def _generate_event_audio(event, voice_config, secret, control):
     job = _create_interactions_tts_job(
         event["text"],
@@ -966,6 +1055,36 @@ def prisma_prefetch():
     except (AudioCoordinatorError, RuntimeError):
         return jsonify({"ok": False, "error": "VOICE_SERVICE_UNAVAILABLE"}), 503
     subscription.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/internal/prisma/channel-b/telegram-voice-reply", methods=["POST"])
+def channel_b_telegram_voice_reply():
+    """B1: Channel B's own on-answer voice-note delivery. Presentation fires
+    this on its own background thread right after TelegramLocalBot sends the
+    text answer (see _fire_channel_b_voice_reply /
+    mint_channel_b_reply_token in local_presentation.py), carrying a
+    single-use bearer token in place of an eventId. Never blocks the caller's
+    receive loop and never reports failure to the chat: a resolve or
+    synthesis failure here is swallowed and logged (redacted), because the
+    caller is a fire-and-forget background thread and the text answer has
+    already been delivered."""
+    if request.content_length is not None and request.content_length > 1024:
+        return jsonify({"ok": False, "error": "INVALID_CHANNEL_B_VOICE_REPLY_REQUEST"}), 400
+    capability = request.headers.get(CAPABILITY_HEADER, "")
+    if not capability:
+        return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
+    try:
+        payload = _resolve_channel_b_voice_reply_payload(capability)
+    except VoiceSessionUnauthorized:
+        return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
+    except RuntimeError:
+        return jsonify({"ok": False, "error": "CHANNEL_B_VOICE_REPLY_LOOKUP_UNAVAILABLE"}), 503
+    try:
+        _deliver_channel_b_voice_reply(payload)
+    except Exception:
+        _logger.warning("Prisma channel B voice reply: synthesis or delivery failed")
+        return jsonify({"ok": False, "error": "CHANNEL_B_VOICE_REPLY_FAILED"}), 502
     return jsonify({"ok": True})
 
 

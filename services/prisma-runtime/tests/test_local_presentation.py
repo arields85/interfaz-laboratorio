@@ -176,6 +176,40 @@ class LocalPresentationTests(unittest.TestCase):
         self.assertEqual(no_header.status_code, 401)
         self.assertEqual(bad_token.status_code, 401)
 
+    def test_channel_b_voice_reply_route_resolves_a_valid_token(self) -> None:
+        """B1: Channel B's own internal auth -- a single-use bearer token
+        minted by VoiceEventStore.mint_channel_b_reply_token, resolved
+        through a route fully separate from /internal/prisma/voice-events/
+        (Channel B never touches the shared HMI voice-event store)."""
+        with tempfile.TemporaryDirectory() as temporary:
+            events = VoiceEventStore()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            token = events.mint_channel_b_reply_token(7, "El OEE actual es 88,6 %.", 55)
+
+            response = client.get("/internal/prisma/channel-b/voice-reply", headers={"X-Prisma-Session-Capability": token})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["chatId"], 7)
+        self.assertEqual(body["text"], "El OEE actual es 88,6 %.")
+        self.assertEqual(body["replyToMessageId"], 55)
+
+    def test_channel_b_voice_reply_route_rejects_missing_unknown_or_reused_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            events = VoiceEventStore()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            token = events.mint_channel_b_reply_token(7, "answer")
+
+            no_header = client.get("/internal/prisma/channel-b/voice-reply")
+            bad_token = client.get("/internal/prisma/channel-b/voice-reply", headers={"X-Prisma-Session-Capability": "not-a-real-token"})
+            first_use = client.get("/internal/prisma/channel-b/voice-reply", headers={"X-Prisma-Session-Capability": token})
+            reused = client.get("/internal/prisma/channel-b/voice-reply", headers={"X-Prisma-Session-Capability": token})
+
+        self.assertEqual(no_header.status_code, 401)
+        self.assertEqual(bad_token.status_code, 401)
+        self.assertEqual(first_use.status_code, 200)
+        self.assertEqual(reused.status_code, 401)
+
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()

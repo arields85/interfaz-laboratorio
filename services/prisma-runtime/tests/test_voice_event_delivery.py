@@ -459,3 +459,67 @@ class VoiceEventPrefetchTokenTests(unittest.TestCase):
 
         self.assertNotEqual(owner, OTHER)
         self.assertIsNone(self.store.get(event["id"], OTHER))
+
+
+class ChannelBReplyTokenTests(unittest.TestCase):
+    """B1: Channel B (the remote personal Telegram bot) has no HMI owner and
+    must never publish through the shared _events/_latest HMI voice-event
+    store -- its bearer token binds an answer's text, destination chat and
+    question message id in a fully separate table, with its own TTL and
+    capacity, so resolving it can never surface on /hmi/voice/latest,
+    /hmi/voice/events or the orb."""
+
+    def setUp(self):
+        self.now = 10.0
+        self.store = VoiceEventStore(clock=lambda: self.now)
+
+    def test_mint_and_resolve_round_trip_returns_the_bound_payload(self):
+        token = self.store.mint_channel_b_reply_token(7, "El OEE actual es 88,6 %.", 55)
+
+        self.assertIsInstance(token, str)
+        self.assertGreaterEqual(len(token), 32)
+        self.assertEqual(
+            self.store.resolve_channel_b_reply_token(token),
+            {"chatId": 7, "text": "El OEE actual es 88,6 %.", "replyToMessageId": 55},
+        )
+
+    def test_mint_never_touches_the_shared_events_or_latest_store(self):
+        self.store.mint_channel_b_reply_token(7, "answer", 55)
+
+        self.assertEqual(len(self.store._events), 0)
+        self.assertEqual(len(self.store._latest), 0)
+
+    def test_reply_to_message_id_is_optional(self):
+        token = self.store.mint_channel_b_reply_token(7, "answer")
+
+        self.assertEqual(
+            self.store.resolve_channel_b_reply_token(token),
+            {"chatId": 7, "text": "answer", "replyToMessageId": None},
+        )
+
+    def test_token_is_single_use(self):
+        token = self.store.mint_channel_b_reply_token(7, "answer", 55)
+
+        first = self.store.resolve_channel_b_reply_token(token)
+        second = self.store.resolve_channel_b_reply_token(token)
+
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+
+    def test_resolve_rejects_an_unknown_or_malformed_token(self):
+        self.assertIsNone(self.store.resolve_channel_b_reply_token("not-a-real-token"))
+        self.assertIsNone(self.store.resolve_channel_b_reply_token(""))
+        self.assertIsNone(self.store.resolve_channel_b_reply_token(None))
+
+    def test_resolve_rejects_an_expired_token(self):
+        token = self.store.mint_channel_b_reply_token(7, "answer", 55)
+
+        self.now += 61.0  # past the short channel-B reply-token TTL
+
+        self.assertIsNone(self.store.resolve_channel_b_reply_token(token))
+
+    def test_mint_rejects_an_invalid_chat_id(self):
+        for invalid_chat_id in (0, True, "7", None):
+            with self.subTest(chat_id=invalid_chat_id):
+                with self.assertRaises(ValueError):
+                    self.store.mint_channel_b_reply_token(invalid_chat_id, "answer")

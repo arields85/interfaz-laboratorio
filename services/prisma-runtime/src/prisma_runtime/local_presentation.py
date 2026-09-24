@@ -95,6 +95,14 @@ CHANNEL_A_POLL_PAUSE_SECONDS = 0.1
 # back from the old hmi_tts behavior (a flat 5 s in-place retry).
 CHANNEL_A_POLL_RETRY_DELAY_SECONDS = 5.0
 CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS = 15.0
+# B1: bounds the presentation -> voice process call for Channel B's own
+# voice-note request, fired on its own background thread (never the bot's
+# receive loop). Generous relative to the prefetch/HMI timeouts above
+# because this one call covers the whole Gemini TTS + Opus encode + Telegram
+# upload round trip synchronously (see channel_b_telegram_voice_reply in
+# voice_service.py), not just admission into a stream the browser reads
+# separately.
+CHANNEL_B_VOICE_REPLY_TIMEOUT_SECONDS = 45
 
 
 def utc_now_iso() -> str:
@@ -188,6 +196,27 @@ def _fire_voice_prefetch(local_http: requests.Session, voice_url: str, event_id:
             json={"eventId": event_id},
             headers={CAPABILITY_HEADER: capability},
             timeout=3,
+        )
+    except Exception:
+        pass
+
+
+def _fire_channel_b_voice_reply(local_http: requests.Session, voice_url: str, token: str) -> None:
+    """B1: Channel B's own on-answer voice request. Fired on its own
+    background thread by TelegramLocalBot._request_channel_b_voice_reply,
+    right after the text answer has already been sent -- never awaited,
+    never allowed to delay the bot's receive loop. Reaches a dedicated
+    voice-process route (never /internal/prisma/prefetch): Channel B has no
+    HMI owner and no published voice event, so it never touches the shared
+    voice_events store (see VoiceEventStore.mint_channel_b_reply_token). A
+    slow or failed request simply means no voice note this time; nothing
+    here may ever raise."""
+    try:
+        local_http.post(
+            f"{voice_url}/internal/prisma/channel-b/telegram-voice-reply",
+            json={},
+            headers={CAPABILITY_HEADER: token},
+            timeout=CHANNEL_B_VOICE_REPLY_TIMEOUT_SECONDS,
         )
     except Exception:
         pass
@@ -491,9 +520,15 @@ class TelegramLocalBot:
     never overwrite a live lease.
     """
 
-    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None):
+    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
+        # B1: both optional -- a bot built without them (e.g. build_telegram_
+        # bot's legacy standalone path) simply never requests a Channel B
+        # voice reply; _request_channel_b_voice_reply is a no-op in that case.
+        self.voice_url, self.local_http = voice_url, local_http
+        self._channel_b_voice_lock = threading.Lock()
+        self._channel_b_voice_in_flight: set[int] = set()
         self.stop_event, self.thread = threading.Event(), None
         self.last_error, self.bot_username, self.bot_id = None, None, None
         self._state = None
@@ -741,6 +776,43 @@ class TelegramLocalBot:
         if command.startswith("/help"):
             self.send_message(chat_id, "Puede consultar lote, producto, orden, cliente, OEE, estado, actividad, potencia, progreso, tiempo restante, alertas o pedir un resumen."); return
         answer = answer_from_snapshot(self.snapshot_store.read(), text); self.send_message(chat_id, answer.answer_text)
+        self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
+
+    def _request_channel_b_voice_reply(self, chat_id, reply_to_message_id, answer_text):
+        """B1: after the text answer above, request a same-text voice note
+        for the same chat from the voice process -- never for /start,
+        /status or /help (this is only ever reached from the final
+        answer_from_snapshot branch of _handle_message). Bounded to at most
+        one synthesis in flight per chat: a chat that asks a new question
+        before its previous voice note finished drops the newer request
+        instead of queuing it (Channel B is a single paired human; losing an
+        occasional voice note under overlap is preferable to an unbounded
+        queue or delaying the receive loop for every later poll). Minting
+        and dispatch both happen off this thread's return path except for
+        the cheap in-memory in-flight check/reservation, which must be
+        synchronous so a second overlapping call can observe it
+        immediately. Never raises: a mint or dispatch failure is logged
+        (redacted -- no answer text, chat id or token) and stays silent to
+        the chat; the already-sent text answer is never affected."""
+        if not self.voice_url or self.local_http is None:
+            return
+        with self._channel_b_voice_lock:
+            if chat_id in self._channel_b_voice_in_flight:
+                _logger.warning("Prisma channel B voice reply: dropped, already in flight for this chat")
+                return
+            self._channel_b_voice_in_flight.add(chat_id)
+
+        def worker():
+            try:
+                token = self.voice_events.mint_channel_b_reply_token(chat_id, answer_text, reply_to_message_id)
+                _fire_channel_b_voice_reply(self.local_http, self.voice_url, token)
+            except Exception:
+                _logger.warning("Prisma channel B voice reply: mint or dispatch failed")
+            finally:
+                with self._channel_b_voice_lock:
+                    self._channel_b_voice_in_flight.discard(chat_id)
+
+        threading.Thread(target=worker, name="PrismaChannelBVoiceReply", daemon=True).start()
 
     def run(self):
         """Claim the single runner slot, then poll under owned activity.
@@ -931,7 +1003,8 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 resolver,
                 credentials,
                 lambda token: TelegramLocalBot(
-                    token, snapshot_store, state_store, voice_events, reservation=identity_reservation
+                    token, snapshot_store, state_store, voice_events, reservation=identity_reservation,
+                    voice_url=voice_url, local_http=local_http,
                 ),
             )
 
@@ -1230,6 +1303,23 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 return session_error()
         event = voice_events.get_internal(event_id, owner_id)
         return (jsonify({"ok": False, "error": "VOICE_EVENT_NOT_FOUND"}), 404) if event is None else jsonify(event)
+
+    @app.route("/internal/prisma/channel-b/voice-reply", methods=["GET"])
+    def channel_b_voice_reply_token():
+        """B1: resolves a Channel-B voice-reply bearer token (minted by
+        TelegramLocalBot, see mint_channel_b_reply_token) into its bound
+        chat id, answer text and question message id. Deliberately separate
+        from /internal/prisma/voice-events/<id> above: Channel B has no HMI
+        owner, and this token's table is not the shared _events/_latest HMI
+        voice-event store, so resolving it can never surface on any HMI
+        voice surface. Single-use, like the token itself."""
+        token = request.headers.get(CAPABILITY_HEADER, "")
+        if not token:
+            return session_error()
+        payload = voice_events.resolve_channel_b_reply_token(token)
+        if payload is None:
+            return session_error()
+        return jsonify({"ok": True, **payload})
 
     @app.route("/hmi/voice/timeline", methods=["POST", "OPTIONS"])
     def voice_timeline():

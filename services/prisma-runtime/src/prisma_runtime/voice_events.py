@@ -84,6 +84,8 @@ class VoiceEventStore:
         max_total_events=256,
         prefetch_token_ttl_seconds=60.0,
         max_prefetch_tokens=64,
+        channel_b_reply_token_ttl_seconds=60.0,
+        max_channel_b_reply_tokens=64,
         max_stream_subscribers_per_owner=4,
         max_stream_subscribers_total=32,
     ):
@@ -93,6 +95,8 @@ class VoiceEventStore:
         self.max_total_events = max_total_events
         self.prefetch_token_ttl_seconds = prefetch_token_ttl_seconds
         self.max_prefetch_tokens = max_prefetch_tokens
+        self.channel_b_reply_token_ttl_seconds = channel_b_reply_token_ttl_seconds
+        self.max_channel_b_reply_tokens = max_channel_b_reply_tokens
         # T13b should-fix: an open SSE stream holds one Werkzeug thread for
         # as long as the connection lives, with no explicit cap of its own
         # before this -- only the 64-session HMI registry indirectly bounded
@@ -109,6 +113,17 @@ class VoiceEventStore:
         # with no live browser request in flight (Channel A's on-outcome
         # callback). token -> (event_id, owner_id, expires_at).
         self._prefetch_tokens: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
+        # B1: Channel B (the remote personal Telegram bot) has no HMI owner
+        # and no published voice event to bind a prefetch token to -- its own
+        # bearer token instead carries the full answer payload (destination
+        # chat, answer text, question message id) in this fully separate
+        # table. Deliberately never touches _events/_latest: resolving it can
+        # never surface on /hmi/voice/latest, /hmi/voice/events or the orb.
+        # Single-use (popped on resolve, unlike the reusable prefetch token
+        # above) since Channel B's flow synthesizes and delivers exactly
+        # once, with no AudioCoordinator multi-admission revalidation to
+        # support.
+        self._channel_b_reply_tokens: OrderedDict[str, tuple[dict, float]] = OrderedDict()
         # T13 unit (c): per-owner wake flags so a push (SSE) endpoint can
         # block-wait for the next publish instead of polling the store.
         self._owner_waiters: dict[str, list[threading.Event]] = {}
@@ -291,6 +306,48 @@ class VoiceEventStore:
         expired = [token for token, (_eid, _oid, expires_at) in self._prefetch_tokens.items() if expires_at <= now]
         for token in expired:
             self._prefetch_tokens.pop(token, None)
+
+    def mint_channel_b_reply_token(self, chat_id, text, reply_to_message_id=None):
+        """B1: mint a single-use bearer token for one Channel B answer, bound
+        to its destination chat, its own text, and (when known) the question
+        message id to reply to. See the table's own docstring above for why
+        this never touches _events/_latest."""
+        if not isinstance(chat_id, int) or isinstance(chat_id, bool) or chat_id == 0:
+            raise ValueError("VOICE_EVENT_CHAT_INVALID")
+        normalized_reply_to = (
+            reply_to_message_id
+            if isinstance(reply_to_message_id, int) and not isinstance(reply_to_message_id, bool) and reply_to_message_id > 0
+            else None
+        )
+        now = self.clock()
+        with self.lock:
+            self._purge_channel_b_reply_tokens_locked(now)
+            if len(self._channel_b_reply_tokens) >= self.max_channel_b_reply_tokens:
+                self._channel_b_reply_tokens.popitem(last=False)
+            token = secrets.token_urlsafe(32)
+            payload = {"chatId": chat_id, "text": str(text), "replyToMessageId": normalized_reply_to}
+            self._channel_b_reply_tokens[token] = (payload, now + self.channel_b_reply_token_ttl_seconds)
+        return token
+
+    def resolve_channel_b_reply_token(self, token):
+        """Single-use: a valid token is consumed by its first resolution."""
+        if not isinstance(token, str) or not token:
+            return None
+        now = self.clock()
+        with self.lock:
+            self._purge_channel_b_reply_tokens_locked(now)
+            record = self._channel_b_reply_tokens.pop(token, None)
+        if record is None:
+            return None
+        payload, expires_at = record
+        if expires_at <= now:
+            return None
+        return dict(payload)
+
+    def _purge_channel_b_reply_tokens_locked(self, now):
+        expired = [token for token, (_payload, expires_at) in self._channel_b_reply_tokens.items() if expires_at <= now]
+        for token in expired:
+            self._channel_b_reply_tokens.pop(token, None)
 
     def remove_owner(self, owner_id):
         owner_id = str(owner_id)
