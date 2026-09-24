@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 import requests
 from flask import Flask, Response, jsonify, request
 
+from .access_log_redaction import install_access_log_query_redaction
 from .admin_auth import AdminAuthRepository, AdminAuthService, ScryptPasswordHasher
 from .admin_http import AdminHttpBoundary
 from .bot_identity_reservation import process_bot_identity_reservation
@@ -1338,6 +1339,7 @@ def main():
     # path claims guaranteed closure.
     if telegram_manager: telegram_manager.startup_apply()
     if channel_a_manager: channel_a_manager.startup_apply()
+    install_access_log_query_redaction()
     try: app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, threaded=True, use_reloader=False)
     finally:
         if channel_a_manager: channel_a_manager.stop()

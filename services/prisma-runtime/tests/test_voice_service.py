@@ -693,5 +693,20 @@ class VoiceServiceTests(unittest.TestCase):
             self.assertEqual(Path(temporary, "config.json").read_bytes(), before)
 
 
+class MainStartupWiringTests(unittest.TestCase):
+    def test_main_installs_access_log_query_redaction_before_app_run(self) -> None:
+        """T13b should-fix (defense in depth): the query-string-redacting
+        access log filter must be installed before Werkzeug's dev server
+        starts logging requests, not after."""
+        source = (RUNTIME_ROOT / "src" / "prisma_runtime" / "voice_service.py").read_text(encoding="utf-8")
+        main_start = source.index("\ndef main():")
+        main_body = source[main_start:]
+        self.assertIn("install_access_log_query_redaction()", main_body)
+        self.assertLess(
+            main_body.index("install_access_log_query_redaction()"),
+            main_body.index("app.run("),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -29,6 +29,7 @@ from uuid import UUID
 import requests
 from flask import Flask, Response, jsonify, request
 
+from .access_log_redaction import install_access_log_query_redaction
 from .audio_observability import BoundedAudioSink
 from .event_audio import AudioCapacityError, AudioCoordinator, AudioCoordinatorError
 from .hmi_sessions import CAPABILITY_HEADER
@@ -957,6 +958,7 @@ def _warm_up_gemini_client_in_background():
 def main():
     _validate_single_process_environment()
     threading.Thread(target=_warm_up_gemini_client_in_background, name="PrismaGeminiWarmup", daemon=True).start()
+    install_access_log_query_redaction()
     app.run(host=PRISMA_VOICE_HOST, port=5056, threaded=True, use_reloader=False)
 
 
