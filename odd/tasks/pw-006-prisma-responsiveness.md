@@ -580,9 +580,75 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   (d) find why Gemini TTFB inside the runtime is ~2× the standalone measurement and fix it if it is
   ours; (e) send the Telegram typing action without blocking the answer (fire-and-forget) or skip
   it when the answer is immediate.
+  - **Unit (a) — in-memory Gemini secret** (2026-09-24, commit `5411978`). Evidence:
+    `gemini_credentials.py` `GeminiCredentialResolver` now keeps the resolved secret in memory and
+    only re-reads the protected store when a cheap `os.stat()` on the credential database's mtime
+    proves it changed, instead of on every `resolve()` call. Chosen invalidation: file mtime of
+    `runtime_paths().credential_database`, not a cross-process signal — the presentation process
+    (admin routes) and this voice process are separate OS processes with no shared memory, but
+    every `CredentialService.set_secret`/`delete_secret` (save, delete, and rotate — a rotate is
+    just a re-save) already writes to that same SQLite file, so its mtime advances on any of those
+    changes for free. New `_default_mtime_probe()` (injectable via `mtime_probe=`) does the stat();
+    a failed or unprovable stat always fails safe to a real resolve (never serves a possibly-stale
+    secret). Only cached on a *successful* resolve (a failure is never cached, so the next call
+    retries the store normally). Environment-mode (unprotected) credentials never consult the probe
+    at all — that path was already free (a plain `os.environ.get`). Adapts
+    `test_queued_work_reads_replacement_credential_at_dequeue`'s guarantee (unchanged,
+    `test_event_audio.py` — that test exercises `AudioCoordinator`'s own call-timing with a hand-
+    rolled resolver, untouched by this change) to this resolver's own cache with new
+    `GeminiCredentialCachingTests` (6 tests: cache hit never touches the store; mtime change
+    invalidates and re-reads; an unprovable/failed probe always bypasses the cache; environment
+    source never calls the probe; a failed resolve is never cached; `status()` benefits from the
+    cache too) plus `GeminiCredentialDefaultMtimeProbeTests` (3 tests for the default probe, using a
+    patched `runtime_paths()` pointing at a temp file — never touches the real credential database).
+    RED confirmed (`TypeError: unexpected keyword argument 'mtime_probe'` / `AttributeError: no
+    attribute '_default_mtime_probe'`) before implementation. Full suite green (1417 passed).
+  - **Unit (d) — Gemini TTFB inside the runtime** (2026-09-24, commit pending). Root cause found and
+    fixed, evidence-backed by a live standalone measurement (user-authorized real Gemini calls,
+    short Spanish sentences, 4 requests total; script under the session scratchpad, not committed):
+    httpx's own default `keepalive_expiry` is **5 seconds** (`httpx.Limits()`, confirmed by reading
+    the installed `httpx` 0.28.1 source) and `google-genai`'s `_api_client.py` never overrides it, so
+    the pooled HTTP connection closes whenever more than 5 s pass between Gemini calls — which real,
+    humanly-spaced Channel A/HMI questions almost always do — forcing a fresh TCP+TLS handshake on
+    nearly every real request. `WarmGeminiClient` reusing the same SDK client *object* does not by
+    itself keep the underlying httpx connection warm. Measured with the exact production helpers
+    (`create_gemini_client`, `TTS_MODEL`, `VOICE`) against the real API: a call issued after a 7 s
+    idle gap on the default client measured **1335 ms** (matches the runtime's observed
+    1311–1486 ms almost exactly); the same 7 s gap on a client built with a longer
+    `keepalive_expiry` measured **559 ms** (matches the ~0.6–0.7 s standalone benchmark/smoke-test
+    figures). This is ours to fix. `gemini_credentials.py` — new
+    `GEMINI_HTTP_KEEPALIVE_EXPIRY_SECONDS = 55.0`; `create_gemini_client` now passes
+    `http_options=genai.types.HttpOptions(timeout=timeout_ms, client_args={"limits":
+    httpx.Limits(max_keepalive_connections=20, keepalive_expiry=55.0)})` (`client_args` flows
+    straight into the SDK's own `httpx.Client(**client_args)` construction — confirmed by reading
+    `_api_client.py`'s `_ensure_httpx_ssl_ctx`). Applies to both the TTS client and the verification
+    client (same factory function); harmless for verification's one-off calls. Added `httpx==0.28.1`
+    to `requirements.in` as a direct dependency (was already pinned with hashes in
+    `requirements.lock.txt` as a transitive dependency of `google-genai`, so the lock file needed no
+    regeneration — the pin is already exactly consistent). New/updated tests in
+    `test_gemini_credentials.py`: new `test_client_uses_a_keepalive_expiry_longer_than_httpxs_five_
+    second_default`; the two existing `HttpOptions(timeout=...)` call-shape assertions
+    (`test_client_uses_documented_45_second_sdk_timeout`,
+    `test_default_client_factory_uses_the_short_verification_timeout`) updated to also expect
+    `client_args={"limits": ANY}`. RED confirmed (both existing tests failed on the old call shape)
+    before implementation. Full suite green (1418 passed).
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
-  keyboard while the system keyboard is open (it shows a keyboard toggle icon instead); pending a
-  user decision on an always-visible alternative.
+  keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
+  decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
+  menu button (always visible left of the input, also while typing) offering "Desvincular"
+  (e.g. `setMyCommands` + chat menu button of type commands), routed to the same confirm-unlink
+  flow. Only for linked chats if Telegram allows per-chat scope; otherwise handle the command
+  gracefully when not linked. Queued after T13 (same files).
+
+- [ ] **T15 — Unused HMI 2.5 s playback buffer (deferred by the user, 2026-09-24).** The
+  `buffer-before-playback` transport (`prismaLocalAudioPlayback.ts`
+  `PRISMA_LOCAL_BUFFERING_POLICY.targetBufferSeconds: 2.5`, `playLocalWorklet`,
+  `PrismaPcmWorkletBuffer`, the PCM audio worklet) was built to stop choppy audio and used in
+  `local` runtime mode until `36eeaa4` (2026-09-17) hard-coded `playbackTransport: 'progressive'`
+  (`prismaVoiceTtsAudioSource.ts:23`, 25 ms lead). It is dead code in production and does not
+  explain the current orb wait. Decision: keep it until live tests confirm the new model plays
+  without choppiness; then delete it. If choppiness returns, prefer a small (~200–300 ms) pre-roll
+  on the progressive path over re-enabling the 2.5 s buffer.
 
 ## Progress
 

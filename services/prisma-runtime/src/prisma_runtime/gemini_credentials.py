@@ -10,12 +10,28 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Literal
 
+import httpx
+
 from .credential_store import CredentialService
 from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 
 
 SDK_TIMEOUT_MS = 45_000
+# T13 unit (d): confirmed by a live standalone measurement against the real
+# API (same create_gemini_client/TTS_MODEL/VOICE helpers) that httpx's own
+# default keepalive_expiry (5s, see httpx.Limits()) closes the pooled HTTP
+# connection whenever more than 5s pass between calls -- which real,
+# humanly-spaced Channel A/HMI questions almost always do. That forces a
+# fresh TCP+TLS handshake on nearly every real request even though
+# WarmGeminiClient reuses the same SDK client OBJECT: the object being warm
+# does not keep its underlying httpx connection warm. Measured: a call
+# after a >5s idle gap on the httpx default was ~1335 ms (matching the
+# runtime's observed 1311-1486 ms time_to_first_byte_ms); the same gap with
+# a longer keepalive_expiry was ~559 ms (matching the ~0.6-0.7 s standalone
+# benchmark/smoke-test figures). This is "ours" to fix: configuring our own
+# client's connection pool, not a Gemini-side latency floor.
+GEMINI_HTTP_KEEPALIVE_EXPIRY_SECONDS = 55.0
 # Verification is a short liveness/authorization probe, never a generation
 # call, so it uses its own much shorter SDK timeout than TTS.
 GEMINI_VERIFY_TIMEOUT_MS = 10_000
@@ -160,7 +176,18 @@ def create_gemini_client(secret: str, timeout_ms: int = SDK_TIMEOUT_MS):
 
     return genai.Client(
         api_key=secret,
-        http_options=genai.types.HttpOptions(timeout=timeout_ms),
+        http_options=genai.types.HttpOptions(
+            timeout=timeout_ms,
+            # See GEMINI_HTTP_KEEPALIVE_EXPIRY_SECONDS above: without this,
+            # httpx's own 5s default keepalive_expiry silently undoes most
+            # of WarmGeminiClient's benefit for real, spaced-out requests.
+            client_args={
+                "limits": httpx.Limits(
+                    max_keepalive_connections=20,
+                    keepalive_expiry=GEMINI_HTTP_KEEPALIVE_EXPIRY_SECONDS,
+                )
+            },
+        ),
     )
 
 

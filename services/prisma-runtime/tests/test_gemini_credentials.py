@@ -4,7 +4,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import httpx
 from google.genai import errors as genai_errors
@@ -84,7 +84,10 @@ class GeminiCredentialResolverTests(unittest.TestCase):
             result = create_gemini_client("secret")
 
         self.assertIsNotNone(result)
-        http_options_type.assert_called_once_with(timeout=45_000)
+        http_options_type.assert_called_once_with(
+            timeout=45_000,
+            client_args={"limits": ANY},
+        )
         client_type.assert_called_once_with(api_key="secret", http_options="http-options")
 
     def test_client_accepts_an_explicit_shorter_timeout_for_verification(self):
@@ -93,7 +96,33 @@ class GeminiCredentialResolverTests(unittest.TestCase):
         with patch.dict("sys.modules", {"google.genai": Mock(Client=client_type, types=Mock(HttpOptions=http_options_type))}):
             create_gemini_client("secret", timeout_ms=GEMINI_VERIFY_TIMEOUT_MS)
 
-        http_options_type.assert_called_once_with(timeout=GEMINI_VERIFY_TIMEOUT_MS)
+        http_options_type.assert_called_once_with(
+            timeout=GEMINI_VERIFY_TIMEOUT_MS,
+            client_args={"limits": ANY},
+        )
+
+    def test_client_uses_a_keepalive_expiry_longer_than_httpxs_five_second_default(self):
+        # T13 unit (d): confirmed by live measurement (standalone script
+        # against the real API using these exact helpers) that httpx's
+        # default keepalive_expiry (5s) closes the pooled HTTP connection
+        # between real, humanly-spaced Channel A questions, forcing a fresh
+        # TCP+TLS handshake on almost every request: a call issued right
+        # after a >5s idle gap on the DEFAULT client measured ~1335 ms
+        # (matching the runtime's observed 1311-1486 ms), while the same
+        # gap on a client with a longer keepalive_expiry measured ~559 ms
+        # (matching the ~0.6-0.7 s standalone/smoke-test figures). The SDK
+        # client object being warm/reused (WarmGeminiClient) does not by
+        # itself keep the underlying httpx connection warm.
+        import httpx
+
+        client_type = Mock(return_value=object())
+        http_options_type = Mock(return_value="http-options")
+        with patch.dict("sys.modules", {"google.genai": Mock(Client=client_type, types=Mock(HttpOptions=http_options_type))}):
+            create_gemini_client("secret")
+
+        limits = http_options_type.call_args.kwargs["client_args"]["limits"]
+        self.assertIsInstance(limits, httpx.Limits)
+        self.assertGreater(limits.keepalive_expiry, 5.0)
 
 
 class GeminiCredentialCachingTests(unittest.TestCase):
@@ -447,7 +476,10 @@ class GeminiVerificationServiceTests(unittest.TestCase):
             service = GeminiVerificationService(self._resolver(secret="real-key"), clock=lambda: 7.0)
             result = service.verify()
 
-        http_options_type.assert_called_once_with(timeout=GEMINI_VERIFY_TIMEOUT_MS)
+        http_options_type.assert_called_once_with(
+            timeout=GEMINI_VERIFY_TIMEOUT_MS,
+            client_args={"limits": ANY},
+        )
         client_type.assert_called_once_with(api_key="real-key", http_options="http-options")
         model_client.models.get.assert_called_once_with(model=GEMINI_VERIFY_MODEL)
         self.assertEqual(result.state, "verified")
