@@ -4,6 +4,7 @@ import { QueryClientContext } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrendChartV2WidgetConfig } from '../../domain/admin.types';
 import type { DataHistoryResponseV2 } from '../../domain/dataContract.types';
+import type { TrendChartV2PresentationData } from '../controllers/PresentationControllers';
 import { WIDGET_CHART_CONTAINER_CLASS, WIDGET_CHART_HEADER_CLASS } from '../../components/ui/WidgetChartLayout.shared';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
@@ -2333,5 +2334,89 @@ describe('TrendChartV2Widget', () => {
             series: [{ timestamp: '2026-06-18T12:00:00.000Z', timestampMs: 1, value: 42 }],
             summary: { last: 42, min: 42, max: 42, avg: 42 },
         })).toBe(true);
+    });
+
+    describe('TrendChartV2PresentationRenderer (presentation-controller path)', () => {
+        function makePresentationData(overrides?: Partial<TrendChartV2PresentationData>): TrendChartV2PresentationData {
+            return {
+                data: makeHistoryResponse(),
+                displayedRange: '24h',
+                displayedCustomWindow: null,
+                isSimulated: false,
+                isLoading: false,
+                isError: false,
+                error: null,
+                isFetching: false,
+                isPlaceholderData: false,
+                isRefreshing: false,
+                isLoadingData: false,
+                isShowingRefreshingSnapshot: false,
+                isShowingRefreshFailedSnapshot: false,
+                isNoData: false,
+                runtimeState: 'empty',
+                onRangeChange: vi.fn(),
+                onCustomWindowChange: vi.fn(),
+                ...overrides,
+            };
+        }
+
+        it('does not pin the ResizeObserver-observed chart shell to the measured dimensions state (PW-008)', () => {
+            // Regression for PW-008: the chart shell (chartShellRef) is BOTH the
+            // element measured by ResizeObserver AND, in the pre-fix code, the
+            // element that received `style={{ width, height }}` sourced from the
+            // very same measured `dimensions` state. An explicit inline px size
+            // beats flex stretch in a real browser, so the shell would stay
+            // pinned to whatever it started at (previously 320x180) forever,
+            // regardless of the card's real available size. jsdom has no layout
+            // engine, so this asserts the structural invariant directly: the
+            // observed element must never carry an inline width/height at all —
+            // it must rely on its flex/CSS sizing instead.
+            nextObservedMeasurements = [{ width: 900, height: 400 }];
+
+            render(
+                <TrendChartV2Widget
+                    widget={makeWidget()}
+                    equipmentMap={new Map()}
+                    machines={[]}
+                    presentationData={{ data: makePresentationData() }}
+                />,
+            );
+
+            const shell = screen.getByTestId('trend-chart-v2-chart-shell');
+
+            expect(shell.style.width).toBe('');
+            expect(shell.style.height).toBe('');
+
+            // The measurement must still reach the chart's own layout/SVG size,
+            // proving the fix does not just stop measuring.
+            const svg = screen.getByTestId('trend-chart-v2-svg');
+            expect(svg).toHaveAttribute('width', '900');
+            expect(svg).toHaveAttribute('height', '400');
+        });
+
+        it('right-aligns the min/max/avg summary label at its slot instead of overflowing past the plot area (PW-008)', () => {
+            // Regression for PW-008: found while verifying the width fix in a real
+            // browser. The presentation renderer's summary <text> set `x` from
+            // `layout.topMetaSlot.x` (computed for text-anchor "end", i.e. the
+            // right edge of the label) but never applied `text-anchor` itself, so
+            // it rendered left-anchored (SVG default) and overflowed far past the
+            // right edge of the plot/viewBox, clipping to an unreadable fragment
+            // ("mir" instead of "min 4.9max 76avg 41"). The legacy renderer
+            // (below, ~L1324) already applies `textAnchor={layout.topMetaSlot.textAnchor}`
+            // — this asserts the presentation renderer follows the same pattern.
+            nextObservedMeasurements = [{ width: 900, height: 400 }];
+
+            render(
+                <TrendChartV2Widget
+                    widget={makeWidget()}
+                    equipmentMap={new Map()}
+                    machines={[]}
+                    presentationData={{ data: makePresentationData() }}
+                />,
+            );
+
+            const summary = screen.getByTestId('trend-chart-v2-summary');
+            expect(summary).toHaveAttribute('text-anchor', 'end');
+        });
     });
 });
