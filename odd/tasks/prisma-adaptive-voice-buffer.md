@@ -401,12 +401,41 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
     `VoiceSettingsTab.tsx`/`PrismaVoiceEffectsSettings.tsx` — T5 adds the "Buffer de audio"
     section (Automático/Manual + seconds control shown only in Manual), in Spanish (usted),
     tokens/Lucide only, following `ADMIN_CONVENTIONS.md`/`widget-property-panel`.
-- [ ] **T5 — Prisma tab controls.** In `hmi-app/src/components/admin/VoiceSettingsTab.tsx`:
+- [x] **T5 — Prisma tab controls.** In `hmi-app/src/components/admin/VoiceSettingsTab.tsx`:
   "Buffer de audio" with `Automático`/`Manual`; manual seconds control shown only in Manual.
   Copy (usted) drafted by the writer and confirmed with the user before commit. Follow the
   `widget-property-panel`/admin conventions where they apply. Tests: `VoiceSettingsTab.test.tsx`,
   `GlobalSettingsDialog.voice.integration.test.tsx`; visual check in a real browser. Route:
   delegated writer.
+
+  **T5 draft ready, pending copy approval (2026-09-24, delegated writer, strict TDD; not
+  committed).** New `hmi-app/src/components/admin/PrismaVoicePlaybackBufferSettings.tsx` (section
+  "Buffer de audio", mode `AdminSelect` + explanatory hint + `DockSliderField` for the manual
+  seconds, shown only in Manual), wired into `VoiceSettingsTab.tsx` between the effects section and
+  the orb visual section, bound to `draft.playbackBuffer` via `updatePlaybackBufferField`. Tests
+  added to `VoiceSettingsTab.test.tsx` (default Automático, no manual control; Manual reveals the
+  slider with 0.1/3/0.1 bounds and default 0.2, marks the tab dirty, hides again on switching back)
+  and `GlobalSettingsDialog.voice.integration.test.tsx` (Manual mode + seconds edit sends
+  `playbackBuffer` in the one PUT). RED observed for all three (missing "Buffer de audio" heading /
+  "Modo del buffer de audio" button) before the component existed, then GREEN. Checks: hmi-app 224
+  files / 2551 tests, `tsc -b` clean, lint clean. Visual check: real browser only reached the
+  read-only viewer at `/admin` (redirects to `/` without an authenticated `admin:access` session);
+  did not attempt to bypass auth, so the in-browser look is pending the user's own admin login.
+  Spanish copy (usted) awaiting user approval before commit: heading "Buffer de audio"; field label
+  "Modo"; select `aria-label` "Modo del buffer de audio"; options "Automático" / "Manual"; hint
+  (Automático) "La HMI mide cada respuesta y ajusta sola la espera antes de hablar, para evitar
+  cortes con la red y el equipo actuales."; hint (Manual) "Se usa siempre la espera fija que usted
+  defina. Más espera reduce los cortes, pero la respuesta empieza a hablar más tarde."; manual
+  field label "Espera manual (s)" / `aria-label` "Espera manual en segundos". Nothing staged or
+  committed; working tree left dirty for the user's review.
+  **Approved and committed (2026-09-24, parent).** User approved the copy with one change: the
+  Manual hint now ends "…pero Prisma empieza a hablar más tarde." (was "la respuesta empieza"),
+  and asked to move "Buffer de audio" ABOVE "Efectos de voz de Prisma" (user screenshot). Both
+  applied inline; new test "places the playback buffer section above the voice effects section"
+  and a Manual-hint text assertion; RED observed with the old order (order test failed) and the old
+  copy (manual test failed), GREEN after. Checks: `cd hmi-app && npx vitest run` → 224 files / 2552
+  tests passed; `npx tsc -b` clean; `npm run lint` clean. In-browser look still pending the user's
+  admin session (part of T6).
 - [ ] **T6 — Live verification (user).** Several voice answers in Automatic: `playback-ended`
   shows `needed_prebuffer_ms` per answer and `prebuffer_ms` following it; no audible cuts; a
   Manual run confirms the fixed value is used. Parent reads the `HMI voice timeline:` lines in
@@ -477,10 +506,11 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
   hmi-app (224 files / 2548 tests), `tsc -b` and lint all green; prisma-runtime (1532 tests) green.
   Two commits on `feat/prisma-adaptive-voice-buffer` (runtime/HMI work units): `ea03605`,
   `737ab87` (both GGA review passed).
+- 2026-09-24: T5 approved by the user (copy change + section order) and committed.
 
 ## Next step
 
-Start T5 (Prisma tab controls in `hmi-app/src/components/admin/VoiceSettingsTab.tsx`: "Buffer de
-audio" section, Automático/Manual + seconds control shown only in Manual, Spanish usted copy
-confirmed with the user before commit; field paths and hooks from T4's evidence above; delegated
-writer, strict TDD).
+T6 live verification (user): relaunch, open General Settings → Prisma (admin session) to check the
+"Buffer de audio" section above "Efectos de voz de Prisma", then several voice answers in
+Automático and one run in Manual; the parent reads `prebuffer_ms` / `needed_prebuffer_ms` /
+`prebuffer_mode` in the `HMI voice timeline:` lines. Then T7 (delete the legacy 2.5 s transport).
