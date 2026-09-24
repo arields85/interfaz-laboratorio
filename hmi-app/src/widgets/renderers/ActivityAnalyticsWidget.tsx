@@ -4127,8 +4127,8 @@ const ComparisonRow = memo(function ComparisonRow({
     const fillHeight = entry.productivityRatio === null ? 0 : clamp(entry.productivityRatio * 100, 0, 100);
 
     return (
-        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-1 text-center" data-testid="activity-analytics-comparison-row">
-            <div className="text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-comparison-percent">{entry.productivityLabel}</div>
+        <div className="flex h-full min-h-0 min-w-0 flex-col items-center justify-center gap-1 text-center" data-testid="activity-analytics-comparison-row">
+            <div className="break-words text-industrial-text" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-comparison-percent">{entry.productivityLabel}</div>
             <div
                 className="flex shrink-0 items-end justify-center self-stretch"
                 style={{ height: `${COMPARISON_LAYOUT_RULES.trackHeightPx}px` }}
@@ -4152,7 +4152,7 @@ const ComparisonRow = memo(function ComparisonRow({
                 </div>
             </div>
             <div className="uppercase text-industrial-muted" style={GENERAL_TYPOGRAPHY_STYLE}>{entry.heading}</div>
-            <div className="text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-metric-value">{entry.label}</div>
+            <div className="break-words text-industrial-muted" style={TECHNICAL_TYPOGRAPHY_STYLE} data-testid="activity-analytics-metric-value">{entry.label}</div>
         </div>
     );
 });

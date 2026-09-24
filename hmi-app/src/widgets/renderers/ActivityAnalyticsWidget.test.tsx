@@ -7844,6 +7844,63 @@ describe('ActivityAnalyticsWidget', () => {
         expect(comparisonPanel).not.toHaveTextContent(/Observado · Cob\./);
     });
 
+    it('keeps each Mejor/Peor caption confined to its own column at narrow widths (regression, PW-007 T5c)', () => {
+        // jsdom has no real layout engine, so this cannot assert pixel overlap
+        // directly. It instead asserts the structural fix: grid items default
+        // to `min-width: auto`, which keeps a row from shrinking below its
+        // longest unbreakable word and lets it overflow into the neighboring
+        // "Mejor"/"Peor" column at narrow widths (observed as "sin
+        // comparación" captions running together, "comparacióncomparación").
+        // `min-w-0` lets the row shrink to its actual grid-track width, and
+        // `break-words` lets a caption that still doesn't fit break mid-word
+        // instead of overflowing horizontally.
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({
+                bucketKey: 'day-1',
+                label: '2026-06-18',
+                durationsMs: { prod: 6 * 60 * 60 * 1000, setup: 3 * 60 * 60 * 1000, stopped: 0, noData: 15 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: 0.25,
+                productivityLabel: '25%',
+            }),
+            buildGroupedBucket({
+                bucketKey: 'day-2',
+                label: '2026-06-19 (en curso)',
+                durationsMs: { prod: 4 * 60 * 60 * 1000, setup: 2 * 60 * 60 * 1000, stopped: 0, noData: 4 * 60 * 60 * 1000 },
+                expectedDurationMs: 24 * 60 * 60 * 1000,
+                productivityRatio: null,
+                productivityLabel: 'sin datos',
+                isInProgress: true,
+            }),
+        ]);
+
+        render(<ActivityAnalyticsWidget widget={makeWidget({ displayOptions: { ...makeWidget().displayOptions, range: '7d', groupBy: 'day' } })} machines={MACHINES} />);
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 520, bodyHeight: 420 });
+        });
+
+        const comparisonRows = screen.getAllByTestId('activity-analytics-comparison-row');
+        expect(comparisonRows).toHaveLength(2);
+        comparisonRows.forEach((row) => {
+            expect(row).toHaveClass('min-w-0');
+        });
+
+        const percentValues = screen.getAllByTestId('activity-analytics-comparison-percent');
+        const metricValues = screen.getAllByTestId('activity-analytics-metric-value');
+        expect(percentValues.length + metricValues.length).toBeGreaterThan(0);
+        [...percentValues, ...metricValues].forEach((node) => {
+            expect(node).toHaveClass('break-words');
+        });
+    });
+
     it('moves grouped productivity labels above the bars and removes the total-hours top labels', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,

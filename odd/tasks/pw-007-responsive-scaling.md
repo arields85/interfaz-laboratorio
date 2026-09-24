@@ -258,10 +258,43 @@ end together with PW-006; NO push.
     2560/1760 > damped zoom there).
   - Verification: `npm test` 215 files / 2388 tests passed; `npx tsc -b` clean; `npm run lint`
     clean (T5c not yet applied at this point).
-- [ ] **T5c — "sin comparación" labels overlap (widget defect).** In the Activity Analysis widget's
+- [x] **T5c — "sin comparación" labels overlap (widget defect).** In the Activity Analysis widget's
   best/worst ("MEJOR"/"PEOR") columns, the two "sin comparación" labels run into each other
   ("comparacióncomparación") at the laptop and TV widths; they must wrap or fit within their
   column instead of overlapping. Independent of zoom.
+  Route: direct inline (single already-understood component, 1 file + its test). Root cause
+  (found via `mcp__codegraph__codegraph_explore` + direct read of
+  `hmi-app/src/widgets/renderers/ActivityAnalyticsWidget.tsx`): the "Mejor"/"Peor" comparison
+  columns are CSS Grid items (`grid grid-cols-2` in `ComparisonPanel`) wrapped in a container whose
+  own CSS width can shrink to as little as 132 px total for both columns combined
+  (`COMPARISON_LAYOUT_RULES.externalWidthPx.min`, ≈61 px per column after the gap) — narrower than
+  the unbroken word "comparación" at `--font-size-mono`. Grid items default to `min-width: auto`,
+  which floors a grid item's shrink at its content's min-content width (here, the longest
+  unbreakable word) instead of the track's actual computed width; combined with
+  `justify-items-center`, the overflowing text bleeds symmetrically past both sides of its own
+  column and visually runs into the neighboring column's overflowing text — the "comparacióncomparación"
+  the user saw. This reproduces with any long caption at a narrow-enough column width, not only the
+  fallback label (the productivity-percent slot renders the same fallback text).
+  Fix (`ComparisonRow` in the same file): added `min-w-0` to the row's root class list (lets the
+  grid item actually shrink to its track's computed width instead of overflowing) and `break-words`
+  to both text slots that can render long captions (`activity-analytics-comparison-percent` and
+  `activity-analytics-metric-value`, i.e. the productivity percent and the bucket/fallback label) so
+  a caption that still doesn't fit its column breaks mid-word and wraps onto multiple centered lines
+  instead of overflowing horizontally. Tokens-only change (Tailwind utility classes), no
+  hardcoded px; resolved in the widget's own responsible layer, not a generic wrapper (anti-parches
+  policy).
+  Tests: `hmi-app/src/widgets/renderers/ActivityAnalyticsWidget.test.tsx` (+1 regression test,
+  "keeps each Mejor/Peor caption confined to its own column at narrow widths"): jsdom has no real
+  layout engine so it cannot assert pixel-level overlap directly; the test instead asserts the
+  structural fix — every `activity-analytics-comparison-row` has the `min-w-0` class, and every
+  `activity-analytics-comparison-percent`/`activity-analytics-metric-value` node has `break-words`.
+  RED confirmed against the unmodified component (missing classes), then GREEN after the two class
+  additions; full suite 150/150 passed, no regressions.
+  Visual confirmation: the general-chrome headless screenshots at 1440×900 and 1280×720 (see T5b)
+  show no other layout regression from this change, but this specific widget's actual before/after
+  pixels were not re-screenshotted (same fresh-profile/no-dashboard limitation as T5b) — the user
+  should re-check the "ANÁLISIS DE ACTIVIDAD" widget specifically on next visual pass.
+  Verification: `npm test` 215 files / 2389 tests passed; `npx tsc -b` clean; `npm run lint` clean.
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
   2560×1440 CSS px; calibrate `k`.
 
@@ -300,16 +333,25 @@ end together with PW-006; NO push.
   widget-specific screenshot needs the user's own configured dashboard, out of reach from a fresh
   browser profile — see T5b findings). TDD: RED confirmed via `git stash` of the implementation
   with tests updated, then GREEN. All checks green: `npm test` 215 files / 2388 tests, `npx tsc -b`
-  clean, `npm run lint` clean. T5c (the "sin comparación" overlap) is next.
+  clean, `npm run lint` clean.
+
+- 2026-09-24: T5c done (route: direct inline). Fixed the "sin comparación" caption overlap in
+  `ActivityAnalyticsWidget.tsx`'s `ComparisonRow`: a CSS grid item's default `min-width: auto` let
+  it overflow past its computed track width under a narrow comparison column (as little as ≈61 px
+  per column), and `justify-items-center` let the overflow bleed into the neighboring column.
+  Added `min-w-0` to the row and `break-words` to its two long-caption text slots. TDD: RED
+  confirmed against the unmodified component, then GREEN. All checks green: `npm test` 215 files /
+  2389 tests, `npx tsc -b` clean, `npm run lint` clean.
 
 ## Next step
 
-T5c — the Activity Analysis widget's "sin comparación" caption overlap (see the T5c task entry
-above). After that, resume T4 (needs a user decision on UI placement for the per-browser
-fine-tune factor: admin settings page vs. a viewer-accessible control) and T5 (full manual
-acceptance and `k` calibration across 1440×900, 1920×1080, 2560×1440 CSS px, plus T3b's
+User re-check needed on both the laptop and the TV: (1) the Activity Analysis widget's "MEJOR"/
+"PEOR" columns no longer overlap ("sin comparación" or any other caption), and (2) the TV
+(1280×720 CSS) no longer truncates/wraps widget titles ("ACTIVIDAD DE MÁQUINA", "PRODUCCIÓN",
+"RENDIMIENTO DIARIO (ÚLTIMOS 7 DÍAS)"). If the 1760 px floor still isn't enough on the real TV,
+increase `MIN_LAYOUT_WIDTH_PX` in `hmi-app/src/utils/viewportScale.ts` — recalibration never
+requires touching call sites. After that, resume T4 (needs a user decision on UI placement for the
+per-browser fine-tune factor: admin settings page vs. a viewer-accessible control) and T5 (full
+manual acceptance and `k` calibration across 1440×900, 1920×1080, 2560×1440 CSS px, plus T3b's
 manual-check list: overlay/tooltip positioning, drag tracking, trend chart selection, shader
-sharpness at non-1920 widths). The user should also re-check the TV (1280×720 CSS) no longer
-truncates/wraps widget titles now that T5b's floor is in place; if 1760 px still isn't enough,
-increase `MIN_LAYOUT_WIDTH_PX` in `hmi-app/src/utils/viewportScale.ts` (recalibration never
-requires touching call sites).
+sharpness at non-1920 widths).
