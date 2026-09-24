@@ -441,7 +441,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     voice-orb path that cannot be verified end-to-end by this writer. Recommended next step: a
     follow-up pass that runs with the launcher available, implements the SSE endpoint + listener with
     the same TDD rigor as units 1-4, and does one live proxy check before calling it done.
-- [ ] **T11 — Near-instant voice, part 2.** Benchmark authorized and run (2026-09-23; results in
+- [x] **T11 — Near-instant voice, part 2.** Benchmark authorized and run (2026-09-23; results in
   Engram `odd/pw-006-prisma-responsiveness/t11-benchmark`): Gemini TTFB for the current call 1.31 s
   median vs 2.3–6.7 s in the runtime; `gemini-3.8-flash-lite-tts` + `generate_content_stream`
   0.61 s. **User decision (2026-09-23): adopt `gemini-3.8-flash-lite-tts`** — the user listened to
@@ -453,27 +453,107 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   text). The 45 lines were guard rails for the 3.1 preview model (voice/accent/pacing plus "do not
   read or change the transcript"); 3.8 treats input as a verbatim transcript by default. Idea
   recorded, not scheduled: a Prisma settings selector for the style (normal / 45-line / style
-  field). Pending implementation: switch to `gemini-3.8-flash-lite-tts` with
-  `generate_content_stream` and plain transcript, keep verification model in sync
-  (`GEMINI_VERIFY_MODEL`), re-check DSP and Telegram audio on the new stream.
-- [ ] **T12 — Remove redundant per-request resolves (T10 finding).** `resolve_voice_event` runs up
+  field).
+  Evidence (2026-09-23, commit `bd10a52`): `voice_service.py` — `TTS_MODEL` changed to
+  `"gemini-3.8-flash-lite-tts"`; the Interactions-API call path
+  (`build_tts_prompt`/`_tts_interaction_request`/`_create_tts_interaction`/
+  `_iter_interaction_audio_deltas`/`_validate_audio_delta`/`_decode_audio_delta`) is removed as
+  dead code and replaced with `_tts_generate_content_config`/`_create_tts_stream`/
+  `_create_tts_response` (`client.models.generate_content_stream`/`generate_content`, same
+  `importlib.import_module("google.genai")` mockability pattern as `gemini_credentials.py`) and
+  `_iter_inline_audio_parts`/`_iter_tts_audio_parts`/`_validate_audio_inline_data`/
+  `_decode_audio_inline_data` reading `candidates[].content.parts[].inline_data` instead of
+  `step.delta` events. "Normal" style sends the plain transcript as `contents`, unwrapped. Decode
+  accepts raw `bytes` (confirmed against the real installed `google-genai==2.17.0` SDK) and a
+  base64 `str` defensively; mime validation accepts any `audio/l16*` form and only rejects an
+  explicit non-24000 `rate=` parameter (accept-if-absent, matching the old delta's optional-field
+  behavior); no `channels` check anymore since `inline_data` exposes no such field (24 kHz mono is
+  this model's fixed output) — documented as the one dropped validation. No explicit "stream
+  completed" event exists in this API (unlike Interactions' `interaction.completed`); the existing
+  "no audio at all" check (`TTS_STREAM_AUDIO_MISSING`) still covers a stream that ends without ever
+  yielding anything. The non-streaming fallback (`_full_file_fallback_pcm`) now calls
+  `_create_tts_response`/`generate_content` and concatenates every inline audio part instead of
+  reading `interaction.output_audio.data`; its blanket `except Exception` mapping to
+  `TTS_FALLBACK_PROVIDER_FAILED` is unchanged. `gemini_credentials.py` —
+  `GEMINI_VERIFY_MODEL = "gemini-3.8-flash-lite-tts"` (existing guard test keeps both constants
+  equal). Renamed for clarity (no behavior change): `_generate_interactions_tts_audio` →
+  `_generate_tts_audio`, `_discard_interactions_tts_job` → `_discard_tts_job`,
+  `_close_interaction_stream` → `_close_tts_stream`; `_create_interactions_tts_job` kept as-is
+  (job/state builder, not protocol-specific). Warm client reuse, the exact-text cache (its key
+  already includes `TTS_MODEL`, so the model switch invalidates old entries for free), prefetch,
+  DSP, Telegram audio delivery, cancellation/idle-guard handling, and the T5/T10 timing log lines
+  (`time_to_first_byte_ms`, `first_yield_processing_elapsed_ms`, etc.) are unchanged in shape — no
+  log format changes besides the removed `interactions`-specific comments. No docs referenced the
+  specific model/API by name (checked `services/prisma-runtime/README.md` and
+  `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md`), so none needed updating.
+  RED confirmed (`test_tts_request_uses_streaming_interactions_contract` failing on the model
+  string change) before rewriting the test doubles (`FakeStream`/`FakeModels`/`FakeClient`/
+  `audio_chunk` replacing the Interactions-shaped fakes) and every dependent test; new tests added
+  for mime/rate acceptance and rejection, bytes-vs-base64 decode, the plain-transcript stream/
+  response request shape, and that the retired helpers no longer exist. Full suite:
+  `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+  -p "test_*.py"` → 1407 passed (was 1402; +5 net after renames/rewrites). Commit: `feat(prisma):
+  speak with gemini-3.8-flash-lite-tts plain transcripts`.
+  Risk/cost note: `gemini-3.8-flash-lite-tts` generation cost per request is unverified by this
+  writer (no live Gemini call made — fakes only, per this writer's brief); confirm via the user's
+  next live voice test alongside the T10 timing logs.
+- [x] **T12 — Remove redundant per-request resolves (T10 finding).** `resolve_voice_event` runs up
   to 3× and the Gemini credential resolve up to 2× per voice request (`prisma_speak_live`,
   `AudioCoordinator.subscribe` admission gate, worker `_run`), each credential resolve opening the
   protected store and checking ACLs. Resolve once per request/job and pass the result along,
   preserving the same authorization guarantees.
-  Original research notes:
-  Research (2026-09-23, sources in the session report): community reports that
-  `gemini-3.1-flash-tts-preview` via `interactions.create(stream=True)` is much slower than
-  `generate_content_stream` and delivers audio in a burst
-  (https://discuss.ai.google.dev/t/3-1-flash-tts-preview-streaming-latency/176050, unconfirmed by
-  Google); `gemini-3.8-flash-tts` / `gemini-3.8-flash-lite-tts` released as stable on 2026-09-23
-  (verbatim transcript by default, style in `speech_metadata.style`); Gemini Live has no verbatim
-  guarantee and had 16–26 s first-audio reports in the EU in 2026-09 — not a safer bet; the old
-  `PrismaLiveManager` targets the deprecated 3.1 Live model and has no measurements. Proposed
-  benchmark (needs the user's Gemini key and authorization): 5–10 short fixed-sentence requests per
-  variant — 3.1 via `interactions.create` (baseline) vs `generate_content_stream`, and 3.8 lite
-  with both — recording only time to first PCM byte. Later options needing user decisions: fixed
-  prefix + synthesized value, local TTS (voice identity change).
+  Evidence (2026-09-23, commit `9521bbe`) — **credential resolve reduced 2x → 1x, resolve_voice_event
+  deliberately left at 3x (reasoned, not silently skipped):**
+  - `event_audio.py` `AudioCoordinator.subscribe()`: removed its own admission-time
+    `self.resolve_credential()` call (the `credential_gate_elapsed_ms` log line it produced is
+    gone with it). This resolve's result was always discarded — it only ever fail-fast-probed
+    whether the local protected secret store was readable (it never calls Gemini itself, so it
+    never actually proved provider reachability), duplicating the exact same store read (ACL check
+    + fresh `sqlite3.connect()`, T10 unit 1's finding) that `_run()` already performs once,
+    immediately before generation. `_run()`'s own resolve is the one kept as the single remaining
+    per-request credential read, because it must stay fresh for a job that waited in the queue —
+    proven load-bearing by the pre-existing `test_queued_work_reads_replacement_credential_at_
+    dequeue`, which a first design attempt (keep admission's resolve, drop the worker's) would have
+    broken. `WarmGeminiClient`'s rotation detection (`current_secret_hash`) keeps working correctly
+    off this single resolve with no extra protected-store read — the "one read is the only safe
+    signal" option from the task brief, chosen over eliminating both.
+    Documented, accepted trade-off: a request submitted while Gemini credentials are entirely
+    unconfigured/unreadable no longer gets an immediate `503 GEMINI_CREDENTIAL_UNAVAILABLE` JSON
+    response from `subscribe()` itself; it is admitted and fails once its generation attempt
+    starts (`AudioRetryUnavailable("VOICE_GENERATION_UNAVAILABLE")`, surfaced as a stream failure
+    instead of a synchronous error) — still rejected, just later. Judged acceptable because Gemini
+    configuration is an admin-side, session-independent condition already surfaced separately
+    (`/health`'s `providerStatus`, the admin credential UI), not a per-request authorization
+    decision.
+  - `resolve_voice_event`'s two `AudioCoordinator`-internal calls (admission's `event_validator` in
+    `subscribe()`, and the same validator again in `_run()` before generation) were evaluated and
+    **kept unchanged** after finding both are load-bearing for distinct, real guarantees that a
+    same-narrow reduction would break: admission's synchronous revalidation is what lets an
+    invalid/unauthorized/expired event map to a clean `404`/`401` from `prisma_speak_live` — proven
+    necessary because Flask commits the streaming response's `200` status as soon as the view
+    function returns, before the PCM generator ever yields a first chunk, so a failure discovered
+    only later can no longer become a clean JSON error; the worker's revalidation is what protects
+    a job that waited in the queue (up to `queue_timeout`, 30 s) from acting on a since-invalidated
+    event. Removing either changes observable rejection behavior for a common, per-request
+    condition (unlike the now-removed credential admission check, which only ever guarded a rare,
+    admin-side misconfiguration). A safe reduction here would need a larger restructuring
+    (`AudioCoordinator`'s `event_validator` contract returning and propagating the resolved event so
+    the route handler's own upfront resolve could be dropped instead) — flagged as a follow-up
+    beyond this task's scope, not attempted.
+  - New/changed tests: `test_event_audio.py` — `test_rejected_subscriber_does_not_create_or_
+    enqueue_paid_work` updated (`credentials.call_count` 2 → 1);
+    `test_subscribe_logs_validate_and_credential_gate_elapsed_ms` renamed to
+    `test_subscribe_logs_validate_elapsed_ms_but_no_longer_a_credential_gate` and rewritten to
+    assert `validate_elapsed_ms` still logs from `subscribe()` while `credential_gate_elapsed_ms`
+    no longer does; new `test_unconfigured_credential_no_longer_rejects_subscribe_itself` locks in
+    the documented trade-off (subscribe() admits even with an always-failing resolver; the failure
+    surfaces on the first `next()` instead). RED confirmed for exactly these 2 pre-existing tests
+    (`credentials.call_count: 1 != 2`, `credential_gate_lines: 0 not >= 1`) before the test updates;
+    no other test in the 1408-test suite was affected. `voice_service.py`'s `resolve_voice_event`
+    comment updated to record the "kept, reasoned" decision for future readers. Full suite:
+    `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+    -p "test_*.py"` → 1408 passed. Commit: `perf(prisma): resolve voice event and credential once
+    per request`.
 
 ## Acceptance criteria
 
@@ -517,16 +597,30 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   entry above for the recommended follow-up. Route: delegated writer (multi-file, behavior-changing
   work across `voice_service.py`, `gemini_credentials.py`, `event_audio.py`, `local_presentation.py`
   and their tests; touched only `services/prisma-runtime` and this doc).
+- 2026-09-23: T11 (switch TTS to `gemini-3.8-flash-lite-tts` + `generate_content_stream`, plain
+  transcript) and T12 (remove the redundant per-request resolves T10 unit 1 found) implemented and
+  committed (`bd10a52`, `9521bbe`). Full prisma-runtime suite green after each (1407, then 1408
+  tests). T12 reduced the Gemini credential resolve from 2x to 1x per request but deliberately left
+  `resolve_voice_event`'s 3x unchanged after finding both `AudioCoordinator`-internal calls
+  load-bearing (synchronous 404/401 mapping vs. queue-wait TOCTOU protection) — see T12's evidence
+  above for the full reasoning and the flagged follow-up. This writer's brief forbade starting the
+  runtime/launcher or calling Gemini for real, so both tasks used fakes only (no live Gemini call,
+  no live voice test) — the cost/behavior of the new model and the credential-resolve trade-off are
+  unverified against the real API/runtime and need the user's next live voice test. Route: delegated
+  writer (multi-file, behavior-changing work across `voice_service.py`, `gemini_credentials.py`,
+  `event_audio.py` and their tests; touched only `services/prisma-runtime` and this doc).
 
 ## Next step
 
-Next: live measurement with the user comparing HMI voice first-audio latency before/after T10 units
-1-4 (the new `Prisma Gemini TTS: time_to_first_byte_ms=`, `Prisma TTS cache:`, and the other new T10
-log lines are what to read for that comparison); a follow-up pass for T10 unit 5 (SSE push), run with
-the launcher available so the Vite proxy can be checked live; T11 benchmark once the user authorizes
-it. Also recommended but not part of T10's 5 units: resolve the redundant `resolve_voice_event`/
-credential-resolve calls found in `AudioCoordinator` (see T10 unit 1's evidence). In parallel, **user
-manual check of T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
+Next: a live voice test with the user is now the priority — it covers three still-unverified things
+at once: (1) T10 units 1-4's latency improvement (read `Prisma Gemini TTS: time_to_first_byte_ms=`,
+`Prisma TTS cache:`, and the other T10 log lines), (2) T11's new model/voice actually sounding right
+end-to-end over the real Vite→voice-service→Gemini path (this writer only exercised it against
+fakes), and (3) T12's documented credential-resolve trade-off not causing a surprise (it only
+changes behavior when Gemini credentials are entirely unconfigured, which should not be the case in
+the user's normal setup). After that: a follow-up pass for T10 unit 5 (SSE push), run with the
+launcher available so the Vite proxy can be checked live. In parallel, **user manual check of
+T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
 - **T2**: pair a phone via QR; the confirmation prompt should read "Está a un paso: confirme y
   Prisma responderá sus consultas en este chat." (no "documento").
 - **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
