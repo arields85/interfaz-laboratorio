@@ -131,7 +131,7 @@ interface AdminDialogProps {
 
 - Usar `AdminDialog` para todo diálogo/modal del modo admin: confirmaciones, prompts con campos, mensajes de error y acciones destructivas.
 - Estilo base obligatorio:
-  - overlay: `fixed inset-0 z-50` + `bg-black/60` + `backdrop-blur-sm`
+  - overlay: `fixed inset-0 z-50` + `bg-modal-overlay` (token, `--color-modal-overlay` en `index.css`) + `backdrop-blur-sm`
   - panel: superficie oscura premium, `rounded-xl`, `border border-white/10`, `p-6`
   - título: `uppercase`, `font-black`, `tracking-widest`, tamaño compacto (`text-sm`)
   - cierre con `Escape`

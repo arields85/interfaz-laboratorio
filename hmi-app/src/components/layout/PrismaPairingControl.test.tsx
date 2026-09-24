@@ -34,6 +34,18 @@ import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// T20b: both the modal open/close fade and the orb entry flip inside it use the same
+// double-`requestAnimationFrame` mount pattern as PrismaOrbOverlay's `PrismaOrbOverlayVisible`
+// (T17b) -- an invisible "entering" frame paints first, then two rAFs later the real look
+// flips in so the CSS transition has a "from" state to interpolate from. `vi.useFakeTimers()`
+// fakes `requestAnimationFrame` too, so advancing by two simulated frames' worth of time
+// flushes both rAF calls (see PrismaOrbOverlay.test.tsx's identical helper/comment).
+function flushEntryAnimationFrame(): void {
+    act(() => {
+        vi.advanceTimersByTime(32);
+    });
+}
+
 import type { HmiNameReadResult } from '../../domain/hmiName';
 import type { PrismaOrbVisualConfig } from '../../domain/voice.types';
 import PrismaPairingControl from './PrismaPairingControl';
@@ -227,7 +239,9 @@ describe('PrismaPairingControl', () => {
         // dark, blurred backdrop — never a copy-pasted variant of it.
         const backdrop = dialog.parentElement;
         expect(backdrop).not.toBeNull();
-        expect(backdrop).toHaveClass('fixed', 'inset-0', 'flex', 'items-center', 'justify-center', 'bg-black/60', 'backdrop-blur-sm');
+        // T20b: lighter shared backdrop token (`--color-modal-overlay` in index.css @theme),
+        // replacing the hardcoded `bg-black/60` — applies to every ModalBackdrop consumer.
+        expect(backdrop).toHaveClass('fixed', 'inset-0', 'flex', 'items-center', 'justify-center', 'bg-modal-overlay', 'backdrop-blur-sm');
         expect(backdrop).toHaveAttribute('role', 'presentation');
     });
 
@@ -465,6 +479,12 @@ describe('PrismaPairingControl', () => {
 
             const dialog = screen.getByRole('dialog', { name: DIALOG_NAME });
             const backdrop = dialog.parentElement as HTMLElement;
+            // T20b: opens with the mirror fade-in (invisible until the entry flip) instead of
+            // popping in at full opacity.
+            expect(dialog).toHaveClass('opacity-0');
+            expect(backdrop).toHaveClass('opacity-0');
+
+            flushEntryAnimationFrame();
             expect(dialog).toHaveClass('opacity-100');
             expect(backdrop).toHaveClass('opacity-100');
 
@@ -500,6 +520,65 @@ describe('PrismaPairingControl', () => {
 
             expect(dialog).toHaveClass('motion-reduce:transition-none', 'motion-reduce:duration-0');
             expect(backdrop).toHaveClass('motion-reduce:transition-none', 'motion-reduce:duration-0');
+        });
+
+        it('animates the orb entry from the invisible thinking scale, same as PrismaOrbOverlay (T17b)', async () => {
+            vi.useFakeTimers({ shouldAdvanceTime: true });
+            setPairingFixture('pending', null, 0);
+
+            render(<PrismaPairingControl />);
+            const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+            await user.click(screen.getByRole('button', { name: 'Prisma' }));
+
+            const dialog = screen.getByRole('dialog', { name: DIALOG_NAME });
+            const orbWrapper = dialog.querySelector(ORB_TAG)?.parentElement as HTMLElement;
+            expect(orbWrapper).not.toBeNull();
+            // Mount-only "entering" look: the thinking scale at zero opacity, no prior DOM
+            // state to interpolate from yet.
+            expect(orbWrapper).toHaveClass('scale-75', 'opacity-0');
+            // Tailwind v4 `scale-*` compiles to the CSS `scale` property, a separate property
+            // from `transform` — transitioning `opacity,scale` (never `transform`) is the T17b
+            // root-cause-1 fix this reuses.
+            expect(orbWrapper.className).toMatch(/transition-\[opacity,scale\]/);
+
+            flushEntryAnimationFrame();
+            expect(orbWrapper).toHaveClass('scale-100', 'opacity-100');
+        });
+
+        it('centers the pending and linked status copy', async () => {
+            setPairingFixture('pending', null, 0);
+
+            render(<PrismaPairingControl />);
+            const dialog = await openDialog();
+
+            expect(within(dialog).getByText('Confirme el destino en Telegram.')).toHaveClass('text-center');
+        });
+
+        it('centers the QR instruction copy for consistency with the orb states', async () => {
+            setPairingFixture('free', liveQr(), 42);
+
+            render(<PrismaPairingControl />);
+            const dialog = await openDialog();
+
+            expect(within(dialog).getByText(/Escanee el código QR/)).toHaveClass('text-center');
+        });
+
+        it('keeps the fixed visual slot centered and fully inside the panel, with no overflow past its right edge', async () => {
+            setPairingFixture('pending', null, 0);
+
+            render(<PrismaPairingControl />);
+            const dialog = await openDialog();
+            const slot = within(dialog).getByTestId(SLOT_TEST_ID);
+
+            // Regression (user screenshot, 2026-09-24): the 280px fixed slot overflowed the
+            // panel's own content box (previously `w-72` = 288px minus `p-4` = 32px padding ->
+            // 256px content, narrower than the 280px slot) by bleeding past the right edge. The
+            // panel width is now DERIVED from the same slot-size variable via `calc()` (an exact
+            // fit with the panel's own `p-4` padding) instead of a second hand-picked constant
+            // that could drift out of sync again, and the slot self-centers so any rounding slack
+            // splits evenly instead of biasing to one side.
+            expect(dialog).toHaveClass('w-[calc(var(--pairing-visual-slot-size)+var(--spacing)*8+2px)]');
+            expect(slot).toHaveClass('mx-auto');
         });
     });
 });

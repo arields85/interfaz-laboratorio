@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ModalBackdropProps {
@@ -11,6 +11,12 @@ interface ModalBackdropProps {
      * utility for a fade-out). Never replaces the base backdrop treatment.
      */
     className?: string;
+    /**
+     * Inline style merged onto the backdrop div (e.g. a `transitionDuration` driven by a caller's
+     * own JS constant — Tailwind's static class scanner cannot read a JS value, so a duration
+     * that must stay in sync with a timer belongs here, not in a `duration-*` class).
+     */
+    style?: CSSProperties;
 }
 
 // Shared centered-modal backdrop primitive: the dark, blurred full-screen layer behind a
@@ -25,6 +31,7 @@ export default function ModalBackdrop({
     onClose,
     children,
     className = '',
+    style,
 }: ModalBackdropProps) {
     useEffect(() => {
         if (!open) return;
@@ -45,7 +52,8 @@ export default function ModalBackdrop({
 
     return createPortal(
         <div
-            className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm ${className}`.trim()}
+            className={`fixed inset-0 z-50 flex items-center justify-center bg-modal-overlay backdrop-blur-sm ${className}`.trim()}
+            style={style}
             onMouseDown={(event) => {
                 if (event.target === event.currentTarget) {
                     onClose();

@@ -225,6 +225,9 @@ h1, h2, h3, h4, h5, h6 {
   --color-industrial-muted: #94a3b8;
   --color-chart-grid: color-mix(in srgb, var(--color-industrial-muted) 35%, transparent);
 
+  /* Fondo oscuro semitransparente detrás de todo modal centrado (ModalBackdrop) */
+  --color-modal-overlay: rgba(0, 0, 0, 0.4);
+
   --color-accent-cyan: #22d3ee;
   --color-accent-purple: #a855f7;
   --color-accent-purple-light: #927bec;

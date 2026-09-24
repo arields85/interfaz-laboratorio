@@ -1824,6 +1824,154 @@ After that: T14 is done (see its own evidence above, including the user's next T
   the awaiting/linked states show the orb in the same fixed square with the warning/success colors;
   confirm the modal fades out and closes on its own a few seconds after linking; confirm reopening
   later shows the current state; confirm Escape/backdrop-click/"Cerrar" all still close it.
+- [x] **T20b — Pairing modal polish after the user's live check (2026-09-24 ~13:53): orb entry
+  animation, centered copy, open fade-in, lighter backdrop, orb-slot overflow fix.** Route:
+  delegated writer (concurrent with T21 and T18b, disjoint files, per the parallel-writer brief).
+  1. **Orb entry animation**: new `PairingOrbVisual` component
+     (`PrismaPairingControl.tsx`) wraps the orb in a div that mounts in the invisible "entering"
+     look (`scale-75 opacity-0`) and flips to `scale-100 opacity-100` on the next paint via a
+     double `requestAnimationFrame` — the exact T17b mount pattern from
+     `PrismaOrbOverlay.tsx`'s `PrismaOrbOverlayVisible`. Reuses `PRISMA_ORB_ENTRY_DURATION_MS`
+     (250 ms, imported read-only from `usePrismaOrbPresentation.ts`, never edited — owned by the
+     concurrent T21 writer); the phase classes/entering constant there are local (not exported),
+     so equivalent constants (`PAIRING_ORB_ENTERING_CLS`/`PAIRING_ORB_VISIBLE_CLS`) are
+     redeclared in `PrismaPairingControl.tsx` with identical values instead of importing them.
+     Transitions `opacity,scale` (never `transform`), same Tailwind v4 root-cause-1 fix reused
+     verbatim (`scale-*` compiles to the CSS `scale` property, a separate property from
+     `transform`).
+  2. **Centered status texts**: `text-center` added to the pending/linked status paragraph and,
+     for consistency, to the QR instruction paragraph. The blocked/error/unreachable copy
+     paragraphs were left unchanged (not named in the request).
+  3. **Modal + backdrop open fade-in**: new `entered` state, false right after `togglePanel`
+     opens the dialog, flipped to `true` by its own double-rAF effect (`useEffect` on `[open]`,
+     mirroring the auto-close fade-out already built in T20). `fadeOpacityCls` becomes
+     `closing || !entered ? 'opacity-0' : 'opacity-100'`, reusing the existing
+     `PAIRING_FADE_TRANSITION_CLS` (300 ms, same easing) on both `ModalBackdrop` and the panel —
+     under `prefers-reduced-motion` the `motion-reduce:*` classes already on that constant
+     disable the transition, so the open is instant instead of animated, same convention as the
+     close.
+  4. **Lighter shared backdrop**: no existing overlay/darkness token in `index.css`'s `@theme`,
+     so one was added — `--color-modal-overlay: rgba(0, 0, 0, 0.4)` (new "Superposición modal"
+     row in `docs/DESIGN_SYSTEM.md`'s token table) — and `ModalBackdrop.tsx` now uses
+     `bg-modal-overlay` instead of the hardcoded `bg-black/60` (blur unchanged). Applies to every
+     `ModalBackdrop` consumer, confirmed by the unchanged `GlobalSettingsDialog`/
+     `GlobalSettingsDialog.voice.integration` suites (23 tests, AdminDialog composes on
+     ModalBackdrop since T20). `ADMIN_CONVENTIONS.md`'s overlay line updated to name the token.
+  5. **Orb-slot overflow fix (root cause verified, not the user's own hypothesis)**: the user's
+     screenshot showed a darker rectangle bleeding past the modal's right edge and guessed the
+     orb/glow box was larger than the 280px slot. Verified false by computing the actual boxes:
+     the panel was `w-72` (288px) minus `p-4` (32px padding) = 256px content, 24px *narrower*
+     than the fixed 280px `PAIRING_VISUAL_SLOT_SIZE_PX` slot — the slot itself (with whatever
+     filled it, QR or orb) overflowed the panel, and the panel's flex column had no
+     `items-center`, so a fixed-width child sits at the cross-axis start (left) instead of
+     stretching/centering, biasing 100% of the 24px overflow to the right — matching the
+     reported side exactly. Fixed by widening the panel to `w-80` (320px -> 288px content, fits
+     the 280px slot with 8px to spare) and adding `mx-auto` to `PAIRING_VISUAL_SLOT_CLS` so that
+     spare margin splits evenly instead of biasing to one side again. `QR_SIZE_PX`/
+     `PAIRING_VISUAL_SLOT_SIZE_PX` (still 280) were left untouched — the fixed-size-across-states
+     rule from T20 is unaffected, only the panel now actually contains it.
+  **TDD**: RED confirmed first — 6 new/changed assertions (backdrop token class, open-fade
+  opacity-0-then-100 via `flushEntryAnimationFrame` after a double-rAF `vi.advanceTimersByTime
+  (32)` flush like `PrismaOrbOverlay.test.tsx`'s own helper, orb entry `scale-75 opacity-0` ->
+  `scale-100 opacity-100` plus the `transition-[opacity,scale]` property, both `text-center`
+  paragraphs, `w-80`/`mx-auto` slot containment) all failed against the pre-change component (one
+  synchronous class-mismatch failure per assertion; the orb-entry test additionally needed
+  `vi.useFakeTimers({ shouldAdvanceTime: true })`, not bare `vi.useFakeTimers()`, to avoid
+  `userEvent.click` hanging under fully-paused fake timers). GREEN after the implementation above
+  — `PrismaPairingControl.test.tsx` 25 passed, `ModalBackdrop.test.tsx` 3 passed.
+  **Visual verification**: dev server already running (not started/stopped by this writer, per
+  the brief) at `http://127.0.0.1:5173`; fetched `/src/index.css?direct` to confirm
+  `.bg-modal-overlay`, `.w-80` and `.mx-auto` compiled. Built a scratch reproduction
+  (`…/scratchpad/t20b/repro.html`) with the exact production classes, linked to that live
+  compiled CSS, driven by headless Chrome (`--headless=new`, isolated
+  `--user-data-dir=…/scratchpad/t20b/chrome-profile`, only this writer's own one-shot PIDs).
+  `--dump-dom` confirmed the class flip (`opacity-0 scale-75` -> `opacity-100 scale-100`) actually
+  happens on the DOM; a `getBoundingClientRect`-based geometry probe sampled at t=0/50/150/400ms
+  confirmed `slot` stays fully inside the panel's padding box at every sample
+  (`insidePanelPadding=true`, `overflowR=0.0`, `overflowL=0.0`) and the orb wrapper stays fully
+  inside the slot (`insideSlot=true`). A `--screenshot` of the settled state visually confirms the
+  orb placeholder sits centered inside the panel with no rectangle crossing the rounded border —
+  the reported overflow is gone. Note: the harness's own live `getComputedStyle().opacity`/`.scale`
+  polling (via `setTimeout`, standing in for the production double-rAF, since headless Chrome's
+  virtual-time mode does not reliably drive `requestAnimationFrame` without a real compositor)
+  read stale values across all four samples despite the DOM/class-attribute dump and the final
+  screenshot both showing the correct settled state — a headless-virtual-time sampling artifact
+  in this harness, not evidence of a bug (the geometry probe, which does not depend on style
+  recalculation timing, was consistent and correct throughout).
+  **Post-implementation review round (Gentleman Guardian Angel pre-commit hook, `claude`
+  provider)**: the first commit attempt was blocked — `--no-verify` was never used, the
+  violations were fixed instead. Three real anti-parche/anti-hardcode findings, all in
+  `PrismaPairingControl.tsx`:
+  1. The double-rAF entry flip existed 2x inline in this file (modal open-fade, orb entry) plus a
+     3rd, separate implementation in `PrismaOrbOverlay.tsx`. Extracted a new shared hook,
+     `hmi-app/src/hooks/useDoubleRafFlip.ts` (own test file, 4 cases), and both of this file's
+     call sites now use it (`PairingOrbVisual` passes a constant `true` for a mount-only flip; the
+     modal fade passes `open` for a re-armable flip). `PrismaOrbOverlay.tsx` keeps its own copy
+     with a `TODO` in the new hook noting it should migrate there once that file is not
+     concurrently owned — it could not be touched in this change (T21's file).
+  2. `PANEL_WIDTH_CLS` was a second hand-picked constant (`w-80`) alongside the derived
+     `PAIRING_VISUAL_SLOT_SIZE_PX`, and `QR_SLOT_PADDING_PX` duplicated the `p-3` Tailwind class
+     as a second source for the same 12px. Fixed by deriving the panel width from the slot-size
+     CSS variable via a static `calc()` (`w-[calc(var(--pairing-visual-slot-size)+2rem+2px)]` —
+     the `+2px` accounts for the panel's own `border` utility, 1px/side under
+     `box-sizing: border-box`; a headless-Chrome geometry probe caught the 1-2px overflow this
+     term fixes before it was added) and by moving the slot's padding to an inline
+     `padding: ${QR_SLOT_PADDING_PX}px` style instead of `p-3`, so the JS constant is the only
+     source for both the size math and the rendered padding.
+  3. `PAIRING_FADE_DURATION_MS = 300` and a `duration-300` Tailwind class were two sources for
+     the same fade duration. `ModalBackdrop.tsx` gained an optional `style` prop (pass-through,
+     backward compatible) so both the backdrop and the panel now take `transitionDuration` from
+     `PAIRING_FADE_DURATION_MS` via inline style instead, matching the convention
+     `PrismaOrbOverlay.tsx` already uses for its own durations.
+  Also fixed on the same pass (flagged "worth fixing", not blocking): `close` is now wrapped in
+  `useCallback` so `ModalBackdrop`'s Escape-listener effect (keyed on `onClose`) and this file's
+  own `[closing]` auto-close effect (now correctly listing `close` as a dependency) stop
+  re-registering on every render.
+  **Re-verification after the fixes**: RED/GREEN cycle re-run for the changed assertions
+  (`w-80` → the new calc class); re-run → 29 passed; `npx tsc -b` → clean; `npm run lint` → clean;
+  full `npm test` → 219 test files / 2467 tests passed. The headless-Chrome geometry probe was
+  re-run against the new calc-based width and now reports `insidePanelPadding=true`,
+  `overflowR=0.0`, `overflowL=0.0` at every sampled time (was `overflowR=1.0` before the `+2px`
+  border term).
+  **Second Guardian Angel round**: the hook blocked again (still no `--no-verify`) with 2 more
+  findings, both in `PrismaPairingControl.tsx` and both fixed:
+  1. `PANEL_WIDTH_CLS`'s `+2rem` hardcoded the panel's `p-4` padding as a literal instead of
+     tying it to the actual design token. Confirmed against the compiled CSS that `p-4` -> `padding:
+     calc(var(--spacing) * 4)` (`--spacing: 0.25rem` in `index.css`'s `@theme`), so the calc now
+     reads `+var(--spacing)*8+2px` instead of `+2rem+2px` — tracks the real spacing token, not a
+     restated copy of its current value.
+  2. `PAIRING_ORB_ENTERING_CLS`/`PAIRING_ORB_VISIBLE_CLS` still copied
+     `PrismaOrbOverlay.tsx`'s `PRISMA_ORB_ENTERING_CLASSES`/`PRISMA_ORB_VISIBLE_CLASSES` literals,
+     and the review correctly pointed out T21 was already committed (`f419fcb`, `de4d2fb`) by the
+     time this was flagged, so the "concurrent writer" reason for the copy was stale — T21's own
+     tracker entry confirms it touched only `usePrismaOrbPresentation.ts` and
+     `prismaVoiceAudioEngine.ts`, never `PrismaOrbOverlay.tsx`. Exported
+     `PRISMA_ORB_ENTERING_CLASSES`/`PRISMA_ORB_VISIBLE_CLASSES`/`PRISMA_ORB_TRANSITION_CLASSNAME`
+     from `PrismaOrbOverlay.tsx` (three `export` keywords added to existing local constants, zero
+     behavior change to that file/its own passing test suite) and imported them here instead of
+     redeclaring copies — the double-rAF flip itself still has 2 implementations
+     (`useDoubleRafFlip`'s own call sites vs. `PrismaOrbOverlayVisible`'s inline one), tracked by
+     the `TODO` already in `useDoubleRafFlip.ts`.
+  **Verification (final)**: `cd hmi-app && npx vitest run
+  src/components/layout/PrismaPairingControl.test.tsx src/components/ui/ModalBackdrop.test.tsx
+  src/hooks/useDoubleRafFlip.test.ts src/components/PrismaOrbOverlay.test.tsx` → 40 passed;
+  `npx tsc -b` → clean; `npm run lint` → clean; full `npm test` → 219 test files / 2467 tests
+  passed (no regressions); headless-Chrome geometry probe re-run once more against the final
+  `var(--spacing)`-based calc → still `insidePanelPadding=true`, `overflowR=0.0`, `overflowL=0.0`
+  at every sampled time (panel width 314px = 280 + 32 + 2, exact fit).
+  **Files**: `hmi-app/src/components/layout/PrismaPairingControl.tsx`,
+  `hmi-app/src/components/layout/PrismaPairingControl.test.tsx`,
+  `hmi-app/src/components/ui/ModalBackdrop.tsx` (base backdrop treatment + new optional `style`
+  prop), `hmi-app/src/components/ui/ModalBackdrop.test.tsx` (assertion-only, unchanged behavior),
+  `hmi-app/src/components/PrismaOrbOverlay.tsx` (3 `export` keywords added to existing constants
+  only — no behavior change, T21 already committed and never touched this file),
+  `hmi-app/src/hooks/useDoubleRafFlip.ts` (new, shared), `hmi-app/src/hooks/useDoubleRafFlip.test.ts`
+  (new), `hmi-app/src/index.css` (new `--color-modal-overlay` token), `docs/DESIGN_SYSTEM.md`,
+  `hmi-app/src/components/admin/ADMIN_CONVENTIONS.md`.
+  **Next step (user)**: reopen the pairing modal and confirm live: it now fades in on open (not a
+  pop-in); the orb grows/fades in the same way the HMI voice orb does; the backdrop reads lighter
+  behind every modal (pairing and admin dialogs); the pending/linked text and the QR instruction
+  are centered; and the orb/QR square no longer shows any dark sliver past the modal's right edge.
 - [x] **T21 — Voice answer/orb as instant as possible (user priority, live timeline 2026-09-24
   ~13:40).** Evidence (`prisma-presentation-stderr.log`, `HMI voice timeline:` lines):
   `speak-live-request-start` 85–144 ms after event received (before T17 it was ~62–80 ms) — the

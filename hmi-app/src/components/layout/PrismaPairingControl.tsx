@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { Pyramid } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import ModalBackdrop from '../ui/ModalBackdrop';
@@ -11,6 +11,16 @@ import type { ChannelARuntimeUnreachableDetail } from '../../domain/channelAPair
 import { readPrismaOrbVisualConfig } from '../../config/prismaOrb.config';
 import type { PrismaOrbVisualConfig } from '../../domain/voice.types';
 import { TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
+// T20b: reuse of the HMI orb overlay's own entry duration and animation classes — single
+// source of truth for the exact same "invisible thinking scale -> visible" look, instead of a
+// copy-pasted literal in this file.
+import { PRISMA_ORB_ENTRY_DURATION_MS } from '../../hooks/usePrismaOrbPresentation';
+import {
+    PRISMA_ORB_ENTERING_CLASSES,
+    PRISMA_ORB_TRANSITION_CLASSNAME,
+    PRISMA_ORB_VISIBLE_CLASSES,
+} from '../PrismaOrbOverlay';
+import { useDoubleRafFlip } from '../../hooks/useDoubleRafFlip';
 
 const DIALOG_LABEL = 'Vincular teléfono con Prisma';
 const MISSING_NAME_COPY = 'Configure el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
@@ -42,25 +52,92 @@ const QR_FG_COLOR = 'var(--color-industrial-bg)';
 
 // T20: the QR, the awaiting-confirmation orb and the linked orb all occupy the SAME fixed
 // square slot so the modal never shifts layout across those three states. Derived from the
-// QR's own rendered size (the qrcode.react `size` prop below) plus the p-3 padding (0.75rem
-// at the 16px root font-size) that already wrapped it, instead of an independent constant.
+// QR's own rendered size (the qrcode.react `size` prop below) plus its padding, instead of an
+// independent constant.
 const QR_SIZE_PX = 256;
+// T20b: this constant is now the SINGLE source for the slot's padding — applied as an inline
+// style (below) instead of a `p-3` Tailwind class, so it cannot drift out of sync with the size
+// math the way a hand-kept-in-sync `p-3`/12px pair could (same "JS constant -> inline style"
+// convention PrismaOrbOverlay.tsx already uses for its own duration, since Tailwind's static
+// class scanner cannot read a JS value).
 const QR_SLOT_PADDING_PX = 12;
 const PAIRING_VISUAL_SLOT_SIZE_PX = QR_SIZE_PX + QR_SLOT_PADDING_PX * 2;
+// Applied to BOTH the panel (so its own width calc below can reference the same variable, and so
+// it cascades down to the slot for real browser layout) and the slot itself (redundant in a real
+// browser thanks to inheritance, but jsdom's tests read this exact inline attribute directly via
+// `style.getPropertyValue`, not computed/inherited style — see PrismaPairingControl.test.tsx's
+// 'keeps the identical fixed visual-slot size...' test). Both reads still resolve to this one
+// object/constant, so there is still exactly one source of truth for the slot size.
 const PAIRING_VISUAL_SLOT_STYLE = {
     '--pairing-visual-slot-size': `${PAIRING_VISUAL_SLOT_SIZE_PX}px`,
 } as CSSProperties;
-const PAIRING_VISUAL_SLOT_CLS = 'flex size-[var(--pairing-visual-slot-size)] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-industrial-surface p-3';
+const PAIRING_VISUAL_SLOT_PADDING_STYLE: CSSProperties = {
+    padding: `${QR_SLOT_PADDING_PX}px`,
+};
+const PAIRING_VISUAL_SLOT_FULL_STYLE: CSSProperties = {
+    ...PAIRING_VISUAL_SLOT_STYLE,
+    ...PAIRING_VISUAL_SLOT_PADDING_STYLE,
+};
+// T20b: `mx-auto` self-centers the slot regardless of the panel's own cross-axis alignment (the
+// panel's flex column never set `items-center`, so a fixed-width child defaults to the start of
+// the cross axis instead of centering itself) — see PANEL_WIDTH_CLS below for the matching width
+// fix.
+const PAIRING_VISUAL_SLOT_CLS = 'mx-auto flex size-[var(--pairing-visual-slot-size)] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-industrial-surface';
+
+// T20b regression fix (user screenshot, 2026-09-24): the previous `w-72` (288px) panel minus its
+// `p-4` (32px) padding left only a 256px content box — 24px narrower than the 280px fixed visual
+// slot above, so the slot (and whatever filled it) bled past the panel's right edge. Rather than
+// pick another fixed width by hand (which would silently reopen the same overflow if QR_SIZE_PX
+// ever changes), the width is DERIVED from the same `--pairing-visual-slot-size` variable via a
+// static (not JS-interpolated — Tailwind's scanner needs literal text) `calc()`: the slot size
+// plus the panel's own `p-4` horizontal padding, expressed via Tailwind v4's actual `--spacing`
+// theme token (`p-4` compiles to `padding: calc(var(--spacing) * 4)`, confirmed against the
+// compiled CSS — `--spacing: 0.25rem` in index.css's `@theme`; both sides = `var(--spacing) * 8`)
+// instead of a hardcoded `2rem`, so a change to the design system's base spacing scale is picked
+// up automatically. The `+2px` covers the panel's own `border` utility (1px/side under
+// `box-sizing: border-box`, Tailwind preflight) — omitting it left a real ~1-2px overflow,
+// verified with a headless-Chrome geometry probe (`getBoundingClientRect`) before this term was
+// added. An exact fit; PAIRING_VISUAL_SLOT_CLS's `mx-auto` centers the slot inside it.
+const PANEL_WIDTH_CLS = 'w-[calc(var(--pairing-visual-slot-size)+var(--spacing)*8+2px)]';
 
 // T20: how long the "Teléfono vinculado" state stays visible before the modal auto-closes.
 const PAIRING_LINKED_AUTO_CLOSE_MS = 3000;
-// T20: fade-out duration for the modal+backdrop opacity transition (matches Tailwind's
-// `duration-300` step below, kept as its own constant so the auto-close timing chain has one
-// source of truth). `motion-reduce:transition-none` clears the transition itself under
-// prefers-reduced-motion, so the opacity jumps instantly there — the close still happens after
-// this same delay, it is just invisible instead of animated.
+// T20b: fade duration for the modal+backdrop opacity transition — applied as an inline
+// `transitionDuration` style (below) instead of a Tailwind `duration-300` class, so the actual
+// close timer (`setTimeout(close, PAIRING_FADE_DURATION_MS)`) and the rendered CSS transition
+// duration can never drift out of sync (same "JS constant -> inline style" convention
+// PrismaOrbOverlay.tsx uses for its own durations). `motion-reduce:transition-none` clears the
+// transition itself under prefers-reduced-motion, so the opacity jumps instantly there — the
+// close still happens after this same delay, it is just invisible instead of animated.
 const PAIRING_FADE_DURATION_MS = 300;
-const PAIRING_FADE_TRANSITION_CLS = 'transition-opacity duration-300 ease-out motion-reduce:transition-none motion-reduce:duration-0';
+const PAIRING_FADE_TRANSITION_CLS = 'transition-opacity ease-out motion-reduce:transition-none motion-reduce:duration-0';
+const PAIRING_FADE_STYLE: CSSProperties = { transitionDuration: `${PAIRING_FADE_DURATION_MS}ms` };
+
+// T20b: the orb's own entry animation inside the modal, mirroring PrismaOrbOverlay.tsx's
+// PrismaOrbOverlayVisible (T17/T17b) — invisible at the thinking scale, then interpolating
+// opacity and size in. Reuses the imported PRISMA_ORB_ENTERING_CLASSES/PRISMA_ORB_VISIBLE_CLASSES/
+// PRISMA_ORB_TRANSITION_CLASSNAME (single source of truth, no copy-pasted literals) plus the
+// motion-reduce suffix PrismaOrbOverlay.tsx appends inline at its own call site.
+const PAIRING_ORB_TRANSITION_CLS = `${PRISMA_ORB_TRANSITION_CLASSNAME} ease-out motion-reduce:transition-none motion-reduce:duration-0`;
+
+// T20b: mounts fresh only when the orb branch below first renders (QR/blocked -> pending/linked),
+// same lifecycle reasoning as T17b's PrismaOrbOverlayVisible — one frame paints the invisible
+// "entering" look, then a double `requestAnimationFrame` (via the shared `useDoubleRafFlip` hook)
+// flips to the visible look on the next paint, giving the CSS transition a real "from" state
+// instead of popping in. Passing a constant `true` reproduces a mount-only flip (this component
+// only ever mounts at the moment its own entry animation should start).
+function PairingOrbVisual({ config }: { config: PrismaOrbVisualConfig }) {
+    const entered = useDoubleRafFlip(true);
+
+    return (
+        <div
+            className={`size-full ${PAIRING_ORB_TRANSITION_CLS} ${entered ? PRISMA_ORB_VISIBLE_CLASSES : PRISMA_ORB_ENTERING_CLASSES}`}
+            style={{ transitionDuration: `${PRISMA_ORB_ENTRY_DURATION_MS}ms` }}
+        >
+            <PrismaOrb config={config} className="size-full" />
+        </div>
+    );
+}
 
 function pairingStatusCopy(phase: ChannelAPairingPhase, unreachableDetail: ChannelARuntimeUnreachableDetail | null): string {
     switch (phase) {
@@ -105,10 +182,10 @@ export default function PrismaPairingControl() {
     const hookOpen = open && nameGateOk;
     const { phase, qr, remainingSeconds, unreachableDetail } = useChannelAPairing(hookOpen);
 
-    const close = () => {
+    const close = useCallback(() => {
         setOpen(false);
         setClosing(false);
-    };
+    }, []);
     const showQr = hookOpen && phase === 'free' && qr !== null && remainingSeconds > 0;
     const showPendingOrb = hookOpen && phase === 'pending';
     const showLinkedOrb = hookOpen && phase === 'linked';
@@ -126,6 +203,12 @@ export default function PrismaPairingControl() {
         setClosing(false);
         setOpen(true);
     };
+
+    // T20b: mirrors the auto-close fade-out on the way in — false for the one frame right after
+    // opening (mirroring the mount look, no prior DOM state to interpolate from), then flipped to
+    // true by the shared double-rAF hook so the backdrop+panel opacity transition actually
+    // interpolates instead of popping in at full opacity.
+    const entered = useDoubleRafFlip(open);
 
     // T20: once linked, wait the named auto-close delay, then start the fade.
     useEffect(() => {
@@ -147,9 +230,9 @@ export default function PrismaPairingControl() {
         return () => {
             clearTimeout(fadeTimer);
         };
-    }, [closing]);
+    }, [closing, close]);
 
-    const fadeOpacityCls = closing ? 'opacity-0' : 'opacity-100';
+    const fadeOpacityCls = closing || !entered ? 'opacity-0' : 'opacity-100';
 
     return (
         <>
@@ -168,12 +251,14 @@ export default function PrismaPairingControl() {
                 open={open}
                 onClose={close}
                 className={`${PAIRING_FADE_TRANSITION_CLS} ${fadeOpacityCls}`}
+                style={PAIRING_FADE_STYLE}
             >
                 <div
                     role="dialog"
                     aria-modal="true"
                     aria-label={DIALOG_LABEL}
-                    className={`w-72 rounded-2xl border border-industrial-border bg-industrial-surface/95 p-4 shadow-2xl backdrop-blur-xl ${PAIRING_FADE_TRANSITION_CLS} ${fadeOpacityCls}`}
+                    style={{ ...PAIRING_VISUAL_SLOT_STYLE, ...PAIRING_FADE_STYLE }}
+                    className={`${PANEL_WIDTH_CLS} rounded-2xl border border-industrial-border bg-industrial-surface/95 p-4 shadow-2xl backdrop-blur-xl ${PAIRING_FADE_TRANSITION_CLS} ${fadeOpacityCls}`}
                 >
                     <div className="flex flex-col gap-3">
                         {!hookOpen ? (
@@ -198,7 +283,7 @@ export default function PrismaPairingControl() {
                             <>
                                 <div
                                     data-testid="pairing-visual-slot"
-                                    style={PAIRING_VISUAL_SLOT_STYLE}
+                                    style={PAIRING_VISUAL_SLOT_FULL_STYLE}
                                     className={PAIRING_VISUAL_SLOT_CLS}
                                 >
                                     <QRCodeSVG
@@ -214,7 +299,7 @@ export default function PrismaPairingControl() {
                                         className="h-auto w-full"
                                     />
                                 </div>
-                                <p className="text-industrial-muted">
+                                <p className="text-center text-industrial-muted">
                                     Escanee el código QR con el teléfono y confirme el destino en
                                     Telegram.
                                 </p>
@@ -223,12 +308,12 @@ export default function PrismaPairingControl() {
                             <>
                                 <div
                                     data-testid="pairing-visual-slot"
-                                    style={PAIRING_VISUAL_SLOT_STYLE}
+                                    style={PAIRING_VISUAL_SLOT_FULL_STYLE}
                                     className={PAIRING_VISUAL_SLOT_CLS}
                                 >
-                                    <PrismaOrb config={visualConfig} className="size-full" />
+                                    <PairingOrbVisual config={visualConfig} />
                                 </div>
-                                <p className={showLinkedOrb ? 'text-status-normal' : 'text-status-warning'}>
+                                <p className={`text-center ${showLinkedOrb ? 'text-status-normal' : 'text-status-warning'}`}>
                                     {pairingStatusCopy(phase, unreachableDetail)}
                                 </p>
                             </>

@@ -38,7 +38,9 @@ interface PrismaOrbOverlayProps {
 // (not just the duration), so reduced motion still skips the transition
 // entirely regardless of the inline duration value.
 const PRISMA_ORB_THINKING_CLASSES = 'scale-75 opacity-60';
-const PRISMA_ORB_VISIBLE_CLASSES = 'scale-100 opacity-100';
+// T20b: exported so other entry animations reusing this exact look (e.g. the pairing modal's
+// orb, PrismaPairingControl.tsx) have one source of truth instead of a copy-pasted literal.
+export const PRISMA_ORB_VISIBLE_CLASSES = 'scale-100 opacity-100';
 const PRISMA_ORB_FADING_CLASSES = 'scale-75 opacity-0';
 
 // T17b: the entering look is the thinking scale at zero opacity -- the
@@ -46,7 +48,8 @@ const PRISMA_ORB_FADING_CLASSES = 'scale-75 opacity-0';
 // PrismaOrbOverlayVisible below). Kept as its own named constant (rather
 // than reusing PRISMA_ORB_THINKING_CLASSES) because it is a distinct,
 // mount-only concept, not one of the three steady phase looks.
-const PRISMA_ORB_ENTERING_CLASSES = 'scale-75 opacity-0';
+// T20b: exported for the same reason as PRISMA_ORB_VISIBLE_CLASSES above.
+export const PRISMA_ORB_ENTERING_CLASSES = 'scale-75 opacity-0';
 
 type VisiblePhase = Exclude<PrismaOrbPresentationPhase, 'hidden'>;
 
@@ -71,7 +74,10 @@ function phaseTransitionDurationMs(phase: VisiblePhase): number {
 // nothing would ever animate on it, and CSS Transforms Level 2 animates
 // `translate`/`scale`/`rotate` independently of `transform` and of each
 // other).
-const PRISMA_ORB_TRANSITION_CLASSNAME = 'transition-[opacity,scale]';
+// T20b: exported for the same reason as PRISMA_ORB_VISIBLE_CLASSES/PRISMA_ORB_ENTERING_CLASSES
+// above -- the pairing modal's orb entry animation reuses this exact Tailwind v4 root-cause-1
+// fix (transition `opacity,scale`, never `transform`) instead of redeclaring it.
+export const PRISMA_ORB_TRANSITION_CLASSNAME = 'transition-[opacity,scale]';
 
 interface PrismaOrbOverlayVisibleProps {
     phase: VisiblePhase;
