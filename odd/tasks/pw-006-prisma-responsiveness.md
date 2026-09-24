@@ -1000,6 +1000,14 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     sink test) — flagged for a future pass if this proves fragile in practice.
   - **Commits:** `c605519` (feat: stream HMI voice timeline diagnostics), `9db0368` (refactor: reuse
     the generated session-reset reason type), `2964d1a` (fix: pin sendBeacon to no-store/no-redirect).
+- [ ] **T16 follow-ups (parent, 2026-09-24 ~11:10 test).** (1) The launcher reused the runtime
+  started at 09:39 ("already running", `start-local.ps1:114-131`), so the T16 endpoint answered 404
+  (12 POSTs) and no timeline was captured; a real restart needs `stop-local.cmd` before relaunching
+  (known reuse behavior). (2) The same log shows 1148 `GET /hmi/voice/latest` polls vs 22 SSE
+  connections: once the HMI falls back to polling it apparently never returns to SSE — investigate
+  with the timeline. (3) 55 of 130 `GET /internal/prisma/voice-events/<id>` answered 401 (bursts,
+  e.g. 10:26:16) — check whether prefetch-token validations expire or race. (4) T14 gap: inactivity
+  expiry purges the link silently, leaving the menu entry and reply keyboard in that chat.
 - [x] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
