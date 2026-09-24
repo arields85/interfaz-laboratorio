@@ -197,7 +197,14 @@ end together with PW-006; NO push.
     admin drag/resize and the resize tooltip track the pointer 1:1, the trend chart drag-to-zoom
     selection lands on the correct time range, the shader background renders sharp (not blurry) at
     zoom > 1, and 1920×1080 stays pixel-identical to before this change.
-- [ ] **T4 — Per-device fine-tune.** Per-browser factor (default 100%, fine steps) combined with the
+- [x] **T3c — Independent verification of T3/T3b (2026-09-23).** PASS for `d88e034` and `927e56e`,
+  no defects. Every grep hit classified (converted / same-space ratio / unrelated); no stray viewport
+  units. Headless Chrome probes (zoom 1.25): `var(--viewport-height)` fills exactly 801 px; a fixed
+  element placed via the layout-px conversion lands at the intended real coordinates; `innerWidth`
+  is unaffected by zoom (no feedback loop). `npm test` 215 files / 2372 tests, `tsc -b` and lint
+  clean.
+- [ ] **T4 — Per-device fine-tune. DEFERRED by the user (2026-09-23):** build it only if T5 manual
+  acceptance on the laptop and the 4K monitor shows the automatic curve is not enough. Per-browser factor (default 100%, fine steps) combined with the
   automatic zoom; UI placement to be agreed with the user.
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
   2560×1440 CSS px; calibrate `k`.
