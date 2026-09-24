@@ -24,7 +24,7 @@ GEMINI_VERIFY_TIMEOUT_MS = 10_000
 # check the exact model the voice service actually speaks with. Not imported
 # directly from voice_service to avoid coupling this port-5057 module to the
 # separate port-5056 voice service process.
-GEMINI_VERIFY_MODEL = "gemini-3.1-flash-tts-preview"
+GEMINI_VERIFY_MODEL = "gemini-3.8-flash-lite-tts"
 
 GeminiVerificationState = Literal[
     "not_checked", "verified", "invalid_key", "unreachable", "not_configured"

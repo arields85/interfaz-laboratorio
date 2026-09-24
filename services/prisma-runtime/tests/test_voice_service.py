@@ -21,17 +21,23 @@ from prisma_runtime.event_audio import GenerationControl
 
 
 class FakeStream:
-    def __init__(self, events, failure=None):
-        self.events, self.failure, self.index, self.close_calls = list(events), failure, 0, 0
+    """T11: mimics client.models.generate_content_stream's return value --
+    an iterator of chunks, each shaped like candidates[].content.parts[]
+    .inline_data (see FakeChunk below). Unlike the retired Interactions
+    stream, there is no distinct terminal "completed" event; the stream
+    simply ends."""
+
+    def __init__(self, chunks, failure=None):
+        self.chunks, self.failure, self.index, self.close_calls = list(chunks), failure, 0, 0
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if self.index < len(self.events):
-            event = self.events[self.index]
+        if self.index < len(self.chunks):
+            chunk = self.chunks[self.index]
             self.index += 1
-            return event
+            return chunk
         if self.failure is not None:
             failure, self.failure = self.failure, None
             raise failure
@@ -41,21 +47,27 @@ class FakeStream:
         self.close_calls += 1
 
 
-class FakeInteractions:
+class FakeModels:
     def __init__(self, responses):
         self.responses, self.calls = list(responses), []
 
-    def create(self, **kwargs):
+    def _pop(self, kwargs):
         self.calls.append(kwargs)
         result = self.responses.pop(0)
         if isinstance(result, BaseException):
             raise result
         return result
 
+    def generate_content_stream(self, **kwargs):
+        return self._pop(kwargs)
+
+    def generate_content(self, **kwargs):
+        return self._pop(kwargs)
+
 
 class FakeClient:
     def __init__(self, responses):
-        self.interactions, self.close_calls = FakeInteractions(responses), 0
+        self.models, self.close_calls = FakeModels(responses), 0
 
     def close(self):
         self.close_calls += 1
@@ -70,12 +82,16 @@ class IdentityDsp:
         return bytes(pcm)
 
 
-def audio_event(raw, **metadata):
-    return SimpleNamespace(event_type="step.delta", delta=SimpleNamespace(type="audio", data=base64.b64encode(raw).decode("ascii"), **metadata))
-
-
-def completed_event(status="completed"):
-    return SimpleNamespace(event_type="interaction.completed", interaction=SimpleNamespace(status=status))
+def audio_chunk(raw, mime_type="audio/L16;codec=pcm;rate=24000", as_base64=False):
+    """A generate_content_stream chunk carrying one audio part. `as_base64`
+    exercises the defensive str-data fallback; production/real SDK 2.17
+    delivers inline_data.data as raw bytes."""
+    data = base64.b64encode(raw).decode("ascii") if as_base64 else raw
+    inline_data = SimpleNamespace(data=data, mime_type=mime_type)
+    part = SimpleNamespace(inline_data=inline_data)
+    content = SimpleNamespace(parts=[part])
+    candidate = SimpleNamespace(content=content)
+    return SimpleNamespace(candidates=[candidate])
 
 
 class VoiceServiceTests(unittest.TestCase):
@@ -369,14 +385,69 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertIn("elapsed_ms=", lines[0])
         self.assertNotIn("Some transcript", lines[0])
 
-    def test_tts_request_uses_streaming_interactions_contract(self):
+    def test_tts_stream_request_sends_the_plain_transcript_with_no_wrapping_prompt(self):
+        """T11: "normal" style is the only style implemented -- the exact
+        transcript text is sent as `contents`, never wrapped in a prompt
+        (the retired build_tts_prompt no longer exists)."""
         stream = FakeStream([])
         client = FakeClient([stream])
-        result = service._create_tts_interaction(client, "Exact transcript", stream=True)
-        self.assertEqual(client.interactions.calls[0]["model"], "gemini-3.1-flash-tts-preview")
-        self.assertEqual(client.interactions.calls[0]["generation_config"], {"speech_config": [{"voice": "Leda"}]})
-        self.assertTrue(client.interactions.calls[0]["stream"])
+        result = service._create_tts_stream(client, "Exact transcript")
+        call = client.models.calls[0]
+        self.assertEqual(call["model"], "gemini-3.8-flash-lite-tts")
+        self.assertEqual(call["contents"], "Exact transcript")
+        config = call["config"]
+        self.assertEqual(config.response_modalities, ["AUDIO"])
+        self.assertEqual(config.speech_config.voice_config.prebuilt_voice_config.voice_name, "Leda")
         self.assertIs(result, stream)
+
+    def test_tts_response_request_uses_the_same_model_and_config_as_the_stream(self):
+        """The non-streaming fallback call must speak with the exact same
+        model/voice as the streaming path, just without `stream`."""
+        response = SimpleNamespace(candidates=[])
+        client = FakeClient([response])
+        result = service._create_tts_response(client, "Exact transcript")
+        call = client.models.calls[0]
+        self.assertEqual(call["model"], "gemini-3.8-flash-lite-tts")
+        self.assertEqual(call["contents"], "Exact transcript")
+        self.assertEqual(call["config"].speech_config.voice_config.prebuilt_voice_config.voice_name, "Leda")
+        self.assertIs(result, response)
+
+    def test_build_tts_prompt_and_the_interactions_call_path_are_retired(self):
+        """T11: the 45-line build_tts_prompt and the Interactions-API request
+        builders are dead code now that "normal" style sends the plain
+        transcript via generate_content_stream/generate_content."""
+        for removed in ("build_tts_prompt", "_tts_interaction_request", "_create_tts_interaction", "_iter_interaction_audio_deltas", "_validate_audio_delta", "_decode_audio_delta"):
+            with self.subTest(removed=removed):
+                self.assertFalse(hasattr(service, removed))
+
+    def test_audio_inline_data_accepts_equivalent_mime_forms_and_rejects_others(self):
+        accepted = ("audio/L16;codec=pcm;rate=24000", "audio/l16", "AUDIO/L16;RATE=24000", None)
+        for mime_type in accepted:
+            with self.subTest(mime_type=mime_type):
+                inline_data = SimpleNamespace(data=b"\x12\x34", mime_type=mime_type)
+                self.assertEqual(service._decode_audio_inline_data(inline_data), b"\x12\x34")
+
+        rejected = (
+            ("audio/mpeg", "UNSUPPORTED_TTS_AUDIO_MIME_TYPE"),
+            ("audio/l16;rate=16000", "UNSUPPORTED_TTS_SAMPLE_RATE"),
+        )
+        for mime_type, code in rejected:
+            with self.subTest(mime_type=mime_type):
+                inline_data = SimpleNamespace(data=b"\x12\x34", mime_type=mime_type)
+                with self.assertRaisesRegex(service.PrismaTtsFormatError, code):
+                    service._decode_audio_inline_data(inline_data)
+
+    def test_audio_inline_data_handles_bytes_and_base64_str_defensively(self):
+        raw = b"\x12\x34\x56"
+        self.assertEqual(service._decode_audio_inline_data(SimpleNamespace(data=raw, mime_type=None)), raw)
+        encoded = base64.b64encode(raw).decode("ascii")
+        self.assertEqual(service._decode_audio_inline_data(SimpleNamespace(data=encoded, mime_type=None)), raw)
+
+    def test_audio_inline_data_rejects_missing_or_empty_data(self):
+        for data in (None, "", b""):
+            with self.subTest(data=data):
+                with self.assertRaises(service.PrismaTtsFormatError):
+                    service._decode_audio_inline_data(SimpleNamespace(data=data, mime_type=None))
 
     def test_get_gemini_client_logs_resolve_build_elapsed_ms_and_reused_flag(self):
         """T10 unit 1+2: split credential-resolve time from client-build time,
@@ -396,11 +467,11 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertIn("reused=True", lines[0])
         self.assertNotIn("secret-value", lines[0])
 
-    def test_generate_interactions_tts_audio_never_closes_the_warm_client(self):
+    def test_generate_tts_audio_never_closes_the_warm_client(self):
         """T10 unit 2: the client is a shared warm singleton now, so neither
         an ordinary completion nor a cancellation may close it; only the
         per-request stream and idle guard are ever closed."""
-        stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
+        stream = FakeStream([audio_chunk(b"\x12\x34")])
         client = FakeClient([stream])
         control = GenerationControl()
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
@@ -416,12 +487,12 @@ class VoiceServiceTests(unittest.TestCase):
 
     def test_stream_logs_time_to_first_byte_and_first_yield_processing_once(self):
         """T10 unit 1: Gemini time-to-first-byte vs our own post-processing time."""
-        stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
+        stream = FakeStream([audio_chunk(b"\x12\x34")])
         client = FakeClient([stream])
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
             job = service._create_interactions_tts_job("Lazy transcript")
             with self.assertLogs(service._logger, level="WARNING") as observed:
-                output = service._generate_interactions_tts_audio(job)
+                output = service._generate_tts_audio(job)
                 self.assertEqual(next(output), b"\x12\x34")
                 self.assertEqual(list(output), [])
         first_byte = [line for line in observed.output if "time_to_first_byte_ms" in line]
@@ -465,11 +536,11 @@ class VoiceServiceTests(unittest.TestCase):
                 self.assertIn("event_publish_to_received_ms=None", lines[0])
 
     def test_stream_yields_first_post_dsp_chunk_before_completion(self):
-        stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
+        stream = FakeStream([audio_chunk(b"\x12\x34")])
         client = FakeClient([stream])
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
             job = service._create_interactions_tts_job("Lazy transcript")
-            output = service._generate_interactions_tts_audio(job)
+            output = service._generate_tts_audio(job)
             self.assertEqual(next(output), b"\x12\x34")
             self.assertEqual(list(output), [])
         self.assertEqual(stream.close_calls, 1)
@@ -479,7 +550,7 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertFalse(any(thread.name == "PrismaProviderIdleGuard" for thread in threading.enumerate()))
 
     def test_generation_control_runs_provider_and_job_cleanup_once(self):
-        stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
+        stream = FakeStream([audio_chunk(b"\x12\x34")])
         client = FakeClient([stream])
         control = GenerationControl()
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
@@ -513,29 +584,29 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertIsNone(cache.get("too-big"))
 
     def test_second_identical_request_is_served_from_cache_without_calling_gemini(self):
-        stream = FakeStream([audio_event(b"\x12\x34\x56\x78"), completed_event()])
+        stream = FakeStream([audio_chunk(b"\x12\x34\x56\x78")])
         client = FakeClient([stream])
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
             job_one = service._create_interactions_tts_job("Repeated transcript")
-            first_output = list(service._generate_interactions_tts_audio(job_one))
+            first_output = list(service._generate_tts_audio(job_one))
             self.assertEqual(first_output, [b"\x12\x34\x56\x78"])
 
             job_two = service._create_interactions_tts_job("Repeated transcript")
             with self.assertLogs(service._logger, level="WARNING") as observed:
-                second_output = list(service._generate_interactions_tts_audio(job_two))
+                second_output = list(service._generate_tts_audio(job_two))
         self.assertEqual(second_output, [b"\x12\x34\x56\x78"])
         # Only the first job's stream was ever created; the SDK's
-        # interactions.create was never called a second time.
-        self.assertEqual(len(client.interactions.calls), 1)
+        # generate_content_stream was never called a second time.
+        self.assertEqual(len(client.models.calls), 1)
         self.assertTrue(any("Prisma TTS cache: hit" in line for line in observed.output))
 
     def test_different_text_or_voice_config_is_a_cache_miss(self):
         def run(text, config=None):
-            stream = FakeStream([audio_event(b"\xaa\xbb"), completed_event()])
+            stream = FakeStream([audio_chunk(b"\xaa\xbb")])
             client = FakeClient([stream])
             with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
                 job = service._create_interactions_tts_job(text, voice_config=config)
-                list(service._generate_interactions_tts_audio(job))
+                list(service._generate_tts_audio(job))
             return client
 
         base_config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
@@ -546,8 +617,8 @@ class VoiceServiceTests(unittest.TestCase):
         client_for_different_text = run("Text two", base_config)
         client_for_different_config = run("Text one", other_config)
 
-        self.assertEqual(len(client_for_different_text.interactions.calls), 1)
-        self.assertEqual(len(client_for_different_config.interactions.calls), 1)
+        self.assertEqual(len(client_for_different_text.models.calls), 1)
+        self.assertEqual(len(client_for_different_config.models.calls), 1)
 
     def test_cache_key_changes_when_the_warm_client_secret_hash_changes(self):
         with patch.object(service._warm_gemini_client, "current_secret_hash", return_value="hash-one"):
@@ -559,22 +630,23 @@ class VoiceServiceTests(unittest.TestCase):
     def test_stream_falls_back_once_before_any_audio(self):
         stream = FakeStream([], RuntimeError("provider unavailable"))
         fallback = b"\x34\x12\xfe\xff"
-        interaction = SimpleNamespace(output_audio=SimpleNamespace(data=base64.b64encode(fallback).decode("ascii")))
-        client = FakeClient([stream, interaction])
+        response = SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(inline_data=SimpleNamespace(data=fallback, mime_type="audio/L16;codec=pcm;rate=24000"))]))])
+        client = FakeClient([stream, response])
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "apply_prisma_dsp_full_pcm", side_effect=lambda pcm, _config: pcm), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
             job = service._create_interactions_tts_job("Fallback transcript")
-            self.assertEqual(list(service._generate_interactions_tts_audio(job)), [fallback])
-        self.assertEqual(len(client.interactions.calls), 2)
-        self.assertNotIn("stream", client.interactions.calls[1])
+            self.assertEqual(list(service._generate_tts_audio(job)), [fallback])
+        self.assertEqual(len(client.models.calls), 2)
+        self.assertNotIn("stream", client.models.calls[1])
+        self.assertEqual(client.models.calls[1]["model"], "gemini-3.8-flash-lite-tts")
 
     def test_stream_rejects_incomplete_pcm_without_fallback(self):
-        stream = FakeStream([audio_event(b"\x7f"), completed_event()])
+        stream = FakeStream([audio_chunk(b"\x7f")])
         client = FakeClient([stream])
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp):
             job = service._create_interactions_tts_job("Odd sample transcript")
             with self.assertRaisesRegex(service.PrismaTtsFormatError, "INCOMPLETE_PCM_S16LE_SAMPLE"):
-                list(service._generate_interactions_tts_audio(job))
-        self.assertEqual(len(client.interactions.calls), 1)
+                list(service._generate_tts_audio(job))
+        self.assertEqual(len(client.models.calls), 1)
 
     def test_local_endpoint_returns_canonical_pcm_metadata_without_provider_connection(self):
         event_id = str(uuid.uuid4())

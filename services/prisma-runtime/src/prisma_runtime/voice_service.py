@@ -46,7 +46,15 @@ app = Flask(__name__)
 # `prisma-voice-stderr.log` without adding runtime-wide configuration. Only a
 # duration is ever logged, never an event id, question or answer text.
 _logger = logging.getLogger(__name__)
-TTS_MODEL = "gemini-3.1-flash-tts-preview"
+# T11: switched from gemini-3.1-flash-tts-preview (Interactions API,
+# client.interactions.create) to the stable gemini-3.8-flash-lite-tts model
+# via client.models.generate_content_stream -- user-authorized decision
+# (2026-09-23) after a benchmark showed the new pairing both averages a much
+# lower Gemini time-to-first-byte and, at "normal" style (plain transcript,
+# no style/prompt instructions), reads the transcript verbatim by default,
+# unlike the 3.1 preview model, which needed the 45-line build_tts_prompt as
+# guard rails.
+TTS_MODEL = "gemini-3.8-flash-lite-tts"
 VOICE = "Leda"
 SAMPLE_RATE = 24000
 CHANNELS = 1
@@ -341,55 +349,6 @@ def _parse_event_publish_epoch(timestamp):
         return None
 
 
-def build_tts_prompt(text):
-    return f"""
-Synthesize speech for the transcript below.
-
-Do not speak, repeat, paraphrase, or mention any of these instructions.
-Speak only the text inside the TRANSCRIPT section.
-Do not add, remove, rewrite, or improvise words.
-
-AUDIO PROFILE:
-Youthful female voice.
-Professional, warm, approachable, and confident.
-Natural and human, without sounding theatrical or exaggerated.
-
-SCENE:
-You are Prisma, the voice assistant of an industrial HMI in a professional production environment.
-The listener needs to understand operational information quickly and clearly.
-
-DIRECTOR'S NOTES:
-Style:
-Professional, warm, calm, and reliable.
-Friendly but restrained.
-Natural emotional expression.
-Avoid advertising, radio-announcer, dramatic, or overly cheerful delivery.
-
-Accent:
-Neutral Latin American Spanish.
-Avoid a marked Spain Spanish accent.
-Avoid a strongly identifiable regional Latin American accent.
-
-Pacing:
-Medium and fluid.
-Use natural short pauses between ideas.
-Do not rush technical information.
-
-Articulation:
-Pronounce machine names, product names, acronyms, numbers, percentages,
-dates, times, and measurement units clearly.
-Keep technical terms precise and easy to understand.
-
-Dynamics:
-Maintain a stable, controlled delivery.
-Use subtle natural emphasis only where it improves comprehension.
-Do not exaggerate changes in pitch, volume, or emotion.
-
-TRANSCRIPT:
-{text}
-"""
-
-
 class PrismaTtsStreamError(RuntimeError):
     def __init__(self, code): self.code = code; super().__init__(code)
 class PrismaTtsProviderError(PrismaTtsStreamError): pass
@@ -429,7 +388,7 @@ class ProviderStreamIdleGuard:
                 if remaining > 0:
                     self.condition.wait(remaining)
                     continue
-                _close_interaction_stream(self.stream)
+                _close_tts_stream(self.stream)
                 return
 
 
@@ -441,49 +400,110 @@ class S16LeChunkAssembler:
         if self.carry: raise PrismaTtsFormatError("INCOMPLETE_PCM_S16LE_SAMPLE")
 
 
-def _tts_interaction_request(text): return {"model": TTS_MODEL, "input": build_tts_prompt(text), "response_format": {"type": "audio"}, "generation_config": {"speech_config": [{"voice": VOICE}]}}
-def _create_tts_interaction(client, text, stream=False):
-    payload = _tts_interaction_request(text)
-    if stream: payload["stream"] = True
-    return client.interactions.create(**payload)
-def _close_interaction_stream(stream):
+# T11: gemini-3.8-flash-lite-tts is spoken via the plain content-generation
+# contract (client.models.generate_content_stream / generate_content), not
+# the Interactions API the 3.1 preview model used. "Normal" style (the only
+# style implemented -- see the task notes) sends the transcript as-is in
+# `contents`, with no wrapping prompt: this model treats its input as a
+# verbatim transcript by default, unlike 3.1, which needed 45 lines of guard
+# rails (the removed build_tts_prompt) to avoid paraphrasing.
+def _tts_generate_content_config():
+    # Imported the same way as gemini_credentials.create_gemini_client
+    # (importlib.import_module, resolved through sys.modules) for the same
+    # test-time mockability at this exact SDK boundary.
+    import importlib
+
+    genai = importlib.import_module("google.genai")
+    types = genai.types
+    return types.GenerateContentConfig(
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=VOICE))
+        ),
+    )
+
+
+def _create_tts_stream(client, text):
+    return client.models.generate_content_stream(model=TTS_MODEL, contents=text, config=_tts_generate_content_config())
+
+
+def _create_tts_response(client, text):
+    return client.models.generate_content(model=TTS_MODEL, contents=text, config=_tts_generate_content_config())
+
+
+def _close_tts_stream(stream):
     if stream is not None:
         try: stream.close()
         except Exception: pass
 
 
-def _validate_audio_delta(delta):
-    if getattr(delta, "mime_type", None) is not None and str(delta.mime_type).lower() != "audio/l16": raise PrismaTtsFormatError("UNSUPPORTED_TTS_AUDIO_MIME_TYPE")
-    if getattr(delta, "sample_rate", None) is not None and delta.sample_rate != SAMPLE_RATE: raise PrismaTtsFormatError("UNSUPPORTED_TTS_SAMPLE_RATE")
-    if getattr(delta, "channels", None) is not None and delta.channels != CHANNELS: raise PrismaTtsFormatError("UNSUPPORTED_TTS_CHANNELS")
+def _iter_inline_audio_parts(chunk):
+    """A `generate_content_stream` chunk (or a non-streaming `generate_content`
+    response, same shape) carries zero or more audio parts at
+    candidates[].content.parts[].inline_data. Unlike the retired Interactions
+    API, there is no separate per-delta event envelope to unwrap."""
+    for candidate in getattr(chunk, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) if content is not None else None
+        for part in parts or []:
+            inline_data = getattr(part, "inline_data", None)
+            if inline_data is not None and getattr(inline_data, "data", None):
+                yield inline_data
 
 
-def _decode_audio_delta(delta):
-    _validate_audio_delta(delta); data = getattr(delta, "data", None)
-    if not isinstance(data, str) or not data: raise PrismaTtsFormatError("TTS_AUDIO_DATA_MISSING")
-    try: decoded = base64.b64decode(data, validate=True)
-    except (binascii.Error, ValueError, TypeError): raise PrismaTtsFormatError("TTS_AUDIO_DATA_INVALID") from None
+def _mime_rate_param(normalized_mime_type):
+    for parameter in normalized_mime_type.split(";")[1:]:
+        name, _, value = parameter.strip().partition("=")
+        if name == "rate":
+            try: return int(value)
+            except ValueError: return None
+    return None
+
+
+def _validate_audio_inline_data(inline_data):
+    # Gemini TTS audio parts carry a mime type such as
+    # "audio/L16;codec=pcm;rate=24000"; accept any audio/L16 variant and
+    # only reject an explicit, different rate. No channel count is exposed
+    # on inline_data (24 kHz mono PCM is this model's fixed TTS output), so
+    # unlike the retired Interactions delta shape, channels are not checked
+    # here.
+    mime_type = getattr(inline_data, "mime_type", None)
+    if mime_type is None: return
+    normalized = str(mime_type).strip().lower()
+    if not normalized.startswith("audio/l16"): raise PrismaTtsFormatError("UNSUPPORTED_TTS_AUDIO_MIME_TYPE")
+    rate = _mime_rate_param(normalized)
+    if rate is not None and rate != SAMPLE_RATE: raise PrismaTtsFormatError("UNSUPPORTED_TTS_SAMPLE_RATE")
+
+
+def _decode_audio_inline_data(inline_data):
+    _validate_audio_inline_data(inline_data)
+    data = getattr(inline_data, "data", None)
+    if isinstance(data, (bytes, bytearray)):
+        # google-genai 2.17 delivers inline_data.data as raw bytes already.
+        decoded = bytes(data)
+    elif isinstance(data, str) and data:
+        # Defensive fallback for an SDK/response shape that base64-encodes it.
+        try: decoded = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError, TypeError): raise PrismaTtsFormatError("TTS_AUDIO_DATA_INVALID") from None
+    else:
+        raise PrismaTtsFormatError("TTS_AUDIO_DATA_MISSING")
     if not decoded: raise PrismaTtsFormatError("TTS_AUDIO_DATA_EMPTY")
     return decoded
 
 
-def _iter_interaction_audio_deltas(stream, on_activity=lambda: None):
-    completed = False
+def _iter_tts_audio_parts(stream, on_activity=lambda: None):
+    """Yield each inline_data audio part across the stream. Unlike the
+    retired Interactions API, generate_content_stream has no explicit
+    "interaction.completed" terminal event -- the stream simply ends when
+    Gemini is done; the caller's own "no audio at all" check covers a
+    stream that ends without ever yielding anything."""
     try:
-        for event in stream:
+        for chunk in stream:
             on_activity()
-            if getattr(event, "event_type", None) == "step.delta":
-                delta = getattr(event, "delta", None)
-                if getattr(delta, "type", None) == "audio": yield delta
-            elif getattr(event, "event_type", None) == "interaction.completed":
-                if getattr(getattr(event, "interaction", None), "status", None) != "completed": raise PrismaTtsProviderError("TTS_STREAM_NOT_COMPLETED")
-                completed = True; break
-            elif getattr(event, "event_type", None) == "interaction.status_update" and getattr(event, "status", None) in {"failed", "cancelled", "incomplete", "budget_exceeded"}: raise PrismaTtsProviderError("TTS_STREAM_TERMINATED")
-            elif getattr(event, "event_type", None) == "error": raise PrismaTtsProviderError("TTS_STREAM_PROVIDER_ERROR")
+            yield from _iter_inline_audio_parts(chunk)
     except GeneratorExit: raise
     except PrismaTtsStreamError: raise
     except Exception: raise PrismaTtsProviderError("TTS_STREAM_PROVIDER_FAILED") from None
-    if not completed: raise PrismaTtsProviderError("TTS_STREAM_TERMINAL_MISSING")
 
 
 class VoiceAudioCache:
@@ -582,12 +602,14 @@ def _append_post_dsp_pcm(job, pcm):
     return pcm
 
 
-def _discard_interactions_tts_job(job):
+def _discard_tts_job(job):
     job["cancelled"].set(); _cancel_telegram_job(job); job["telegram_pcm_parts"].clear()
 
 
 def _full_file_fallback_pcm(client, job):
-    try: interaction = _create_tts_interaction(client, job["text"]); pcm = base64.b64decode(interaction.output_audio.data, validate=True)
+    try:
+        response = _create_tts_response(client, job["text"])
+        pcm = b"".join(_decode_audio_inline_data(inline_data) for inline_data in _iter_inline_audio_parts(response))
     except Exception: raise PrismaTtsProviderError("TTS_FALLBACK_PROVIDER_FAILED") from None
     if not pcm or len(pcm) % SAMPLE_WIDTH: raise PrismaTtsFormatError("TTS_FALLBACK_AUDIO_INVALID")
     processed = apply_prisma_dsp_full_pcm(pcm, job["voice_config"])
@@ -595,7 +617,7 @@ def _full_file_fallback_pcm(client, job):
     return processed
 
 
-def _generate_interactions_tts_audio(job, secret=None, control=None):
+def _generate_tts_audio(job, secret=None, control=None):
     # T10 unit 4: exact-text audio cache, checked before any provider work.
     # A hit replays already-DSP-processed PCM straight from memory and never
     # calls Gemini; a miss falls through to the normal streaming path below,
@@ -613,11 +635,11 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
             _queue_same_prisma_audio_to_telegram(job)
             prisma_audio_sink.emit("backend", "finalization", {"status": "success", "sample_count": len(cached) // SAMPLE_WIDTH})
         except GeneratorExit:
-            _discard_interactions_tts_job(job)
+            _discard_tts_job(job)
             raise
         except Exception:
             prisma_audio_sink.emit("backend", "finalization", {"status": "error"})
-            _discard_interactions_tts_job(job)
+            _discard_tts_job(job)
             raise PrismaTtsProviderError("TTS_STREAM_INTERNAL_FAILURE") from None
         return
     _logger.warning("Prisma TTS cache: miss")
@@ -632,12 +654,12 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
             # and idle guard are.
             client = get_gemini_client(secret)
             stream_requested_at = time.monotonic()
-            stream = _create_tts_interaction(client, job["text"], stream=True)
-            if control is not None: control.add_cancel_callback(lambda resource=stream: _close_interaction_stream(resource))
+            stream = _create_tts_stream(client, job["text"])
+            if control is not None: control.add_cancel_callback(lambda resource=stream: _close_tts_stream(resource))
             assembler = S16LeChunkAssembler(); idle_guard = ProviderStreamIdleGuard(); idle_guard.start(stream)
             if control is not None: control.add_cancel_callback(idle_guard.close)
             first_byte_at = None; first_yield_logged = False
-            for delta in _iter_interaction_audio_deltas(stream, idle_guard.touch):
+            for inline_data in _iter_tts_audio_parts(stream, idle_guard.touch):
                 if control is not None and control.cancelled.is_set(): return
                 if first_byte_at is None:
                     first_byte_at = time.monotonic()
@@ -645,7 +667,7 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
                         "Prisma Gemini TTS: time_to_first_byte_ms=%d",
                         round((first_byte_at - stream_requested_at) * 1000),
                     )
-                audio_accepted = True; canonical = assembler.push(_decode_audio_delta(delta))
+                audio_accepted = True; canonical = assembler.push(_decode_audio_inline_data(inline_data))
                 if canonical:
                     delivered = _append_post_dsp_pcm(job, job["dsp"].process(canonical))
                     prisma_audio_sink.emit("backend", "dsp", {"sample_count": len(delivered or b"") // SAMPLE_WIDTH})
@@ -665,25 +687,25 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
             if control is not None and control.cancelled.is_set(): return
             if audio_accepted: raise error if isinstance(error, PrismaTtsProviderError) else PrismaTtsProviderError("TTS_STREAM_PROVIDER_FAILED") from None
             if idle_guard is not None: idle_guard.close(); idle_guard = None
-            _close_interaction_stream(stream); stream = None; delivered = _append_post_dsp_pcm(job, _full_file_fallback_pcm(client, job))
+            _close_tts_stream(stream); stream = None; delivered = _append_post_dsp_pcm(job, _full_file_fallback_pcm(client, job))
             prisma_audio_sink.emit("provider", "completion", {"status": "success"})
             if delivered is not None: yield delivered
         if control is not None and control.cancelled.is_set(): return
         _voice_audio_cache.put(cache_key, b"".join(job["telegram_pcm_parts"]))
         _queue_same_prisma_audio_to_telegram(job)
         prisma_audio_sink.emit("backend", "finalization", {"status": "success", "sample_count": sum(len(part) for part in job["telegram_pcm_parts"]) // SAMPLE_WIDTH})
-    except GeneratorExit: _discard_interactions_tts_job(job); raise
+    except GeneratorExit: _discard_tts_job(job); raise
     except PrismaTtsStreamError:
         prisma_audio_sink.emit("backend", "finalization", {"status": "error"})
-        _discard_interactions_tts_job(job)
+        _discard_tts_job(job)
         raise
     except Exception:
         prisma_audio_sink.emit("backend", "finalization", {"status": "error"})
-        _discard_interactions_tts_job(job)
+        _discard_tts_job(job)
         raise PrismaTtsProviderError("TTS_STREAM_INTERNAL_FAILURE") from None
     finally:
         if idle_guard is not None: idle_guard.close()
-        _close_interaction_stream(stream)
+        _close_tts_stream(stream)
 
 
 def pcm_to_wav(pcm):
@@ -758,8 +780,8 @@ def _generate_event_audio(event, voice_config, secret, control):
         event.get("telegramChatId"),
         voice_config,
     )
-    control.add_cancel_callback(lambda: _discard_interactions_tts_job(job))
-    yield from _generate_interactions_tts_audio(job, secret, control)
+    control.add_cancel_callback(lambda: _discard_tts_job(job))
+    yield from _generate_tts_audio(job, secret, control)
 
 
 def _revalidate_voice_event(event):
