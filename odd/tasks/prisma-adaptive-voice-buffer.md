@@ -436,7 +436,7 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
   copy (manual test failed), GREEN after. Checks: `cd hmi-app && npx vitest run` → 224 files / 2552
   tests passed; `npx tsc -b` clean; `npm run lint` clean. In-browser look still pending the user's
   admin session (part of T6).
-- [ ] **T6 — Live verification (user).** Several voice answers in Automatic: `playback-ended`
+- [x] **T6 — Live verification (user).** Several voice answers in Automatic: `playback-ended`
   shows `needed_prebuffer_ms` per answer and `prebuffer_ms` following it; no audible cuts; a
   Manual run confirms the fixed value is used. Parent reads the `HMI voice timeline:` lines in
   `%LOCALAPPDATA%\CoreAnalytics\Prisma\logs\prisma-presentation-stderr.log`.
@@ -461,6 +461,13 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
   and after). Checks: `cd hmi-app && npx vitest run` → 224 files / 2554 tests; `npx tsc -b` clean;
   `npm run lint` clean. Route: direct inline (one understood source file plus its test).
   **Next:** repeat the T6 live voice test.
+  **T6 repeated after T6b (2026-09-24 ~17:55): passed.** 11 answers, `underflow_count=0` in all.
+  Automático (6 + 1 cached): prebuffer 169 → 169 → 150 → 150 → 121 → 121 ms while every
+  `needed_prebuffer_ms` was 25 — the value fell only as the older high measurements (119, 100)
+  left the 10-answer window, exactly as designed; cached answer started +127 ms. Manual 0.5 s
+  (4 + 1 cached): `prebuffer_ms=500` every time, measurements still recorded (e.g. 31 ms). No
+  errors in the log. User: "salió perfecto" (no audible cuts). Admin section verified by the
+  user's screenshot (above "Efectos de voz de Prisma").
 - [ ] **T7 — Delete the unused 2.5 s `buffer-before-playback` transport (user decision 2026-09-24).**
   Only after T6 passes, so a fallback exists until the adaptive prebuffer is proven live. Remove
   `prismaLocalAudioPlayback.ts` (2.5 s policy), `PrismaPcmWorkletBuffer`, `playLocalWorklet`, the PCM
@@ -528,10 +535,9 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
   `737ab87` (both GGA review passed).
 - 2026-09-24: T5 approved by the user (copy change + section order) and committed.
 - 2026-09-24: T6 live test found the per-block prebuffer bug; T6b fixed it (inline). T6 to repeat.
+- 2026-09-24: T6 passed after T6b (11 answers, 0 underflows, user heard no cuts).
 
 ## Next step
 
-T6 live verification (user): relaunch, open General Settings → Prisma (admin session) to check the
-"Buffer de audio" section above "Efectos de voz de Prisma", then several voice answers in
-Automático and one run in Manual; the parent reads `prebuffer_ms` / `needed_prebuffer_ms` /
-`prebuffer_mode` in the `HMI voice timeline:` lines. Then T7 (delete the legacy 2.5 s transport).
+T7: delete the legacy 2.5 s `buffer-before-playback` transport (delegated writer), then integrate
+`feat/prisma-adaptive-voice-buffer` into local `main` (user confirmation) and close PW-010.
