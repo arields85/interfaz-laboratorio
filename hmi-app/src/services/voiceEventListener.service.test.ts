@@ -833,6 +833,42 @@ describe('startVoiceEventListener', () => {
             stop();
         });
 
+        it('PW-011 M2: returns to SSE once the retry interval elapses after a fallback to polling', async () => {
+            const recoveredBody = new FakeSseBody();
+            sessionClientMock.fetch
+                .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+                .mockResolvedValueOnce(jsonResponse(FIRST_EVENT))
+                .mockResolvedValueOnce(sseResponse(recoveredBody));
+            const onEvent = vi.fn();
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+                intervalMs: 60_000,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            // The initial SSE connect failed, so it fell back to polling.
+            expect(sessionClientMock.fetch).toHaveBeenCalledTimes(2);
+            expect(onEvent).toHaveBeenCalledExactlyOnceWith(FIRST_EVENT);
+
+            // The SSE retry fires well before the next scheduled poll.
+            await vi.advanceTimersByTimeAsync(30_000);
+            expect(sessionClientMock.fetch).toHaveBeenCalledTimes(3);
+
+            recoveredBody.push(`data: ${JSON.stringify({ ...FIRST_EVENT, id: 'voice-2' })}\n\n`);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(onEvent).toHaveBeenCalledTimes(2);
+
+            // Back on SSE: no further polling GETs happen even once the
+            // original poll interval would have elapsed again.
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(sessionClientMock.fetch).toHaveBeenCalledTimes(3);
+
+            stop();
+        });
+
         it('never attempts SSE when fetchImpl is provided (the existing polling test seam)', async () => {
             const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(FIRST_EVENT));
 

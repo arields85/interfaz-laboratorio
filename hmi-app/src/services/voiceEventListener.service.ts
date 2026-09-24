@@ -6,6 +6,14 @@ import { recordVoiceEventReceived } from './prismaVoiceTimelineRecorder';
 
 const DEFAULT_VOICE_POLL_INTERVAL_MS = 1_000;
 
+/** PW-011 M2 (T16 follow-up): once a fallback to polling happens, nothing
+ * ever attempted SSE again for the rest of the listener's lifetime -- a
+ * live test showed 1148 polling GETs against 22 SSE connections in one
+ * session. While polling, retry the SSE connection on this interval; a
+ * successful reconnect switches back to push delivery, a failed one falls
+ * back to polling again and schedules another retry. */
+const SSE_RETRY_INTERVAL_MS = 30_000;
+
 interface VoiceEventListenerOptions {
     url: string | null;
     onEvent: (event: VoiceEvent) => void;
@@ -55,6 +63,14 @@ export function startVoiceEventListener({
     let activeController: AbortController | null = null;
     let activeSse: { stop: () => void } | null = null;
     let usingPolling = false;
+    let sseRetryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    // Attempted only in real production usage (fetchImpl === undefined,
+    // matching every existing test/injected-transport seam), same
+    // precondition the initial SSE attempt below already applies.
+    const canAttemptSse = fetchImpl === undefined
+        && !!streamUrl
+        && streamUrl.trim() !== '';
 
     const poll = async () => {
         activeController = typeof AbortController === 'function' ? new AbortController() : null;
@@ -99,7 +115,11 @@ export function startVoiceEventListener({
         } finally {
             activeController = null;
 
-            if (!stopped) {
+            // PW-011 M2: `usingPolling` may have flipped back to false while
+            // this poll was in flight (a successful SSE reconnect) -- do not
+            // reschedule a poll cycle that would otherwise run forever
+            // alongside the now-restored SSE stream.
+            if (!stopped && usingPolling) {
                 timeoutId = setTimeout(() => {
                     void poll();
                 }, intervalMs);
@@ -115,6 +135,7 @@ export function startVoiceEventListener({
         usingPolling = true;
         activeSse?.stop();
         activeSse = null;
+        scheduleSseRetry();
         void poll();
     };
 
@@ -243,6 +264,32 @@ export function startVoiceEventListener({
         }
     };
 
+    /** PW-011 M2: schedules one attempt to reconnect SSE while the listener
+     * is polling. A successful reconnect leaves `usingPolling` false and
+     * streams again; a failed one runs `startSse`'s own fallback, which
+     * calls `startPolling()` again and (through it) schedules the next
+     * retry -- so the listener keeps trying for its whole lifetime instead
+     * of being stuck on polling after the first drop. */
+    const scheduleSseRetry = () => {
+        if (!canAttemptSse || stopped || sseRetryTimeoutId !== null) {
+            return;
+        }
+
+        sseRetryTimeoutId = setTimeout(() => {
+            sseRetryTimeoutId = null;
+            if (stopped || !usingPolling) {
+                return;
+            }
+
+            usingPolling = false;
+            if (timeoutId !== null) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            void startSse();
+        }, SSE_RETRY_INTERVAL_MS);
+    };
+
     const owner = { stop: () => undefined as void };
     const stop = () => {
         if (stopped) {
@@ -256,6 +303,11 @@ export function startVoiceEventListener({
             timeoutId = null;
         }
 
+        if (sseRetryTimeoutId !== null) {
+            clearTimeout(sseRetryTimeoutId);
+            sseRetryTimeoutId = null;
+        }
+
         activeController?.abort();
         activeController = null;
         activeSse?.stop();
@@ -267,10 +319,6 @@ export function startVoiceEventListener({
 
     owner.stop = stop;
     activeVoiceEventListener = owner;
-
-    const canAttemptSse = fetchImpl === undefined
-        && !!streamUrl
-        && streamUrl.trim() !== '';
 
     if (canAttemptSse) {
         void startSse();
