@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from collections.abc import Callable, Mapping
@@ -96,6 +97,82 @@ def create_gemini_client(secret: str, timeout_ms: int = SDK_TIMEOUT_MS):
         api_key=secret,
         http_options=genai.types.HttpOptions(timeout=timeout_ms),
     )
+
+
+def _hash_secret(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def _close_client_quietly(client) -> None:
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        pass
+
+
+class WarmGeminiClient:
+    """T10 unit 2: build the Gemini SDK client once and reuse it across
+    requests, instead of one new client (and its TCP/TLS/HTTP setup) per
+    voice request.
+
+    Thread-safe for Flask's threaded worker mode via a lock plus a
+    double-checked rebuild: concurrent callers racing to rebuild for the
+    same new secret converge on one winning client, and the other's client
+    is closed immediately rather than leaked.
+
+    Invalidation is implicit, not a signal from another process: the
+    presentation process (port 5057) is the one that saves, deletes, or
+    rotates the Gemini credential, in a separate OS process from this voice
+    service (port 5056), so there is no shared memory to flip a flag in.
+    Instead, credential resolution already re-reads the underlying
+    keyring/env on every call (unchanged, pre-existing behavior), so this
+    cache simply compares a SHA-256 hash of the freshly resolved secret
+    against the hash it last built with; a changed hash rebuilds. Only the
+    hash is retained, never the secret itself, to minimize how long the raw
+    key value stays reachable in this process's memory.
+    """
+
+    def __init__(self, build: Callable[[str], object] = create_gemini_client):
+        self._build = build
+        self._lock = Lock()
+        self._client = None
+        self._secret_hash: str | None = None
+
+    def get(self, secret: str):
+        """Return (client, reused) for the given already-resolved secret."""
+        digest = _hash_secret(secret)
+        with self._lock:
+            if self._client is not None and self._secret_hash == digest:
+                return self._client, True
+        candidate = self._build(secret)
+        with self._lock:
+            if self._client is not None and self._secret_hash == digest:
+                # Another thread already won the race for this exact secret;
+                # never keep two live clients around for the same identity.
+                _close_client_quietly(candidate)
+                return self._client, True
+            stale = self._client
+            self._client = candidate
+            self._secret_hash = digest
+        _close_client_quietly(stale)
+        return candidate, False
+
+    def warm_up(self, resolve_secret: Callable[[], str]) -> None:
+        """Best-effort boot warm-up: never raises, never blocks startup, and
+        never performs a real synthesis call (that would cost one Gemini API
+        call per process start for no measurement benefit here -- see T10
+        task notes). Only the client object and, where the SDK opens one, its
+        underlying HTTP connection are pre-built."""
+        try:
+            secret = resolve_secret()
+        except Exception:
+            return
+        try:
+            self.get(secret)
+        except Exception:
+            return
 
 
 @dataclass(frozen=True)

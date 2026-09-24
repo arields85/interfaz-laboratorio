@@ -30,7 +30,7 @@ from flask import Flask, Response, jsonify, request
 from .audio_observability import BoundedAudioSink
 from .event_audio import AudioCapacityError, AudioCoordinator, AudioCoordinatorError
 from .hmi_sessions import CAPABILITY_HEADER
-from .gemini_credentials import GeminiCredentialResolver, GeminiCredentialUnavailable, create_gemini_client
+from .gemini_credentials import GeminiCredentialResolver, GeminiCredentialUnavailable, WarmGeminiClient, create_gemini_client
 from .paths import runtime_paths
 from .telegram_config import telegram_token
 from .voice_dsp import PrismaStreamingDSP, apply_prisma_dsp_full_pcm
@@ -56,6 +56,11 @@ _TELEGRAM_HTTP_LOCK = threading.Lock()
 _VOICE_EVENT_URL = "http://127.0.0.1:5057/internal/prisma/voice-events"
 _VOICE_EVENT_MAX_BYTES = 32 * 1024
 gemini_credentials = GeminiCredentialResolver()
+# T10 unit 2: one warm Gemini client reused across requests instead of one
+# new client per request; see WarmGeminiClient's docstring for the
+# invalidation design (implicit, via a secret-hash comparison on every call,
+# not a cross-process signal from the presentation process's admin routes).
+_warm_gemini_client = WarmGeminiClient()
 voice_event_http = requests.Session()
 voice_event_http.trust_env = False
 
@@ -307,12 +312,13 @@ def get_gemini_client(secret=None):
     resolved = secret if secret is not None else gemini_credentials.resolve()
     resolve_elapsed_ms = round((time.monotonic() - resolve_start) * 1000)
     build_start = time.monotonic()
-    client = create_gemini_client(resolved)
+    client, reused = _warm_gemini_client.get(resolved)
     build_elapsed_ms = round((time.monotonic() - build_start) * 1000)
     _logger.warning(
-        "Prisma Gemini client: resolve_elapsed_ms=%d build_elapsed_ms=%d",
+        "Prisma Gemini client: resolve_elapsed_ms=%d build_elapsed_ms=%d reused=%s",
         resolve_elapsed_ms,
         build_elapsed_ms,
+        reused,
     )
     return client
 
@@ -442,10 +448,6 @@ def _close_interaction_stream(stream):
     if stream is not None:
         try: stream.close()
         except Exception: pass
-def _close_gemini_client(client):
-    if client is not None:
-        try: client.close()
-        except Exception: pass
 
 
 def _validate_audio_delta(delta):
@@ -518,8 +520,11 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
     prisma_audio_sink.emit("provider", "dispatch", {})
     try:
         try:
+            # T10 unit 2: `client` is now the shared warm singleton, so it is
+            # never registered for cancel-callback close, and never closed in
+            # this generator's `finally` below -- only the per-request stream
+            # and idle guard are.
             client = get_gemini_client(secret)
-            if control is not None: control.add_cancel_callback(lambda resource=client: _close_gemini_client(resource))
             stream_requested_at = time.monotonic()
             stream = _create_tts_interaction(client, job["text"], stream=True)
             if control is not None: control.add_cancel_callback(lambda resource=stream: _close_interaction_stream(resource))
@@ -571,7 +576,7 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
         raise PrismaTtsProviderError("TTS_STREAM_INTERNAL_FAILURE") from None
     finally:
         if idle_guard is not None: idle_guard.close()
-        _close_interaction_stream(stream); _close_gemini_client(client)
+        _close_interaction_stream(stream)
 
 
 def pcm_to_wav(pcm):
@@ -742,8 +747,19 @@ def _validate_single_process_environment(environ=None):
         raise RuntimeError("PRISMA_VOICE_RELOADER_UNSUPPORTED")
 
 
+def _warm_up_gemini_client_in_background():
+    """T10 unit 2: pre-build the Gemini client at boot so the first real
+    voice request does not pay for it. Runs on its own daemon thread so it
+    can never block process startup or the /health endpoint; failures
+    (missing credential, unreachable provider) are swallowed by
+    WarmGeminiClient.warm_up itself and simply leave the client to be built
+    lazily on the first request instead, exactly as before this task."""
+    _warm_gemini_client.warm_up(gemini_credentials.resolve)
+
+
 def main():
     _validate_single_process_environment()
+    threading.Thread(target=_warm_up_gemini_client_in_background, name="PrismaGeminiWarmup", daemon=True).start()
     app.run(host=PRISMA_VOICE_HOST, port=5056, threaded=True, use_reloader=False)
 
 

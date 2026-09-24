@@ -195,6 +195,15 @@ class VoiceServiceTests(unittest.TestCase):
 
         self.assertGreaterEqual(stream.close.call_count, 1)
 
+    def test_boot_warm_up_delegates_to_the_warm_client_without_blocking(self):
+        """T10 unit 2: main() must never block on Gemini reachability, so the
+        warm-up entry point is a plain, synchronous, already-safe delegation
+        that main() runs on its own daemon thread (not exercised here)."""
+        with patch.object(service, "_warm_gemini_client") as warm_client, \
+                patch.object(service.gemini_credentials, "resolve") as resolve:
+            service._warm_up_gemini_client_in_background()
+        warm_client.warm_up.assert_called_once_with(resolve)
+
     def test_known_multiworker_and_reloader_modes_fail_closed(self):
         with self.assertRaisesRegex(RuntimeError, "SINGLE_PROCESS"):
             service._validate_single_process_environment({"WEB_CONCURRENCY": "2"})
@@ -278,21 +287,41 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertTrue(client.interactions.calls[0]["stream"])
         self.assertIs(result, stream)
 
-    def test_get_gemini_client_logs_resolve_and_build_elapsed_ms(self):
-        """T10 unit 1: split credential-resolve time from client-build time."""
+    def test_get_gemini_client_logs_resolve_build_elapsed_ms_and_reused_flag(self):
+        """T10 unit 1+2: split credential-resolve time from client-build time,
+        and report whether the T10-unit-2 warm client cache was reused."""
         fake_client = object()
         with patch.object(service.gemini_credentials, "resolve", return_value="secret-value") as resolve, \
-                patch.object(service, "create_gemini_client", return_value=fake_client) as create:
+                patch.object(service._warm_gemini_client, "get", return_value=(fake_client, True)) as warm_get:
             with self.assertLogs(service._logger, level="WARNING") as observed:
                 result = service.get_gemini_client()
         self.assertIs(result, fake_client)
         resolve.assert_called_once_with()
-        create.assert_called_once_with("secret-value")
+        warm_get.assert_called_once_with("secret-value")
         lines = [line for line in observed.output if "Prisma Gemini client:" in line]
         self.assertEqual(len(lines), 1)
         self.assertIn("resolve_elapsed_ms=", lines[0])
         self.assertIn("build_elapsed_ms=", lines[0])
+        self.assertIn("reused=True", lines[0])
         self.assertNotIn("secret-value", lines[0])
+
+    def test_generate_interactions_tts_audio_never_closes_the_warm_client(self):
+        """T10 unit 2: the client is a shared warm singleton now, so neither
+        an ordinary completion nor a cancellation may close it; only the
+        per-request stream and idle guard are ever closed."""
+        stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
+        client = FakeClient([stream])
+        control = GenerationControl()
+        with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
+            job = service._create_interactions_tts_job("Cancelled transcript")
+            with patch.object(service, "_create_interactions_tts_job", return_value=job):
+                output = service._generate_event_audio({"id": str(uuid.uuid4()), "text": "Cancelled transcript"}, {}, "secret", control)
+                self.assertEqual(next(output), b"\x12\x34")
+                control.signal()
+                control.run_callbacks()
+                self.assertEqual(stream.close_calls, 1)
+                self.assertEqual(client.close_calls, 0)
+                output.close()
 
     def test_stream_logs_time_to_first_byte_and_first_yield_processing_once(self):
         """T10 unit 1: Gemini time-to-first-byte vs our own post-processing time."""
@@ -353,7 +382,9 @@ class VoiceServiceTests(unittest.TestCase):
             self.assertEqual(next(output), b"\x12\x34")
             self.assertEqual(list(output), [])
         self.assertEqual(stream.close_calls, 1)
-        self.assertEqual(client.close_calls, 1)
+        # T10 unit 2: the client is now a shared warm singleton, never closed
+        # per-generation.
+        self.assertEqual(client.close_calls, 0)
         self.assertFalse(any(thread.name == "PrismaProviderIdleGuard" for thread in threading.enumerate()))
 
     def test_generation_control_runs_provider_and_job_cleanup_once(self):
@@ -370,7 +401,8 @@ class VoiceServiceTests(unittest.TestCase):
                 control.run_callbacks()
                 self.assertTrue(job["cancelled"].is_set())
                 self.assertEqual(stream.close_calls, 1)
-                self.assertEqual(client.close_calls, 1)
+                # T10 unit 2: cancellation must never close the shared warm client.
+                self.assertEqual(client.close_calls, 0)
                 output.close()
 
     def test_stream_falls_back_once_before_any_audio(self):

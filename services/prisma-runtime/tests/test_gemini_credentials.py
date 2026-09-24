@@ -1,4 +1,5 @@
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -16,6 +17,7 @@ from prisma_runtime.gemini_credentials import (
     GeminiCredentialUnavailable,
     GeminiVerificationInProgress,
     GeminiVerificationService,
+    WarmGeminiClient,
     create_gemini_client,
 )
 from prisma_runtime.voice_service import TTS_MODEL
@@ -90,6 +92,94 @@ class GeminiCredentialResolverTests(unittest.TestCase):
             create_gemini_client("secret", timeout_ms=GEMINI_VERIFY_TIMEOUT_MS)
 
         http_options_type.assert_called_once_with(timeout=GEMINI_VERIFY_TIMEOUT_MS)
+
+
+class WarmGeminiClientTests(unittest.TestCase):
+    def _fake_client(self):
+        client = Mock()
+        client.close = Mock()
+        return client
+
+    def test_first_call_builds_and_later_calls_with_the_same_secret_reuse_it(self):
+        build = Mock(side_effect=lambda secret: self._fake_client())
+        warm = WarmGeminiClient(build=build)
+
+        first, reused_first = warm.get("secret-a")
+        second, reused_second = warm.get("secret-a")
+
+        self.assertIs(first, second)
+        self.assertFalse(reused_first)
+        self.assertTrue(reused_second)
+        build.assert_called_once_with("secret-a")
+
+    def test_secret_change_rebuilds_and_closes_the_stale_client(self):
+        clients = [self._fake_client(), self._fake_client()]
+        build = Mock(side_effect=clients)
+        warm = WarmGeminiClient(build=build)
+
+        first, _ = warm.get("secret-a")
+        second, reused = warm.get("secret-b")
+
+        self.assertIsNot(first, second)
+        self.assertFalse(reused)
+        first.close.assert_called_once_with()
+        second.close.assert_not_called()
+        self.assertEqual(build.call_count, 2)
+
+    def test_warm_up_swallows_missing_credential_without_building(self):
+        build = Mock()
+        warm = WarmGeminiClient(build=build)
+
+        def resolve_secret():
+            raise GeminiCredentialUnavailable("GEMINI_CREDENTIAL_MISSING")
+
+        warm.warm_up(resolve_secret)
+
+        build.assert_not_called()
+
+    def test_warm_up_swallows_any_build_failure(self):
+        build = Mock(side_effect=RuntimeError("boom"))
+        warm = WarmGeminiClient(build=build)
+
+        warm.warm_up(lambda: "secret-a")  # must not raise
+
+        build.assert_called_once_with("secret-a")
+
+    def test_warm_up_builds_once_when_credential_resolves(self):
+        client = self._fake_client()
+        build = Mock(return_value=client)
+        warm = WarmGeminiClient(build=build)
+
+        warm.warm_up(lambda: "secret-a")
+        reused_client, reused = warm.get("secret-a")
+
+        self.assertIs(reused_client, client)
+        self.assertTrue(reused)
+        build.assert_called_once_with("secret-a")
+
+    def test_concurrent_calls_with_the_same_secret_never_leak_two_live_clients(self):
+        barrier = threading.Barrier(4)
+
+        def slow_build(secret):
+            barrier.wait(timeout=5)
+            return self._fake_client()
+
+        warm = WarmGeminiClient(build=slow_build)
+        results = [None] * 4
+
+        def worker(index):
+            results[index] = warm.get("secret-a")[0]
+
+        threads = [threading.Thread(target=worker, args=(index,)) for index in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        first = results[0]
+        self.assertTrue(all(result is first for result in results))
+        # Every client built but not retained must have been closed exactly once.
+        self.assertEqual(first.close.call_count, 0)
 
 
 class GeminiVerifyModelTests(unittest.TestCase):
