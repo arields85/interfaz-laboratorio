@@ -57,7 +57,9 @@ PW-011). hmi-app: 221 files / 2532 tests, `tsc -b` clean, `npm run lint` clean.
     `[..., "session-capability"]`) before the fix; GREEN after.
   - **Checks:** `tests.test_event_audio` — OK. Full prisma-runtime suite — 1532 (2 pre-existing
     environmental failures, unrelated).
-  - **Commit:** pending (see below).
+  - **Commits:** `54a765c` (fix), `6401c7a` (review follow-up: gate the refresh to
+    admitting/queued jobs only, so a capability is never reintroduced onto an already
+    active/complete/evicted job).
 
 - [x] **M2 — HMI never returns from polling to SSE.** Route: inline
   (`hmi-app/src/services/voiceEventListener.service.ts`, one already-understood file). Fix now.
@@ -80,7 +82,7 @@ PW-011). hmi-app: 221 files / 2532 tests, `tsc -b` clean, `npm run lint` clean.
     fixed.
   - **Checks:** `npx vitest run src/services/voiceEventListener.service.test.ts` — 37/37 OK. Full
     hmi-app suite — 221 files / 2532 tests OK. `npx tsc -b` clean. `npm run lint` clean.
-  - **Commit:** pending (see below).
+  - **Commit:** `d76a871`.
 
 - [ ] **M3 — Channel A inactivity expiry leaves the Telegram menu/keyboard.** Reported, not fixed —
   larger than a follow-up. See report below.
@@ -127,16 +129,18 @@ PW-011). hmi-app: 221 files / 2532 tests, `tsc -b` clean, `npm run lint` clean.
     already-proven pattern to its direct-HMI sibling), flagged here rather than silently skipped.
   - **Checks:** full prisma-runtime suite — 1532 tests, same 2 pre-existing environmental failures,
     no new failures.
-  - **Commit:** pending (see below).
+  - **Commits:** `54a765c`/`6401c7a` (event_audio.py's own portion landed alongside the M1 fix —
+    process note: a `git add <path>` during the M1 review-follow-up commit re-swept the still-unstaged
+    M4 hunks for `event_audio.py`/`test_event_audio.py` back in; functionally identical to a separate
+    commit, just not cleanly isolated for that one file pair), `0930989` (the other four files),
+    `47c7f8e` (stale-comment follow-up caught by the pre-commit review).
 
-- [x] **M5 — typing action may arrive after the answer.** Route: inline (one file,
-  `channel_a_bot.py`, already-understood ordering fix). Fix now.
-  - See implementation notes below (added after M5 lands).
+- [ ] **M5 — typing action may arrive after the answer.** Reported, not fixed — see report below.
 
 ## Verification (final, all items)
 
-- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — pending final run, see report.
-- `cd hmi-app && npx vitest run` / `npx tsc -b` / `npm run lint` — pending final run, see report.
+- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — 1534 tests, 2 pre-existing environmental failures (same as baseline), no new failures.
+- `cd hmi-app && npx vitest run` — 221 files / 2532 tests OK. `npx tsc -b` clean. `npm run lint` clean.
 
 ## M3 report (needs a product/scope decision)
 
@@ -165,3 +169,36 @@ already deferred. Recommend the user decide: (1) build the RCA-5 scheduler now a
 this gap, folding both the warning sweep and the expiry cleanup into it, or (2) keep this gap open
 and re-file it once RCA-5 is scheduled, or (3) accept the gap permanently (stale command/menu button
 until the next explicit unlink) as low-risk cosmetic debt.
+
+## M5 report (no clear, verifiable fix within this item's scope)
+
+Not fixed. `channel_a_bot.py`'s `_typing()` (the one call site, `channel_a_bot.py:1007`, right
+before `handle_query()`) already fires the "typing…" chat action *before* the answer is computed —
+the ordering bug is not in the call sequence. The cause is `_typing()`'s own T13 design: it fires
+`send_chat_action` on an independent, fire-and-forget background daemon thread specifically so it
+can never delay the answer that follows on the main thread. T13's own docstring (`_typing`, and the
+test `test_typing_indicator_is_sent_without_blocking_the_answer`) documents this as a *deliberate*
+trade-off, made after a live measurement showed the previous synchronous call added ~0.36s to every
+question: "the exact relative order between send_chat_action and send_message is no longer
+guaranteed." Once two independent HTTP requests race to Telegram's servers with no synchronization,
+nothing on this side can guarantee which one Telegram processes/renders first.
+
+I prototyped the smallest plausible mitigation — block `_typing()` briefly (bounded, non-blocking on
+the actual network round trip) until its worker thread has been scheduled and is about to call
+`send_chat_action`, narrowing the dispatch-order race without reintroducing T13's latency. It failed
+its own purpose as a Strict-TDD candidate: a test asserting `_typing()`'s caller can't proceed before
+`send_chat_action` was invoked **already passes against the current, unfixed code** in this test
+harness (`FakeTransport.send_chat_action` is an instant in-process list append, so CPython's thread
+creation already appears to yield the new thread a turn before `_typing()` returns, empirically,
+every run) — so there is no reproducible RED to fix against, and no way to prove the mitigation
+changes anything observable here. The real race is a *production, real-network* phenomenon (two
+concurrent HTTP requests to Telegram with independent latency), not a Python-thread-scheduling one;
+this project's synchronous `FakeTransport` test doubles cannot simulate that, so I could not
+honestly claim a verified fix.
+
+Closing this properly means either (a) accepting the T13 trade-off as-is (typing is "UX feedback,
+not a delivery contract," per its own docstring) and treating an occasional out-of-order arrival as
+expected, low-severity behavior, or (b) reintroducing a bounded wait for the *actual* `send_chat_action`
+round trip before producing the answer, which is precisely the latency T13 was written to remove —
+a real product trade-off (guaranteed visual ordering vs. the measured ~0.36s/question latency) that
+needs the user's call, not a code-level "clear cause" fix.
