@@ -1116,6 +1116,22 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   exposing it (unused since 2026-09-17). Automatic underflow detection was considered and
   rejected for now (complexity vs. a rare case). **Deprioritized by the user (2026-09-24):** start
   only after the screen scaling (PW-007) and voice latency work are solved.
+  **Scope extension proposed by the user (2026-09-24), pending one decision:** besides OFF, two
+  modes — Manual (the user sets the cushion "by eye" within 0.3–3.0 s) and Automatic (chooses the
+  best value for the current conditions, since network quality varies day to day). Evidence that
+  motivates it: the 2026-09-24 ~11:30 timeline recorded one underflow (`underflow_count=1`) on an
+  answer. Parent proposal for Automatic: an adaptive jitter buffer that learns from real answers
+  (chunk arrival gaps vs playback rate, underflows) and moves the cushion within min–max, instead
+  of a separate test request (no extra Gemini calls, adapts within the day; trade-off: the first
+  answer after the network degrades may still cut once). The earlier "automatic underflow
+  detection rejected" note is superseded by this user request.
+- [ ] **T17 — Orb "thinking" state (user decision 2026-09-24, option B).** Evidence (browser
+  timeline after a real restart, 2026-09-24 ~11:30): orb visible → first sound 0.58–0.79 s (1.11 s
+  on the first answer after startup, of which 0.38 s is the first AudioContext start), 0.15 s for a
+  cached answer; ~0.5–0.7 s of it is Gemini's first-audio time, our own share ~0.07 s; all events
+  via SSE; no session resets; the first question after restart worked. Decision: show a distinct
+  "thinking" orb look from event received until playback starts, then the speaking look; never stay
+  in thinking forever (fall back on error/timeout). Visual options being mapped (read-only).
 
 ## Progress
 
