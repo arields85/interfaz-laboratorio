@@ -1203,8 +1203,8 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   - **Checks:** `cd hmi-app && npm test` → 2427 passed (was 2418). `npx tsc -b` clean. `npm run
     lint` clean. `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
     services\prisma-runtime -p "test_*.py"` → 1517 passed (unchanged — pure schema rename).
-  - **Post-commit code-review fixes (non-blocking findings, applied same pass, commit `<pending>`,
-    see below).** The repo's own commit-time review flagged two duplication risks: (1) the duration
+  - **Post-commit code-review fixes (non-blocking findings, applied same pass, commit `74f5c1b`).**
+    The repo's own commit-time review flagged two duplication risks: (1) the duration
     numbers existed in two places (the JS constants and the literal `duration-[400ms]`/
     `duration-[700ms]` Tailwind classes) — fixed by reading `PRISMA_ORB_GROW_DURATION_MS`/
     `PRISMA_ORB_FADE_DURATION_MS` directly into an inline `style.transitionDuration` in
