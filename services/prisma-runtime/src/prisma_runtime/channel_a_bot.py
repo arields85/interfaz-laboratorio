@@ -1454,22 +1454,34 @@ class ChannelAPairingDialogue:
         return SEND_DELIVERED
 
     def _typing(self, chat_id) -> None:
-        """Best-effort "typing…" chat action (T4).
+        """Best-effort "typing…" chat action (T4), fire-and-forget (T13
+        unit (e)).
 
-        Never blocks or fails the caller's answer: a transport double
-        without ``send_chat_action`` at all, or any exception it raises, is
-        silently swallowed here. This is UX feedback, not a delivery
-        contract -- there is no outcome, no retry and no logged failure at
-        this layer (the transport itself already logs elapsed time on a
-        genuine failure, T4/T5-style).
+        T4's original synchronous call added ~0.36s to every question
+        (measured live, 2026-09-24: update handling grew from ~0.38s to
+        ~0.74-0.80s) since it ran to completion before the answer was
+        produced. It now runs on its own background daemon thread so it can
+        never add latency to the answer that follows immediately after --
+        the transport's own reused HTTP session (T7) is documented safe for
+        concurrent use, so this never needs to serialize with the answer's
+        own send. Never blocks or fails the caller's answer: a transport
+        double without ``send_chat_action`` at all, or any exception it
+        raises (on either thread), is silently swallowed. This is UX
+        feedback, not a delivery contract -- there is no outcome, no retry
+        and no logged failure at this layer (the transport itself already
+        logs elapsed time on a genuine failure, T4/T5-style).
         """
         send = getattr(self.transport, "send_chat_action", None)
         if not callable(send):
             return
-        try:
-            send(chat_id=chat_id, action="typing")
-        except Exception:
-            pass
+
+        def worker() -> None:
+            try:
+                send(chat_id=chat_id, action="typing")
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, name="ChannelATypingIndicator", daemon=True).start()
 
     def _answer(self, callback_id, text) -> bool:
         """Acknowledge one callback press. Returns true only on an explicit ack."""

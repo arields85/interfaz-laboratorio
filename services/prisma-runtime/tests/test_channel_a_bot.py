@@ -10,6 +10,7 @@ import dataclasses
 import itertools
 import sys
 import threading
+import time
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -2382,15 +2383,43 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         self.assertEqual(envelope.generation, link.generation)
         self.assertEqual(self.touches, [(PHONE, link.generation)])
 
-    def test_typing_indicator_is_sent_right_before_the_answer(self):
+    def test_typing_indicator_is_sent_without_blocking_the_answer(self):
+        """T13 unit (e): fire-and-forget on a background thread -- the exact
+        relative order between "send_chat_action" and "send_message" is no
+        longer guaranteed (that was T4's synchronous design, which added
+        ~0.36s per question), but the indicator still fires once with the
+        right chat id/action."""
         outcome = self.query("¿cuál es el oee?")
+        self.assertEqual(outcome.kind, QUERY_ANSWER_DELIVERED)
+        self._wait_for_chat_action()
         self.assertEqual(len(self.transport.chat_actions), 1)
         action = self.transport.chat_actions[0]
         self.assertEqual(action["chat_id"], CHAT_ID)
         self.assertEqual(action["action"], "typing")
-        # Sent right before the answer, not after and not more than once.
-        self.assertEqual(self.transport.calls[-2:], ["send_chat_action", "send_message"])
+
+    def test_typing_indicator_never_delays_the_answer(self):
+        """T13 unit (e): even a slow send_chat_action call must never block
+        query handling -- the answer is produced without waiting on it."""
+        started = threading.Event()
+        release = threading.Event()
+        real_send_chat_action = self.transport.send_chat_action
+
+        def slow_send_chat_action(**payload):
+            started.set()
+            release.wait(2)
+            return real_send_chat_action(**payload)
+
+        self.transport.send_chat_action = slow_send_chat_action
+
+        start = time.monotonic()
+        outcome = self.query("¿cuál es el oee?")
+        elapsed = time.monotonic() - start
+
         self.assertEqual(outcome.kind, QUERY_ANSWER_DELIVERED)
+        self.assertIn("88", self.transport.sent[-1]["text"])
+        self.assertLess(elapsed, 1.0, "the answer waited on the typing indicator")
+        release.set()
+        self.assertTrue(started.wait(2), "the typing indicator was never attempted")
 
     def test_typing_indicator_failure_never_blocks_or_fails_the_answer(self):
         self.transport.chat_action_error = RuntimeError("transient network failure")
@@ -2398,8 +2427,14 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         self.assert_outcome(
             outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED
         )
+        self._wait_for_chat_action()
         self.assertEqual(len(self.transport.chat_actions), 1)
         self.assertIn("88", self.transport.sent[-1]["text"])
+
+    def _wait_for_chat_action(self, timeout=2):
+        deadline = time.monotonic() + timeout
+        while not self.transport.chat_actions and time.monotonic() < deadline:
+            time.sleep(0.01)
 
     def test_typing_indicator_is_not_sent_for_an_unbound_query(self):
         outcome = self.handle(message_update(4, "hola", chat=CHAT_ID))

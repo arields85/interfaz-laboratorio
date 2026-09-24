@@ -632,7 +632,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     `test_default_client_factory_uses_the_short_verification_timeout`) updated to also expect
     `client_args={"limits": ANY}`. RED confirmed (both existing tests failed on the old call shape)
     before implementation. Full suite green (1418 passed).
-  - **Unit (b) — prefetch for Channel A answers** (2026-09-24, commit pending). Evidence: Channel
+  - **Unit (b) — prefetch for Channel A answers** (2026-09-24, commit `7e84d4f`). Evidence: Channel
     A's on-outcome publish site (`channel_a_on_outcome`, `local_presentation.py`) runs on the
     Channel A poll thread, after the Telegram answer has already been sent — it is an async
     callback, not a Flask request handler, so it has no live HMI session capability to forward the
@@ -675,6 +675,25 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     real thread/network path is never exercised there while the "ignores"/"fails closed"/
     "publishes" `on_outcome` tests now also assert the prefetch fired (or didn't) with the right
     event id and a token that resolves back to the exact owner. Full suite green (1428 passed).
+  - **Unit (e) — typing action must not delay the answer** (2026-09-24, commit pending). Evidence:
+    `channel_a_bot.py` — `ChannelAPairingDialogue._typing()` now spawns a background daemon thread
+    (`ChannelATypingIndicator`) to call `send_chat_action`, chosen over skipping it when the answer
+    is immediate (the "typing…" indicator still gives real feedback during the actual dead time —
+    Gemini/local answer prep — it was only ITS OWN synchronous wait, not the answer prep itself,
+    that added the ~0.36 s). Reuses the transport's own T7-reused HTTP session and existing error
+    handling (`requests.Session` documented safe for concurrent use, confirmed already relied upon
+    by T7). Still never blocks or fails the answer, on either thread; still a best-effort probe for
+    an optional `send_chat_action` method. Test fallout: the old
+    `test_typing_indicator_is_sent_right_before_the_answer` asserted an exact call-order fence
+    (`transport.calls[-2:] == ["send_chat_action", "send_message"]`) that a fire-and-forget design
+    can no longer guarantee — renamed to `test_typing_indicator_is_sent_without_blocking_the_answer`
+    and rewritten to poll (bounded, 2 s) for the chat action to land instead of asserting order; the
+    failure-never-blocks test similarly adds the same bounded wait. New
+    `test_typing_indicator_never_delays_the_answer`: a `send_chat_action` double that blocks on a
+    `threading.Event` for up to 2 s proves the answer still returns in well under 1 s. RED confirmed
+    (`elapsed=2.008s not less than 1.0s`) before implementation; the full `ChannelAQueryIntegrationTests`
+    class also dropped from 2.018 s to 0.014 s wall time now that no test in it pays the old
+    synchronous chat-action cost. Full suite green (1429 passed).
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
