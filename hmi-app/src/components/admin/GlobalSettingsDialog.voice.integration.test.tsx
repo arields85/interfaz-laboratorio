@@ -228,6 +228,27 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(puts[0]?.[0]).toBe('/api/prisma/voice-config');
     });
 
+    it('saves the Manual playback buffer mode and seconds through the shared PUT', async () => {
+        const fetchMock = vi.fn(async () => envelope());
+        vi.stubGlobal('fetch', fetchMock);
+        renderDialog();
+        const save = screen.getByRole('button', { name: 'Guardar' });
+        await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('100'));
+        expect(save).toBeDisabled();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Modo del buffer de audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Manual' }));
+        fireEvent.change(screen.getByRole('slider', { name: 'Espera manual en segundos' }), { target: { value: '0.7' } });
+        await waitFor(() => expect(save).toBeEnabled());
+        await userEvent.click(save);
+
+        await waitFor(() => expect(screen.getByText('Guardado')).toBeInTheDocument());
+        const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+        expect(puts).toHaveLength(1);
+        const body = JSON.parse(puts[0]?.[1]?.body as string) as { playbackBuffer: unknown };
+        expect(body.playbackBuffer).toEqual({ mode: 'manual', manualSeconds: 0.7 });
+    });
+
     it('keeps Save pending until the one PUT resolves', async () => {
         let resolvePut!: (response: Response) => void;
         const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => (

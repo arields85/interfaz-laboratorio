@@ -451,4 +451,49 @@ describe('VoiceSettingsTab', () => {
 
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
     });
+
+    it('renders the playback buffer section with Automático selected by default and no manual seconds control', async () => {
+        const fetchMock = vi.fn(async () => configEnvelope());
+        vi.stubGlobal('fetch', fetchMock);
+        render(<VoiceSettingsTab />);
+
+        expect(await screen.findByRole('heading', { name: 'Buffer de audio' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Modo del buffer de audio' })).toHaveTextContent('Automático');
+        expect(screen.queryByRole('slider', { name: 'Espera manual en segundos' })).not.toBeInTheDocument();
+    });
+
+    it('places the playback buffer section above the voice effects section', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => configEnvelope()));
+        render(<VoiceSettingsTab />);
+
+        const bufferHeading = await screen.findByRole('heading', { name: 'Buffer de audio' });
+        const effectsHeading = screen.getByRole('heading', { name: 'Efectos de voz de Prisma' });
+        expect(bufferHeading.compareDocumentPosition(effectsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('reveals the manual seconds control only in Manual mode, with the configured bounds, and marks the tab dirty on edit', async () => {
+        const fetchMock = vi.fn(async () => configEnvelope());
+        vi.stubGlobal('fetch', fetchMock);
+        const onSaveStatusChange = vi.fn();
+        render(<VoiceSettingsTab onSaveStatusChange={onSaveStatusChange} />);
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+        expect(screen.getByRole('heading', { name: 'Buffer de audio' })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Modo del buffer de audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Manual' }));
+
+        expect(screen.getByText('Se usa siempre la espera fija que usted defina. Más espera reduce los cortes, pero Prisma empieza a hablar más tarde.')).toBeInTheDocument();
+        const manualSlider = screen.getByRole('slider', { name: 'Espera manual en segundos' });
+        expect(manualSlider).toHaveAttribute('min', '0.1');
+        expect(manualSlider).toHaveAttribute('max', '3');
+        expect(manualSlider).toHaveAttribute('step', '0.1');
+        expect(manualSlider).toHaveValue('0.2');
+
+        fireEvent.change(manualSlider, { target: { value: '0.8' } });
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Modo del buffer de audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Automático' }));
+        expect(screen.queryByRole('slider', { name: 'Espera manual en segundos' })).not.toBeInTheDocument();
+    });
 });

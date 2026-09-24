@@ -23,6 +23,7 @@ import DockInlineControlRow from './DockInlineControlRow';
 import DockSliderField from './DockSliderField';
 import DockToggleField from './DockToggleField';
 import PrismaVoiceEffectsSettings from './PrismaVoiceEffectsSettings';
+import PrismaVoicePlaybackBufferSettings from './PrismaVoicePlaybackBufferSettings';
 import VoiceCredentialSettings from './VoiceCredentialSettings';
 import HmiNameSettings from './HmiNameSettings';
 import {
@@ -287,6 +288,12 @@ export default function VoiceSettingsTab({
                     No se pudo cargar la configuración de Prisma. Se mantienen los valores actuales.
                 </p>
             ) : null}
+
+            <PrismaVoicePlaybackBufferSettings
+                config={voiceConfigDraft.draft.playbackBuffer}
+                onFieldChange={voiceConfigDraft.updatePlaybackBufferField}
+                onEdit={() => markPersistentEdit()}
+            />
 
             <PrismaVoiceEffectsSettings
                 key={voiceConfigDraft.baselineGeneration}
