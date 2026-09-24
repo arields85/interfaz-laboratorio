@@ -15,5 +15,9 @@
     "echo2Gain": 0.1,
     "normalizationTarget": 29500,
     "normalizationMaxGain": 1.6
+  },
+  "playbackBuffer": {
+    "mode": "automatic",
+    "manualSeconds": 0.2
   }
 }

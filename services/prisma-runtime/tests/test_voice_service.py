@@ -692,6 +692,97 @@ class VoiceServiceTests(unittest.TestCase):
                 store.update_local(invalid)
             self.assertEqual(Path(temporary, "config.json").read_bytes(), before)
 
+    # T4: playbackBuffer mode/manualSeconds -- config field, defaults,
+    # validation bounds/step and backward-compatible defaulting of configs
+    # persisted before this field existed.
+
+    def test_default_config_carries_the_automatic_playback_buffer_default(self):
+        self.assertEqual(
+            service.DEFAULT_PRISMA_VOICE_CONFIG["playbackBuffer"],
+            {"mode": "automatic", "manualSeconds": 0.2},
+        )
+
+    def test_validate_accepts_a_manual_playback_buffer_on_the_grid(self):
+        config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+        config["playbackBuffer"] = {"mode": "manual", "manualSeconds": 1.5}
+
+        validated = service.validate_prisma_voice_config(config)
+
+        self.assertEqual(validated["playbackBuffer"], {"mode": "manual", "manualSeconds": 1.5})
+
+    def test_validate_accepts_the_manual_seconds_boundaries(self):
+        for manual_seconds in (0.1, 3.0):
+            with self.subTest(manual_seconds=manual_seconds):
+                config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+                config["playbackBuffer"] = {"mode": "manual", "manualSeconds": manual_seconds}
+                validated = service.validate_prisma_voice_config(config)
+                self.assertEqual(validated["playbackBuffer"]["manualSeconds"], manual_seconds)
+
+    def test_validate_rejects_a_missing_playback_buffer(self):
+        config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+        del config["playbackBuffer"]
+
+        with self.assertRaises(ValueError):
+            service.validate_prisma_voice_config(config)
+
+    def test_validate_rejects_an_unsupported_playback_buffer_mode(self):
+        config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+        config["playbackBuffer"] = {"mode": "fixed", "manualSeconds": 0.2}
+
+        with self.assertRaises(ValueError):
+            service.validate_prisma_voice_config(config)
+
+    def test_validate_rejects_manual_seconds_out_of_range(self):
+        for manual_seconds in (0.05, 3.1):
+            with self.subTest(manual_seconds=manual_seconds):
+                config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+                config["playbackBuffer"] = {"mode": "manual", "manualSeconds": manual_seconds}
+                with self.assertRaises(ValueError):
+                    service.validate_prisma_voice_config(config)
+
+    def test_validate_rejects_manual_seconds_off_the_grid(self):
+        config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+        config["playbackBuffer"] = {"mode": "manual", "manualSeconds": 0.25}
+
+        with self.assertRaises(ValueError):
+            service.validate_prisma_voice_config(config)
+
+    def test_validate_still_rejects_an_unexpected_top_level_field(self):
+        """The T4 backward-compatible defaulting only backfills a MISSING
+        playbackBuffer -- it must not become a loophole that tolerates
+        arbitrary unknown top-level fields."""
+        config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+        config["unexpected"] = True
+
+        with self.assertRaises(ValueError):
+            service.validate_prisma_voice_config(config)
+
+    def test_store_loads_a_legacy_config_file_without_playback_buffer_as_the_default(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            legacy = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+            del legacy["playbackBuffer"]
+            path.write_text(json.dumps(legacy), encoding="utf-8")
+
+            store = service.PrismaVoiceConfigStore(path)
+
+            self.assertEqual(store.get()["playbackBuffer"], {"mode": "automatic", "manualSeconds": 0.2})
+            # every other legacy field survives the migration untouched
+            self.assertEqual(store.get()["preset"], legacy["preset"])
+            self.assertEqual(store.get()["robotic"], legacy["robotic"])
+
+    def test_store_update_local_defaults_a_legacy_candidate_missing_playback_buffer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = service.PrismaVoiceConfigStore(Path(temporary) / "config.json")
+            legacy_candidate = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+            del legacy_candidate["playbackBuffer"]
+
+            updated = store.update_local(legacy_candidate)
+
+            self.assertEqual(updated["playbackBuffer"], {"mode": "automatic", "manualSeconds": 0.2})
+            persisted = json.loads(Path(temporary, "config.json").read_text(encoding="utf-8"))
+            self.assertIn("playbackBuffer", persisted)
+
 
 class MainStartupWiringTests(unittest.TestCase):
     def test_main_installs_access_log_query_redaction_before_app_run(self) -> None:

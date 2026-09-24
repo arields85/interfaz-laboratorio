@@ -237,17 +237,46 @@ def _queue_same_prisma_audio_to_telegram(job):
     _send_same_prisma_audio_to_telegram(job)
 
 
-DEFAULT_PRISMA_VOICE_CONFIG = {"effectEnabled": True, "preset": "robotic_medium_light", "effectIntensity": 100, "robotic": {"modulationHz": 30, "baseGain": 0.78, "modulationDepth": 0.22, "quantizationSteps": 260, "metallicHz": 410, "metallicMix": 0.04, "echo1DelayMs": 40, "echo1Gain": 0.22, "echo2DelayMs": 95, "echo2Gain": 0.10, "normalizationTarget": 29500, "normalizationMaxGain": 1.6}}
+DEFAULT_PRISMA_VOICE_CONFIG = {"effectEnabled": True, "preset": "robotic_medium_light", "effectIntensity": 100, "robotic": {"modulationHz": 30, "baseGain": 0.78, "modulationDepth": 0.22, "quantizationSteps": 260, "metallicHz": 410, "metallicMix": 0.04, "echo1DelayMs": 40, "echo1Gain": 0.22, "echo2DelayMs": 95, "echo2Gain": 0.10, "normalizationTarget": 29500, "normalizationMaxGain": 1.6}, "playbackBuffer": {"mode": "automatic", "manualSeconds": 0.2}}
 PRISMA_VOICE_PRESETS = {"clean", "robotic_medium_light"}
 PRISMA_ROBOTIC_FIELDS = set(DEFAULT_PRISMA_VOICE_CONFIG["robotic"])
+PRISMA_PLAYBACK_BUFFER_FIELDS = set(DEFAULT_PRISMA_VOICE_CONFIG["playbackBuffer"])
+PRISMA_PLAYBACK_BUFFER_MODES = {"automatic", "manual"}
+# T4 design decision (2026-09-24, user-approved): manual buffer range
+# 0.1-3.0 s in 0.1 s steps, default 0.2 s. Mirrors the HMI's
+# `domain/prismaVoiceConfig.ts` constants of the same name/values -- one
+# documented source per side, kept equal by hand (no shared schema for this
+# plain config, unlike the generated audio-record types).
+PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN = 0.1
+PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_MAX = 3.0
+PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_STEP = 0.1
 
 
 def clone_json(value): return json.loads(json.dumps(value))
 def _is_number(value): return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _is_valid_playback_buffer_manual_seconds(value):
+    if not _is_number(value): return False
+    if value < PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN - 1e-9 or value > PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_MAX + 1e-9: return False
+    steps = value / PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_STEP
+    return abs(steps - round(steps)) < 1e-6
+
+
+def _migrate_prisma_voice_config(config):
+    """T4 backward compatibility: a config persisted (or PUT by an old HMI
+    client) before `playbackBuffer` existed has no such key at all. Backfill
+    the default here, in front of `validate_prisma_voice_config`'s strict
+    exact-field-set check, instead of loosening that check itself -- an
+    actually unexpected/unknown field must keep failing validation."""
+    if isinstance(config, dict) and "playbackBuffer" not in config:
+        config = dict(config)
+        config["playbackBuffer"] = clone_json(DEFAULT_PRISMA_VOICE_CONFIG["playbackBuffer"])
+    return config
+
+
 def validate_prisma_voice_config(config):
-    if not isinstance(config, dict) or set(config) != {"effectEnabled", "preset", "effectIntensity", "robotic"}: raise ValueError("CONFIG_FIELDS_INVALID")
+    if not isinstance(config, dict) or set(config) != {"effectEnabled", "preset", "effectIntensity", "robotic", "playbackBuffer"}: raise ValueError("CONFIG_FIELDS_INVALID")
     if not isinstance(config["effectEnabled"], bool): raise ValueError("effectEnabled must be boolean")
     if config["preset"] not in PRISMA_VOICE_PRESETS: raise ValueError("preset must be clean or robotic_medium_light")
     if not _is_number(config["effectIntensity"]) or not 0 <= config["effectIntensity"] <= 100: raise ValueError("effectIntensity must be between 0 and 100")
@@ -260,6 +289,10 @@ def validate_prisma_voice_config(config):
         if value < minimum or value > maximum: raise ValueError(f"{field} out of range")
     steps = robotic["quantizationSteps"]
     if not isinstance(steps, int) or isinstance(steps, bool) or not 2 <= steps <= 65536: raise ValueError("quantizationSteps must be an integer between 2 and 65536")
+    playback_buffer = config["playbackBuffer"]
+    if not isinstance(playback_buffer, dict) or set(playback_buffer) != PRISMA_PLAYBACK_BUFFER_FIELDS: raise ValueError("playbackBuffer fields invalid")
+    if playback_buffer["mode"] not in PRISMA_PLAYBACK_BUFFER_MODES: raise ValueError("playbackBuffer.mode must be automatic or manual")
+    if not _is_valid_playback_buffer_manual_seconds(playback_buffer["manualSeconds"]): raise ValueError(f"playbackBuffer.manualSeconds must be between {PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN} and {PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_MAX} in {PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_STEP} s steps")
     return clone_json(config)
 
 
@@ -270,7 +303,7 @@ class PrismaVoiceConfigStore:
     def allows_local_updates(self): return True
 
     def _load(self):
-        try: return validate_prisma_voice_config(json.loads(open(self.path, encoding="utf-8").read()))
+        try: return validate_prisma_voice_config(_migrate_prisma_voice_config(json.loads(open(self.path, encoding="utf-8").read())))
         except (OSError, ValueError, json.JSONDecodeError): return clone_json(DEFAULT_PRISMA_VOICE_CONFIG)
 
     def _write(self, config):
@@ -282,7 +315,7 @@ class PrismaVoiceConfigStore:
         with self.lock: return clone_json(self.config)
 
     def update_local(self, candidate):
-        config = validate_prisma_voice_config(candidate)
+        config = validate_prisma_voice_config(_migrate_prisma_voice_config(candidate))
         with self.lock: self._write(config); self.config = clone_json(config); return clone_json(config)
 
     def status(self): return {"source": "local", "centralUrlConfigured": False, "lastSyncAt": None, "lastSyncError": None}
