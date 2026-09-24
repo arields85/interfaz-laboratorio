@@ -9,6 +9,7 @@ import {
     PRISMA_VOICE_TIMELINE_URL,
 } from '../config/prismaAssistant.config';
 import type { PrismaContextCommand, PrismaContextIntent, PrismaSessionMetadata, PrismaSessionRequestSnapshot } from '../domain/prismaSession.types';
+import type { PrismaAudioMetricReason } from '../domain/prismaAudioMetric.types';
 import { isPrismaRuntimeUnreachableMarker, parsePrismaRuntimeUnreachableDetail, PrismaRuntimeUnreachableError } from './prismaRuntimeUnreachable';
 import { recordSessionReset } from './prismaVoiceTimelineRecorder';
 
@@ -358,7 +359,7 @@ export class PrismaSessionClient {
         });
     }
 
-    #invalidate(reason: 'unauthorized-401' | 'explicit'): void {
+    #invalidate(reason: PrismaAudioMetricReason): void {
         this.#capability = null;
         this.#metadata = null;
         this.#bootstrap = null;
