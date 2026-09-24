@@ -4,6 +4,7 @@ import {
     PRISMA_BROWSER_ROUTES,
     PRISMA_ASK_URL,
     PRISMA_CHANNEL_A_PAIRING_URL,
+    PRISMA_EVENTS_STREAM_URL,
     PRISMA_EVENTS_URL,
     PRISMA_SESSION_URL,
     PRISMA_SNAPSHOT_URL,
@@ -12,10 +13,11 @@ import {
 } from './prismaAssistant.config';
 
 describe('prismaAssistant.config', () => {
-    it('exposes only the seven fixed same-origin browser routes', () => {
+    it('exposes only the eight fixed same-origin browser routes', () => {
         expect(PRISMA_BROWSER_ROUTES).toEqual({
             snapshot: '/api/prisma/snapshot',
             events: '/api/prisma/events/latest',
+            eventsStream: '/api/prisma/events/stream',
             session: '/api/prisma/session',
             ask: '/api/prisma/ask',
             voiceConfig: '/api/prisma/voice-config',
@@ -24,6 +26,7 @@ describe('prismaAssistant.config', () => {
         });
         expect(PRISMA_SNAPSHOT_URL).toBe('/api/prisma/snapshot');
         expect(PRISMA_EVENTS_URL).toBe('/api/prisma/events/latest');
+        expect(PRISMA_EVENTS_STREAM_URL).toBe('/api/prisma/events/stream');
         expect(PRISMA_SESSION_URL).toBe('/api/prisma/session');
         expect(PRISMA_ASK_URL).toBe('/api/prisma/ask');
         expect(PRISMA_VOICE_CONFIG_URL).toBe('/api/prisma/voice-config');

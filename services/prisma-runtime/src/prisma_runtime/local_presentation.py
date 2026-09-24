@@ -55,6 +55,11 @@ DEFAULT_TELEGRAM_API_URL = "https://api.telegram.org"
 HMI_SESSION_BOOTSTRAP_MAX_BYTES = 128
 HMI_ASK_MAX_BYTES = 32 * 1024
 HMI_QUESTION_MAX_BYTES = 4096
+# T13 unit (c): how often the voice-events SSE stream re-authorizes (keeping
+# the underlying session's idle window alive the way repeated 1s polling
+# used to) and sends a keep-alive comment while idle. Comfortably below the
+# session's 30-minute idle_ttl and below typical reverse-proxy idle timeouts.
+VOICE_EVENTS_SSE_KEEPALIVE_SECONDS = 15.0
 # The closed pairing projection is validated before any HTTP value is built:
 # the opaque URL-safe token may appear only inside the deep link and the bot
 # username is restricted to the Telegram-safe alphabet.
@@ -1133,6 +1138,58 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         if owner_id is None: return session_error()
         event = voice_events.latest(owner_id)
         return Response(status=204) if event is None else jsonify(event)
+
+    @app.route("/hmi/voice/events", methods=["GET", "OPTIONS"])
+    def voice_events_stream():
+        """T13 unit (c) / T10 unit 5: push voice events to the HMI instead of
+        the previous 1s polling. Same session-capability authorization as
+        /hmi/voice/latest -- a native browser EventSource cannot set a
+        custom header, so this route also accepts the capability as a
+        `?capability=` query parameter (used only by this one same-origin,
+        dev-proxied, local endpoint; never logged -- this runtime has no
+        logging.basicConfig anywhere -- and never recorded in browser
+        history, since EventSource issues a background request, not a page
+        navigation). The ordinary header-based path stays available and is
+        tried first.
+        """
+        if request.method == "OPTIONS": return Response(status=204)
+        capability = request.headers.get(CAPABILITY_HEADER, "") or request.args.get("capability", "")
+        try:
+            owner_id = session_registry.authorize(capability)
+        except HmiSessionUnauthorized:
+            return session_error()
+
+        def generate():
+            last_sent_id = None
+            flag, unsubscribe = voice_events.subscribe_owner(owner_id)
+            try:
+                while True:
+                    # Re-authorize (and touch) every pass instead of only at
+                    # connect time: a long-lived stream must keep the
+                    # underlying session's idle window alive the same way
+                    # repeated 1s polling used to, and must stop cleanly if
+                    # the session is later closed/expired/revoked.
+                    try:
+                        session_registry.authorize(capability)
+                    except HmiSessionUnauthorized:
+                        return
+                    event = voice_events.latest(owner_id)
+                    if event is not None and event.get("id") != last_sent_id:
+                        last_sent_id = event.get("id")
+                        yield f"data: {json.dumps(event, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                        continue
+                    if flag.wait(VOICE_EVENTS_SSE_KEEPALIVE_SECONDS):
+                        flag.clear()
+                        continue
+                    yield ": keep-alive\n\n"
+            finally:
+                unsubscribe()
+
+        response = Response(generate(), mimetype="text/event-stream")
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+        response.headers["Connection"] = "keep-alive"
+        return response
 
     @app.route("/internal/prisma/voice-events/<event_id>", methods=["GET"])
     def voice_event(event_id):

@@ -563,7 +563,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
 - Approved copy, reachable keep/unlink control, and typing indicator in place.
 - All gates green: vitest, `tsc`, eslint, prisma-runtime unittest discover.
 
-- [ ] **T13 — Voice latency, part 3 (from the 2026-09-24 live test, runtime at `82e7176`).**
+- [x] **T13 — Voice latency, part 3 (from the 2026-09-24 live test, runtime at `82e7176`).**
   Measured per voice answer (Channel A questions from the phone): `event_publish_to_received_ms`
   170–1088 (HMI 1 s poll, no prefetch on the Channel A publish path); `AudioCoordinator generate:
   credential_elapsed_ms` 581–604 on EVERY request, cache hits included (protected-store secret
@@ -675,7 +675,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     real thread/network path is never exercised there while the "ignores"/"fails closed"/
     "publishes" `on_outcome` tests now also assert the prefetch fired (or didn't) with the right
     event id and a token that resolves back to the exact owner. Full suite green (1428 passed).
-  - **Unit (e) — typing action must not delay the answer** (2026-09-24, commit pending). Evidence:
+  - **Unit (e) — typing action must not delay the answer** (2026-09-24, commit `acea713`). Evidence:
     `channel_a_bot.py` — `ChannelAPairingDialogue._typing()` now spawns a background daemon thread
     (`ChannelATypingIndicator`) to call `send_chat_action`, chosen over skipping it when the answer
     is immediate (the "typing…" indicator still gives real feedback during the actual dead time —
@@ -694,6 +694,72 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     (`elapsed=2.008s not less than 1.0s`) before implementation; the full `ChannelAQueryIntegrationTests`
     class also dropped from 2.018 s to 0.014 s wall time now that no test in it pays the old
     synchronous chat-action cost. Full suite green (1429 passed).
+  - **Unit (c) — push voice events to the HMI, T10 unit 5** (2026-09-24, commit pending). The
+    launcher was running throughout (ports 5056/5057/5173 in use) and this writer's brief forbids
+    starting/stopping it, so this could not be verified live through the real Vite proxy against the
+    newly written code (the running processes still serve the pre-this-unit code; only a restart
+    picks up file changes) -- implemented with full unit/integration test coverage on both sides
+    instead, per the brief's own guidance for this case. **Pending live check**: confirm the orb/audio
+    experience is unchanged and that the SSE connection survives the real Vite dev-server proxy
+    without buffering, after the next launcher restart.
+    - Backend (`services/prisma-runtime`): `voice_events.py` — new `VoiceEventStore.subscribe_owner`/
+      `_notify_owner` (per-owner `threading.Event` waiters, guard-refused publishes never notify).
+      `local_presentation.py` — new `GET /hmi/voice/events` SSE route, same session-capability
+      authorization as `/hmi/voice/latest`; also accepts `?capability=` (native browser `EventSource`
+      cannot set a custom header) tried only after the header path fails, never weakening the
+      ordinary path. Sends the current latest event immediately on connect (matching polling's own
+      first-response behavior), then blocks on the owner's wake flag (re-checking `latest()` on every
+      wake, so no event is ever missed even if a wake races a check) and re-authorizes every pass
+      (not just at connect) so a long-lived stream keeps the session's idle window alive the way 1s
+      polling used to, stopping cleanly if the session is later closed/expired/revoked. Headers:
+      `Cache-Control: no-cache`, `X-Accel-Buffering: no`, `Connection: keep-alive`,
+      `mimetype=text/event-stream`; a 15s keep-alive comment (`VOICE_EVENTS_SSE_KEEPALIVE_SECONDS`)
+      during idle periods. `unsubscribe()` always runs on generator exit (`try/finally`, covers a
+      client disconnect via `GeneratorExit`).
+      New tests: `VoiceEventOwnerNotificationTests` (6, `test_voice_event_delivery.py`) and
+      `VoiceEventsStreamTests` (7, `test_local_presentation.py`: authorization required; header/query
+      capability accepted/rejected; no-buffering headers; existing-latest-sent-immediately;
+      new-event-pushed-after-connect; unsubscribe-on-close). Debugging note kept for future
+      test-writers in this codebase: Werkzeug's test client eagerly runs a streaming Response's
+      generator up to its first `yield` as part of `client.get()` itself (a WSGI-conformance
+      behavior), not lazily afterward — a test that opens the connection before any event exists
+      must run `client.get()` itself on a background thread (confirmed necessary and sufficient via a
+      standalone repro before rewriting the real tests; an earlier version of these tests blocked on
+      the route's own keep-alive interval for exactly this reason, since `client.get()` was called on
+      the main thread instead). Full prisma-runtime suite green (1442 passed, was 1429).
+    - Frontend (`hmi-app`): `prismaAssistant.config.ts` — new `PRISMA_EVENTS_STREAM_URL =
+      '/api/prisma/events/stream'`, added to `PRISMA_BROWSER_ROUTES` (closed-set contract test
+      updated to 8 routes). `vite.prismaProxy.config.ts` — new proxy route to `/hmi/voice/events`;
+      verified via the existing rewrite/query-preservation test, no proxy-level SSE-specific config
+      needed (`http-proxy`'s default streaming already proxies `/prisma/speak-live`'s PCM generator
+      response live today, confirmed working in the T6 live test — the same unbuffered pass-through
+      applies to any streamed response regardless of content type). `prismaSessionClient.ts` — new
+      `capability()` method (bootstraps the session like `fetch()` does, returns the raw capability
+      string) because a native `EventSource` cannot set the `X-Prisma-Session-Capability` header;
+      the query-parameter fallback is scoped to this one same-origin, dev-proxied, local endpoint,
+      never logged (no `logging.basicConfig` anywhere in the runtime) and never recorded in browser
+      history (EventSource is a background request, not a page navigation).
+      `voiceEventListener.service.ts` — `startVoiceEventListener` now attempts SSE first
+      (`EventSource` + query capability) and falls back to the existing, unchanged polling loop on
+      any error, a malformed/unsupported environment, or a `capability()` rejection; both paths share
+      one `lastProcessedKey`/`acceptVoiceEvent` dedupe state so a mid-stream fallback never replays or
+      blocks an event the other path already handled. SSE is attempted only when `fetchImpl ===
+      undefined` — the exact same internal convention the existing code already used to distinguish
+      "real production client" from "test/injected transport" — so **every one of the 21 existing
+      polling tests needed zero changes** (they all already pass `fetchImpl`) and continues to
+      exercise the identical, unmodified polling code path. `useVoiceEventListener.ts` now also
+      passes `streamUrl: PRISMA_EVENTS_STREAM_URL`.
+      New tests: 3 in `prismaSessionClient.test.ts` (`capability()` round trip, bootstrap-failure
+      rejection, stale-after-reset rejection); 8 new SSE tests in `voiceEventListener.service.test.ts`
+      using a `FakeEventSource` test double and a mocked `prismaSessionClient` (happy path with the
+      exact query-string URL asserted; cross-listener dedupe; malformed-frame tolerance; fallback on
+      `onerror`; fallback on `capability()` rejection; fallback when unsupported -- exercised against
+      the REAL jsdom test environment, confirmed to have no global `EventSource`, not a simulated
+      absence; fetchImpl bypasses SSE entirely; `stop()` racing before `capability()` resolves closes
+      instead of connecting). Verified the new SSE tests actually exercise the new code (not
+      vacuously passing) by temporarily disabling the SSE branch and confirming exactly the 4 tests
+      that depend on it failed, then restoring it. `tsc -b`: clean. `eslint`: clean. Full hmi-app
+      suite green (2384 passed, was 2372).
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
@@ -772,24 +838,51 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   `gemini-3.8-flash-lite-tts` → first audio 0.62 s and 0.70 s (3.4 s and 7.1 s of audio); the real
   mime type `audio/l16; rate=24000; channels=1` passes validation. Full suite 1408 passed
   (parent spot check).
+- 2026-09-24: T13 writer implemented all five scoped units from the 2026-09-24 live test
+  (a: in-memory Gemini secret with mtime-based cache invalidation; d: found and fixed the Gemini
+  TTFB gap via a longer httpx keepalive_expiry, evidence-backed by a live standalone measurement;
+  b: prefetch for Channel A answers via a new short-lived event-scoped token; e: fire-and-forget
+  Telegram typing indicator; c: push voice events to the HMI over SSE, backend+frontend, with full
+  test coverage but a pending live Vite-proxy check since the launcher was running and could not be
+  restarted). Commits `5411978`, `74cf145`, `7e84d4f`, `acea713`, and one more for unit (c). Full
+  prisma-runtime suite green after each (1417 → 1418 → 1428 → 1429 → 1442 tests); full hmi-app suite
+  green for unit (c)'s frontend half (2384 tests, `tsc -b` and `eslint` both clean). Route: delegated
+  writer (multi-file, behavior-changing work across `gemini_credentials.py`, `voice_events.py`,
+  `local_presentation.py`, `channel_a_bot.py` and their tests in `services/prisma-runtime`, plus
+  `prismaAssistant.config.ts`, `vite.prismaProxy.config.ts`, `prismaSessionClient.ts`,
+  `voiceEventListener.service.ts`, `useVoiceEventListener.ts` and their tests in `hmi-app`; touched
+  only those two trees and this doc).
 
 ## Next step
 
-Next: a live voice test with the user is now the priority — it covers three still-unverified things
-at once: (1) T10 units 1-4's latency improvement (read `Prisma Gemini TTS: time_to_first_byte_ms=`,
-`Prisma TTS cache:`, and the other T10 log lines), (2) T11's new model/voice actually sounding right
-end-to-end over the real Vite→voice-service→Gemini path (this writer only exercised it against
-fakes), and (3) T12's documented credential-resolve trade-off not causing a surprise (it only
-changes behavior when Gemini credentials are entirely unconfigured, which should not be the case in
-the user's normal setup). After that: a follow-up pass for T10 unit 5 (SSE push), run with the
-launcher available so the Vite proxy can be checked live. In parallel, **user manual check of
-T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
-- **T2**: pair a phone via QR; the confirmation prompt should read "Confirme para hacerle preguntas
-  a Prisma desde aquí; le responderá en pantalla y con voz." (no "documento").
-- **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
-  stay visible through later messages. Tapping it should ask for confirmation with "Confirmar
-  desvinculación"/"Cancelar" inline buttons — confirming should unlink and remove the persistent
-  button; cancelling should keep the link and the button. The inactivity-warning message (idle ~9
-  minutes) should show only "Seguir conectado" now, not a second inline "Desvincular".
-- **T4**: send an ordinary question; Telegram should show "Prisma está escribiendo…" briefly before
-  the answer arrives.
+Next: a live voice test with the user, covering everything still unverified against the real
+runtime:
+1. **T13 unit (c), highest priority**: after the next launcher restart (so it picks up the new SSE
+   code), confirm the orb/audio experience is unchanged and that `GET /hmi/voice/events` streams
+   live through the real Vite dev-server proxy (5173 → 5057) without buffering — open the HMI,
+   check the Network tab for an `EventSource`/`text/event-stream` connection to
+   `/api/prisma/events/stream`, ask a question, and confirm the answer arrives at least as fast as
+   before (no regression), with polling never engaging unless the SSE connection is deliberately
+   broken.
+2. T13 units (a)/(b)/(d)/(e): read the updated `credential_elapsed_ms`, `time_to_first_byte_ms`, and
+   Channel A update-handling timings in the logs to confirm the measured improvements hold live
+   (in-memory secret cache should show near-zero `credential_elapsed_ms` on repeat requests; Gemini
+   TTFB should drop close to the ~0.6-0.7s standalone figure even after idle gaps between
+   questions; a Channel A phone answer should also get audio on the HMI without waiting for the
+   1s poll; Channel A update handling should return close to the pre-T4 ~0.38s again).
+3. T10 units 1-4's latency improvement, T11's new model/voice sounding right end-to-end, and T12's
+   documented credential-resolve trade-off (all still pending their own first live confirmation from
+   before T13).
+4. **User manual check of T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
+   - **T2**: pair a phone via QR; the confirmation prompt should read "Confirme para hacerle
+     preguntas a Prisma desde aquí; le responderá en pantalla y con voz." (no "documento").
+   - **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
+     stay visible through later messages. Tapping it should ask for confirmation with "Confirmar
+     desvinculación"/"Cancelar" inline buttons — confirming should unlink and remove the persistent
+     button; cancelling should keep the link and the button. The inactivity-warning message (idle
+     ~9 minutes) should show only "Seguir conectado" now, not a second inline "Desvincular".
+   - **T4**: send an ordinary question; Telegram should show "Prisma está escribiendo…" (now
+     fire-and-forget) before the answer arrives, without the answer itself feeling delayed.
+
+After that: T14 (queued, user decision already recorded) and T15 (deferred by the user) remain open,
+not started by this writer.

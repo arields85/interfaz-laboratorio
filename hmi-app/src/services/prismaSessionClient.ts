@@ -163,6 +163,24 @@ export class PrismaSessionClient {
         return operation;
     }
 
+    /**
+     * T13 unit (c): a native browser EventSource cannot set a custom
+     * header, so the voice-events SSE listener needs the raw capability
+     * string to embed as a `?capability=` query parameter on its own
+     * connection URL -- bootstrap the session the same way fetch() does,
+     * but return the capability itself instead of issuing a request.
+     */
+    async capability(signal?: AbortSignal): Promise<string> {
+        const requestEpoch = this.#epoch;
+        throwIfAborted(signal);
+        await this.#waitForBootstrap(signal);
+        throwIfAborted(signal);
+        if (requestEpoch !== this.#epoch) throw new PrismaStaleSessionResponse();
+        const capability = this.#capability;
+        if (capability === null) throw new PrismaStaleSessionResponse();
+        return capability;
+    }
+
     async fetch(path: string, init: RequestInit = {}): Promise<Response> {
         this.#assertAuthorizedPath(path);
         const requestEpoch = this.#epoch;

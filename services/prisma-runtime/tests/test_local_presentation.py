@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import uuid
 import unittest
 from pathlib import Path
@@ -266,6 +267,132 @@ class LocalPresentationTests(unittest.TestCase):
             }, headers=session_headers(client))
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.get_json()["error"], "INVALID_SNAPSHOT")
+
+
+class VoiceEventsStreamTests(unittest.TestCase):
+    """T13 unit (c) / T10 unit 5: push voice events to the HMI (SSE)."""
+
+    def _client(self, events=None):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        events = events if events is not None else VoiceEventStore()
+        client = create_app(JsonFileStore(Path(temporary.name) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+        return client, events
+
+    def test_requires_authorization(self) -> None:
+        client, _events = self._client()
+        response = client.get("/hmi/voice/events")
+        self.assertEqual(response.status_code, 401)
+
+    def test_rejects_an_unknown_capability_via_header_or_query(self) -> None:
+        client, _events = self._client()
+        via_header = client.get("/hmi/voice/events", headers={"X-Prisma-Session-Capability": "not-a-real-capability"})
+        via_query = client.get("/hmi/voice/events?capability=not-a-real-capability")
+        self.assertEqual(via_header.status_code, 401)
+        self.assertEqual(via_query.status_code, 401)
+
+    def test_accepts_a_valid_capability_via_query_for_native_eventsource(self) -> None:
+        """EventSource cannot set custom headers, so this route must also
+        accept ?capability= for a real browser EventSource client."""
+        client, _events = self._client()
+        headers = session_headers(client)
+        capability = headers["X-Prisma-Session-Capability"]
+        # Publish first: Werkzeug's test client pulls the stream's first
+        # chunk as part of client.get() itself (to conform to WSGI, it
+        # eagerly runs the generator up to its first yield before
+        # returning), so an already-existing event avoids this test
+        # blocking on the route's own keep-alive interval.
+        client.post("/local/ask", json={"question": "status"}, headers=headers)
+        response = client.get(f"/hmi/voice/events?capability={capability}")
+        try:
+            self.assertEqual(response.status_code, 200)
+        finally:
+            response.close()
+
+    def test_response_headers_avoid_buffering(self) -> None:
+        client, _events = self._client()
+        headers = session_headers(client)
+        client.post("/local/ask", json={"question": "status"}, headers=headers)  # see note above
+        response = client.get("/hmi/voice/events", headers=headers)
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, "text/event-stream")
+            self.assertEqual(response.headers.get("Cache-Control"), "no-cache")
+            self.assertEqual(response.headers.get("X-Accel-Buffering"), "no")
+        finally:
+            response.close()
+
+    def test_sends_the_existing_latest_event_immediately_on_connect(self) -> None:
+        client, _events = self._client()
+        headers = session_headers(client)
+        client.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": demo_snapshot()}, headers=headers)
+        ask_response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=headers)
+        published_id = ask_response.get_json()["voiceEvent"]["id"]
+
+        response = client.get("/hmi/voice/events", headers=headers)
+        try:
+            chunk = next(iter(response.response)).decode("utf-8")
+            self.assertTrue(chunk.startswith("data: "))
+            payload = json.loads(chunk[len("data: "):].strip())
+            self.assertEqual(payload["id"], published_id)
+            self.assertEqual(payload["text"], "El OEE actual es 88,6 %.")
+        finally:
+            response.close()
+
+    def test_pushes_a_new_event_published_after_the_connection_opened(self) -> None:
+        """No event exists yet when the connection opens. Werkzeug's test
+        client eagerly runs the response generator up to its first yield as
+        part of client.get() itself (a WSGI-conformance behavior, not
+        lazy iteration afterward) -- so client.get() itself must run on its
+        own thread here, or it would block the test on the route's own
+        keep-alive interval instead of on the publish this test is after."""
+        client, events = self._client()
+        headers = session_headers(client)
+        result: dict = {}
+
+        def connect_and_receive_first_chunk() -> None:
+            response = result["response"] = client.get("/hmi/voice/events", headers=headers)
+            result["first_chunk"] = next(iter(response.response)).decode("utf-8")
+
+        consumer = threading.Thread(target=connect_and_receive_first_chunk)
+        consumer.start()
+        try:
+            # subscribe_owner() runs as soon as the generator starts (inside
+            # client.get() itself, on the consumer thread) -- wait for the
+            # real subscription (not just "the thread started") before
+            # publishing, so this test's own publish is guaranteed to land
+            # after subscription.
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not any(events._owner_waiters.values()):
+                time.sleep(0.01)
+            self.assertTrue(any(events._owner_waiters.values()), "the stream never subscribed")
+
+            ask_response = client.post("/local/ask", json={"question": "status"}, headers=headers)
+            published_id = ask_response.get_json()["voiceEvent"]["id"]
+            consumer.join(timeout=2)
+            self.assertFalse(consumer.is_alive(), "the SSE stream never delivered the new event")
+            self.assertTrue(result["first_chunk"].startswith("data: "))
+            payload = json.loads(result["first_chunk"][len("data: "):].strip())
+            self.assertEqual(payload["id"], published_id)
+        finally:
+            response = result.get("response")
+            if response is not None:
+                response.close()
+            consumer.join(timeout=2)
+
+    def test_closing_the_response_unsubscribes_from_the_store(self) -> None:
+        client, events = self._client()
+        headers = session_headers(client)
+        # Publish first so the generator's first pass resolves immediately
+        # (an already-existing latest event) instead of blocking on
+        # flag.wait() -- the generator body only starts executing, and thus
+        # only calls subscribe_owner(), once actually iterated.
+        client.post("/local/ask", json={"question": "status"}, headers=headers)
+        response = client.get("/hmi/voice/events", headers=headers)
+        next(iter(response.response))
+        response.close()
+        for waiters in events._owner_waiters.values():
+            self.assertEqual(len(waiters), 0)
 
 
 class LocalAskRevisionTests(unittest.TestCase):

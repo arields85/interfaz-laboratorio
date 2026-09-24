@@ -92,6 +92,9 @@ class VoiceEventStore:
         # with no live browser request in flight (Channel A's on-outcome
         # callback). token -> (event_id, owner_id, expires_at).
         self._prefetch_tokens: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
+        # T13 unit (c): per-owner wake flags so a push (SSE) endpoint can
+        # block-wait for the next publish instead of polling the store.
+        self._owner_waiters: dict[str, list[threading.Event]] = {}
         self._empty_event = {"id": str(uuid.uuid4()), "timestamp": _timestamp(), "text": "", "question": "inicio-local"}
 
     @staticmethod
@@ -127,7 +130,37 @@ class VoiceEventStore:
                 raise VoiceEventCapacity("VOICE_EVENT_CAPACITY")
             self._events[event["id"]] = (str(owner_id), copy.deepcopy(event), is_current)
             self._latest[str(owner_id)] = event["id"]
+        self._notify_owner(str(owner_id))
         return copy.deepcopy(event)
+
+    def subscribe_owner(self, owner_id):
+        """T13 unit (c): returns (flag, unsubscribe). ``flag`` is a
+        threading.Event set by every later successful publish() for this
+        exact owner (a guard-refused publish never sets it); the caller
+        blocks on ``flag.wait(timeout)`` instead of polling. ``unsubscribe``
+        is idempotent and must always be called when the caller is done."""
+        owner_id = str(owner_id)
+        flag = threading.Event()
+        with self.lock:
+            self._owner_waiters.setdefault(owner_id, []).append(flag)
+
+        def unsubscribe():
+            with self.lock:
+                waiters = self._owner_waiters.get(owner_id)
+                if waiters is None:
+                    return
+                if flag in waiters:
+                    waiters.remove(flag)
+                if not waiters:
+                    self._owner_waiters.pop(owner_id, None)
+
+        return flag, unsubscribe
+
+    def _notify_owner(self, owner_id):
+        with self.lock:
+            waiters = list(self._owner_waiters.get(owner_id, ()))
+        for flag in waiters:
+            flag.set()
 
     def get(self, event_id, owner_id=None):
         try:

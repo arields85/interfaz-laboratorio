@@ -252,6 +252,63 @@ class VoiceEventDeliveryTests(unittest.TestCase):
         self.assertEqual(depths, [0] * len(depths))
 
 
+class VoiceEventOwnerNotificationTests(unittest.TestCase):
+    """T13 unit (c): a push (SSE) endpoint needs a way to wait for the next
+    publish for a given owner instead of polling the store every second."""
+
+    def setUp(self):
+        self.now = 10.0
+        self.store = VoiceEventStore(clock=lambda: self.now, ttl_seconds=300)
+
+    def test_flag_is_unset_until_a_publish_for_that_owner(self):
+        flag, unsubscribe = self.store.subscribe_owner(OWNER)
+        try:
+            self.assertFalse(flag.is_set())
+        finally:
+            unsubscribe()
+
+    def test_publish_sets_the_flag_for_the_exact_owner_only(self):
+        flag_a, unsubscribe_a = self.store.subscribe_owner(OWNER)
+        flag_b, unsubscribe_b = self.store.subscribe_owner(OTHER)
+        try:
+            self.store.publish("q", "a", owner_id=OWNER)
+            self.assertTrue(flag_a.wait(1))
+            self.assertFalse(flag_b.is_set())
+        finally:
+            unsubscribe_a()
+            unsubscribe_b()
+
+    def test_unsubscribe_stops_further_notifications(self):
+        flag, unsubscribe = self.store.subscribe_owner(OWNER)
+        unsubscribe()
+        self.store.publish("q", "a", owner_id=OWNER)
+        self.assertFalse(flag.is_set())
+
+    def test_unsubscribe_is_idempotent(self):
+        _flag, unsubscribe = self.store.subscribe_owner(OWNER)
+        unsubscribe()
+        unsubscribe()  # must not raise
+
+    def test_multiple_subscribers_for_the_same_owner_are_all_notified(self):
+        flag_one, unsubscribe_one = self.store.subscribe_owner(OWNER)
+        flag_two, unsubscribe_two = self.store.subscribe_owner(OWNER)
+        try:
+            self.store.publish("q", "a", owner_id=OWNER)
+            self.assertTrue(flag_one.wait(1))
+            self.assertTrue(flag_two.wait(1))
+        finally:
+            unsubscribe_one()
+            unsubscribe_two()
+
+    def test_a_guard_refused_publish_never_notifies(self):
+        flag, unsubscribe = self.store.subscribe_owner(OWNER)
+        try:
+            self.store.publish("q", "a", owner_id=OWNER, is_current=lambda: False)
+            self.assertFalse(flag.wait(0.1))
+        finally:
+            unsubscribe()
+
+
 class VoiceEventPrefetchTokenTests(unittest.TestCase):
     """T13 unit (b): Channel A's on-outcome publish site has no live HMI
     session capability to forward (it is an async Telegram outcome

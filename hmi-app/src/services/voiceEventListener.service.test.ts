@@ -1,6 +1,45 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { sessionClientMock } = vi.hoisted(() => ({
+    sessionClientMock: {
+        capability: vi.fn<() => Promise<string>>(),
+        fetch: vi.fn<typeof fetch>(),
+        isCurrentResponse: vi.fn(() => true),
+        acceptVoiceEvent: vi.fn(() => true),
+    },
+}));
+
+vi.mock('./prismaSessionClient', () => ({
+    prismaSessionClient: sessionClientMock,
+}));
+
 import { startVoiceEventListener } from './voiceEventListener.service';
+
+/** Minimal fake EventSource: records instances, lets tests drive onmessage/onerror directly. */
+class FakeEventSource {
+    static instances: FakeEventSource[] = [];
+    url: string;
+    closed = false;
+    onmessage: ((event: MessageEvent<string>) => void) | null = null;
+    onerror: (() => void) | null = null;
+
+    constructor(url: string) {
+        this.url = url;
+        FakeEventSource.instances.push(this);
+    }
+
+    close(): void {
+        this.closed = true;
+    }
+
+    emit(data: string): void {
+        this.onmessage?.(new MessageEvent('message', { data }));
+    }
+
+    fail(): void {
+        this.onerror?.();
+    }
+}
 
 const FIRST_EVENT = {
     id: 'voice-1',
@@ -27,6 +66,11 @@ function deferred<Value>() {
 describe('startVoiceEventListener', () => {
     beforeEach(() => {
         vi.useFakeTimers();
+        FakeEventSource.instances = [];
+        sessionClientMock.capability.mockReset();
+        sessionClientMock.fetch.mockReset();
+        sessionClientMock.isCurrentResponse.mockReset().mockReturnValue(true);
+        sessionClientMock.acceptVoiceEvent.mockReset().mockReturnValue(true);
     });
 
     afterEach(() => {
@@ -399,5 +443,179 @@ describe('startVoiceEventListener', () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
 
         stop();
+    });
+
+    describe('T13 unit (c) / T10 unit 5: push voice events (SSE)', () => {
+        it('connects over SSE with the capability as a query parameter and never falls back to polling', async () => {
+            sessionClientMock.capability.mockResolvedValue('the-capability');
+            const onEvent = vi.fn();
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+                eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(FakeEventSource.instances).toHaveLength(1);
+            expect(FakeEventSource.instances[0]?.url).toBe('/api/prisma/events/stream?capability=the-capability');
+
+            FakeEventSource.instances[0]?.emit(JSON.stringify(FIRST_EVENT));
+            expect(onEvent).toHaveBeenCalledExactlyOnceWith(FIRST_EVENT);
+
+            await vi.advanceTimersByTimeAsync(5_000);
+            expect(sessionClientMock.fetch).not.toHaveBeenCalled();
+
+            stop();
+            expect(FakeEventSource.instances[0]?.closed).toBe(true);
+        });
+
+        it('deduplicates a repeated SSE event through the shared cross-listener accept gate', async () => {
+            sessionClientMock.capability.mockResolvedValue('the-capability');
+            sessionClientMock.acceptVoiceEvent.mockReturnValueOnce(true).mockReturnValueOnce(false);
+            const onEvent = vi.fn();
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+                eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            const source = FakeEventSource.instances[0]!;
+            source.emit(JSON.stringify(FIRST_EVENT));
+            source.emit(JSON.stringify(FIRST_EVENT));
+
+            expect(onEvent).toHaveBeenCalledOnce();
+            stop();
+        });
+
+        it('ignores a malformed SSE frame without falling back to polling or throwing', async () => {
+            sessionClientMock.capability.mockResolvedValue('the-capability');
+            const onEvent = vi.fn();
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+                eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(() => FakeEventSource.instances[0]?.emit('not json')).not.toThrow();
+            expect(onEvent).not.toHaveBeenCalled();
+            expect(sessionClientMock.fetch).not.toHaveBeenCalled();
+
+            stop();
+        });
+
+        it('falls back to polling when the EventSource reports an error', async () => {
+            sessionClientMock.capability.mockResolvedValue('the-capability');
+            sessionClientMock.fetch.mockResolvedValue(jsonResponse(FIRST_EVENT));
+            const onEvent = vi.fn();
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+                intervalMs: 1_000,
+                eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            const source = FakeEventSource.instances[0]!;
+            expect(source.closed).toBe(false);
+
+            source.fail();
+            expect(source.closed).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(0);
+            expect(sessionClientMock.fetch).toHaveBeenCalledTimes(1);
+            expect(onEvent).toHaveBeenCalledExactlyOnceWith(FIRST_EVENT);
+
+            stop();
+        });
+
+        it('falls back to polling immediately when session capability() rejects', async () => {
+            sessionClientMock.capability.mockRejectedValue(new Error('bootstrap failed'));
+            sessionClientMock.fetch.mockResolvedValue(jsonResponse(FIRST_EVENT));
+            const onEvent = vi.fn();
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+                intervalMs: 1_000,
+                eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(FakeEventSource.instances).toHaveLength(0);
+            expect(sessionClientMock.fetch).toHaveBeenCalledTimes(1);
+            expect(onEvent).toHaveBeenCalledExactlyOnceWith(FIRST_EVENT);
+
+            stop();
+        });
+
+        it('falls back to polling immediately when no EventSource implementation is available (real jsdom global)', async () => {
+            sessionClientMock.fetch.mockResolvedValue(jsonResponse(FIRST_EVENT));
+            const onEvent = vi.fn();
+
+            // No eventSourceImpl injected, and jsdom does not implement a
+            // native EventSource -- exercises the real "unsupported" branch.
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+                intervalMs: 1_000,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(sessionClientMock.capability).not.toHaveBeenCalled();
+            expect(sessionClientMock.fetch).toHaveBeenCalledTimes(1);
+            expect(onEvent).toHaveBeenCalledExactlyOnceWith(FIRST_EVENT);
+
+            stop();
+        });
+
+        it('never attempts SSE when fetchImpl is provided (the existing polling test seam)', async () => {
+            const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(FIRST_EVENT));
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent: vi.fn(),
+                fetchImpl: fetchMock,
+                eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(FakeEventSource.instances).toHaveLength(0);
+            expect(sessionClientMock.capability).not.toHaveBeenCalled();
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            stop();
+        });
+
+        it('stop() before capability() resolves closes the EventSource instead of connecting', async () => {
+            const capability = deferred<string>();
+            sessionClientMock.capability.mockReturnValue(capability.promise);
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent: vi.fn(),
+                eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+            });
+
+            stop();
+            capability.resolve('the-capability');
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(FakeEventSource.instances[0]?.closed ?? true).toBe(true);
+        });
     });
 });

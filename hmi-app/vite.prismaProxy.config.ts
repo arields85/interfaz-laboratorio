@@ -56,6 +56,10 @@ export const PRISMA_PROXY_ROUTES: readonly PrismaProxyRoute[] = Object.freeze([
     createRoute('/api/prisma/session', 'http://127.0.0.1:5057', '/hmi/session', ['POST', 'DELETE']),
     createRoute('/api/prisma/snapshot', 'http://127.0.0.1:5057', '/hmi/current-snapshot', ['POST']),
     createRoute('/api/prisma/events/latest', 'http://127.0.0.1:5057', '/hmi/voice/latest', ['GET']),
+    // T13 unit (c) / T10 unit 5: push voice events (SSE) instead of 1s
+    // polling. The capability travels as a query parameter here (native
+    // EventSource cannot set custom headers), so it is never stripped.
+    createRoute('/api/prisma/events/stream', 'http://127.0.0.1:5057', '/hmi/voice/events', ['GET']),
     createRoute('/api/prisma/ask', 'http://127.0.0.1:5057', '/local/ask', ['POST']),
     createRoute('/api/prisma/voice-config', 'http://127.0.0.1:5057', '/hmi/prisma-config', ['GET', 'PUT']),
     createRoute('/api/prisma/tts/live', 'http://127.0.0.1:5056', '/prisma/speak-live', ['POST']),

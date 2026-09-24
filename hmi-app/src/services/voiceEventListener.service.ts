@@ -10,6 +10,15 @@ interface VoiceEventListenerOptions {
     onEvent: (event: VoiceEvent) => void;
     intervalMs?: number;
     fetchImpl?: typeof fetch;
+    /** T13 unit (c) / T10 unit 5: push voice events (SSE) instead of
+     * polling every intervalMs. Attempted only in real production usage
+     * (fetchImpl === undefined, matching every existing test/injected-
+     * transport seam in this module) and only when a native EventSource
+     * is available; falls back to the polling loop above on any error,
+     * on stream end, or when unsupported. */
+    streamUrl?: string | null;
+    /** Test seam for the SSE path, mirroring fetchImpl's role for polling. */
+    eventSourceImpl?: typeof EventSource;
 }
 
 let activeVoiceEventListener: { stop: () => void } | null = null;
@@ -19,6 +28,8 @@ export function startVoiceEventListener({
     onEvent,
     intervalMs = DEFAULT_VOICE_POLL_INTERVAL_MS,
     fetchImpl,
+    streamUrl = null,
+    eventSourceImpl,
 }: VoiceEventListenerOptions): () => void {
     activeVoiceEventListener?.stop();
 
@@ -27,9 +38,14 @@ export function startVoiceEventListener({
     }
 
     let stopped = false;
+    // Shared between the SSE path and the polling fallback so a mid-stream
+    // fallback never replays (or is blocked from delivering) an event the
+    // other path already handled.
     let lastProcessedKey: string | null = null;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let activeController: AbortController | null = null;
+    let activeSse: { stop: () => void } | null = null;
+    let usingPolling = false;
 
     const poll = async () => {
         activeController = typeof AbortController === 'function' ? new AbortController() : null;
@@ -81,6 +97,95 @@ export function startVoiceEventListener({
         }
     };
 
+    const startPolling = () => {
+        if (stopped || usingPolling) {
+            return;
+        }
+
+        usingPolling = true;
+        activeSse?.stop();
+        activeSse = null;
+        void poll();
+    };
+
+    const startSse = async () => {
+        let capability: string;
+
+        try {
+            capability = await prismaSessionClient.capability();
+        } catch {
+            startPolling();
+            return;
+        }
+
+        if (stopped || usingPolling) {
+            return;
+        }
+
+        const EventSourceCtor = eventSourceImpl
+            ?? (typeof EventSource === 'function' ? EventSource : undefined);
+        if (!EventSourceCtor || !streamUrl) {
+            startPolling();
+            return;
+        }
+
+        const source = new EventSourceCtor(
+            `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}capability=${encodeURIComponent(capability)}`,
+        );
+        let closed = false;
+        const stopSse = () => {
+            if (closed) {
+                return;
+            }
+
+            closed = true;
+            source.close();
+        };
+
+        if (stopped || usingPolling) {
+            stopSse();
+            return;
+        }
+
+        activeSse = { stop: stopSse };
+
+        source.onmessage = (message: MessageEvent<string>) => {
+            if (stopped || closed) {
+                return;
+            }
+
+            let payload: unknown;
+            try {
+                payload = JSON.parse(message.data);
+            } catch {
+                return;
+            }
+
+            const event = normalizeVoiceEvent(payload);
+            if (!event) {
+                return;
+            }
+
+            const eventKey = getVoiceEventDedupeKey(event);
+            if (eventKey === lastProcessedKey) {
+                return;
+            }
+
+            lastProcessedKey = eventKey;
+            if (!prismaSessionClient.acceptVoiceEvent(eventKey)) {
+                return;
+            }
+            onEvent(event);
+        };
+
+        source.onerror = () => {
+            stopSse();
+            if (!stopped) {
+                startPolling();
+            }
+        };
+    };
+
     const owner = { stop: () => undefined as void };
     const stop = () => {
         if (stopped) {
@@ -96,6 +201,8 @@ export function startVoiceEventListener({
 
         activeController?.abort();
         activeController = null;
+        activeSse?.stop();
+        activeSse = null;
         if (activeVoiceEventListener === owner) {
             activeVoiceEventListener = null;
         }
@@ -103,7 +210,17 @@ export function startVoiceEventListener({
 
     owner.stop = stop;
     activeVoiceEventListener = owner;
-    void poll();
+
+    const canAttemptSse = fetchImpl === undefined
+        && !!streamUrl
+        && streamUrl.trim() !== ''
+        && (eventSourceImpl !== undefined || typeof EventSource === 'function');
+
+    if (canAttemptSse) {
+        void startSse();
+    } else {
+        startPolling();
+    }
 
     return stop;
 }

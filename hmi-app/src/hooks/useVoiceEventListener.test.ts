@@ -27,6 +27,7 @@ describe('useVoiceEventListener', () => {
         expect(startVoiceEventListenerMock).toHaveBeenCalledTimes(1);
         expect(startVoiceEventListenerMock).toHaveBeenCalledWith({
             url: '/api/prisma/events/latest',
+            streamUrl: '/api/prisma/events/stream',
             onEvent: expect.any(Function),
         });
         unmount();
