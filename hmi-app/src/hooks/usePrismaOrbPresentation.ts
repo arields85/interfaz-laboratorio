@@ -27,6 +27,15 @@ export const PRISMA_ORB_FADE_DURATION_MS = 700;
 // the constant above.
 export const PRISMA_ORB_GROW_DURATION_MS = 400;
 
+// T17b: duration of the overlay's very first appearance (fully invisible ->
+// the "thinking" look), fired once per hidden -> thinking mount. Chosen
+// mid-range of the user-agreed 250-300 ms window: quicker than the 400 ms
+// grow (an entrance only crosses opacity, not scale+opacity, so it reads
+// complete sooner) while still long enough to read as a fade instead of a
+// pop. PrismaOrbOverlay.tsx reads this directly, same single-source-of-truth
+// reason as the two constants above.
+export const PRISMA_ORB_ENTRY_DURATION_MS = 250;
+
 // T17: bounded ceiling for the thinking phase when playback never starts
 // (`onStarted` never fires -- a stale discard, a provider error surfaced
 // only as a stream failure, or a hang). Chosen from the ~8-10 s range

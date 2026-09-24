@@ -1220,6 +1220,106 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     speaking (no snap); (3) a smooth ~0.7 s fade-out at the end instead of the old abrupt
     disappearance; (4) if practical to test, a stalled/failed answer should still fade the orb out
     after a few seconds rather than leaving it stuck "thinking".
+- [x] **T17b — Orb transitions were abrupt (user live test 2026-09-24 ~12:45).** User report: the
+  orb's appearance, its grow-on-speaking, and its disappearance all still looked abrupt despite T17.
+  Route: direct inline (one component + its hook constant, already understood after reading T17's
+  own evidence and `git show 041af41 74f5c1b`).
+  **Root causes confirmed (2026-09-24):**
+  1. Tailwind v4 compiles `scale-*` to the CSS `scale` property and `-translate-x-1/2` to the CSS
+     `translate` property -- both are separate properties from `transform` under CSS Transforms
+     Level 2 -- but `PrismaOrbOverlay.tsx` transitioned `opacity,transform`. Verified against the
+     compiled CSS served by the running Vite dev server (`http://127.0.0.1:5173/src/index.css?direct`,
+     read-only fetch): `.scale-75 { scale: var(--tw-scale-x) var(--tw-scale-y); }`, no `transform`
+     involved anywhere. `transition-property: opacity,transform` therefore never covered the scale
+     change at all -- it snapped instantly on every phase change (thinking<->visible<->fading), while
+     opacity (which IS in that list) animated normally.
+  2. The overlay rendered `null` while hidden and mounted directly in its target look on every
+     hidden -> thinking transition (no prior DOM state to interpolate from), so the appearance itself
+     popped in with no fade, independent of cause 1.
+  3. The abrupt-looking fade-out was NOT a separate remount/key-change bug (confirmed by reading
+     `App.tsx`: `<PrismaOrbOverlay>` is rendered unconditionally, never keyed or conditionally
+     mounted by the parent) -- it was cause 1 again: opacity faded over 700 ms as designed, but the
+     scale snapped from 100% to 75% instantly underneath it, reading as a jump-then-fade rather than
+     one smooth motion.
+  **Fixes (commit `<pending>`):**
+  - `PrismaOrbOverlay.tsx` -- transition class changed from `transition-[opacity,transform]` to
+    `transition-[opacity,scale]` (new `PRISMA_ORB_TRANSITION_CLASSNAME` constant); `translate` is
+    deliberately left out (it never changes -- it only centers the fixed-position overlay).
+  - Split the component in two: the outer `PrismaOrbOverlay` (unchanged signature, still returns
+    `null` while hidden) now delegates to a new inner `PrismaOrbOverlayVisible`, rendered only while
+    `phase !== 'hidden'`. This was necessary, not cosmetic: the OUTER component is instantiated once
+    for the whole app lifetime (`App.tsx` always renders `<PrismaOrbOverlay>`), so hooks placed there
+    would only ever run their mount effect once, never again on a later reappearance. The inner
+    component mounts fresh on every hidden -> thinking transition, exactly matching the div's own
+    real mount/unmount lifecycle.
+  - `PrismaOrbOverlayVisible` renders one frame in a new invisible "entering" look (`scale-75
+    opacity-0`, new `PRISMA_ORB_ENTERING_CLASSES` constant) with nothing to transition from, then a
+    double `requestAnimationFrame` (guards against the browser coalescing the state change into the
+    same frame as the initial paint, more robust than a bare `useEffect`) flips to the real phase
+    look once the browser has already painted that first frame -- giving the CSS transition a real
+    "from" state so the entrance actually interpolates.
+  - New `PRISMA_ORB_ENTRY_DURATION_MS = 250` (`usePrismaOrbPresentation.ts`, next to the other named
+    duration constants; within the user's 250-300 ms window) used for the entry flip specifically;
+    every later real phase change still uses the existing `phaseTransitionDurationMs` (grow 400 ms /
+    fade 700 ms), tracked via a `durationForPhase` piece of state compared against the current phase
+    and adjusted synchronously during render (React's documented "storing information from previous
+    renders" pattern) -- NOT a ref: this repo's `react-hooks/refs` lint rule flags ref access during
+    render, and a `useEffect`-based comparison would apply the correct duration one commit too late
+    (the first frame of a real phase transition would visibly use the wrong duration).
+  - `leda-orb.js` and the audio engine untouched (confirmed: `git status` shows neither touched); the
+    T17 design (thinking 75%/60%, grow 400 ms, fade 700 ms, 9 s thinking timeout, `motion-reduce`
+    keeps no transition) is otherwise unchanged.
+  **Real-browser verification (mandatory, jsdom has no transitions):** built a scratch HTML page
+  (`repro.html`, session scratchpad, not committed) using the exact compiled CSS rules for
+  `.scale-75`/`.scale-100`/`.opacity-0`/`.opacity-60`/`.opacity-100` fetched read-only from the
+  running Vite dev server, driven over the Chrome DevTools Protocol with REAL wall-clock time (no
+  `--virtual-time-budget`, which does not reliably advance the CSS transition/animation clock) via a
+  small Node script talking to `chrome.exe --headless=new --remote-debugging-port`, sampling
+  `getComputedStyle(el).scale/opacity` at fixed real-time checkpoints after each class switch.
+  BEFORE (`transition:[opacity,transform]`, the old bug) vs AFTER (`transition:[opacity,scale]`, the
+  fix), same 400 ms nominal duration, thinking (`scale=0.75 opacity=0.6`) -> visible
+  (`scale=1 opacity=1`):
+  | t (ms) | BEFORE scale | BEFORE opacity | AFTER scale | AFTER opacity |
+  |---|---|---|---|---|
+  | 0 (pre-switch) | 0.75 | 0.6 | 0.75 | 0.6 |
+  | 0 (post-switch) | **1** (already snapped) | 0.6 | 0.75 | 0.6 |
+  | 60 | 1 | 0.679 | 0.799664 | 0.679 |
+  | 101 | 1 | 0.728 | 0.829976 | 0.728 |
+  | 151 | 1 | 0.795 | 0.872024 | 0.795 |
+  | 209 | 1 | 0.874 | 0.921151 | 0.874 |
+  | 256 | 1 | 0.908 | 0.942359 | 0.908 |
+  | 314 | 1 | 0.963 | 0.976642 | 0.963 |
+  | 401 | 1 | 0.999 | 0.999218 | 0.999 |
+  | 458 | 1 | 1 | 1 | 1 |
+
+  BEFORE's `scale` is already `1` at the instant of the class switch (t=0 post-switch) -- it never
+  interpolated, confirming root cause 1 exactly; its `opacity` interpolated normally the whole time
+  (proving opacity was never the problem). AFTER's `scale` interpolates in lockstep with `opacity`,
+  reaching the target at ~458 ms (the ease-out curve's tail past the nominal 400 ms), confirming the
+  fix. Separately, the entry technique (opacity-0 -> opacity-0.6 over the double-rAF flip, 250 ms
+  nominal): `t=0/1ms opacity=0` (still invisible, the painted "from" state) -> `57ms: 0.185` ->
+  `103ms: 0.342` -> `153ms: 0.471` -> `205ms: 0.563` -> `256ms: 0.6` (target reached), `scale` staying
+  constant at `0.75` throughout (only opacity moves during entry, as designed) -- confirming the
+  entry fade is a real interpolating transition in an actual browser, not a jsdom-only illusion.
+  **TDD.** RED confirmed by first running the pre-existing suite against the fix-only production code
+  before updating tests: 4 failures, all exactly the expected ones (stale `transition-[opacity,
+  transform]` class assertion; three tests asserting the post-emit class list without yet accounting
+  for the new pre-flip "entering" frame). Updated the shared `emit()` test helper to flush the double
+  rAF (`vi.advanceTimersByTime(32)`, since `vi.useFakeTimers()` fakes `requestAnimationFrame` too) and
+  fixed the stale transition-property assertion. Added 2 new tests: one that deliberately does NOT
+  flush the rAF, asserting the raw pre-flip frame (`opacity-0`, not `opacity-60`, entry duration in
+  the inline style) then the post-flip frame (`opacity-60`, still the entry duration -- not the grow
+  duration -- since this specific transition is the entry, not a phase change); one asserting the
+  grow duration applies to thinking -> visible and the fade duration to visible -> fading once
+  entered. Cross-checked RED again after this redesign by stashing only the two production files and
+  re-running against the new tests: exactly the 2 new/updated tests failed, for the expected reasons.
+  **Checks:** `cd hmi-app && npm test` -> 2429 passed (was 2427). `npx tsc -b` clean. `npm run lint`
+  clean (including this repo's `react-hooks/refs` rule, which caught and required redesigning an
+  earlier ref-based draft of the duration bookkeeping into the state-during-render form described
+  above).
+  **Next step (user, live check):** ask Prisma a voice question and confirm all three motions now
+  read as one smooth interpolation end to end: appearing (fade in from nothing), growing when speech
+  starts (no snap), and fading out at the end (opacity and size easing together, not size-then-fade).
 
 ## Progress
 

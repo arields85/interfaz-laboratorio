@@ -8,7 +8,12 @@ import type { VoiceEvent } from '../domain/voice.types';
 import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource, VoicePlaybackLifecycle } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
 import { PRISMA_ORB_VISUAL_DEFAULTS, savePrismaOrbVisualConfig } from '../config/prismaOrb.config';
-import { PRISMA_ORB_FADE_DURATION_MS, usePrismaOrbPresentation } from '../hooks/usePrismaOrbPresentation';
+import {
+    PRISMA_ORB_ENTRY_DURATION_MS,
+    PRISMA_ORB_FADE_DURATION_MS,
+    PRISMA_ORB_GROW_DURATION_MS,
+    usePrismaOrbPresentation,
+} from '../hooks/usePrismaOrbPresentation';
 import { usePrismaOrbVisualConfig } from '../hooks/usePrismaOrbVisualConfig';
 import PrismaOrbOverlay from './PrismaOrbOverlay';
 
@@ -48,6 +53,16 @@ const Harness = forwardRef<HarnessHandle, {
 
 function emit(ref: RefObject<HarnessHandle | null>): void {
     act(() => ref.current?.presentVoiceEvent(EVENT));
+    flushEntryAnimationFrame();
+}
+
+// T17b: the overlay's entry look (opacity 0 at the thinking scale) flips to
+// the real phase look via a double `requestAnimationFrame`, not a timer --
+// see PrismaOrbOverlay.tsx's `PrismaOrbOverlayVisible`. `vi.useFakeTimers()`
+// (enabled in this file's beforeEach) fakes `requestAnimationFrame` too, so
+// advancing by two simulated frames' worth of time flushes both rAF calls.
+function flushEntryAnimationFrame(): void {
+    act(() => { vi.advanceTimersByTime(32); });
 }
 
 describe('PrismaOrbOverlay', () => {
@@ -147,7 +162,7 @@ describe('PrismaOrbOverlay', () => {
                 '-translate-x-1/2',
                 'pointer-events-none',
                 'bg-transparent',
-                'transition-[opacity,transform]',
+                'transition-[opacity,scale]',
                 'motion-reduce:transition-none',
                 'motion-reduce:duration-0',
             );
@@ -208,5 +223,47 @@ describe('PrismaOrbOverlay', () => {
         act(() => vi.advanceTimersByTime(10_000));
         expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-100');
         expect(engine.play).toHaveBeenCalledTimes(1);
+    });
+
+    // T17b: root cause 2 (the overlay mounted directly in its target look,
+    // with nothing to transition from). This test intentionally does NOT
+    // flush the entry rAF, so it observes exactly the one frame the browser
+    // actually paints before the flip.
+    it('mounts one invisible frame before flipping to the thinking look, so the entry has a "from" state', () => {
+        const { engine } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+
+        act(() => ref.current?.presentVoiceEvent(EVENT));
+
+        const overlay = screen.getByTestId('prisma-orb-overlay');
+        expect(overlay).toHaveAttribute('data-phase', 'thinking');
+        expect(overlay).toHaveClass('scale-75', 'opacity-0');
+        expect(overlay).not.toHaveClass('opacity-60');
+        expect(overlay.style.transitionDuration).toBe(`${PRISMA_ORB_ENTRY_DURATION_MS}ms`);
+
+        act(() => { vi.advanceTimersByTime(32); });
+
+        expect(overlay).toHaveClass('scale-75', 'opacity-60');
+        // T17b: the flip itself (entering -> thinking) also uses the entry
+        // duration, not the 400 ms grow duration -- the grow duration is
+        // reserved for the later thinking -> visible transition below.
+        expect(overlay.style.transitionDuration).toBe(`${PRISMA_ORB_ENTRY_DURATION_MS}ms`);
+    });
+
+    it('uses the grow duration for thinking -> visible and the fade duration for visible -> fading, once entered', () => {
+        const { engine, lifecycles } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+        emit(ref);
+        const overlay = screen.getByTestId('prisma-orb-overlay');
+
+        act(() => lifecycles[0]?.onStarted?.());
+        expect(overlay).toHaveAttribute('data-phase', 'visible');
+        expect(overlay.style.transitionDuration).toBe(`${PRISMA_ORB_GROW_DURATION_MS}ms`);
+
+        act(() => lifecycles[0]?.onEnded?.());
+        expect(overlay).toHaveAttribute('data-phase', 'fading');
+        expect(overlay.style.transitionDuration).toBe(`${PRISMA_ORB_FADE_DURATION_MS}ms`);
     });
 });
