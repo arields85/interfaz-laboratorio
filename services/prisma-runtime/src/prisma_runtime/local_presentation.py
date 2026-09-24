@@ -180,6 +180,24 @@ def _fire_voice_prefetch(local_http: requests.Session, voice_url: str, event_id:
         pass
 
 
+def _fire_channel_a_voice_prefetch(local_http: requests.Session, voice_url: str, event_id: str, token: str) -> None:
+    """T13 unit (b): Channel A's on-outcome callback has no live HMI session
+    capability to forward (it is an async Telegram outcome callback, not a
+    request handler) -- reuses the exact same _fire_voice_prefetch
+    transport/route with a short-lived, event-scoped prefetch token in
+    place of a capability (see VoiceEventStore.mint_prefetch_token). Always
+    on its own background thread, never awaited, so a slow or failed
+    prefetch can never delay the Channel A poll loop from processing the
+    next update -- the Telegram answer has already been sent by the time
+    on_outcome (and this call) runs."""
+    threading.Thread(
+        target=_fire_voice_prefetch,
+        args=(local_http, voice_url, event_id, token),
+        name="PrismaVoicePrefetchChannelA",
+        daemon=True,
+    ).start()
+
+
 def normalize(value: Any) -> str:
     text = unicodedata.normalize("NFD", str(value or "").lower())
     return "".join(char for char in text if unicodedata.category(char) != "Mn")
@@ -917,7 +935,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 return
             publish_started = time.monotonic()
             try:
-                voice_events.publish(
+                event = voice_events.publish(
                     "",
                     envelope.answer_text,
                     owner_id=envelope.owner_id,
@@ -930,6 +948,20 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                     "Prisma voice event publish (channel A): elapsed_ms=%d",
                     round((time.monotonic() - publish_started) * 1000),
                 )
+            if event is None:
+                return
+            # T13 unit (b): start Gemini synthesis now, the same way /local/ask
+            # already does for HMI-originated questions, instead of waiting for
+            # the HMI's own poll-then-POST /prisma/speak-live round trip. This
+            # publish site has no live browser capability to forward (it runs
+            # on the Channel A poll thread, after the Telegram answer has
+            # already been sent), so a short-lived, event-scoped prefetch
+            # token stands in for it -- see VoiceEventStore.mint_prefetch_token.
+            # A missing token (event already gone) simply skips the prefetch;
+            # never blocks or fails the Channel A poll loop.
+            token = voice_events.mint_prefetch_token(event["id"], envelope.owner_id)
+            if token is not None:
+                _fire_channel_a_voice_prefetch(local_http, voice_url, event["id"], token)
 
         def build_channel_a_activation(token, desired, epoch, reservation):
             """Compose one real activation; the manager keeps this call lazy, so no
@@ -1105,7 +1137,17 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     @app.route("/internal/prisma/voice-events/<event_id>", methods=["GET"])
     def voice_event(event_id):
         owner_id = session_owner()
-        if owner_id is None: return session_error()
+        if owner_id is None:
+            # T13 unit (b): a Channel-A-minted prefetch token (see
+            # VoiceEventStore.mint_prefetch_token) stands in for an HMI
+            # session capability at a publish site with no live browser
+            # request in flight. Tried only after a normal session
+            # capability fails to resolve -- never weakens the ordinary
+            # browser-facing authorization path.
+            token = request.headers.get(CAPABILITY_HEADER, "")
+            owner_id = voice_events.resolve_prefetch_token(token, event_id) if token else None
+            if owner_id is None:
+                return session_error()
         event = voice_events.get_internal(event_id, owner_id)
         return (jsonify({"ok": False, "error": "VOICE_EVENT_NOT_FOUND"}), 404) if event is None else jsonify(event)
 
@@ -1154,9 +1196,10 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         # T10 unit 3: kick off Gemini synthesis now, on a background thread,
         # instead of waiting for the HMI's own poll-then-POST
         # /prisma/speak-live round trip. Fire-and-forget: never awaited,
-        # never allowed to delay this response. The Channel A on-outcome
-        # publish site does not have a live browser capability to forward at
-        # publish time, so it is intentionally out of scope here.
+        # never allowed to delay this response. (T13 unit (b) covers the
+        # Channel A on-outcome publish site with the same prefetch route,
+        # using a minted event-scoped token in place of a live capability --
+        # see channel_a_on_outcome/_fire_channel_a_voice_prefetch below.)
         capability = request.headers.get(CAPABILITY_HEADER, "")
         threading.Thread(
             target=_fire_voice_prefetch,

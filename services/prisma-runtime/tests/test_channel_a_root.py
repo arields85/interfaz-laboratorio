@@ -417,6 +417,19 @@ class ChannelARootCompositionTests(RootHarness, unittest.TestCase):
         ):
             self.patch_target(module, name, value, create=create)
         self.patch_target(local_presentation, "process_bot_identity_reservation", lambda: self.reservation)
+        # T13 unit (b): channel_a_on_outcome fires one legitimate background
+        # prefetch thread (_fire_channel_a_voice_prefetch) when it publishes
+        # a voice event. Capturing the function itself (rather than letting
+        # the real threading.Thread.start() run) keeps on_outcome tests
+        # synchronous and never trips this file's blanket thread/network
+        # containment -- exactly how test_local_presentation.py already
+        # patches out _fire_voice_prefetch for the analogous /local/ask path.
+        self.prefetch_calls = []
+        self.patch_target(
+            local_presentation,
+            "_fire_channel_a_voice_prefetch",
+            lambda local_http, voice_url, event_id, token: self.prefetch_calls.append((event_id, token)),
+        )
         self.app = self.compose_application()
 
     def activation_arguments(self):
@@ -535,6 +548,7 @@ class ChannelARootCompositionTests(RootHarness, unittest.TestCase):
         self.assertEqual(manager.guard_calls, [])
         self.assertIsNone(self.events.latest(OWNER_A))
         self.assertIsNone(self.events.latest(OWNER_B))
+        self.assertEqual(self.prefetch_calls, [])
 
     def test_on_outcome_publishes_for_the_exact_owner_with_an_empty_question(self):
         arguments = self.activation_arguments()
@@ -557,6 +571,15 @@ class ChannelARootCompositionTests(RootHarness, unittest.TestCase):
         self.assertIsNone(self.events.get(event["id"], OWNER_B))
         self.assertIsNone(self.events.get_internal(event["id"], OWNER_B))
 
+        # T13 unit (b): the same publish also fires one prefetch for the
+        # exact published event, carrying a token that resolves back to the
+        # exact owner -- and never a live HMI session capability, since this
+        # publish site has none.
+        self.assertEqual(len(self.prefetch_calls), 1)
+        prefetch_event_id, prefetch_token = self.prefetch_calls[0]
+        self.assertEqual(prefetch_event_id, event["id"])
+        self.assertEqual(self.events.resolve_prefetch_token(prefetch_token, event["id"]), OWNER_A)
+
     def test_on_outcome_fails_closed_when_the_publication_guard_refuses_or_raises(self):
         arguments = self.activation_arguments()
         manager = self.single(ChannelAManagerDouble)
@@ -575,6 +598,7 @@ class ChannelARootCompositionTests(RootHarness, unittest.TestCase):
                 self.assertEqual(manager.guard_calls, [envelope])
                 self.assertIsNone(self.events.latest(OWNER_A))
                 self.assertIsNone(self.events.latest(OWNER_B))
+                self.assertEqual(self.prefetch_calls, [])
 
     def test_published_answer_is_revoked_on_read_and_never_served_to_another_owner(self):
         arguments = self.activation_arguments()

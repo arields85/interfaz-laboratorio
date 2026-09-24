@@ -123,6 +123,57 @@ class LocalPresentationTests(unittest.TestCase):
 
         local_presentation_module._fire_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "cap-one")  # must not raise
 
+    def test_fire_channel_a_voice_prefetch_starts_a_background_thread(self) -> None:
+        """T13 unit (b): reuses _fire_voice_prefetch's own transport/route on
+        its own background thread, never inline, never blocking the caller
+        (the Channel A poll loop)."""
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        fired = threading.Event()
+        captured = {}
+
+        def fake_prefetch(local_http, voice_url, event_id, token):
+            captured["event_id"] = event_id
+            captured["token"] = token
+            fired.set()
+
+        local_http = Mock()
+        with patch.object(local_presentation_module, "_fire_voice_prefetch", side_effect=fake_prefetch):
+            local_presentation_module._fire_channel_a_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "token-one")
+
+        self.assertTrue(fired.wait(2), "channel A prefetch was never fired")
+        self.assertEqual(captured["event_id"], "event-one")
+        self.assertEqual(captured["token"], "token-one")
+
+    def test_voice_event_route_accepts_a_valid_prefetch_token_without_a_session(self) -> None:
+        """T13 unit (b): the internal voice-event lookup falls back to a
+        Channel-A-minted prefetch token when no HMI session capability
+        authorizes the request."""
+        with tempfile.TemporaryDirectory() as temporary:
+            events = VoiceEventStore()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            owner_id = "00000000-0000-4000-8000-000000000001"
+            event = events.publish("", "Respuesta de canal A", owner_id=owner_id)
+            token = events.mint_prefetch_token(event["id"], owner_id)
+
+            response = client.get(f"/internal/prisma/voice-events/{event['id']}", headers={"X-Prisma-Session-Capability": token})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["text"], "Respuesta de canal A")
+
+    def test_voice_event_route_rejects_an_unknown_token_and_a_missing_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            events = VoiceEventStore()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            owner_id = "00000000-0000-4000-8000-000000000001"
+            event = events.publish("", "Respuesta de canal A", owner_id=owner_id)
+
+            no_header = client.get(f"/internal/prisma/voice-events/{event['id']}")
+            bad_token = client.get(f"/internal/prisma/voice-events/{event['id']}", headers={"X-Prisma-Session-Capability": "not-a-real-token"})
+
+        self.assertEqual(no_header.status_code, 401)
+        self.assertEqual(bad_token.status_code, 401)
+
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()

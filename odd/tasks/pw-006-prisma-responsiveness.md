@@ -603,7 +603,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     patched `runtime_paths()` pointing at a temp file — never touches the real credential database).
     RED confirmed (`TypeError: unexpected keyword argument 'mtime_probe'` / `AttributeError: no
     attribute '_default_mtime_probe'`) before implementation. Full suite green (1417 passed).
-  - **Unit (d) — Gemini TTFB inside the runtime** (2026-09-24, commit pending). Root cause found and
+  - **Unit (d) — Gemini TTFB inside the runtime** (2026-09-24, commit `74cf145`). Root cause found and
     fixed, evidence-backed by a live standalone measurement (user-authorized real Gemini calls,
     short Spanish sentences, 4 requests total; script under the session scratchpad, not committed):
     httpx's own default `keepalive_expiry` is **5 seconds** (`httpx.Limits()`, confirmed by reading
@@ -632,6 +632,49 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     `test_default_client_factory_uses_the_short_verification_timeout`) updated to also expect
     `client_args={"limits": ANY}`. RED confirmed (both existing tests failed on the old call shape)
     before implementation. Full suite green (1418 passed).
+  - **Unit (b) — prefetch for Channel A answers** (2026-09-24, commit pending). Evidence: Channel
+    A's on-outcome publish site (`channel_a_on_outcome`, `local_presentation.py`) runs on the
+    Channel A poll thread, after the Telegram answer has already been sent — it is an async
+    callback, not a Flask request handler, so it has no live HMI session capability to forward the
+    way `/local/ask` does. Reused the existing `/internal/prisma/prefetch` route and
+    `_fire_voice_prefetch` transport unchanged; the missing authorization is bridged with a new
+    short-lived (60 s), event-scoped, server-minted bearer token
+    (`VoiceEventStore.mint_prefetch_token`/`resolve_prefetch_token`, `voice_events.py`, random via
+    `secrets.token_urlsafe(32)`, matching `hmi_sessions.py`'s own entropy standard) carried in the
+    exact same capability header/transport a real session capability would use — zero changes
+    needed in `voice_service.py`. Deliberately reusable within its TTL, not single-use:
+    `AudioCoordinator` revalidates the same event twice per job (subscribe()-time admission, then
+    again at dequeue — see `event_audio.py`'s own T12 comment on why both calls are load-bearing),
+    and a single-use token would break the second revalidation for the very job its first use
+    admitted. Never returned in any browser-facing response; only ever exchanged between the
+    presentation and voice processes over localhost. `local_presentation.py`'s
+    `/internal/prisma/voice-events/<event_id>` route (`voice_event()`) now falls back to
+    `resolve_prefetch_token` only after the normal session-capability path fails to resolve —
+    the ordinary HMI browser-facing authorization path is unchanged. New
+    `_fire_channel_a_voice_prefetch` wrapper spawns the actual background thread (mirrors
+    `/local/ask`'s existing pattern) so a slow/failed prefetch can never delay the Channel A poll
+    loop from processing the next update. `channel_a_on_outcome` mints the token and fires the
+    prefetch right after a successful publish; a missing token (event already gone) or an
+    unsuccessful publish (guard refused/raised) simply skips prefetch, never raises. Security note:
+    the prefetch endpoint itself never returns audio to its caller regardless of credential kind
+    (it closes its subscription immediately), so the actual confidentiality boundary — reading real
+    audio via `/prisma/speak-live` — still requires the HMI's own genuine session capability; a
+    leaked prefetch token could theoretically also authorize a `/prisma/speak-live` read since
+    token resolution is layered onto the same internal lookup route, but tokens are high-entropy,
+    short-lived and never sent to any browser, so this is judged an acceptable, documented
+    trade-off at the same trust level as the primary capability mechanism. Tests: new
+    `VoiceEventPrefetchTokenTests` (7, `test_voice_event_delivery.py` — round trip, wrong-event
+    rejection, malformed/unknown token, reusability within TTL across two resolves, expiry,
+    never authorizes a foreign owner); new tests in `test_local_presentation.py` (prefetch wrapper
+    starts a background thread; the voice-event route accepts a valid token without a session and
+    rejects an unknown token/missing session). `test_channel_a_root.py`'s offline-containment
+    harness (`RootHarness.install_offline_guards`) refuses every `threading.Thread.start()` and
+    real network call for its whole test class and asserts zero attempts at teardown — adapted
+    (not weakened) by patching the new `_fire_channel_a_voice_prefetch` wrapper itself (the same
+    technique `test_local_presentation.py` already uses for `_fire_voice_prefetch`), so the
+    real thread/network path is never exercised there while the "ignores"/"fails closed"/
+    "publishes" `on_outcome` tests now also assert the prefetch fired (or didn't) with the right
+    event id and a token that resolves back to the exact owner. Full suite green (1428 passed).
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
@@ -646,9 +689,18 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   `PrismaPcmWorkletBuffer`, the PCM audio worklet) was built to stop choppy audio and used in
   `local` runtime mode until `36eeaa4` (2026-09-17) hard-coded `playbackTransport: 'progressive'`
   (`prismaVoiceTtsAudioSource.ts:23`, 25 ms lead). It is dead code in production and does not
-  explain the current orb wait. Decision: keep it until live tests confirm the new model plays
-  without choppiness; then delete it. If choppiness returns, prefer a small (~200–300 ms) pre-roll
-  on the progressive path over re-enabling the 2.5 s buffer.
+  explain the current orb wait. **Revised user decision (2026-09-24): keep it as an opt-in bypass**
+  instead of deleting it. Scope: a toggle in the admin General Settings → Prisma tab, OFF by
+  default, stored in the shared Prisma voice configuration (runtime config, same as the rest of the
+  tab); when ON, the HMI plays voice answers through the buffered transport. Buffer duration
+  adjustable by the user: default 1.0 s, min 0.3 s, max 3.0 s, step 0.1 s (replaces the fixed
+  2.5 s policy; validated on both runtime and HMI). Copy (formal usted): toggle "Activar buffer de
+  audio"; legend "Acumula audio antes de reproducir cada respuesta. Actívelo si la voz de Prisma se
+  escucha entrecortada, por ejemplo con una conexión a internet inestable. Agrega una breve demora
+  al inicio de cada respuesta." (legend no longer states "un segundo", since the value is
+  adjustable). Re-verify the buffered path with tests and a live test on the new model before
+  exposing it (unused since 2026-09-17). Automatic underflow detection was considered and
+  rejected for now (complexity vs. a rare case). Queued after T13 and T14.
 
 ## Progress
 

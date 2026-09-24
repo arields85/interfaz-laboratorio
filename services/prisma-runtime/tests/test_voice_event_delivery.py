@@ -250,3 +250,75 @@ class VoiceEventDeliveryTests(unittest.TestCase):
             self.assertIsNotNone(self.retrieve(method, event))
             self.assertGreater(len(depths), before)
         self.assertEqual(depths, [0] * len(depths))
+
+
+class VoiceEventPrefetchTokenTests(unittest.TestCase):
+    """T13 unit (b): Channel A's on-outcome publish site has no live HMI
+    session capability to forward (it is an async Telegram outcome
+    callback, not a request handler). A short-lived, event-scoped,
+    server-minted token stands in for it so voice_service's existing
+    internal prefetch route (and its capability-shaped transport) can be
+    reused unchanged."""
+
+    def setUp(self):
+        self.now = 10.0
+        self.store = VoiceEventStore(clock=lambda: self.now, ttl_seconds=300)
+
+    def test_mint_returns_none_for_an_unknown_event(self):
+        self.assertIsNone(self.store.mint_prefetch_token("00000000-0000-4000-8000-000000000099", OWNER))
+
+    def test_mint_and_resolve_round_trip_returns_the_owner(self):
+        event = self.store.publish("q", "a", owner_id=OWNER)
+
+        token = self.store.mint_prefetch_token(event["id"], OWNER)
+
+        self.assertIsInstance(token, str)
+        self.assertGreaterEqual(len(token), 32)
+        self.assertEqual(self.store.resolve_prefetch_token(token, event["id"]), OWNER)
+
+    def test_resolve_rejects_a_token_bound_to_a_different_event(self):
+        event_one = self.store.publish("q1", "a1", owner_id=OWNER)
+        event_two = self.store.publish("q2", "a2", owner_id=OWNER)
+        token = self.store.mint_prefetch_token(event_one["id"], OWNER)
+
+        self.assertIsNone(self.store.resolve_prefetch_token(token, event_two["id"]))
+
+    def test_resolve_rejects_an_unknown_or_malformed_token(self):
+        event = self.store.publish("q", "a", owner_id=OWNER)
+
+        self.assertIsNone(self.store.resolve_prefetch_token("not-a-real-token", event["id"]))
+        self.assertIsNone(self.store.resolve_prefetch_token("", event["id"]))
+        self.assertIsNone(self.store.resolve_prefetch_token(None, event["id"]))
+
+    def test_resolve_reusable_within_ttl_survives_admission_and_dequeue_revalidation(self):
+        # AudioCoordinator revalidates the same event twice per job (once at
+        # subscribe()-time admission, once again at dequeue) -- see
+        # event_audio.py's own comment on why both calls are load-bearing.
+        # A single-use token would break the second revalidation for the
+        # very job its first use admitted, so the token must stay usable
+        # multiple times within its short window.
+        event = self.store.publish("q", "a", owner_id=OWNER)
+        token = self.store.mint_prefetch_token(event["id"], OWNER)
+
+        first = self.store.resolve_prefetch_token(token, event["id"])
+        second = self.store.resolve_prefetch_token(token, event["id"])
+
+        self.assertEqual(first, OWNER)
+        self.assertEqual(second, OWNER)
+
+    def test_resolve_rejects_an_expired_token(self):
+        event = self.store.publish("q", "a", owner_id=OWNER)
+        token = self.store.mint_prefetch_token(event["id"], OWNER)
+
+        self.now += 61.0  # past the short prefetch-token TTL
+
+        self.assertIsNone(self.store.resolve_prefetch_token(token, event["id"]))
+
+    def test_token_never_authorizes_a_foreign_owner(self):
+        event = self.store.publish("q", "a", owner_id=OWNER)
+        token = self.store.mint_prefetch_token(event["id"], OWNER)
+
+        owner = self.store.resolve_prefetch_token(token, event["id"])
+
+        self.assertNotEqual(owner, OTHER)
+        self.assertIsNone(self.store.get(event["id"], OTHER))

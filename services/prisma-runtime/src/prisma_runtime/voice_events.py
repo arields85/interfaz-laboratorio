@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
+import secrets
 import threading
 import time
 import uuid
@@ -67,14 +68,30 @@ def validate_voice_event(payload, expected_id, *, now=time.time, max_text_bytes=
 
 
 class VoiceEventStore:
-    def __init__(self, *, clock=time.time, ttl_seconds=300, max_events=16, max_total_events=256):
+    def __init__(
+        self,
+        *,
+        clock=time.time,
+        ttl_seconds=300,
+        max_events=16,
+        max_total_events=256,
+        prefetch_token_ttl_seconds=60.0,
+        max_prefetch_tokens=64,
+    ):
         self.clock = clock
         self.ttl_seconds = ttl_seconds
         self.max_events = max_events
         self.max_total_events = max_total_events
+        self.prefetch_token_ttl_seconds = prefetch_token_ttl_seconds
+        self.max_prefetch_tokens = max_prefetch_tokens
         self.lock = threading.RLock()
         self._events = OrderedDict()
         self._latest = {}
+        # T13 unit (b): short-lived, event-scoped, server-minted bearer
+        # tokens standing in for an HMI session capability at a publish site
+        # with no live browser request in flight (Channel A's on-outcome
+        # callback). token -> (event_id, owner_id, expires_at).
+        self._prefetch_tokens: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
         self._empty_event = {"id": str(uuid.uuid4()), "timestamp": _timestamp(), "text": "", "question": "inicio-local"}
 
     @staticmethod
@@ -155,6 +172,64 @@ class VoiceEventStore:
     def get_internal(self, event_id, owner_id):
         event = self.get(event_id, owner_id)
         return {**event, "ownerId": str(owner_id)} if event is not None else None
+
+    def mint_prefetch_token(self, event_id, owner_id):
+        """T13 unit (b): a background (non-browser) publish site -- Channel
+        A's on-outcome callback -- has no live HMI session capability to
+        forward at publish time, but it does have direct in-process
+        knowledge of the exact event id and owner it just published. This
+        mints a random (secrets.token_urlsafe, matching hmi_sessions.py's
+        own entropy standard), short-lived, event-scoped bearer token that
+        voice_service's existing internal prefetch route can carry in the
+        SAME capability header/transport unchanged, without ever needing a
+        real HMI session capability. Reusable within its short TTL (not
+        single-use): AudioCoordinator revalidates the same event twice per
+        job (subscribe()-time admission, then again at dequeue), and a
+        single-use token would break the second revalidation for the very
+        job its first use admitted. Never included in any browser-facing
+        response. Returns None if the event does not exist (nothing to
+        prefetch)."""
+        try:
+            canonical = str(uuid.UUID(str(event_id)))
+        except (ValueError, TypeError, AttributeError):
+            return None
+        now = self.clock()
+        with self.lock:
+            self._purge(now)
+            if canonical not in self._events:
+                return None
+            self._purge_prefetch_tokens_locked(now)
+            if len(self._prefetch_tokens) >= self.max_prefetch_tokens:
+                self._prefetch_tokens.popitem(last=False)
+            token = secrets.token_urlsafe(32)
+            self._prefetch_tokens[token] = (canonical, str(owner_id), now + self.prefetch_token_ttl_seconds)
+        return token
+
+    def resolve_prefetch_token(self, token, event_id):
+        """Validate a prefetch token against the exact event id it was
+        minted for; returns the bound owner id on success, None otherwise
+        (missing, malformed, expired, or bound to a different event)."""
+        if not isinstance(token, str) or not token:
+            return None
+        try:
+            canonical = str(uuid.UUID(str(event_id)))
+        except (ValueError, TypeError, AttributeError):
+            return None
+        now = self.clock()
+        with self.lock:
+            self._purge_prefetch_tokens_locked(now)
+            record = self._prefetch_tokens.get(token)
+        if record is None:
+            return None
+        bound_event_id, owner_id, expires_at = record
+        if bound_event_id != canonical or expires_at <= now:
+            return None
+        return owner_id
+
+    def _purge_prefetch_tokens_locked(self, now):
+        expired = [token for token, (_eid, _oid, expires_at) in self._prefetch_tokens.items() if expires_at <= now]
+        for token in expired:
+            self._prefetch_tokens.pop(token, None)
 
     def remove_owner(self, owner_id):
         owner_id = str(owner_id)
