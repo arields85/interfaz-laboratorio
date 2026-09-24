@@ -880,6 +880,21 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
       confirmed: the module tests via `ImportError` before the module existed; the two wiring tests by
       temporarily removing the `install_access_log_query_redaction()` call from each `main()` and
       confirming both failed, then restoring. Full suite: 1451 passed.
+- [ ] **T16 — Browser-side voice timeline and first-question miss (live test 2026-09-24 09:39–09:51).**
+  Server side after T13/T13b: publish → `/prisma/speak-live` 117–143 ms (SSE works), server first
+  chunk 482–762 ms (first request 1358 ms), cache hit 28 ms, credential 0 ms, no capability in
+  logs. The user still perceives the orb waiting before audio, and after the launcher restart the
+  first question showed neither orb nor voice although the server answered 200. Read-only browser
+  diagnosis: Vite proxy and client stream reader are pass-through (parent's buffering suspicion
+  refuted, `vite.prismaProxy.config.ts:85-142`, `prismaSessionClient.ts:273-333`); the engine's
+  `log` defaults to a no-op (`prismaVoiceAudioEngine.ts:276`) and `prisma-browser-metric` events have
+  no production listener, so the browser timeline is invisible. First-question candidates: session
+  epoch reset race (a concurrent 401 invalidates the epoch → orb hidden and the already-answered
+  speak-live response discarded as stale, `prismaSessionClient.ts:203-206,335-350`,
+  `usePrismaOrbPresentation.ts:97-103`, `prismaVoiceTtsAudioSource.ts:39-41`) or autoplay
+  (`ensureContextRunning`, `prismaVoiceAudioEngine.ts:928-937`). Scope: dev-guarded console
+  instrumentation (engine `log`, metric listener, reset/401 warnings), then one live repro, then fix
+  the confirmed cause.
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
