@@ -15,11 +15,47 @@ export interface PrismaRoboticVoiceConfig {
     normalizationMaxGain: number;
 }
 
+export type PrismaVoicePlaybackBufferMode = 'automatic' | 'manual';
+
+export interface PrismaVoicePlaybackBufferConfig {
+    mode: PrismaVoicePlaybackBufferMode;
+    manualSeconds: number;
+}
+
 export interface PrismaVoiceConfig {
     effectEnabled: boolean;
     preset: PrismaVoicePreset;
     effectIntensity: number;
     robotic: PrismaRoboticVoiceConfig;
+    playbackBuffer: PrismaVoicePlaybackBufferConfig;
+}
+
+// T4 design decision (2026-09-24, user-approved 2026-09-24): manual buffer
+// range 0.1-3.0 s in 0.1 s steps, default 0.2 s (the T22 proven baseline).
+// Kept as named constants (not re-derived from the defaults below) so T5's
+// UI control and the runtime's mirrored bounds have one documented source
+// each to point back to.
+export const PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN = 0.1;
+export const PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MAX = 3.0;
+export const PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_STEP = 0.1;
+
+// Floating-point tolerance for the 0.1 s grid check below (e.g. 0.1 + 0.2 in
+// IEEE754 is 0.30000000000000004): comparing against this epsilon instead of
+// exact equality accepts every intended step while still rejecting a value
+// like 0.25 that is genuinely off the grid.
+const PRISMA_VOICE_PLAYBACK_BUFFER_GRID_EPSILON = 1e-6;
+const PRISMA_VOICE_PLAYBACK_BUFFER_BOUNDS_EPSILON = 1e-9;
+
+function isPrismaVoicePlaybackBufferManualSecondsValid(value: number): boolean {
+    if (value < PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN - PRISMA_VOICE_PLAYBACK_BUFFER_BOUNDS_EPSILON) {
+        return false;
+    }
+    if (value > PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MAX + PRISMA_VOICE_PLAYBACK_BUFFER_BOUNDS_EPSILON) {
+        return false;
+    }
+
+    const steps = value / PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_STEP;
+    return Math.abs(steps - Math.round(steps)) < PRISMA_VOICE_PLAYBACK_BUFFER_GRID_EPSILON;
 }
 
 export interface PrismaVoiceConfigValidationIssue {
@@ -49,12 +85,17 @@ export const PRISMA_VOICE_CONFIG_DEFAULTS = Object.freeze({
         normalizationTarget: 29_500,
         normalizationMaxGain: 1.6,
     }),
+    playbackBuffer: Object.freeze({
+        mode: 'automatic',
+        manualSeconds: 0.2,
+    }),
 } as const satisfies Readonly<PrismaVoiceConfig>);
 
 export function clonePrismaVoiceConfig(config: PrismaVoiceConfig): PrismaVoiceConfig {
     return {
         ...config,
         robotic: { ...config.robotic },
+        playbackBuffer: { ...config.playbackBuffer },
     };
 }
 
@@ -76,13 +117,16 @@ export function arePrismaVoiceConfigsEqual(
         && left.robotic.echo2DelayMs === right.robotic.echo2DelayMs
         && left.robotic.echo2Gain === right.robotic.echo2Gain
         && left.robotic.normalizationTarget === right.robotic.normalizationTarget
-        && left.robotic.normalizationMaxGain === right.robotic.normalizationMaxGain;
+        && left.robotic.normalizationMaxGain === right.robotic.normalizationMaxGain
+        && left.playbackBuffer.mode === right.playbackBuffer.mode
+        && left.playbackBuffer.manualSeconds === right.playbackBuffer.manualSeconds;
 }
 
 export function createDefaultPrismaVoiceConfig(): PrismaVoiceConfig {
     return {
         ...PRISMA_VOICE_CONFIG_DEFAULTS,
         robotic: { ...PRISMA_VOICE_CONFIG_DEFAULTS.robotic },
+        playbackBuffer: { ...PRISMA_VOICE_CONFIG_DEFAULTS.playbackBuffer },
     };
 }
 
@@ -182,12 +226,50 @@ export function validatePrismaVoiceConfig(value: unknown): PrismaVoiceConfigVali
         }
     }
 
+    // T4 backward compatibility: a config persisted before this field existed
+    // has no `playbackBuffer` at all -- default it here instead of rejecting
+    // the whole (otherwise valid) config, so an old stored/served config
+    // loads as Automatic with no error. A `playbackBuffer` that IS present
+    // is validated strictly, same as every other field.
+    let resolvedPlaybackBuffer: PrismaVoicePlaybackBufferConfig = {
+        ...PRISMA_VOICE_CONFIG_DEFAULTS.playbackBuffer,
+    };
+    if ('playbackBuffer' in value) {
+        const playbackBuffer = value.playbackBuffer;
+        if (!isRecord(playbackBuffer)) {
+            issues.push({ path: 'playbackBuffer', message: 'playbackBuffer must be an object.' });
+        } else if (!('mode' in playbackBuffer) || !('manualSeconds' in playbackBuffer)) {
+            issues.push({ path: 'playbackBuffer', message: 'playbackBuffer is incomplete.' });
+        } else {
+            const mode = playbackBuffer.mode;
+            if (mode !== 'automatic' && mode !== 'manual') {
+                issues.push({ path: 'playbackBuffer.mode', message: 'playbackBuffer.mode must be "automatic" or "manual".' });
+            }
+
+            const manualSeconds = playbackBuffer.manualSeconds;
+            if (typeof manualSeconds !== 'number' || !Number.isFinite(manualSeconds)) {
+                issues.push({ path: 'playbackBuffer.manualSeconds', message: 'playbackBuffer.manualSeconds must be a finite number.' });
+            } else if (!isPrismaVoicePlaybackBufferManualSecondsValid(manualSeconds)) {
+                issues.push({
+                    path: 'playbackBuffer.manualSeconds',
+                    message: `playbackBuffer.manualSeconds must be between ${PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN} and `
+                        + `${PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MAX} in ${PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_STEP} s steps.`,
+                });
+            } else if (mode === 'automatic' || mode === 'manual') {
+                resolvedPlaybackBuffer = { mode, manualSeconds };
+            }
+        }
+    }
+
     if (issues.length > 0) {
         return { valid: false, issues };
     }
 
     return {
         valid: true,
-        value: clonePrismaVoiceConfig(value as unknown as PrismaVoiceConfig),
+        value: {
+            ...clonePrismaVoiceConfig(value as unknown as PrismaVoiceConfig),
+            playbackBuffer: resolvedPlaybackBuffer,
+        },
     };
 }

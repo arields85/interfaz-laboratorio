@@ -2,25 +2,37 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { VoiceEvent } from '../domain/voice.types';
+import type { PrismaVoiceConfig } from '../domain/prismaVoiceConfig';
 import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource, VoicePlaybackLifecycle } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
 import { prismaSessionClient } from '../services/prismaSessionClient';
 import { PRISMA_BROWSER_METRIC_EVENT } from '../services/prismaVoiceMetrics';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
 
-// T3: the hook builds a real engine (mocked here) with a browser-backed
-// Automatic prebuffer policy (also mocked) when the caller injects no
-// `engine` option -- every other test in this file injects one, so the
-// real `PrismaVoiceAudioEngine` constructor path below is only exercised
-// by the dedicated "builds the production engine" test.
-const { engineConstructorSpy, fakePrebufferPolicy, prebufferPolicyFactorySpy } = vi.hoisted(() => {
+// T3/T4: the hook builds a real engine (mocked here) with a browser-backed
+// Configured prebuffer policy (Automatic/Manual, also mocked) when the
+// caller injects no `engine` option -- every other test in this file
+// injects one, so the real `PrismaVoiceAudioEngine` constructor path below
+// is only exercised by the dedicated "builds the production engine" tests.
+const {
+    engineConstructorSpy,
+    fakePrebufferPolicy,
+    prebufferPolicyFactorySpy,
+    usePrismaVoiceConfigMock,
+} = vi.hoisted(() => {
     const engineConstructorSpy = vi.fn();
     const fakePrebufferPolicy = {
         resolvePrebufferMs: vi.fn(() => ({ prebufferMs: 777, mode: 'automatic' as const })),
         recordNeededPrebufferMs: vi.fn(),
     };
     const prebufferPolicyFactorySpy = vi.fn(() => fakePrebufferPolicy);
-    return { engineConstructorSpy, fakePrebufferPolicy, prebufferPolicyFactorySpy };
+    const usePrismaVoiceConfigMock = vi.fn(() => ({
+        data: null,
+        error: null,
+        isEnabled: true,
+        isLoading: false,
+    }));
+    return { engineConstructorSpy, fakePrebufferPolicy, prebufferPolicyFactorySpy, usePrismaVoiceConfigMock };
 });
 
 vi.mock('../services/prismaVoiceAudioEngine', async (importOriginal) => {
@@ -40,7 +52,11 @@ vi.mock('../services/prismaVoiceAudioEngine', async (importOriginal) => {
 });
 
 vi.mock('../services/prismaVoicePrebufferController', () => ({
-    createBrowserPrismaVoiceAutomaticPrebufferPolicy: prebufferPolicyFactorySpy,
+    createBrowserPrismaVoiceConfiguredPrebufferPolicy: prebufferPolicyFactorySpy,
+}));
+
+vi.mock('../queries/usePrismaVoiceConfig', () => ({
+    usePrismaVoiceConfig: usePrismaVoiceConfigMock,
 }));
 
 import {
@@ -102,7 +118,10 @@ function attachOrb(result: { current: { orbRef: { current: LedaOrbElement | null
 }
 
 describe('usePrismaOrbPresentation', () => {
-    afterEach(() => vi.useRealTimers());
+    afterEach(() => {
+        vi.useRealTimers();
+        usePrismaVoiceConfigMock.mockReturnValue({ data: null, error: null, isEnabled: true, isLoading: false });
+    });
 
     it('creates one progressive source request and enters the thinking phase', () => {
         const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
@@ -372,12 +391,61 @@ describe('usePrismaOrbPresentation', () => {
         });
     });
 
-    it('T3: builds the production engine with a browser-backed Automatic prebuffer policy when no engine is injected', () => {
+    it('T3/T4: builds the production engine with a browser-backed Configured prebuffer policy when no engine is injected', () => {
         const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
 
         renderHook(() => usePrismaOrbPresentation({ audioSourceFactory: factory }));
 
         expect(prebufferPolicyFactorySpy).toHaveBeenCalledTimes(1);
+        expect(prebufferPolicyFactorySpy).toHaveBeenCalledWith(expect.any(Function));
         expect(engineConstructorSpy).toHaveBeenCalledWith({ prebufferPolicy: fakePrebufferPolicy });
+    });
+
+    it('T4: the getter passed to the Configured policy factory reads the current voice config playbackBuffer', () => {
+        prebufferPolicyFactorySpy.mockClear();
+        const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
+        const config = {
+            playbackBuffer: { mode: 'manual', manualSeconds: 0.9 },
+        } as unknown as PrismaVoiceConfig;
+        usePrismaVoiceConfigMock.mockReturnValue({ data: config, error: null, isEnabled: true, isLoading: false });
+
+        renderHook(() => usePrismaOrbPresentation({ audioSourceFactory: factory }));
+
+        const getPlaybackBuffer = prebufferPolicyFactorySpy.mock.calls.at(-1)?.[0] as () => unknown;
+        expect(getPlaybackBuffer()).toEqual({ mode: 'manual', manualSeconds: 0.9 });
+    });
+
+    it('T4: the getter reflects a later voice config value without rebuilding the engine (no engine rebuild on config change)', () => {
+        prebufferPolicyFactorySpy.mockClear();
+        engineConstructorSpy.mockClear();
+        const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
+        usePrismaVoiceConfigMock.mockReturnValue({ data: null, error: null, isEnabled: true, isLoading: false });
+
+        const { rerender } = renderHook(() => usePrismaOrbPresentation({ audioSourceFactory: factory }));
+        const getPlaybackBuffer = prebufferPolicyFactorySpy.mock.calls.at(-1)?.[0] as () => unknown;
+        expect(getPlaybackBuffer()).toBeNull();
+
+        const config = {
+            playbackBuffer: { mode: 'manual', manualSeconds: 0.5 },
+        } as unknown as PrismaVoiceConfig;
+        usePrismaVoiceConfigMock.mockReturnValue({ data: config, error: null, isEnabled: true, isLoading: false });
+        rerender();
+
+        expect(getPlaybackBuffer()).toEqual({ mode: 'manual', manualSeconds: 0.5 });
+        // The engine (and so the policy factory) was built exactly once,
+        // across both renders -- only the getter's resolved value changed.
+        expect(prebufferPolicyFactorySpy).toHaveBeenCalledTimes(1);
+        expect(engineConstructorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('T4: falls back to null (Automatic) while the voice config is unavailable', () => {
+        prebufferPolicyFactorySpy.mockClear();
+        const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
+        usePrismaVoiceConfigMock.mockReturnValue({ data: null, error: new Error('failed'), isEnabled: true, isLoading: false });
+
+        renderHook(() => usePrismaOrbPresentation({ audioSourceFactory: factory }));
+
+        const getPlaybackBuffer = prebufferPolicyFactorySpy.mock.calls.at(-1)?.[0] as () => unknown;
+        expect(getPlaybackBuffer()).toBeNull();
     });
 });

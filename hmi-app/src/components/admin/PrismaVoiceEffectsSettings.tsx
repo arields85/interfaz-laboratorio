@@ -19,7 +19,7 @@ import {
 
 interface PrismaVoiceEffectsSettingsProps {
     config: PrismaVoiceConfig;
-    onFieldChange: <Key extends Exclude<keyof PrismaVoiceConfig, 'robotic'>>(
+    onFieldChange: <Key extends Exclude<keyof PrismaVoiceConfig, 'robotic' | 'playbackBuffer'>>(
         key: Key,
         value: PrismaVoiceConfig[Key],
     ) => void;

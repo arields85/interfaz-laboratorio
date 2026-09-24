@@ -3,13 +3,14 @@ import type { RefObject } from 'react';
 
 import type { PrismaAudioMetricPhase } from '../domain/prismaAudioMetric.types';
 import type { VoiceEvent } from '../domain/voice.types';
+import { usePrismaVoiceConfig } from '../queries/usePrismaVoiceConfig';
 import { PrismaVoiceAudioEngine } from '../services/prismaVoiceAudioEngine';
 import type {
     PrismaOrbAudioTarget,
     PrismaVoiceAudioEngineContract,
 } from '../services/prismaVoiceAudioEngine';
 import { prismaSessionClient } from '../services/prismaSessionClient';
-import { createBrowserPrismaVoiceAutomaticPrebufferPolicy } from '../services/prismaVoicePrebufferController';
+import { createBrowserPrismaVoiceConfiguredPrebufferPolicy } from '../services/prismaVoicePrebufferController';
 import { recordOrbPhase } from '../services/prismaVoiceTimelineRecorder';
 import { createPrismaVoiceTtsAudioSource } from '../services/prismaVoiceTtsAudioSource';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
@@ -156,15 +157,33 @@ export function usePrismaOrbPresentation(
     const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const thinkingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // T4: the shared Prisma voice config carries the user's Automatic/Manual
+    // mode choice (`playbackBuffer`). This is the viewer's only current
+    // reader of the config query (previously read only by the admin Prisma
+    // tab) -- calling it here, in the same hook that already owns the
+    // engine/prebuffer-policy wiring, keeps that concern local instead of
+    // threading a config prop down from `App.tsx`. `voiceConfigRef` is kept
+    // current on every render (a plain "latest ref" write, not an effect)
+    // so the policy below -- built once, for the engine's whole lifetime --
+    // reads the *current* value at `resolvePrebufferMs()` call time instead
+    // of a stale snapshot from whenever the engine happened to be built.
+    const voiceConfigQuery = usePrismaVoiceConfig();
+    const voiceConfigRef = useRef(voiceConfigQuery.data);
+    voiceConfigRef.current = voiceConfigQuery.data;
+
     if (engineRef.current === null) {
-        // T3: production answers always resolve the prebuffer through the
-        // browser-backed Automatic policy (T2's continuous estimator +
-        // localStorage history) -- mode selection between Automatic and
-        // Manual (T4) will choose which policy is built here instead, but
-        // the engine's own `PrismaVoicePrebufferPolicy` dependency and call
-        // sites do not change.
+        // T3/T4: production answers resolve the prebuffer through a
+        // browser-backed policy that picks Automatic (T2's continuous
+        // estimator + localStorage history) or Manual (the configured
+        // seconds) per answer, from the current voice config read above.
+        // Unavailable/loading/failed config (`null`) falls back to
+        // Automatic.
         engineRef.current = options.engine
-            ?? new PrismaVoiceAudioEngine({ prebufferPolicy: createBrowserPrismaVoiceAutomaticPrebufferPolicy() });
+            ?? new PrismaVoiceAudioEngine({
+                prebufferPolicy: createBrowserPrismaVoiceConfiguredPrebufferPolicy(
+                    () => voiceConfigRef.current?.playbackBuffer ?? null,
+                ),
+            });
     }
 
     const clearFadeTimer = (): void => {

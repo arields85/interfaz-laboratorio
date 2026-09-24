@@ -6,9 +6,10 @@ import {
     createDefaultPrismaVoiceConfig,
     type PrismaRoboticVoiceConfig,
     type PrismaVoiceConfig,
+    type PrismaVoicePlaybackBufferConfig,
 } from '../domain/prismaVoiceConfig';
 
-type PrismaVoiceScalarKey = Exclude<keyof PrismaVoiceConfig, 'robotic'>;
+type PrismaVoiceScalarKey = Exclude<keyof PrismaVoiceConfig, 'robotic' | 'playbackBuffer'>;
 
 function rebaseDraft(
     sentSnapshot: PrismaVoiceConfig,
@@ -22,6 +23,19 @@ function rebaseDraft(
         }
     }
 
+    // Field-by-field like the top-level scalars below (not the generic
+    // per-key loop `robotic` uses above): `PrismaVoicePlaybackBufferConfig`
+    // mixes a string-union `mode` with a numeric `manualSeconds`, so a
+    // single indexed assignment across both keys does not type-check.
+    const playbackBuffer: PrismaVoicePlaybackBufferConfig = {
+        mode: currentDraft.playbackBuffer.mode !== sentSnapshot.playbackBuffer.mode
+            ? currentDraft.playbackBuffer.mode
+            : remoteConfig.playbackBuffer.mode,
+        manualSeconds: currentDraft.playbackBuffer.manualSeconds !== sentSnapshot.playbackBuffer.manualSeconds
+            ? currentDraft.playbackBuffer.manualSeconds
+            : remoteConfig.playbackBuffer.manualSeconds,
+    };
+
     return {
         effectEnabled: currentDraft.effectEnabled !== sentSnapshot.effectEnabled
             ? currentDraft.effectEnabled
@@ -33,6 +47,7 @@ function rebaseDraft(
             ? currentDraft.effectIntensity
             : remoteConfig.effectIntensity,
         robotic,
+        playbackBuffer,
     };
 }
 
@@ -67,6 +82,20 @@ export function usePrismaVoiceConfigDraft(initialConfig?: PrismaVoiceConfig) {
             draft: {
                 ...current.draft,
                 robotic: { ...current.draft.robotic, [key]: value },
+            },
+            acceptsRemoteInitialization: false,
+        }));
+    };
+
+    const updatePlaybackBufferField = <Key extends keyof PrismaVoicePlaybackBufferConfig>(
+        key: Key,
+        value: PrismaVoicePlaybackBufferConfig[Key],
+    ) => {
+        setState((current) => ({
+            ...current,
+            draft: {
+                ...current.draft,
+                playbackBuffer: { ...current.draft.playbackBuffer, [key]: value },
             },
             acceptsRemoteInitialization: false,
         }));
@@ -113,6 +142,7 @@ export function usePrismaVoiceConfigDraft(initialConfig?: PrismaVoiceConfig) {
         baselineGeneration: state.baselineGeneration,
         updateField,
         updateRoboticField,
+        updatePlaybackBufferField,
         commitDraft,
         commitRemote,
         initializeFromRemote,

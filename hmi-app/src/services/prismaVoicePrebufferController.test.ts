@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { PrismaVoicePrebufferHistory } from '../domain/prismaVoicePrebufferHistory.types';
 import { PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS, PRISMA_PREBUFFER_ESTIMATE_SAFETY_MS } from './prismaVoicePrebufferEstimator';
 import {
     createPrismaVoiceAutomaticPrebufferPolicy,
+    createPrismaVoiceConfiguredPrebufferPolicy,
+    createPrismaVoiceManualPrebufferPolicy,
     PrismaVoicePrebufferController,
 } from './prismaVoicePrebufferController';
 import { PrismaVoicePrebufferHistoryStorage } from './prismaVoicePrebufferHistoryStorage';
@@ -109,5 +111,99 @@ describe('createPrismaVoiceAutomaticPrebufferPolicy', () => {
         now = 2_000;
 
         expect(policy.resolvePrebufferMs().prebufferMs).toBe(900 + PRISMA_PREBUFFER_ESTIMATE_SAFETY_MS);
+    });
+});
+
+describe('createPrismaVoiceManualPrebufferPolicy', () => {
+    it('T4: resolves the configured manual seconds, tagged as manual, ignoring history', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 1_000);
+        controller.recordMeasurement(2_500); // would push the automatic estimate way up
+        const policy = createPrismaVoiceManualPrebufferPolicy(controller, () => 0.9);
+
+        expect(policy.resolvePrebufferMs()).toEqual({ prebufferMs: 900, mode: 'manual' });
+    });
+
+    it('T4: re-reads the manual seconds getter on every resolve (no caching)', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 1_000);
+        let manualSeconds = 0.2;
+        const policy = createPrismaVoiceManualPrebufferPolicy(controller, () => manualSeconds);
+
+        expect(policy.resolvePrebufferMs().prebufferMs).toBe(200);
+        manualSeconds = 1.2;
+        expect(policy.resolvePrebufferMs().prebufferMs).toBe(1_200);
+    });
+
+    it('T4: still forwards a recorded measurement to the shared controller/history (design item 4)', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 5_000);
+        const policy = createPrismaVoiceManualPrebufferPolicy(controller, () => 0.2);
+
+        policy.recordNeededPrebufferMs(300);
+
+        expect(storage.read()).toEqual([{ neededPrebufferMs: 300, recordedAtMs: 5_000 }]);
+    });
+});
+
+describe('createPrismaVoiceConfiguredPrebufferPolicy', () => {
+    it('T4: resolves Automatic when the getter reports mode "automatic"', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 1_000);
+        const policy = createPrismaVoiceConfiguredPrebufferPolicy(
+            controller,
+            () => ({ mode: 'automatic', manualSeconds: 0.9 }),
+        );
+
+        expect(policy.resolvePrebufferMs()).toEqual({
+            prebufferMs: PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS,
+            mode: 'automatic',
+        });
+    });
+
+    it('T4: resolves Manual with the configured seconds when the getter reports mode "manual"', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 1_000);
+        const policy = createPrismaVoiceConfiguredPrebufferPolicy(
+            controller,
+            () => ({ mode: 'manual', manualSeconds: 0.7 }),
+        );
+
+        expect(policy.resolvePrebufferMs()).toEqual({ prebufferMs: 700, mode: 'manual' });
+    });
+
+    it('T4: falls back to Automatic when the config is unavailable (loading/failed/null)', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 1_000);
+        const policy = createPrismaVoiceConfiguredPrebufferPolicy(controller, () => null);
+
+        expect(policy.resolvePrebufferMs()).toEqual({
+            prebufferMs: PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS,
+            mode: 'automatic',
+        });
+    });
+
+    it('T4: re-reads the getter on every resolve, switching modes across answers without rebuilding the policy', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 1_000);
+        const getSnapshot = vi.fn(() => ({ mode: 'automatic' as const, manualSeconds: 0.2 }));
+        const policy = createPrismaVoiceConfiguredPrebufferPolicy(controller, getSnapshot);
+
+        expect(policy.resolvePrebufferMs().mode).toBe('automatic');
+        getSnapshot.mockReturnValue({ mode: 'manual', manualSeconds: 0.6 });
+        expect(policy.resolvePrebufferMs()).toEqual({ prebufferMs: 600, mode: 'manual' });
+    });
+
+    it('T4: forwards a recorded measurement to the shared controller regardless of the current mode (design item 4)', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 5_000);
+        const policy = createPrismaVoiceConfiguredPrebufferPolicy(
+            controller,
+            () => ({ mode: 'manual', manualSeconds: 0.2 }),
+        );
+
+        policy.recordNeededPrebufferMs(300);
+
+        expect(storage.read()).toEqual([{ neededPrebufferMs: 300, recordedAtMs: 5_000 }]);
     });
 });

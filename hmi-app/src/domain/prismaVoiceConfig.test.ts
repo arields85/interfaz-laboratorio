@@ -27,9 +27,14 @@ describe('PrismaVoiceConfig', () => {
                 normalizationTarget: 29_500,
                 normalizationMaxGain: 1.6,
             },
+            playbackBuffer: {
+                mode: 'automatic',
+                manualSeconds: 0.2,
+            },
         });
         expect(Object.isFrozen(PRISMA_VOICE_CONFIG_DEFAULTS)).toBe(true);
         expect(Object.isFrozen(PRISMA_VOICE_CONFIG_DEFAULTS.robotic)).toBe(true);
+        expect(Object.isFrozen(PRISMA_VOICE_CONFIG_DEFAULTS.playbackBuffer)).toBe(true);
     });
 
     it('creates independent mutable configs without sharing nested references', () => {
@@ -53,6 +58,12 @@ describe('PrismaVoiceConfig', () => {
         }],
         ['effectIntensity', (config: ReturnType<typeof createDefaultPrismaVoiceConfig>) => {
             config.effectIntensity -= 1;
+        }],
+        ['playbackBuffer.mode', (config: ReturnType<typeof createDefaultPrismaVoiceConfig>) => {
+            config.playbackBuffer.mode = 'manual';
+        }],
+        ['playbackBuffer.manualSeconds', (config: ReturnType<typeof createDefaultPrismaVoiceConfig>) => {
+            config.playbackBuffer.manualSeconds += 0.1;
         }],
     ])('detects a top-level %s difference', (_field, changeConfig) => {
         const left = createDefaultPrismaVoiceConfig();
@@ -98,6 +109,73 @@ describe('PrismaVoiceConfig', () => {
         if (result.valid) {
             expect(result.value).not.toBe(config);
             expect(result.value.robotic).not.toBe(config.robotic);
+            expect(result.value.playbackBuffer).not.toBe(config.playbackBuffer);
+        }
+    });
+
+    it('backfills a missing playbackBuffer with the default (T4 backward compatibility)', () => {
+        const legacyConfig = createDefaultPrismaVoiceConfig() as Partial<ReturnType<typeof createDefaultPrismaVoiceConfig>>;
+        delete legacyConfig.playbackBuffer;
+
+        const result = validatePrismaVoiceConfig(legacyConfig);
+
+        expect(result).toEqual({
+            valid: true,
+            value: {
+                ...createDefaultPrismaVoiceConfig(),
+                playbackBuffer: { mode: 'automatic', manualSeconds: 0.2 },
+            },
+        });
+    });
+
+    it.each([
+        [0.1],
+        [0.2],
+        [1.5],
+        [3.0],
+    ])('accepts a manual buffer of %s seconds, on the grid and within bounds', (manualSeconds) => {
+        const config = {
+            ...createDefaultPrismaVoiceConfig(),
+            playbackBuffer: { mode: 'manual' as const, manualSeconds },
+        };
+
+        const result = validatePrismaVoiceConfig(config);
+
+        expect(result).toEqual({ valid: true, value: config });
+    });
+
+    it.each([
+        ['a non-object payload', { ...createDefaultPrismaVoiceConfig(), playbackBuffer: 'automatic' }, 'playbackBuffer'],
+        ['an incomplete payload', {
+            ...createDefaultPrismaVoiceConfig(),
+            playbackBuffer: { mode: 'automatic' },
+        }, 'playbackBuffer'],
+        ['an unsupported mode', {
+            ...createDefaultPrismaVoiceConfig(),
+            playbackBuffer: { mode: 'fixed', manualSeconds: 0.2 },
+        }, 'playbackBuffer.mode'],
+        ['manualSeconds below the minimum', {
+            ...createDefaultPrismaVoiceConfig(),
+            playbackBuffer: { mode: 'manual', manualSeconds: 0.05 },
+        }, 'playbackBuffer.manualSeconds'],
+        ['manualSeconds above the maximum', {
+            ...createDefaultPrismaVoiceConfig(),
+            playbackBuffer: { mode: 'manual', manualSeconds: 3.1 },
+        }, 'playbackBuffer.manualSeconds'],
+        ['manualSeconds off the 0.1 s grid', {
+            ...createDefaultPrismaVoiceConfig(),
+            playbackBuffer: { mode: 'manual', manualSeconds: 0.25 },
+        }, 'playbackBuffer.manualSeconds'],
+        ['a non-numeric manualSeconds', {
+            ...createDefaultPrismaVoiceConfig(),
+            playbackBuffer: { mode: 'manual', manualSeconds: '0.2' },
+        }, 'playbackBuffer.manualSeconds'],
+    ])('rejects %s without coercion', (_case, payload, expectedPath) => {
+        const result = validatePrismaVoiceConfig(payload);
+
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+            expect(result.issues.map((issue) => issue.path)).toContain(expectedPath);
         }
     });
 

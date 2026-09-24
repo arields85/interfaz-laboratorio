@@ -18,6 +18,16 @@ import { usePrismaOrbVisualConfig } from '../hooks/usePrismaOrbVisualConfig';
 import PrismaOrbOverlay from './PrismaOrbOverlay';
 
 vi.mock('../vendor/leda-orb.js', () => ({}));
+// T4: `usePrismaOrbPresentation` now reads the shared Prisma voice config
+// (for the Automatic/Manual playback-buffer mode) via `usePrismaVoiceConfig`,
+// a TanStack Query hook. This suite has no `QueryClientProvider` in its tree
+// and is not exercising config-driven prebuffer selection (every test here
+// injects a fake `engine`, so the real prebuffer policy is never built) --
+// mock the query hook itself rather than adding a provider this file
+// otherwise has no use for.
+vi.mock('../queries/usePrismaVoiceConfig', () => ({
+    usePrismaVoiceConfig: () => ({ data: null, error: null, isEnabled: true, isLoading: false }),
+}));
 
 class MockLedaOrb extends HTMLElement {
     public level = 0;
