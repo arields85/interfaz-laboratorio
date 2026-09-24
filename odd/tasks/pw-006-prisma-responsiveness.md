@@ -1824,3 +1824,96 @@ After that: T14 is done (see its own evidence above, including the user's next T
   the awaiting/linked states show the orb in the same fixed square with the warning/success colors;
   confirm the modal fades out and closes on its own a few seconds after linking; confirm reopening
   later shows the current state; confirm Escape/backdrop-click/"Cerrar" all still close it.
+- [x] **T21 — Voice answer/orb as instant as possible (user priority, live timeline 2026-09-24
+  ~13:40).** Evidence (`prisma-presentation-stderr.log`, `HMI voice timeline:` lines):
+  `speak-live-request-start` 85–144 ms after event received (before T17 it was ~62–80 ms) — the
+  audio request appeared to wait for the orb overlay mount; first answer after startup:
+  `first-readable-audio` 696 ms but `playback-started` 1106 ms — ~0.41 s spent starting the
+  AudioContext AFTER the first audio arrived (subsequent answers ~25–30 ms). Route: direct inline
+  (2 already-understood files + their tests, no unresolved design work; touched only
+  `hmi-app/src/hooks/usePrismaOrbPresentation.ts` and `hmi-app/src/services/prismaVoiceAudioEngine.ts`
+  per this task's own scope).
+  - **What gated `engine.play`/`source.openLive`.** `usePrismaOrbPresentation.ts`'s
+    `useLayoutEffect(() => {...}, [request])` read `const orb = orbRef.current;` and returned early
+    when `!orb` — i.e. `engine.play()` (and so `source.openLive()`, the speak-live fetch) could not
+    even be CALLED until `orbRef.current` was non-null, which requires React to have committed the
+    render that mounts `<PrismaOrbOverlayVisible>`/`<PrismaOrb>`'s `<leda-orb>` custom element AND
+    for that effect to actually run — both gated behind a React commit/layout-effect cycle the fetch
+    never needed.
+  - **Decoupling.** `presentVoiceEvent` now calls `engine.play(audioSource, deferredTarget, {...})`
+    synchronously, at voice-event receipt, no longer from an effect keyed on `request`/`orbRef`
+    (removed the `PlaybackRequest` state/`startedGenerationRef` entirely — no longer needed once
+    starting playback isn't gated behind a commit). New `createDeferredOrbAudioTarget()`: a
+    `PrismaOrbAudioTarget` stand-in the engine drives immediately; `level`/`setSpeaking` writes are
+    buffered (only if actually touched, so an untouched target never fires a spurious call) and
+    replayed the instant the real orb attaches, then forwarded live for every update after that.
+    `orbRef`'s `current` is now a `get`/`set` accessor object (still structurally a
+    `RefObject<LedaOrbElement | null>` — React assigns `ref.current = node` as an ordinary property
+    write, so the setter intercepts it exactly like a plain field) whose setter attaches the deferred
+    target the instant React commits the DOM node, not on a later, possibly-skipped effect tick. An
+    already-mounted orb (a new question arriving while a previous answer is still visible/fading)
+    attaches immediately, synchronously, inside `presentVoiceEvent` itself. T17/T17b visuals and the
+    thinking→visible transition on `onStarted` are unchanged (`PrismaOrbOverlay.tsx`/`PrismaOrb.tsx`
+    untouched).
+  - **AudioContext warm-up.** New `PrismaVoiceAudioEngineContract.warmAudioContext()`: creates/
+    resumes the shared context, swallows every error, safe to call anytime. `PrismaVoiceAudioEngine`:
+    new private `resumeContext(context)` is the ONE place that ever calls `context.resume()`, shared
+    (and reused, never re-triggered) between `warmAudioContext()` and the existing
+    `ensureContextRunning()` via a `contextResumePromise` keyed to its exact `AudioContext` instance
+    (fixed after this task's own pre-commit review flagged the shared-context risk — the progressive
+    and local-worklet transports use two separate `AudioContext`s, and an unkeyed cache could have
+    let one's resume stand in for the other's). `play()` calls `warmAudioContext()` immediately, in
+    parallel with the live request, scoped to the `'progressive'` transport only (the only one HMI
+    voice actually uses — scoping avoids pre-creating the plain shared context for a
+    `'buffer-before-playback'` request, which needs its own differently-configured
+    `getLocalWorkletContext()`). A rejected/suspended warm-up resume is caught and warned, never
+    thrown; `ensureContextRunning()` still makes its own resume attempt when scheduling the first
+    block if the warm-up didn't succeed — falls back to exactly today's path. The existing T16
+    `audio-context-state` diagnostic (`at-play`/`after-resume`) is unchanged in shape and still fires
+    only when a resume is genuinely still needed at schedule time (the common case, once warmed,
+    is no diagnostic at all — already running). `usePrismaOrbPresentation.ts` also warms the context
+    on the page's first `pointerdown`/`keydown`/`touchstart` (one-shot listeners removed after firing
+    once), well ahead of any voice event, so autoplay policy has already been satisfied by the time a
+    real answer needs to play.
+  - **TDD.** RED confirmed per change: hook — `engine.play` not yet callable without an attached orb
+    (new "starts... even when the orb has not mounted yet" test failed against the pre-change gated
+    effect); engine — `warmAudioContext` undefined on the contract before the interface/class change;
+    the local-worklet test file's exact-`createAudioContext`-call-args assertion caught (RED, then
+    fixed by scoping the warm-up to `'progressive'`) an early version that warmed the wrong,
+    plain-options context on every `play()` regardless of transport. New tests: hook —
+    `usePrismaOrbPresentation.test.ts`'s new `'T21: decoupled from the orb overlay mount'` block (4:
+    synchronous start with no orb attached; buffers then replays level/speaking on attach; forwards
+    live once attached; attaches immediately when the orb is already mounted) plus
+    `warmAudioContext: vi.fn()` added to the fake engine contract in both this file and
+    `PrismaOrbOverlay.test.tsx` (mechanical, required by the contract's new method). Engine —
+    `prismaVoiceAudioEngine.test.ts`: rewrote the existing `'T16: records audio-context-state...'`
+    test to hold the warm-up resume open via a new harness `setState()` control (a real resume
+    genuinely takes time; the old test's synchronous fake resume was no longer representative once
+    warm-up runs earlier) plus 4 new `'T21: ...'` tests (`warmAudioContext()` resumes when suspended /
+    no-ops when already running; `play()` warms in parallel with the live request, not after the
+    first chunk, and first-block scheduling does not re-resume; a rejected warm-up resume falls back
+    safely to `ensureContextRunning`'s own attempt). All GREEN after implementation.
+  - **Checks:** `cd hmi-app && npm test` → 2459 passed (was 2434). `npx tsc -b` clean. `npm run lint`
+    clean.
+  - **Post-commit code-review fix (non-blocking finding, applied same pass, commit `ad59d69`).** The
+    repo's own commit-time review flagged that `contextResumePromise` didn't record which
+    `AudioContext` it belonged to — a real edge-case bug (not exercised by any existing test, since
+    no production `PrismaVoiceAudioSource` ever sets `'buffer-before-playback'`): a resume of one
+    context could be mistakenly awaited-and-trusted for the other. Fixed by keying the cached promise
+    to its exact context (`contextResumePromiseContext`), cleared on `dispose()` too. No new
+    regression test added for this specific two-context race (would need building a second,
+    independently-suspended fake `AudioContext` in the local-worklet harness, disproportionate effort
+    for a currently dead-code transport) — flagged here for whoever eventually wires up
+    `'buffer-before-playback'` for real.
+  - **Files:** `hmi-app/src/hooks/usePrismaOrbPresentation.ts`,
+    `hmi-app/src/hooks/usePrismaOrbPresentation.test.ts`, `hmi-app/src/components/PrismaOrbOverlay.test.tsx`,
+    `hmi-app/src/services/prismaVoiceAudioEngine.ts`, `hmi-app/src/services/prismaVoiceAudioEngine.test.ts`.
+  - **Commits:** `503f170` (perf: warm the audio context while the answer is generated), `ad59d69`
+    (fix: scope the AudioContext resume cache to its own context), `f419fcb` (perf: start Prisma
+    voice playback without waiting for the orb).
+  **Next step (user, live test)**: ask Prisma a voice question and read
+  `prisma-presentation-stderr.log` for the `HMI voice timeline:` lines around it — expect
+  `speak-live-request-start` at ≤ ~20 ms after the voice event is received (no more waiting on the
+  orb mount), and on the first answer after a launcher restart expect `playback-started` close to
+  `first-readable-audio` + ~30 ms (not +~0.4 s) now that the AudioContext was warmed in parallel with
+  the request and, if the user interacted with the page first, likely already running.
