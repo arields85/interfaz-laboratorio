@@ -46,27 +46,92 @@ def _default_service() -> CredentialService:
     )
 
 
+def _default_mtime_probe() -> float | None:
+    """T13 unit (a): the cheapest reliable signal that the protected
+    credential store changed is a plain os.stat() on its encrypted SQLite
+    database file. Every save/delete/rotate goes through
+    CredentialService.set_secret/delete_secret, which always writes to this
+    same file, so its mtime advances on any of those changes -- no admin-
+    route hook or cross-process signal is needed between the presentation
+    process (which owns the admin credential routes) and this voice
+    process, which only ever reads the file. A stat() is one lightweight
+    syscall, dramatically cheaper than the get_secret() read it lets a
+    cache hit skip: ~590 ms on Windows, almost entirely a PowerShell
+    subprocess spawned by SecureStoragePermissions.verify's `-VerifyOnly`
+    ACL check (see storage_permissions.py `_run_windows`) -- confirmed as
+    the credential_elapsed_ms cost in T13's live evidence."""
+    try:
+        return os.stat(runtime_paths().credential_database).st_mtime_ns
+    except OSError:
+        return None
+
+
 class GeminiCredentialResolver:
     def __init__(
         self,
         environ: Mapping[str, str] | None = None,
         credential_service_factory: Callable[[], CredentialService] = _default_service,
+        mtime_probe: Callable[[], float | None] = _default_mtime_probe,
     ):
         self.environ = environ if environ is not None else os.environ
         self.credential_service_factory = credential_service_factory
+        self.mtime_probe = mtime_probe
+        self._cache_lock = Lock()
+        self._cached_secret: str | None = None
+        self._cached_mtime: float | None = None
 
     @property
     def source(self) -> str:
         return "protected" if self.environ.get("PRISMA_CREDENTIAL_MASTER_KEY_FILE", "").strip() else "environment"
 
-    def resolve(self) -> str:
+    def _safe_mtime(self) -> float | None:
         try:
-            protected = self.source == "protected"
+            return self.mtime_probe()
+        except Exception:
+            return None
+
+    def _cached_secret_if_fresh(self) -> str | None:
+        with self._cache_lock:
+            secret, cached_mtime = self._cached_secret, self._cached_mtime
+        if secret is None:
+            return None
+        current_mtime = self._safe_mtime()
+        # Fail-safe: once freshness can no longer be proven (the database is
+        # gone, the probe failed, or a concurrent save/delete/rotate moved
+        # the mtime), never serve the possibly-stale cached secret -- fall
+        # through to a real resolve instead.
+        if current_mtime is None or current_mtime != cached_mtime:
+            with self._cache_lock:
+                if self._cached_mtime == cached_mtime:
+                    self._cached_secret = None
+                    self._cached_mtime = None
+            return None
+        return secret
+
+    def _store_cache(self, value: str) -> None:
+        # Only cache when the mtime that will guard it is itself provably
+        # fresh (never cache "blind" -- an unprovable entry could otherwise
+        # be served forever, since a later stat() failure also fails safe
+        # to "not fresh" rather than "definitely changed").
+        mtime = self._safe_mtime()
+        with self._cache_lock:
+            self._cached_secret = value if mtime is not None else None
+            self._cached_mtime = mtime
+
+    def resolve(self) -> str:
+        protected = self.source == "protected"
+        if protected:
+            cached = self._cached_secret_if_fresh()
+            if cached is not None:
+                return cached
+        try:
             value = self.credential_service_factory().get_secret("gemini") if protected else self.environ.get("GEMINI_API_KEY", "")
         except Exception:
             raise GeminiCredentialUnavailable("GEMINI_CREDENTIAL_UNAVAILABLE") from None
         if not isinstance(value, str) or not value.strip():
             raise GeminiCredentialUnavailable("GEMINI_CREDENTIAL_MISSING")
+        if protected:
+            self._store_cache(value)
         return value if protected else value.strip()
 
     def status(self) -> dict[str, object]:

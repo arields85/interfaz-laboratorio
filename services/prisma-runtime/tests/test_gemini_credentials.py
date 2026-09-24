@@ -1,7 +1,9 @@
 import sys
+import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import httpx
@@ -92,6 +94,138 @@ class GeminiCredentialResolverTests(unittest.TestCase):
             create_gemini_client("secret", timeout_ms=GEMINI_VERIFY_TIMEOUT_MS)
 
         http_options_type.assert_called_once_with(timeout=GEMINI_VERIFY_TIMEOUT_MS)
+
+
+class GeminiCredentialCachingTests(unittest.TestCase):
+    """T13 unit (a): the protected-store read (~590 ms on Windows, mostly a
+    PowerShell subprocess spawned by SecureStoragePermissions.verify) must
+    not run on every resolve() -- only when the credential database's mtime
+    proves the previously cached secret may be stale. Adapts
+    test_queued_work_reads_replacement_credential_at_dequeue's guarantee
+    (test_event_audio.py) to this resolver's own in-memory cache: a job
+    that dequeues after a save/delete/rotate must never be handed a stale
+    cached secret."""
+
+    def test_cache_hit_never_touches_the_credential_store(self):
+        store = Mock()
+        store.get_secret.return_value = "key-one"
+        db_mtime = {"value": 100.0}
+        resolver = GeminiCredentialResolver(
+            {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"},
+            credential_service_factory=lambda: store,
+            mtime_probe=lambda: db_mtime["value"],
+        )
+
+        first = resolver.resolve()
+        second = resolver.resolve()
+
+        self.assertEqual(first, "key-one")
+        self.assertEqual(second, "key-one")
+        self.assertEqual(store.get_secret.call_count, 1)
+
+    def test_cache_invalidates_when_the_credential_database_mtime_changes(self):
+        store = Mock()
+        store.get_secret.side_effect = ["key-one", "key-two"]
+        db_mtime = {"value": 100.0}
+        resolver = GeminiCredentialResolver(
+            {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"},
+            credential_service_factory=lambda: store,
+            mtime_probe=lambda: db_mtime["value"],
+        )
+
+        first = resolver.resolve()
+        db_mtime["value"] = 200.0  # a save/delete/rotate touched the file
+        second = resolver.resolve()
+
+        self.assertEqual(first, "key-one")
+        self.assertEqual(second, "key-two")
+        self.assertEqual(store.get_secret.call_count, 2)
+
+    def test_cache_is_bypassed_when_the_mtime_probe_cannot_prove_freshness(self):
+        store = Mock()
+        store.get_secret.side_effect = ["key-one", "key-one"]
+        resolver = GeminiCredentialResolver(
+            {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"},
+            credential_service_factory=lambda: store,
+            mtime_probe=lambda: None,
+        )
+
+        resolver.resolve()
+        resolver.resolve()
+
+        self.assertEqual(store.get_secret.call_count, 2)
+
+    def test_environment_source_never_consults_the_mtime_probe(self):
+        probe = Mock(return_value=100.0)
+        resolver = GeminiCredentialResolver({"GEMINI_API_KEY": "legacy"}, mtime_probe=probe)
+
+        resolver.resolve()
+        resolver.resolve()
+
+        probe.assert_not_called()
+
+    def test_a_failed_resolve_is_never_cached(self):
+        store = Mock()
+        store.get_secret.side_effect = [OSError("locked"), "key-one"]
+        resolver = GeminiCredentialResolver(
+            {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"},
+            credential_service_factory=lambda: store,
+            mtime_probe=lambda: 100.0,
+        )
+
+        with self.assertRaises(GeminiCredentialUnavailable):
+            resolver.resolve()
+        second = resolver.resolve()
+
+        self.assertEqual(second, "key-one")
+        self.assertEqual(store.get_secret.call_count, 2)
+
+    def test_status_also_benefits_from_the_cache(self):
+        store = Mock()
+        store.get_secret.return_value = "key-one"
+        resolver = GeminiCredentialResolver(
+            {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"},
+            credential_service_factory=lambda: store,
+            mtime_probe=lambda: 100.0,
+        )
+
+        resolver.resolve()
+        status = resolver.status()
+
+        self.assertEqual(status["configured"], True)
+        self.assertEqual(store.get_secret.call_count, 1)
+
+
+class GeminiCredentialDefaultMtimeProbeTests(unittest.TestCase):
+    def test_reads_the_credential_database_stat(self):
+        from prisma_runtime import gemini_credentials as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "provider-credentials.sqlite3"
+            database.write_bytes(b"x")
+            fake_paths = SimpleNamespace(credential_database=database)
+            with patch.object(module, "runtime_paths", return_value=fake_paths):
+                mtime = module._default_mtime_probe()
+
+            self.assertEqual(mtime, database.stat().st_mtime_ns)
+
+    def test_returns_none_when_the_database_is_missing(self):
+        from prisma_runtime import gemini_credentials as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "does-not-exist.sqlite3"
+            fake_paths = SimpleNamespace(credential_database=missing)
+            with patch.object(module, "runtime_paths", return_value=fake_paths):
+                mtime = module._default_mtime_probe()
+
+            self.assertIsNone(mtime)
+
+    def test_default_resolver_uses_the_default_mtime_probe(self):
+        from prisma_runtime.gemini_credentials import _default_mtime_probe
+
+        resolver = GeminiCredentialResolver()
+
+        self.assertIs(resolver.mtime_probe, _default_mtime_probe)
 
 
 class WarmGeminiClientTests(unittest.TestCase):
