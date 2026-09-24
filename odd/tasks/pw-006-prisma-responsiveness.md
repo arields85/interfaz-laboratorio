@@ -1132,6 +1132,17 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   via SSE; no session resets; the first question after restart worked. Decision: show a distinct
   "thinking" orb look from event received until playback starts, then the speaking look; never stay
   in thinking forever (fall back on error/timeout). Visual options being mapped (read-only).
+  **Design agreed with the user (2026-09-24):** the orb's own two internal states in
+  `leda-orb.js` (idle breathing vs `speaking` voice modulation driven by the audio engine) stay
+  untouched. The change lives only in the overlay container: thinking = ~75 % scale and ~60 %
+  opacity (orb keeps its native idle breathing, no extra CSS pulse because a removed CSS animation
+  snaps instead of interpolating); on playback start, scale and opacity interpolate to 100 % over
+  ~400 ms with an ease curve while voice modulation starts; when speech ends, a smooth fade-out
+  replaces today's abrupt disappearance (user reports it vanishes abruptly; today `fading` lasts
+  200 ms); if audio never starts, a bounded timeout fades it out. Existing hooks: phase
+  `buffering` declared but unused in `usePrismaOrbPresentation.ts`, engine `onStarted` wired to a
+  no-op. Durations/scales as named constants; `prefers-reduced-motion` keeps the current
+  no-transition behavior.
 
 ## Progress
 
