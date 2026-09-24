@@ -5,7 +5,7 @@
   "x-record-types": {
     "provider": ["dispatch", "completion"],
     "backend": ["receipt", "dsp", "yield", "finalization"],
-    "browser": ["request-start", "first-readable-audio", "buffering-complete", "eof", "canonical-decode", "playback-started", "playback-ended", "underflow", "error", "cancel"]
+    "browser": ["request-start", "first-readable-audio", "buffering-complete", "eof", "canonical-decode", "playback-started", "playback-ended", "underflow", "error", "cancel", "voice-event-received", "orb-phase", "speak-live-request-start", "speak-live-response-received", "speak-live-stale-discarded", "session-reset", "audio-context-state"]
   },
   "x-payload-fields": {
     "dispatch": [],
@@ -23,7 +23,14 @@
     "playback-ended": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds", "underflow_count"],
     "underflow": ["underflow_count"],
     "error": ["code", "status", "elapsed_ms", "error_code"],
-    "cancel": ["code", "status", "elapsed_ms"]
+    "cancel": ["code", "status", "elapsed_ms"],
+    "voice-event-received": ["source"],
+    "orb-phase": ["phase"],
+    "speak-live-request-start": [],
+    "speak-live-response-received": ["http_status", "elapsed_ms"],
+    "speak-live-stale-discarded": ["elapsed_ms"],
+    "session-reset": ["reason", "epoch_after"],
+    "audio-context-state": ["state", "when"]
   },
   "x-required-payload-fields": {
     "request-start": [],
@@ -35,7 +42,14 @@
     "playback-ended": ["elapsed_ms", "transport", "pcm_bytes", "pcm_duration_seconds", "underflow_count"],
     "underflow": ["underflow_count"],
     "error": ["elapsed_ms", "error_code"],
-    "cancel": ["elapsed_ms"]
+    "cancel": ["elapsed_ms"],
+    "voice-event-received": ["source"],
+    "orb-phase": ["phase"],
+    "speak-live-request-start": [],
+    "speak-live-response-received": ["http_status", "elapsed_ms"],
+    "speak-live-stale-discarded": ["elapsed_ms"],
+    "session-reset": ["reason", "epoch_after"],
+    "audio-context-state": ["state", "when"]
   },
   "x-payload-kinds": {
     "status": "enum",
@@ -47,13 +61,25 @@
     "pcm_bytes": "nonnegative-number",
     "pcm_duration_seconds": "nullable-nonnegative-number",
     "underflow_count": "nonnegative-integer",
-    "error_code": "enum"
+    "error_code": "enum",
+    "source": "enum",
+    "phase": "enum",
+    "http_status": "nonnegative-integer",
+    "reason": "enum",
+    "epoch_after": "nonnegative-integer",
+    "state": "enum",
+    "when": "enum"
   },
   "x-payload-enums": {
     "status": ["success", "error", "cancel"],
     "code": ["provider-failure", "backend-failure", "browser-failure", "cancelled", "invalid-format", "unknown"],
     "transport": ["progressive", "buffer-before-playback"],
-    "error_code": ["audio-failure"]
+    "error_code": ["audio-failure"],
+    "source": ["sse", "poll"],
+    "phase": ["hidden", "buffering", "visible", "fading"],
+    "reason": ["unauthorized-401", "explicit"],
+    "state": ["suspended", "running", "closed", "interrupted"],
+    "when": ["at-play", "after-resume"]
   },
   "type": "object",
   "additionalProperties": false,
@@ -62,7 +88,7 @@
     "schema_version": {"const": "1"},
     "run_id": {"type": "string", "pattern": "^prisma-[0-9a-f]{16,64}$"},
     "layer": {"enum": ["provider", "backend", "browser"]},
-    "record_type": {"enum": ["dispatch", "completion", "receipt", "dsp", "yield", "finalization", "request-start", "first-readable-audio", "buffering-complete", "eof", "canonical-decode", "playback-started", "playback-ended", "underflow", "error", "cancel"]},
+    "record_type": {"enum": ["dispatch", "completion", "receipt", "dsp", "yield", "finalization", "request-start", "first-readable-audio", "buffering-complete", "eof", "canonical-decode", "playback-started", "playback-ended", "underflow", "error", "cancel", "voice-event-received", "orb-phase", "speak-live-request-start", "speak-live-response-received", "speak-live-stale-discarded", "session-reset", "audio-context-state"]},
     "sequence": {"type": "integer", "minimum": 0},
     "monotonic_ms": {"type": "number", "minimum": 0},
     "elapsed_ms": {"type": "number", "minimum": 0},
@@ -79,7 +105,14 @@
         "pcm_bytes": {"type": "number", "minimum": 0},
         "pcm_duration_seconds": {"type": ["number", "null"], "minimum": 0},
         "underflow_count": {"type": "integer", "minimum": 0},
-        "error_code": {"enum": ["audio-failure"]}
+        "error_code": {"enum": ["audio-failure"]},
+        "source": {"enum": ["sse", "poll"]},
+        "phase": {"enum": ["hidden", "buffering", "visible", "fading"]},
+        "http_status": {"type": "integer", "minimum": 0},
+        "reason": {"enum": ["unauthorized-401", "explicit"]},
+        "epoch_after": {"type": "integer", "minimum": 0},
+        "state": {"enum": ["suspended", "running", "closed", "interrupted"]},
+        "when": {"enum": ["at-play", "after-resume"]}
       }
     }
   }

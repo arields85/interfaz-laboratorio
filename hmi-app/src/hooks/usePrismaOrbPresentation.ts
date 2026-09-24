@@ -5,6 +5,7 @@ import type { VoiceEvent } from '../domain/voice.types';
 import { PrismaVoiceAudioEngine } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource } from '../services/prismaVoiceAudioEngine';
 import { prismaSessionClient } from '../services/prismaSessionClient';
+import { recordOrbPhase } from '../services/prismaVoiceTimelineRecorder';
 import { createPrismaVoiceTtsAudioSource } from '../services/prismaVoiceTtsAudioSource';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
@@ -52,13 +53,22 @@ export function usePrismaOrbPresentation(
         }
     };
 
+    // T16: every phase transition also lands one orb-phase browser voice
+    // timeline record (see prismaVoiceTimelineRecorder.ts), so the parent
+    // can read the runtime log for exactly when the orb showed/hid instead
+    // of the user copying the browser console.
+    const updatePhase = (next: PrismaOrbPresentationPhase): void => {
+        recordOrbPhase(next);
+        setPhase(next);
+    };
+
     const presentVoiceEvent = (event: VoiceEvent): void => {
         const eventId = event.id?.trim();
         if (!eventId) return;
         generationRef.current += 1;
         clearFadeTimer();
         const audioSource = audioSourceFactoryRef.current({ eventId });
-        setPhase('visible');
+        updatePhase('visible');
         setRequest({ generation: generationRef.current, audioSource });
     };
 
@@ -73,11 +83,11 @@ export function usePrismaOrbPresentation(
             if (generationRef.current !== request.generation || terminalCallbackHandled) return;
             terminalCallbackHandled = true;
             clearFadeTimer();
-            setPhase('fading');
+            updatePhase('fading');
             fadeTimerRef.current = setTimeout(() => {
                 if (generationRef.current !== request.generation) return;
                 fadeTimerRef.current = null;
-                setPhase('hidden');
+                updatePhase('hidden');
                 setRequest(null);
             }, PRISMA_ORB_FADE_DURATION_MS);
         };
@@ -99,7 +109,7 @@ export function usePrismaOrbPresentation(
         clearFadeTimer();
         engineRef.current?.stop();
         setRequest(null);
-        setPhase('hidden');
+        updatePhase('hidden');
     }), []);
 
     return { phase, orbRef, presentVoiceEvent };

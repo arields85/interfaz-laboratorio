@@ -62,6 +62,9 @@ export const PRISMA_PROXY_ROUTES: readonly PrismaProxyRoute[] = Object.freeze([
     // in the ordinary request header and is never stripped here.
     createRoute('/api/prisma/events/stream', 'http://127.0.0.1:5057', '/hmi/voice/events', ['GET']),
     createRoute('/api/prisma/ask', 'http://127.0.0.1:5057', '/local/ask', ['POST']),
+    // T16: batched browser voice timeline diagnostics -- header-based
+    // session capability, like every other route above.
+    createRoute('/api/prisma/voice/timeline', 'http://127.0.0.1:5057', '/hmi/voice/timeline', ['POST']),
     createRoute('/api/prisma/voice-config', 'http://127.0.0.1:5057', '/hmi/prisma-config', ['GET', 'PUT']),
     createRoute('/api/prisma/tts/live', 'http://127.0.0.1:5056', '/prisma/speak-live', ['POST']),
     createRoute('/api/prisma/channel-a/pairing', 'http://127.0.0.1:5057', '/hmi/channel-a/pairing', ['GET', 'POST']),

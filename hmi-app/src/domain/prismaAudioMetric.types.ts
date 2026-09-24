@@ -10,4 +10,9 @@ export type {
     PrismaAudioMetric,
     PrismaAudioMetricPayload,
     PrismaAudioMetricTransport,
+    PrismaAudioMetricSource,
+    PrismaAudioMetricPhase,
+    PrismaAudioMetricReason,
+    PrismaAudioMetricState,
+    PrismaAudioMetricWhen,
 } from './prismaAudioMetric.generated';

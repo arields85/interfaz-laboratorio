@@ -5,8 +5,26 @@ import type { VoiceEvent } from '../domain/voice.types';
 import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource, VoicePlaybackLifecycle } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
 import { prismaSessionClient } from '../services/prismaSessionClient';
+import { PRISMA_BROWSER_METRIC_EVENT } from '../services/prismaVoiceMetrics';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
 import { PRISMA_ORB_FADE_DURATION_MS, usePrismaOrbPresentation } from './usePrismaOrbPresentation';
+
+function collectOrbPhaseRecords(run: () => void): string[] {
+    const phases: string[] = [];
+    const listener = (event: Event) => {
+        const detail = (event as CustomEvent<{ record_type: string; payload: { phase: string } }>).detail;
+        if (detail.record_type === 'orb-phase') {
+            phases.push(detail.payload.phase);
+        }
+    };
+    window.addEventListener(PRISMA_BROWSER_METRIC_EVENT, listener);
+    try {
+        run();
+    } finally {
+        window.removeEventListener(PRISMA_BROWSER_METRIC_EVENT, listener);
+    }
+    return phases;
+}
 
 const EVENT: VoiceEvent = {
     id: 'voice-1',
@@ -122,5 +140,38 @@ describe('usePrismaOrbPresentation', () => {
 
         expect(engine.stop).toHaveBeenCalledTimes(1);
         expect(result.current.phase).toBe('hidden');
+    });
+
+    it('records a T16 orb-phase timeline entry for every phase change', () => {
+        vi.useFakeTimers();
+        const lifecycle: Array<{ onEnded?: () => void }> = [];
+        const engine: PrismaVoiceAudioEngineContract = {
+            play: vi.fn((_source, _target, next) => lifecycle.push(next)),
+            stop: vi.fn(),
+            dispose: vi.fn(),
+        };
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        const phases = collectOrbPhaseRecords(() => {
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycle[0]?.onEnded?.());
+            act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
+        });
+
+        expect(phases).toEqual(['visible', 'fading', 'hidden']);
+    });
+
+    it('records a hidden orb-phase entry when the session resets mid-playback', () => {
+        const engine = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        const phases = collectOrbPhaseRecords(() => {
+            act(() => prismaSessionClient.reset({ close: false }));
+        });
+
+        expect(phases).toEqual(['hidden']);
     });
 });

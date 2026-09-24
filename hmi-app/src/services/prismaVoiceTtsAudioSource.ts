@@ -2,6 +2,11 @@ import { PRISMA_TTS_LIVE_URL } from '../config/prismaAssistant.config';
 import type { PrismaVoiceAudioSource } from './prismaVoiceAudioEngine';
 import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
 import { prismaSessionClient } from './prismaSessionClient';
+import {
+    recordSpeakLiveRequestStart,
+    recordSpeakLiveResponseReceived,
+    recordSpeakLiveStaleDiscarded,
+} from './prismaVoiceTimelineRecorder';
 
 export interface PrismaVoiceTtsAudioRequest {
     eventId: string;
@@ -26,6 +31,8 @@ export function createPrismaVoiceTtsAudioSource(
             if (!eventId) {
                 throw new Error('Prisma voice event ID is required');
             }
+            const requestStartedAt = performance.now();
+            recordSpeakLiveRequestStart();
             const response = await (fetchImpl ?? prismaSessionClient.fetch.bind(prismaSessionClient))(PRISMA_TTS_LIVE_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -33,10 +40,13 @@ export function createPrismaVoiceTtsAudioSource(
                 cache: 'no-store',
                 signal,
             });
+            const responseElapsedMs = Math.max(0, performance.now() - requestStartedAt);
+            recordSpeakLiveResponseReceived(response.status, responseElapsedMs);
             if (!response.ok) {
                 throw new Error(`Prisma Live request failed with status ${response.status}`);
             }
             if (fetchImpl === undefined && !prismaSessionClient.isCurrentResponse(response)) {
+                recordSpeakLiveStaleDiscarded(responseElapsedMs);
                 throw new Error('Prisma Live response belongs to a stale session');
             }
             if (response.headers.get('X-Prisma-Audio-Format')?.toLowerCase() !== LIVE_AUDIO_FORMAT) {

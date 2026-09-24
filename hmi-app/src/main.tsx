@@ -6,6 +6,7 @@ import App from './App.tsx'
 import { applyThemeOverrides } from './components/admin/DesignSettingsTab'
 import { cleanupLegacyStorage } from './utils/legacyStorageCleanup'
 import { prismaSessionClient } from './services/prismaSessionClient'
+import { startPrismaVoiceTimelineDiagnostics } from './services/prismaVoiceTimelineDiagnosticsSink'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,6 +21,11 @@ const queryClient = new QueryClient({
 cleanupLegacyStorage()
 applyThemeOverrides()
 void prismaSessionClient.bootstrap().catch(() => undefined)
+// T16: registered before the session-reset pagehide listener below, so its
+// own pagehide flush (browser voice timeline diagnostics) runs first --
+// listeners on the same target/event fire in registration order, and once
+// the session resets its capability is gone.
+startPrismaVoiceTimelineDiagnostics()
 window.addEventListener('pagehide', () => prismaSessionClient.reset({ keepalive: true }), { once: true })
 
 createRoot(document.getElementById('root')!).render(

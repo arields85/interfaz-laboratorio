@@ -53,6 +53,46 @@ class AudioRecordTypeTests(unittest.TestCase):
             with self.subTest(record_type=record_type, payload=payload), self.assertRaises(ValueError):
                 make_record("prisma-0123456789abcdef", layer, record_type, 0, 1, 1, payload)
 
+    def test_allowlist_includes_the_t16_voice_timeline_record_types(self) -> None:
+        for record_type in (
+            "voice-event-received",
+            "orb-phase",
+            "speak-live-request-start",
+            "speak-live-response-received",
+            "speak-live-stale-discarded",
+            "session-reset",
+            "audio-context-state",
+        ):
+            with self.subTest(record_type=record_type):
+                self.assertIn(record_type, ALLOWED_RECORD_TYPES["browser"])
+
+    def test_accepts_complete_t16_voice_timeline_payloads(self) -> None:
+        cases = (
+            ("voice-event-received", {"source": "sse"}),
+            ("orb-phase", {"phase": "visible"}),
+            ("speak-live-request-start", {}),
+            ("speak-live-response-received", {"http_status": 200, "elapsed_ms": 143}),
+            ("speak-live-stale-discarded", {"elapsed_ms": 620}),
+            ("session-reset", {"reason": "unauthorized-401", "epoch_after": 3}),
+            ("audio-context-state", {"state": "suspended", "when": "at-play"}),
+        )
+        for record_type, payload in cases:
+            with self.subTest(record_type=record_type):
+                record = make_record("prisma-0123456789abcdef", "browser", record_type, 0, 1, 1, payload)
+                self.assertEqual(record["payload"], payload)
+
+    def test_rejects_t16_voice_timeline_payloads_missing_required_fields_or_free_text(self) -> None:
+        invalid = (
+            ("voice-event-received", {}),
+            ("orb-phase", {"phase": "curious"}),
+            ("speak-live-response-received", {"http_status": 200}),
+            ("session-reset", {"reason": "explicit"}),
+            ("audio-context-state", {"state": "running", "when": "at-play", "note": "free text"}),
+        )
+        for record_type, payload in invalid:
+            with self.subTest(record_type=record_type, payload=payload), self.assertRaises(ValueError):
+                make_record("prisma-0123456789abcdef", "browser", record_type, 0, 1, 1, payload)
+
     def test_accepts_complete_browser_payload_and_optional_runtime_payloads(self) -> None:
         browser = make_record(
             "prisma-0123456789abcdef",

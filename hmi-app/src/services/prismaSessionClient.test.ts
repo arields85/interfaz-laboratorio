@@ -15,6 +15,19 @@ afterAll(() => vi.unstubAllGlobals());
 
 import { PrismaSessionClient, PrismaStaleSessionResponse } from './prismaSessionClient';
 import { PrismaRuntimeUnreachableError } from './prismaRuntimeUnreachable';
+import { PRISMA_BROWSER_METRIC_EVENT } from './prismaVoiceMetrics';
+
+function collectSessionResetRecords(run: () => Promise<unknown>): Promise<{ reason: string; epoch_after: number }[]> {
+    const records: { reason: string; epoch_after: number }[] = [];
+    const listener = (event: Event) => {
+        const detail = (event as CustomEvent<{ record_type: string; payload: { reason: string; epoch_after: number } }>).detail;
+        if (detail.record_type === 'session-reset') {
+            records.push(detail.payload);
+        }
+    };
+    window.addEventListener(PRISMA_BROWSER_METRIC_EVENT, listener);
+    return Promise.resolve(run()).finally(() => window.removeEventListener(PRISMA_BROWSER_METRIC_EVENT, listener)).then(() => records);
+}
 
 function canonicalCapability(seed = 0): string {
     const bytes = Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
@@ -481,5 +494,67 @@ describe('PrismaSessionClient', () => {
             await expect(client.fetch(lookalike)).rejects.toThrow();
         }
         expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('T16: records a session-reset(reason=unauthorized-401) timeline entry on a current 401', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse(canonicalCapability(1)))
+            .mockResolvedValueOnce(new Response(null, { status: 401 }))
+            .mockResolvedValueOnce(sessionResponse(canonicalCapability(2)));
+        const client = new PrismaSessionClient(fetchMock);
+
+        const records = await collectSessionResetRecords(async () => {
+            await client.fetch('/api/prisma/snapshot', { method: 'POST' });
+            await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+        });
+
+        expect(records).toEqual([{ reason: 'unauthorized-401', epoch_after: 1 }]);
+    });
+
+    it('T16: records a session-reset(reason=explicit) timeline entry on an explicit reset', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(sessionResponse());
+        const client = new PrismaSessionClient(fetchMock);
+
+        const records = await collectSessionResetRecords(() => {
+            client.reset({ close: false });
+        });
+
+        expect(records).toEqual([{ reason: 'explicit', epoch_after: 1 }]);
+    });
+
+    it('T16: sendBeacon sends the current capability with keepalive and never awaits bootstrap', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(sessionResponse())
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        const client = new PrismaSessionClient(fetchMock);
+        await client.bootstrap();
+
+        client.sendBeacon('/api/prisma/snapshot', '{"records":[]}');
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+        const [path, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+        expect(path).toBe('/api/prisma/snapshot');
+        expect(init.method).toBe('POST');
+        expect(init.body).toBe('{"records":[]}');
+        expect(init.keepalive).toBe(true);
+        expect(new Headers(init.headers).get('X-Prisma-Session-Capability')).toBe(canonicalCapability());
+    });
+
+    it('T16: sendBeacon does nothing without a minted capability', () => {
+        const fetchMock = vi.fn<typeof fetch>();
+        const client = new PrismaSessionClient(fetchMock);
+
+        client.sendBeacon('/api/prisma/snapshot', '{}');
+
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('T16: sendBeacon refuses an unauthorized path like every other capability-bearing call', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(sessionResponse());
+        const client = new PrismaSessionClient(fetchMock);
+        await client.bootstrap();
+
+        expect(() => client.sendBeacon('/api/prisma/unknown', '{}')).toThrow();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 });

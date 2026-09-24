@@ -493,7 +493,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         }
 
         const context = this.getLocalWorkletContext();
-        await this.ensureContextRunning(context);
+        await this.ensureContextRunning(context, active);
         if (!this.isCurrent(active)) {
             return;
         }
@@ -775,7 +775,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         active: ActivePlayback,
     ): Promise<void> {
         const context = this.getAudioContext();
-        await this.ensureContextRunning(context);
+        await this.ensureContextRunning(context, active);
         if (!this.isCurrent(active)) {
             return;
         }
@@ -856,7 +856,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         if (!this.isCurrent(active)) {
             return;
         }
-        await this.ensureContextRunning(context);
+        await this.ensureContextRunning(context, active);
         if (!this.isCurrent(active)) {
             return;
         }
@@ -925,12 +925,24 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         return this.localWorkletContext;
     }
 
-    private async ensureContextRunning(context: AudioContext): Promise<void> {
+    private async ensureContextRunning(context: AudioContext, active: ActivePlayback): Promise<void> {
         if (isAudioContextRunning(context)) {
             return;
         }
 
+        // T16: only observed when a resume is actually needed (autoplay/idle
+        // suspension is a first-question-miss candidate) -- this is called
+        // on every scheduled PCM block in the progressive path, so recording
+        // unconditionally would flood the timeline with "already running".
+        this.emitDiagnostic(active, {
+            record_type: 'audio-context-state',
+            payload: { state: context.state, when: 'at-play' },
+        });
         await context.resume();
+        this.emitDiagnostic(active, {
+            record_type: 'audio-context-state',
+            payload: { state: context.state, when: 'after-resume' },
+        });
         if (!isAudioContextRunning(context)) {
             throw new Error('AudioContext remained suspended after resume');
         }

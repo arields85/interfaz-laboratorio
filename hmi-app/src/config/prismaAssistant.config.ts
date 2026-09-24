@@ -8,6 +8,10 @@ export const PRISMA_ASK_URL = '/api/prisma/ask';
 export const PRISMA_VOICE_CONFIG_URL = '/api/prisma/voice-config';
 export const PRISMA_TTS_LIVE_URL = '/api/prisma/tts/live';
 export const PRISMA_CHANNEL_A_PAIRING_URL = '/api/prisma/channel-a/pairing';
+// T16: batched browser voice timeline diagnostics (see
+// prismaVoiceTimelineDiagnosticsSink.ts and the runtime's
+// /hmi/voice/timeline route) -- never plant control, read-only logging.
+export const PRISMA_VOICE_TIMELINE_URL = '/api/prisma/voice/timeline';
 
 export const PRISMA_BROWSER_ROUTES = Object.freeze({
     snapshot: PRISMA_SNAPSHOT_URL,
@@ -18,4 +22,5 @@ export const PRISMA_BROWSER_ROUTES = Object.freeze({
     voiceConfig: PRISMA_VOICE_CONFIG_URL,
     ttsLive: PRISMA_TTS_LIVE_URL,
     pairing: PRISMA_CHANNEL_A_PAIRING_URL,
+    voiceTimeline: PRISMA_VOICE_TIMELINE_URL,
 });

@@ -2,6 +2,7 @@ import type { VoiceEvent } from '../domain/voice.types';
 import { normalizeTelegramChatId } from '../domain/voice';
 import { PRISMA_EVENTS_URL } from '../config/prismaAssistant.config';
 import { prismaSessionClient } from './prismaSessionClient';
+import { recordVoiceEventReceived } from './prismaVoiceTimelineRecorder';
 
 const DEFAULT_VOICE_POLL_INTERVAL_MS = 1_000;
 
@@ -91,6 +92,7 @@ export function startVoiceEventListener({
             if (fetchImpl === undefined && !prismaSessionClient.acceptVoiceEvent(eventKey)) {
                 return;
             }
+            recordVoiceEventReceived('poll');
             onEvent(event);
         } catch {
             // Voice channel failures must never interrupt the HMI.
@@ -143,6 +145,7 @@ export function startVoiceEventListener({
         if (!prismaSessionClient.acceptVoiceEvent(eventKey)) {
             return;
         }
+        recordVoiceEventReceived('sse');
         onEvent(event);
     };
 

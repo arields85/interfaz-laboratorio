@@ -6,9 +6,11 @@ import {
     PRISMA_SESSION_URL,
     PRISMA_SNAPSHOT_URL,
     PRISMA_TTS_LIVE_URL,
+    PRISMA_VOICE_TIMELINE_URL,
 } from '../config/prismaAssistant.config';
 import type { PrismaContextCommand, PrismaContextIntent, PrismaSessionMetadata, PrismaSessionRequestSnapshot } from '../domain/prismaSession.types';
 import { isPrismaRuntimeUnreachableMarker, parsePrismaRuntimeUnreachableDetail, PrismaRuntimeUnreachableError } from './prismaRuntimeUnreachable';
+import { recordSessionReset } from './prismaVoiceTimelineRecorder';
 
 const CAPABILITY_HEADER = 'X-Prisma-Session-Capability';
 const AUTHORIZED_PATHS = new Set([
@@ -22,6 +24,8 @@ const AUTHORIZED_PATHS = new Set([
     PRISMA_ASK_URL,
     PRISMA_TTS_LIVE_URL,
     PRISMA_CHANNEL_A_PAIRING_URL,
+    // T16: batched browser voice timeline diagnostics.
+    PRISMA_VOICE_TIMELINE_URL,
 ]);
 const SESSION_METADATA_KEYS = ['absoluteExpiresAt', 'idleExpiresAt', 'ok'] as const;
 
@@ -201,7 +205,7 @@ export class PrismaSessionClient {
             });
             if (requestEpoch !== this.#epoch) throw new PrismaStaleSessionResponse();
             if (response.status === 401 && this.#capability === capability) {
-                this.#invalidate();
+                this.#invalidate('unauthorized-401');
                 void this.bootstrap().catch(() => undefined);
             }
             const returnedResponse = path === PRISMA_TTS_LIVE_URL && response.body !== null
@@ -232,7 +236,7 @@ export class PrismaSessionClient {
 
     reset({ close = true, keepalive = false }: { close?: boolean; keepalive?: boolean } = {}): void {
         const capability = this.#capability;
-        this.#invalidate();
+        this.#invalidate('explicit');
         if (close && capability !== null) {
             void this.#fetchImpl(PRISMA_SESSION_URL, {
                 method: 'DELETE',
@@ -242,6 +246,28 @@ export class PrismaSessionClient {
                 keepalive,
             }).catch(() => undefined);
         }
+    }
+
+    /** T16: a synchronous, epoch-agnostic best-effort send for use from a
+     * `pagehide` handler (see prismaVoiceTimelineDiagnosticsSink.ts), where
+     * the normal fetch() gate would race a same-tick session reset: both
+     * are registered as `pagehide` listeners, fetch()'s own await of
+     * #waitForBootstrap() yields to the event loop, and reset()'s listener
+     * (registered after the sink's) then bumps the epoch before fetch()
+     * resumes -- silently discarding the batch as PrismaStaleSessionResponse.
+     * Reads the capability synchronously, never waits for bootstrap, never
+     * checks the epoch, and does nothing when no capability was ever minted
+     * -- there is nothing safe to send without one. */
+    sendBeacon(path: string, body: string): void {
+        this.#assertAuthorizedPath(path);
+        const capability = this.#capability;
+        if (capability === null) return;
+        void this.#fetchImpl(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', [CAPABILITY_HEADER]: capability },
+            body,
+            keepalive: true,
+        }).catch(() => undefined);
     }
 
     #assertAuthorizedPath(path: string): void {
@@ -332,11 +358,12 @@ export class PrismaSessionClient {
         });
     }
 
-    #invalidate(): void {
+    #invalidate(reason: 'unauthorized-401' | 'explicit'): void {
         this.#capability = null;
         this.#metadata = null;
         this.#bootstrap = null;
         this.#epoch += 1;
+        recordSessionReset(reason, this.#epoch);
         this.#voiceEventKeys.clear();
         this.#requestController.abort();
         this.#requestController = new AbortController();

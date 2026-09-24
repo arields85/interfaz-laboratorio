@@ -13,6 +13,24 @@ vi.mock('./prismaSessionClient', () => ({
 }));
 
 import { startVoiceEventListener } from './voiceEventListener.service';
+import { PRISMA_BROWSER_METRIC_EVENT } from './prismaVoiceMetrics';
+
+async function collectVoiceEventReceivedSources(run: () => Promise<void>): Promise<string[]> {
+    const sources: string[] = [];
+    const listener = (event: Event) => {
+        const detail = (event as CustomEvent<{ record_type: string; payload: { source: string } }>).detail;
+        if (detail.record_type === 'voice-event-received') {
+            sources.push(detail.payload.source);
+        }
+    };
+    window.addEventListener(PRISMA_BROWSER_METRIC_EVENT, listener);
+    try {
+        await run();
+    } finally {
+        window.removeEventListener(PRISMA_BROWSER_METRIC_EVENT, listener);
+    }
+    return sources;
+}
 
 /**
  * T13b: minimal fake for a fetch Response's streaming `body`
@@ -155,6 +173,27 @@ describe('startVoiceEventListener', () => {
         expect(onEvent).toHaveBeenLastCalledWith({ ...FIRST_EVENT, id: 'voice-2', text: 'Current response' });
 
         stop();
+    });
+
+    it('T16: records one voice-event-received(source=poll) timeline entry per delivered poll event', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(FIRST_EVENT))
+            .mockResolvedValueOnce(jsonResponse({ ...FIRST_EVENT, id: 'voice-2', text: 'Current response' }));
+        const onEvent = vi.fn();
+
+        const sources = await collectVoiceEventReceivedSources(async () => {
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                onEvent,
+                fetchImpl: fetchMock,
+                intervalMs: 1_000,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+            await vi.advanceTimersByTimeAsync(1_000);
+            stop();
+        });
+
+        expect(sources).toEqual(['poll', 'poll']);
     });
 
     it('keeps the first legacy payload silent, deduplicates it, and emits a new legacy event once', async () => {
@@ -524,6 +563,26 @@ describe('startVoiceEventListener', () => {
             stop();
             await vi.advanceTimersByTimeAsync(0);
             expect(body.cancelled).toBe(true);
+        });
+
+        it('T16: records one voice-event-received(source=sse) timeline entry for a delivered SSE event', async () => {
+            const body = new FakeSseBody();
+            sessionClientMock.fetch.mockResolvedValueOnce(sseResponse(body));
+            const onEvent = vi.fn();
+
+            const sources = await collectVoiceEventReceivedSources(async () => {
+                const stop = startVoiceEventListener({
+                    url: '/api/prisma/events/latest',
+                    streamUrl: '/api/prisma/events/stream',
+                    onEvent,
+                });
+                await vi.advanceTimersByTimeAsync(0);
+                body.push(`data: ${JSON.stringify(FIRST_EVENT)}\n\n`);
+                await vi.advanceTimersByTimeAsync(0);
+                stop();
+            });
+
+            expect(sources).toEqual(['sse']);
         });
 
         it('reassembles a single SSE frame split across multiple stream chunks', async () => {

@@ -17,6 +17,7 @@ sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 from prisma_runtime.local_presentation import JsonFileStore, VoiceEventStore, answer_from_snapshot, create_app
 from prisma_runtime.voice_events import VoiceEventCapacity
 from prisma_runtime.hmi_sessions import HmiSessionRegistry
+from prisma_runtime.voice_timeline_diagnostics import VoiceTimelineRateLimiter
 
 
 # Explicitly inert collaborators for these HTTP fixtures, never runtime defaults.
@@ -619,6 +620,124 @@ class MainStartupWiringTests(unittest.TestCase):
             main_body.index("install_access_log_query_redaction()"),
             main_body.index("app.run("),
         )
+
+
+class VoiceTimelineDiagnosticsRouteTests(unittest.TestCase):
+    """T16: POST /hmi/voice/timeline validates a closed batch of
+    browser-side voice timeline records and writes one compact WARNING
+    log line per accepted record -- never a question, answer, capability
+    or real event id."""
+
+    def _client(self, *, limiter=None):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        registry = HmiSessionRegistry()
+        client = create_app(
+            JsonFileStore(Path(temporary.name) / "snapshot.json"), VoiceEventStore(), None,
+            session_registry=registry, voice_timeline_limiter=limiter, **DISABLED_HTTP_OPTIONS,
+        ).test_client()
+        return client, registry
+
+    def _record(self, **overrides):
+        record = {
+            "schema_version": "1",
+            "run_id": "prisma-0123456789abcdef",
+            "layer": "browser",
+            "record_type": "orb-phase",
+            "sequence": 0,
+            "monotonic_ms": 5.0,
+            "elapsed_ms": 5.0,
+            "payload": {"phase": "visible"},
+        }
+        record.update(overrides)
+        return record
+
+    def test_requires_authorization(self) -> None:
+        client, _registry = self._client()
+        response = client.post("/hmi/voice/timeline", json={"records": [self._record()]})
+        self.assertEqual(response.status_code, 401)
+
+    def test_accepts_a_valid_batch_and_logs_one_warning_line_per_record(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        client, registry = self._client()
+        capability, _metadata = registry.create()
+        headers = {"X-Prisma-Session-Capability": capability}
+        with self.assertLogs(local_presentation_module._logger, level="WARNING") as observed:
+            response = client.post(
+                "/hmi/voice/timeline",
+                json={"records": [self._record(), self._record(sequence=1, record_type="speak-live-request-start", payload={})]},
+                headers=headers,
+            )
+        self.assertEqual(response.status_code, 204)
+        matching = [line for line in observed.output if "HMI voice timeline:" in line]
+        self.assertEqual(len(matching), 2)
+        self.assertIn("type=orb-phase", matching[0])
+        self.assertIn("extra=phase=visible", matching[0])
+        self.assertIn("type=speak-live-request-start", matching[1])
+
+    def test_rejects_a_malformed_batch_without_logging_anything(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        client, registry = self._client()
+        capability, _metadata = registry.create()
+        headers = {"X-Prisma-Session-Capability": capability}
+        with self.assertRaises(AssertionError):
+            # assertLogs itself raises when nothing was logged -- this is
+            # the expected shape: no log line for a rejected batch.
+            with self.assertLogs(local_presentation_module._logger, level="WARNING"):
+                response = client.post(
+                    "/hmi/voice/timeline",
+                    json={"records": [self._record(payload={"phase": "visible", "note": "free text"})]},
+                    headers=headers,
+                )
+        self.assertEqual(response.status_code, 400)
+
+    def test_rejects_an_oversized_body(self) -> None:
+        client, registry = self._client()
+        capability, _metadata = registry.create()
+        headers = {"X-Prisma-Session-Capability": capability}
+        response = client.post(
+            "/hmi/voice/timeline",
+            json={"records": [self._record() for _ in range(400)]},
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 413)
+
+    def test_never_logs_free_text_carried_in_the_question_or_answer(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        client, registry = self._client()
+        capability, _metadata = registry.create()
+        headers = {"X-Prisma-Session-Capability": capability}
+        with self.assertLogs(local_presentation_module._logger, level="WARNING") as observed:
+            client.post(
+                "/hmi/voice/timeline",
+                json={"records": [self._record(
+                    record_type="speak-live-response-received",
+                    payload={"http_status": 200, "elapsed_ms": 143},
+                )]},
+                headers=headers,
+            )
+        matching = [line for line in observed.output if "HMI voice timeline:" in line]
+        self.assertEqual(len(matching), 1)
+        self.assertNotIn("capability", matching[0].lower())
+
+    def test_enforces_the_rate_limit_with_a_clean_429(self) -> None:
+        client, registry = self._client(limiter=VoiceTimelineRateLimiter(max_requests=1, window_seconds=60.0))
+        capability, _metadata = registry.create()
+        headers = {"X-Prisma-Session-Capability": capability}
+        first = client.post("/hmi/voice/timeline", json={"records": [self._record()]}, headers=headers)
+        second = client.post("/hmi/voice/timeline", json={"records": [self._record()]}, headers=headers)
+        self.assertEqual(first.status_code, 204)
+        self.assertEqual(second.status_code, 429)
+
+    def test_response_has_no_store_cache_control(self) -> None:
+        client, registry = self._client()
+        capability, _metadata = registry.create()
+        headers = {"X-Prisma-Session-Capability": capability}
+        response = client.post("/hmi/voice/timeline", json={"records": [self._record()]}, headers=headers)
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
 
 
 if __name__ == "__main__":

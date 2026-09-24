@@ -47,6 +47,9 @@ from .telegram_credentials import TelegramCredentialResolver
 from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, project_telegram_diagnostic, validate_telegram_state
 from .telegram_verification import TelegramTokenVerificationService
 from .voice_events import VoiceEventCapacity, VoiceEventStore, VoiceEventStreamCapacity
+from .voice_timeline_diagnostics import (
+    MAX_TIMELINE_BATCH_RECORDS, VoiceTimelineRateLimiter, format_timeline_log_line, validate_timeline_batch,
+)
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -56,6 +59,10 @@ DEFAULT_TELEGRAM_API_URL = "https://api.telegram.org"
 HMI_SESSION_BOOTSTRAP_MAX_BYTES = 128
 HMI_ASK_MAX_BYTES = 32 * 1024
 HMI_QUESTION_MAX_BYTES = 4096
+# T16: a batch of up to MAX_TIMELINE_BATCH_RECORDS small, enum/numeric-only
+# records (see voice_timeline_diagnostics.py); generous next to real usage,
+# tiny next to anything that could carry real text.
+HMI_VOICE_TIMELINE_MAX_BYTES = 16 * 1024
 # T13 unit (c): how often the voice-events SSE stream re-authorizes (keeping
 # the underlying session's idle window alive the way repeated 1s polling
 # used to) and sends a keep-alive comment while idle. Comfortably below the
@@ -888,11 +895,12 @@ def build_telegram_bot(snapshot_store, state_store, voice_events, api_base=DEFAU
     )
 
 
-def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None, telegram_manager=None, channel_a_manager=None) -> Flask:
+def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegram_configuration=None, admin_http=None, session_registry=None, telegram_manager=None, channel_a_manager=None, voice_timeline_limiter=None) -> Flask:
     paths = runtime_paths()
     snapshot_store = snapshot_store or JsonFileStore(paths.snapshot)
     voice_events = voice_events or VoiceEventStore()
     session_registry = session_registry or HmiSessionRegistry(on_remove=voice_events.remove_owner)
+    voice_timeline_limiter = voice_timeline_limiter or VoiceTimelineRateLimiter()
     telegram_configuration = telegram_configuration or read_telegram_config()
     voice_url = (os.environ.get("PRISMA_LOCAL_VOICE_URL") or DEFAULT_PRISMA_VOICE_URL).rstrip("/")
     local_http = requests.Session(); local_http.trust_env = False
@@ -1044,7 +1052,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         origin = request.headers.get("Origin"); allowed = {"http://127.0.0.1:5173", "http://localhost:5173"}
         response.headers["Access-Control-Allow-Origin"] = origin if origin in allowed else "http://127.0.0.1:5173"; response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Headers"] = f"Content-Type, X-CSRF-Token, {CAPABILITY_HEADER}"; response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        if request.path in {"/hmi/session", "/hmi/channel-a/pairing", "/hmi/current-snapshot", "/hmi/voice/latest", "/local/ask"} or request.path.startswith("/internal/prisma/voice-events/"):
+        if request.path in {"/hmi/session", "/hmi/channel-a/pairing", "/hmi/current-snapshot", "/hmi/voice/latest", "/local/ask", "/hmi/voice/timeline"} or request.path.startswith("/internal/prisma/voice-events/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1222,6 +1230,32 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 return session_error()
         event = voice_events.get_internal(event_id, owner_id)
         return (jsonify({"ok": False, "error": "VOICE_EVENT_NOT_FOUND"}), 404) if event is None else jsonify(event)
+
+    @app.route("/hmi/voice/timeline", methods=["POST", "OPTIONS"])
+    def voice_timeline():
+        """T16: browser voice timeline diagnostics -- see
+        voice_timeline_diagnostics.py for the closed-schema validation and
+        the log-line format. Read-only with respect to the plant: this
+        route only ever logs a bounded, typed batch to
+        prisma-presentation-stderr.log; it never reads or writes plant
+        state, and (by design, see prismaVoiceTimelineDiagnosticsSink.ts)
+        a diagnostics failure here can never affect voice playback -- the
+        browser sink only ever best-effort POSTs."""
+        if request.method == "OPTIONS": return Response(status=204)
+        owner_id = session_owner(touch=False)
+        if owner_id is None: return session_error()
+        if not voice_timeline_limiter.allow(owner_id):
+            return jsonify({"ok": False, "error": "VOICE_TIMELINE_RATE_LIMITED"}), 429
+        payload = request_bytes_within(HMI_VOICE_TIMELINE_MAX_BYTES)
+        if payload is None:
+            return jsonify({"ok": False, "error": "VOICE_TIMELINE_PAYLOAD_TOO_LARGE"}), 413
+        try:
+            records = validate_timeline_batch(parse_json_bytes(payload), max_records=MAX_TIMELINE_BATCH_RECORDS)
+        except ValueError:
+            return jsonify({"ok": False, "error": "INVALID_VOICE_TIMELINE_REQUEST"}), 400
+        for record in records:
+            _logger.warning(format_timeline_log_line(record))
+        return Response(status=204)
 
     @app.route("/local/ask", methods=["POST", "OPTIONS"])
     def local_ask():

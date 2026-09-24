@@ -398,6 +398,41 @@ describe('PrismaVoiceAudioEngine', () => {
         expect(frames.count()).toBe(0);
     });
 
+    it('T16: records audio-context-state before and after a resume, only when one was needed', async () => {
+        audio = createAudioHarness('suspended');
+        const reader = createReader([
+            { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) },
+            { done: true, value: undefined },
+        ]);
+        const target = createTarget();
+        const engine = createEngine();
+
+        engine.play(createLiveSource(reader), target, { onStarted: vi.fn(), onEnded: vi.fn() });
+        await settlePlayback();
+
+        expect(audio.resume).toHaveBeenCalledTimes(1);
+        const contextStateRecords = diagnostics.filter((diagnostic) => diagnostic.record_type === 'audio-context-state');
+        expect(contextStateRecords).toEqual([
+            expect.objectContaining({ record_type: 'audio-context-state', payload: { state: 'suspended', when: 'at-play' } }),
+            expect.objectContaining({ record_type: 'audio-context-state', payload: { state: 'running', when: 'after-resume' } }),
+        ]);
+    });
+
+    it('T16: never records audio-context-state when the context is already running', async () => {
+        const reader = createReader([
+            { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) },
+            { done: true, value: undefined },
+        ]);
+        const target = createTarget();
+        const engine = createEngine();
+
+        engine.play(createLiveSource(reader), target, { onStarted: vi.fn(), onEnded: vi.fn() });
+        await settlePlayback();
+
+        expect(audio.resume).not.toHaveBeenCalled();
+        expect(diagnostics.some((diagnostic) => diagnostic.record_type === 'audio-context-state')).toBe(false);
+    });
+
     it('starts Local at the fixed target regardless of delivery rate and drains one worklet exactly once', async () => {
         const reads = Array.from({ length: 5 }, () => (
             deferred<ReadableStreamReadResult<Uint8Array>>()
