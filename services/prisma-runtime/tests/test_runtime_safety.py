@@ -348,55 +348,22 @@ Save-PrismaJsonFile -Path '{receipt}' -Value ([ordered]@{{ registered = $true; g
             )
         self.assertEqual(node.returncode, 0, node.stderr)
 
-    def test_failed_sole_owner_receipt_handoff_rolls_back_exact_owned_processes(self) -> None:
-        self._assert_failed_receipt_handoff_rolls_back(owner_list=["owner-b"], expected_owners=None, expected_stopped="200,201")
-
-    def test_failed_shared_owner_receipt_handoff_removes_only_invocation_owner(self) -> None:
-        self._assert_failed_receipt_handoff_rolls_back(owner_list=["owner-a"], expected_owners=["owner-a"], expected_stopped="")
-
-    def _assert_failed_receipt_handoff_rolls_back(self, owner_list: list[str], expected_owners: list[str] | None, expected_stopped: str) -> None:
-        start_script = OPERATIONS_ROOT / "start-local.ps1"
-        with tempfile.TemporaryDirectory() as temporary:
-            state = Path(temporary)
-            (state / "run").mkdir()
-            manifest_path = state / "run" / "process-manifest.json"
-            manifest_path.write_text(json.dumps({
-                "schemaVersion": 2,
-                "repositoryRoot": str(RUNTIME_ROOT),
-                "processes": [
-                    {"service": "prisma-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service", "creationTimeUtc": "voice-created"},
-                    {"service": "prisma-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "prisma_runtime.local_presentation", "commandLine": "python.exe -m prisma_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
-                ],
-                "developmentOwnership": {"generation": "generation", "owners": owner_list},
-            }), encoding="utf-8")
-            missing_parent_receipt = state / "missing" / "receipt.json"
-            command = fr"""
-$ErrorActionPreference = 'Stop'
-$env:PRISMA_RUNTIME_STATE_DIR = '{state}'
-function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
-function global:Get-CimInstance {{
-    param([string]$ClassName, [string]$Filter)
-    $voice = $Filter -match '200'
-    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m prisma_runtime.voice_service' }} else {{ 'python.exe -m prisma_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-created' }} else {{ 'presentation-created' }}) }}
-}}
-function global:Invoke-RestMethod {{
-    param([string]$Uri, [int]$TimeoutSec)
-    if ($Uri -match '5056') {{ return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-voice'; mode = 'local' }} }}
-    return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-local-presentation'; mode = 'local'; prismaVoiceReady = $true }}
-}}
-$global:stopped = @()
-function global:Stop-Process {{ [CmdletBinding()] param([int]$Id, [switch]$Force) $global:stopped += $Id }}
-try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-b' -DevelopmentReceiptPath '{missing_parent_receipt}'; exit 9 }}
-catch {{ Write-Output "failed=True;stopped=$($global:stopped -join ',')" }}
-"""
-            result = self.run_powershell(command)
-            final_manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig")) if manifest_path.exists() else None
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"failed=True;stopped={expected_stopped}", result.stdout)
-        if expected_owners is None:
-            self.assertIsNone(final_manifest)
-        else:
-            self.assertEqual(final_manifest["developmentOwnership"]["owners"], expected_owners)
+    # T18 (2026-09-24): _assert_failed_receipt_handoff_rolls_back and its two callers
+    # (test_failed_sole_owner_receipt_handoff_rolls_back_exact_owned_processes,
+    # test_failed_shared_owner_receipt_handoff_removes_only_invocation_owner) were removed
+    # here. They exercised rolling back Add-PrismaDevelopmentOwner registering a NEW owner
+    # onto an EXISTING, already-running, healthy dev-owned manifest after a receipt-save
+    # failure -- that registration only ever happened inside the warm-reuse branch T18
+    # deleted from start-local.ps1's Invoke-PrismaStartTransaction (a healthy runtime is
+    # never reused and therefore never gains a second owner anymore). The rollback
+    # machinery itself (Invoke-PrismaDevelopmentReleaseTransaction, sole-vs-shared-owner
+    # semantics) is unchanged and remains covered directly via release-dev-local.ps1 by
+    # test_release_keeps_nonfinal_generation_and_never_kills_replaced_identity,
+    # test_release_reaps_provably_dead_peer_and_stops_runtime_for_last_live_owner and
+    # test_release_retains_legacy_peer_even_when_warnings_are_terminating below.
+    # Add-PrismaDevelopmentOwner/Remove-PrismaDevelopmentOwner themselves stay directly
+    # unit-tested by test_development_owner_transaction_shares_generation_and_releases_only_last_owner
+    # and test_generation_mismatch_and_repeated_release_cannot_claim_replacement.
 
     def test_generation_mismatch_and_repeated_release_cannot_claim_replacement(self) -> None:
         helper = OPERATIONS_ROOT / "process-ownership.ps1"
@@ -445,93 +412,18 @@ Write-Output "legacy=$(Test-PrismaManifestIdentity -Listener $listener -Record $
         self.assertIn("False", corrupt.stdout)
         self.assertIn("False", foreign.stdout)
 
-    def test_manual_canonical_runtime_is_reused_without_start_or_stop_ownership(self) -> None:
-        start_script = OPERATIONS_ROOT / "start-local.ps1"
-        with tempfile.TemporaryDirectory() as temporary:
-            state = Path(temporary)
-            (state / "run").mkdir()
-            manifest = {
-                "schemaVersion": 1,
-                "repositoryRoot": str(RUNTIME_ROOT),
-                "processes": [
-                    {"service": "prisma-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service"},
-                    {"service": "prisma-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "prisma_runtime.local_presentation", "commandLine": "python.exe -m prisma_runtime.local_presentation"},
-                ],
-            }
-            (state / "run" / "process-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-            receipt = state / "receipt.json"
-            command = fr"""
-$ErrorActionPreference = 'Stop'
-$env:PRISMA_RUNTIME_STATE_DIR = '{state}'
-function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
-function global:Get-CimInstance {{
-    param([string]$ClassName, [string]$Filter)
-    $pidValue = if ($Filter -match '200') {{ 200 }} else {{ 201 }}
-    $module = if ($pidValue -eq 200) {{ 'prisma_runtime.voice_service' }} else {{ 'prisma_runtime.local_presentation' }}
-    [pscustomobject]@{{ ProcessId = $pidValue; ExecutablePath = 'C:\Python.exe'; CommandLine = "python.exe -m $module" }}
-}}
-$global:started = 0
-$global:stopped = 0
-function global:Start-Process {{ $global:started++ }}
-function global:Stop-Process {{ $global:stopped++ }}
-& '{start_script}' -DevelopmentOwnerToken 'owner' -DevelopmentReceiptPath '{receipt}'
-$receiptValue = Get-Content -LiteralPath '{receipt}' -Raw | ConvertFrom-Json
-Write-Output "registered=$($receiptValue.registered);started=$global:started;stopped=$global:stopped"
-"""
-            result = self.run_powershell(command)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("registered=False;started=0;stopped=0", result.stdout)
-        # T1c: a manual reuse must still announce itself in the launcher terminal, distinct
-        # from the fresh-start message, so a relaunch after an abrupt close is not silent.
-        self.assertIn("Prisma voice is ready at http://127.0.0.1:5056 (already running).", result.stdout)
-        self.assertIn("Prisma is ready at http://127.0.0.1:5057 (already running).", result.stdout)
-
-    def test_concurrent_acquisitions_join_one_owned_generation_without_manifest_corruption(self) -> None:
-        start_script = OPERATIONS_ROOT / "start-local.ps1"
-        with tempfile.TemporaryDirectory() as temporary:
-            state = Path(temporary)
-            (state / "run").mkdir()
-            generation = "generation-a"
-            manifest = {
-                "schemaVersion": 2,
-                "repositoryRoot": str(RUNTIME_ROOT),
-                "processes": [
-                    {"service": "prisma-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service", "creationTimeUtc": "voice-created"},
-                    {"service": "prisma-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "prisma_runtime.local_presentation", "commandLine": "python.exe -m prisma_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
-                ],
-                "developmentOwnership": {"generation": generation, "owners": ["owner-a"]},
-            }
-            (state / "run" / "process-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-
-            def command(owner: str) -> str:
-                receipt = state / f"{owner}.json"
-                return fr"""
-$ErrorActionPreference = 'Stop'
-$env:PRISMA_RUNTIME_STATE_DIR = '{state}'
-function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
-function global:Get-CimInstance {{
-    param([string]$ClassName, [string]$Filter)
-    $voice = $Filter -match '200'
-    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m prisma_runtime.voice_service' }} else {{ 'python.exe -m prisma_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-created' }} else {{ 'presentation-created' }}) }}
-}}
-function global:Invoke-RestMethod {{
-    param([string]$Uri, [int]$TimeoutSec)
-    if ($Uri -match '5056') {{ return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-voice'; mode = 'local' }} }}
-    return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-local-presentation'; mode = 'local'; prismaVoiceReady = $true }}
-}}
-& '{start_script}' -DevelopmentOwnerToken '{owner}' -DevelopmentReceiptPath '{receipt}'
-"""
-
-            powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-            first = subprocess.Popen([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command("owner-b")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            second = subprocess.Popen([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command("owner-c")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            first_stdout, first_stderr = first.communicate(timeout=10)
-            second_stdout, second_stderr = second.communicate(timeout=10)
-            final_manifest = json.loads((state / "run" / "process-manifest.json").read_text(encoding="utf-8-sig"))
-        self.assertEqual(first.returncode, 0, first_stderr or first_stdout)
-        self.assertEqual(second.returncode, 0, second_stderr or second_stdout)
-        self.assertEqual(final_manifest["developmentOwnership"]["generation"], generation)
-        self.assertCountEqual(final_manifest["developmentOwnership"]["owners"], ["owner-a", "owner-b", "owner-c"])
+    # T18 (2026-09-24): test_manual_canonical_runtime_is_reused_without_start_or_stop_ownership
+    # was rewritten as test_start_local_always_stops_and_restarts_a_manually_started_runtime
+    # below (a manual runtime is now ALSO stopped and restarted, not reused).
+    #
+    # test_concurrent_acquisitions_join_one_owned_generation_without_manifest_corruption was
+    # removed: it proved two concurrent `npm run dev` launches could join the SAME
+    # developmentOwnership generation of an already-running, healthy manifest without
+    # corrupting it. That joining behavior no longer exists -- every start (concurrent or
+    # not) now always stops whatever verified runtime of this repository it finds and starts
+    # its own fresh, singly-owned one (Invoke-PrismaManifestLock still serializes the two
+    # transactions, so the manifest itself is never corrupted; there is simply no longer a
+    # "join" outcome to assert).
 
     def test_release_keeps_nonfinal_generation_and_never_kills_replaced_identity(self) -> None:
         release_script = OPERATIONS_ROOT / "release-dev-local.ps1"
@@ -617,66 +509,17 @@ Write-Output "stopped=$($global:stopped -join ',')"
         self.assertIn("stopped=200,201", result.stdout)
         self.assertIsNone(final_manifest)
 
-    def test_warm_acquisition_reaps_provably_dead_owner_and_registers_new_owner_without_stopping(self) -> None:
-        """PW-005: warm reuse must reap a provably dead prior owner (successful
-        zero-result CIM lookup) in the same registration that adds the new
-        owner, keeping the generation stable and never stopping owner-identity
-        processes (owner PIDs are liveness data, not stop targets)."""
-        start_script = OPERATIONS_ROOT / "start-local.ps1"
-        with tempfile.TemporaryDirectory() as temporary:
-            state = Path(temporary)
-            (state / "run").mkdir()
-            manifest = {
-                "schemaVersion": 2,
-                "repositoryRoot": str(RUNTIME_ROOT),
-                "processes": [
-                    {"service": "prisma-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service", "creationTimeUtc": "voice-created"},
-                    {"service": "prisma-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "prisma_runtime.local_presentation", "commandLine": "python.exe -m prisma_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
-                ],
-                "developmentOwnership": {
-                    "generation": "generation",
-                    "owners": ["dead-peer"],
-                    "ownerIdentities": {
-                        "dead-peer": {"pid": 5001, "creationTimeUtc": "2026-09-17T10:00:01.0000000Z"},
-                    },
-                },
-            }
-            (state / "run" / "process-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-            receipt = state / "receipt.json"
-            command = fr"""
-$ErrorActionPreference = 'Stop'
-$env:PRISMA_RUNTIME_STATE_DIR = '{state}'
-function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
-function global:Get-CimInstance {{
-    param([string]$ClassName, [string]$Filter)
-    if ($Filter -match '5001') {{ return @() }}
-    if ($Filter -match '5002') {{ return [pscustomobject]@{{ ProcessId = 5002; CreationDate = '2026-09-17T10:00:02.0000000Z' }} }}
-    $voice = $Filter -match '200'
-    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m prisma_runtime.voice_service' }} else {{ 'python.exe -m prisma_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-created' }} else {{ 'presentation-created' }}) }}
-}}
-function global:Invoke-RestMethod {{
-    param([string]$Uri, [int]$TimeoutSec)
-    if ($Uri -match '5056') {{ return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-voice'; mode = 'local' }} }}
-    return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-local-presentation'; mode = 'local'; prismaVoiceReady = $true }}
-}}
-$global:started = 0
-$global:stopped = 0
-function global:Start-Process {{ $global:started++ }}
-function global:Stop-Process {{ $global:stopped++ }}
-& '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentOwnerProcessId '5002' -DevelopmentReceiptPath '{receipt}'
-$receiptValue = Get-Content -LiteralPath '{receipt}' -Raw | ConvertFrom-Json
-Write-Output "registered=$($receiptValue.registered);started=$global:started;stopped=$global:stopped"
-"""
-            result = self.run_powershell(command)
-            final_manifest = json.loads((state / "run" / "process-manifest.json").read_text(encoding="utf-8-sig"))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("registered=True;started=0;stopped=0", result.stdout)
-        source = start_script.read_text(encoding="utf-8-sig")
-        warm_path = source[source.index("if ($isDevelopment -and $canonical)"):source.index("Prune-PrismaProcessManifest")]
-        self.assertEqual(warm_path.count("Save-PrismaProcessManifest"), 1)
-        self.assertEqual(final_manifest["developmentOwnership"]["owners"], ["owner-new"])
-        self.assertEqual(final_manifest["developmentOwnership"]["generation"], "generation")
-        self.assertEqual(final_manifest["developmentOwnership"]["ownerIdentities"]["owner-new"]["pid"], 5002)
+    # T18 (2026-09-24): test_warm_acquisition_reaps_provably_dead_owner_and_registers_new_owner_without_stopping
+    # was removed. It proved a NEW owner could join an existing manifest's generation (reaping
+    # a provably dead peer along the way) WITHOUT stopping or starting anything -- the exact
+    # warm-reuse branch (Get-PrismaCanonicalManifest + Add-PrismaDevelopmentOwner) T18 deleted
+    # from Invoke-PrismaStartTransaction. Dead-peer reaping itself is untouched and stays
+    # covered by Invoke-PrismaDevelopmentReleaseTransaction's own tests (see the note above
+    # test_release_keeps_nonfinal_generation_and_never_kills_replaced_identity); a dead peer
+    # recorded on an old manifest no longer matters to a start, since that manifest is now
+    # always discarded and its verified listeners stopped regardless
+    # (test_start_local_always_stops_and_restarts_a_healthy_dev_owned_runtime below covers the
+    # now-unconditional stop-and-restart path a dead-peer manifest would also hit).
 
     def test_owner_liveness_lookup_distinguishes_dead_live_reused_and_unknown(self) -> None:
         helper = OPERATIONS_ROOT / "process-ownership.ps1"
@@ -946,65 +789,19 @@ catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stopped
             result = self.run_powershell(command)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r"port 505[67] is occupied")
-        self.assertIn("Recovered Prisma Local development state left by an abrupt shutdown.", result.stdout)
+        self.assertIn("Stopped previous Prisma runtime (pid 200) to start clean.", result.stdout)
+        self.assertIn("Stopped previous Prisma runtime (pid 201) to start clean.", result.stdout)
+        self.assertNotIn("Recovered Prisma Local development state left by an abrupt shutdown.", result.stdout)
         self.assertIn("stopped=200,201;started=0", result.stdout)
 
-    def test_start_local_reuses_a_healthy_verified_runtime_without_stopping_or_starting(self) -> None:
-        """T1b acceptance (c): a complete, identity-verified, HEALTHY
-        development runtime is reused as before; nothing is stopped or
-        started, and the launcher never even reaches the port-recovery scan."""
-        start_script = OPERATIONS_ROOT / "start-local.ps1"
-        with tempfile.TemporaryDirectory() as temporary:
-            state = Path(temporary)
-            (state / "run").mkdir()
-            manifest = {
-                "schemaVersion": 2,
-                "repositoryRoot": str(RUNTIME_ROOT),
-                "processes": [
-                    {"service": "prisma-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service", "creationTimeUtc": "voice-created"},
-                    {"service": "prisma-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "prisma_runtime.local_presentation", "commandLine": "python.exe -m prisma_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
-                ],
-                "developmentOwnership": {"generation": "generation", "owners": ["owner-a"]},
-            }
-            manifest_path = state / "run" / "process-manifest.json"
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            receipt = state / "receipt.json"
-            command = fr"""
-$ErrorActionPreference = 'Stop'
-$env:PRISMA_RUNTIME_STATE_DIR = '{state}'
-function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
-function global:Get-CimInstance {{
-    param([string]$ClassName, [string]$Filter)
-    $voice = $Filter -match '200'
-    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m prisma_runtime.voice_service' }} else {{ 'python.exe -m prisma_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-created' }} else {{ 'presentation-created' }}) }}
-}}
-function global:Invoke-RestMethod {{
-    param([string]$Uri, [int]$TimeoutSec)
-    if ($Uri -match '5056') {{ return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-voice'; mode = 'local' }} }}
-    return [pscustomobject]@{{ ok = $true; ready = $true; service = 'prisma-local-presentation'; mode = 'local'; prismaVoiceReady = $true }}
-}}
-$global:started = 0
-$global:stopped = 0
-function global:Start-Process {{ $global:started++ }}
-function global:Stop-Process {{ $global:stopped++ }}
-& '{start_script}' -DevelopmentOwnerToken 'owner-b' -DevelopmentReceiptPath '{receipt}'
-$receiptValue = Get-Content -LiteralPath '{receipt}' -Raw | ConvertFrom-Json
-Write-Output "registered=$($receiptValue.registered);started=$global:started;stopped=$global:stopped"
-"""
-            result = self.run_powershell(command)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("registered=True;started=0;stopped=0", result.stdout)
-        # T1c: a healthy dev-owned reuse must also announce itself, matching the fresh-start
-        # messages' format (green, same URLs) but marked "(already running)".
-        self.assertIn("Prisma voice is ready at http://127.0.0.1:5056 (already running).", result.stdout)
-        self.assertIn("Prisma is ready at http://127.0.0.1:5057 (already running).", result.stdout)
-
-    def test_start_local_recovers_an_identity_verified_but_unhealthy_runtime(self) -> None:
-        """T1b acceptance (e): identity matches (listeners are verified as
-        this repository's own Prisma modules) but the health check fails
-        (e.g. still starting up, or wedged): the runtime is NOT reused, its
-        verified listeners are stopped, the manifest is discarded and a fresh
-        start is attempted."""
+    def test_start_local_always_stops_and_restarts_a_healthy_dev_owned_runtime(self) -> None:
+        """T18 (user decision, 2026-09-24, supersedes T1b/T1c's warm-reuse branch): a
+        complete, identity-verified, HEALTHY dev-owned development runtime is no longer
+        reused. It is stopped -- with a clear per-process terminal announcement, printed
+        BEFORE the fresh-start attempt -- and the launcher proceeds exactly like the
+        abrupt-shutdown recovery path always did for an unhealthy runtime. The health
+        endpoint is never even consulted anymore (Invoke-RestMethod throws if called),
+        since reuse itself no longer exists to need a health check."""
         start_script = OPERATIONS_ROOT / "start-local.ps1"
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary)
@@ -1025,39 +822,90 @@ Write-Output "registered=$($receiptValue.registered);started=$global:started;sto
 $ErrorActionPreference = 'Stop'
 $env:PRISMA_RUNTIME_STATE_DIR = '{state}'
 $global:netTcpCalls = 0
-$global:stopped = @()
 function global:Get-NetTCPConnection {{
     param([int]$LocalPort, [string]$State)
     $global:netTcpCalls++
-    # A complete, identity-matching manifest is present here (unlike the no-manifest
-    # scenario), so the canonical-manifest check and the identity re-check each add
-    # their own 2-call pass before the port-recovery scan even starts: 2 (canonical) +
-    # 2 (identity re-check) + 2 (port-state scan) + 2 (post-stop wait loop) = 8 calls,
-    # all reflecting genuine dynamic listener state, before Assert-PrismaLocalPortsAvailable.
-    if ($global:netTcpCalls -gt 8) {{ return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }}) }}
-    $ownerPid = if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}
-    if ($global:stopped -contains $ownerPid) {{ return @() }}
-    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = $ownerPid }})
+    if ($global:netTcpCalls -le 2) {{
+        $ownerPid = if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}
+        return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = $ownerPid }})
+    }}
+    if ($global:netTcpCalls -le 4) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }})
 }}
 function global:Get-CimInstance {{
     param([string]$ClassName, [string]$Filter)
     $voice = $Filter -match '200'
-    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m prisma_runtime.voice_service' }} else {{ 'python.exe -m prisma_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-created' }} else {{ 'presentation-created' }}) }}
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m prisma_runtime.voice_service' }} else {{ 'python.exe -m prisma_runtime.local_presentation' }}) }}
 }}
-function global:Invoke-RestMethod {{ param([string]$Uri, [int]$TimeoutSec) throw 'connection refused' }}
-function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
-$global:started = 0
-function global:Start-Process {{ $global:started++ }}
-try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
-catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stopped -join ',');started=$global:started" }}
+function global:Invoke-RestMethod {{ throw 'Invoke-RestMethod must not be called: reuse no longer health-checks anything.' }}
+$global:stoppedIds = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stoppedIds += $Id }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-b' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stoppedIds -join ',')" }}
 """
             result = self.run_powershell(command)
-            manifest_exists = manifest_path.exists()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r"port 505[67] is occupied")
-        self.assertIn("Recovered Prisma Local development state left by an abrupt shutdown.", result.stdout)
-        self.assertIn("stopped=200,201;started=0", result.stdout)
-        self.assertFalse(manifest_exists)
+        self.assertIn("stopped=200,201", result.stdout)
+        self.assertIn("Stopped previous Prisma runtime (pid 200) to start clean.", result.stdout)
+        self.assertIn("Stopped previous Prisma runtime (pid 201) to start clean.", result.stdout)
+        self.assertNotIn("already running", result.stdout)
+
+    def test_start_local_always_stops_and_restarts_a_manually_started_runtime(self) -> None:
+        """T18 (user decision, 2026-09-24, supersedes T1b/T1c's manual-reuse branch): a
+        manually started runtime of THIS repository (start-local.cmd run by hand, no
+        developmentOwnership record at all) is verified the exact same way as a dev-owned
+        one -- via Resolve-PrismaPortState, path + '-m <module>' command line, independent
+        of any manifest field -- and is therefore ALSO stopped and restarted by the dev
+        launcher. 'Always start clean' applies regardless of who started the prior runtime,
+        as long as it is verifiably this repository's own Prisma."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest = {
+                "schemaVersion": 1,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "prisma-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "prisma_runtime.voice_service", "commandLine": "python.exe -m prisma_runtime.voice_service"},
+                    {"service": "prisma-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "prisma_runtime.local_presentation", "commandLine": "python.exe -m prisma_runtime.local_presentation"},
+                ],
+            }
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:PRISMA_RUNTIME_STATE_DIR = '{state}'
+$global:netTcpCalls = 0
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:netTcpCalls++
+    if ($global:netTcpCalls -le 2) {{
+        $ownerPid = if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}
+        return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = $ownerPid }})
+    }}
+    if ($global:netTcpCalls -le 4) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }})
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    $voice = $Filter -match '200'
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m prisma_runtime.voice_service' }} else {{ 'python.exe -m prisma_runtime.local_presentation' }}) }}
+}}
+function global:Invoke-RestMethod {{ throw 'Invoke-RestMethod must not be called: reuse no longer health-checks anything.' }}
+$global:stoppedIds = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stoppedIds += $Id }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stoppedIds -join ',')" }}
+"""
+            result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"port 505[67] is occupied")
+        self.assertIn("stopped=200,201", result.stdout)
+        self.assertIn("Stopped previous Prisma runtime (pid 200) to start clean.", result.stdout)
+        self.assertIn("Stopped previous Prisma runtime (pid 201) to start clean.", result.stdout)
+        self.assertNotIn("already running", result.stdout)
 
     def test_start_local_reports_and_never_stops_a_foreign_process_holding_a_port(self) -> None:
         """T1b acceptance (d): a non-Prisma process holding 5057 must never be

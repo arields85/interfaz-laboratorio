@@ -1371,3 +1371,122 @@ runtime:
 
 After that: T14 is done (see its own evidence above, including the user's next Telegram check) and T15
 (deferred by the user) remains open, not started.
+
+- [x] **T18 — Dev launcher always starts Prisma clean (user decision, 2026-09-24).** Route:
+  delegated writer (single non-trivial file + its test suite; strict TDD observed). **User
+  decision, supersedes T1b of `odd/tasks/prisma-channel-a-corrections.md`**: `npm run dev` must
+  never reuse a running Prisma runtime of this repository — it must always stop it first and
+  start fresh. Evidence this was a real, user-hit bug, not just a theoretical concern: the T16
+  follow-ups note above (2026-09-24 ~11:10 test) — "The launcher reused the runtime started at
+  09:39 ('already running', `start-local.ps1:114-131`), so the T16 endpoint answered 404 (12
+  POSTs) and no timeline was captured; a real restart needs `stop-local.cmd` before relaunching
+  (known reuse behavior)."
+  - **Before**: `Invoke-PrismaStartTransaction` (`start-local.ps1`) had two early-return reuse
+    branches (added by T1b/T1c, `odd/tasks/prisma-channel-a-corrections.md` ~83-89/~114-120): a
+    manual (non-development) canonical runtime was reused as-is, never stopped or health-checked;
+    a healthy, identity-verified, dev-owned runtime was reused by registering the new launch as
+    an additional owner of the SAME generation. Both printed "(already running)" and skipped code
+    changes entirely, which is exactly the bug the T16 note hit.
+  - **After**: both branches were deleted. In development mode, `Invoke-PrismaStartTransaction`
+    now unconditionally scans ports 5056/5057 with the existing `Resolve-PrismaPortState` (path +
+    `-m <module>` command-line verification, unchanged), stops every listener VERIFIED as this
+    repository's own Prisma module, waits briefly for the port to free, and prints
+    `Stopped previous Prisma runtime (pid <pid>) to start clean.` per stopped process — before
+    falling through to the pre-existing fresh-start code (unchanged: ports asserted free,
+    interpreter/dependency checks, `Start-Process` × 2, health polling, new manifest with a new
+    `developmentOwnership` generation). A foreign (non-Prisma) process holding a port still blocks
+    the attempt with the existing clear terminal message and structured `port_in_use` receipt
+    (`portInUseTerminalMessage`/`Save-PrismaDevelopmentReceipt`, unchanged) — never stopped. Owner
+    PIDs (`ownerIdentities`, used only for dead-peer reaping on release) are never a stop target,
+    unchanged.
+  - **Manual-runtime decision (explicit, per the brief's own question): YES.** A manually started
+    runtime of this repository (`start-local.cmd` run by hand, no `developmentOwnership` record at
+    all) is now ALSO stopped and restarted by the dev launcher, exactly like a dev-owned one —
+    `Resolve-PrismaPortState` verifies "ours" purely from the listening process's path and
+    command line, independent of any manifest field, so there is no separate code path to keep a
+    manual runtime privileged. Rationale: the user's stated intent is "always start clean" with no
+    separate stop step, and a manually started runtime is exactly as capable of holding stale code
+    as a dev-owned one; treating it specially would silently reopen the same class of bug for
+    anyone who happens to launch Prisma by hand first.
+  - **Message semantics** (distinguishing the two Write-Warning/Write-Host lines): when a verified
+    listener actually needed stopping, the new `Stopped previous Prisma runtime (pid <pid>) to
+    start clean.` line is printed for each one (`Write-Host`, yellow) and the old
+    `Recovered Prisma Local development state left by an abrupt shutdown.` warning is suppressed
+    for that run. When nothing needed stopping (both ports already free) but a stale manifest file
+    was left behind by a genuine abrupt shutdown (Ctrl+C, window closed, crash), the old
+    "Recovered..." warning still prints — that scenario is unchanged by this task and is
+    genuinely a different situation (nothing was running to stop).
+  - **Non-development/manual entry points**: `start-local.cmd`/`start-local.ps1` invoked WITHOUT
+    `-DevelopmentOwnerToken` (i.e. not through `npm run dev`) never entered either the old reuse
+    branches or this new stop-and-restart block (`$isDevelopment` gates the whole block, unchanged)
+    — it already always attempted a fresh start and failed on `Assert-PrismaLocalPortsAvailable`
+    if a port was occupied, with no reuse. This behavior is unchanged by T18; documented here for
+    completeness since the brief asked about it explicitly.
+  - **Scope decision on dead code**: `Add-PrismaDevelopmentOwner`/`Test-PrismaDevelopmentRuntimeHealthy`
+    (`process-ownership.ps1`) become unreachable from `start-local.ps1`'s own flow after this
+    change (their only caller was the deleted warm-reuse branch). Left in place rather than
+    deleted: both remain directly, meaningfully unit-tested as general-purpose helpers
+    (`test_development_owner_transaction_shares_generation_and_releases_only_last_owner`,
+    `test_generation_mismatch_and_repeated_release_cannot_claim_replacement`), removing shared
+    `process-ownership.ps1` helpers used by `release-dev-local.ps1`/`stop-local.ps1` too is a
+    larger, riskier change outside this task's scope, and keeping them causes no behavior change
+    or dead-code hazard beyond an unused call site. Flagged here as a documented, reasoned decision
+    rather than a silent leftover.
+  - **Test changes** (`services/prisma-runtime/tests/test_runtime_safety.py`,
+    `RuntimeOwnershipTests`): renamed/rewrote
+    `test_start_local_reuses_a_healthy_verified_runtime_without_stopping_or_starting` →
+    `test_start_local_always_stops_and_restarts_a_healthy_dev_owned_runtime` (asserts both
+    processes are stopped with the new message, the flow proceeds past the old reuse point to
+    `Assert-PrismaLocalPortsAvailable`, and `Invoke-RestMethod` — the old health check — is never
+    called at all anymore). Added `test_start_local_always_stops_and_restarts_a_manually_started_runtime`
+    (same shape, manifest without `developmentOwnership`). Updated the message assertions in
+    `test_start_local_stops_leftover_verified_listeners_with_no_manifest_and_recovers` (now expects
+    "Stopped previous Prisma runtime..." instead of "Recovered..."). Removed (documented inline in
+    the test file at each removal site, T18-dated) six tests whose exact premise no longer exists
+    because the code path they exercised was deleted: `_assert_failed_receipt_handoff_rolls_back`
+    and its two callers (rollback of registering a NEW owner onto an EXISTING reused runtime —
+    `Add-PrismaDevelopmentOwner` is no longer called from `start-local.ps1` at all);
+    `test_manual_canonical_runtime_is_reused_without_start_or_stop_ownership` (replaced by the new
+    manual-runtime test above); `test_concurrent_acquisitions_join_one_owned_generation_without_manifest_corruption`
+    (generation-sharing across concurrent launches no longer happens — every start now always
+    stops-and-restarts into its own new generation); `test_warm_acquisition_reaps_provably_dead_owner_and_registers_new_owner_without_stopping`
+    and `test_start_local_recovers_an_identity_verified_but_unhealthy_runtime` (the healthy/unhealthy
+    distinction they tested no longer affects behavior — both cases now always stop-and-restart the
+    same way, covered by the new healthy-dev-owned test). The rollback machinery itself
+    (`Invoke-PrismaDevelopmentReleaseTransaction`) remains fully covered by the pre-existing
+    `test_release_keeps_nonfinal_generation_and_never_kills_replaced_identity`,
+    `test_release_reaps_provably_dead_peer_and_stops_runtime_for_last_live_owner`, and
+    `test_release_retains_legacy_peer_even_when_warnings_are_terminating`, which exercise it
+    directly via `release-dev-local.ps1`, not via the deleted warm-reuse registration path.
+  - **RED/GREEN**: confirmed RED by stashing only the `start-local.ps1` change and running the
+    3 new/rewritten tests against the pre-existing test file — all 3 failed exactly as expected
+    (the healthy-dev-owned and manual-runtime tests hit the old "(already running)" reuse branches
+    instead of stopping anything; the leftover-listeners test still printed the old "Recovered..."
+    message). Restored the fix; all 40 tests in `RuntimeOwnershipTests`/the file's other classes
+    passed. Full suite:
+    `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+    -p "test_*.py"` → **1512 passed** (was 1517 before this task per the brief's own count; net
+    -5 from removing 6 obsolete tests and adding 1 new one, all accounted for above — no
+    unexplained loss).
+  - **`services/prisma-runtime/README.md`** ("Local development boundary" section) updated: removed
+    the now-false claims that "Concurrent development commands share one verified development-owned
+    runtime generation" and "A complete canonical runtime started manually may be reused, but the
+    development wrapper never stops it"; documented the new always-stop-and-restart behavior, the
+    new terminal message, and that two concurrent `npm run dev` invocations now interrupt each
+    other's Prisma connection (the later one stops the earlier one's runtime) instead of sharing it.
+  - **Trade-off (for the user)**: every `npm run dev` now drops any in-memory Channel A phone links
+    and HMI voice sessions held by the previously running Prisma runtime, since that runtime is
+    stopped and a brand-new process pair (with fresh in-memory state) starts in its place — **the
+    user must re-scan the QR pairing after each launch**. This is the direct, accepted cost of
+    "always start clean" (no stale code silently kept running) and matches the user's explicit
+    request; no code changed on the Channel A/pairing side.
+  - **hmi-app**: not touched (`dev.mjs`'s receipt-reading contract — `registered`/`generation`/
+    `failure` shape — is unchanged; a reused-vs-fresh-start receipt was always structurally
+    identical, so no test or code change was needed there). Ran, as a precaution even though no
+    hmi-app file changed: `cd hmi-app && npx vitest run --allowOnly=false dev.test.ts` (23 passed)
+    and `npm run lint` (clean, no output) — both green, no regressions.
+  - **Next step (user)**: relaunch (`npm run dev`) and confirm the terminal shows
+    `Stopped previous Prisma runtime (pid ...) to start clean.` (when a prior runtime was running)
+    followed by the normal "is ready" lines, never "(already running)"; then re-scan the QR to
+    re-pair Channel A, since the previous pairing session's in-memory state was dropped by the
+    clean restart as documented above.

@@ -107,40 +107,20 @@ function Invoke-PrismaStartTransaction {
         Write-Warning 'Prisma Local development owner process identity was omitted; this legacy owner cannot be reaped automatically.' -WarningAction Continue
     }
 
-    $canonical = Get-PrismaCanonicalManifest -ManifestPath $manifestPath -RepositoryRoot $runtimeRoot -RequireCompleteRuntime
-    if ($isDevelopment -and $canonical) {
-        $ownershipProperty = $canonical.PSObject.Properties['developmentOwnership']
-        if (-not $ownershipProperty) {
-            # Manual (non-development) runtime: reused as-is, exactly like today. Never
-            # registered, stopped or health-checked.
-            Write-Host 'Prisma voice is ready at http://127.0.0.1:5056 (already running).' -ForegroundColor Green
-            Write-Host 'Prisma is ready at http://127.0.0.1:5057 (already running).' -ForegroundColor Green
-            return [ordered]@{ registered = $false; generation = ''; reused = $true }
-        }
-        if ((Test-PrismaDevelopmentRuntimeIdentity -Manifest $canonical) -and (Test-PrismaDevelopmentRuntimeHealthy)) {
-            $generation = [string]$ownershipProperty.Value.generation
-            $reap = Invoke-PrismaDevelopmentOwnerReap -Ownership $ownershipProperty.Value -ExcludedOwnerToken $DevelopmentOwnerToken
-            Add-PrismaDevelopmentOwner -Manifest $canonical -OwnerToken $DevelopmentOwnerToken -ExpectedGeneration $generation -OwnerIdentity $ownerIdentity
-            Save-PrismaProcessManifest -ManifestPath $manifestPath -Manifest $canonical
-            Write-PrismaDevelopmentOwnerWarnings -Messages $reap.warnings
-            # T1c: reuse (e.g. after the launcher window was closed with X and relaunched) was
-            # previously silent, leaving the terminal showing only Vite with no indication
-            # Prisma was ever touched. Announce it the same way a fresh start does.
-            Write-Host 'Prisma voice is ready at http://127.0.0.1:5056 (already running).' -ForegroundColor Green
-            Write-Host 'Prisma is ready at http://127.0.0.1:5057 (already running).' -ForegroundColor Green
-            return [ordered]@{ registered = $true; generation = $generation; reused = $true }
-        }
-        # Identity mismatch or an unhealthy runtime: never reused. Falls through to the
-        # always-start recovery below, exactly like a missing/partial/ambiguous manifest.
-    }
-
     if ($isDevelopment) {
-        # User decision: the launcher must always start Prisma, however the previous run
-        # ended (Ctrl+C, the window closed, or a shutdown). Owner liveness is irrelevant here
-        # (only a reuse decision above cares about it); every case that did not already reuse
-        # above recovers instead of refusing. Only a listener VERIFIED as this repository's
-        # own Prisma module is ever stopped; a foreign process holding a port blocks the
-        # attempt with a clear terminal message and a structured receipt failure instead.
+        # T18 (user decision, 2026-09-24; supersedes T1b/T1c's warm-reuse branches above,
+        # which used to return here with an "(already running)" message): the dev launcher
+        # must ALWAYS start Prisma clean. A previously running runtime of this repository on
+        # 5056/5057 is never reused anymore -- not a healthy dev-owned one (the old warm-reuse
+        # branch) and not a manually started one (the old manual-reuse branch,
+        # start-local.cmd run by hand outside the launcher): both are verified and stopped the
+        # SAME way via Resolve-PrismaPortState below (path + "-m <module>" command line,
+        # independent of any developmentOwnership manifest field), then a fresh start is
+        # attempted. Only a listener VERIFIED as this repository's own Prisma module is ever
+        # stopped; a foreign process holding a port blocks the attempt with a clear terminal
+        # message and a structured receipt failure instead. Owner liveness and manifest
+        # health are no longer consulted at all before stopping -- every case recovers
+        # instead of reusing or refusing.
         $portChecks = @(
             [pscustomobject]@{ port = 5056; module = (Get-PrismaExpectedModule -Service 'prisma-voice') }
             [pscustomobject]@{ port = 5057; module = (Get-PrismaExpectedModule -Service 'prisma-local-presentation') }
@@ -171,26 +151,34 @@ function Invoke-PrismaStartTransaction {
             throw $message
         }
 
-        $recoveredPorts = @()
+        $stoppedProcesses = @()
         foreach ($entry in $portStates) {
             if ($entry.result.state -ne 'ours') { continue }
             try {
                 Stop-Process -Id ([int]$entry.result.pid) -Force -ErrorAction Stop
-                $recoveredPorts += $entry.port
+                $stoppedProcesses += [pscustomobject]@{ port = $entry.port; pid = $entry.result.pid }
             }
             catch {
             }
         }
-        foreach ($port in $recoveredPorts) {
+        foreach ($entry in $stoppedProcesses) {
             for ($attempt = 0; $attempt -lt 20; $attempt++) {
-                if (@(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).Count -eq 0) { break }
+                if (@(Get-NetTCPConnection -LocalPort $entry.port -State Listen -ErrorAction SilentlyContinue).Count -eq 0) { break }
                 Start-Sleep -Milliseconds 100
             }
+            # T18: replaces the old silent-until-recovery messaging with an explicit,
+            # per-process announcement, printed BEFORE the fresh start begins, so the
+            # terminal never again shows only Vite with no indication Prisma was touched.
+            Write-Host "Stopped previous Prisma runtime (pid $($entry.pid)) to start clean." -ForegroundColor Yellow
         }
 
         $hadManifest = Test-Path -LiteralPath $manifestPath -PathType Leaf
         if ($hadManifest) { Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue }
-        if ($hadManifest -or $recoveredPorts.Count -gt 0) {
+        if ($hadManifest -and $stoppedProcesses.Count -eq 0) {
+            # No verified listener needed stopping (both ports were already free), but a
+            # manifest file was left behind (Ctrl+C, the window closed, or a crash): this is
+            # genuine abrupt-shutdown recovery, not a clean-restart stop, so it keeps its own
+            # distinct message instead of the "Stopped previous Prisma runtime" one above.
             Write-Warning 'Recovered Prisma Local development state left by an abrupt shutdown.' -WarningAction Continue
         }
     }

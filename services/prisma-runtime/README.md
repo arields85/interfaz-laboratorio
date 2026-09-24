@@ -378,13 +378,23 @@ startup failure is reported in the terminal but does not prevent Vite from
 running. The wrapper never installs dependencies or invokes bootstrap.
 
 On Windows, helper and service windows are hidden while the existing npm/Vite
-terminal remains attached. Concurrent development commands share one verified
-development-owned runtime generation. **Use Ctrl+C in the owning terminal for normal
-shutdown**; wait for release before closing the window. A normal release removes only its
-owner; the final owner stops only the exact process identities started by that
-generation. A complete canonical runtime started manually may be reused, but
-the development wrapper never stops it. Foreign, replaced, corrupt, or
-insufficiently proven process state is left untouched with a warning.
+terminal remains attached. The wrapper always starts Prisma clean: any verified
+runtime of this repository already listening on 5056/5057 is stopped first --
+whether it is a healthy development-owned runtime from an earlier `npm run dev`
+or a complete canonical runtime started manually (`start-local.cmd` run by
+hand) -- and a fresh pair of processes is started for the new invocation. The
+terminal prints `Stopped previous Prisma runtime (pid <pid>) to start clean.`
+for each stopped process before the usual "is ready" lines; reuse and its old
+"(already running)" message no longer happen. This means two concurrent
+`npm run dev` invocations no longer share one runtime generation: the second
+one stops the first one's Prisma processes and starts its own, so a currently
+running dev session's Prisma connection is interrupted by a later launch.
+**Use Ctrl+C in the owning terminal for normal shutdown**; wait for release
+before closing the window. A normal release removes only its owner; the final
+owner stops only the exact process identities started by that generation. A
+foreign process holding a port, or process state that cannot be verified as
+this repository's own Prisma, is left untouched with a clear error instead of
+being stopped.
 
 Ownership registration and receipt delivery are one locked transaction. The
 PowerShell helper writes the receipt as BOM-less UTF-8 for Node interoperability;
