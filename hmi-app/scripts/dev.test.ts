@@ -2,7 +2,7 @@
 
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { createPowerShellRuntime, createViteLauncher, runDevelopment } from './dev.mjs'
+import { createPowerShellRuntime, createViteLauncher, createVitePortGuard, runDevelopment } from './dev.mjs'
 
 type ExitResult = { code: number | null; signal: NodeJS.Signals | null }
 
@@ -32,6 +32,14 @@ function createSignals() {
   }
 }
 
+// T18b: runDevelopment's Vite dev-port guard is exercised on its own below (createVitePortGuard
+// tests) and in the two dedicated integration tests further down. Every other runDevelopment test
+// here is unrelated to the guard and just needs it to be a harmless pass-through so Vite always
+// gets spawned, exactly as before this task.
+function createNoopPortGuard() {
+  return { ensureAvailable: vi.fn(async () => ({ blocked: false as const })) }
+}
+
 describe('development orchestration', () => {
   it('acquires Prisma before forwarding Vite arguments exactly and releases once on exit', async () => {
     const events: string[] = []
@@ -56,6 +64,7 @@ describe('development orchestration', () => {
 
     const code = await runDevelopment({
       platform: 'win32',
+      portGuard: createNoopPortGuard(),
       viteArgs: ['--host', '127.0.0.1', '--port', '4173'],
       runtime,
       spawnVite,
@@ -84,6 +93,7 @@ describe('development orchestration', () => {
 
     await expect(runDevelopment({
       platform: 'win32',
+      portGuard: createNoopPortGuard(),
       viteArgs: [],
       runtime,
       spawnVite,
@@ -114,6 +124,7 @@ describe('development orchestration', () => {
 
     await expect(runDevelopment({
       platform: 'win32',
+      portGuard: createNoopPortGuard(),
       viteArgs: ['--host'],
       runtime,
       spawnVite,
@@ -143,6 +154,7 @@ describe('development orchestration', () => {
 
     await runDevelopment({
       platform: 'win32',
+      portGuard: createNoopPortGuard(),
       viteArgs: [],
       runtime,
       spawnVite,
@@ -191,16 +203,22 @@ describe('development orchestration', () => {
       release: vi.fn(async () => undefined),
     }
     const vite = { result: exit.promise, terminate: vi.fn() }
+    const spawnVite = vi.fn(() => vite)
     const running = runDevelopment({
       platform: 'win32',
+      portGuard: createNoopPortGuard(),
       viteArgs: [],
       runtime,
-      spawnVite: vi.fn(() => vite),
+      spawnVite,
       signals,
       warn: vi.fn(),
     })
 
-    await vi.waitFor(() => expect(signals.listenerCount(signal)).toBe(1))
+    // Waits for Vite to actually be running (not just for the signal listeners to be
+    // registered, which happens synchronously before the async Prisma-acquire/port-guard work)
+    // so this test exercises "signal forwarded to an already-running Vite", independently of
+    // how many async steps precede spawnVite.
+    await vi.waitFor(() => expect(spawnVite).toHaveBeenCalledTimes(1))
     signals.emit(signal)
     signals.emit(signal)
     exit.resolve({ code: null, signal })
@@ -222,6 +240,7 @@ describe('development orchestration', () => {
     const spawnVite = vi.fn()
     const running = runDevelopment({
       platform: 'win32',
+      portGuard: createNoopPortGuard(),
       viteArgs: [],
       runtime,
       spawnVite,
@@ -249,6 +268,7 @@ describe('development orchestration', () => {
 
     await expect(runDevelopment({
       platform: 'win32',
+      portGuard: createNoopPortGuard(),
       viteArgs: [],
       runtime,
       spawnVite: vi.fn(() => { throw new Error('spawn failed') }),
@@ -259,6 +279,274 @@ describe('development orchestration', () => {
     expect(runtime.release).toHaveBeenCalledTimes(1)
     expect(signals.listenerCount('SIGINT')).toBe(0)
     expect(signals.listenerCount('SIGTERM')).toBe(0)
+  })
+})
+
+describe('Vite dev-port guard integration (T18b)', () => {
+  // Evidence 2026-09-24: after relaunching, a still-shutting-down previous Vite dev server was
+  // still listening on 5173 when the new one tried to bind, so Vite silently fell back to 5174
+  // while the user's fixed-port browser tab got ERR_CONNECTION_REFUSED. runDevelopment must check
+  // the Vite dev port before ever spawning Vite: a foreign holder blocks with a clear message and
+  // Vite is never started; a verified leftover Vite of this repo is stopped by the guard itself
+  // (asserted at the createVitePortGuard unit level below) and Vite still starts normally.
+  function createRuntimeStub() {
+    return {
+      acquire: vi.fn(async () => ({ ownerToken: 'owner', generation: 'generation' })),
+      cancelAcquire: vi.fn(),
+      release: vi.fn(async () => undefined),
+    }
+  }
+
+  it('never spawns Vite and exits 1 when the port guard reports a foreign holder on the Vite dev port', async () => {
+    const warn = vi.fn()
+    const portGuard = {
+      ensureAvailable: vi.fn(async () => ({
+        blocked: true as const,
+        message: 'Vite dev server could not start: port 5173 is in use by "app.exe" (PID 42). Close it and run the launcher again.',
+      })),
+    }
+    const spawnVite = vi.fn()
+
+    const code = await runDevelopment({
+      platform: 'win32',
+      portGuard,
+      viteArgs: ['--host', '127.0.0.1', '--port', '5173'],
+      runtime: createRuntimeStub(),
+      spawnVite,
+      signals: createSignals(),
+      warn,
+    })
+
+    expect(code).toBe(1)
+    expect(portGuard.ensureAvailable).toHaveBeenCalledWith(5173)
+    expect(spawnVite).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith('Vite dev server could not start: port 5173 is in use by "app.exe" (PID 42). Close it and run the launcher again.')
+  })
+
+  it('spawns Vite normally when the port guard reports the port is available', async () => {
+    const portGuard = { ensureAvailable: vi.fn(async () => ({ blocked: false as const })) }
+    const vite = { result: Promise.resolve<ExitResult>({ code: 0, signal: null }), terminate: vi.fn() }
+    const spawnVite = vi.fn(() => vite)
+
+    const code = await runDevelopment({
+      platform: 'win32',
+      portGuard,
+      viteArgs: ['--host', '127.0.0.1', '--port', '5173'],
+      runtime: createRuntimeStub(),
+      spawnVite,
+      signals: createSignals(),
+      warn: vi.fn(),
+    })
+
+    expect(code).toBe(0)
+    expect(portGuard.ensureAvailable).toHaveBeenCalledWith(5173)
+    expect(spawnVite).toHaveBeenCalledTimes(1)
+  })
+
+  it('defaults the checked port to 5173 when --port is not present in viteArgs', async () => {
+    const portGuard = { ensureAvailable: vi.fn(async () => ({ blocked: false as const })) }
+    const vite = { result: Promise.resolve<ExitResult>({ code: 0, signal: null }), terminate: vi.fn() }
+
+    await runDevelopment({
+      platform: 'win32',
+      portGuard,
+      viteArgs: [],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn: vi.fn(),
+    })
+
+    expect(portGuard.ensureAvailable).toHaveBeenCalledWith(5173)
+  })
+
+  it('reads a non-default --port value out of viteArgs', async () => {
+    const portGuard = { ensureAvailable: vi.fn(async () => ({ blocked: false as const })) }
+    const vite = { result: Promise.resolve<ExitResult>({ code: 0, signal: null }), terminate: vi.fn() }
+
+    await runDevelopment({
+      platform: 'win32',
+      portGuard,
+      viteArgs: ['--host', '127.0.0.1', '--port', '4321'],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn: vi.fn(),
+    })
+
+    expect(portGuard.ensureAvailable).toHaveBeenCalledWith(4321)
+  })
+
+  it('never runs the port guard on non-Windows platforms', async () => {
+    const portGuard = { ensureAvailable: vi.fn(async () => ({ blocked: false as const })) }
+    const vite = { result: Promise.resolve<ExitResult>({ code: 0, signal: null }), terminate: vi.fn() }
+
+    await runDevelopment({
+      platform: 'linux',
+      portGuard,
+      viteArgs: ['--port', '5173'],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn: vi.fn(),
+    })
+
+    expect(portGuard.ensureAvailable).not.toHaveBeenCalled()
+  })
+})
+
+describe('createVitePortGuard', () => {
+  function createChild() {
+    return Object.assign(new EventEmitter(), { kill: vi.fn() })
+  }
+
+  it('reports a free port as not blocked without touching files beyond the receipt cleanup', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({ state: 'free', pid: 0, processName: '', stopped: false, freed: true })),
+      rm: vi.fn(async () => undefined),
+    }
+    const guard = createVitePortGuard({ spawn, files, newId: () => 'id' })
+
+    await expect(guard.ensureAvailable(5173)).resolves.toEqual({ blocked: false })
+    expect(files.rm).toHaveBeenCalledTimes(1)
+  })
+
+  it('invokes resolve-vite-dev-port.ps1 with the port, this repo\'s Vite CLI path and a receipt path', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({ state: 'free', pid: 0, processName: '', stopped: false, freed: true })),
+      rm: vi.fn(async () => undefined),
+    }
+    const guard = createVitePortGuard({
+      spawn,
+      files,
+      newId: () => 'id',
+      operationsRoot: String.raw`C:\repo\services\prisma-runtime\operations`,
+      viteCli: String.raw`C:\repo\hmi-app\node_modules\vite\bin\vite.js`,
+      temporaryRoot: String.raw`C:\temp`,
+    })
+
+    await guard.ensureAvailable(5173)
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.stringMatching(/powershell\.exe$/i),
+      expect.arrayContaining([
+        '-File', String.raw`C:\repo\services\prisma-runtime\operations\resolve-vite-dev-port.ps1`,
+        '-Port', '5173',
+        '-ViteCliPath', String.raw`C:\repo\hmi-app\node_modules\vite\bin\vite.js`,
+        '-ReceiptPath', String.raw`C:\temp\vite-port-id.json`,
+      ]),
+      expect.objectContaining({ shell: false, windowsHide: true }),
+    )
+  })
+
+  it('prints the stop message and does not block when a leftover verified Vite was stopped and freed', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({ state: 'ours', pid: 777, processName: '', stopped: true, freed: true })),
+      rm: vi.fn(async () => undefined),
+    }
+    const log = vi.fn()
+    const warn = vi.fn()
+    const guard = createVitePortGuard({ spawn, files, newId: () => 'id', log, warn })
+
+    await expect(guard.ensureAvailable(5173)).resolves.toEqual({ blocked: false })
+    expect(log).toHaveBeenCalledWith('Stopped previous Vite dev server (pid 777) to start clean.')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('warns but still does not block when the port did not free up after stopping a leftover Vite', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({ state: 'ours', pid: 777, processName: '', stopped: true, freed: false })),
+      rm: vi.fn(async () => undefined),
+    }
+    const warn = vi.fn()
+    const guard = createVitePortGuard({ spawn, files, newId: () => 'id', warn })
+
+    await expect(guard.ensureAvailable(5173)).resolves.toEqual({ blocked: false })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('did not free up'))
+  })
+
+  it('reports a foreign holder as blocked with a clear message naming the port, process and pid', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({ state: 'foreign', pid: 42, processName: 'app.exe', stopped: false, freed: true })),
+      rm: vi.fn(async () => undefined),
+    }
+    const guard = createVitePortGuard({ spawn, files, newId: () => 'id' })
+
+    await expect(guard.ensureAvailable(5173)).resolves.toEqual({
+      blocked: true,
+      message: 'Vite dev server could not start: port 5173 is in use by "app.exe" (PID 42). Close it and run the launcher again.',
+    })
+  })
+
+  it('reports a foreign holder with an unresolved name as "another program"', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+    const files = {
+      readFile: vi.fn(async () => JSON.stringify({ state: 'foreign', pid: 42, processName: '', stopped: false, freed: true })),
+      rm: vi.fn(async () => undefined),
+    }
+    const guard = createVitePortGuard({ spawn, files, newId: () => 'id' })
+
+    await expect(guard.ensureAvailable(5173)).resolves.toEqual({
+      blocked: true,
+      message: 'Vite dev server could not start: port 5173 is in use by another program (PID 42). Close it and run the launcher again.',
+    })
+  })
+
+  it('fails open (never blocks) when the resolver script exits non-zero', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 1, null))
+      return child
+    })
+    const files = { readFile: vi.fn(), rm: vi.fn(async () => undefined) }
+    const warn = vi.fn()
+    const guard = createVitePortGuard({ spawn, files, newId: () => 'id', warn })
+
+    await expect(guard.ensureAvailable(5173)).resolves.toEqual({ blocked: false })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not be verified'))
+  })
+
+  it('fails open (never blocks) when the receipt cannot be read or parsed', async () => {
+    const spawn = vi.fn(() => {
+      const child = createChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+    const files = { readFile: vi.fn(async () => { throw new Error('receipt missing') }), rm: vi.fn(async () => undefined) }
+    const warn = vi.fn()
+    const guard = createVitePortGuard({ spawn, files, newId: () => 'id', warn })
+
+    await expect(guard.ensureAvailable(5173)).resolves.toEqual({ blocked: false })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('receipt missing'))
   })
 })
 

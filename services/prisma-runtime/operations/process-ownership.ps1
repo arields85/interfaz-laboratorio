@@ -583,6 +583,64 @@ function Resolve-PrismaPortState {
     return [pscustomobject]@{ state = 'foreign'; pid = $ownerPid; processName = $processName }
 }
 
+function Test-PrismaViteProcessIdentity {
+    <#
+    .SYNOPSIS
+        Node/Vite counterpart to Test-PrismaProcessIdentity (T18b): verifies a listener is
+        node.exe running THIS repository's own Vite CLI script, instead of python.exe running a
+        Prisma module.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object]$ProcessIdentity,
+        [Parameter(Mandatory = $true)] [string]$ExpectedViteCliPath
+    )
+
+    $executable = [string]$ProcessIdentity.executable
+    $commandLine = Normalize-PrismaCommandLine -Value $ProcessIdentity.commandLine
+    $cliToken = Normalize-PrismaCommandLine -Value $ExpectedViteCliPath
+    $cliPattern = '(^|\s)"?' + [Regex]::Escape($cliToken) + '"?(?=\s|$)'
+    return -not [string]::IsNullOrWhiteSpace($executable) -and [IO.Path]::GetFileName($executable) -match '^node(w)?\.exe$' -and $commandLine -match $cliPattern
+}
+
+function Resolve-PrismaViteDevPortState {
+    <#
+    .SYNOPSIS
+        Classifies a local port for the Vite dev-server leftover-listener guard (dev.mjs, T18b)
+        with exactly one Get-NetTCPConnection call -- same single-snapshot 'free'/'ours'/'foreign'
+        contract as Resolve-PrismaPortState, generalized to verify a node.exe process running
+        THIS repository's Vite CLI script instead of a Python module.
+
+    .DESCRIPTION
+        Returns a pscustomobject with `state` one of:
+          - 'free': no listener at all.
+          - 'ours': a single listener verified (by executable name + Vite CLI script path in the
+            command line) as this repository's own Vite dev server; safe to stop.
+          - 'foreign': a listener present but not verified as ours; NEVER a stop target. `pid`
+            and (when resolvable) `processName` are set.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [int]$Port,
+        [Parameter(Mandatory = $true)] [string]$ExpectedViteCliPath
+    )
+
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) { return [pscustomobject]@{ state = 'free'; pid = 0; processName = '' } }
+
+    $ownerPid = [int]$listeners[0].OwningProcess
+    $identity = Get-PrismaProcessIdentity -ProcessId $ownerPid
+    if ($identity -and (Test-PrismaViteProcessIdentity -ProcessIdentity $identity -ExpectedViteCliPath $ExpectedViteCliPath)) {
+        return [pscustomobject]@{ state = 'ours'; pid = $ownerPid; processName = '' }
+    }
+
+    $processName = ''
+    if ($identity -and -not [string]::IsNullOrWhiteSpace([string]$identity.executable)) {
+        $processName = [IO.Path]::GetFileName([string]$identity.executable)
+    }
+    return [pscustomobject]@{ state = 'foreign'; pid = $ownerPid; processName = $processName }
+}
+
 function Test-PrismaDevelopmentRuntimeHealthy {
     <#
     .SYNOPSIS

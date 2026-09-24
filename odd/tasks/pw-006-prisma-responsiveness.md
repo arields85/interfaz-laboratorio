@@ -1647,6 +1647,93 @@ After that: T14 is done (see its own evidence above, including the user's next T
     followed by the normal "is ready" lines, never "(already running)"; then re-scan the QR to
     re-pair Channel A, since the previous pairing session's in-memory state was dropped by the
     clean restart as documented above.
+- [x] **T18b — Vite dev server stays on its fixed port instead of silently drifting (user live
+  test evidence, 2026-09-24 ~13:36).** Route: direct inline single writer (2 non-trivial files in
+  `hmi-app`, 1 new + 1 modified in `services/prisma-runtime/operations`, all already-understood,
+  no unresolved design work); ran alongside T21 (a second, unrelated writer in
+  `hmi-app/src/services`/`hmi-app/src/hooks`) — only this task's own files were touched/committed.
+  **Evidence**: after relaunching, the terminal printed "Port 5173 is in use, trying another
+  one..." and Vite silently started on `http://127.0.0.1:5174/`; the user's browser (fixed on
+  5173) got `ERR_CONNECTION_REFUSED`. A parent check right after showed 5173 only in `TIME_WAIT`
+  and 5174 `LISTEN` by `node ...\vite.js --host 127.0.0.1 --port 5173` — the *previous*
+  launcher's Vite dev server was still finishing its shutdown (still `LISTEN`ing on 5173) at the
+  exact moment the *new* one tried to bind, so Vite's own port-fallback silently moved to 5174.
+  **Layering decision**: OS-level process/port verification (is a listener on a port really THIS
+  repository's own Vite dev server, not a foreign process?) belongs next to the existing
+  `Resolve-PrismaPortState` helper in `services/prisma-runtime/operations/process-ownership.ps1`
+  — Node has no reliable cross-process command-line inspection on Windows without shelling out,
+  and this repository already owns that verification pattern. `dev.mjs` (Node) only orchestrates:
+  invoke the classifier, turn its receipt into a terminal message or a block decision. This
+  mirrors T18's own split between `Resolve-PrismaPortState` (classify) and its caller (stop/wait).
+  **New `Resolve-PrismaViteDevPortState`/`Test-PrismaViteProcessIdentity`**
+  (`process-ownership.ps1`): same single-snapshot `free`/`ours`/`foreign` contract as
+  `Resolve-PrismaPortState`, generalized to verify `node(w)?.exe` running THIS repository's Vite
+  CLI script path (`hmi-app/node_modules/vite/bin/vite.js`) in its command line, instead of
+  `python(w)?.exe` running a Prisma module.
+  **New top-level `services/prisma-runtime/operations/resolve-vite-dev-port.ps1`**: classifies
+  `-Port` via the helper above; when `state = 'ours'`, stops it (`Stop-Process -Force`) and waits
+  up to 20×100ms (same bounded wait already used by `start-local.ps1`'s own leftover-Prisma stop)
+  for the port to free; never stops a `foreign` listener. Writes a JSON receipt (`state`, `pid`,
+  `processName`, `stopped`, `freed`) via the existing `Save-PrismaJsonFile` (BOM-less UTF-8) so
+  `dev.mjs` decides what to print — this script only classifies/stops, same
+  receipt-not-print-from-PowerShell split as `dev.mjs`'s existing Prisma `port_in_use` handling.
+  **`hmi-app/scripts/dev.mjs`**: new `createVitePortGuard()` (mirrors `createPowerShellRuntime`'s
+  shape/DI style) invokes the script above and turns its receipt into `{ blocked, message? }`;
+  fails OPEN (never blocks) on any verification error, so a broken guard can never prevent an
+  otherwise-healthy start. New `parseVitePort(viteArgs)` reads `--port`/`--port=` out of the args
+  `npm run dev -- --host 127.0.0.1 --port 5173` already passes, defaulting to Vite's own 5173.
+  `runDevelopment` calls the guard (Windows only, right after the existing Prisma-acquire step,
+  before ever calling `spawnVite`): `state='free'` → silent proceed; `state='ours'` → prints
+  `Stopped previous Vite dev server (pid <pid>) to start clean.` (mirrors T18's own Prisma
+  message) and proceeds, with a `warn` if the port did not free up in time; `state='foreign'` →
+  prints `Vite dev server could not start: port <port> is in use by "<name>" (PID <pid>). Close it
+  and run the launcher again.` (mirrors the existing Prisma `port_in_use` message/receipt style)
+  and exits 1 **without ever spawning Vite**.
+  **Signal-race fix found while wiring this in**: the port guard is itself a real async round
+  trip (a PowerShell child process), so it reopens the same "signal arrives before the next
+  step" race already handled once for Prisma's own `runtime.acquire()`. Without re-checking
+  `requestedSignal` right after the guard resolves, a Ctrl+C landing exactly during the port
+  check would have been silently swallowed and Vite would still have started. Fixed by mirroring
+  the existing post-acquire `requestedSignal` check after the guard call too.
+  **`hmi-app/vite.config.ts`**: `server.strictPort: true` — the defense-in-depth backstop in case
+  the guard's classification is stale by the time Vite actually binds (e.g. a brand-new foreign
+  process grabbed the port in the gap between the guard's check and Vite's own bind); Vite now
+  always fails loudly on a busy port instead of silently choosing another one.
+  **TDD (strict).** RED confirmed for every new surface before implementing it: (1)
+  `vite.config.test.ts`'s new `strictPort` assertion failed against the pre-fix config; (2) the 4
+  new `services/prisma-runtime/tests/test_runtime_safety.py::ViteDevPortGuardTests` failed with
+  `CommandNotFoundException` against the pre-fix operations tree (script did not exist yet) —
+  confirmed by temporarily moving the new script and stashing the `process-ownership.ps1` change,
+  then restoring both; (3) all 12 new `hmi-app/scripts/dev.test.ts` tests
+  (`createVitePortGuard`/`Vite dev-port guard integration`) failed with `createVitePortGuard is
+  not a function` against the pre-fix `dev.mjs`. Restored the fixes; every RED test went GREEN
+  with no other regressions. The 7 pre-existing win32 `runDevelopment` tests needed a
+  `portGuard: createNoopPortGuard()` fake added (mechanical, same DI style already used for
+  `runtime`) so they keep exercising unrelated behavior unaffected by this new dependency; the two
+  signal-forwarding tests were also updated to synchronize on `spawnVite` having actually been
+  called (rather than on signal-listener registration timing), since the new port-guard await
+  legitimately shifts by how many microtask ticks `spawnVite` is reached — a timing detail those
+  tests should never have depended on, not a behavior regression.
+  **Checks:** `cd hmi-app && npx vitest run scripts/dev.test.ts vite.config.test.ts` → 38 passed
+  (was 24 for `dev.test.ts` + 1 for `vite.config.test.ts` = 25; net +13: 12 new port-guard tests +
+  1 new strictPort test). `npx tsc -b` → clean for every file this task touched (one pre-existing
+  unrelated error in `src/hooks/usePrismaOrbPresentation.ts`, the concurrent T21 writer's
+  in-progress file, not touched by this task). `npm run lint` → clean, no output.
+  `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+  -p "test_*.py"` → **1519 passed** (was 1515 after T18; net +4 new `ViteDevPortGuardTests`). Full
+  `hmi-app` `npm test` was NOT used as this task's gate:
+  it currently shows 30 failures, all inside T21's concurrently in-progress, uncommitted files
+  (`src/services/prismaVoiceAudioEngine.ts`/`src/hooks/usePrismaOrbPresentation.ts` and their
+  tests) — unrelated to and untouched by this task; the scoped run above is this task's true
+  signal. The real launcher/`npm run dev` was never started or stopped (forbidden by this
+  writer's brief; the user was running it live throughout).
+  **Next step (user, live check):** relaunch the dev launcher (`npm run dev -- --host 127.0.0.1
+  --port 5173`) twice in a row, back to back. First relaunch: the terminal may or may not show
+  `Stopped previous Vite dev server (pid ...) to start clean.` depending on whether a prior Vite
+  was still shutting down; the browser should reach `http://127.0.0.1:5173/` both times, never a
+  silent `5174` fallback and never `ERR_CONNECTION_REFUSED`. If a *foreign* (non-Vite) process
+  ever holds 5173, the terminal should show the new clear `"Vite dev server could not start: port
+  5173 is in use by ..."` message instead of Vite's own generic port-fallback text.
 - [x] **T20 — Channel A pairing UI as a centered modal with the Prisma orb (user request,
   2026-09-24).** The topbar Prisma popover (`PrismaPairingControl.tsx`, previously anchored under
   the button via `AnchoredOverlay`) had three states (QR, awaiting confirmation, linked) with plain

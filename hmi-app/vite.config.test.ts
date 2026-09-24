@@ -14,4 +14,16 @@ describe('vite.config', () => {
 
         expect(resolved).toMatchObject({ clearScreen: false });
     });
+
+    it('binds strictly to its configured port instead of silently drifting to another one (T18b)', async () => {
+        // Evidence 2026-09-24: after a relaunch, Vite printed "Port 5173 is in use, trying
+        // another one..." and started on 5174 instead, while the user's browser stayed on
+        // 5173 and got ERR_CONNECTION_REFUSED. strictPort makes Vite fail loudly on a busy
+        // port rather than silently choosing a different one.
+        const resolved = typeof configExport === 'function'
+            ? await configExport({ mode: 'development', command: 'serve' } as Parameters<typeof configExport>[0])
+            : configExport;
+
+        expect(resolved.server).toMatchObject({ strictPort: true });
+    });
 });

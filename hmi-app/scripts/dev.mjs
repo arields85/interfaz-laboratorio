@@ -159,6 +159,113 @@ export function createPowerShellRuntime({
   }
 }
 
+// T18b: default Vite dev port when --port is not present in viteArgs -- matches Vite's own
+// default and the project's fixed-port contract (AGENTS.md, odd/tasks/pw-006-prisma-responsiveness.md).
+const DEFAULT_VITE_DEV_PORT = 5173
+
+function parseVitePort(viteArguments) {
+  for (let index = 0; index < viteArguments.length; index += 1) {
+    const argument = viteArguments[index]
+    let candidate = null
+    if (argument === '--port') {
+      candidate = viteArguments[index + 1]
+    }
+    else if (argument.startsWith('--port=')) {
+      candidate = argument.slice('--port='.length)
+    }
+    if (candidate === null || candidate === undefined) continue
+    const parsed = Number.parseInt(candidate, 10)
+    if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) return parsed
+  }
+  return DEFAULT_VITE_DEV_PORT
+}
+
+// T18b: before Vite starts, verify the configured Vite dev port is actually free. Evidence
+// 2026-09-24: a still-shutting-down previous Vite dev server was still LISTENING on 5173 when a
+// freshly relaunched dev.mjs tried to start a new one, so Vite silently fell back to 5174 while
+// the user's browser (fixed on 5173) got ERR_CONNECTION_REFUSED. Layering: OS-level process/port
+// verification (is a listener on this port really THIS repository's own Vite CLI, by executable
+// name + script path?) lives in resolve-vite-dev-port.ps1 / Resolve-PrismaViteDevPortState
+// (services/prisma-runtime/operations/process-ownership.ps1), mirroring the existing
+// Resolve-PrismaPortState pattern used for Prisma's own ports -- Node has no reliable
+// cross-process command-line inspection on Windows without shelling out, and this repository
+// already has that verification helper. This factory only orchestrates: run the classifier
+// script, stop a verified leftover Vite (the script itself stops it and waits briefly -- see
+// resolve-vite-dev-port.ps1), and turn the receipt into a terminal message / block decision.
+// vite.config.ts's own `server.strictPort: true` is the defense-in-depth backstop in case this
+// guard's classification is stale by the time Vite actually binds.
+export function createVitePortGuard({
+  spawn = spawnChild,
+  files = fileSystem,
+  operationsRoot = defaultOperationsRoot,
+  temporaryRoot = tmpdir(),
+  newId = randomUUID,
+  viteCli = defaultViteCli,
+  log = (message) => console.log(message),
+  warn = (message) => console.warn(message),
+  powershellExecutable = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+} = {}) {
+  return {
+    async ensureAvailable(port) {
+      const receiptPath = join(temporaryRoot, `vite-port-${newId()}.json`)
+      let receipt
+      try {
+        const child = spawn(
+          powershellExecutable,
+          [
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-File', join(operationsRoot, 'resolve-vite-dev-port.ps1'),
+            '-Port', String(port),
+            '-ViteCliPath', viteCli,
+            '-ReceiptPath', receiptPath,
+          ],
+          { shell: false, windowsHide: true, stdio: 'inherit' },
+        )
+        const result = await waitForChild(child)
+        if (result.code !== 0) {
+          throw new Error(`resolve-vite-dev-port.ps1 exited with code ${result.code ?? 'unknown'}.`)
+        }
+        receipt = JSON.parse(await files.readFile(receiptPath, 'utf8'))
+      }
+      catch (error) {
+        // Fails open: a verification error means the guard could not run, not that a real
+        // port conflict was found -- it must never block a start that would otherwise succeed.
+        warn(`Vite dev server port ${port} could not be verified before starting: ${error instanceof Error ? error.message : String(error)}`)
+        return { blocked: false }
+      }
+      finally {
+        try {
+          await files.rm(receiptPath, { force: true })
+        }
+        catch {
+          // Best-effort cleanup only; a leftover temp receipt is not worth surfacing.
+        }
+      }
+
+      if (receipt.state === 'free') return { blocked: false }
+
+      if (receipt.state === 'ours') {
+        if (receipt.stopped) {
+          log(`Stopped previous Vite dev server (pid ${receipt.pid}) to start clean.`)
+          if (!receipt.freed) {
+            warn(`Port ${port} did not free up after stopping the previous Vite dev server; Vite will attempt to start anyway.`)
+          }
+        }
+        else {
+          warn(`Could not stop the previous Vite dev server (pid ${receipt.pid}) on port ${port}; Vite will attempt to start anyway.`)
+        }
+        return { blocked: false }
+      }
+
+      const occupant = receipt.processName ? `"${receipt.processName}"` : 'another program'
+      return {
+        blocked: true,
+        message: `Vite dev server could not start: port ${port} is in use by ${occupant} (PID ${receipt.pid}). Close it and run the launcher again.`,
+      }
+    },
+  }
+}
+
 export function createViteLauncher({
   spawn = spawnChild,
   nodeExecutable = process.execPath,
@@ -189,6 +296,7 @@ export async function runDevelopment({
   viteArgs = process.argv.slice(2),
   runtime = createPowerShellRuntime(),
   spawnVite = createViteLauncher(),
+  portGuard = createVitePortGuard(),
   signals = process,
   warn = (message) => console.warn(message),
   newOwnerToken = randomUUID,
@@ -248,6 +356,24 @@ export async function runDevelopment({
       }
     } else {
       warn('Automatic Prisma Local orchestration is available only for Windows development; Vite will continue without it.')
+    }
+
+    if (platform === 'win32') {
+      const port = parseVitePort(viteArgs)
+      const portCheck = await portGuard.ensureAvailable(port)
+      // Mirrors the requestedSignal check right after runtime.acquire() above: the port guard
+      // is itself an async round-trip (a PowerShell classification, possibly stopping a
+      // leftover process), so a signal can legitimately arrive while it is in flight. Without
+      // this, a Ctrl+C during that window would be silently swallowed and Vite would still
+      // start.
+      if (requestedSignal) {
+        await releaseOnce()
+        return signalExitCode(requestedSignal)
+      }
+      if (portCheck.blocked) {
+        warn(portCheck.message)
+        return 1
+      }
     }
 
     try {

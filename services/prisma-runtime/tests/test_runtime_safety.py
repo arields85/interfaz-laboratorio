@@ -1100,6 +1100,96 @@ Write-Output '###END###'
         self.assertIn("###END###", stdout)
 
 
+class ViteDevPortGuardTests(unittest.TestCase):
+    """T18b: hmi-app/scripts/dev.mjs's leftover-Vite-listener guard invokes
+    resolve-vite-dev-port.ps1 before starting Vite. These tests exercise the real script
+    end to end (Resolve-PrismaViteDevPortState + the stop/wait/receipt wiring around it),
+    faking only the OS-level cmdlets (Get-NetTCPConnection/Get-CimInstance/Stop-Process),
+    the same style already used above for Resolve-PrismaVerifiedListener/stop-local.ps1."""
+
+    def run_powershell(self, command: str) -> subprocess.CompletedProcess[str]:
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        return subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+
+    def test_free_port_is_reported_free_and_nothing_is_stopped(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @() }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) throw 'must not be called' }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(receipt_value)
+        self.assertEqual(receipt_value, {"state": "free", "pid": 0, "processName": "", "stopped": False, "freed": True})
+
+    def test_verified_node_vite_listener_is_stopped_and_receipt_reports_freed(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$global:calls = 0
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:calls++
+    if ($global:calls -eq 1) {{ return @([pscustomobject]@{{ LocalPort = 5173; OwningProcess = 777 }}) }}
+    return @()
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    return [pscustomobject]@{{ ProcessId = 777; ExecutablePath = 'C:\node\node.exe'; CommandLine = 'node.exe "C:\repo\hmi-app\node_modules\vite\bin\vite.js" --host 127.0.0.1 --port 5173' }}
+}}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+Write-Output ('stopped=' + ($global:stopped -join ','))
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=777", result.stdout)
+        self.assertEqual(receipt_value, {"state": "ours", "pid": 777, "processName": "", "stopped": True, "freed": True})
+
+    def test_foreign_listener_is_never_stopped_and_is_reported_with_process_name(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @([pscustomobject]@{{ LocalPort = 5173; OwningProcess = 42 }}) }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) return [pscustomobject]@{{ ProcessId = 42; ExecutablePath = 'C:\Other\app.exe'; CommandLine = 'app.exe --serve' }} }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) throw 'must not be called' }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(receipt_value)
+        self.assertEqual(receipt_value, {"state": "foreign", "pid": 42, "processName": "app.exe", "stopped": False, "freed": True})
+
+    def test_stop_failure_is_reported_without_crashing_and_freed_is_false(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @([pscustomobject]@{{ LocalPort = 5173; OwningProcess = 777 }}) }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) return [pscustomobject]@{{ ProcessId = 777; ExecutablePath = 'C:\node\node.exe'; CommandLine = 'node.exe "C:\repo\hmi-app\node_modules\vite\bin\vite.js" --port 5173' }} }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) throw 'access denied' }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(receipt_value)
+        self.assertEqual(receipt_value, {"state": "ours", "pid": 777, "processName": "", "stopped": False, "freed": False})
+
+
 class ConcurrentFreshStateSeedingTests(unittest.TestCase):
     """PW-002: seeding the effective configuration happens before the manifest
     lock, so two concurrent launchers on a fresh state root can both observe a

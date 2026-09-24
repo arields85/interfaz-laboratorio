@@ -14,6 +14,15 @@ export default defineConfig(({ mode }) => {
     // See https://vite.dev/config/shared-options.html#clearscreen.
     clearScreen: false,
     server: {
+      // T18b: fixed ports 5056/5057/5173 are a project-wide contract
+      // (odd/tasks/pw-006-prisma-responsiveness.md). Without strictPort, a still-shutting-down
+      // previous Vite dev server left listening on 5173 makes Vite silently fall back to
+      // 5174+ instead of failing loudly -- the browser (fixed on 5173) then sees
+      // ERR_CONNECTION_REFUSED with no indication Vite moved. dev.mjs's leftover-listener
+      // guard stops a verified previous Vite of this repo before this ever matters; strictPort
+      // is the defense-in-depth backstop so a busy port is always a clear failure, never a
+      // silent port drift.
+      strictPort: true,
       proxy: createPrismaProxyConfig(),
     },
     plugins: [
