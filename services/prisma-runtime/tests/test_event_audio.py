@@ -181,6 +181,75 @@ class AudioCoordinatorTests(unittest.TestCase):
         self.assertTrue(all("_capability" not in event for event in self.calls))
         self.assertIsNone(getattr(state, "capability", None))
 
+    def test_late_attach_to_a_queued_job_refreshes_the_capability_used_at_dequeue(self):
+        """PW-011 M1: Channel A's prefetch admits a job with its own
+        short-lived (60s-TTL) event-scoped token; if the real HMI session
+        later attaches to that same still-queued job with its own
+        (longer-lived) capability, before this fix the job's stored
+        capability was never refreshed -- dequeue-time revalidation kept
+        using the stale first-subscriber token, producing spurious 401s on
+        `/internal/prisma/voice-events/<id>` once it expired. A plain attach
+        (not `created`, not `retry`) must refresh the stored capability the
+        same way the existing retry path already does."""
+        release = threading.Event()
+        first_started = threading.Event()
+        validated = []
+
+        def validate(event):
+            validated.append((event["id"], event.get("_capability")))
+
+        def generate(event, _config, _secret):
+            if event["id"] == "first":
+                first_started.set()
+                release.wait(1)
+            yield event["id"].encode()
+
+        self.coordinator = AudioCoordinator(
+            self.credentials,
+            generate,
+            clock=self.clock,
+            wall_clock=self.clock,
+            event_validator=validate,
+        )
+        first = self.coordinator.subscribe(
+            {"id": "first", "ownerId": "owner", "text": "a", "expiresAt": 200.0}, {},
+        )
+        self.assertTrue(first_started.wait(1))
+
+        # Channel A's prefetch admits "second" first, with its own
+        # short-lived token, then immediately closes (fire-and-forget).
+        prefetch = self.coordinator.subscribe(
+            {
+                "id": "second", "ownerId": "owner", "text": "b", "expiresAt": 200.0,
+                "_capability": "prefetch-token",
+            },
+            {},
+        )
+        prefetch.close()
+
+        # The real HMI session attaches to the SAME still-queued job with
+        # its own capability -- this must refresh the stored capability.
+        second = self.coordinator.subscribe(
+            {
+                "id": "second", "ownerId": "owner", "text": "b", "expiresAt": 200.0,
+                "_capability": "session-capability",
+            },
+            {},
+        )
+        state = self.coordinator.states[("owner", "second")]
+        self.assertEqual(state.capability, "session-capability")
+
+        release.set()
+        self.assertEqual(list(first), [b"first"])
+        self.assertEqual(list(second), [b"second"])
+
+        second_validations = [capability for event_id, capability in validated if event_id == "second"]
+        # Admission validates twice (prefetch's own subscribe, then the
+        # attach's own subscribe) with each caller's own capability, then
+        # dequeue validates once more -- with the freshest one, not the
+        # stale prefetch token.
+        self.assertEqual(second_validations, ["prefetch-token", "session-capability", "session-capability"])
+
     def test_active_event_byte_and_chunk_limits_fail_without_background_retry(self):
         def generate(_event, _config, _secret):
             yield b"1234"
@@ -618,7 +687,7 @@ class AudioCoordinatorTimingTests(unittest.TestCase):
         )
         event = {"id": "timing-one", "text": "a", "expiresAt": 200.0}
 
-        with self.assertLogs(event_audio_module._logger, level="WARNING") as observed:
+        with self.assertLogs(event_audio_module._logger, level="INFO") as observed:
             self.assertEqual(list(self.coordinator.subscribe(event, {})), [b"ok"])
 
         validate_lines = [line for line in observed.output if "AudioCoordinator subscribe: validate_elapsed_ms" in line]
@@ -626,6 +695,8 @@ class AudioCoordinatorTimingTests(unittest.TestCase):
         self.assertGreaterEqual(len(validate_lines), 1)
         self.assertEqual(credential_gate_lines, [])
         self.assertNotIn("timing-one", validate_lines[0])
+        # PW-011 M4: routine per-job timing, not a warning-worthy condition.
+        self.assertTrue(validate_lines[0].startswith("INFO:"))
 
     def test_subscribe_logs_validate_elapsed_ms_even_when_validation_raises(self):
         def raising_validator(_event):
@@ -636,7 +707,7 @@ class AudioCoordinatorTimingTests(unittest.TestCase):
         )
         event = {"id": "timing-fail", "text": "a", "expiresAt": 200.0}
 
-        with self.assertLogs(event_audio_module._logger, level="WARNING") as observed:
+        with self.assertLogs(event_audio_module._logger, level="INFO") as observed:
             with self.assertRaises(LookupError):
                 self.coordinator.subscribe(event, {})
 
@@ -651,7 +722,7 @@ class AudioCoordinatorTimingTests(unittest.TestCase):
         )
         event = {"id": "timing-two", "text": "a", "expiresAt": 200.0}
 
-        with self.assertLogs(event_audio_module._logger, level="WARNING") as observed:
+        with self.assertLogs(event_audio_module._logger, level="INFO") as observed:
             self.assertEqual(list(self.coordinator.subscribe(event, {})), [b"ok"])
 
         self.assertTrue(any("queue_wait_ms" in line for line in observed.output))
@@ -659,6 +730,8 @@ class AudioCoordinatorTimingTests(unittest.TestCase):
         generate_credential = [line for line in observed.output if "credential_elapsed_ms" in line]
         self.assertGreaterEqual(len(generate_validate), 1)
         self.assertGreaterEqual(len(generate_credential), 1)
+        # PW-011 M4: routine per-job timing, not a warning-worthy condition.
+        self.assertTrue(all(line.startswith("INFO:") for line in observed.output))
 
 
 if __name__ == "__main__":

@@ -273,7 +273,8 @@ class AudioCoordinator:
                 self.event_validator(validation_event)
             finally:
                 validation_event.pop("_capability", None)
-                _logger.warning(
+                # PW-011 M4: routine per-job timing, not a warning-worthy condition.
+                _logger.info(
                     "AudioCoordinator subscribe: validate_elapsed_ms=%d",
                     round((self.clock() - validate_start) * 1000),
                 )
@@ -363,9 +364,21 @@ class AudioCoordinator:
             with self.lock:
                 if self.closed:
                     raise AudioCapacityError("VOICE_COORDINATOR_CLOSED")
+                if not created:
+                    # PW-011 M1: refresh the stored capability on every
+                    # attach to an existing, not-yet-dequeued job -- not
+                    # just on retry. Without this, a job admitted first by
+                    # Channel A's short-lived (60s-TTL) prefetch token, then
+                    # later attached to by the real HMI session with its own
+                    # capability, would still be revalidated at dequeue with
+                    # the stale prefetch token, producing a spurious 401 if
+                    # dequeue happens after that token expires. Safe: state
+                    # is keyed by (owner_id, event_id), and owner_id is
+                    # already authoritative by the time subscribe() is
+                    # called, so a later attacher can never belong to a
+                    # different owner.
+                    state.capability = event.get("_capability", state.capability)
                 if created or retry:
-                    if retry:
-                        state.capability = event.get("_capability")
                     state.status = "queued"
                     state.error = None
                     state.queued_at = self.clock()
@@ -444,7 +457,8 @@ class AudioCoordinator:
                     state.started_at = self.clock()
                     state.control = GenerationControl()
                     self.active_state = state
-                    _logger.warning(
+                    # PW-011 M4: routine per-job timing, not a warning-worthy condition.
+                    _logger.info(
                         "AudioCoordinator generate: queue_wait_ms=%d",
                         round((state.started_at - state.queued_at) * 1000),
                     )
@@ -466,7 +480,8 @@ class AudioCoordinator:
                     validation_event.pop("_capability", None)
                     with self.lock:
                         self._clear_authority_locked(state)
-                    _logger.warning(
+                    # PW-011 M4: routine per-job timing, not a warning-worthy condition.
+                    _logger.info(
                         "AudioCoordinator generate: validate_elapsed_ms=%d",
                         round((self.clock() - validate_start) * 1000),
                     )
@@ -475,7 +490,7 @@ class AudioCoordinator:
                         continue
                 credential_start = self.clock()
                 secret = self.resolve_credential()
-                _logger.warning(
+                _logger.info(
                     "AudioCoordinator generate: credential_elapsed_ms=%d",
                     round((self.clock() - credential_start) * 1000),
                 )
