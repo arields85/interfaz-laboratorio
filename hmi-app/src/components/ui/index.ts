@@ -1,6 +1,8 @@
 // Barrel export — src/components/ui/
 export { default as AnchoredOverlay } from './AnchoredOverlay';
 export type { AnchoredOverlayProps, AnchoredOverlayAlign } from './AnchoredOverlay';
+export { default as ModalBackdrop } from './ModalBackdrop';
+export type { ModalBackdropProps } from './ModalBackdrop';
 export { default as StatusBadge } from './StatusBadge';
 export { default as ConnectionBadge } from './ConnectionBadge';
 export { default as MetricCard } from './MetricCard';

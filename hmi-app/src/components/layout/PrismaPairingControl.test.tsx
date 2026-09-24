@@ -1,41 +1,33 @@
-// Offline component contract tests for PrismaPairingControl (RCA-5l, TDD RED stage).
-// The component source does NOT exist yet: importing it must fail collection, which is the
-// honest observed RED for the later UI gate. No placeholder source and no import catch here.
+// Contract tests for PrismaPairingControl (TDD, PW-006 T20 rewrite).
 //
-// Frozen contract under test (tracker `odd/tasks/prisma-channel-a-remote.md`):
-// - The default `PrismaPairingControl` owns the `Pyramid` button ref, the open state and the
-//   existing `AnchoredOverlay` primitive itself — never via props — with local state only.
+// T20 replaces the AnchoredOverlay-anchored popover with a CENTERED MODAL that reuses the
+// shared `ModalBackdrop` primitive (the same backdrop treatment as admin dialogs such as
+// GlobalSettingsDialog/AdminDialog). Frozen contract under test:
 // - Trigger: button `aria-label`/`title` "Prisma", `aria-haspopup="dialog"`, `aria-expanded`
 //   false until a real click opens it. Dialog accessible name: "Vincular teléfono con Prisma".
-//   Close via the "Cerrar" button, outside click or Escape through `AnchoredOverlay`.
+//   Close via the "Cerrar" button, backdrop click or Escape (through the shared ModalBackdrop).
 // - The hook is mocked at the boundary and returns the real hook shape
-//   `{ phase, qr, remainingSeconds }`; the captured `open` argument proves manual open/close
-//   without any service, network or fake clock.
-// - The QR is the ACTUAL installed qrcode.react SVG, exposed accessibly as
-//   role img named "Código QR para vincular Telegram", and rendered ONLY while
-//   phase is `free` with a valid qr payload and remainingSeconds > 0. No QR token ever reaches
-//   a title attribute, log or storage beyond the deep link itself.
-// - Spanish neutral copy (formal "usted" register, user decision 2026-09-23): pending
-//   "Confirme el destino en Telegram.", linked
-//   "Teléfono vinculado", unavailable "Canal A no disponible"; loading/error stay truthful and
-//   generic (exact copy intentionally not pinned). No extra Renew/Apply/local-confirm buttons;
-//   no admin auth dependency. High-contrast token styling is checked by static source review,
-//   never by computed color assertions (jsdom does not resolve stylesheets).
-// - NAME gate (tracker `odd/tasks/prisma-pairing-name-preflight.md`): every panel open reads
-//   the saved HMI name through `readHmiName()` (service mocked at the boundary, default
-//   `{ ok: true, name: 'Panel recepción' }`), so later openings re-read instead of caching.
-//   A valid name preserves every existing behavior below. With no configured name the panel
-//   shows the actionable copy `Configure el nombre de esta HMI en Configuración general →
-//   Prisma antes de vincular un teléfono.`; when the read itself fails or returns an invalid
-//   result it truthfully shows `No se pudo leer el nombre guardado.` with the settings
-//   direction instead of falsely claiming the name is absent. Both blocked states pass `false`
-//   to the pairing hook and render no QR even if a mocked/stale hook result contains one, and
-//   the close action still works.
-// - Panel sizing follows the anti-hardcode dimensional policy: the control measures the open
-//   panel at runtime (ResizeObserver/getBoundingClientRect) and feeds the SHARED
-//   AnchoredOverlay primitive, instead of arbitrary estimatedHeight/minWidth constants. The
-//   synthetic geometry numbers in the measurement test are TEST inputs, never production
-//   dimensions.
+//   `{ phase, qr, remainingSeconds, unreachableDetail }`; the captured `open` argument proves
+//   manual open/close without any service, network or fake clock.
+// - The QR is the ACTUAL installed qrcode.react SVG, exposed accessibly as role img named
+//   "Código QR para vincular Telegram", rendered ONLY while phase is `free` with a valid qr
+//   payload and remainingSeconds > 0.
+// - NAME gate unchanged from the previous popover: every open re-reads `readHmiName()`; a
+//   missing/invalid name blocks the panel with its existing copy and never reaches the hook
+//   with `open=true`.
+// - T20 new behavior:
+//   - `pending` (awaiting confirmation): the same "Confirme el destino en Telegram." copy, now
+//     in the warning token color, with the Prisma orb (mocked leda-orb custom element) filling
+//     the SAME fixed visual slot the QR occupied, sized from `readPrismaOrbVisualConfig()`
+//     (mocked at the boundary).
+//   - `linked`: "Teléfono vinculado" in the success token color, orb still in the same slot;
+//     after the named auto-close delay the dialog fades out (opacity-0 on both the panel and
+//     the ModalBackdrop) and unmounts after the fade duration — proven with fake timers.
+//   - The visual slot (`data-testid="pairing-visual-slot"`) reports the identical fixed
+//     `--pairing-visual-slot-size` custom property in all three states (QR, pending, linked):
+//     no layout shift.
+//   - Every other existing state (missing/invalid name, unavailable, error, unreachable incl.
+//     the port_in_use detail, free-without-live-qr) keeps its previous text-only rendering.
 
 import '@testing-library/jest-dom/vitest';
 import { act, render, screen, within } from '@testing-library/react';
@@ -43,6 +35,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HmiNameReadResult } from '../../domain/hmiName';
+import type { PrismaOrbVisualConfig } from '../../domain/voice.types';
 import PrismaPairingControl from './PrismaPairingControl';
 
 type PairingPhase =
@@ -66,6 +59,8 @@ const QR_IMG_NAME = 'Código QR para vincular Telegram';
 const MISSING_NAME_COPY = 'Configure el nombre de esta HMI en Configuración general → Prisma antes de vincular un teléfono.';
 const READ_FAILURE_COPY = 'No se pudo leer el nombre guardado.';
 const SETTINGS_DIRECTION_FRAGMENT = 'Configuración general';
+const SLOT_TEST_ID = 'pairing-visual-slot';
+const ORB_TAG = 'leda-orb';
 
 interface UnreachableDetail {
     reason: 'port_in_use';
@@ -102,8 +97,8 @@ const useChannelAPairingMock = vi.hoisted(() =>
     }),
 );
 
-// The hook module does not exist yet, so the mock factory is fully synthetic and includes every
-// export the component may consume. No service, network or timer is involved.
+// The hook module does not exist... it does, but the mock factory still includes every export
+// the component may consume. No service, network or timer is involved.
 vi.mock('../../hooks/useChannelAPairing', () => ({
     useChannelAPairing: useChannelAPairingMock,
     CHANNEL_A_PAIRING_POLL_INTERVAL_MS: 2000,
@@ -117,10 +112,7 @@ function setPairingFixture(phase: PairingPhase, qr: PairingQr | null, remainingS
 }
 
 // The name service is the authority for the configured HMI name; the mock sits exactly on that
-// boundary and returns the real discriminated `HmiNameReadResult` union (never a parallel
-// validator). The default is a valid configured name so every pre-existing case keeps its
-// current pairing flow; each read is recorded so re-open behavior is observable without
-// duplicating any storage key or validation rule.
+// boundary and returns the real discriminated `HmiNameReadResult` union.
 const hmiNameBoundary = vi.hoisted(() => ({
     result: {
         ok: true,
@@ -144,22 +136,44 @@ function setHmiNameResult(result: HmiNameReadResult): void {
     hmiNameBoundary.result = result;
 }
 
+// The orb visual config service is mocked at the same boundary as the name service (deterministic
+// fixture, no real localStorage read) — matches admin's `VoiceSettingsTab` preview config shape.
+const ORB_CONFIG: PrismaOrbVisualConfig = {
+    rays: 0.45,
+    speed: 1,
+    intensity: 1,
+    size: 290,
+    core: '#1b6ee0',
+    glow: '#8ff0ff',
+};
+
+const readPrismaOrbVisualConfigMock = vi.hoisted(() => vi.fn(() => ORB_CONFIG));
+
+vi.mock('../../config/prismaOrb.config', () => ({
+    readPrismaOrbVisualConfig: readPrismaOrbVisualConfigMock,
+}));
+
+// Real custom element registration for `<leda-orb>` (PrismaOrb's host element), mirroring the
+// convention already used by PrismaOrbOverlay.test.tsx: the actual `leda-orb.js` module is
+// mocked out and a minimal stand-in custom element is registered instead.
+vi.mock('../../vendor/leda-orb.js', () => ({}));
+
+class MockLedaOrb extends HTMLElement {
+    public setSpeaking = vi.fn();
+}
+
+if (!customElements.get(ORB_TAG)) customElements.define(ORB_TAG, MockLedaOrb);
+
 function liveQr(): PairingQr {
     return { deepLink: QR_LINK, expiresInSeconds: 42 };
 }
 
-// AnchoredOverlay registers its outside-click/Escape listeners after a macrotask boundary; a
-// single real 0 ms timeout is the deterministic way to cross it under real timers.
-async function flushListenerRegistration(): Promise<void> {
-    await new Promise<void>((resolve) => {
-        setTimeout(resolve, 0);
-    });
-}
-
+// ModalBackdrop registers its Escape listener synchronously (unlike the old AnchoredOverlay,
+// which deferred registration past a macrotask); nothing here needs a listener-registration
+// flush, but click/keyboard interactions still go through userEvent's own internal scheduling.
 async function openDialog(): Promise<HTMLElement> {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Prisma' }));
-    await flushListenerRegistration();
     return screen.getByRole('dialog', { name: DIALOG_NAME });
 }
 
@@ -170,143 +184,11 @@ beforeEach(() => {
     setHmiNameResult({ ok: true, name: 'Panel recepción' });
     hmiNameBoundary.reads = [];
     readHmiNameMock.mockClear();
+    readPrismaOrbVisualConfigMock.mockClear();
 });
 
-// --- Runtime panel measurement fixture (anti-hardcode dimensional policy) --------------------
-// Every geometry number below is a synthetic TEST input: never a production dimension and never
-// the old arbitrary estimatedHeight/minWidth constants (340/280), which are never asserted.
-
-const VIEWPORT_WIDTH = 1280;
-const VIEWPORT_HEIGHT = 720;
-const OVERLAY_GAP_PX = 4; // AnchoredOverlay's documented default gap.
-
-const MEASURED_WIDTH = 320;
-const MEASURED_TALL_HEIGHT = 500; // exceeds the 160 px of space below the trigger
-const MEASURED_SHORT_HEIGHT = 120; // fits below the trigger
-
-const TRIGGER_RECT: DOMRect = {
-    x: 1000,
-    y: 528,
-    width: 160,
-    height: 32,
-    top: 528,
-    right: 1160,
-    bottom: 560,
-    left: 1000,
-    toJSON: () => ({}),
-} as DOMRect;
-
-const originalViewport = { width: window.innerWidth, height: window.innerHeight };
-
-class ResizeObserverFixture {
-    static instances: ResizeObserverFixture[] = [];
-
-    callback: ResizeObserverCallback;
-    observed: Element[] = [];
-    disconnected = false;
-
-    constructor(callback: ResizeObserverCallback) {
-        this.callback = callback;
-        ResizeObserverFixture.instances.push(this);
-    }
-
-    observe(target: Element): void {
-        this.observed.push(target);
-    }
-
-    unobserve(target: Element): void {
-        this.observed = this.observed.filter((element) => element !== target);
-    }
-
-    disconnect(): void {
-        this.disconnected = true;
-    }
-}
-
-// getBoundingClientRect overrides applied during a test; restored after EVERY test so no
-// geometry instrumentation leaks into the other cases.
-const geometryRestorers: Array<() => void> = [];
-
-function spyGeometry(element: Element, rect: DOMRect): void {
-    geometryRestorers.push((() => {
-        const spy = vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rect);
-        return () => spy.mockRestore();
-    })());
-}
-
-function panelRect(width: number, height: number): DOMRect {
-    return {
-        x: 0,
-        y: 0,
-        width,
-        height,
-        top: 0,
-        right: width,
-        bottom: height,
-        left: 0,
-        toJSON: () => ({}),
-    } as DOMRect;
-}
-
-// Border box vs content box: getBoundingClientRect reports the BORDER box (the actual
-// rendered size, padding and border included), while a ResizeObserver entry.contentRect is the
-// CONTENT box only (padding and border excluded). The real panel pads its content (p-4 plus
-// border, w-72 = 288 px outer), so an implementation that measured entry.contentRect would
-// treat the content width as the whole overlay width and misalign the 'end' placement. The
-// fixture therefore keeps the getBoundingClientRect spies at the provided border-box
-// width/height but delivers a contentRect deliberately SMALLER by this explicit positive TEST
-// inset: only a source measuring the ACTUAL rendered panel (getBoundingClientRect on the RO
-// callback, or borderBoxSize) satisfies the unchanged minWidth/left and flip expectations.
-const CONTENT_BOX_INSET_PX = 24;
-
-async function emitPanelMeasurement(
-    observer: ResizeObserverFixture,
-    width: number,
-    height: number,
-): Promise<void> {
-    // Observed elements report the ACTUAL rendered border-box size via getBoundingClientRect.
-    for (const observed of observer.observed) {
-        spyGeometry(observed, panelRect(width, height));
-    }
-    const entry = {
-        target: observer.observed[0],
-        contentRect: panelRect(width - CONTENT_BOX_INSET_PX, height - CONTENT_BOX_INSET_PX),
-    } as unknown as ResizeObserverEntry;
-    await act(async () => {
-        observer.callback([entry], observer as unknown as ResizeObserver);
-    });
-}
-
-function overlayOf(dialog: HTMLElement): HTMLElement {
-    const overlay = dialog.parentElement;
-    if (!overlay) {
-        throw new Error('the pairing dialog must be portaled inside the overlay wrapper');
-    }
-    return overlay;
-}
-
-function lastPanelObserver(): ResizeObserverFixture {
-    const observer = ResizeObserverFixture.instances.at(-1);
-    if (!observer) {
-        throw new Error('the open panel never registered a ResizeObserver');
-    }
-    return observer;
-}
-
 afterEach(() => {
-    vi.unstubAllGlobals();
-    for (const restore of geometryRestorers) {
-        restore();
-    }
-    geometryRestorers.length = 0;
-    Object.defineProperty(window, 'innerWidth', {
-        configurable: true,
-        value: originalViewport.width,
-    });
-    Object.defineProperty(window, 'innerHeight', {
-        configurable: true,
-        value: originalViewport.height,
-    });
+    vi.useRealTimers();
 });
 
 describe('PrismaPairingControl', () => {
@@ -322,18 +204,31 @@ describe('PrismaPairingControl', () => {
         expect(screen.queryByRole('dialog', { name: DIALOG_NAME })).not.toBeInTheDocument();
 
         await user.click(trigger);
-        await flushListenerRegistration();
 
-        expect(screen.getByRole('dialog', { name: DIALOG_NAME })).toBeInTheDocument();
+        const dialog = screen.getByRole('dialog', { name: DIALOG_NAME });
+        expect(dialog).toBeInTheDocument();
+        expect(dialog).toHaveAttribute('aria-modal', 'true');
         expect(trigger).toHaveAttribute('aria-expanded', 'true');
         // The component drives the hook with the manual open flag, never an auto-open.
         expect(pairingFixture.openArguments.at(-1)).toBe(true);
 
-        await user.click(within(screen.getByRole('dialog', { name: DIALOG_NAME })).getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
 
         expect(screen.queryByRole('dialog', { name: DIALOG_NAME })).not.toBeInTheDocument();
         expect(trigger).toHaveAttribute('aria-expanded', 'false');
         expect(pairingFixture.openArguments.at(-1)).toBe(false);
+    });
+
+    it('renders the dialog centered behind the shared backdrop treatment', async () => {
+        render(<PrismaPairingControl />);
+        const dialog = await openDialog();
+
+        // Shared with AdminDialog via the extracted ModalBackdrop primitive: fixed, centered,
+        // dark, blurred backdrop — never a copy-pasted variant of it.
+        const backdrop = dialog.parentElement;
+        expect(backdrop).not.toBeNull();
+        expect(backdrop).toHaveClass('fixed', 'inset-0', 'flex', 'items-center', 'justify-center', 'bg-black/60', 'backdrop-blur-sm');
+        expect(backdrop).toHaveAttribute('role', 'presentation');
     });
 
     it('shows the actual local QR SVG with its accessible label while a valid challenge is live', async () => {
@@ -343,16 +238,13 @@ describe('PrismaPairingControl', () => {
         const dialog = await openDialog();
 
         const qrImage = within(dialog).getByRole('img', { name: QR_IMG_NAME });
-        // The real installed qrcode.react SVG is rendered locally, not a fake or remote image.
         expect(qrImage.tagName.toLowerCase()).toBe('svg');
-        // No extra Renew/Apply/local-confirm actions exist anywhere in the dialog.
         const dialogButtons = within(dialog).getAllByRole('button');
         expect(dialogButtons).toHaveLength(1);
         expect(dialogButtons[0]).toHaveAccessibleName('Cerrar');
     });
 
     it('blocks the panel with the actionable missing-name copy before any QR even while a challenge is live', async () => {
-        // A stale/live hook result must never leak a QR past the missing-name gate.
         setPairingFixture('free', liveQr(), 42);
         setHmiNameResult({ ok: true, name: null });
 
@@ -360,13 +252,10 @@ describe('PrismaPairingControl', () => {
         const dialog = await openDialog();
 
         expect(within(dialog).getByText(MISSING_NAME_COPY)).toBeInTheDocument();
-        // Truthful state separation: the read did not fail, so no failure copy may appear.
         expect(within(dialog).queryByText(READ_FAILURE_COPY)).not.toBeInTheDocument();
         expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
-        // The gate passes `false` to the existing hook on every call while the name is missing.
         expect(pairingFixture.openArguments.every((value) => value === false)).toBe(true);
 
-        // The close action stays available in the blocked state.
         const user = userEvent.setup();
         await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
 
@@ -377,8 +266,6 @@ describe('PrismaPairingControl', () => {
     it('reports a failed or invalid name read truthfully with the settings direction and never a QR', async () => {
         setPairingFixture('free', liveQr(), 42);
 
-        // Both service failure variants are real `HmiNameReadResult` members: an invalid saved
-        // value and unavailable storage. Neither may be reported as "no name configured".
         const failures: ReadonlyArray<HmiNameReadResult> = [
             { ok: false, name: null, error: 'invalid' },
             { ok: false, name: null, error: 'unavailable' },
@@ -391,7 +278,6 @@ describe('PrismaPairingControl', () => {
             const dialog = await openDialog();
 
             expect(within(dialog).getByText(READ_FAILURE_COPY)).toBeInTheDocument();
-            // The direction reuses the existing admin settings route wording.
             expect(within(dialog).getByText(new RegExp(SETTINGS_DIRECTION_FRAGMENT))).toBeInTheDocument();
             expect(within(dialog).queryByText(MISSING_NAME_COPY)).not.toBeInTheDocument();
             expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
@@ -413,8 +299,6 @@ describe('PrismaPairingControl', () => {
         const user = userEvent.setup();
         await user.click(within(first).getByRole('button', { name: 'Cerrar' }));
 
-        // Configuring the name in settings re-opens into the unchanged valid pairing flow;
-        // the changed behavior after a fixture change is the observable re-read proof.
         setPairingFixture('free', liveQr(), 42);
         setHmiNameResult({ ok: true, name: 'Panel recepción' });
 
@@ -424,37 +308,25 @@ describe('PrismaPairingControl', () => {
 
         await user.click(within(second).getByRole('button', { name: 'Cerrar' }));
 
-        // Clearing the name blocks again on the next open.
         setHmiNameResult({ ok: true, name: null });
 
         const third = await openDialog();
         expect(within(third).getByText(MISSING_NAME_COPY)).toBeInTheDocument();
         expect(within(third).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
 
-        // Every opening performed its own service read (at least one per open), never a
-        // module-load snapshot; exact call counts stay unpinned to avoid coupling to renders.
         expect(hmiNameBoundary.reads.length).toBeGreaterThanOrEqual(3);
         expect(hmiNameBoundary.reads.at(-1)).toEqual({ ok: true, name: null });
     });
 
-    it('reflects pending, linked and unavailable states with their copy and never a QR', async () => {
-        const stateCopy: ReadonlyArray<[PairingPhase, string]> = [
-            ['pending', 'Confirme el destino en Telegram.'],
-            ['linked', 'Teléfono vinculado'],
-            ['unavailable', 'Canal A no disponible'],
-        ];
+    it('shows the unavailable state with its copy and never a QR', async () => {
+        setPairingFixture('unavailable', liveQr(), 30);
 
-        for (const [phase, copy] of stateCopy) {
-            setPairingFixture(phase, liveQr(), 30);
+        render(<PrismaPairingControl />);
+        const dialog = await openDialog();
 
-            const { unmount } = render(<PrismaPairingControl />);
-            const dialog = await openDialog();
-
-            expect(within(dialog).getByText(copy)).toBeInTheDocument();
-            expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
-
-            unmount();
-        }
+        expect(within(dialog).getByText('Canal A no disponible')).toBeInTheDocument();
+        expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
+        expect(within(dialog).queryByTestId(SLOT_TEST_ID)).not.toBeInTheDocument();
     });
 
     it('shows the clear runtime-unreachable copy and never a QR when the Prisma runtime could not be reached', async () => {
@@ -464,8 +336,6 @@ describe('PrismaPairingControl', () => {
         const dialog = await openDialog();
 
         expect(within(dialog).getByText('Prisma no se pudo iniciar.')).toBeInTheDocument();
-        // Distinct from the runtime-reported unavailable copy: this is a connectivity failure,
-        // not a state the runtime itself answered with.
         expect(within(dialog).queryByText('Canal A no disponible')).not.toBeInTheDocument();
         expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
     });
@@ -478,7 +348,6 @@ describe('PrismaPairingControl', () => {
 
         expect(within(dialog).getByText('Prisma no se pudo iniciar: el puerto 5057 está en uso por otro programa.')).toBeInTheDocument();
         expect(within(dialog).queryByText('Prisma no se pudo iniciar.')).not.toBeInTheDocument();
-        // The hint line is unrelated to T4b and stays exactly as T4 left it.
         expect(within(dialog).getByText('Reinicie el lanzador para volver a intentarlo.')).toBeInTheDocument();
         expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
     });
@@ -507,7 +376,7 @@ describe('PrismaPairingControl', () => {
         expect(within(reopened).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
     });
 
-    it('closes the dialog with Escape through the existing overlay primitive', async () => {
+    it('closes the dialog with Escape through the shared ModalBackdrop primitive', async () => {
         render(<PrismaPairingControl />);
         await openDialog();
         const trigger = screen.getByRole('button', { name: 'Prisma' });
@@ -520,79 +389,117 @@ describe('PrismaPairingControl', () => {
         expect(pairingFixture.openArguments.at(-1)).toBe(false);
     });
 
-    it('closes the dialog when clicking outside through the existing overlay primitive', async () => {
+    it('closes the dialog when clicking the backdrop outside the panel', async () => {
         render(<PrismaPairingControl />);
-        await openDialog();
+        const dialog = await openDialog();
+        const backdrop = dialog.parentElement as HTMLElement;
 
         const user = userEvent.setup();
-        await user.click(document.body);
+        await user.click(backdrop);
 
         expect(screen.queryByRole('dialog', { name: DIALOG_NAME })).not.toBeInTheDocument();
         expect(pairingFixture.openArguments.at(-1)).toBe(false);
     });
 
-    it('sizes and places the overlay from the ACTUAL measured panel and disconnects the observer on close/unmount', async () => {
-        vi.stubGlobal('ResizeObserver', ResizeObserverFixture);
-        Object.defineProperty(window, 'innerWidth', { configurable: true, value: VIEWPORT_WIDTH });
-        Object.defineProperty(window, 'innerHeight', { configurable: true, value: VIEWPORT_HEIGHT });
+    describe('T20 — awaiting confirmation and linked orb states', () => {
+        it('shows the Prisma orb with the configured visual settings and the warning-token copy while awaiting confirmation', async () => {
+            setPairingFixture('pending', null, 0);
 
-        setPairingFixture('free', liveQr(), 42);
-        const first = render(<PrismaPairingControl />);
+            render(<PrismaPairingControl />);
+            const dialog = await openDialog();
 
-        // Scoped trigger instrumentation: 160 px of space below the trigger fit the SHORT
-        // measurement but not the TALL one.
-        const trigger = screen.getByRole('button', { name: 'Prisma' });
-        spyGeometry(trigger, TRIGGER_RECT);
+            const orb = dialog.querySelector(ORB_TAG);
+            expect(orb).not.toBeNull();
+            expect(orb).toHaveAttribute('rays', String(ORB_CONFIG.rays));
+            expect(orb).toHaveAttribute('speed', String(ORB_CONFIG.speed));
+            expect(orb).toHaveAttribute('intensity', String(ORB_CONFIG.intensity));
+            expect(orb).toHaveAttribute('core', ORB_CONFIG.core);
+            expect(orb).toHaveAttribute('glow', ORB_CONFIG.glow);
+            expect(within(dialog).queryByRole('img', { name: QR_IMG_NAME })).not.toBeInTheDocument();
 
-        const dialog = await openDialog();
-        const overlay = overlayOf(dialog);
-
-        // The control must own the runtime measurement: a real ResizeObserver observing the
-        // open panel, with the shared AnchoredOverlay primitive left completely untouched.
-        const observer = lastPanelObserver();
-        expect(
-            observer.observed.some(
-                (element) => element === dialog || dialog.contains(element) || overlay.contains(element),
-            ),
-        ).toBe(true);
-        expect(observer.disconnected).toBe(false);
-
-        // Tall measured QR content cannot fit below the trigger: the overlay flips ABOVE it,
-        // with end-alignment geometry derived from the MEASURED width (never from the removed
-        // estimatedHeight/minWidth constants).
-        await emitPanelMeasurement(observer, MEASURED_WIDTH, MEASURED_TALL_HEIGHT);
-        expect(overlay).toHaveStyle({
-            bottom: `${VIEWPORT_HEIGHT - TRIGGER_RECT.top + OVERLAY_GAP_PX}px`,
+            const copy = within(dialog).getByText('Confirme el destino en Telegram.');
+            expect(copy).toHaveClass('text-status-warning');
         });
-        expect(overlay.style.top).toBe('');
-        expect(overlay).toHaveStyle({ minWidth: `${MEASURED_WIDTH}px` });
-        expect(overlay).toHaveStyle({ left: `${TRIGGER_RECT.right - MEASURED_WIDTH}px` });
 
-        // Short measured pending content fits below: back underneath the trigger, still sized
-        // by the same measured width.
-        setPairingFixture('pending', null, 0);
-        await emitPanelMeasurement(observer, MEASURED_WIDTH, MEASURED_SHORT_HEIGHT);
-        expect(within(dialog).getByText('Confirme el destino en Telegram.')).toBeInTheDocument();
-        expect(overlay).toHaveStyle({ top: `${TRIGGER_RECT.bottom + OVERLAY_GAP_PX}px` });
-        expect(overlay.style.bottom).toBe('');
-        expect(overlay).toHaveStyle({ minWidth: `${MEASURED_WIDTH}px` });
-        expect(overlay).toHaveStyle({ left: `${TRIGGER_RECT.right - MEASURED_WIDTH}px` });
+        it('shows the Prisma orb with the success-token copy once linked', async () => {
+            setPairingFixture('linked', null, 0);
 
-        // The observer is owned by the open panel only: an explicit close disconnects it.
-        const user = userEvent.setup();
-        await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
-        expect(screen.queryByRole('dialog', { name: DIALOG_NAME })).not.toBeInTheDocument();
-        expect(observer.disconnected).toBe(true);
-        first.unmount();
+            render(<PrismaPairingControl />);
+            const dialog = await openDialog();
 
-        // Unmount while open also disconnects any observer still owned by the control.
-        ResizeObserverFixture.instances = [];
-        setPairingFixture('pending', null, 0);
-        const second = render(<PrismaPairingControl />);
-        await openDialog();
-        const reopenObserver = lastPanelObserver();
-        expect(reopenObserver.disconnected).toBe(false);
-        second.unmount();
-        expect(reopenObserver.disconnected).toBe(true);
+            expect(dialog.querySelector(ORB_TAG)).not.toBeNull();
+            const copy = within(dialog).getByText('Teléfono vinculado');
+            expect(copy).toHaveClass('text-status-normal');
+        });
+
+        it('keeps the identical fixed visual-slot size across the QR, pending and linked states', async () => {
+            setPairingFixture('free', liveQr(), 42);
+            const first = render(<PrismaPairingControl />);
+            const qrDialog = await openDialog();
+            const qrSlot = within(qrDialog).getByTestId(SLOT_TEST_ID);
+            const slotSizeStyle = qrSlot.style.getPropertyValue('--pairing-visual-slot-size');
+            expect(slotSizeStyle).not.toBe('');
+            first.unmount();
+
+            setPairingFixture('pending', null, 0);
+            const second = render(<PrismaPairingControl />);
+            const pendingDialog = await openDialog();
+            const pendingSlot = within(pendingDialog).getByTestId(SLOT_TEST_ID);
+            expect(pendingSlot.style.getPropertyValue('--pairing-visual-slot-size')).toBe(slotSizeStyle);
+            second.unmount();
+
+            setPairingFixture('linked', null, 0);
+            render(<PrismaPairingControl />);
+            const linkedDialog = await openDialog();
+            const linkedSlot = within(linkedDialog).getByTestId(SLOT_TEST_ID);
+            expect(linkedSlot.style.getPropertyValue('--pairing-visual-slot-size')).toBe(slotSizeStyle);
+        });
+
+        it('auto-closes with a fade after the phone links, animating the backdrop and panel opacity together', async () => {
+            vi.useFakeTimers({ shouldAdvanceTime: true });
+            setPairingFixture('linked', null, 0);
+
+            render(<PrismaPairingControl />);
+            const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+            await user.click(screen.getByRole('button', { name: 'Prisma' }));
+
+            const dialog = screen.getByRole('dialog', { name: DIALOG_NAME });
+            const backdrop = dialog.parentElement as HTMLElement;
+            expect(dialog).toHaveClass('opacity-100');
+            expect(backdrop).toHaveClass('opacity-100');
+
+            // Still visible well before the auto-close delay elapses.
+            act(() => {
+                vi.advanceTimersByTime(1000);
+            });
+            expect(screen.getByRole('dialog', { name: DIALOG_NAME })).toBeInTheDocument();
+
+            // The named auto-close delay (~3 s) elapses: the fade starts on both layers together.
+            act(() => {
+                vi.advanceTimersByTime(2000);
+            });
+            expect(dialog).toHaveClass('opacity-0');
+            expect(backdrop).toHaveClass('opacity-0');
+            // Still mounted mid-fade.
+            expect(screen.getByRole('dialog', { name: DIALOG_NAME })).toBeInTheDocument();
+
+            // The fade duration elapses: the dialog unmounts.
+            act(() => {
+                vi.advanceTimersByTime(500);
+            });
+            expect(screen.queryByRole('dialog', { name: DIALOG_NAME })).not.toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Prisma' })).toHaveAttribute('aria-expanded', 'false');
+        });
+
+        it('skips the fade transition under prefers-reduced-motion, on both the panel and the backdrop', async () => {
+            setPairingFixture('pending', null, 0);
+
+            render(<PrismaPairingControl />);
+            const dialog = await openDialog();
+            const backdrop = dialog.parentElement as HTMLElement;
+
+            expect(dialog).toHaveClass('motion-reduce:transition-none', 'motion-reduce:duration-0');
+            expect(backdrop).toHaveClass('motion-reduce:transition-none', 'motion-reduce:duration-0');
+        });
     });
 });

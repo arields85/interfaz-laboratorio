@@ -1647,3 +1647,93 @@ After that: T14 is done (see its own evidence above, including the user's next T
     followed by the normal "is ready" lines, never "(already running)"; then re-scan the QR to
     re-pair Channel A, since the previous pairing session's in-memory state was dropped by the
     clean restart as documented above.
+- [x] **T20 — Channel A pairing UI as a centered modal with the Prisma orb (user request,
+  2026-09-24).** The topbar Prisma popover (`PrismaPairingControl.tsx`, previously anchored under
+  the button via `AnchoredOverlay`) had three states (QR, awaiting confirmation, linked) with plain
+  "Cerrar"-only copy. Required: centered modal with the same backdrop as admin dialogs
+  (`GlobalSettingsDialog`/`AdminDialog`); awaiting-confirmation state shows the Prisma orb (as in
+  the admin Prisma tab preview) in warning-token copy; linked state keeps the orb in success-token
+  copy and auto-closes with a fade after ~3 s; the modal/orb slot keeps the EXACT same fixed size
+  across all three states (no layout shift). Route: direct inline (one already-understood control
+  rewrite + one small shared-primitive extraction, no unresolved design work).
+  **Shared backdrop primitive** (new `hmi-app/src/components/ui/ModalBackdrop.tsx`, exported from
+  the `components/ui` barrel): extracted verbatim from `AdminDialog.tsx`'s own backdrop div (`fixed
+  inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm`, `role="presentation"`,
+  Escape-to-close, backdrop-click-to-close) plus an optional `className` so a caller can append
+  fade/opacity utility classes without touching the base treatment. `AdminDialog.tsx` now composes
+  on `ModalBackdrop` instead of owning its own copy (removes its duplicate `useEffect`
+  Escape-listener and backdrop div) — same rendered markup/behavior, confirmed by the full
+  `GlobalSettingsDialog`/`GlobalSettingsDialog.voice.integration` suites passing unchanged (23
+  tests). `RuntimeDialog.tsx` (a third, deliberately different backdrop style —
+  `bg-industrial-bg/80 backdrop-blur-lg`) was left untouched: the user asked specifically for
+  AdminDialog's backdrop, not RuntimeDialog's.
+  **`PrismaPairingControl.tsx` rewrite**: replaced `AnchoredOverlay` + the trigger-relative
+  `ResizeObserver`/`getBoundingClientRect` panel-measurement machinery (no longer needed once the
+  panel is centered, not anchored to the button) with `ModalBackdrop`. Existing name-gate,
+  QR-live-challenge, blocked/error/unreachable-with-port-detail states are unchanged in copy and
+  behavior. New:
+  - **Fixed visual slot**: `PAIRING_VISUAL_SLOT_SIZE_PX = QR_SIZE_PX (256) + QR_SLOT_PADDING_PX (12)
+    * 2 = 280`, derived from the QR's own `size` prop and its `p-3` wrapper padding rather than an
+    independent magic number; exposed as a `--pairing-visual-slot-size` CSS custom property (same
+    convention as `PrismaOrbOverlay`'s `--prisma-orb-size`) on a `data-testid="pairing-visual-slot"`
+    wrapper reused verbatim (same class string, same inline style) for the QR, the pending orb and
+    the linked orb — asserted identical across all three states in
+    `'keeps the identical fixed visual-slot size across the QR, pending and linked states'`.
+  - **Orb states**: `showPendingOrb`/`showLinkedOrb` render `PrismaOrb` (already the exact component
+    the admin Prisma tab preview uses) with `config` from `readPrismaOrbVisualConfig()` — read once
+    per panel open alongside the existing `readHmiName()` read, mocked at the same service boundary
+    in the test (never touches `leda-orb.js`, per the brief). Copy reuses the existing
+    `pairingStatusCopy(phase, ...)` switch, only the paragraph's className changes:
+    `text-status-warning` for pending, `text-status-normal` for linked (existing design tokens,
+    `--color-status-warning`/`--color-status-normal` in `index.css`, already used elsewhere e.g.
+    `ConnectionStatusBadge`/`AdminDestructiveDialog` — no new token, Golden Rule respected).
+  - **Linked auto-close fade**: `PAIRING_LINKED_AUTO_CLOSE_MS = 3000` (named constant) starts a
+    timer on entering `linked`; on elapse it sets `closing = true`, which applies
+    `opacity-0`/`opacity-100` plus a shared `PAIRING_FADE_TRANSITION_CLS` (`transition-opacity
+    duration-300 ease-out motion-reduce:transition-none motion-reduce:duration-0`) to BOTH the
+    `ModalBackdrop` (`className` prop) and the dialog panel, so they fade together; `closing` also
+    then starts `PAIRING_FADE_DURATION_MS = 300` before actually calling `close()` (unmount). Only
+    `opacity` is animated (no `scale`/size animation), so the Tailwind v4 `scale-*`-is-a-separate-
+    CSS-property bug fixed elsewhere today (`PrismaOrbOverlay`, commit `468ca4e`) does not apply
+    here. Under `prefers-reduced-motion`, `motion-reduce:transition-none` disables the CSS
+    transition itself (same convention as `PrismaOrbOverlay`), so the opacity jumps instantly
+    instead of animating — the close still happens after the same two delays, only the visual
+    animation differs; no JS `matchMedia` branch was added, consistent with the existing
+    `PrismaOrbOverlay` pattern of asserting the `motion-reduce:*` classes statically rather than
+    stubbing `matchMedia`.
+  - Removed `triggerRef`/`panelRef` (no longer needed without `AnchoredOverlay`'s trigger-relative
+    positioning).
+  **Tests** (`PrismaPairingControl.test.tsx`, full rewrite — the old file asserted `AnchoredOverlay`-
+  specific trigger-relative measurement/flip/`ResizeObserver` behavior that no longer exists once
+  the panel is centered): RED confirmed by writing the new test file first and running it against
+  the OLD (AnchoredOverlay-based) component — 8 of 18 tests failed exactly on the new-behavior
+  assertions (centered backdrop classes, orb rendering/copy tokens, fixed-slot-size equality across
+  states, the fade+auto-close timer sequence, `motion-reduce` classes on both layers) while the
+  10 carried-over tests (open/close, name gate, QR rendering, blocked/error/unreachable copy,
+  Escape/backdrop-click) passed unchanged, confirming those existing contracts were preserved by the
+  rewrite. GREEN after the rewrite (all 18 passed). New `leda-orb` custom-element registration and
+  `readPrismaOrbVisualConfig` mock in the test file follow the exact convention already used by
+  `PrismaOrbOverlay.test.tsx`/`VoiceSettingsTab.test.tsx`. The auto-close/fade test uses
+  `vi.useFakeTimers({ shouldAdvanceTime: true })` + `vi.advanceTimersByTime` (same pattern as
+  `PrismaOrbOverlay.test.tsx`'s own fade test) to assert, in order: opacity-100 on open, still
+  mounted before 3 s, `opacity-0` on both layers exactly at 3 s (still mounted mid-fade), then
+  unmounted (and the trigger's `aria-expanded` back to `false`) after the further 300 ms fade delay.
+  **Verification**: `cd hmi-app && npx vitest run src/components/layout/PrismaPairingControl.test.tsx`
+  → 18 passed; full suite `npm test` → 217 test files / 2434 tests passed (no regressions, incl. the
+  `GlobalSettingsDialog`/`AdminDestructiveDialog`/`NodeTypeConfigDialog` suites that depend on the
+  refactored `AdminDialog`); `npx tsc -b` → clean; `npm run lint` → clean (one transient "unused
+  eslint-disable directive" warning from an initial defensive comment was removed once the effect
+  turned out not to need it; re-run clean). No live headless-Chrome visual check was performed: a
+  real pairing round needs the Prisma runtime, and this writer's brief forbids starting/stopping it
+  (same constraint T10 unit 5 stopped on) — the full state-machine and fixed-size-slot behavior is
+  covered by the automated tests above instead.
+  **Files**: `hmi-app/src/components/ui/ModalBackdrop.tsx` (new),
+  `hmi-app/src/components/ui/index.ts` (barrel export), `hmi-app/src/components/admin/AdminDialog.tsx`
+  (refactored to compose on `ModalBackdrop`), `hmi-app/src/components/layout/PrismaPairingControl.tsx`
+  (rewritten), `hmi-app/src/components/layout/PrismaPairingControl.test.tsx` (rewritten).
+  Commit: `feat(hmi): show Channel A pairing as a centered modal with the Prisma orb`.
+  **Next step (user)**: open the Prisma pairing modal from the topbar button and live-check: the
+  centered backdrop matches "Configuración general"'s; scan the QR, confirm in Telegram, and watch
+  the awaiting/linked states show the orb in the same fixed square with the warning/success colors;
+  confirm the modal fades out and closes on its own a few seconds after linking; confirm reopening
+  later shows the current state; confirm Escape/backdrop-click/"Cerrar" all still close it.

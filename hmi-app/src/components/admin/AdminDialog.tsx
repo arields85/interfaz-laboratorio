@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import ModalBackdrop from '../ui/ModalBackdrop';
 
 interface AdminDialogProps {
     open: boolean;
@@ -17,33 +18,8 @@ export default function AdminDialog({
     actions,
     maxWidth = 'max-w-md',
 }: AdminDialogProps) {
-    useEffect(() => {
-        if (!open) return;
-
-        const handleEscape = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onClose();
-            }
-        };
-
-        window.addEventListener('keydown', handleEscape);
-        return () => {
-            window.removeEventListener('keydown', handleEscape);
-        };
-    }, [open, onClose]);
-
-    if (!open) return null;
-
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-            onMouseDown={(event) => {
-                if (event.target === event.currentTarget) {
-                    onClose();
-                }
-            }}
-            role="presentation"
-        >
+        <ModalBackdrop open={open} onClose={onClose}>
             <div
                 role="dialog"
                 aria-modal="true"
@@ -54,6 +30,6 @@ export default function AdminDialog({
                 <div className="mt-4 space-y-4">{children}</div>
                 <div className="mt-6 flex justify-end gap-2">{actions}</div>
             </div>
-        </div>
+        </ModalBackdrop>
     );
 }
