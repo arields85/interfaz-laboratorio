@@ -880,7 +880,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
       confirmed: the module tests via `ImportError` before the module existed; the two wiring tests by
       temporarily removing the `install_access_log_query_redaction()` call from each `main()` and
       confirming both failed, then restoring. Full suite: 1451 passed.
-- [ ] **T16 — Browser-side voice timeline and first-question miss (live test 2026-09-24 09:39–09:51).**
+- [x] **T16 — Browser-side voice timeline and first-question miss (live test 2026-09-24 09:39–09:51).**
   Server side after T13/T13b: publish → `/prisma/speak-live` 117–143 ms (SSE works), server first
   chunk 482–762 ms (first request 1358 ms), cache hit 28 ms, credential 0 ms, no capability in
   logs. The user still perceives the orb waiting before audio, and after the launcher restart the
@@ -895,6 +895,111 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   (`ensureContextRunning`, `prismaVoiceAudioEngine.ts:928-937`). Scope: dev-guarded console
   instrumentation (engine `log`, metric listener, reset/401 warnings), then one live repro, then fix
   the confirmed cause.
+  **Delivered as observability only (no repro/fix — see Next step)**, route: delegated writer
+  (multi-file, behavior-changing across `hmi-app` and `services/prisma-runtime`; forbidden from
+  starting/stopping the runtime/launcher).
+  - **Design.** Extended the existing closed `prisma-audio-record.v1` schema
+    (`schemas/prisma-audio-record.v1.schema.json`, already driving codegen for both languages via
+    `schemas/generate_prisma_audio_bindings.py`) with 7 new `browser`-layer record types instead of
+    inventing a parallel validation mechanism: `voice-event-received` (`source`: sse|poll),
+    `orb-phase` (`phase`: hidden|buffering|visible|fading), `speak-live-request-start` (no payload),
+    `speak-live-response-received` (`http_status`, `elapsed_ms`), `speak-live-stale-discarded`
+    (`elapsed_ms`), `session-reset` (`reason`: unauthorized-401|explicit, `epoch_after`),
+    `audio-context-state` (`state`: suspended|running|closed|interrupted, `when`: at-play|after-resume).
+    Regenerated `audio_record_types.py` and `prismaAudioMetric.generated.ts`; both language
+    validators (`make_record`/`isPrismaAudioMetric`) now accept these for free. No real question,
+    answer, capability, or event id ever enters a record — only enums, non-negative numbers, and the
+    existing opaque `run_id` pattern (`prisma-[0-9a-f]{16,64}`); a per-event short hash was judged
+    unnecessary since no record needs to correlate back to a specific event id.
+  - **Frontend pipeline.** New `prismaVoiceTimelineRecorder.ts`: mints ONE opaque page-run id
+    (reuses `createOpaqueBrowserRunId`) and emits the 6 page-scoped record types through the
+    existing `dispatchPrismaBrowserMetric`/`prisma-browser-metric` CustomEvent channel — the exact
+    same bus the audio engine's own per-playback records (`request-start`, `first-readable-audio`,
+    `playback-started/ended`, `eof`, `cancel`, `error`, `underflow`, `canonical-decode`) already use,
+    so the sink needs only one listener for the whole timeline. `audio-context-state` is the one
+    exception: it is playback-scoped (AudioContext resume happens inside one playback), so the
+    engine emits it itself through its own per-playback `emitDiagnostic`
+    (`prismaVoiceAudioEngine.ts` `ensureContextRunning`), only when a resume was actually needed
+    (not on every scheduled PCM block, which would flood the timeline with "already running").
+    New `prismaVoiceTimelineDiagnosticsSink.ts`: the first production listener on
+    `prisma-browser-metric`. Batches validated records (`isPrismaAudioMetric` filters malformed/
+    foreign CustomEvent details), flushes on a 2 s interval, immediately once 20 records are
+    pending, and on `pagehide`. Every POST is fire-and-forget (rejection swallowed); the module
+    never throws from its own handlers. Wired into `main.tsx`, unconditional (dev and prod alike —
+    single local kiosk runtime, no separate flag needed per the brief's "keep it simple" guidance).
+  - **The pagehide race (verifier-adjacent finding, fixed same pass).** The obvious design — flush
+    the final batch on `pagehide` through the normal `prismaSessionClient.fetch()` — silently loses
+    the batch: `fetch()` awaits `#waitForBootstrap()` even when already bootstrapped (still yields a
+    microtask), and the pre-existing `pagehide` listener in `main.tsx` that calls
+    `prismaSessionClient.reset()` runs synchronously right after (same macrotask, listeners fire in
+    registration order) and bumps the epoch before `fetch()` resumes, so it throws
+    `PrismaStaleSessionResponse`. Fixed with a new `PrismaSessionClient.sendBeacon(path, body)`:
+    reads the capability synchronously, never awaits bootstrap, never checks the epoch, no-ops
+    without a capability. The sink's pagehide flush uses this instead of the ordinary transport;
+    interval/size flushes still use the ordinary `fetch()`. `sendBeacon` matches every other
+    capability-bearing call's `cache: 'no-store'`/`redirect: 'error'`.
+  - **Backend endpoint.** New `POST /hmi/voice/timeline` (`local_presentation.py`), same
+    session-capability header authorization and `no-store` CORS as every other HMI route,
+    `touch=False` (a diagnostics POST alone shouldn't extend the idle window). New
+    `voice_timeline_diagnostics.py`: `validate_timeline_batch()` rejects a non-`{"records": [...]}`
+    envelope, an empty/oversized batch (cap 40), any record outside the `browser` layer, a wrong
+    `schema_version`, an unknown record type, an unlisted/free-text payload key, or a missing
+    required field — reusing the generated `make_record()` per record (never partially accepts a
+    malformed batch). `VoiceTimelineRateLimiter`: in-memory per-owner sliding window (default 30
+    req/60 s), a clean `429` before any body read. Body capped at 16 KiB
+    (`HMI_VOICE_TIMELINE_MAX_BYTES`). `format_timeline_log_line()` produces exactly:
+    `HMI voice timeline: run=<run_id> seq=<sequence> type=<record_type> t_ms=<round(elapsed_ms)>[ extra=<k>=<v> ...]`
+    (fields sorted, `extra=` omitted when the payload is empty) — one `logger.warning(...)` per
+    accepted record, same WARNING-level/no-`basicConfig` convention as every other T5/T10/T13 log
+    line, landing in `prisma-presentation-stderr.log`.
+  - **TDD.** RED confirmed before every implementation: `test_audio_record_types.py`/
+    `test_audio_bindings_generation.py` (schema drift) before regenerating bindings;
+    `test_voice_timeline_diagnostics.py` (18 tests, module missing) before the backend module;
+    `VoiceTimelineDiagnosticsRouteTests` (7 tests) before the route; frontend — moved
+    `prismaVoiceTimelineRecorder.ts` aside to confirm an import-resolution RED before restoring it;
+    every other new/changed `*.test.ts(x)` failed for the right reason (assertion mismatch or
+    missing export) before its implementation, confirmed individually. GREEN after every step; full
+    suites green after every commit (see below).
+  - **Independent code-review gate (pre-commit hook, not part of this task's own brief) findings,
+    fixed before the first commit landed:** (1) inline string-union payload types in the recorder
+    duplicated the generated `PrismaAudioMetricSource/Phase/Reason` enums instead of importing them
+    from `domain/prismaAudioMetric.types.ts` — fixed, those types now re-exported from the domain
+    module and imported. (2) the pagehide flush never actually sent (the race above) — fixed with
+    `sendBeacon`. (3) `recordSessionReset`/`recordAudioContextState` were exported but never called
+    from production code, contradicting their own doc comment — fixed: `session-reset` now wired
+    into `prismaSessionClient.ts`'s `#invalidate()` (both call sites, 401 and explicit reset);
+    `audio-context-state` moved to the engine's own per-playback diagnostic stream instead (a
+    better fit, and removed the now-dead page-scoped duplicate). Two more non-blocking review notes
+    fixed same pass: reuse `PrismaAudioMetricReason` instead of repeating its union in
+    `#invalidate()`'s signature; `sendBeacon` missing `redirect: 'error'`/`cache: 'no-store'`.
+  - **Files:** `schemas/prisma-audio-record.v1.schema.json`,
+    `services/prisma-runtime/src/prisma_runtime/audio_record_types.py` (generated),
+    `services/prisma-runtime/src/prisma_runtime/voice_timeline_diagnostics.py` (new),
+    `services/prisma-runtime/src/prisma_runtime/local_presentation.py`,
+    `services/prisma-runtime/tests/test_voice_timeline_diagnostics.py` (new),
+    `services/prisma-runtime/tests/test_audio_record_types.py`,
+    `services/prisma-runtime/tests/test_local_presentation.py`,
+    `hmi-app/src/domain/prismaAudioMetric.generated.ts` (generated),
+    `hmi-app/src/domain/prismaAudioMetric.types.ts`,
+    `hmi-app/src/services/prismaVoiceTimelineRecorder.ts` (new),
+    `hmi-app/src/services/prismaVoiceTimelineDiagnosticsSink.ts` (new),
+    `hmi-app/src/services/prismaSessionClient.ts`, `hmi-app/src/services/prismaVoiceAudioEngine.ts`,
+    `hmi-app/src/services/prismaVoiceTtsAudioSource.ts`,
+    `hmi-app/src/services/voiceEventListener.service.ts`,
+    `hmi-app/src/hooks/usePrismaOrbPresentation.ts`, `hmi-app/src/config/prismaAssistant.config.ts`,
+    `hmi-app/vite.prismaProxy.config.ts`, `hmi-app/src/main.tsx`, plus every listed file's test.
+  - **Checks:** `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
+    services\prisma-runtime -p "test_*.py"` → 1487 passed (was 1459). `cd hmi-app && npm test` →
+    2418 passed (was 2392). `npx tsc -b` clean. `npm run lint` clean.
+  - **Known, accepted trade-off (not fixed, judged low-risk):** the sink's automatic pagehide flush
+    and `main.tsx`'s explicit session-reset pagehide listener are two separate `pagehide` listeners
+    whose *relative* registration order matters (the sink is registered first in `main.tsx`,
+    documented there); a later edit that reorders those two lines would silently break the pagehide
+    flush again. Not restructured into one handler in this pass (would mean the sink stop-lifecycle
+    exposing its flush function to the caller, touching its public contract and every existing
+    sink test) — flagged for a future pass if this proves fragile in practice.
+  - **Commits:** `c605519` (feat: stream HMI voice timeline diagnostics), `9db0368` (refactor: reuse
+    the generated session-reset reason type), `2964d1a` (fix: pin sendBeacon to no-store/no-redirect).
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
@@ -1006,12 +1111,42 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   their tests in `services/prisma-runtime`, plus `prismaSessionClient.ts`,
   `voiceEventListener.service.ts`, `vite.prismaProxy.config.ts` and their tests in `hmi-app`, plus a
   new `access_log_redaction.py` and its test; touched only those two trees and this doc).
+- 2026-09-24: T16 writer made the browser voice timeline observable server-side (diagnostics only,
+  no fix attempted): extended the closed audio-record schema with 7 browser record types, a new
+  `prismaVoiceTimelineRecorder.ts`/`prismaVoiceTimelineDiagnosticsSink.ts` pair on the frontend
+  batches and POSTs them through a new `POST /hmi/voice/timeline` route
+  (`voice_timeline_diagnostics.py`), which writes one WARNING log line per record to
+  `prisma-presentation-stderr.log`. Wired: orb phase, voice-event delivery source, speak-live
+  request/response/stale-discard, every session reset (with cause), and AudioContext resume
+  outcomes. Fixed a pagehide/session-reset race found while implementing (the naive design silently
+  lost the final batch) with a new `PrismaSessionClient.sendBeacon()`. Commits `c605519`, `9db0368`,
+  `2964d1a` (the latter two are code-review follow-ups on the first). Full suites green after every
+  commit (prisma-runtime 1487, was 1459; hmi-app 2418, was 2392; `tsc -b` and `eslint` both clean).
+  Route: delegated writer (multi-file, behavior-changing work across `services/prisma-runtime` and
+  `hmi-app`; forbidden from starting/stopping the runtime/launcher, so this is unverified against a
+  real live voice test — see Next step).
 
 ## Next step
 
 Next: a live voice test with the user, covering everything still unverified against the real
 runtime:
-1. **T13b / T13 unit (c), highest priority**: after the next launcher restart (so it picks up the
+1. **T16, highest priority (new)**: restart the launcher (picks up the new
+   `/hmi/voice/timeline` route and the browser diagnostics sink) and repeat the exact 2026-09-24
+   09:39–09:51 scenario: ask the first question right after the restart (this is the one that
+   previously showed neither orb nor voice), then 4-5 more ordinary questions. The parent then
+   reads `prisma-presentation-stderr.log` for `HMI voice timeline: run=... seq=... type=... t_ms=...
+   extra=...` lines (no browser console needed) to see, per question: `voice-event-received` (source
+   sse/poll) → `orb-phase` transitions (hidden→visible→fading→hidden, or a `hidden` with no prior
+   `visible` if the orb never showed) → `speak-live-request-start`/`speak-live-response-received` →
+   any `speak-live-stale-discarded` or `session-reset` (reason=unauthorized-401 means a concurrent
+   401 raced the request; reason=explicit is an ordinary pagehide/reset) → any `audio-context-state`
+   (state=suspended when=at-play means the browser needed a resume; when=after-resume shows whether
+   it succeeded) — cross-referenced with the existing server-side speak-live timing lines already in
+   the log. This should finally show which of the two named candidates (session-reset race vs.
+   AudioContext autoplay) explains the first-question miss, or reveal a third cause. Observability
+   only in this pass — no fix attempted yet; a follow-up task should read this log, confirm the root
+   cause, and fix it.
+2. **T13b / T13 unit (c)**: after the next launcher restart (so it picks up the
    new SSE code — restarting also deletes the logs and invalidates every in-memory session
    capability, including any leaked by the pre-T13b query-string fallback), confirm the orb/audio
    experience is unchanged and that `GET /hmi/voice/events` streams live through the real Vite
@@ -1021,16 +1156,16 @@ runtime:
    the answer arrives at least as fast as before (no regression), with polling never engaging unless
    the SSE connection is deliberately broken. Also confirm `prisma-presentation-stderr.log` never
    shows a raw capability value again, even for an unrelated route's query string.
-2. T13 units (a)/(b)/(d)/(e): read the updated `credential_elapsed_ms`, `time_to_first_byte_ms`, and
+3. T13 units (a)/(b)/(d)/(e): read the updated `credential_elapsed_ms`, `time_to_first_byte_ms`, and
    Channel A update-handling timings in the logs to confirm the measured improvements hold live
    (in-memory secret cache should show near-zero `credential_elapsed_ms` on repeat requests; Gemini
    TTFB should drop close to the ~0.6-0.7s standalone figure even after idle gaps between
    questions; a Channel A phone answer should also get audio on the HMI without waiting for the
    1s poll; Channel A update handling should return close to the pre-T4 ~0.38s again).
-3. T10 units 1-4's latency improvement, T11's new model/voice sounding right end-to-end, and T12's
+4. T10 units 1-4's latency improvement, T11's new model/voice sounding right end-to-end, and T12's
    documented credential-resolve trade-off (all still pending their own first live confirmation from
    before T13).
-4. **User manual check of T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
+5. **User manual check of T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
    - **T2**: pair a phone via QR; the confirmation prompt should read "Confirme para hacerle
      preguntas a Prisma desde aquí; le responderá en pantalla y con voz." (no "documento").
    - **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
