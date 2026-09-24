@@ -1222,6 +1222,17 @@ class ChannelAActivationPairingViewTests(ActivationHarnessTestCase):
         recovered = fixture.activation.issue_pairing_challenge_view(owner)
         self.assertEqual(recovered["token"], rotated["token"])
 
+    def test_stop_closes_the_transport_exactly_once(self):
+        """T7/T8b: `stop()` must close the owned transport session on
+        teardown, and exactly once per `stop()` call."""
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        self.assertEqual(fixture.transport.close_calls, 0)
+
+        self.assertTrue(fixture.activation.stop())
+
+        self.assertEqual(fixture.transport.close_calls, 1)
+
     def test_stop_withdraws_the_registry_and_every_pairing_projection(self):
         owner = self.new_owner(SNAPSHOT_A, LABEL_A)
         fixture = self.activate()

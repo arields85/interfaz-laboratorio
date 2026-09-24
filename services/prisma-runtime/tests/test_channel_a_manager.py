@@ -151,6 +151,9 @@ class FakeActivation:
         # this file must stay exact even though the manager now binds this on
         # every candidate. Tests that care about it read it directly.
         self.on_terminal = None
+        # T8b: the manager's in-place poll-retry observer, captured the same
+        # way as on_terminal -- never ledger-tracked either.
+        self.on_poll_retry = None
 
     def event(self, operation):
         self.ledger.append((self.name, operation))
@@ -190,6 +193,10 @@ class FakeActivation:
         # binds this on every candidate, and every pre-existing ledger-based
         # assertion in this file must stay unaffected.
         self.on_terminal = callback
+
+    def set_on_poll_retry(self, callback):
+        # Mirrors set_on_terminal (T8b): also never ledger-tracked.
+        self.on_poll_retry = callback
 
 
 class ChannelAManagerTests(unittest.TestCase):
@@ -1555,6 +1562,67 @@ class ChannelAManagerBackgroundRecoveryTests(ChannelAManagerTests):
         self.assertEqual(_retry_delay_seconds(6), 160.0)
         self.assertEqual(_retry_delay_seconds(7), 300.0)
         self.assertEqual(_retry_delay_seconds(20), 300.0)
+
+
+class ChannelAManagerPollRetryTests(ChannelAManagerBackgroundRecoveryTests):
+    """T8b: the T8 in-place poll-retry status must stay independent of the
+    T16 background-retry attempt counter, merging only for display in
+    ``status()``. Inherits the fake timer factory from the background-recovery
+    fixture so a background failure can still be simulated in the interaction
+    case, even though a genuine in-place poll retry schedules no timer at all.
+    """
+
+    def fail_poll_retry(self, candidate, retrying, gap_seconds=None):
+        candidate.on_poll_retry(retrying, gap_seconds)
+
+    def test_apply_binds_a_usable_poll_retry_observer(self):
+        candidate, _ = self.applied()
+        self.assertTrue(callable(candidate.on_poll_retry))
+
+    def test_poll_retry_started_surfaces_as_reconnecting_without_a_backoff_timer(self):
+        candidate, _ = self.applied()
+        self.fail_poll_retry(candidate, True)
+        status = self.manager.status()
+        self.assertTrue(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 1)
+        self.assertIsNone(status["lastError"])
+        self.assertEqual(self.timers.created, [])
+
+    def test_poll_retry_recovery_clears_the_reconnecting_status(self):
+        candidate, _ = self.applied()
+        self.fail_poll_retry(candidate, True)
+        self.fail_poll_retry(candidate, False, gap_seconds=5.0)
+        status = self.manager.status()
+        self.assertFalse(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 0)
+        self.assertEqual(self.timers.created, [])
+
+    def test_a_stale_activations_poll_retry_is_ignored_after_being_superseded(self):
+        old, _ = self.applied()
+        old_poll_retry = old.on_poll_retry
+        self.assertTrue(self.manager.stop())
+        self.applied()
+        old_poll_retry(True, None)
+        status = self.manager.status()
+        self.assertFalse(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 0)
+
+    def test_a_background_failure_during_a_sticky_poll_retry_starts_its_own_backoff_at_attempt_one(self):
+        """The should-fix case: a poll retry already in flight must never
+        seed or corrupt the separate T16 backoff attempt counter. Before the
+        fix, ``_handle_poll_retry`` wrote ``_retry_attempt = 1`` directly, so
+        the background failure's own ``self._retry_attempt += 1`` landed on
+        attempt 2 (10s) instead of attempt 1 (5s)."""
+        candidate, _ = self.applied()
+        self.fail_poll_retry(candidate, True)
+        self.fail_in_background(candidate, POLL_FAILED)
+        status = self.manager.status()
+        self.assertTrue(status["retrying"])
+        self.assertEqual(status["retryAttempt"], 1)
+        self.assertEqual(len(self.timers.created), 1)
+        timer = self.timers.created[0]
+        self.assertEqual(timer.delay, self.INITIAL_DELAY)
+        self.assertNotEqual(timer.delay, self.INITIAL_DELAY * self.BACKOFF_FACTOR)
 
 
 if __name__ == "__main__":

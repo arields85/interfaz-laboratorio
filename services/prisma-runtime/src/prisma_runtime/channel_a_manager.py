@@ -230,6 +230,13 @@ class ChannelAManager:
         self._retrying = False
         self._retry_attempt = 0
         self._retry_timer = None
+        # T8b: the T8 in-place poll retry is a distinct signal from the T16
+        # background-failure backoff above and gets its own state, merged
+        # with `_retrying`/`_retry_attempt` only for display in `status()` --
+        # never shared, so a background failure that lands while a poll
+        # retry is sticky still starts its OWN backoff at attempt 1 (5s)
+        # instead of inheriting the poll retry's attempt count.
+        self._poll_retrying = False
 
     @contextmanager
     def _mutation(self):
@@ -365,19 +372,22 @@ class ChannelAManager:
         poll-retry state transition (T8). NEVER terminal: the activation stays
         exactly the one this manager already publishes, so this never touches
         the mutation lock, the manager's own backoff timer or ``_activation``
-        itself -- only the SAME ``retrying``/``retryAttempt`` status fields
-        T16's background-failure handling already surfaces (``status()``),
-        so the admin/HMI "reconnecting" signal reads the same regardless of
-        whether the manager is rebuilding a new activation after a terminal
-        failure or this activation is retrying its OWN session/dialogue in
-        place. A stale/superseded activation is recorded nowhere, matching
-        :meth:`_handle_background_failure`.
+        itself -- only its OWN ``_poll_retrying`` flag (T8b), which
+        ``status()`` merges with T16's ``retrying``/``retryAttempt`` fields
+        purely for display, so the admin/HMI "reconnecting" signal reads the
+        same regardless of whether the manager is rebuilding a new activation
+        after a terminal failure or this activation is retrying its OWN
+        session/dialogue in place. Never written back into
+        ``_retry_attempt``: that counter is T16's own backoff-attempt state
+        and must stay untouched by an in-place poll retry, so a background
+        failure that lands while a poll retry is sticky still starts its own
+        backoff at attempt 1. A stale/superseded activation is recorded
+        nowhere, matching :meth:`_handle_background_failure`.
         """
         with self._lock:
             if self._activation is not activation:
                 return
-            self._retrying = retrying
-            self._retry_attempt = 1 if retrying else 0
+            self._poll_retrying = retrying
         if retrying:
             _log_channel_a_poll_retry_started()
         else:
@@ -519,8 +529,18 @@ class ChannelAManager:
                 generation = self._applied_generation
                 epoch = self._activation_epoch
                 error = self._last_error
-                retrying = self._retrying
-                retry_attempt = self._retry_attempt
+                # T8b: `_retrying`/`_retry_attempt` (T16 background backoff)
+                # and `_poll_retrying` (T8 in-place poll retry) are separate
+                # state, merged here only for display so the admin
+                # "reconnecting" indicator reads the same either way.
+                # `_retry_attempt` keeps its own existing semantics verbatim
+                # (including staying at its last value after a permanent
+                # background failure stops retrying, T16's original
+                # diagnostic behavior); a pure poll retry that never touched
+                # the background counter (still 0) displays attempt 1 while
+                # in flight instead of a bare 0.
+                retrying = self._retrying or self._poll_retrying
+                retry_attempt = self._retry_attempt or (1 if self._poll_retrying else 0)
             observed = self._observe(activation)
             return {
                 "configured": present,

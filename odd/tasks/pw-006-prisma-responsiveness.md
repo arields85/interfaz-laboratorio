@@ -193,16 +193,40 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   occurred in the window, so T8's in-place retry was not exercised; the improvement is consistent
   with T7 (reused session) removing the transient failures that triggered the 5→80 s backoff, but
   that causal link is inferred, not directly observed.
-- [ ] **T8b — Verifier corrections (independent verifier, 2026-09-23; T5 and T7 PASS).**
-  - Should-fix (T8): `ChannelAManager._handle_poll_retry` reuses `_retrying`/`_retry_attempt`, which
-    T16's `_handle_background_failure` uses as the backoff attempt counter
-    (`channel_a_manager.py:305-347` vs `363-384`): a background failure during a sticky poll retry
-    starts the backoff at attempt 2 (10 s) and reports a misleading `retryAttempt`. Give poll retry
-    its own state, merged only in `status()`. Manager-level tests for poll retry/recovery and this
-    interaction are missing.
-  - Should-fix (T7): no test asserts `ChannelAActivation.stop()` closes the transport.
-  - Noise (T5): every empty 25 s `getUpdates` logs at WARNING; log `getUpdates` timing only when
-    updates arrived or the poll failed.
+- [x] **T8b — Verifier corrections (independent verifier, 2026-09-23; T5 and T7 PASS).**
+  Evidence (2026-09-23):
+  - Should-fix (T8): `channel_a_manager.py` — new `self._poll_retrying` bool, set only by
+    `_handle_poll_retry` (T8), never touching `_retry_attempt` (T16's own backoff counter) anymore.
+    `status()` merges purely for display: `retrying = self._retrying or self._poll_retrying`;
+    `retry_attempt = self._retry_attempt or (1 if self._poll_retrying else 0)` — preserves T16's
+    existing semantics verbatim (including staying at the last attempt count after a permanent
+    background failure stops retrying) while a pure poll retry that never touched the background
+    counter displays attempt 1 instead of 0. New manager-level tests in
+    `ChannelAManagerPollRetryTests` (extends `ChannelAManagerBackgroundRecoveryTests`, mirroring
+    T16's own fixture-extension pattern): poll retry started sets `retrying`/`retryAttempt=1` with
+    no backoff timer created; recovery clears both; a stale/superseded activation's poll retry is
+    ignored; and the should-fix interaction case itself — a background failure landing while a poll
+    retry is sticky now starts its own backoff at attempt 1 (5 s), not attempt 2 (10 s). RED
+    confirmed for the interaction test only (`retryAttempt: 2 != 1`, i.e. exactly the reported bug);
+    the other 3 new poll-retry tests passed immediately since they didn't exercise the
+    cross-contamination path. `test_channel_a_manager.py` — added `set_on_poll_retry`/`on_poll_retry`
+    to `FakeActivation`, mirroring the existing `set_on_terminal`/`on_terminal` (never
+    ledger-tracked).
+  - Should-fix (T7): new `test_stop_closes_the_transport_exactly_once` in
+    `ChannelAActivationPairingViewTests` (`test_channel_a_activation.py`) — no RED possible (pure
+    coverage: `ChannelAActivation.stop()` already called `transport.close()` since T7), confirmed
+    passing immediately.
+  - Noise (T5): `channel_a_transport.py` — `get_updates`'s `finally` now logs only when
+    `count is None` (failed) or `count > 0` (updates arrived); an empty long poll (`count == 0`)
+    logs nothing. New `test_get_updates_logs_nothing_on_an_empty_long_poll` using
+    `assertNoLogs` (Python 3.14 in this venv). RED confirmed (empty-poll case logged
+    `count=0 elapsed_ms=0` before the fix); the two pre-existing count/failure log tests kept
+    passing unchanged.
+  Full suite: `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
+  services\prisma-runtime -p "test_*.py"` → 1352 passed (was 1285; +67 includes the 6 new focused
+  tests plus every inherited base-class test re-run under the new `ChannelAManagerPollRetryTests`
+  fixture, matching the project's existing T16 fixture-extension convention).
+  Commit: `fix(prisma): separate Channel A poll retry state from reconnect backoff`.
 - [ ] **T9+ — Further fixes.** From T5/T6 evidence (HMI voice orb/audio).
 
 ## Acceptance criteria

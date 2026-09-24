@@ -382,7 +382,11 @@ class ChannelATransport:
             count = len(updates)
             return updates
         finally:
-            _log_get_updates_elapsed(count, time.monotonic() - started)
+            # T8b: an empty long poll (no updates, no failure) is noise at
+            # the ~25s poll cadence -- log only when updates actually
+            # arrived (count > 0) or the poll failed (count is None).
+            if count is None or count > 0:
+                _log_get_updates_elapsed(count, time.monotonic() - started)
 
     def _url(self, method: str) -> str:
         return f"{CHANNEL_A_API_BASE}/bot{self._token}/{method}"

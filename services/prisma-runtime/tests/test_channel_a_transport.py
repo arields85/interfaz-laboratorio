@@ -917,6 +917,15 @@ class TimingLogTests(ChannelATransportTestCase):
         self.assertEqual(len(observed.output), 1)
         self.assertIn("Channel A getUpdates: count=2 elapsed_ms=", observed.output[0])
 
+    def test_get_updates_logs_nothing_on_an_empty_long_poll(self):
+        """T8b: an empty 25s long poll (no updates, no failure) is noise --
+        only a poll that returned updates or failed is worth a log line."""
+        session = FakeSession(FakeResponse(200, ok_body([])))
+        transport = self.build(session)
+        with self.assertNoLogs(transport_module._logger, level="WARNING"):
+            result = transport.get_updates(poll_timeout=1, read_timeout=2)
+        self.assertEqual(result, ())
+
     def test_get_updates_logs_a_failure_without_a_count(self):
         session = FakeSession(post_error=ConnectionError(f"refused {CANARY}"))
         transport = self.build(session)
