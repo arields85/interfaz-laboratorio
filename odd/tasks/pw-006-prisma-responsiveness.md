@@ -760,6 +760,21 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
       vacuously passing) by temporarily disabling the SSE branch and confirming exactly the 4 tests
       that depend on it failed, then restoring it. `tsc -b`: clean. `eslint`: clean. Full hmi-app
       suite green (2384 passed, was 2372).
+- [ ] **T13b — Verifier findings on T13 (independent verifier, 2026-09-24).** `5411978`, `74cf145`,
+  `7e84d4f`, `acea713` PASS. `82345d0` (SSE):
+  - **Blocking, confirmed in the real log:** the HMI session capability travels in
+    `GET /hmi/voice/events?capability=…` (EventSource cannot send headers) and Werkzeug's dev server
+    logs the full request line to stderr → `prisma-presentation-stderr.log`. Parent check found 11
+    such lines already written by the running (pre-T13) runtime after Vite hot-reloaded the new
+    listener. Capabilities live up to 8 h and are refreshed by the SSE keep-alive. Fix: stop putting
+    the capability in the URL — read the SSE stream with `fetch` + header (ReadableStream parser) and
+    remove the `?capability=` fallback server-side; add defense in depth (a Werkzeug log filter that
+    redacts query strings). Existing leaked lines: the launcher start deletes the logs and restarting
+    the runtime invalidates all in-memory session capabilities.
+  - Should-fix: SSE holds one Werkzeug thread per open connection with no explicit cap beyond the
+    64-session registry; add a bounded limit.
+  - Nit (acea713): typing may now arrive after the answer; accepted trade-off, revisit if visible.
+  - Pending: live check of SSE through the Vite proxy.
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
@@ -785,7 +800,8 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   al inicio de cada respuesta." (legend no longer states "un segundo", since the value is
   adjustable). Re-verify the buffered path with tests and a live test on the new model before
   exposing it (unused since 2026-09-17). Automatic underflow detection was considered and
-  rejected for now (complexity vs. a rare case). Queued after T13 and T14.
+  rejected for now (complexity vs. a rare case). **Deprioritized by the user (2026-09-24):** start
+  only after the screen scaling (PW-007) and voice latency work are solved.
 
 ## Progress
 
