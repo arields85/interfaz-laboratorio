@@ -212,12 +212,81 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
     add the continuous prebuffer estimator and its browser history.
   - Route: delegated writer (confirmed; 8 new files across `hmi-app/src/domain/` and
     `hmi-app/src/services/`).
-- [ ] **T3 — Feed the estimator into playback.** Engine takes the prebuffer per answer (per-answer
+- [x] **T3 — Feed the estimator into playback.** Engine takes the prebuffer per answer (per-answer
   `play()` option or a `resolvePrebufferSeconds` dependency, decided by the writer against the
   existing DI pattern) and reports the measurement back; wire in
   `hmi-app/src/hooks/usePrismaOrbPresentation.ts` using the configured mode. Remove the fixed
   `PRISMA_PCM_PLAYBACK_LEAD_SECONDS` role as the only source (keep 200 ms as the default).
   Route: delegated writer.
+
+  **Evidence (2026-09-24, delegated writer, strict TDD):**
+  - Files: `hmi-app/src/services/prismaVoiceAudioEngine.ts` (+ `.test.ts`) — new exported
+    `PrismaVoicePrebufferMode` (`Exclude<PrismaAudioMetricPrebufferMode, 'fixed'>`),
+    `PrismaVoicePrebufferResolution` and `PrismaVoicePrebufferPolicy` types; new optional
+    `prebufferPolicy` engine dependency; `ActivePlayback.prebufferMs`/`prebufferMode` snapshotted
+    once in `play()`; `schedulePcmBlock` uses `active.prebufferMs / 1_000` as the lead instead of
+    the module constant; `completeLiveIfFinished` calls
+    `this.prebufferPolicy?.recordNeededPrebufferMs(neededPrebufferMs)` and reports
+    `active.prebufferMs`/`active.prebufferMode` on `playback-ended`. Renamed the module constant
+    to `PRISMA_PCM_PLAYBACK_LEAD_MS`, now sourced from `PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS`
+    (single source of truth with the T2 estimator's no-history default, both 200 ms) instead of a
+    second, independent `0.2` literal. `hmi-app/src/domain/prismaAudioMetric.types.ts` — added the
+    missing re-export of `PrismaAudioMetricPrebufferMode` (schema/generator already supported the
+    `automatic`/`manual` enum values since T1; this task only needed the type, no schema/generator
+    change). `hmi-app/src/services/prismaVoicePrebufferController.ts` (+ `.test.ts`) — new
+    `createPrismaVoiceAutomaticPrebufferPolicy(controller)` (adapts the T2 controller to the
+    engine's policy interface, always resolving/reporting `mode: 'automatic'`) and
+    `createBrowserPrismaVoiceAutomaticPrebufferPolicy()` (one-call production factory).
+    `hmi-app/src/hooks/usePrismaOrbPresentation.ts` (+ `.test.ts`) — the production engine is now
+    built with `new PrismaVoiceAudioEngine({ prebufferPolicy:
+    createBrowserPrismaVoiceAutomaticPrebufferPolicy() })` when no `options.engine` is injected.
+  - Design decisions: injection point is a **constructor-level (per-hook-lifetime) dependency**,
+    matching every other `PrismaVoiceAudioEngineDependencies` entry (`now`, `log`, `onDiagnostic`,
+    `levelPolicy`, ...) rather than a per-`play()` option — the engine is already a long-lived
+    singleton across answers in `usePrismaOrbPresentation.ts` (`engineRef.current`), so this is
+    the existing DI pattern, not a new one. `resolvePrebufferMs()` is called exactly once per
+    answer at `play()` time and the result is snapshotted onto `ActivePlayback` (no mid-answer
+    re-reads), satisfying Design item 1. Record rule: `recordNeededPrebufferMs()` is called from
+    exactly one call site, `completeLiveIfFinished()`, which only ever runs when
+    `active.streamCompleted && active.sourceNodes.size === 0` for a *current* (non-superseded)
+    playback — i.e. only on true normal completion of a progressive answer; a stopped/cancelled
+    answer goes through `cleanupActive('cancel', ...)`, an errored one through
+    `cleanupActive('error', ...)`/`failActive`, and the buffer-before-playback transport never
+    reaches this function at all (its own completion path is `handleLocalWorkletEnded`). No
+    engine-side `mode` branching was added: the engine always resolves once and records once
+    per completed answer regardless of what `mode` the injected policy reports, so a Manual-mode
+    policy (T4) can still receive the call ("still measured and logged", per Design item 4) and
+    decide internally whether to feed it back into the shared history, without touching the engine.
+    Constant consolidation: `PRISMA_PCM_PLAYBACK_LEAD_SECONDS` (0.2, unexported, no external
+    consumers) was replaced by `PRISMA_PCM_PLAYBACK_LEAD_MS`, importing
+    `PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS` from `prismaVoicePrebufferEstimator.ts` — this is a
+    pure-constant, one-directional dependency (engine -> estimator; no cycle, since the controller
+    depends on the engine only via a type-only import for the policy interface).
+  - T4 hook: mode selection lives entirely in *which policy object* `usePrismaOrbPresentation.ts`
+    constructs and injects (e.g. a Manual policy resolving the configured seconds with
+    `mode: 'manual'`); the engine's dependency shape, snapshot timing and record call site do not
+    change.
+  - RED evidence: `prismaVoiceAudioEngine.test.ts` — the three new "T3: per-answer prebuffer
+    policy" positive tests failed first (`expected "vi.fn()" to be called with arguments: [ 1.5 ]`
+    received `[ 1.2 ]`; `resolvePrebufferMs`/`recordNeededPrebufferMs` called 0 times) before the
+    engine wiring, run via `npx vitest run src/services/prismaVoiceAudioEngine.test.ts -t "T3"`.
+    `prismaVoicePrebufferController.test.ts` — the three new `createPrismaVoiceAutomaticPrebufferPolicy`
+    tests failed with `TypeError: createPrismaVoiceAutomaticPrebufferPolicy is not a function`
+    before the adapter existed. `usePrismaOrbPresentation.test.ts` — the new "builds the production
+    engine..." test failed with `expected "vi.fn()" to be called 1 times, but got 0 times` (the
+    mocked `createBrowserPrismaVoiceAutomaticPrebufferPolicy` factory) before the hook wiring, with
+    all 20 pre-existing tests in the file still green throughout (every other test injects its own
+    `engine`, so the real construction path is only exercised by this one test). Two negative tests
+    (never record on stop; never record on WAV-fallback failure) were added as regression guards
+    but do not RED before the change, since the unused dependency trivially satisfies "not called"
+    before wiring -- noted honestly rather than claimed as driving RED.
+  - Checks: `cd hmi-app && npx vitest run` -> 224 files / 2521 tests passed (baseline 224/2512 + 9
+    new: 5 engine + 3 controller + 1 hook). `cd hmi-app && npx tsc -b` -> clean, no output.
+    `cd hmi-app && npm run lint` -> clean, no findings.
+  - Commits (branch `feat/prisma-adaptive-voice-buffer`, GGA review passed): `b94c2fd` feat(hmi):
+    feed the adaptive prebuffer estimator into progressive playback.
+  - Route: delegated writer (confirmed; touched `hmi-app/src/domain/`, `hmi-app/src/hooks/` and
+    `hmi-app/src/services/` across 4 non-trivial source files plus their tests).
 - [ ] **T4 — Configuration field.** `playbackBuffer: { mode: 'automatic' | 'manual',
   manualSeconds }` in the Prisma voice config: HMI domain types/validation/defaults, runtime
   defaults/validation/persistence, backward-compatible defaulting of stored configs. Tests:
@@ -277,8 +346,18 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
   files / 2512 tests), `tsc -b` and lint all green. One commit on
   `feat/prisma-adaptive-voice-buffer`: `013795f` (GGA review passed).
 
+- 2026-09-24: T3 done (delegated writer, strict TDD; RED observed for the engine wiring, the new
+  automatic-policy adapter and the hook wiring before each GREEN). Progressive playback now takes
+  its prebuffer from an optional `prebufferPolicy` engine dependency, snapshotted once per answer;
+  `usePrismaOrbPresentation.ts` wires a browser-backed Automatic policy in production, so every
+  production progressive answer now reports `prebuffer_mode: 'automatic'` and feeds its measured
+  `needed_prebuffer_ms` back to the T2 estimator on normal completion. `PRISMA_PCM_PLAYBACK_LEAD_MS`
+  (fallback default, 200 ms) is now sourced from the same `PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS`
+  constant as the estimator, removing the duplicate literal. hmi-app (224 files / 2521 tests),
+  `tsc -b` and lint all green. One commit on `feat/prisma-adaptive-voice-buffer`: `b94c2fd` (GGA
+  review passed).
+
 ## Next step
 
-Start T3 (feed the estimator into playback: engine takes the prebuffer per answer and reports
-the measurement back via `PrismaVoicePrebufferController`, wire in
-`hmi-app/src/hooks/usePrismaOrbPresentation.ts`; delegated writer, strict TDD).
+Start T4 (configuration field: `playbackBuffer: { mode: 'automatic' | 'manual', manualSeconds }`
+in the Prisma voice config, HMI + runtime; delegated writer, strict TDD).
