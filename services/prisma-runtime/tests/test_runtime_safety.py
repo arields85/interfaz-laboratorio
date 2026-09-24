@@ -52,6 +52,20 @@ class TelegramOptInTests(unittest.TestCase):
             self.assertIsInstance(bot, local_presentation.TelegramLocalBot)
             self.assertEqual(bot.token, "secret-token")
 
+    def test_production_factory_wires_the_session_registry_for_channel_b(self) -> None:
+        """B1c: the production TelegramLifecycleManager factory (built by
+        create_app) must thread its session_registry into every
+        TelegramLocalBot it constructs, so Channel B answers from the
+        active HMI screen instead of the retired file-based snapshot
+        store (prisma_local_snapshot.json)."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["telegram_manager"]
+            bot = manager.bot_factory("some-token")
+        self.assertIs(bot.session_registry, app.config["session_registry"])
+
     def test_voice_delivery_is_blocked_when_opt_in_is_disabled(self) -> None:
         job = {
             "telegram_chat_id": 12345,

@@ -19,6 +19,7 @@ from prisma_runtime.bot_identity_reservation import (
     BotIdentityReservationError,
     process_bot_identity_reservation,
 )
+from prisma_runtime.hmi_sessions import HmiSessionRegistry
 from prisma_runtime.local_presentation import TELEGRAM_STOPPING, TelegramLocalBot, build_telegram_bot
 from prisma_runtime.telegram_config import TelegramConfig
 from prisma_runtime.telegram_lifecycle import (
@@ -1407,6 +1408,85 @@ class ChannelBVoiceReplyTests(unittest.TestCase):
         bot = self.build_bot(voice_url=None, local_http=None)
 
         bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 14, "text": "¿Cuál es el OEE?"})
+
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+
+
+class ChannelBActiveScreenTests(unittest.TestCase):
+    """B1c: Channel B answers from the active HMI screen -- the most
+    recently updated live session context, read through the trusted
+    HmiSessionRegistry accessor -- instead of the retired file-based
+    snapshot store (last written before the HMI migrated to per-session
+    context; see prisma_local_snapshot.json / JsonFileStore)."""
+
+    def setUp(self):
+        install_offline_dispatch_guard(self)
+
+    def build_bot(self, *, session_registry=None):
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
+        bot = TelegramLocalBot(
+            "secret-token", Mock(), MemoryStateStore(state), Mock(),
+            reservation=BotIdentityReservation(), session_registry=session_registry,
+        )
+        bot._call = identity_transport()
+        bot.prepare()
+        bot.send_message = Mock()
+        return bot
+
+    def test_answers_from_the_active_screen_session_context(self):
+        registry = HmiSessionRegistry()
+        capability, _metadata = registry.create()
+        registry.set_context(capability, channel_b_snapshot())
+        bot = self.build_bot(session_registry=registry)
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 1, "text": "¿Cuál es el OEE?"})
+
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+
+    def test_status_reports_the_active_screen_timestamp(self):
+        registry = HmiSessionRegistry()
+        capability, _metadata = registry.create()
+        registry.set_context(capability, {"widgets": [], "timestamp": "2026-09-23T10:00:00Z"})
+        bot = self.build_bot(session_registry=registry)
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/status"})
+
+        bot.send_message.assert_called_once_with(7, "Prisma está activa. Última actualización de datos: 2026-09-23T10:00:00Z.")
+
+    def test_no_live_session_answers_honestly_without_touching_the_retired_file_store(self):
+        registry = HmiSessionRegistry()  # no session was ever created
+        bot = self.build_bot(session_registry=registry)
+        bot.snapshot_store.read = Mock(side_effect=AssertionError("the retired file store must not be read"))
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 2, "text": "¿Cuál es el OEE?"})
+
+        bot.send_message.assert_called_once_with(7, "Todavía no hay datos del dashboard cargados.")
+
+    def test_answers_from_the_most_recently_updated_session_among_several(self):
+        registry = HmiSessionRegistry()
+        older_capability, _older = registry.create()
+        registry.set_context(older_capability, {"widgets": [
+            {"id": "oee", "title": "OEE", "type": "metric-card", "value": 1.0, "unit": "%"},
+        ]})
+        newer_capability, _newer = registry.create()
+        registry.set_context(newer_capability, {"widgets": [
+            {"id": "oee", "title": "OEE", "type": "metric-card", "value": 99.0, "unit": "%"},
+        ]})
+        bot = self.build_bot(session_registry=registry)
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 3, "text": "¿Cuál es el OEE?"})
+
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 99 %.")
+
+    def test_without_a_session_registry_falls_back_to_the_retired_file_store(self):
+        """Legacy/direct construction (no production session_registry) keeps
+        answering from the file store it was built with -- backward
+        compatible with the standalone build_telegram_bot path and every
+        pre-B1c test that mocks snapshot_store directly."""
+        bot = self.build_bot(session_registry=None)
+        bot.snapshot_store.read = Mock(return_value=channel_b_snapshot())
+
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 4, "text": "¿Cuál es el OEE?"})
 
         bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
 

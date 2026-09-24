@@ -787,5 +787,111 @@ class FrameGenerationTests(unittest.TestCase):
         )
 
 
+class MostRecentContextTests(unittest.TestCase):
+    """B1c: Channel B (remote Telegram) has no HMI session of its own, so it
+    reads the *active screen* -- the context of the most recently updated
+    live session -- through a trusted in-process accessor that returns only
+    the context, never an owner id or capability."""
+
+    @staticmethod
+    def make_registry(now, **overrides):
+        owners = itertools.count(20)
+        sources = itertools.count(1)
+        options = {
+            "clock": lambda: now[0],
+            "entropy": lambda size: bytes([next(sources)]) * size,
+            "owner_factory": lambda: f"00000000-0000-4000-8000-{next(owners):012d}",
+            "idle_ttl": 30,
+            "absolute_ttl": 600,
+        }
+        options.update(overrides)
+        return HmiSessionRegistry(**options)
+
+    def test_no_live_session_ever_received_a_context_returns_none(self):
+        now = [10.0]
+        registry = self.make_registry(now)
+        registry.create()
+
+        self.assertIsNone(registry.get_most_recent_context())
+
+    def test_single_live_session_returns_its_own_context(self):
+        now = [10.0]
+        registry = self.make_registry(now)
+        capability, _metadata = registry.create()
+        registry.set_context(capability, {"widgets": [], "screen": "A"})
+
+        self.assertEqual(registry.get_most_recent_context(), {"widgets": [], "screen": "A"})
+
+    def test_selects_the_session_with_the_latest_context_receipt(self):
+        now = [10.0]
+        registry = self.make_registry(now)
+        older_capability, _older_metadata = registry.create()
+        registry.set_context(older_capability, {"widgets": [], "screen": "older"})
+        now[0] = 15.0
+        newer_capability, _newer_metadata = registry.create()
+        registry.set_context(newer_capability, {"widgets": [], "screen": "newer"})
+
+        self.assertEqual(registry.get_most_recent_context(), {"widgets": [], "screen": "newer"})
+
+        # A later re-publish on the older session becomes the most recent again.
+        now[0] = 20.0
+        registry.set_context(older_capability, {"widgets": [], "screen": "older-again"})
+        self.assertEqual(registry.get_most_recent_context(), {"widgets": [], "screen": "older-again"})
+
+    def test_an_expired_session_is_excluded_even_if_its_context_was_the_latest(self):
+        now = [10.0]
+        registry = self.make_registry(now, idle_ttl=5, absolute_ttl=600)
+        live_capability, _live_metadata = registry.create()
+        registry.set_context(live_capability, {"widgets": [], "screen": "live"})  # receipt at t=10
+
+        now[0] = 13.0
+        registry.authorize(live_capability)  # keeps "live" alive without changing its context/receipt
+
+        now[0] = 14.0
+        expiring_capability, _metadata = registry.create()
+        # A strictly more recent receipt than "live"'s (t=14 > t=10) -- it
+        # would win a receipt-only comparison.
+        registry.set_context(expiring_capability, {"widgets": [], "screen": "expiring"})
+
+        now[0] = 17.0
+        registry.authorize(live_capability)  # "live" touched again, stays under idle_ttl
+
+        now[0] = 20.0  # live: idle_age=3 (alive); expiring: idle_age=6 >= 5 (expired)
+        self.assertEqual(registry.get_most_recent_context(), {"widgets": [], "screen": "live"})
+
+    def test_a_session_with_no_context_yet_is_never_selected(self):
+        now = [10.0]
+        registry = self.make_registry(now)
+        registry.create()
+        capability, _metadata = registry.create()
+        registry.set_context(capability, {"widgets": [], "screen": "only"})
+
+        self.assertEqual(registry.get_most_recent_context(), {"widgets": [], "screen": "only"})
+
+    def test_the_returned_context_is_a_copy_mutating_it_never_affects_the_registry(self):
+        now = [10.0]
+        registry = self.make_registry(now)
+        capability, _metadata = registry.create()
+        registry.set_context(capability, {"widgets": [], "nested": {"value": 1}})
+
+        result = registry.get_most_recent_context()
+        result["nested"]["value"] = 999
+
+        self.assertEqual(registry.get_most_recent_context(), {"widgets": [], "nested": {"value": 1}})
+
+    def test_never_touches_activity_or_purges_an_already_expired_session(self):
+        now = [10.0]
+        registry = self.make_registry(now, idle_ttl=5, absolute_ttl=600)
+        capability, _metadata = registry.create()
+        registry.set_context(capability, {"widgets": [], "screen": "solo"})
+
+        now[0] = 16.0  # past idle_ttl
+        self.assertIsNone(registry.get_most_recent_context())
+        # A no-touch, no-purge read: the expired entry is still present in the
+        # registry's own bookkeeping (an unrelated remote question must never
+        # extend or shorten an HMI browser session's lifetime).
+        self.assertEqual(len(registry._sessions), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

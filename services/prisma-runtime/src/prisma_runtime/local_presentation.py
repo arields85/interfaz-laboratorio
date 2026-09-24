@@ -520,13 +520,20 @@ class TelegramLocalBot:
     never overwrite a live lease.
     """
 
-    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None):
+    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
         # B1: both optional -- a bot built without them (e.g. build_telegram_
         # bot's legacy standalone path) simply never requests a Channel B
         # voice reply; _request_channel_b_voice_reply is a no-op in that case.
         self.voice_url, self.local_http = voice_url, local_http
+        # B1c: optional -- the production factory (create_app /
+        # TelegramLifecycleManager) always supplies the live HmiSessionRegistry
+        # so Channel B answers from the active HMI screen; a bot built without
+        # one (build_telegram_bot's legacy standalone path, direct tests) keeps
+        # answering from the file-based snapshot_store it was built with. See
+        # _active_snapshot.
+        self.session_registry = session_registry
         self._channel_b_voice_lock = threading.Lock()
         self._channel_b_voice_in_flight: set[int] = set()
         self.stop_event, self.thread = threading.Event(), None
@@ -772,11 +779,23 @@ class TelegramLocalBot:
             return
         if chat_id not in paired: self.send_message(chat_id, "Envíe /start para vincular este bot."); return
         if command.startswith("/status"):
-            snapshot = self.snapshot_store.read(); self.send_message(chat_id, f"Prisma está activa. Última actualización de datos: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
+            snapshot = self._active_snapshot(); self.send_message(chat_id, f"Prisma está activa. Última actualización de datos: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
         if command.startswith("/help"):
             self.send_message(chat_id, "Puede consultar lote, producto, orden, cliente, OEE, estado, actividad, potencia, progreso, tiempo restante, alertas o pedir un resumen."); return
-        answer = answer_from_snapshot(self.snapshot_store.read(), text); self.send_message(chat_id, answer.answer_text)
+        answer = answer_from_snapshot(self._active_snapshot(), text); self.send_message(chat_id, answer.answer_text)
         self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
+
+    def _active_snapshot(self):
+        """B1c: the active screen for Channel B -- the most recently updated
+        live HMI session context, provisionally (until the semantic query
+        service, PW-003, gives every channel its own data source). Falls
+        back to the retired file-based snapshot_store only when this bot was
+        built without a session_registry (legacy/standalone/tests); the
+        production factory always supplies one, so that fallback is never
+        reached in production."""
+        if self.session_registry is not None:
+            return self.session_registry.get_most_recent_context()
+        return self.snapshot_store.read()
 
     def _request_channel_b_voice_reply(self, chat_id, reply_to_message_id, answer_text):
         """B1: after the text answer above, request a same-text voice note
@@ -1004,7 +1023,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 credentials,
                 lambda token: TelegramLocalBot(
                     token, snapshot_store, state_store, voice_events, reservation=identity_reservation,
-                    voice_url=voice_url, local_http=local_http,
+                    voice_url=voice_url, local_http=local_http, session_registry=session_registry,
                 ),
             )
 

@@ -242,6 +242,36 @@ class HmiSessionRegistry:
             session.last_seen_at = now
             return session.owner_id, copy.deepcopy(session.context)
 
+    def get_most_recent_context(self) -> dict | None:
+        """Read-only: the context of the most recently updated live session.
+
+        B1c: a trusted in-process accessor for Channel B (remote Telegram),
+        which has no HMI session of its own and must never receive an owner
+        id or a capability -- only the context of whichever live session's
+        screen was updated most recently ("the active screen"). Selects the
+        session with the greatest ``context_received_at`` among sessions
+        that are not expired and have actually received a context; a
+        session that never published one is never selected.
+
+        Never purges, touches activity, or invokes removal callbacks -- an
+        unrelated remote question must never extend or shorten an HMI
+        browser session's idle/absolute lifetime. Returns ``None`` when no
+        live session has ever received a context.
+        """
+        with self.lock:
+            now = self.clock()
+            best = None
+            for session in self._sessions.values():
+                if (
+                    self._expired(session, now)
+                    or session.context is None
+                    or session.context_received_at is None
+                ):
+                    continue
+                if best is None or session.context_received_at > best.context_received_at:
+                    best = session
+            return copy.deepcopy(best.context) if best is not None else None
+
     def get_owner_context(self, owner_id: str, *, max_age_seconds: float) -> tuple[float, dict]:
         age, context, _revision = self.capture_owner_context(owner_id, max_age_seconds=max_age_seconds)
         return age, context
