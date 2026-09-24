@@ -278,6 +278,72 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertTrue(client.interactions.calls[0]["stream"])
         self.assertIs(result, stream)
 
+    def test_get_gemini_client_logs_resolve_and_build_elapsed_ms(self):
+        """T10 unit 1: split credential-resolve time from client-build time."""
+        fake_client = object()
+        with patch.object(service.gemini_credentials, "resolve", return_value="secret-value") as resolve, \
+                patch.object(service, "create_gemini_client", return_value=fake_client) as create:
+            with self.assertLogs(service._logger, level="WARNING") as observed:
+                result = service.get_gemini_client()
+        self.assertIs(result, fake_client)
+        resolve.assert_called_once_with()
+        create.assert_called_once_with("secret-value")
+        lines = [line for line in observed.output if "Prisma Gemini client:" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("resolve_elapsed_ms=", lines[0])
+        self.assertIn("build_elapsed_ms=", lines[0])
+        self.assertNotIn("secret-value", lines[0])
+
+    def test_stream_logs_time_to_first_byte_and_first_yield_processing_once(self):
+        """T10 unit 1: Gemini time-to-first-byte vs our own post-processing time."""
+        stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
+        client = FakeClient([stream])
+        with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
+            job = service._create_interactions_tts_job("Lazy transcript")
+            with self.assertLogs(service._logger, level="WARNING") as observed:
+                output = service._generate_interactions_tts_audio(job)
+                self.assertEqual(next(output), b"\x12\x34")
+                self.assertEqual(list(output), [])
+        first_byte = [line for line in observed.output if "time_to_first_byte_ms" in line]
+        first_yield = [line for line in observed.output if "first_yield_processing_elapsed_ms" in line]
+        self.assertEqual(len(first_byte), 1)
+        self.assertEqual(len(first_yield), 1)
+        self.assertNotIn("Lazy transcript", first_byte[0] + first_yield[0])
+
+    def test_speak_live_logs_event_publish_to_received_delta_from_event_timestamp(self):
+        """T10 unit 1: cross-process delta computed from the event's own wall-clock
+        timestamp, never by logging the raw event id on either side."""
+        event_id = str(uuid.uuid4())
+        published_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999, "timestamp": published_at}
+        coordinator = Mock()
+        coordinator.subscribe.return_value = iter([b"\x12\x34"])
+        with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+            with self.assertLogs(service._logger, level="WARNING") as observed:
+                response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
+                self.assertEqual(response.status_code, 200)
+        lines = [line for line in observed.output if "event_publish_to_received_ms" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertNotIn(event_id, lines[0])
+        self.assertNotIn("event_publish_to_received_ms=None", lines[0])
+
+    def test_speak_live_logs_none_delta_when_event_timestamp_is_missing_or_invalid(self):
+        for timestamp in (None, "not-a-time"):
+            with self.subTest(timestamp=timestamp):
+                event_id = str(uuid.uuid4())
+                event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999}
+                if timestamp is not None:
+                    event["timestamp"] = timestamp
+                coordinator = Mock()
+                coordinator.subscribe.return_value = iter([b"\x12\x34"])
+                with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+                    with self.assertLogs(service._logger, level="WARNING") as observed:
+                        response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
+                        self.assertEqual(response.status_code, 200)
+                lines = [line for line in observed.output if "event_publish_to_received_ms" in line]
+                self.assertEqual(len(lines), 1)
+                self.assertIn("event_publish_to_received_ms=None", lines[0])
+
     def test_stream_yields_first_post_dsp_chunk_before_completion(self):
         stream = FakeStream([audio_event(b"\x12\x34"), completed_event()])
         client = FakeClient([stream])

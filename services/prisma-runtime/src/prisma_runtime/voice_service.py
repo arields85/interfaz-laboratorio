@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import wave
+from datetime import datetime, timezone
 from uuid import UUID
 
 import requests
@@ -299,7 +300,37 @@ def _gemini_unavailable_response():
 
 
 def get_gemini_client(secret=None):
-    return create_gemini_client(secret or gemini_credentials.resolve())
+    # T10 unit 1: split credential-resolve time from client-build time so the
+    # two very different costs (local/keyring read vs SDK/HTTP client setup)
+    # are visible separately in the logs. No secret is ever logged.
+    resolve_start = time.monotonic()
+    resolved = secret if secret is not None else gemini_credentials.resolve()
+    resolve_elapsed_ms = round((time.monotonic() - resolve_start) * 1000)
+    build_start = time.monotonic()
+    client = create_gemini_client(resolved)
+    build_elapsed_ms = round((time.monotonic() - build_start) * 1000)
+    _logger.warning(
+        "Prisma Gemini client: resolve_elapsed_ms=%d build_elapsed_ms=%d",
+        resolve_elapsed_ms,
+        build_elapsed_ms,
+    )
+    return client
+
+
+def _parse_event_publish_epoch(timestamp):
+    """Parse the voice event's own ISO-8601 UTC `timestamp` field into epoch
+    seconds, or None if missing/invalid. Reusing the event's own timestamp
+    (instead of a second cross-process hash-correlation scheme) lets the
+    delta be computed and logged directly here, in one number, without
+    requiring a human to grep and subtract two separate log lines -- and it
+    only needs comparable wall-clock time, unlike time.monotonic(), which is
+    not comparable across processes."""
+    if not isinstance(timestamp, str) or not timestamp.endswith("Z"):
+        return None
+    try:
+        return datetime.fromisoformat(timestamp[:-1] + "+00:00").timestamp()
+    except ValueError:
+        return None
 
 
 def build_tts_prompt(text):
@@ -489,17 +520,32 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
         try:
             client = get_gemini_client(secret)
             if control is not None: control.add_cancel_callback(lambda resource=client: _close_gemini_client(resource))
+            stream_requested_at = time.monotonic()
             stream = _create_tts_interaction(client, job["text"], stream=True)
             if control is not None: control.add_cancel_callback(lambda resource=stream: _close_interaction_stream(resource))
             assembler = S16LeChunkAssembler(); idle_guard = ProviderStreamIdleGuard(); idle_guard.start(stream)
             if control is not None: control.add_cancel_callback(idle_guard.close)
+            first_byte_at = None; first_yield_logged = False
             for delta in _iter_interaction_audio_deltas(stream, idle_guard.touch):
                 if control is not None and control.cancelled.is_set(): return
+                if first_byte_at is None:
+                    first_byte_at = time.monotonic()
+                    _logger.warning(
+                        "Prisma Gemini TTS: time_to_first_byte_ms=%d",
+                        round((first_byte_at - stream_requested_at) * 1000),
+                    )
                 audio_accepted = True; canonical = assembler.push(_decode_audio_delta(delta))
                 if canonical:
                     delivered = _append_post_dsp_pcm(job, job["dsp"].process(canonical))
                     prisma_audio_sink.emit("backend", "dsp", {"sample_count": len(delivered or b"") // SAMPLE_WIDTH})
-                    if delivered is not None: yield delivered
+                    if delivered is not None:
+                        if not first_yield_logged:
+                            _logger.warning(
+                                "Prisma Gemini TTS: first_yield_processing_elapsed_ms=%d",
+                                round((time.monotonic() - first_byte_at) * 1000),
+                            )
+                            first_yield_logged = True
+                        yield delivered
             assembler.finish()
             if not audio_accepted or not job["telegram_pcm_parts"]: raise PrismaTtsProviderError("TTS_STREAM_AUDIO_MISSING")
             prisma_audio_sink.emit("provider", "completion", {"status": "success"})
@@ -664,6 +710,11 @@ def prisma_speak_live():
         return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
     try:
         event = resolve_voice_event(data["eventId"], capability)
+        published_epoch = _parse_event_publish_epoch(event.get("timestamp"))
+        _logger.warning(
+            "Prisma speak-live: event_publish_to_received_ms=%s",
+            round((time.time() - published_epoch) * 1000) if published_epoch is not None else None,
+        )
         event["_capability"] = capability
         stream = audio_coordinator.subscribe(event, prisma_voice_config_store.get())
     except ValueError:
