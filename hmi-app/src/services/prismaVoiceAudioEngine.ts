@@ -129,9 +129,10 @@ interface ActivePlayback {
     lastMetricAt: number;
     mode: 'live' | 'fallback';
     metricSequence: number;
-    // T1: only the progressive path records block arrivals (the worklet
-    // transport is out of scope, see prismaPrebufferNeedTracker.ts), but the
-    // tracker is harmless and unused for that transport.
+    // T1: only handleProgressiveBlock (used by the progressive transport
+    // only) ever calls recordBlockArrival -- the buffer-before-playback
+    // worklet transport is out of scope for this measurement (see the
+    // feature document), so the tracker stays harmless and unused there.
     prebufferNeedTracker: PrismaPrebufferNeedTracker;
 }
 
@@ -525,7 +526,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         const blockArrivalMs = this.now();
         if (!active.firstAudioReceived) {
             active.firstAudioReceived = true;
-            const elapsedMs = this.now() - requestStartedAt;
+            const elapsedMs = blockArrivalMs - requestStartedAt;
             this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
             this.emitDiagnostic(active, {
                 record_type: 'first-readable-audio',
