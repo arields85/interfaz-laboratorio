@@ -183,6 +183,26 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
   -p "test_*.py"` → 1285 passed. Commit: `fix(prisma): retry Channel A polling in place after
   transient failures`.
+- [x] **T6 — Live repro (user manual, 2026-09-23 21:24–21:29, runtime at `90f1932`).** User
+  verdict: QR pairing, confirmation and every reply excellent in Telegram and in HMI voice (orb and
+  audio present every time). Log evidence (`prisma-presentation-stderr.log`,
+  `prisma-voice-stderr.log`): Channel A `sendMessage` 361–370 ms; update handled 362–717 ms
+  (message ~380–420 ms, confirm callback 717 ms); `getUpdates` elapsed with count=1 is long-poll wait
+  for the user's next message, not lag; voice event publish 0 ms; speak-live first audio chunk
+  2.3–6.7 s (first request slowest), stream end 5.1–8.7 s (Gemini TTS). No poll failures or retries
+  occurred in the window, so T8's in-place retry was not exercised; the improvement is consistent
+  with T7 (reused session) removing the transient failures that triggered the 5→80 s backoff, but
+  that causal link is inferred, not directly observed.
+- [ ] **T8b — Verifier corrections (independent verifier, 2026-09-23; T5 and T7 PASS).**
+  - Should-fix (T8): `ChannelAManager._handle_poll_retry` reuses `_retrying`/`_retry_attempt`, which
+    T16's `_handle_background_failure` uses as the backoff attempt counter
+    (`channel_a_manager.py:305-347` vs `363-384`): a background failure during a sticky poll retry
+    starts the backoff at attempt 2 (10 s) and reports a misleading `retryAttempt`. Give poll retry
+    its own state, merged only in `status()`. Manager-level tests for poll retry/recovery and this
+    interaction are missing.
+  - Should-fix (T7): no test asserts `ChannelAActivation.stop()` closes the transport.
+  - Noise (T5): every empty 25 s `getUpdates` logs at WARNING; log `getUpdates` timing only when
+    updates arrived or the poll failed.
 - [ ] **T9+ — Further fixes.** From T5/T6 evidence (HMI voice orb/audio).
 
 ## Acceptance criteria
