@@ -624,8 +624,12 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
   tests, 25 fewer than baseline, all from removed dead-path tests), `tsc -b`, lint and `npm run
   build` all green; prisma-runtime (1532 tests) unchanged. One commit on
   `feat/prisma-adaptive-voice-buffer`: `50ade65` (GGA review passed).
+- 2026-09-24: PW-010 closed and integrated into local `main`.
 
 ## Next step
 
-Integrate `feat/prisma-adaptive-voice-buffer` into local `main` (user confirmation) and close
-PW-010.
+**PW-010 CLOSED 2026-09-24.** All tasks T0–T7 (+T6b) done and verified live; branch
+`feat/prisma-adaptive-voice-buffer` integrated into local `main` by fast-forward (no push), with the
+user's confirmation. Engram `backlog/prisma-adaptive-voice-buffer` closed; row removed from
+`docs/PENDING_WORK.md`. Known pre-existing gap (from T7): the progressive path lacks dedicated
+empty-stream / odd-trailing-byte tests.
