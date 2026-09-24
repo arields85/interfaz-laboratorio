@@ -1143,7 +1143,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   `buffering` declared but unused in `usePrismaOrbPresentation.ts`, engine `onStarted` wired to a
   no-op. Durations/scales as named constants; `prefers-reduced-motion` keeps the current
   no-transition behavior.
-  Evidence (2026-09-24, commit `2c2f68f`) — implemented exactly as agreed, engine untouched:
+  Evidence (2026-09-24, commit `041af41`) — implemented exactly as agreed, engine untouched:
   - **Schema/generated bindings.** Renamed the `orb-phase` payload's `phase` enum value
     `buffering` → `thinking` in `schemas/prisma-audio-record.v1.schema.json` (both the
     `x-payload-enums` and `properties.payload.properties.phase` copies) and regenerated both
@@ -1158,10 +1158,10 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     low end of the user's 600-800 ms range: long enough to read as a fade, short enough not to
     linger), `PRISMA_ORB_GROW_DURATION_MS = 400` (thinking→visible), `PRISMA_ORB_THINKING_TIMEOUT_MS
     = 9_000` (chosen from the user's 8-10 s range — comfortably above every first-chunk time T13
-    measured live, 0.6-2.1 s typical, up to 8.7 s stream end on the retired TTS model). Comments
-    document that the two duration constants must be kept in sync **by hand** with the literal
-    `duration-[400ms]`/`duration-[700ms]` Tailwind classes in `PrismaOrbOverlay.tsx`, since
-    Tailwind's arbitrary-value scanner needs literal class text and cannot read a JS constant.
+    measured live, 0.6-2.1 s typical, up to 8.7 s stream end on the retired TTS model). Phase type
+    `PrismaOrbPresentationPhase` is now a direct alias of the generated `PrismaAudioMetricPhase`
+    (T16's timeline schema type) instead of a separately hand-maintained union, so the hook and the
+    timeline schema can never silently drift apart (post-review fix, see below).
     `presentVoiceEvent` now sets phase `thinking` (was `visible`) and starts a bounded
     `thinkingTimeoutRef` timer alongside `engine.play(...)`; `onStarted` (previously a no-op) now
     clears that timer and moves to `visible`; the thinking-timeout callback and `onEnded`/`onError`
@@ -1175,16 +1175,15 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     file touched).
   - **`PrismaOrbOverlay.tsx`.** Renders for `thinking`/`visible`/`fading` (still `null` for
     `hidden`, so the overlay stays mounted through the whole fade as required). Three named class
-    constants (`PRISMA_ORB_THINKING_CLASSES = 'scale-75 opacity-60 duration-[400ms]'`,
-    `_VISIBLE_ = 'scale-100 opacity-100 duration-[400ms]'`, `_FADING_ = 'scale-75 opacity-0
-    duration-[700ms]'`) picked by a small `phaseClasses()` switch, using Tailwind's own default
-    scale/opacity steps (both include 60/75/100 without arbitrary values) plus one arbitrary-value
-    duration class per phase-with-a-different-duration. Fading eases the scale back toward the
-    thinking scale (75%) instead of staying at 100% while fading out, per the brief's "optionally
-    ease scale back" — avoids the orb ballooning to full size right before disappearing. Transition
-    property changed from `transition-opacity` to `transition-[opacity,transform]` (GPU-friendly:
-    opacity + transform only); `motion-reduce:transition-none motion-reduce:duration-0` kept
-    unchanged, so reduced-motion still snaps instantly in every phase (verified by a new test
+    constants (`PRISMA_ORB_THINKING_CLASSES = 'scale-75 opacity-60'`, `_VISIBLE_ = 'scale-100
+    opacity-100'`, `_FADING_ = 'scale-75 opacity-0'`) picked by a small `phaseClasses()` switch,
+    using Tailwind's own default scale/opacity steps (60/75/100/0 are all on the default scale, no
+    arbitrary values needed). Fading eases the scale back toward the thinking scale (75%) instead
+    of staying at 100% while fading out, per the brief's "optionally ease scale back" — avoids the
+    orb ballooning to full size right before disappearing. Transition property changed from
+    `transition-opacity` to `transition-[opacity,transform]` (GPU-friendly: opacity + transform
+    only); `motion-reduce:transition-none motion-reduce:duration-0` kept unchanged, so reduced
+    motion still skips the transition entirely regardless of duration (verified by a new test
     re-asserting the same base classes across thinking/visible/fading).
   - **TDD.** RED confirmed for the schema-drift tests (4 failures: stale hash + stale body, both
     languages) before regenerating bindings; full prisma-runtime suite green after regeneration
@@ -1204,6 +1203,17 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   - **Checks:** `cd hmi-app && npm test` → 2427 passed (was 2418). `npx tsc -b` clean. `npm run
     lint` clean. `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
     services\prisma-runtime -p "test_*.py"` → 1517 passed (unchanged — pure schema rename).
+  - **Post-commit code-review fixes (non-blocking findings, applied same pass, commit `<pending>`,
+    see below).** The repo's own commit-time review flagged two duplication risks: (1) the duration
+    numbers existed in two places (the JS constants and the literal `duration-[400ms]`/
+    `duration-[700ms]` Tailwind classes) — fixed by reading `PRISMA_ORB_GROW_DURATION_MS`/
+    `PRISMA_ORB_FADE_DURATION_MS` directly into an inline `style.transitionDuration` in
+    `PrismaOrbOverlay.tsx` instead of a Tailwind arbitrary-value class, confirmed safe because
+    `motion-reduce:transition-none` clears `transition-property` (not just the duration), so an
+    inline duration never fights reduced motion. (2) `PrismaOrbPresentationPhase` duplicated the
+    generated `PrismaAudioMetricPhase` union by hand — fixed by making it a direct type alias of the
+    generated type instead. Re-ran the full check set after both fixes: `npm test` still 2427
+    passed, `tsc -b` clean, `lint` clean.
   - **Next step (user, live check):** open the HMI and ask Prisma a voice question. Look for: (1)
     the orb appearing smaller/dimmer ("thinking") right when the question lands, still breathing
     natively, no extra pulsing; (2) a smooth grow to full size/opacity exactly when the voice starts

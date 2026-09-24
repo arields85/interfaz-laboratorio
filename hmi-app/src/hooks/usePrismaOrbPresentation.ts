@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
+import type { PrismaAudioMetricPhase } from '../domain/prismaAudioMetric.types';
 import type { VoiceEvent } from '../domain/voice.types';
 import { PrismaVoiceAudioEngine } from '../services/prismaVoiceAudioEngine';
 import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource } from '../services/prismaVoiceAudioEngine';
@@ -14,17 +15,16 @@ import type { LedaOrbElement } from '../vendor/leda-orb.js';
 // abrupt 200 ms disappearance. Chosen at the low end of the 600-800 ms
 // range agreed with the user -- long enough to read as a fade rather than
 // a cut, short enough that the orb does not linger noticeably after the
-// answer ends. Must be kept in sync by hand with the `duration-[700ms]`
-// Tailwind class in PrismaOrbOverlay.tsx: Tailwind's arbitrary-value
-// scanner needs the literal class text in source and cannot read this
-// constant at build time.
+// answer ends. PrismaOrbOverlay.tsx reads this constant directly (inline
+// `transitionDuration`), so there is exactly one source of truth for the
+// number.
 export const PRISMA_ORB_FADE_DURATION_MS = 700;
 
 // T17: thinking -> speaking transition duration. The overlay grows from
 // the thinking scale/opacity to full size while the engine starts voice
 // modulation, per the user-agreed design ("~400 ms with an ease curve").
-// Must be kept in sync by hand with the `duration-[400ms]` Tailwind class
-// in PrismaOrbOverlay.tsx, for the same reason as the constant above.
+// Also read directly by PrismaOrbOverlay.tsx, same single-source reason as
+// the constant above.
 export const PRISMA_ORB_GROW_DURATION_MS = 400;
 
 // T17: bounded ceiling for the thinking phase when playback never starts
@@ -36,7 +36,12 @@ export const PRISMA_ORB_GROW_DURATION_MS = 400;
 // bounded, so the orb never waits in "thinking" forever.
 export const PRISMA_ORB_THINKING_TIMEOUT_MS = 9_000;
 
-export type PrismaOrbPresentationPhase = 'hidden' | 'thinking' | 'visible' | 'fading';
+// Tied to the generated T16 timeline's own phase enum (schemas/prisma-audio-
+// record.v1.schema.json -> prismaAudioMetric.generated.ts) instead of a
+// separately hand-maintained union, so the two can never silently drift
+// apart -- recordOrbPhase(next) (below) only type-checks because both sides
+// agree on the same four values.
+export type PrismaOrbPresentationPhase = PrismaAudioMetricPhase;
 
 interface PrismaOrbPresentation {
     phase: PrismaOrbPresentationPhase;
