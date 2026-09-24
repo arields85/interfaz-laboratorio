@@ -176,9 +176,11 @@ _USERNAME_PATTERN = re.compile(r"\A[A-Za-z0-9_]{5,32}\Z")
 _LOOP_THREAD_NAME = "prisma-channel-a-lifecycle"
 
 # T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
-# comment in `channel_a_manager.py`); relying on the same WARNING-or-above
-# "handler of last resort" keeps this diagnostic visible in
-# `prisma-presentation-stderr.log` without adding runtime-wide configuration.
+# comment in `channel_a_manager.py`), so a module logger with no handler
+# falls back to `logging`'s own WARNING-or-above "handler of last resort".
+# PW-011 M4: the only line this module logs (`_log_update_handled`) is
+# routine per-update timing, not a warning-worthy condition, so it is INFO
+# -- invisible to that last-resort handler by default, exactly as intended.
 # Only a closed update-shape label and a duration are ever logged, never a
 # chat id, username or message body.
 _logger = logging.getLogger(__name__)
