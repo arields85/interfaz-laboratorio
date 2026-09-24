@@ -159,6 +159,13 @@ class WarmGeminiClient:
         _close_client_quietly(stale)
         return candidate, False
 
+    def current_secret_hash(self) -> str | None:
+        """T10 unit 4: lets the exact-text audio cache invalidate itself when
+        the credential rotates, without forcing a fresh resolve/build on
+        every cache lookup -- None before any client has ever been built."""
+        with self._lock:
+            return self._secret_hash
+
     def warm_up(self, resolve_secret: Callable[[], str]) -> None:
         """Best-effort boot warm-up: never raises, never blocks startup, and
         never performs a real synthesis call (that would cost one Gemini API

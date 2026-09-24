@@ -157,6 +157,20 @@ class WarmGeminiClientTests(unittest.TestCase):
         self.assertTrue(reused)
         build.assert_called_once_with("secret-a")
 
+    def test_current_secret_hash_is_none_before_any_build_then_tracks_the_active_secret(self):
+        warm = WarmGeminiClient(build=lambda secret: self._fake_client())
+
+        self.assertIsNone(warm.current_secret_hash())
+
+        warm.get("secret-a")
+        hash_a = warm.current_secret_hash()
+        self.assertIsNotNone(hash_a)
+
+        warm.get("secret-b")
+        hash_b = warm.current_secret_hash()
+        self.assertIsNotNone(hash_b)
+        self.assertNotEqual(hash_a, hash_b)
+
     def test_concurrent_calls_with_the_same_secret_never_leak_two_live_clients(self):
         barrier = threading.Barrier(4)
 

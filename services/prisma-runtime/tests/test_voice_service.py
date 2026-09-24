@@ -79,6 +79,12 @@ def completed_event(status="completed"):
 
 
 class VoiceServiceTests(unittest.TestCase):
+    def setUp(self):
+        # T10 unit 4: the exact-text audio cache is a module-level singleton
+        # shared by production requests across the process's lifetime, so it
+        # must not leak entries between tests that reuse the same transcript.
+        service._voice_audio_cache.clear()
+
     def test_raw_tts_is_retired_and_live_request_is_strictly_event_only(self):
         raw = service.app.test_client().post("/prisma/speak", json={"text": "raw"})
         self.assertEqual(raw.status_code, 410)
@@ -442,6 +448,66 @@ class VoiceServiceTests(unittest.TestCase):
                 # T10 unit 2: cancellation must never close the shared warm client.
                 self.assertEqual(client.close_calls, 0)
                 output.close()
+
+    def test_voice_audio_cache_evicts_by_count_and_bytes(self):
+        cache = service.VoiceAudioCache(max_entries=2, max_bytes=10)
+        cache.put("a", b"12345")
+        cache.put("b", b"12345")
+        self.assertEqual(cache.get("a"), b"12345")
+        # A third entry pushes past max_entries=2: the least recently used
+        # ("a" was just touched above, so "b" is the LRU one) is evicted.
+        cache.put("c", b"12345")
+        self.assertIsNone(cache.get("b"))
+        self.assertEqual(cache.get("a"), b"12345")
+        self.assertEqual(cache.get("c"), b"12345")
+
+        # An entry alone larger than max_bytes is never cached.
+        cache.put("too-big", b"x" * 11)
+        self.assertIsNone(cache.get("too-big"))
+
+    def test_second_identical_request_is_served_from_cache_without_calling_gemini(self):
+        stream = FakeStream([audio_event(b"\x12\x34\x56\x78"), completed_event()])
+        client = FakeClient([stream])
+        with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
+            job_one = service._create_interactions_tts_job("Repeated transcript")
+            first_output = list(service._generate_interactions_tts_audio(job_one))
+            self.assertEqual(first_output, [b"\x12\x34\x56\x78"])
+
+            job_two = service._create_interactions_tts_job("Repeated transcript")
+            with self.assertLogs(service._logger, level="WARNING") as observed:
+                second_output = list(service._generate_interactions_tts_audio(job_two))
+        self.assertEqual(second_output, [b"\x12\x34\x56\x78"])
+        # Only the first job's stream was ever created; the SDK's
+        # interactions.create was never called a second time.
+        self.assertEqual(len(client.interactions.calls), 1)
+        self.assertTrue(any("Prisma TTS cache: hit" in line for line in observed.output))
+
+    def test_different_text_or_voice_config_is_a_cache_miss(self):
+        def run(text, config=None):
+            stream = FakeStream([audio_event(b"\xaa\xbb"), completed_event()])
+            client = FakeClient([stream])
+            with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
+                job = service._create_interactions_tts_job(text, voice_config=config)
+                list(service._generate_interactions_tts_audio(job))
+            return client
+
+        base_config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+        other_config = service.clone_json(service.DEFAULT_PRISMA_VOICE_CONFIG)
+        other_config["effectIntensity"] = 1
+
+        run("Text one", base_config)
+        client_for_different_text = run("Text two", base_config)
+        client_for_different_config = run("Text one", other_config)
+
+        self.assertEqual(len(client_for_different_text.interactions.calls), 1)
+        self.assertEqual(len(client_for_different_config.interactions.calls), 1)
+
+    def test_cache_key_changes_when_the_warm_client_secret_hash_changes(self):
+        with patch.object(service._warm_gemini_client, "current_secret_hash", return_value="hash-one"):
+            key_one = service._voice_audio_cache_key({"text": "same", "voice_config": {}})
+        with patch.object(service._warm_gemini_client, "current_secret_hash", return_value="hash-two"):
+            key_two = service._voice_audio_cache_key({"text": "same", "voice_config": {}})
+        self.assertNotEqual(key_one, key_two)
 
     def test_stream_falls_back_once_before_any_audio(self):
         stream = FakeStream([], RuntimeError("provider unavailable"))

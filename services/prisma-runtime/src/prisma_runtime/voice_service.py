@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import io
 import json
 import logging
@@ -21,6 +22,7 @@ import sys
 import threading
 import time
 import wave
+from collections import OrderedDict
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -484,6 +486,74 @@ def _iter_interaction_audio_deltas(stream, on_activity=lambda: None):
     if not completed: raise PrismaTtsProviderError("TTS_STREAM_TERMINAL_MISSING")
 
 
+class VoiceAudioCache:
+    """T10 unit 4: exact-text audio cache.
+
+    Identical answer text plus identical voice settings (and TTS model,
+    voice, and active credential -- see `_voice_audio_cache_key`) replay
+    already-generated, already-DSP-processed PCM instantly instead of
+    calling Gemini again. Bounded by both entry count and total bytes
+    (whichever limit is hit first evicts the least-recently-used entry);
+    thread-safe for Flask's threaded workers.
+    """
+
+    def __init__(self, max_entries=32, max_bytes=64 * 1024 * 1024):
+        self.max_entries = max_entries
+        self.max_bytes = max_bytes
+        self._lock = threading.Lock()
+        self._entries = OrderedDict()
+        self._total_bytes = 0
+
+    def get(self, key):
+        with self._lock:
+            data = self._entries.get(key)
+            if data is None:
+                return None
+            self._entries.move_to_end(key)
+            return data
+
+    def put(self, key, data):
+        if not data or len(data) > self.max_bytes:
+            return
+        with self._lock:
+            existing = self._entries.pop(key, None)
+            if existing is not None:
+                self._total_bytes -= len(existing)
+            self._entries[key] = data
+            self._total_bytes += len(data)
+            while self._entries and (len(self._entries) > self.max_entries or self._total_bytes > self.max_bytes):
+                _, evicted = self._entries.popitem(last=False)
+                self._total_bytes -= len(evicted)
+
+    def clear(self):
+        with self._lock:
+            self._entries.clear()
+            self._total_bytes = 0
+
+
+_voice_audio_cache = VoiceAudioCache()
+
+
+def _voice_audio_cache_key(job):
+    """Bind the cache to exactly the inputs that determine the audio bytes:
+    the transcript, the voice/DSP settings, the fixed model/voice constants,
+    and the currently active credential's hash (read for free from the warm
+    client, never forcing an extra resolve) so a credential rotation
+    invalidates every prior entry without an explicit signal."""
+    payload = json.dumps(
+        {
+            "text": job["text"],
+            "voiceConfig": job["voice_config"],
+            "model": TTS_MODEL,
+            "voice": VOICE,
+            "secretHash": _warm_gemini_client.current_secret_hash(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _create_interactions_tts_job(text, event_id=None, telegram_chat_id=None, voice_config=None):
     # T10: times the whole job-creation step, including the conditional
     # TelegramOpusStreamEncoder subprocess spin-up (ffmpeg) and recording
@@ -526,6 +596,32 @@ def _full_file_fallback_pcm(client, job):
 
 
 def _generate_interactions_tts_audio(job, secret=None, control=None):
+    # T10 unit 4: exact-text audio cache, checked before any provider work.
+    # A hit replays already-DSP-processed PCM straight from memory and never
+    # calls Gemini; a miss falls through to the normal streaming path below,
+    # which stores its result in the cache once it completes successfully.
+    cache_key = _voice_audio_cache_key(job)
+    cached = _voice_audio_cache.get(cache_key)
+    if cached is not None:
+        _logger.warning("Prisma TTS cache: hit bytes=%d", len(cached))
+        try:
+            if control is not None and control.cancelled.is_set(): return
+            delivered = _append_post_dsp_pcm(job, cached)
+            prisma_audio_sink.emit("backend", "dsp", {"sample_count": len(cached) // SAMPLE_WIDTH})
+            if delivered is not None: yield delivered
+            if control is not None and control.cancelled.is_set(): return
+            _queue_same_prisma_audio_to_telegram(job)
+            prisma_audio_sink.emit("backend", "finalization", {"status": "success", "sample_count": len(cached) // SAMPLE_WIDTH})
+        except GeneratorExit:
+            _discard_interactions_tts_job(job)
+            raise
+        except Exception:
+            prisma_audio_sink.emit("backend", "finalization", {"status": "error"})
+            _discard_interactions_tts_job(job)
+            raise PrismaTtsProviderError("TTS_STREAM_INTERNAL_FAILURE") from None
+        return
+    _logger.warning("Prisma TTS cache: miss")
+
     client = stream = idle_guard = None; audio_accepted = False
     prisma_audio_sink.emit("provider", "dispatch", {})
     try:
@@ -573,6 +669,7 @@ def _generate_interactions_tts_audio(job, secret=None, control=None):
             prisma_audio_sink.emit("provider", "completion", {"status": "success"})
             if delivered is not None: yield delivered
         if control is not None and control.cancelled.is_set(): return
+        _voice_audio_cache.put(cache_key, b"".join(job["telegram_pcm_parts"]))
         _queue_same_prisma_audio_to_telegram(job)
         prisma_audio_sink.emit("backend", "finalization", {"status": "success", "sample_count": sum(len(part) for part in job["telegram_pcm_parts"]) // SAMPLE_WIDTH})
     except GeneratorExit: _discard_interactions_tts_job(job); raise
