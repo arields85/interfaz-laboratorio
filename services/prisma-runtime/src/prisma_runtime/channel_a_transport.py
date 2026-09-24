@@ -4,12 +4,12 @@ Scope (RCA-5a)
 --------------
 
 This module is the HTTP boundary of the dedicated Channel A bot and nothing
-else. It performs exactly four Bot API calls — ``sendMessage``,
-``answerCallbackQuery``, ``getMe`` and ``getUpdates`` — against the fixed
-official HTTPS host and returns the raw response mapping to its caller. The
-adapter (RCA-3a) keeps deciding what ``delivered``, ``rejected`` and ``unknown``
-mean; this module never classifies a receipt beyond the status/boundary rules the
-frozen contract declares.
+else. It performs exactly five Bot API calls — ``sendMessage``,
+``answerCallbackQuery``, ``getMe``, ``getUpdates`` and ``sendChatAction`` (T4)
+— against the fixed official HTTPS host and returns the raw response mapping
+to its caller. The adapter (RCA-3a) keeps deciding what ``delivered``,
+``rejected`` and ``unknown`` mean; this module never classifies a receipt
+beyond the status/boundary rules the frozen contract declares.
 
 Boundary rules that deliberately stay here:
 
@@ -97,6 +97,13 @@ def _log_get_updates_elapsed(count: int | None, elapsed_seconds: float) -> None:
         round(elapsed_seconds * 1000),
     )
 
+
+def _log_send_chat_action_failed_elapsed(elapsed_seconds: float) -> None:
+    # T4: unlike sendMessage/getUpdates, a successful chat-action ping is not
+    # itself a useful lag signal (it precedes the answer, it does not carry
+    # it), so this is logged only on failure -- T5-style noise discipline.
+    _logger.warning("Channel A sendChatAction: elapsed_ms=%d", round(elapsed_seconds * 1000))
+
 PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE = "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE"
 # T16: the one deliberate exception to "every failure becomes the same fixed
 # code" -- a provider-confirmed 401 on the bot token itself is distinguished
@@ -114,6 +121,12 @@ SEND_MESSAGE_METHOD = "sendMessage"
 ANSWER_CALLBACK_QUERY_METHOD = "answerCallbackQuery"
 GET_ME_METHOD = "getMe"
 GET_UPDATES_METHOD = "getUpdates"
+SEND_CHAT_ACTION_METHOD = "sendChatAction"
+
+# T4: the only chat action this runtime ever sends; the transport's own
+# closed, non-disclosing validation accepts nothing else.
+CHAT_ACTION_TYPING = "typing"
+_ALLOWED_CHAT_ACTIONS = frozenset({CHAT_ACTION_TYPING})
 
 _TOKEN_PATTERN = re.compile(r"\A[A-Za-z0-9_:-]+\Z")
 _USERNAME_PATTERN = re.compile(r"\A[A-Za-z0-9_]{5,32}\Z")
@@ -124,6 +137,7 @@ __all__ = [
     "ALLOWED_UPDATES",
     "ANSWER_CALLBACK_QUERY_METHOD",
     "CHANNEL_A_API_BASE",
+    "CHAT_ACTION_TYPING",
     "ChannelABotIdentity",
     "ChannelATransport",
     "ChannelATransportError",
@@ -134,6 +148,7 @@ __all__ = [
     "MESSAGE_MAX_CHARS",
     "PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED",
     "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE",
+    "SEND_CHAT_ACTION_METHOD",
     "SEND_MESSAGE_METHOD",
 ]
 
@@ -227,6 +242,12 @@ def _validated_callback_id(value: object) -> str:
 
 def _validated_ack_text(value: object) -> str:
     if not isinstance(value, str) or len(value) > MAX_ACK_TEXT_CHARS:
+        raise _unavailable() from None
+    return value
+
+
+def _validated_chat_action(value: object) -> str:
+    if not isinstance(value, str) or value not in _ALLOWED_CHAT_ACTIONS:
         raise _unavailable() from None
     return value
 
@@ -335,6 +356,24 @@ class ChannelATransport:
         if text is not None:
             payload["text"] = _validated_ack_text(text)
         return self._effect(ANSWER_CALLBACK_QUERY_METHOD, payload, self.request_timeout)
+
+    def send_chat_action(self, *, chat_id: int, action: str) -> object:
+        """Signal a transient chat action (e.g. "typing") while preparing an
+        answer (T4). Same owned/reused session, timeouts, error
+        classification and redaction as every other call; a successful ping
+        carries no useful lag signal on its own, so timing is logged only on
+        failure (T5-style noise discipline, mirroring T8b's getUpdates fix).
+        """
+        payload: dict[str, object] = {
+            "chat_id": _validated_chat_id(chat_id),
+            "action": _validated_chat_action(action),
+        }
+        started = time.monotonic()
+        try:
+            return self._effect(SEND_CHAT_ACTION_METHOD, payload, self.request_timeout)
+        except Exception:
+            _log_send_chat_action_failed_elapsed(time.monotonic() - started)
+            raise
 
     def get_me(self) -> ChannelABotIdentity:
         """Observe the bot identity Channel A is actually authenticated as."""

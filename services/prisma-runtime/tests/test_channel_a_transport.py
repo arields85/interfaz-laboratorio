@@ -499,6 +499,54 @@ class AnswerCallbackQueryTests(ChannelATransportTestCase):
                 self.assert_unavailable(raised.exception)
 
 
+class SendChatActionTests(ChannelATransportTestCase):
+    """T4: the "typing…" chat action, same session/timeout/redaction contract."""
+
+    def test_send_chat_action_posts_the_exact_payload_and_returns_the_body(self):
+        body = {"ok": True, "result": True}
+        session = FakeSession(FakeResponse(200, body))
+        transport = self.build(session)
+        returned = transport.send_chat_action(chat_id=CHAT_ID, action="typing")
+        self.assert_posted(session, "sendChatAction", {"chat_id": CHAT_ID, "action": "typing"})
+        self.assertIs(returned, body)
+
+    def test_chat_identifier_bounds_are_enforced_before_io(self):
+        for chat_id in (True, 0, -1, MAX_TELEGRAM_ID + 1, 10**1000, 1.0, "1", None):
+            with self.subTest(chat_id=chat_id):
+                self.assert_rejected_before_io(
+                    lambda t, value=chat_id: t.send_chat_action(chat_id=value, action="typing")
+                )
+
+    def test_only_typing_is_accepted_as_the_action(self):
+        for action in ("", "Typing", "upload_photo", "typing ", None, 5, True, b"typing"):
+            with self.subTest(action=action):
+                self.assert_rejected_before_io(
+                    lambda t, value=action: t.send_chat_action(chat_id=CHAT_ID, action=value)
+                )
+
+    def test_explicit_four_hundred_ok_false_passes_through_and_other_failures_do_not(self):
+        body = {"ok": False, "error_code": 400, "description": "chat not found"}
+        session = FakeSession(FakeResponse(400, body))
+        self.assertIs(self.build(session).send_chat_action(chat_id=CHAT_ID, action="typing"), body)
+
+        for response in (FakeResponse(400, {"ok": True}), FakeResponse(500, {"ok": False}), FakeResponse(302, {"ok": False})):
+            with self.subTest(status=response.status_code):
+                session = FakeSession(response)
+                transport = self.build(session)
+                with self.assertRaises(ChannelATransportError) as raised:
+                    transport.send_chat_action(chat_id=CHAT_ID, action="typing")
+                self.assert_unavailable(raised.exception)
+
+    def test_send_chat_action_reuses_the_owned_session(self):
+        session = FakeSession(responses=[FakeResponse(200, {"ok": True}), FakeResponse(200, {"ok": True})])
+        transport = self.build(session)
+        transport.send_chat_action(chat_id=CHAT_ID, action="typing")
+        transport.send_chat_action(chat_id=CHAT_ID, action="typing")
+        self.assertEqual(len(self.factory.calls), 1)
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
+
+
 class GetMeTests(ChannelATransportTestCase):
     def test_get_me_posts_an_empty_payload_and_returns_a_frozen_identity(self):
         session = FakeSession(FakeResponse(200, ok_body({"id": 987654321, "is_bot": True, "username": "prisma_bot"})))
@@ -762,6 +810,7 @@ class TransportBoundaryTests(ChannelATransportTestCase):
             lambda transport: transport.answer_callback_query(callback_query_id=CALLBACK_ID),
             lambda transport: transport.get_me(),
             lambda transport: transport.get_updates(poll_timeout=1, read_timeout=2),
+            lambda transport: transport.send_chat_action(chat_id=CHAT_ID, action="typing"),
         )
         seen = []
         for call in methods:
@@ -934,6 +983,24 @@ class TimingLogTests(ChannelATransportTestCase):
                 transport.get_updates(poll_timeout=1, read_timeout=2)
         self.assertEqual(len(observed.output), 1)
         self.assertIn("Channel A getUpdates: count=failed elapsed_ms=", observed.output[0])
+        self.assertNotIn(CANARY, observed.output[0])
+
+    def test_send_chat_action_logs_nothing_on_success(self):
+        """T4: unlike sendMessage, a successful chat-action ping carries no
+        useful lag signal on its own -- timing is logged only on failure."""
+        session = FakeSession(FakeResponse(200, {"ok": True}))
+        transport = self.build(session)
+        with self.assertNoLogs(transport_module._logger, level="WARNING"):
+            transport.send_chat_action(chat_id=CHAT_ID, action="typing")
+
+    def test_send_chat_action_logs_elapsed_ms_only_on_failure(self):
+        session = FakeSession(post_error=ConnectionError(f"refused {CANARY}"))
+        transport = self.build(session)
+        with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+            with self.assertRaises(ChannelATransportError):
+                transport.send_chat_action(chat_id=CHAT_ID, action="typing")
+        self.assertEqual(len(observed.output), 1)
+        self.assertIn("Channel A sendChatAction: elapsed_ms=", observed.output[0])
         self.assertNotIn(CANARY, observed.output[0])
 
     def test_timing_logs_never_contain_the_token_or_message_text(self):

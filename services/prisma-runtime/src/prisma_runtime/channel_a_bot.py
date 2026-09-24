@@ -354,6 +354,11 @@ class ChannelATextTransport(Protocol):
     def answer_callback_query(self, *, callback_query_id: str, text: str = None) -> object:
         """Acknowledge one callback press and return the raw response body."""
 
+    def send_chat_action(self, *, chat_id: int, action: str) -> object:
+        """Signal a transient chat action (e.g. "typing") and return the raw
+        response body (T4). Optional at runtime: a transport double that
+        omits this method is tolerated -- see ``_typing``."""
+
 
 @dataclass(frozen=True)
 class IngressOutcome:
@@ -955,6 +960,9 @@ class ChannelAPairingDialogue:
             record.confirmed_update_id,
             self._epoch,
         )
+        # T4: signal "typing…" right before producing the answer, so the
+        # phone shows feedback for the dead time while a query is prepared.
+        self._typing(actor_id)
         outcome = self.query.handle_query(binding, text)
         delivery = SEND_NONE if outcome.delivery is None else outcome.delivery
         return IngressOutcome(
@@ -1444,6 +1452,24 @@ class ChannelAPairingDialogue:
         if author.get("is_bot") is not True or _bounded_id(author.get("id")) != self.bot_id:
             return SEND_UNKNOWN
         return SEND_DELIVERED
+
+    def _typing(self, chat_id) -> None:
+        """Best-effort "typing…" chat action (T4).
+
+        Never blocks or fails the caller's answer: a transport double
+        without ``send_chat_action`` at all, or any exception it raises, is
+        silently swallowed here. This is UX feedback, not a delivery
+        contract -- there is no outcome, no retry and no logged failure at
+        this layer (the transport itself already logs elapsed time on a
+        genuine failure, T4/T5-style).
+        """
+        send = getattr(self.transport, "send_chat_action", None)
+        if not callable(send):
+            return
+        try:
+            send(chat_id=chat_id, action="typing")
+        except Exception:
+            pass
 
     def _answer(self, callback_id, text) -> bool:
         """Acknowledge one callback press. Returns true only on an explicit ack."""

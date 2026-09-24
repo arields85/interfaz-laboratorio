@@ -152,7 +152,29 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   Full suite: `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
   services\prisma-runtime -p "test_*.py"` → 1361 passed. Commit: `feat(prisma): add persistent
   unlink keyboard to Channel A chats`.
-- [ ] **T4 — Typing indicator.** Send Telegram "typing…" while an answer is being prepared.
+- [x] **T4 — Typing indicator.** Send Telegram "typing…" while an answer is being prepared.
+  Evidence (2026-09-23): `channel_a_transport.py` — new `ChannelATransport.send_chat_action(chat_id,
+  action)` posting `sendChatAction`; reuses the T7 owned/lazy session via `self._effect`, same
+  `request_timeout`, same error classification (`_unavailable()`/`ChannelATransportError`) and
+  redaction as every other call; `action` is validated closed (`_validated_chat_action`, only
+  `"typing"` accepted — this runtime never sends any other chat action). Timing is logged only on
+  failure (`_log_send_chat_action_failed_elapsed`, T5-style noise discipline matching T8b's
+  `getUpdates` fix): a successful ping carries no useful lag signal on its own. `channel_a_bot.py` —
+  `ChannelATextTransport` Protocol gains `send_chat_action`; new `ChannelAPairingDialogue._typing()`
+  probes `getattr(self.transport, "send_chat_action", None)` and swallows every exception (including
+  a transport that omits the method entirely), so a failure NEVER blocks or fails the answer; called
+  from `_handle_query` right after binding validation (unbound/stale queries never see a typing
+  ping) and right before `self.query.handle_query(...)` produces the actual answer. New tests: 4 in
+  `ChannelAQueryIntegrationTests` (sent right before the answer with the correct chat_id/action;
+  failure never blocks or fails the answer; not sent for an unbound query; gracefully skipped when
+  the transport lacks the method at all) plus the transport-level `SendChatActionTests` (4 tests) and
+  2 `TimingLogTests` (log-only-on-failure). Updated
+  `test_transport_protocol_declares_exactly_three_calls` (renamed from `...two_calls`) and the
+  method-enumeration list in `TransportBoundaryTests`. RED confirmed at both layers (transport:
+  `AttributeError: no attribute 'send_chat_action'`; bot: `0 != 1` chat actions recorded) before
+  implementation. Full suite: `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover
+  -s services\prisma-runtime -p "test_*.py"` → 1372 passed. Commit: `feat(prisma): show typing
+  indicator while Channel A prepares answers`.
 - [x] **T1b — Old vs new comparison (read-only, delegated).** Findings (2026-09-23), static code:
   - Same library (raw `requests`), same poll cadence (25 s / 35 s), same Gemini TTS model, both
     Flask servers `threaded=True` (not a differentiator).
@@ -320,17 +342,28 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   behavior-changing work across channel_a_transport.py, channel_a_lifecycle.py,
   channel_a_manager.py, channel_a_activation.py, local_presentation.py, voice_service.py and
   their tests).
+- 2026-09-23: T6 live repro (user verdict: excellent, see below), T8b verifier corrections, T2
+  (confirmation copy), T3 (persistent unlink keyboard) and T4 (typing indicator) implemented and
+  committed (`b236e95`, `c523c40`, `99f2fd8`, and the T4 commit above). Full prisma-runtime suite
+  green after each (1352 → 1353 → 1361 → 1372 tests). Route: delegated writer (multi-file,
+  behavior-changing work across channel_a_bot.py, channel_a_transport.py, channel_a_manager.py and
+  their tests; touched only `services/prisma-runtime` and this doc, concurrently with a read-only
+  verifier working in `hmi-app`).
 
 ## Next step
 
-Next: T6 — live repro with the user, using the new T5 timing logs to measure the reported lag
-before/after T7+T8. Tail `%LOCALAPPDATA%\CoreAnalytics\Prisma\logs\prisma-presentation-stderr.log`
-(Channel A: `Channel A sendMessage:`/`Channel A getUpdates:`/`Channel A update:` lines, and on a
-transient poll failure `Canal A background failure:` should no longer appear — instead
-`Channel A poll retry: started` then `Channel A poll retry: recovered gap_s=<N>`, where `<N>`
-is the measured reconnect gap, expected around 5 s instead of the old 5→10→20→40→80 s backoff)
-and `prisma-voice-stderr.log` (`Prisma speak-live: first_chunk_elapsed_ms=`/`stream_end_elapsed_ms=`,
-`Prisma voice event publish: elapsed_ms=`) during a QR pairing and HMI voice queries. Also watch
-the admin Channel A panel's "reconnecting" indicator during a simulated/real network hiccup. Then
-root-cause fixes for the still-unexplained HMI voice orb/audio misses (T9+), followed by the
-parked UX items T2–T4.
+T9+ (HMI voice orb/audio root-cause fixes) remains open and unstarted — no further diagnosis was
+done this session. Next: **user manual check of T2/T3/T4 in Telegram**, since these are UX changes
+best confirmed live:
+- **T2**: pair a phone via QR; the confirmation prompt should read "Está a un paso: confirme y
+  Prisma responderá sus consultas en este chat." (no "documento").
+- **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
+  stay visible through later messages. Tapping it should ask for confirmation with "Confirmar
+  desvinculación"/"Cancelar" inline buttons — confirming should unlink and remove the persistent
+  button; cancelling should keep the link and the button. The inactivity-warning message (idle ~9
+  minutes) should show only "Seguir conectado" now, not a second inline "Desvincular".
+- **T4**: send an ordinary question; Telegram should show "Prisma está escribiendo…" briefly before
+  the answer arrives.
+
+After that manual check, resume T9+ using the T5 timing logs and T6-style live observation for the
+still-unexplained HMI voice orb/audio misses.

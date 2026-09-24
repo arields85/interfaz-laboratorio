@@ -174,13 +174,17 @@ def callback_update(update_id, data, *, chat=CHAT_ID, from_id=None, callback_id=
 class FakeTransport:
     """Text-only transport double: records calls and replays scripted responses."""
 
-    def __init__(self, *, bot_id=BOT_ID, send_responses=None, ack_responses=None):
+    def __init__(self, *, bot_id=BOT_ID, send_responses=None, ack_responses=None, chat_action_error=None):
         self.bot_id = bot_id
         self.sent = []
         self.answered = []
+        self.chat_actions = []
         self.calls = []
         self.send_responses = list(send_responses or ())
         self.ack_responses = list(ack_responses or ())
+        # T4: injectable failure, never surfaced by the dialogue -- proves a
+        # chat-action failure never blocks or fails the answer.
+        self.chat_action_error = chat_action_error
         self.on_send = None
         self.on_ack = None
 
@@ -216,6 +220,13 @@ class FakeTransport:
             self.on_ack(payload)
         if self.ack_responses:
             return self.ack_responses.pop(0)
+        return {"ok": True, "result": True}
+
+    def send_chat_action(self, **payload):
+        self.calls.append("send_chat_action")
+        self.chat_actions.append(payload)
+        if self.chat_action_error is not None:
+            raise self.chat_action_error
         return {"ok": True, "result": True}
 
 
@@ -445,9 +456,11 @@ class ChannelABotConfigTests(ChannelABotTestCase):
                 with self.assertRaises(ChannelABotConfigInvalid):
                     phone_identity(value)
 
-    def test_transport_protocol_declares_exactly_two_calls(self):
+    def test_transport_protocol_declares_exactly_three_calls(self):
+        # T4: send_chat_action joins the protocol (optional at runtime --
+        # see _typing -- but declared here for callers implementing it).
         names = {name for name in vars(ChannelATextTransport) if not name.startswith("_")}
-        self.assertEqual(names, {"send_message", "answer_callback_query"})
+        self.assertEqual(names, {"send_message", "answer_callback_query", "send_chat_action"})
 
     def test_ingress_outcome_is_frozen_and_serializes_camel_case(self):
         outcome = IngressOutcome(1, VARIANT_MESSAGE, PAIRING_PROMPT_DELIVERED, True, SEND_DELIVERED, True)
@@ -2368,6 +2381,59 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         link = self.registry.phone_link(PHONE)
         self.assertEqual(envelope.generation, link.generation)
         self.assertEqual(self.touches, [(PHONE, link.generation)])
+
+    def test_typing_indicator_is_sent_right_before_the_answer(self):
+        outcome = self.query("¿cuál es el oee?")
+        self.assertEqual(len(self.transport.chat_actions), 1)
+        action = self.transport.chat_actions[0]
+        self.assertEqual(action["chat_id"], CHAT_ID)
+        self.assertEqual(action["action"], "typing")
+        # Sent right before the answer, not after and not more than once.
+        self.assertEqual(self.transport.calls[-2:], ["send_chat_action", "send_message"])
+        self.assertEqual(outcome.kind, QUERY_ANSWER_DELIVERED)
+
+    def test_typing_indicator_failure_never_blocks_or_fails_the_answer(self):
+        self.transport.chat_action_error = RuntimeError("transient network failure")
+        outcome = self.query("¿cuál es el oee?")
+        self.assert_outcome(
+            outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED
+        )
+        self.assertEqual(len(self.transport.chat_actions), 1)
+        self.assertIn("88", self.transport.sent[-1]["text"])
+
+    def test_typing_indicator_is_not_sent_for_an_unbound_query(self):
+        outcome = self.handle(message_update(4, "hola", chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_IGNORED_UNBOUND, update_id=4)
+        self.assertEqual(self.transport.chat_actions, [])
+
+    def test_typing_indicator_is_skipped_when_the_transport_lacks_the_method(self):
+        """T4: a transport double without send_chat_action at all must never
+        break the answer -- the dialogue only best-effort probes for it."""
+
+        class NoTypingTransport(FakeTransport):
+            def __getattribute__(self, name):
+                if name == "send_chat_action":
+                    raise AttributeError(name)
+                return super().__getattribute__(name)
+
+        original_dialogue, original_transport = self.dialogue, self.transport
+        self.transport = NoTypingTransport()
+        self.dialogue = self.build(transport=self.transport)
+        self.dialogue.enable_queries(
+            read_context=self.sessions.capture_owner_context,
+            context_is_current=self.sessions.is_owner_context_current,
+            parse=self.parse,
+            freshness_bound=30.0,
+            max_question_bytes=4096,
+            max_answer_chars=4096,
+        )
+        try:
+            outcome = self.query("¿cuál es el oee?")
+            self.assert_outcome(
+                outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED
+            )
+        finally:
+            self.dialogue, self.transport = original_dialogue, original_transport
 
     def test_the_serialized_outcome_exposes_the_envelope_only_when_present(self):
         outcome = self.query("¿cuál es el oee?")
