@@ -563,6 +563,27 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
 - Approved copy, reachable keep/unlink control, and typing indicator in place.
 - All gates green: vitest, `tsc`, eslint, prisma-runtime unittest discover.
 
+- [ ] **T13 — Voice latency, part 3 (from the 2026-09-24 live test, runtime at `82e7176`).**
+  Measured per voice answer (Channel A questions from the phone): `event_publish_to_received_ms`
+  170–1088 (HMI 1 s poll, no prefetch on the Channel A publish path); `AudioCoordinator generate:
+  credential_elapsed_ms` 581–604 on EVERY request, cache hits included (protected-store secret
+  read); validate/resolve 3×~15 ms; Gemini `time_to_first_byte_ms` 1311–1486 (vs 0.6–0.7 s in the
+  standalone benchmark and the smoke test of the same helpers — unexplained); cache hit first chunk
+  619–656 ms (almost all of it the credential read); miss first chunk 1958–2132 ms. Channel A update
+  handling grew from ~0.38 s to ~0.74–0.80 s: T4's synchronous `sendChatAction` (~0.36 s) runs
+  before the answer is sent. User report: the orb appears and waits a few seconds before the audio.
+  Scope: (a) keep the resolved Gemini secret in memory and invalidate it on credential
+  save/delete/rotate instead of reading the protected store per request; (b) start synthesis at
+  publish time for the Channel A on-outcome path too (prefetch keyed by event id without an HMI
+  capability — reuse the internal prefetch route's authorization model safely); (c) T10 unit 5 —
+  push voice events to the HMI (SSE) with polling fallback, verified live through the Vite proxy;
+  (d) find why Gemini TTFB inside the runtime is ~2× the standalone measurement and fix it if it is
+  ours; (e) send the Telegram typing action without blocking the answer (fire-and-forget) or skip
+  it when the answer is immediate.
+- [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
+  keyboard while the system keyboard is open (it shows a keyboard toggle icon instead); pending a
+  user decision on an always-visible alternative.
+
 ## Progress
 
 - 2026-09-23: branch created; feature document created. T1 static diagnosis done (no
