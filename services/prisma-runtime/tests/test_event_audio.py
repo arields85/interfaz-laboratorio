@@ -392,6 +392,22 @@ class AudioCoordinatorTests(unittest.TestCase):
             list(queued)
         self.assertEqual(generated, ["active"])
 
+    def test_unconfigured_credential_no_longer_rejects_subscribe_itself(self):
+        """T12: subscribe() admits the request even when the credential
+        resolver would fail -- it no longer runs its own (redundant)
+        admission-time credential probe. The failure is documented to
+        surface once generation is attempted instead."""
+        def always_broken():
+            raise RuntimeError("GEMINI_CREDENTIAL_UNAVAILABLE")
+
+        def generate(_event, _config, _secret):
+            yield b"unreachable"
+
+        self.coordinator = AudioCoordinator(always_broken, generate, clock=self.clock, wall_clock=self.clock)
+        stream = self.coordinator.subscribe({"id": "broken-credential", "text": "a", "expiresAt": 200.0}, {})
+        with self.assertRaises(AudioRetryUnavailable):
+            next(stream)
+
     def test_deadline_releases_consumer_before_noncooperative_generator_returns(self):
         started = threading.Event()
         release = threading.Event()
@@ -506,7 +522,12 @@ class AudioCoordinatorTests(unittest.TestCase):
         self.assertTrue(started.wait(1))
         with self.assertRaisesRegex(AudioCapacityError, "SUBSCRIBER"):
             self.coordinator.subscribe({"id": "rejected", "text": "b", "expiresAt": 200.0}, {})
-        self.assertEqual(self.credentials.call_count, 2)
+        # T12: subscribe() no longer performs its own admission-time
+        # credential resolve (see the comment in subscribe()), so only
+        # "first"'s single generation-time resolve counts; "rejected" never
+        # reaches credential work at all (it fails the subscriber-limit
+        # check first, same as before).
+        self.assertEqual(self.credentials.call_count, 1)
         release.set()
         self.assertEqual(list(first), [b"ok"])
         self.assertEqual(generated, ["first"])
@@ -581,7 +602,14 @@ class AudioCoordinatorTimingTests(unittest.TestCase):
         if hasattr(self, "coordinator"):
             self.coordinator.close()
 
-    def test_subscribe_logs_validate_and_credential_gate_elapsed_ms(self):
+    def test_subscribe_logs_validate_elapsed_ms_but_no_longer_a_credential_gate(self):
+        """T12: subscribe()'s admission gate still revalidates the event
+        (needed for a clean synchronous rejection of an invalid/unauthorized
+        event -- see subscribe()'s own docstring-level comment), but no
+        longer performs its own separate credential resolve; only the
+        generation-time "AudioCoordinator generate: credential_elapsed_ms"
+        line (asserted by test_generation_start_logs_queue_wait_validate_and_
+        credential_elapsed_ms below) is emitted now."""
         def generate(_event, _config, _secret):
             yield b"ok"
 
@@ -593,12 +621,11 @@ class AudioCoordinatorTimingTests(unittest.TestCase):
         with self.assertLogs(event_audio_module._logger, level="WARNING") as observed:
             self.assertEqual(list(self.coordinator.subscribe(event, {})), [b"ok"])
 
-        validate_lines = [line for line in observed.output if "validate_elapsed_ms" in line]
-        credential_lines = [line for line in observed.output if "credential_gate_elapsed_ms" in line]
+        validate_lines = [line for line in observed.output if "AudioCoordinator subscribe: validate_elapsed_ms" in line]
+        credential_gate_lines = [line for line in observed.output if "credential_gate_elapsed_ms" in line]
         self.assertGreaterEqual(len(validate_lines), 1)
-        self.assertGreaterEqual(len(credential_lines), 1)
+        self.assertEqual(credential_gate_lines, [])
         self.assertNotIn("timing-one", validate_lines[0])
-        self.assertNotIn("timing-one", credential_lines[0])
 
     def test_subscribe_logs_validate_elapsed_ms_even_when_validation_raises(self):
         def raising_validator(_event):

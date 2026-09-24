@@ -339,15 +339,27 @@ class AudioCoordinator:
             state.subscribers += 1
             self.total_subscribers += 1
 
+        # T12: no separate admission-time credential resolve here anymore.
+        # It only ever fail-fast-probed "is the local secret store readable
+        # right now" (never Gemini's own reachability -- resolve_credential
+        # never calls the provider) and its result was always discarded, so
+        # it was a pure duplicate of the SAME protected-store read (ACL
+        # check plus a fresh sqlite3.connect(), per T10 unit 1's finding)
+        # _run() below already performs, once, immediately before
+        # generation -- which is also the read that must stay fresh for a
+        # job that waited in queue (see test_queued_work_reads_replacement_
+        # credential_at_dequeue), so it cannot be the one removed instead.
+        # Trade-off: a request submitted while Gemini credentials are
+        # entirely unconfigured/unreadable no longer gets an immediate
+        # 503 GEMINI_CREDENTIAL_UNAVAILABLE from subscribe() itself; it is
+        # admitted and fails once its generation attempt starts (still
+        # rejected, just surfaced as a stream failure instead of a
+        # synchronous JSON error). This is judged acceptable because Gemini
+        # configuration is an admin-side, session-independent condition
+        # already surfaced separately (the /health endpoint's
+        # providerStatus and the admin credential UI), not a per-request
+        # authorization decision.
         try:
-            credential_gate_start = self.clock()
-            try:
-                self.resolve_credential()
-            finally:
-                _logger.warning(
-                    "AudioCoordinator subscribe: credential_gate_elapsed_ms=%d",
-                    round((self.clock() - credential_gate_start) * 1000),
-                )
             with self.lock:
                 if self.closed:
                     raise AudioCapacityError("VOICE_COORDINATOR_CLOSED")

@@ -731,6 +731,14 @@ def resolve_voice_event(event_id, capability="", http=None):
     # route handler, once in AudioCoordinator.subscribe's admission
     # validation, once again in its worker thread right before generation),
     # so its own elapsed time is logged on every call, success or failure.
+    # T12 evaluated removing one of the two AudioCoordinator-internal calls
+    # but kept both: admission's revalidation is what lets a genuinely
+    # invalid/unauthorized event map to a clean synchronous 404/401 instead
+    # of a mid-stream failure (Flask has already committed the streaming
+    # response's 200 status by the time a generator first yields), and the
+    # worker's revalidation is what protects a job that waited in the queue
+    # (see event_audio.py's own comment on subscribe() for the credential
+    # resolve, which WAS safely reduced from 2x to 1x for the same request).
     resolve_start = time.monotonic()
     try:
         request_options = {
