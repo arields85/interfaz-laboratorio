@@ -324,17 +324,117 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   Commit: `fix(prisma): separate Channel A poll retry state from reconnect backoff`.
 - [x] **T9 — Orb/audio misses: closed by T6.** In the T6 live test the orb and audio appeared on
   every voice answer; no separate fix needed.
-- [ ] **T10 — HMI voice first-audio latency, part 1 (user-approved plan, 2026-09-23).** User goal:
-  spoken answers as close to instant as possible. Current path (read-only map): event published in
-  0 ms → HMI 1 s poll → orb shown → POST `/prisma/speak-live` → new `genai.Client` per request
-  (`gemini_credentials.py:84-98`) → `client.interactions.create(stream=True)` with
-  `gemini-3.1-flash-tts-preview` and ~45 lines of inline style notes (`build_tts_prompt`,
+- [ ] **T10 — HMI voice first-audio latency, part 1 (user-approved plan, 2026-09-23). PARTIAL: units
+  1-4 done, unit 5 blocked.** User goal: spoken answers as close to instant as possible. Current path
+  (read-only map): event published in 0 ms → HMI 1 s poll → orb shown → POST `/prisma/speak-live` →
+  new `genai.Client` per request (`gemini_credentials.py:84-98`) → `client.interactions.create(stream=
+  True)` with `gemini-3.1-flash-tts-preview` and ~45 lines of inline style notes (`build_tts_prompt`,
   `voice_service.py:305-351`) → first chunk 2.3–6.7 s (first request slowest). The old `C:\hmi_tts`
-  local mode was identical (no warm-up, no prefetch). Scope: split timing (credential resolve /
-  client build / Gemini time-to-first-byte / our processing; event publish vs speak-live received),
-  persistent warm client + boot warm-up (invalidate on credential change), server-side synthesis
-  started at answer time keyed by event id (reuse `AudioCoordinator`, `event_audio.py`), exact-text
-  audio cache, push events to the HMI instead of 1 s polling.
+  local mode was identical (no warm-up, no prefetch).
+  - Route: delegated writer (multi-file, behavior-changing work across `voice_service.py`,
+    `gemini_credentials.py`, `event_audio.py`, `local_presentation.py` and their tests). Strict TDD
+    observed for every unit (RED confirmed before each implementation, GREEN after).
+  - **Unit 1 — split timing** (2026-09-23, commit `163435d`, extended by commit `5ded8a3` after new
+    evidence). Evidence: `voice_service.py` `get_gemini_client` logs `Prisma Gemini client:
+    resolve_elapsed_ms=%d build_elapsed_ms=%d` (later `reused=%s`, unit 2); `_generate_interactions_
+    tts_audio` logs `Prisma Gemini TTS: time_to_first_byte_ms=%d` (stream request → first Gemini
+    delta) and `first_yield_processing_elapsed_ms=%d` (first delta → first yielded post-DSP chunk,
+    covering S16LE assembler accumulation + DSP); `prisma_speak_live` logs `Prisma speak-live:
+    event_publish_to_received_ms=%s`, computed from the voice event's own `timestamp` field (not a
+    hash-correlation scheme — simpler, cross-process-safe via wall clock, one number instead of two
+    log lines to grep and subtract; documented in code). New tests in `test_voice_service.py`
+    (`test_get_gemini_client_logs_...`, `test_stream_logs_time_to_first_byte_...`, `test_speak_live_
+    logs_event_publish_to_received_delta_...`, `test_speak_live_logs_none_delta_when_...`).
+    Follow-up (2026-09-23): a standalone benchmark outside the repo (same key/model/voice/prompt,
+    `interactions.create(stream=True)`) measured median Gemini TTFB ~1.31 s (0.89-1.71 s over 6 runs)
+    against the runtime's own logged 2.3-6.7 s for the same kind of request — most of the gap is in
+    OUR pipeline, not Gemini. Instrumented every synchronous step before the Gemini call: found
+    `resolve_voice_event` (HTTP call to the presentation process) and `gemini_credentials.resolve()`
+    (protected-store secret resolve) are each called **redundantly up to 3x and 2x per single voice
+    request** — once in `prisma_speak_live()`'s own handler, once in `AudioCoordinator.subscribe()`'s
+    admission validation/credential gate, once again in its worker thread right before generation
+    (`event_audio.py` `subscribe()`/`_run()`, confirmed by reading the code: `subscribe()` calls
+    `self.event_validator(...)` and `self.resolve_credential()` once each before queueing, then `_run()`
+    calls both again before calling `self.generate(...)`). Added `_logger` to `event_audio.py` and new
+    log lines: `AudioCoordinator subscribe: validate_elapsed_ms=%d` / `credential_gate_elapsed_ms=%d`,
+    `AudioCoordinator generate: queue_wait_ms=%d` / `validate_elapsed_ms=%d` / `credential_elapsed_ms=
+    %d`; `voice_service.py` `resolve_voice_event` logs `Prisma voice event resolve: elapsed_ms=%d`
+    (every call, success or failure) and `_create_interactions_tts_job` logs `Prisma TTS job create:
+    elapsed_ms=%d telegram=%s`. New tests in `test_event_audio.py` (`AudioCoordinatorTimingTests`, 3
+    tests) and `test_voice_service.py` (4 tests). **Not fixed in T10** (reported per the coordinator's
+    request, out of the 5 planned units, T11 owns TTS call-style changes): the redundant
+    `resolve_voice_event`/`resolve_credential` calls are themselves a real, well-evidenced latency
+    cost (each resolve does filesystem ACL checks via `SecureStoragePermissions.verify`, a symlink-safe
+    path walk in `validate_key_path`, and opens a fresh unpooled `sqlite3.connect()` — see
+    `credential_store.py` `CredentialService._cipher`/`_connection`/`get_secret`, called 2x per request
+    even after T10's own warm-client fix, since `AudioCoordinator`'s own two `resolve_credential()`
+    calls are separate from `get_gemini_client`'s). Eliminating the duplication would need an
+    `AudioCoordinator` behavior change (its admission-then-generation double-validate/double-resolve
+    design) beyond this unit's scope — flagged for a future task. Full suite green after both commits
+    (1376, then 1390 passed).
+  - **Unit 2 — persistent warm Gemini client** (2026-09-23, commit `98b2f1b`). Evidence:
+    `gemini_credentials.py` new `WarmGeminiClient` — builds the SDK client once, reuses it across
+    requests (thread-safe, double-checked rebuild), invalidates implicitly by comparing a SHA-256 hash
+    of the freshly resolved secret on every call (no cross-process signal needed since credential
+    resolution already re-reads the store/env each time; only the hash is retained, never the secret).
+    Decided NOT to perform a real synthesis at boot (costs one Gemini API call per process start with
+    no measurement benefit) — only pre-builds the client object, documented in `WarmGeminiClient.
+    warm_up`'s docstring. `voice_service.py` `main()` starts a daemon thread
+    (`_warm_up_gemini_client_in_background`) before `app.run(...)`, never blocking startup/health.
+    Cancellation and normal completion no longer close the shared client (only the per-request stream);
+    removed the now-dead `_close_gemini_client` helper. New tests: `WarmGeminiClientTests` (7 tests
+    incl. a 4-thread race test asserting no two live clients) in `test_gemini_credentials.py`;
+    `test_generate_interactions_tts_audio_never_closes_the_warm_client` plus 2 updated close-count
+    assertions in `test_voice_service.py`. Full suite green (1384 passed).
+  - **Unit 4 — exact-text audio cache** (2026-09-23, commit `691ab1d`; note: done before unit 3 below,
+    since it only needed unit 2's warm-client secret hash, not unit 3's prefetch). Evidence:
+    `voice_service.py` new `VoiceAudioCache` — bounded LRU by both entry count and total bytes,
+    thread-safe; keyed by `_voice_audio_cache_key(job)` on exact transcript text + voice/DSP config +
+    the fixed `TTS_MODEL`/`VOICE` constants + `_warm_gemini_client.current_secret_hash()` (new cheap
+    accessor, no forced resolve), so a credential rotation invalidates prior entries for free.
+    `_generate_interactions_tts_audio` checks the cache before any provider work; a hit replays
+    already-DSP-processed PCM and never calls Gemini (mirrors the same success/cancel/error cleanup as
+    the miss path); a miss stores the full generated PCM into the cache on successful completion. Test
+    isolation fix: cleared the module-level cache singleton in `VoiceServiceTests.setUp` (it's shared
+    across the whole test run, same as production). New tests: `VoiceAudioCacheTests`-equivalent cases
+    in `test_voice_service.py` (eviction by count+bytes, second identical request served from cache
+    without calling Gemini, different text/config is a miss, cache key changes with the secret hash)
+    plus `WarmGeminiClient.current_secret_hash` tests in `test_gemini_credentials.py`. Full suite green
+    (1395 passed).
+  - **Unit 3 — server-side prefetch at answer time** (2026-09-23, commit `b9cfc04`; scoped narrower
+    than planned). Evidence: presentation (`local_presentation.py`) fires a background, never-awaited
+    call (`_fire_voice_prefetch`, own daemon thread) to a new `POST /internal/prisma/prefetch` on the
+    voice service, right after `/local/ask` publishes its voice event, carrying that same request's own
+    session capability. The new route (`voice_service.py` `prisma_prefetch`) reuses the *exact* same
+    `resolve_voice_event` + `audio_coordinator.subscribe(...)` admission path, capability/session/auth
+    checks, and error taxonomy as `/prisma/speak-live`, then closes its subscription immediately.
+    Design finding that simplified this a lot: no separate TTL/reaper was needed for an abandoned
+    prefetch — `AudioCoordinator`'s existing per-event-id dedup and shared buffered-generation replay
+    (already covered by `test_event_audio.py`'s multi-subscriber tests) means the buffered audio just
+    sits under the event's own existing `expiresAt`/capacity-eviction rules, identical to any other
+    completed generation with zero current subscribers; a later real `/prisma/speak-live` subscribe
+    attaches to the same in-flight-or-buffered generation instead of duplicating it. **Scoped to the
+    `/local/ask` HMI path only** — the Channel A on-outcome publish site (`channel_a_on_outcome` in
+    `local_presentation.py`) has no live browser request/capability in hand at publish time (it is an
+    async Telegram outcome callback, not a request handler), so minting or looking up a capability for
+    it would need new machinery beyond this unit; left as a named follow-up, not silently dropped. New
+    tests: `test_voice_service.py` (4: capability required, malformed body, admits-then-closes,
+    error-taxonomy parity with speak-live) and `test_local_presentation.py` (3: `/local/ask` fires the
+    prefetch on a background thread without delaying its own response, using a `threading.Event` for
+    deterministic synchronization; `_fire_voice_prefetch` posts the right payload; swallows every
+    exception). Full suite green (1402 passed).
+  - **Unit 5 — push events to the HMI instead of 1 s polling: NOT DONE, blocked.** This writer's brief
+    explicitly forbids starting/stopping the runtime/launcher. Unit 5's own acceptance bar includes
+    "verify proxy buffering does not delay SSE" through the real Vite dev-server proxy (5173 → 5056/
+    5057) and preserving the orb/audio experience T6 just verified working live with the user — neither
+    is something a static code read or a Flask/vitest unit test can confirms; the closest a headless
+    unit test could get is asserting response headers and generator behavior, not that `http-proxy`
+    (Vite's proxy middleware) actually streams chunks through without buffering, which is exactly the
+    kind of environment-specific behavior this task named as a risk. Stopped here per the task's own
+    guidance ("especially 3 or 5... stop... report partial") rather than shipping a change to the live
+    voice-orb path that cannot be verified end-to-end by this writer. Recommended next step: a
+    follow-up pass that runs with the launcher available, implements the SSE endpoint + listener with
+    the same TDD rigor as units 1-4, and does one live proxy check before calling it done.
 - [ ] **T11 — Near-instant voice, part 2 (research done; benchmark awaits user authorization).**
   Research (2026-09-23, sources in the session report): community reports that
   `gemini-3.1-flash-tts-preview` via `interactions.create(stream=True)` is much slower than
@@ -374,11 +474,33 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   behavior-changing work across channel_a_bot.py, channel_a_transport.py, channel_a_manager.py and
   their tests; touched only `services/prisma-runtime` and this doc, concurrently with a read-only
   verifier working in `hmi-app`).
+- 2026-09-23: T10 writer ran units 1-4 of the user-approved plan (split timing, persistent warm
+  Gemini client, exact-text audio cache, server-side prefetch scoped to `/local/ask`), each with
+  strict TDD (RED confirmed before every implementation) and a green full prisma-runtime suite after
+  every commit (`163435d`, `5ded8a3`, `98b2f1b`, `691ab1d`, `b9cfc04`; suite grew 1376 → 1390 → 1384 →
+  1395 → 1402 as units landed — note unit ordering in the commits differs slightly from the plan's
+  listed order: unit 2 before the unit-1 follow-up's full count, unit 4 before unit 3, since unit 4
+  only needed unit 2's secret hash, not unit 3's prefetch). Mid-task, new user-supplied evidence (a
+  standalone Gemini benchmark showing ~1.3s median TTFB vs the runtime's 2.3-6.7s) prompted expanding
+  unit 1 to instrument the full pre-Gemini pipeline, which surfaced a real, unfixed finding: up to 3x/
+  2x redundant `resolve_voice_event`/credential-resolve calls inside `AudioCoordinator.subscribe()`/
+  `_run()` (see unit 1's evidence above) — flagged for a future task, not fixed here (out of T10's 5
+  planned units). Unit 5 (SSE push) was not attempted: this writer's brief forbade starting/stopping
+  the runtime/launcher, and unit 5's own bar requires a live Vite-proxy verification no static
+  read or headless test can substitute for. T10 stays unchecked (partial); see unit 5's evidence
+  entry above for the recommended follow-up. Route: delegated writer (multi-file, behavior-changing
+  work across `voice_service.py`, `gemini_credentials.py`, `event_audio.py`, `local_presentation.py`
+  and their tests; touched only `services/prisma-runtime` and this doc).
 
 ## Next step
 
-Next: T10 writer (voice latency part 1); T11 benchmark once the user authorizes it. In parallel,
-**user manual check of T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
+Next: live measurement with the user comparing HMI voice first-audio latency before/after T10 units
+1-4 (the new `Prisma Gemini TTS: time_to_first_byte_ms=`, `Prisma TTS cache:`, and the other new T10
+log lines are what to read for that comparison); a follow-up pass for T10 unit 5 (SSE push), run with
+the launcher available so the Vite proxy can be checked live; T11 benchmark once the user authorizes
+it. Also recommended but not part of T10's 5 units: resolve the redundant `resolve_voice_event`/
+credential-resolve calls found in `AudioCoordinator` (see T10 unit 1's evidence). In parallel, **user
+manual check of T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
 - **T2**: pair a phone via QR; the confirmation prompt should read "Está a un paso: confirme y
   Prisma responderá sus consultas en este chat." (no "documento").
 - **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
