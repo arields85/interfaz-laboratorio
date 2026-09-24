@@ -84,7 +84,6 @@ describe('createPrismaVoiceTtsAudioSource', () => {
 
         const live = await source.openLive(signal);
 
-        expect(source.playbackTransport).toBe('progressive');
         expect(source.loadWav).toBeUndefined();
         expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/prisma/tts/live', {
             method: 'POST',

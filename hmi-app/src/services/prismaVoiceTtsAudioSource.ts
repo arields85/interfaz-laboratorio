@@ -25,7 +25,6 @@ export function createPrismaVoiceTtsAudioSource(
     fetchImpl?: typeof fetch,
 ): PrismaVoiceAudioSource {
     return {
-        playbackTransport: 'progressive',
         async openLive(signal) {
             const eventId = request.eventId.trim();
             if (!eventId) {

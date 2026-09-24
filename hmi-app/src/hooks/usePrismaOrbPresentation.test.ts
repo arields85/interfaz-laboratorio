@@ -88,7 +88,7 @@ const EVENT: VoiceEvent = {
     text: 'Unified response',
     question: 'Unified question',
 };
-const SOURCE: PrismaVoiceAudioSource = { playbackTransport: 'progressive', openLive: vi.fn() };
+const SOURCE: PrismaVoiceAudioSource = { openLive: vi.fn() };
 
 interface FakeOrbAudioTarget { level: number; setSpeaking: ReturnType<typeof vi.fn> }
 

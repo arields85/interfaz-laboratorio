@@ -37,7 +37,7 @@ class MockLedaOrb extends HTMLElement {
 if (!customElements.get('leda-orb')) customElements.define('leda-orb', MockLedaOrb);
 
 const EVENT: VoiceEvent = { id: 'voice-2', timestamp: '2026-08-06T12:00:01.000Z', text: 'Current response', question: 'Current question' };
-const SOURCE: PrismaVoiceAudioSource = { playbackTransport: 'progressive', openLive: vi.fn() };
+const SOURCE: PrismaVoiceAudioSource = { openLive: vi.fn() };
 
 interface HarnessHandle { presentVoiceEvent: (event: VoiceEvent) => void }
 

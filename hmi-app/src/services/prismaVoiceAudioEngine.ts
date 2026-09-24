@@ -13,26 +13,13 @@ import type {
     PrismaBrowserMetricSink,
 } from './prismaVoiceMetrics';
 import type { PrismaAudioMetricPayload } from '../domain/prismaAudioMetric.types';
-import prismaPcmAudioWorkletUrl from './prismaPcmAudioWorklet.ts?worker&url';
-import {
-    PcmS16LeChunkParser,
-    PrismaLocalPlaybackError,
-    decidePrismaLocalPlaybackStart,
-} from './prismaLocalAudioPlayback';
 import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
-import { PRISMA_PCM_WORKLET_PROCESSOR_NAME } from './prismaPcmWorkletBuffer';
 import { PRISMA_PREBUFFER_SCHEDULING_MARGIN_MS, PrismaPrebufferNeedTracker } from './prismaPrebufferNeedTracker';
 import { PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS } from './prismaVoicePrebufferEstimator';
 import type { PrismaAudioMetricPrebufferMode } from '../domain/prismaAudioMetric.types';
 
 export const PRISMA_PCM_SAMPLE_RATE = PRISMA_PCM_AUDIO_FORMAT.sampleRate;
 export const PRISMA_PCM_BLOCK_SAMPLES = 1_800;
-// Two minutes is a generous MVP answer ceiling while bounding retained Local PCM to 5,760,000 bytes.
-export const PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS = 120;
-export const PRISMA_LOCAL_PCM_MAX_BYTES = PRISMA_PCM_SAMPLE_RATE
-    * PRISMA_PCM_AUDIO_FORMAT.channels
-    * PRISMA_PCM_AUDIO_FORMAT.bytesPerSample
-    * PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS;
 // T3: fallback/default prebuffer (ms), used before the first block (and after
 // any underflow) only when no `prebufferPolicy` dependency is injected --
 // unit tests, or a caller that has not wired Automatic/Manual mode yet. When
@@ -44,8 +31,6 @@ export const PRISMA_LOCAL_PCM_MAX_BYTES = PRISMA_PCM_SAMPLE_RATE
 const PRISMA_PCM_PLAYBACK_LEAD_MS = PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS;
 // Larger device buffer: voice playback tolerates latency better than render-thread underruns under UI load.
 const PRISMA_PLAYBACK_CONTEXT_OPTIONS: AudioContextOptions = { latencyHint: 'playback' };
-
-export type PrismaVoicePlaybackTransport = 'progressive' | 'buffer-before-playback';
 
 export type PrismaVoiceAudioDiagnostic = PrismaBrowserMetric;
 
@@ -61,7 +46,6 @@ export interface PrismaVoicePcmStream {
 }
 
 export interface PrismaVoiceAudioSource {
-    playbackTransport: PrismaVoicePlaybackTransport;
     openLive(signal: AbortSignal): Promise<PrismaVoicePcmStream>;
     loadWav?: (signal: AbortSignal) => Promise<ArrayBuffer>;
 }
@@ -93,11 +77,10 @@ export interface PrismaVoicePrebufferResolution {
  * changes) -- see `ActivePlayback.prebufferMs`/`prebufferMode`.
  * `recordNeededPrebufferMs()` is called exactly once, only when a
  * progressive answer completes normally (see `completeLiveIfFinished()`):
- * never for a stopped/cancelled/errored answer and never for the
- * buffer-before-playback transport, which cannot measure per-block arrival
- * (T1). The engine never branches on `mode` itself -- a Manual-mode policy
- * (T4) still receives this call ("still measured and logged", per the
- * feature design) and decides internally whether/how to use it.
+ * never for a stopped/cancelled/errored answer. The engine never branches on
+ * `mode` itself -- a Manual-mode policy (T4) still receives this call
+ * ("still measured and logged", per the feature design) and decides
+ * internally whether/how to use it.
  */
 export interface PrismaVoicePrebufferPolicy {
     resolvePrebufferMs(): PrismaVoicePrebufferResolution;
@@ -126,11 +109,6 @@ export interface PrismaVoiceAudioEngineContract {
 
 export interface PrismaVoiceAudioEngineDependencies {
     createAudioContext?: (options?: AudioContextOptions) => AudioContext;
-    createAudioWorkletNode?: (
-        context: AudioContext,
-        name: string,
-        options: AudioWorkletNodeOptions,
-    ) => AudioWorkletNode;
     requestAnimationFrame?: (callback: FrameRequestCallback) => number;
     cancelAnimationFrame?: (handle: number) => void;
     setTimeout?: (callback: () => void, delay: number) => number;
@@ -152,8 +130,6 @@ interface ActivePlayback {
     lifecycle: VoicePlaybackLifecycle;
     reader: ReadableStreamDefaultReader<Uint8Array> | null;
     sourceNodes: Set<AudioBufferSourceNode>;
-    workletNode: AudioWorkletNode | null;
-    workletProcessorErrorHandler: EventListener | null;
     analyser: AnalyserNode | null;
     animationFrame: number | null;
     playbackTimer: number | null;
@@ -167,14 +143,11 @@ interface ActivePlayback {
     pcmDurationSeconds: number;
     underflowCount: number;
     canonicalDecodeEmitted: boolean;
-    localStartCommandSent: boolean;
     lastMetricAt: number;
     mode: 'live' | 'fallback';
     metricSequence: number;
-    // T1: only handleProgressiveBlock (used by the progressive transport
-    // only) ever calls recordBlockArrival -- the buffer-before-playback
-    // worklet transport is out of scope for this measurement (see the
-    // feature document), so the tracker stays harmless and unused there.
+    // T1: handleProgressiveBlock calls recordBlockArrival for every block of
+    // the (now only) progressive transport.
     prebufferNeedTracker: PrismaPrebufferNeedTracker;
     // T3: snapshotted once at play() time from the injected
     // `prebufferPolicy` (or the fixed fallback when none is injected) --
@@ -307,11 +280,6 @@ function isAudioContextRunning(context: AudioContext): boolean {
 
 export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     private readonly createAudioContext: (options?: AudioContextOptions) => AudioContext;
-    private readonly createAudioWorkletNode: (
-        context: AudioContext,
-        name: string,
-        options: AudioWorkletNodeOptions,
-    ) => AudioWorkletNode;
     private readonly requestFrame: (callback: FrameRequestCallback) => number;
     private readonly cancelFrame: (handle: number) => void;
     private readonly setTimer: (callback: () => void, delay: number) => number;
@@ -323,25 +291,20 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     private readonly levelPolicy: AudioLevelPolicy;
     private readonly prebufferPolicy: PrismaVoicePrebufferPolicy | null;
     private context: AudioContext | null = null;
-    private localWorkletContext: AudioContext | null = null;
-    private workletModuleContext: AudioContext | null = null;
-    private workletModulePromise: Promise<void> | null = null;
     private active: ActivePlayback | null = null;
     private generation = 0;
     // T21: the in-flight (or most recently settled) resume attempt, shared
     // between `warmAudioContext()` and `ensureContextRunning()` so a resume
     // already started at voice-event receipt is awaited once, never
     // re-triggered when the first PCM block is ready to schedule.
-    // `contextResumePromiseContext` records which of the two AudioContexts
-    // (`this.context` vs. `this.localWorkletContext`) that promise belongs
-    // to, so a resume for one is never mistakenly reused for the other.
+    // `contextResumePromiseContext` records which AudioContext instance that
+    // promise belongs to, so a resume for a context created after dispose()
+    // is never mistakenly reused for a stale, already-closed one.
     private contextResumePromise: Promise<void> | null = null;
     private contextResumePromiseContext: AudioContext | null = null;
 
     public constructor(dependencies: PrismaVoiceAudioEngineDependencies = {}) {
         this.createAudioContext = dependencies.createAudioContext ?? createBrowserAudioContext;
-        this.createAudioWorkletNode = dependencies.createAudioWorkletNode
-            ?? ((context, name, options) => new AudioWorkletNode(context, name, options));
         this.requestFrame = dependencies.requestAnimationFrame
             ?? ((callback) => window.requestAnimationFrame(callback));
         this.cancelFrame = dependencies.cancelAnimationFrame
@@ -382,8 +345,6 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             lifecycle,
             reader: null,
             sourceNodes: new Set(),
-            workletNode: null,
-            workletProcessorErrorHandler: null,
             analyser: null,
             animationFrame: null,
             playbackTimer: null,
@@ -397,7 +358,6 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             pcmDurationSeconds: 0,
             underflowCount: 0,
             canonicalDecodeEmitted: false,
-            localStartCommandSent: false,
             lastMetricAt: -Infinity,
             mode: 'live',
             metricSequence: 0,
@@ -410,19 +370,11 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         this.active = active;
         this.emitDiagnostic(active, { record_type: 'request-start', payload: {} });
 
-        // T21: warm the shared progressive-playback AudioContext in
-        // parallel with the live request below, instead of only
-        // discovering it needs a resume once the first PCM block is ready
-        // to schedule (previously ~0.4 s after the first audio chunk on the
-        // first answer after startup). Scoped to the 'progressive' transport
-        // only -- the only one HMI voice actually uses
-        // (prismaVoiceTtsAudioSource.ts) -- so this never pre-creates the
-        // plain `getAudioContext()` instance for a 'buffer-before-playback'
-        // request, which needs its own, differently-configured
-        // `getLocalWorkletContext()` instead.
-        if (source.playbackTransport === 'progressive') {
-            this.warmAudioContext();
-        }
+        // T21: warm the shared AudioContext in parallel with the live
+        // request below, instead of only discovering it needs a resume once
+        // the first PCM block is ready to schedule (previously ~0.4 s after
+        // the first audio chunk on the first answer after startup).
+        this.warmAudioContext();
 
         void this.startPlayback(source, active);
     }
@@ -446,25 +398,20 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
     public dispose(): void {
         this.stop();
-        const contexts = new Set([this.context, this.localWorkletContext]);
+        const context = this.context;
         this.context = null;
-        this.localWorkletContext = null;
-        this.workletModuleContext = null;
-        this.workletModulePromise = null;
         // T21: an in-flight resume belongs to whichever context is being
         // disposed; never reused against a context created after dispose.
         this.contextResumePromise = null;
         this.contextResumePromiseContext = null;
 
-        for (const context of contexts) {
-            if (context && context.state !== 'closed') {
-                try {
-                    void context.close().catch((error: unknown) => {
-                        this.warn('Prisma voice AudioContext close failed.', error);
-                    });
-                } catch (error) {
+        if (context && context.state !== 'closed') {
+            try {
+                void context.close().catch((error: unknown) => {
                     this.warn('Prisma voice AudioContext close failed.', error);
-                }
+                });
+            } catch (error) {
+                this.warn('Prisma voice AudioContext close failed.', error);
             }
         }
     }
@@ -474,7 +421,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         active: ActivePlayback,
     ): Promise<void> {
         try {
-            await this.playLive(source, active);
+            await this.playProgressiveLive(source, active);
         } catch (error) {
             if (!this.isCurrent(active)) {
                 return;
@@ -496,15 +443,6 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
             this.failActive(active, error);
         }
-    }
-
-    private async playLive(source: PrismaVoiceAudioSource, active: ActivePlayback): Promise<void> {
-        if (source.playbackTransport === 'buffer-before-playback') {
-            await this.playLocalWorklet(source, active);
-            return;
-        }
-
-        await this.playProgressiveLive(source, active);
     }
 
     private async playProgressiveLive(
@@ -595,139 +533,12 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         }
         const blockDurationMs = (block.length / sampleRate) * 1_000;
         active.prebufferNeedTracker.recordBlockArrival(blockArrivalMs, blockDurationMs);
-        this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, block.length / sampleRate);
+        this.emitCanonicalDecode(active, active.pcmBytes, block.length / sampleRate);
         await this.schedulePcmBlock(block, sampleRate, active);
-    }
-
-    private async playLocalWorklet(
-        source: PrismaVoiceAudioSource,
-        active: ActivePlayback,
-    ): Promise<void> {
-        const requestStartedAt = this.now();
-        active.liveRequestStarted = true;
-        this.log('Prisma Live request started');
-        const stream = await source.openLive(active.abortController.signal);
-        if (!this.isCurrent(active)) {
-            cancelReader(stream.reader);
-            return;
-        }
-
-        active.reader = stream.reader;
-        if (stream.sampleRate !== PRISMA_PCM_AUDIO_FORMAT.sampleRate
-            || stream.channels !== PRISMA_PCM_AUDIO_FORMAT.channels) {
-            throw new Error('Prisma Live stream has unsupported PCM metadata');
-        }
-
-        const context = this.getLocalWorkletContext();
-        await this.ensureContextRunning(context, active);
-        if (!this.isCurrent(active)) {
-            return;
-        }
-        await this.prepareLocalWorklet(context, active);
-        if (!this.isCurrent(active)) {
-            return;
-        }
-
-        const parser = new PcmS16LeChunkParser();
-        let totalBytes = 0;
-        let totalSamples = 0;
-        while (this.isCurrent(active)) {
-            const result = await stream.reader.read();
-            if (!this.isCurrent(active)) {
-                return;
-            }
-            if (result.done) {
-                break;
-            }
-            if (result.value.byteLength === 0) {
-                continue;
-            }
-            if (result.value.byteLength > PRISMA_LOCAL_PCM_MAX_BYTES - totalBytes) {
-                throw new Error(
-                    `Prisma Live stream exceeds the ${PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS}-second Local PCM limit`,
-                );
-            }
-
-            totalBytes += result.value.byteLength;
-            active.pcmBytes = totalBytes;
-            const samples = parser.push(result.value);
-            if (!samples) {
-                continue;
-            }
-
-            totalSamples += samples.length;
-            active.pcmDurationSeconds = totalSamples / stream.sampleRate;
-            if (!active.firstAudioReceived) {
-                active.firstAudioReceived = true;
-                const elapsedMs = this.now() - requestStartedAt;
-                this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
-                this.emitDiagnostic(active, {
-                    record_type: 'first-readable-audio',
-                    payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
-                });
-            }
-            this.emitCanonicalDecode(
-                active,
-                'buffer-before-playback',
-                totalBytes,
-                active.pcmDurationSeconds,
-            );
-            this.enqueueLocalSamples(active, samples);
-
-            const decision = decidePrismaLocalPlaybackStart({
-                bufferedSamples: totalSamples,
-                endOfStream: false,
-                sampleRate: stream.sampleRate,
-            });
-            if (decision === 'start-at-target') {
-                this.sendLocalStart(active);
-            }
-        }
-        if (!this.isCurrent(active)) {
-            return;
-        }
-        totalSamples = parser.finish();
-        if (totalSamples === 0) {
-            throw new Error('Prisma Live stream contained no complete PCM samples');
-        }
-
-        active.reader = null;
-        releaseReader(stream.reader);
-        active.streamCompleted = true;
-        active.pcmDurationSeconds = totalSamples / stream.sampleRate;
-        const bufferingElapsedMs = this.now() - requestStartedAt;
-        this.log('Prisma Live stream completed');
-        this.emitDiagnostic(active, {
-            record_type: 'eof',
-            payload: {
-                elapsed_ms: bufferingElapsedMs,
-                transport: 'buffer-before-playback',
-                pcm_bytes: totalBytes,
-                pcm_duration_seconds: active.pcmDurationSeconds,
-            },
-        });
-        this.emitDiagnostic(active, {
-            record_type: 'buffering-complete',
-            payload: {
-                elapsed_ms: bufferingElapsedMs,
-                pcm_bytes: totalBytes,
-                pcm_duration_seconds: active.pcmDurationSeconds,
-            },
-        });
-        active.workletNode?.port.postMessage({ type: 'end' });
-        const decision = decidePrismaLocalPlaybackStart({
-            bufferedSamples: totalSamples,
-            endOfStream: true,
-            sampleRate: stream.sampleRate,
-        });
-        if (decision === 'start-at-eof') {
-            this.sendLocalStart(active);
-        }
     }
 
     private emitCanonicalDecode(
         active: ActivePlayback,
-        transport: PrismaVoicePlaybackTransport,
         pcmBytes: number,
         pcmDurationSeconds: number,
     ): void {
@@ -740,159 +551,11 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             record_type: 'canonical-decode',
             payload: {
                 elapsed_ms: this.elapsedMs(active),
-                transport,
+                transport: 'progressive',
                 pcm_bytes: pcmBytes,
                 pcm_duration_seconds: pcmDurationSeconds,
             },
         });
-    }
-
-    private async prepareLocalWorklet(
-        context: AudioContext,
-        active: ActivePlayback,
-    ): Promise<void> {
-        await this.ensureLocalWorkletModule(context);
-        if (!this.isCurrent(active)) {
-            return;
-        }
-
-        const node = this.createAudioWorkletNode(
-            context,
-            PRISMA_PCM_WORKLET_PROCESSOR_NAME,
-            {
-                numberOfInputs: 0,
-                numberOfOutputs: 1,
-                outputChannelCount: [PRISMA_PCM_AUDIO_FORMAT.channels],
-                channelCount: PRISMA_PCM_AUDIO_FORMAT.channels,
-            },
-        );
-        active.workletNode = node;
-        node.port.onmessage = (event: MessageEvent<unknown>) => {
-            if (!this.isCurrent(active) || active.workletNode !== node) {
-                return;
-            }
-            const message = event.data;
-            if (!message || typeof message !== 'object' || !('type' in message)) {
-                return;
-            }
-
-            if (message.type === 'started') {
-                this.handleLocalWorkletStarted(active);
-            } else if (message.type === 'ended') {
-                this.handleLocalWorkletEnded(active);
-            } else if (message.type === 'underflow') {
-                active.underflowCount += 1;
-                this.emitDiagnostic(active, {
-                    record_type: 'underflow',
-                    payload: { underflow_count: active.underflowCount },
-                });
-                this.failActive(
-                    active,
-                    new PrismaLocalPlaybackError('audio-worklet-underflow'),
-                );
-            }
-        };
-        const processorErrorHandler: EventListener = () => {
-            if (this.isCurrent(active) && active.workletNode === node) {
-                this.failActive(
-                    active,
-                    new PrismaLocalPlaybackError('audio-worklet-processor-error'),
-                );
-            }
-        };
-        active.workletProcessorErrorHandler = processorErrorHandler;
-        node.addEventListener('processorerror', processorErrorHandler);
-        node.connect(this.getAnalyser(context, active));
-    }
-
-    private async ensureLocalWorkletModule(context: AudioContext): Promise<void> {
-        if (!context.audioWorklet || typeof context.audioWorklet.addModule !== 'function') {
-            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
-        }
-
-        if (this.workletModuleContext !== context || !this.workletModulePromise) {
-            this.workletModuleContext = context;
-            this.workletModulePromise = context.audioWorklet.addModule(prismaPcmAudioWorkletUrl);
-        }
-
-        try {
-            await this.workletModulePromise;
-        } catch {
-            if (this.workletModuleContext === context) {
-                this.workletModuleContext = null;
-                this.workletModulePromise = null;
-            }
-            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
-        }
-    }
-
-    private enqueueLocalSamples(
-        active: ActivePlayback,
-        samples: Float32Array<ArrayBuffer>,
-    ): void {
-        const node = active.workletNode;
-        if (!node) {
-            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
-        }
-        node.port.postMessage(
-            { type: 'enqueue', samples },
-            [samples.buffer],
-        );
-    }
-
-    private sendLocalStart(active: ActivePlayback): void {
-        if (active.localStartCommandSent) {
-            return;
-        }
-        const node = active.workletNode;
-        if (!node) {
-            throw new PrismaLocalPlaybackError('audio-worklet-unavailable');
-        }
-        active.localStartCommandSent = true;
-        node.port.postMessage({ type: 'start' });
-    }
-
-    private handleLocalWorkletStarted(active: ActivePlayback): void {
-        if (!this.isCurrent(active) || active.playbackStarted) {
-            return;
-        }
-
-        active.playbackStarted = true;
-        active.firstPlaybackTime = this.localWorkletContext?.currentTime ?? null;
-        active.target.setSpeaking(true);
-        active.lifecycle.onStarted?.();
-        this.log('Prisma Live playback started');
-        this.emitDiagnostic(active, {
-            record_type: 'playback-started',
-            payload: {
-                elapsed_ms: this.elapsedMs(active),
-                transport: 'buffer-before-playback',
-                pcm_bytes: active.pcmBytes,
-                pcm_duration_seconds: active.pcmDurationSeconds,
-                underflow_count: active.underflowCount,
-            },
-        });
-        this.scheduleAnalysis(active);
-    }
-
-    private handleLocalWorkletEnded(active: ActivePlayback): void {
-        if (!this.isCurrent(active) || !active.streamCompleted) {
-            return;
-        }
-
-        this.log('Prisma Live playback completed');
-        this.emitDiagnostic(active, {
-            record_type: 'playback-ended',
-            payload: {
-                elapsed_ms: this.elapsedMs(active),
-                transport: 'buffer-before-playback',
-                pcm_bytes: active.pcmBytes,
-                pcm_duration_seconds: active.pcmDurationSeconds,
-                underflow_count: active.underflowCount,
-            },
-        });
-        this.cleanupActive('complete', false);
-        active.lifecycle.onEnded?.();
     }
 
     private async schedulePcmBlock(
@@ -1027,7 +690,6 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         active.nextPlaybackTime = 0;
         active.pcmDurationSeconds = 0;
         active.underflowCount = 0;
-        active.localStartCommandSent = false;
         active.target.level = 0;
         active.target.setSpeaking(false);
     }
@@ -1038,22 +700,6 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         }
 
         return this.context;
-    }
-
-    private getLocalWorkletContext(): AudioContext {
-        if (!this.localWorkletContext || this.localWorkletContext.state === 'closed') {
-            this.localWorkletContext = this.createAudioContext({
-                sampleRate: PRISMA_PCM_AUDIO_FORMAT.sampleRate,
-            });
-        }
-
-        if (this.localWorkletContext.sampleRate !== PRISMA_PCM_AUDIO_FORMAT.sampleRate) {
-            throw new Error(
-                `Prisma Local AudioContext sample rate mismatch: expected ${PRISMA_PCM_AUDIO_FORMAT.sampleRate} Hz, received ${this.localWorkletContext.sampleRate} Hz`,
-            );
-        }
-
-        return this.localWorkletContext;
     }
 
     private async ensureContextRunning(context: AudioContext, active: ActivePlayback): Promise<void> {
@@ -1172,11 +818,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
                 // PRISMA_PCM_PLAYBACK_LEAD_MS fallback when no
                 // prebufferPolicy is injected, or the policy's resolved
                 // value otherwise. needed_prebuffer_ms is measured
-                // independently of whichever lead was actually used. Only
-                // the progressive transport measures block arrivals, so
-                // only it reports these -- the worklet transport's
-                // playback-ended leaves them unset (optional in the
-                // schema).
+                // independently of whichever lead was actually used.
                 prebuffer_ms: active.prebufferMs,
                 needed_prebuffer_ms: neededPrebufferMs,
                 prebuffer_mode: active.prebufferMode,
@@ -1225,7 +867,6 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
     private hasLivePlaybackBegun(active: ActivePlayback): boolean {
         return active.playbackStarted
-            || active.localStartCommandSent
             || (active.firstPlaybackTime !== null
                 && this.context !== null
                 && this.context.currentTime >= active.firstPlaybackTime);
@@ -1248,24 +889,6 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             safeDisconnect(sourceNode);
         }
         active.sourceNodes.clear();
-        const workletNode = active.workletNode;
-        if (workletNode) {
-            workletNode.port.onmessage = null;
-            if (active.workletProcessorErrorHandler) {
-                workletNode.removeEventListener(
-                    'processorerror',
-                    active.workletProcessorErrorHandler,
-                );
-            }
-            try {
-                workletNode.port.postMessage({ type: 'reset' });
-            } catch {
-                // The processor port may already be closed after a processor error.
-            }
-            safeDisconnect(workletNode);
-        }
-        active.workletNode = null;
-        active.workletProcessorErrorHandler = null;
         safeDisconnect(active.analyser);
         active.analyser = null;
     }
