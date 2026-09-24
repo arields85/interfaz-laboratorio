@@ -201,6 +201,14 @@ COPY_UNLINK_CONFIRM_PROMPT = (
     "¿Confirma que desea desvincular este teléfono? Ya no recibirá respuestas de Prisma en este chat."
 )
 
+# T14: the always-visible Telegram menu entry (chat menu button + one
+# chat-scoped command), shown alongside the T3 persistent reply keyboard so
+# unlinking stays reachable even while the system keyboard hides it. The
+# description is the exact text Telegram shows next to the command in the
+# menu list.
+UNLINK_COMMAND = "desvincular"
+UNLINK_COMMAND_DESCRIPTION = "Desvincular este teléfono de la HMI"
+
 # One warning reservation is one *attempt*. A skipped, rejected or unknown
 # attempt is reported honestly and is never automatically retried or re-armed.
 WARNING_SKIPPED = "skipped"
@@ -246,6 +254,15 @@ _AUTHORITATIVE_LINK_FAILURES = (ChannelAPairingUnauthorized, ChannelAPairingStal
 # ``/start`` alone, or ``/start <payload>``. ``\Z`` keeps a trailing newline from
 # matching, and ``.`` does not cross a newline, so a multi-line body is unrelated.
 _START_PATTERN = re.compile(r"^/start(?:[ \t]+(?P<rest>.*))?\Z")
+# T14: ``/desvincular``, optionally with Telegram's own ``@<botname>``
+# disambiguation suffix (sent by some clients even in a private chat) and/or
+# trailing text, all ignored -- this command never carries a payload. The
+# suffix's own username is not checked against this bot's identity: a
+# private-chat update can only ever originate from this bot's own polling
+# stream (a different bot's commands never reach it), and the bot's own
+# username is not yet known when this dialogue is constructed (identity
+# discovery runs later, during activation).
+_UNLINK_COMMAND_PATTERN = re.compile(r"^/desvincular(?:@[A-Za-z0-9_]{5,32})?(?:[ \t].*)?\Z")
 _URLSAFE_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{" + str(OPAQUE_CHARS) + r"}\Z")
 _CALLBACK_DATA_PATTERN = re.compile(
     r"^(?P<action>"
@@ -318,6 +335,8 @@ __all__ = [
     "SEND_REJECTED",
     "SEND_UNKNOWN",
     "UNLINK_CANCELLED",
+    "UNLINK_COMMAND",
+    "UNLINK_COMMAND_DESCRIPTION",
     "UNLINK_PROMPT_DELIVERED",
     "UNLINK_PROMPT_REJECTED",
     "UNLINK_PROMPT_UNKNOWN",
@@ -358,6 +377,21 @@ class ChannelATextTransport(Protocol):
         """Signal a transient chat action (e.g. "typing") and return the raw
         response body (T4). Optional at runtime: a transport double that
         omits this method is tolerated -- see ``_typing``."""
+
+    def set_my_commands(self, *, chat_id: int, command: str, description: str) -> object:
+        """Publish one bot command scoped to exactly one chat and return the
+        raw response body (T14). Optional at runtime -- see
+        ``_set_unlink_menu``."""
+
+    def delete_my_commands(self, *, chat_id: int) -> object:
+        """Remove the chat-scoped command list for exactly one chat and
+        return the raw response body (T14). Optional at runtime -- see
+        ``_clear_unlink_menu``."""
+
+    def set_chat_menu_button(self, *, chat_id: int, button_type: str) -> object:
+        """Set or reset the chat menu button for exactly one chat and return
+        the raw response body (T14). Optional at runtime -- see
+        ``_set_unlink_menu``/``_clear_unlink_menu``."""
 
 
 @dataclass(frozen=True)
@@ -750,6 +784,14 @@ class ChannelAPairingDialogue:
                 return IngressOutcome(
                     update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True
                 )
+            if _UNLINK_COMMAND_PATTERN.match(text) is not None:
+                # T14: the Telegram menu entry's "/desvincular" routes to the
+                # SAME confirm-unlink flow as the persistent reply-keyboard
+                # button above -- never treated as a data query (this branch
+                # only runs for text starting with "/"), and gracefully
+                # ignored via _request_unlink's own INGRESS_IGNORED_UNRELATED
+                # when this chat has no live link.
+                return self._request_unlink(update_id, chat_id, actor_id)
             matched = _START_PATTERN.match(text)
             if matched is None:
                 # Ordinary text and every other command stay ignored on this path.
@@ -1203,6 +1245,11 @@ class ChannelAPairingDialogue:
             WELCOME_TEMPLATE.format(label=label),
             _unlink_reply_keyboard(),
         )
+        # T14: the always-visible Telegram menu entry complements the T3
+        # persistent reply keyboard above (Telegram hides a reply keyboard
+        # while the system keyboard is open, but not the chat menu button).
+        # Fire-and-forget, same as _typing -- never delays this response.
+        self._set_unlink_menu(actor_id)
         if delivery == SEND_REJECTED:
             kind = PAIRING_WELCOME_REJECTED
         elif delivery == SEND_UNKNOWN:
@@ -1285,6 +1332,10 @@ class ChannelAPairingDialogue:
         # T3: the only unlink path this module has -- remove the persistent
         # reply keyboard along with the unlink notice.
         delivery = self._send(actor_id, COPY_UNLINKED, _remove_reply_keyboard())
+        # T14: clear the per-chat menu entry along with the reply keyboard --
+        # same fire-and-forget shape as _set_unlink_menu, never delays this
+        # response.
+        self._clear_unlink_menu(actor_id)
         return IngressOutcome(
             update_id, VARIANT_CALLBACK, UNLINKED, True, delivery, acknowledged
         )
@@ -1482,6 +1533,84 @@ class ChannelAPairingDialogue:
                 pass
 
         threading.Thread(target=worker, name="ChannelATypingIndicator", daemon=True).start()
+
+    def _set_unlink_menu(self, chat_id) -> None:
+        """Best-effort, fire-and-forget Telegram menu entry for this chat (T14).
+
+        Publishes the chat-scoped "/desvincular" command and switches this
+        chat's menu button to show it, so an always-visible unlink entry
+        sits next to the input even while the system keyboard hides the T3
+        persistent reply keyboard. Runs on its own background daemon thread,
+        exactly like ``_typing`` (T13 unit (e)), so it can never add latency
+        to the welcome message it follows. Never blocks or fails the
+        caller: a transport double missing either method, or any exception
+        either call raises, is silently swallowed here -- this is UX
+        plumbing, not a delivery contract (the transport itself already
+        logs elapsed time on a genuine failure, T4/T14-style). Like
+        ``_typing``, no background thread is even started when the
+        transport declares neither method.
+        """
+        if not self._has_menu_capability("set_my_commands", "set_chat_menu_button"):
+            return
+        self._run_menu_effect(chat_id, self._apply_unlink_menu)
+
+    def _clear_unlink_menu(self, chat_id) -> None:
+        """Best-effort, fire-and-forget removal of the per-chat menu entry (T14).
+
+        Mirrors ``_set_unlink_menu``: runs on the same kind of background
+        thread so it never delays the unlink notice, never raises, and
+        never starts a thread when the transport declares neither method.
+        """
+        if not self._has_menu_capability("delete_my_commands", "set_chat_menu_button"):
+            return
+        self._run_menu_effect(chat_id, self._apply_cleared_menu)
+
+    def _has_menu_capability(self, *method_names) -> bool:
+        """True when the transport implements at least one named menu call.
+
+        Mirrors ``_typing``'s check-before-spawn precedent: a transport (or
+        test double) declaring none of them never starts a background
+        thread at all.
+        """
+        return any(callable(getattr(self.transport, name, None)) for name in method_names)
+
+    def _run_menu_effect(self, chat_id, apply) -> None:
+        def worker() -> None:
+            apply(chat_id)
+
+        threading.Thread(target=worker, name="ChannelAUnlinkMenu", daemon=True).start()
+
+    def _apply_unlink_menu(self, chat_id) -> None:
+        set_commands = getattr(self.transport, "set_my_commands", None)
+        if callable(set_commands):
+            try:
+                set_commands(chat_id=chat_id, command=UNLINK_COMMAND, description=UNLINK_COMMAND_DESCRIPTION)
+            except Exception:
+                pass
+        set_button = getattr(self.transport, "set_chat_menu_button", None)
+        if callable(set_button):
+            try:
+                # Mirrors _typing's literal "typing": the transport module
+                # (channel_a_transport.py) owns MENU_BUTTON_COMMANDS as the
+                # canonical closed value; this module never imports from it
+                # (transport imports FROM this module, not the reverse).
+                set_button(chat_id=chat_id, button_type="commands")
+            except Exception:
+                pass
+
+    def _apply_cleared_menu(self, chat_id) -> None:
+        delete_commands = getattr(self.transport, "delete_my_commands", None)
+        if callable(delete_commands):
+            try:
+                delete_commands(chat_id=chat_id)
+            except Exception:
+                pass
+        set_button = getattr(self.transport, "set_chat_menu_button", None)
+        if callable(set_button):
+            try:
+                set_button(chat_id=chat_id, button_type="default")
+            except Exception:
+                pass
 
     def _answer(self, callback_id, text) -> bool:
         """Acknowledge one callback press. Returns true only on an explicit ack."""

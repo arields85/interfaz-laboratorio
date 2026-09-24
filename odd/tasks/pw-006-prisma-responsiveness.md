@@ -1000,13 +1000,94 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     sink test) — flagged for a future pass if this proves fragile in practice.
   - **Commits:** `c605519` (feat: stream HMI voice timeline diagnostics), `9db0368` (refactor: reuse
     the generated session-reset reason type), `2964d1a` (fix: pin sendBeacon to no-store/no-redirect).
-- [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
+- [x] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
   menu button (always visible left of the input, also while typing) offering "Desvincular"
   (e.g. `setMyCommands` + chat menu button of type commands), routed to the same confirm-unlink
   flow. Only for linked chats if Telegram allows per-chat scope; otherwise handle the command
   gracefully when not linked. Queued after T13 (same files).
+  Evidence (2026-09-24, commit `feat(prisma): add an always-visible Telegram menu entry to unlink
+  Channel A`): route: inline (2 non-trivial files, mechanical/already-understood transport+dialogue
+  extension of the existing T4 typing pattern, no unresolved design decision — writer's own call per
+  this task's delegation rules).
+  - **Scope decision — per-chat, confirmed viable.** `setMyCommands`/`deleteMyCommands` support
+    `BotCommandScopeChat` (one chat, via `chat_id`), and `setChatMenuButton` already takes an
+    optional `chat_id`. Chose per-chat scope (preferred option in the brief): the "/desvincular"
+    entry and the "Menú" button only ever appear in a chat that is actually linked, never bot-wide.
+    Set on link (`_confirm`'s welcome branch), cleared on unlink. This codebase has exactly ONE
+    unlink code path (`_link_action`'s `CALLBACK_UNLINK` branch — confirmed by T3's own search, no
+    admin-side or inactivity-expiry path sends a separate unlink notice or mutates
+    `registry.unlink_phone` elsewhere), and both the T3 reply-keyboard button and T14's own
+    "/desvincular" command route through the SAME confirm prompt into that one branch, so "cleared on
+    every unlink path" is satisfied by one clearing call there. Inactivity expiry is a silent registry
+    purge with no notice today (a pre-existing gap already accepted at T3, unaffected by T14) — it
+    still leaves the per-chat command/menu-button published until the next explicit unlink action;
+    flagged, not fixed, as out of this task's scope.
+  - **Transport** (`channel_a_transport.py`): new `ChannelATransport.set_my_commands(chat_id, command,
+    description)` (`setMyCommands` with `scope={"type":"chat","chat_id":...}`),
+    `delete_my_commands(chat_id)` (`deleteMyCommands` with the same scope), and
+    `set_chat_menu_button(chat_id, button_type)` (`setChatMenuButton`, `button_type` closed to
+    `"commands"`/`"default"`). Same owned/reused T7 session, timeouts and error classification as
+    every other call; command name/description validated against Telegram's own bot-command charset
+    and length bound before any I/O. Timing logged only on failure (`_log_menu_call_failed_elapsed`,
+    same noise discipline as T4's `sendChatAction`) — a successful call carries no useful lag signal.
+    `ChannelATextTransport` Protocol (`channel_a_bot.py`) gains the same three methods, all optional
+    at runtime (probed via `getattr`/`callable`, exactly like `send_chat_action`).
+  - **Command routing** (`channel_a_bot.py`): new `_UNLINK_COMMAND_PATTERN` matches
+    `/desvincular`, `/desvincular@<botname>` (any username — this bot's own username is not yet
+    known when the dialogue is constructed, and a private-chat update can only ever originate from
+    this bot's own polling stream), and tolerates trailing text. Matched inside `_handle_message`'s
+    existing command branch (`self.query is None or text.startswith("/")`), so it is structurally
+    never routed to the query coordinator even when one is attached — same guarantee as T3's button
+    text. Routes to the exact same `_request_unlink(...)` as the reply-keyboard button, which already
+    handles "not linked" gracefully (`INGRESS_IGNORED_UNRELATED`, no data leak).
+  - **Fire-and-forget menu maintenance** (`channel_a_bot.py`): new `_set_unlink_menu`/
+    `_clear_unlink_menu`, called right after `_confirm`'s welcome send and right after
+    `_link_action`'s unlink notice send, respectively — same background-daemon-thread shape as T13's
+    `_typing`, so they never add latency to either response. Like `_typing`, no thread is even started
+    when the transport declares neither relevant method (`_has_menu_capability`) — required both for
+    the "never break pairing/unlinking" contract and because `test_channel_a_delivery_authority.py`
+    patches `threading.Thread.start` to fail hard on any unexpected dispatch; its fake transport
+    declares none of the three T14 methods, so no thread now starts there (confirmed by re-running the
+    full suite after the fix, see below). Each of the two calls inside `_apply_unlink_menu`/
+    `_apply_cleared_menu` is independently try/excepted, so one failing never blocks the other or the
+    already-sent response.
+  - **User-visible Spanish (usted):** command description "Desvincular este teléfono de la HMI"
+    (`UNLINK_COMMAND_DESCRIPTION`) — no new chat message text; the existing T3 prompt/copy is reused.
+  - **RED confirmed** via `git stash` of both source files: `test_channel_a_transport.py` — 59
+    errors/failures (`AttributeError: no attribute 'set_my_commands'` etc.); `test_channel_a_bot.py`
+    — `ImportError: cannot import name 'UNLINK_COMMAND'`. GREEN after restore.
+  - **Test fallout from legitimate scope growth:** `test_source_avoids_unimplemented_channel_a_surfaces`
+    (a pre-existing RCA-3a scope guard forbidding literal Bot-API-surface strings in this module's
+    source) had `set_my_commands` on its forbidden list — removed with a comment, the same reasoned
+    exception `send_chat_action` already got at T4 (declared on the Protocol, invoked only through
+    duck-typed transport calls, never implemented here). `test_confirm_acknowledges_before_the_welcome_
+    is_sent` asserted the exact synchronous `transport.calls` list; updated to assert only the
+    synchronous prefix (`calls[:3]`), documented the same way T13's typing-indicator tests already
+    document async-ordering non-determinism, since the new menu calls are fire-and-forget and may or
+    may not have landed by assertion time.
+  - **New tests:** transport — `SetMyCommandsTests`, `DeleteMyCommandsTests`, `SetChatMenuButtonTests`
+    (payload shape, chat-id/command/description/button-type validation before I/O, session reuse) plus
+    2 `TimingLogTests` (log-nothing-on-success, log-only-on-failure for all three calls) and the 3 new
+    calls added to `TransportBoundaryTests`' fixed-HTTPS/no-redirect sweep. Bot — `ChannelAUnlinkCommandTests`
+    (7: same prompt as the button, `@botname` suffix, trailing payload, a mere-prefix command is NOT
+    matched, bypasses the query coordinator even when attached, graceful ignore when not linked,
+    confirm reuses the real unlink) and `ChannelAUnlinkMenuTests` (8: set on link scoped to that chat,
+    cleared on unlink, setup/clearing never delay the welcome/unlink response, setup/clearing failures
+    never break confirm/unlink, setup/clearing skipped with no thread when the transport lacks the
+    methods). `test_transport_protocol_declares_exactly_six_calls` (renamed from `...three_calls`).
+  - Full suite: `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
+    services\prisma-runtime -p "test_*.py"` → **1517 passed** (was 1487; +30 net).
+  - Size note: ~682 authored lines (four files: 2 production + 2 test), above the ~400-line advisory
+    heuristic — two coupled layers (transport + dialogue) each needed proportional TDD coverage
+    (validation-before-I/O bounds, session reuse, timing-log discipline, fire-and-forget/no-thread
+    contracts); splitting transport from dialogue would have left either half untestable in isolation.
+  - **Next step (user):** open a linked Telegram chat, tap the text input to bring up the system
+    keyboard (hides the "Desvincular" reply keyboard), and confirm the "Menú"/commands icon next to
+    the input still offers "/desvincular" — tapping it (or typing "/desvincular") should open the same
+    confirm/cancel prompt as the reply-keyboard button. After unlinking, confirm the command disappears
+    from that chat's menu on a fresh pairing check.
 
 - [ ] **T15 — Unused HMI 2.5 s playback buffer (deferred by the user, 2026-09-24).** The
   `buffer-before-playback` transport (`prismaLocalAudioPlayback.ts`
@@ -1176,5 +1257,5 @@ runtime:
    - **T4**: send an ordinary question; Telegram should show "Prisma está escribiendo…" (now
      fire-and-forget) before the answer arrives, without the answer itself feeling delayed.
 
-After that: T14 (queued, user decision already recorded) and T15 (deferred by the user) remain open,
-not started by this writer.
+After that: T14 is done (see its own evidence above, including the user's next Telegram check) and T15
+(deferred by the user) remains open, not started.

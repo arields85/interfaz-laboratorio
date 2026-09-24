@@ -811,6 +811,9 @@ class TransportBoundaryTests(ChannelATransportTestCase):
             lambda transport: transport.get_me(),
             lambda transport: transport.get_updates(poll_timeout=1, read_timeout=2),
             lambda transport: transport.send_chat_action(chat_id=CHAT_ID, action="typing"),
+            lambda transport: transport.set_my_commands(chat_id=CHAT_ID, command="desvincular", description="d"),
+            lambda transport: transport.delete_my_commands(chat_id=CHAT_ID),
+            lambda transport: transport.set_chat_menu_button(chat_id=CHAT_ID, button_type="commands"),
         )
         seen = []
         for call in methods:
@@ -1011,6 +1014,167 @@ class TimingLogTests(ChannelATransportTestCase):
         self.assertNotIn(TOKEN, observed.output[0])
         self.assertNotIn("secreto-de-usuario", observed.output[0])
         self.assertNotIn(str(CHAT_ID), observed.output[0])
+
+    def test_menu_calls_log_nothing_on_success(self):
+        """T14: like sendChatAction, a successful menu-maintenance call
+        carries no useful lag signal on its own -- logged only on failure."""
+        for call in (
+            lambda t: t.set_my_commands(chat_id=CHAT_ID, command="desvincular", description="d"),
+            lambda t: t.delete_my_commands(chat_id=CHAT_ID),
+            lambda t: t.set_chat_menu_button(chat_id=CHAT_ID, button_type="commands"),
+        ):
+            with self.subTest(call=call):
+                session = FakeSession(FakeResponse(200, {"ok": True}))
+                transport = self.build(session)
+                with self.assertNoLogs(transport_module._logger, level="WARNING"):
+                    call(transport)
+
+    def test_menu_calls_log_elapsed_ms_only_on_failure(self):
+        cases = (
+            (lambda t: t.set_my_commands(chat_id=CHAT_ID, command="desvincular", description="d"), "setMyCommands"),
+            (lambda t: t.delete_my_commands(chat_id=CHAT_ID), "deleteMyCommands"),
+            (lambda t: t.set_chat_menu_button(chat_id=CHAT_ID, button_type="commands"), "setChatMenuButton"),
+        )
+        for call, method in cases:
+            with self.subTest(method=method):
+                session = FakeSession(post_error=ConnectionError(f"refused {CANARY}"))
+                transport = self.build(session)
+                with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+                    with self.assertRaises(ChannelATransportError):
+                        call(transport)
+                self.assertEqual(len(observed.output), 1)
+                self.assertIn(f"Channel A {method}: elapsed_ms=", observed.output[0])
+                self.assertNotIn(CANARY, observed.output[0])
+
+
+class SetMyCommandsTests(ChannelATransportTestCase):
+    """T14: the chat-scoped "/desvincular" menu command, BotCommandScopeChat."""
+
+    def test_set_my_commands_posts_the_exact_payload_and_returns_the_body(self):
+        body = {"ok": True, "result": True}
+        session = FakeSession(FakeResponse(200, body))
+        transport = self.build(session)
+        returned = transport.set_my_commands(
+            chat_id=CHAT_ID, command="desvincular", description="Desvincular este teléfono de la HMI"
+        )
+        self.assert_posted(
+            session,
+            "setMyCommands",
+            {
+                "commands": [
+                    {"command": "desvincular", "description": "Desvincular este teléfono de la HMI"}
+                ],
+                "scope": {"type": "chat", "chat_id": CHAT_ID},
+            },
+        )
+        self.assertIs(returned, body)
+
+    def test_chat_identifier_bounds_are_enforced_before_io(self):
+        for chat_id in (True, 0, -1, MAX_TELEGRAM_ID + 1, 10**1000, 1.0, "1", None):
+            with self.subTest(chat_id=chat_id):
+                self.assert_rejected_before_io(
+                    lambda t, value=chat_id: t.set_my_commands(
+                        chat_id=value, command="desvincular", description="d"
+                    )
+                )
+
+    def test_command_name_must_match_the_bot_command_charset(self):
+        for command in ("", "Desvincular", "des vincular", "des-vincular", "a" * 33, None, 5, True, "desvincular\n"):
+            with self.subTest(command=command):
+                self.assert_rejected_before_io(
+                    lambda t, value=command: t.set_my_commands(
+                        chat_id=CHAT_ID, command=value, description="d"
+                    )
+                )
+
+    def test_description_bounds_are_enforced_before_io(self):
+        for description in ("", "x" * 257, None, 5, True):
+            with self.subTest(description=description):
+                self.assert_rejected_before_io(
+                    lambda t, value=description: t.set_my_commands(
+                        chat_id=CHAT_ID, command="desvincular", description=value
+                    )
+                )
+
+    def test_set_my_commands_reuses_the_owned_session(self):
+        session = FakeSession(responses=[FakeResponse(200, {"ok": True}), FakeResponse(200, {"ok": True})])
+        transport = self.build(session)
+        transport.set_my_commands(chat_id=CHAT_ID, command="desvincular", description="d")
+        transport.set_my_commands(chat_id=CHAT_ID, command="desvincular", description="d")
+        self.assertEqual(len(self.factory.calls), 1)
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(session.close_calls, 0)  # T7: reused, not closed per call
+
+
+class DeleteMyCommandsTests(ChannelATransportTestCase):
+    """T14: clearing the chat-scoped command list on unlink."""
+
+    def test_delete_my_commands_posts_the_exact_payload_and_returns_the_body(self):
+        body = {"ok": True, "result": True}
+        session = FakeSession(FakeResponse(200, body))
+        transport = self.build(session)
+        returned = transport.delete_my_commands(chat_id=CHAT_ID)
+        self.assert_posted(session, "deleteMyCommands", {"scope": {"type": "chat", "chat_id": CHAT_ID}})
+        self.assertIs(returned, body)
+
+    def test_chat_identifier_bounds_are_enforced_before_io(self):
+        for chat_id in (True, 0, -1, MAX_TELEGRAM_ID + 1, 10**1000, 1.0, "1", None):
+            with self.subTest(chat_id=chat_id):
+                self.assert_rejected_before_io(
+                    lambda t, value=chat_id: t.delete_my_commands(chat_id=value)
+                )
+
+    def test_delete_my_commands_reuses_the_owned_session(self):
+        session = FakeSession(responses=[FakeResponse(200, {"ok": True}), FakeResponse(200, {"ok": True})])
+        transport = self.build(session)
+        transport.delete_my_commands(chat_id=CHAT_ID)
+        transport.delete_my_commands(chat_id=CHAT_ID)
+        self.assertEqual(len(self.factory.calls), 1)
+        self.assertEqual(session.close_calls, 0)
+
+
+class SetChatMenuButtonTests(ChannelATransportTestCase):
+    """T14: the always-visible chat menu button, set on link and reset on unlink."""
+
+    def test_set_chat_menu_button_posts_the_exact_payload_and_returns_the_body(self):
+        body = {"ok": True, "result": True}
+        session = FakeSession(FakeResponse(200, body))
+        transport = self.build(session)
+        returned = transport.set_chat_menu_button(chat_id=CHAT_ID, button_type="commands")
+        self.assert_posted(
+            session, "setChatMenuButton", {"chat_id": CHAT_ID, "menu_button": {"type": "commands"}}
+        )
+        self.assertIs(returned, body)
+
+    def test_default_button_type_is_also_accepted(self):
+        session = FakeSession(FakeResponse(200, {"ok": True}))
+        transport = self.build(session)
+        transport.set_chat_menu_button(chat_id=CHAT_ID, button_type="default")
+        self.assert_posted(
+            session, "setChatMenuButton", {"chat_id": CHAT_ID, "menu_button": {"type": "default"}}
+        )
+
+    def test_only_commands_and_default_are_accepted_as_the_button_type(self):
+        for button_type in ("", "Commands", "web_app", "default ", None, 5, True):
+            with self.subTest(button_type=button_type):
+                self.assert_rejected_before_io(
+                    lambda t, value=button_type: t.set_chat_menu_button(chat_id=CHAT_ID, button_type=value)
+                )
+
+    def test_chat_identifier_bounds_are_enforced_before_io(self):
+        for chat_id in (True, 0, -1, MAX_TELEGRAM_ID + 1, 10**1000, 1.0, "1", None):
+            with self.subTest(chat_id=chat_id):
+                self.assert_rejected_before_io(
+                    lambda t, value=chat_id: t.set_chat_menu_button(chat_id=value, button_type="commands")
+                )
+
+    def test_set_chat_menu_button_reuses_the_owned_session(self):
+        session = FakeSession(responses=[FakeResponse(200, {"ok": True}), FakeResponse(200, {"ok": True})])
+        transport = self.build(session)
+        transport.set_chat_menu_button(chat_id=CHAT_ID, button_type="commands")
+        transport.set_chat_menu_button(chat_id=CHAT_ID, button_type="default")
+        self.assertEqual(len(self.factory.calls), 1)
+        self.assertEqual(session.close_calls, 0)
 
 
 class ConcurrencyTests(ChannelATransportTestCase):

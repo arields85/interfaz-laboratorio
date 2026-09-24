@@ -4,10 +4,11 @@ Scope (RCA-5a)
 --------------
 
 This module is the HTTP boundary of the dedicated Channel A bot and nothing
-else. It performs exactly five Bot API calls — ``sendMessage``,
-``answerCallbackQuery``, ``getMe``, ``getUpdates`` and ``sendChatAction`` (T4)
-— against the fixed official HTTPS host and returns the raw response mapping
-to its caller. The adapter (RCA-3a) keeps deciding what ``delivered``,
+else. It performs exactly eight Bot API calls — ``sendMessage``,
+``answerCallbackQuery``, ``getMe``, ``getUpdates``, ``sendChatAction`` (T4),
+``setMyCommands``, ``deleteMyCommands`` and ``setChatMenuButton`` (T14) —
+against the fixed official HTTPS host and returns the raw response mapping to
+its caller. The adapter (RCA-3a) keeps deciding what ``delivered``,
 ``rejected`` and ``unknown`` mean; this module never classifies a receipt
 beyond the status/boundary rules the frozen contract declares.
 
@@ -57,6 +58,13 @@ Boundary rules that deliberately stay here:
 Deliberately absent: parse mode, message editing or deletion, file or voice
 upload, webhooks, retries, environment or configuration overrides, offset state,
 a polling loop, and any wiring into the runtime lifecycle.
+
+T14: ``setMyCommands``/``deleteMyCommands`` publish or remove exactly one bot
+command scoped to exactly one chat (``BotCommandScopeChat``), and
+``setChatMenuButton`` sets or resets exactly one chat's menu button. All three
+follow the same session/timeout/redaction contract as every other call; the
+runtime only ever calls them with the closed values it actually needs
+(one command, two menu-button types), never a bot-wide/default scope.
 """
 
 from __future__ import annotations
@@ -104,6 +112,13 @@ def _log_send_chat_action_failed_elapsed(elapsed_seconds: float) -> None:
     # it), so this is logged only on failure -- T5-style noise discipline.
     _logger.warning("Channel A sendChatAction: elapsed_ms=%d", round(elapsed_seconds * 1000))
 
+
+def _log_menu_call_failed_elapsed(method: str, elapsed_seconds: float) -> None:
+    # T14: the three menu-maintenance calls are UX plumbing, not a delivery
+    # contract (mirrors T4's sendChatAction) -- a successful call carries no
+    # useful lag signal on its own, so this is logged only on failure.
+    _logger.warning("Channel A %s: elapsed_ms=%d", method, round(elapsed_seconds * 1000))
+
 PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE = "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE"
 # T16: the one deliberate exception to "every failure becomes the same fixed
 # code" -- a provider-confirmed 401 on the bot token itself is distinguished
@@ -122,11 +137,26 @@ ANSWER_CALLBACK_QUERY_METHOD = "answerCallbackQuery"
 GET_ME_METHOD = "getMe"
 GET_UPDATES_METHOD = "getUpdates"
 SEND_CHAT_ACTION_METHOD = "sendChatAction"
+SET_MY_COMMANDS_METHOD = "setMyCommands"
+DELETE_MY_COMMANDS_METHOD = "deleteMyCommands"
+SET_CHAT_MENU_BUTTON_METHOD = "setChatMenuButton"
 
 # T4: the only chat action this runtime ever sends; the transport's own
 # closed, non-disclosing validation accepts nothing else.
 CHAT_ACTION_TYPING = "typing"
 _ALLOWED_CHAT_ACTIONS = frozenset({CHAT_ACTION_TYPING})
+
+# T14: the two chat menu button states this runtime ever requests -- show the
+# published command list, or reset to Telegram's own default. Never any other
+# ``MenuButton`` variant (e.g. a web app button).
+MENU_BUTTON_COMMANDS = "commands"
+MENU_BUTTON_DEFAULT = "default"
+_ALLOWED_MENU_BUTTON_TYPES = frozenset({MENU_BUTTON_COMMANDS, MENU_BUTTON_DEFAULT})
+
+# T14: Telegram's own bot command charset (lowercase ASCII letters, digits,
+# underscores, 1-32 characters) and the documented command-description bound.
+_COMMAND_NAME_PATTERN = re.compile(r"\A[a-z0-9_]{1,32}\Z")
+MAX_COMMAND_DESCRIPTION_CHARS = 256
 
 _TOKEN_PATTERN = re.compile(r"\A[A-Za-z0-9_:-]+\Z")
 _USERNAME_PATTERN = re.compile(r"\A[A-Za-z0-9_]{5,32}\Z")
@@ -142,14 +172,20 @@ __all__ = [
     "ChannelATransport",
     "ChannelATransportError",
     "ChannelATransportUnauthorized",
+    "DELETE_MY_COMMANDS_METHOD",
     "GET_ME_METHOD",
     "GET_UPDATES_LIMIT",
     "GET_UPDATES_METHOD",
+    "MAX_COMMAND_DESCRIPTION_CHARS",
+    "MENU_BUTTON_COMMANDS",
+    "MENU_BUTTON_DEFAULT",
     "MESSAGE_MAX_CHARS",
     "PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED",
     "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE",
     "SEND_CHAT_ACTION_METHOD",
     "SEND_MESSAGE_METHOD",
+    "SET_CHAT_MENU_BUTTON_METHOD",
+    "SET_MY_COMMANDS_METHOD",
 ]
 
 
@@ -248,6 +284,24 @@ def _validated_ack_text(value: object) -> str:
 
 def _validated_chat_action(value: object) -> str:
     if not isinstance(value, str) or value not in _ALLOWED_CHAT_ACTIONS:
+        raise _unavailable() from None
+    return value
+
+
+def _validated_menu_button_type(value: object) -> str:
+    if not isinstance(value, str) or value not in _ALLOWED_MENU_BUTTON_TYPES:
+        raise _unavailable() from None
+    return value
+
+
+def _validated_command_name(value: object) -> str:
+    if not isinstance(value, str) or _COMMAND_NAME_PATTERN.fullmatch(value) is None:
+        raise _unavailable() from None
+    return value
+
+
+def _validated_command_description(value: object) -> str:
+    if not isinstance(value, str) or not 1 <= len(value) <= MAX_COMMAND_DESCRIPTION_CHARS:
         raise _unavailable() from None
     return value
 
@@ -373,6 +427,65 @@ class ChannelATransport:
             return self._effect(SEND_CHAT_ACTION_METHOD, payload, self.request_timeout)
         except Exception:
             _log_send_chat_action_failed_elapsed(time.monotonic() - started)
+            raise
+
+    def set_my_commands(self, *, chat_id: int, command: str, description: str) -> object:
+        """Publish one bot command scoped to exactly one chat (T14).
+
+        Uses ``BotCommandScopeChat`` -- never the bot-wide/default scope --
+        so only this chat's command menu changes. Same owned/reused session,
+        timeouts, error classification and redaction as every other call;
+        this is UX plumbing, not a delivery contract, so timing is logged
+        only on failure (mirrors ``send_chat_action``).
+        """
+        payload: dict[str, object] = {
+            "commands": [
+                {
+                    "command": _validated_command_name(command),
+                    "description": _validated_command_description(description),
+                }
+            ],
+            "scope": {"type": "chat", "chat_id": _validated_chat_id(chat_id)},
+        }
+        started = time.monotonic()
+        try:
+            return self._effect(SET_MY_COMMANDS_METHOD, payload, self.request_timeout)
+        except Exception:
+            _log_menu_call_failed_elapsed(SET_MY_COMMANDS_METHOD, time.monotonic() - started)
+            raise
+
+    def delete_my_commands(self, *, chat_id: int) -> object:
+        """Remove the chat-scoped command list for exactly one chat (T14).
+
+        Same ``BotCommandScopeChat`` targeting, session, timeout, error
+        classification and failure-only timing log as ``set_my_commands``.
+        """
+        payload: dict[str, object] = {"scope": {"type": "chat", "chat_id": _validated_chat_id(chat_id)}}
+        started = time.monotonic()
+        try:
+            return self._effect(DELETE_MY_COMMANDS_METHOD, payload, self.request_timeout)
+        except Exception:
+            _log_menu_call_failed_elapsed(DELETE_MY_COMMANDS_METHOD, time.monotonic() - started)
+            raise
+
+    def set_chat_menu_button(self, *, chat_id: int, button_type: str) -> object:
+        """Set or reset the chat menu button for exactly one chat (T14).
+
+        ``button_type`` is closed to ``"commands"`` (show the published
+        command list) or ``"default"`` (reset to Telegram's own default) --
+        the only two states this runtime ever requests. Same session,
+        timeout, error classification and failure-only timing log as the
+        other two menu calls.
+        """
+        payload: dict[str, object] = {
+            "chat_id": _validated_chat_id(chat_id),
+            "menu_button": {"type": _validated_menu_button_type(button_type)},
+        }
+        started = time.monotonic()
+        try:
+            return self._effect(SET_CHAT_MENU_BUTTON_METHOD, payload, self.request_timeout)
+        except Exception:
+            _log_menu_call_failed_elapsed(SET_CHAT_MENU_BUTTON_METHOD, time.monotonic() - started)
             raise
 
     def get_me(self) -> ChannelABotIdentity:

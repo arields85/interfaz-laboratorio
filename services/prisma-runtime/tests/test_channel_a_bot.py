@@ -69,6 +69,8 @@ from prisma_runtime.channel_a_bot import (
     SEND_REJECTED,
     SEND_UNKNOWN,
     UNLINK_CANCELLED,
+    UNLINK_COMMAND,
+    UNLINK_COMMAND_DESCRIPTION,
     UNLINK_PROMPT_DELIVERED,
     UNLINKED,
     URLSAFE_ALPHABET,
@@ -175,17 +177,35 @@ def callback_update(update_id, data, *, chat=CHAT_ID, from_id=None, callback_id=
 class FakeTransport:
     """Text-only transport double: records calls and replays scripted responses."""
 
-    def __init__(self, *, bot_id=BOT_ID, send_responses=None, ack_responses=None, chat_action_error=None):
+    def __init__(
+        self,
+        *,
+        bot_id=BOT_ID,
+        send_responses=None,
+        ack_responses=None,
+        chat_action_error=None,
+        set_commands_error=None,
+        delete_commands_error=None,
+        set_menu_button_error=None,
+    ):
         self.bot_id = bot_id
         self.sent = []
         self.answered = []
         self.chat_actions = []
+        self.set_commands_calls = []
+        self.deleted_commands_calls = []
+        self.menu_button_calls = []
         self.calls = []
         self.send_responses = list(send_responses or ())
         self.ack_responses = list(ack_responses or ())
         # T4: injectable failure, never surfaced by the dialogue -- proves a
         # chat-action failure never blocks or fails the answer.
         self.chat_action_error = chat_action_error
+        # T14: same shape, one injectable failure per menu-maintenance call --
+        # proves a menu-setup/clear failure never breaks pairing or unlinking.
+        self.set_commands_error = set_commands_error
+        self.delete_commands_error = delete_commands_error
+        self.set_menu_button_error = set_menu_button_error
         self.on_send = None
         self.on_ack = None
 
@@ -228,6 +248,27 @@ class FakeTransport:
         self.chat_actions.append(payload)
         if self.chat_action_error is not None:
             raise self.chat_action_error
+        return {"ok": True, "result": True}
+
+    def set_my_commands(self, **payload):
+        self.calls.append("set_my_commands")
+        self.set_commands_calls.append(payload)
+        if self.set_commands_error is not None:
+            raise self.set_commands_error
+        return {"ok": True, "result": True}
+
+    def delete_my_commands(self, **payload):
+        self.calls.append("delete_my_commands")
+        self.deleted_commands_calls.append(payload)
+        if self.delete_commands_error is not None:
+            raise self.delete_commands_error
+        return {"ok": True, "result": True}
+
+    def set_chat_menu_button(self, **payload):
+        self.calls.append("set_chat_menu_button")
+        self.menu_button_calls.append(payload)
+        if self.set_menu_button_error is not None:
+            raise self.set_menu_button_error
         return {"ok": True, "result": True}
 
 
@@ -457,11 +498,23 @@ class ChannelABotConfigTests(ChannelABotTestCase):
                 with self.assertRaises(ChannelABotConfigInvalid):
                     phone_identity(value)
 
-    def test_transport_protocol_declares_exactly_three_calls(self):
+    def test_transport_protocol_declares_exactly_six_calls(self):
         # T4: send_chat_action joins the protocol (optional at runtime --
-        # see _typing -- but declared here for callers implementing it).
+        # see _typing). T14: the three menu-maintenance calls join it too
+        # (optional at runtime -- see _set_unlink_menu/_clear_unlink_menu) --
+        # declared here for callers implementing them.
         names = {name for name in vars(ChannelATextTransport) if not name.startswith("_")}
-        self.assertEqual(names, {"send_message", "answer_callback_query", "send_chat_action"})
+        self.assertEqual(
+            names,
+            {
+                "send_message",
+                "answer_callback_query",
+                "send_chat_action",
+                "set_my_commands",
+                "delete_my_commands",
+                "set_chat_menu_button",
+            },
+        )
 
     def test_ingress_outcome_is_frozen_and_serializes_camel_case(self):
         outcome = IngressOutcome(1, VARIANT_MESSAGE, PAIRING_PROMPT_DELIVERED, True, SEND_DELIVERED, True)
@@ -509,6 +562,13 @@ class ChannelABotConfigTests(ChannelABotTestCase):
                 self.assertNotIn(name, vars(bot_module))
 
     def test_source_avoids_unimplemented_channel_a_surfaces(self):
+        # T14: set_my_commands/delete_my_commands/set_chat_menu_button are a
+        # deliberate, reasoned exception -- like send_chat_action (T4) before
+        # them, they are declared on ChannelATextTransport and invoked only
+        # through duck-typed transport calls (_set_unlink_menu/
+        # _clear_unlink_menu), never implemented as raw HTTP here. The names
+        # below stay forbidden because this module still never implements
+        # them itself.
         source = Path(bot_module.__file__).read_text(encoding="utf-8")
         for name in (
             "get_updates",
@@ -520,7 +580,6 @@ class ChannelABotConfigTests(ChannelABotTestCase):
             "send_audio",
             "set_webhook",
             "delete_webhook",
-            "set_my_commands",
         ):
             with self.subTest(name=name):
                 self.assertNotIn(name, source)
@@ -1193,11 +1252,16 @@ class ChannelAConfirmTests(ChannelABotTestCase):
         )
 
     def test_confirm_acknowledges_before_the_welcome_is_sent(self):
+        """T14: the menu setup (set_my_commands/set_chat_menu_button) is
+        fire-and-forget on a background thread -- like T13's typing
+        indicator, it may or may not have landed in ``calls`` yet by the
+        time this synchronous assertion runs, so only the synchronous
+        prefix is asserted here."""
         self.prompted(4)
         ticket = self.prompt_ticket()
         self.handle(callback_update(5, CALLBACK_CONFIRM + ":" + ticket))
         self.assertEqual(
-            self.transport.calls,
+            self.transport.calls[:3],
             ["send_message", "answer_callback_query", "send_message"],
         )
         self.assertEqual(self.transport.answered[-1]["text"], COPY_CONFIRMED)
@@ -1961,6 +2025,208 @@ class ChannelAUnlinkKeyboardTests(ChannelABotTestCase):
         outcome = self.handle(callback_update(7, cancel_data, chat=CHAT_ID_2))
         self.assert_outcome(outcome, ACTION_REFUSED, update_id=7, acknowledged=True)
         self.assertIsNotNone(self.registry.phone_link(PHONE))
+
+
+class ChannelAUnlinkCommandTests(ChannelABotTestCase):
+    """T14: "/desvincular" routes to the SAME confirm-unlink flow as the T3 button."""
+
+    def test_desvincular_command_sends_the_same_confirmation_prompt_as_the_button(self):
+        nonce = self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "/desvincular", chat=CHAT_ID))
+        self.assert_outcome(
+            outcome, UNLINK_PROMPT_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED, update_id=6,
+        )
+        payload = self.transport.sent[-1]
+        self.assertEqual(payload["text"], COPY_UNLINK_CONFIRM_PROMPT)
+        rows = payload["reply_markup"]["inline_keyboard"]
+        self.assertEqual(rows[0][0]["text"], BUTTON_UNLINK_CONFIRM)
+        self.assertEqual(rows[0][0]["callback_data"], CALLBACK_UNLINK + ":" + nonce)
+        self.assertEqual(rows[1][0]["callback_data"], CALLBACK_UNLINK_CANCEL + ":" + nonce)
+
+    def test_desvincular_command_with_botname_suffix_is_also_routed(self):
+        self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "/desvincular@prisma_bot", chat=CHAT_ID))
+        self.assert_outcome(outcome, UNLINK_PROMPT_DELIVERED, variant=VARIANT_MESSAGE, update_id=6)
+
+    def test_desvincular_command_with_trailing_payload_is_also_routed(self):
+        self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "/desvincular ahora", chat=CHAT_ID))
+        self.assert_outcome(outcome, UNLINK_PROMPT_DELIVERED, variant=VARIANT_MESSAGE, update_id=6)
+
+    def test_a_command_that_merely_shares_the_prefix_is_not_matched(self):
+        self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "/desvincularextra", chat=CHAT_ID))
+        self.assertNotEqual(outcome.kind, UNLINK_PROMPT_DELIVERED)
+
+    def test_desvincular_command_bypasses_the_query_coordinator_even_when_attached(self):
+        sessions = HmiSessionRegistry(
+            clock=lambda: 1000.0, owner_factory=lambda: OWNER, entropy=sequential_entropy(),
+        )
+        capability, _info = sessions.create()
+        sessions.set_context(capability, {"widgets": []})
+        parses = []
+
+        def parse(snapshot, question):
+            parses.append((snapshot, question))
+            return answer_from_snapshot(snapshot, question)
+
+        self.dialogue.enable_queries(
+            read_context=sessions.capture_owner_context,
+            context_is_current=sessions.is_owner_context_current,
+            parse=parse,
+            freshness_bound=30.0,
+            max_question_bytes=4096,
+            max_answer_chars=4096,
+        )
+        self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "/desvincular", chat=CHAT_ID))
+        self.assert_outcome(outcome, UNLINK_PROMPT_DELIVERED, variant=VARIANT_MESSAGE, update_id=6)
+        self.assertEqual(parses, [])
+
+    def test_desvincular_command_without_a_live_link_is_ignored_gracefully(self):
+        outcome = self.handle(message_update(4, "/desvincular", chat=CHAT_ID))
+        self.assert_outcome(outcome, INGRESS_IGNORED_UNRELATED, variant=VARIANT_MESSAGE, update_id=4)
+        self.assertEqual(self.transport.sent, [])
+
+    def test_desvincular_command_confirm_reuses_the_existing_unlink_callback(self):
+        self.pair_up(4, 5)
+        self.handle(message_update(6, "/desvincular", chat=CHAT_ID))
+        confirm_data = self.button_data(0)
+        outcome = self.handle(callback_update(7, confirm_data))
+        self.assert_outcome(
+            outcome, UNLINKED, variant=VARIANT_CALLBACK, delivery=SEND_DELIVERED,
+            update_id=7, acknowledged=True,
+        )
+        self.assertIsNone(self.registry.phone_link(PHONE))
+
+
+class ChannelAUnlinkMenuTests(ChannelABotTestCase):
+    """T14: the always-visible Telegram menu entry (chat menu button + command)."""
+
+    def _wait_for(self, predicate, timeout=2):
+        deadline = time.monotonic() + timeout
+        while not predicate() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    def test_menu_command_and_button_are_set_on_link_scoped_to_that_chat(self):
+        self.pair_up(4, 5)
+        self._wait_for(lambda: self.transport.set_commands_calls)
+        self._wait_for(lambda: self.transport.menu_button_calls)
+        self.assertEqual(
+            self.transport.set_commands_calls[-1],
+            {"chat_id": CHAT_ID, "command": UNLINK_COMMAND, "description": UNLINK_COMMAND_DESCRIPTION},
+        )
+        self.assertEqual(
+            self.transport.menu_button_calls[-1], {"chat_id": CHAT_ID, "button_type": "commands"},
+        )
+        self.assertEqual(self.transport.deleted_commands_calls, [])
+
+    def test_menu_command_and_button_are_cleared_on_every_unlink_path(self):
+        # Both routes into the unlink confirmation (T3's persistent button and
+        # T14's own /desvincular command) reuse the SAME _link_action UNLINK
+        # branch -- the only unlink path this module has -- so one test on the
+        # button path covers both.
+        nonce = self.pair_up(4, 5)
+        self._wait_for(lambda: self.transport.set_commands_calls)
+        outcome = self.handle(callback_update(6, CALLBACK_UNLINK + ":" + nonce))
+        self.assert_outcome(
+            outcome, UNLINKED, variant=VARIANT_CALLBACK, delivery=SEND_DELIVERED,
+            update_id=6, acknowledged=True,
+        )
+        self._wait_for(lambda: self.transport.deleted_commands_calls)
+        self._wait_for(lambda: len(self.transport.menu_button_calls) >= 2)
+        self.assertEqual(self.transport.deleted_commands_calls[-1], {"chat_id": CHAT_ID})
+        self.assertEqual(self.transport.menu_button_calls[-1], {"chat_id": CHAT_ID, "button_type": "default"})
+
+    def test_menu_setup_never_delays_the_welcome_message(self):
+        started = threading.Event()
+        release = threading.Event()
+        real = self.transport.set_my_commands
+
+        def slow(**payload):
+            started.set()
+            release.wait(2)
+            return real(**payload)
+
+        self.transport.set_my_commands = slow
+        start = time.monotonic()
+        self.pair_up(4, 5)
+        elapsed = time.monotonic() - start
+        self.assertLess(elapsed, 1.0, "confirmation waited on the menu setup")
+        release.set()
+        self.assertTrue(started.wait(2), "menu setup was never attempted")
+
+    def test_menu_clearing_never_delays_the_unlink_notice(self):
+        nonce = self.pair_up(4, 5)
+        started = threading.Event()
+        release = threading.Event()
+        real = self.transport.delete_my_commands
+
+        def slow(**payload):
+            started.set()
+            release.wait(2)
+            return real(**payload)
+
+        self.transport.delete_my_commands = slow
+        start = time.monotonic()
+        outcome = self.handle(callback_update(6, CALLBACK_UNLINK + ":" + nonce))
+        elapsed = time.monotonic() - start
+        self.assert_outcome(outcome, UNLINKED, variant=VARIANT_CALLBACK, update_id=6)
+        self.assertLess(elapsed, 1.0, "unlink notice waited on the menu clearing")
+        release.set()
+        self.assertTrue(started.wait(2), "menu clearing was never attempted")
+
+    def test_menu_setup_failures_never_break_confirmation(self):
+        self.transport.set_commands_error = RuntimeError("boom")
+        self.transport.set_menu_button_error = RuntimeError("boom")
+        nonce = self.pair_up(4, 5)  # must not raise
+        self.assertIsNotNone(nonce)
+
+    def test_menu_clearing_failures_never_break_unlinking(self):
+        nonce = self.pair_up(4, 5)
+        self.transport.delete_commands_error = RuntimeError("boom")
+        self.transport.set_menu_button_error = RuntimeError("boom")
+        outcome = self.handle(callback_update(6, CALLBACK_UNLINK + ":" + nonce))
+        self.assert_outcome(
+            outcome, UNLINKED, variant=VARIANT_CALLBACK, delivery=SEND_DELIVERED,
+            update_id=6, acknowledged=True,
+        )
+
+    def test_menu_setup_is_skipped_when_the_transport_lacks_the_methods(self):
+        class NoMenuTransport(FakeTransport):
+            def __getattribute__(self, name):
+                if name in ("set_my_commands", "set_chat_menu_button"):
+                    raise AttributeError(name)
+                return super().__getattribute__(name)
+
+        original_dialogue, original_transport = self.dialogue, self.transport
+        self.transport = NoMenuTransport()
+        self.dialogue = self.build(transport=self.transport)
+        try:
+            nonce = self.pair_up(4, 5)  # must not raise
+            self.assertIsNotNone(nonce)
+        finally:
+            self.dialogue, self.transport = original_dialogue, original_transport
+
+    def test_menu_clearing_is_skipped_when_the_transport_lacks_the_methods(self):
+        class NoMenuTransport(FakeTransport):
+            def __getattribute__(self, name):
+                if name in ("delete_my_commands", "set_chat_menu_button"):
+                    raise AttributeError(name)
+                return super().__getattribute__(name)
+
+        original_dialogue, original_transport = self.dialogue, self.transport
+        self.transport = NoMenuTransport()
+        self.dialogue = self.build(transport=self.transport)
+        try:
+            nonce = self.pair_up(4, 5)
+            outcome = self.handle(callback_update(6, CALLBACK_UNLINK + ":" + nonce))
+            self.assert_outcome(
+                outcome, UNLINKED, variant=VARIANT_CALLBACK, delivery=SEND_DELIVERED,
+                update_id=6, acknowledged=True,
+            )
+        finally:
+            self.dialogue, self.transport = original_dialogue, original_transport
 
 
 class ChannelALeakTests(ChannelABotTestCase):
