@@ -445,9 +445,22 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   Engram `odd/pw-006-prisma-responsiveness/t11-benchmark`): Gemini TTFB for the current call 1.31 s
   median vs 2.3–6.7 s in the runtime; `gemini-3.8-flash-lite-tts` + `generate_content_stream`
   0.61 s. **User decision (2026-09-23): adopt `gemini-3.8-flash-lite-tts`** — the user listened to
-  the raw samples and prefers its voice (Leda) over the current one. Pending implementation: switch
-  model and call style (`generate_content_stream`), move style out of the inline transcript prompt,
-  keep verification model in sync (`GEMINI_VERIFY_MODEL`), re-check DSP on the new audio.
+  the raw samples and prefers its voice (Leda) over the current one. **Style decision (user,
+  2026-09-23): "normal" — plain transcript only, no style instructions.** Compared samples on 3.8
+  flash-lite: (1) plain text, (2) condensed style in the separate `speech_metadata.style`
+  annotation (only reachable via raw REST; google-genai 2.17 rejects the annotation type), (3) the
+  current 45-line `build_tts_prompt` inline (3.8 did not read it aloud; audio length matched plain
+  text). The 45 lines were guard rails for the 3.1 preview model (voice/accent/pacing plus "do not
+  read or change the transcript"); 3.8 treats input as a verbatim transcript by default. Idea
+  recorded, not scheduled: a Prisma settings selector for the style (normal / 45-line / style
+  field). Pending implementation: switch to `gemini-3.8-flash-lite-tts` with
+  `generate_content_stream` and plain transcript, keep verification model in sync
+  (`GEMINI_VERIFY_MODEL`), re-check DSP and Telegram audio on the new stream.
+- [ ] **T12 — Remove redundant per-request resolves (T10 finding).** `resolve_voice_event` runs up
+  to 3× and the Gemini credential resolve up to 2× per voice request (`prisma_speak_live`,
+  `AudioCoordinator.subscribe` admission gate, worker `_run`), each credential resolve opening the
+  protected store and checking ACLs. Resolve once per request/job and pass the result along,
+  preserving the same authorization guarantees.
   Original research notes:
   Research (2026-09-23, sources in the session report): community reports that
   `gemini-3.1-flash-tts-preview` via `interactions.create(stream=True)` is much slower than
