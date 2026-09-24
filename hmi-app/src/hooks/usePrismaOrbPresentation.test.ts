@@ -38,17 +38,28 @@ const EVENT: VoiceEvent = {
 };
 const SOURCE: PrismaVoiceAudioSource = { playbackTransport: 'progressive', openLive: vi.fn() };
 
-function createEngine(): { engine: PrismaVoiceAudioEngineContract; lifecycles: VoicePlaybackLifecycle[] } {
+interface FakeOrbAudioTarget { level: number; setSpeaking: ReturnType<typeof vi.fn> }
+
+function createEngine(): {
+    engine: PrismaVoiceAudioEngineContract;
+    lifecycles: VoicePlaybackLifecycle[];
+    targets: FakeOrbAudioTarget[];
+} {
     const lifecycles: VoicePlaybackLifecycle[] = [];
+    const targets: FakeOrbAudioTarget[] = [];
     const engine: PrismaVoiceAudioEngineContract = {
-        play: vi.fn((_source, _target, lifecycle) => lifecycles.push(lifecycle)),
+        play: vi.fn((_source, target, lifecycle) => {
+            lifecycles.push(lifecycle);
+            targets.push(target as unknown as FakeOrbAudioTarget);
+        }),
+        warmAudioContext: vi.fn(),
         stop: vi.fn(),
         dispose: vi.fn(),
     };
-    return { engine, lifecycles };
+    return { engine, lifecycles, targets };
 }
 
-function attachOrb(result: { current: { orbRef: { current: LedaOrbElement | null } } }): { setSpeaking: ReturnType<typeof vi.fn> } {
+function attachOrb(result: { current: { orbRef: { current: LedaOrbElement | null } } }): FakeOrbAudioTarget {
     const orb = { level: 0, setSpeaking: vi.fn() };
     result.current.orbRef.current = orb as unknown as LedaOrbElement;
     return orb;
@@ -265,5 +276,63 @@ describe('usePrismaOrbPresentation', () => {
         act(() => lifecycles[0]?.onEnded?.());
 
         expect(orb.setSpeaking).not.toHaveBeenCalled();
+    });
+
+    describe('T21: decoupled from the orb overlay mount', () => {
+        it('starts the engine synchronously on event receipt even when the orb has not mounted yet', () => {
+            const { engine } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            // Deliberately no attachOrb(result) -- orbRef.current stays null.
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('thinking');
+        });
+
+        it('buffers level/speaking updates on the deferred target and replays them once the orb mounts', () => {
+            const { engine, targets } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            const target = targets[0];
+            expect(target).toBeDefined();
+
+            // The engine drives the target exactly as it would a real orb,
+            // before any orb DOM node exists.
+            target.setSpeaking(true);
+            target.level = 0.42;
+
+            const orb = attachOrb(result);
+
+            expect(orb.setSpeaking).toHaveBeenCalledWith(true);
+            expect(orb.level).toBe(0.42);
+        });
+
+        it('forwards further updates live once the orb has attached', () => {
+            const { engine, targets } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            const orb = attachOrb(result);
+            const target = targets[0];
+
+            target.setSpeaking(true);
+            target.level = 0.9;
+
+            expect(orb.setSpeaking).toHaveBeenLastCalledWith(true);
+            expect(orb.level).toBe(0.9);
+        });
+
+        it('attaches immediately when the orb is already mounted from a previous answer', () => {
+            const { engine, targets } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            const orb = attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            targets[0].setSpeaking(true);
+
+            expect(orb.setSpeaking).toHaveBeenCalledWith(true);
+        });
     });
 });

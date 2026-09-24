@@ -35,6 +35,7 @@ function createEngine() {
     const lifecycles: VoicePlaybackLifecycle[] = [];
     const engine: PrismaVoiceAudioEngineContract = {
         play: vi.fn((_source, _target, lifecycle) => lifecycles.push(lifecycle)),
+        warmAudioContext: vi.fn(),
         stop: vi.fn(),
         dispose: vi.fn(),
     };

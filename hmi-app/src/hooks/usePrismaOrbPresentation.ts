@@ -4,7 +4,10 @@ import type { RefObject } from 'react';
 import type { PrismaAudioMetricPhase } from '../domain/prismaAudioMetric.types';
 import type { VoiceEvent } from '../domain/voice.types';
 import { PrismaVoiceAudioEngine } from '../services/prismaVoiceAudioEngine';
-import type { PrismaVoiceAudioEngineContract, PrismaVoiceAudioSource } from '../services/prismaVoiceAudioEngine';
+import type {
+    PrismaOrbAudioTarget,
+    PrismaVoiceAudioEngineContract,
+} from '../services/prismaVoiceAudioEngine';
 import { prismaSessionClient } from '../services/prismaSessionClient';
 import { recordOrbPhase } from '../services/prismaVoiceTimelineRecorder';
 import { createPrismaVoiceTtsAudioSource } from '../services/prismaVoiceTtsAudioSource';
@@ -63,21 +66,92 @@ interface PrismaOrbPresentationOptions {
     audioSourceFactory?: PrismaVoiceAudioSourceFactory;
 }
 
-interface PlaybackRequest {
-    generation: number;
-    audioSource: PrismaVoiceAudioSource;
+interface DeferredOrbAudioTarget extends PrismaOrbAudioTarget {
+    /** Wires a now-mounted real orb to receive every future update, and
+     * immediately replays whatever level/speaking value was buffered so
+     * far. */
+    attach(orb: PrismaOrbAudioTarget): void;
+}
+
+// T21: `engine.play()` now starts at voice-event receipt, before the orb
+// overlay has necessarily mounted its `<leda-orb>` DOM node (mounting it is
+// gated behind a React commit, which `presentVoiceEvent` below no longer
+// waits on). This stands in for the real orb as the engine's audio target
+// until the real orb attaches (see the `orbRef` accessor below): `level`
+// writes and `setSpeaking()` calls are buffered and, once `attach()` runs,
+// replayed immediately and then forwarded live for every update after that.
+function createDeferredOrbAudioTarget(): DeferredOrbAudioTarget {
+    let orb: PrismaOrbAudioTarget | null = null;
+    let pendingLevel = 0;
+    let pendingSpeaking = false;
+    // Only replay a value on attach if this target actually received one
+    // before the real orb was available -- otherwise `attach()` would fire
+    // a spurious `setSpeaking(false)`/`level = 0` for a request whose
+    // engine callback simply hasn't run yet, which is not this hook's call
+    // to make (driving the orb stays the engine's responsibility).
+    let levelTouched = false;
+    let speakingTouched = false;
+    return {
+        get level() {
+            return orb ? orb.level : pendingLevel;
+        },
+        set level(value: number) {
+            pendingLevel = value;
+            levelTouched = true;
+            if (orb) {
+                orb.level = value;
+            }
+        },
+        setSpeaking(speaking: boolean) {
+            pendingSpeaking = speaking;
+            speakingTouched = true;
+            orb?.setSpeaking(speaking);
+        },
+        attach(target: PrismaOrbAudioTarget) {
+            orb = target;
+            if (levelTouched) {
+                target.level = pendingLevel;
+            }
+            if (speakingTouched) {
+                target.setSpeaking(pendingSpeaking);
+            }
+        },
+    };
 }
 
 export function usePrismaOrbPresentation(
     options: PrismaOrbPresentationOptions = {},
 ): PrismaOrbPresentation {
     const [phase, setPhase] = useState<PrismaOrbPresentationPhase>('hidden');
-    const [request, setRequest] = useState<PlaybackRequest | null>(null);
-    const orbRef = useRef<LedaOrbElement>(null);
+    const orbNodeRef = useRef<LedaOrbElement | null>(null);
+    const deferredTargetRef = useRef<DeferredOrbAudioTarget | null>(null);
+    // T21: a plain `useRef<LedaOrbElement>(null)` (the previous shape) only
+    // stores the node -- it cannot notice the moment the orb actually
+    // mounts. This accessor object is structurally still a
+    // `RefObject<LedaOrbElement | null>` (React assigns `ref.current = node`
+    // as an ordinary property write, so a `get`/`set` pair intercepts it
+    // exactly like a plain field would), but its setter also attaches the
+    // node to whichever deferred target is currently pending -- the instant
+    // React commits the DOM node, not on some later, possibly-skipped
+    // effect tick.
+    const orbRefHolder = useRef<RefObject<LedaOrbElement | null> | undefined>(undefined);
+    if (!orbRefHolder.current) {
+        orbRefHolder.current = {
+            get current() {
+                return orbNodeRef.current;
+            },
+            set current(node: LedaOrbElement | null) {
+                orbNodeRef.current = node;
+                if (node) {
+                    deferredTargetRef.current?.attach(node);
+                }
+            },
+        };
+    }
+    const orbRef = orbRefHolder.current;
     const engineRef = useRef<PrismaVoiceAudioEngineContract | null>(null);
     const audioSourceFactoryRef = useRef(options.audioSourceFactory ?? createPrismaVoiceTtsAudioSource);
     const generationRef = useRef(0);
-    const startedGenerationRef = useRef(0);
     const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const thinkingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -117,35 +191,47 @@ export function usePrismaOrbPresentation(
     // no explicit visual reset here: the overlay's own CSS transition
     // (PrismaOrbOverlay.tsx) interpolates from the current opacity/scale to
     // the thinking target, so this never produces a hard jump.
+    //
+    // T21: `engine.play()` (and so `source.openLive()`, the speak-live
+    // fetch) now starts synchronously, right here, instead of from a
+    // `useLayoutEffect` gated on `orbRef.current` being non-null. The audio
+    // fetch/decode never needed the orb DOM -- only the visual level/
+    // speaking target did -- so this call no longer waits for React to
+    // commit and mount (and the `<leda-orb>` custom element to construct)
+    // before the request can begin. The deferred target below stands in for
+    // the real orb until it mounts; `orbRef`'s setter (above) attaches it
+    // the instant the DOM node commits.
     const presentVoiceEvent = (event: VoiceEvent): void => {
         const eventId = event.id?.trim();
         if (!eventId) return;
         generationRef.current += 1;
+        const generation = generationRef.current;
         clearFadeTimer();
         clearThinkingTimeout();
         const audioSource = audioSourceFactoryRef.current({ eventId });
         updatePhase('thinking');
-        setRequest({ generation: generationRef.current, audioSource });
-    };
 
-    useLayoutEffect(() => {
-        const engine = engineRef.current;
-        const orb = orbRef.current;
-        if (!request || !engine || !orb || startedGenerationRef.current === request.generation) return;
+        const deferredTarget = createDeferredOrbAudioTarget();
+        deferredTargetRef.current = deferredTarget;
+        // The orb overlay may already be mounted (e.g. a new question
+        // arriving while a previous answer is still visible/fading) --
+        // attach immediately rather than waiting for a commit that will
+        // not reattach an already-mounted node.
+        if (orbNodeRef.current) {
+            deferredTarget.attach(orbNodeRef.current);
+        }
 
-        startedGenerationRef.current = request.generation;
         let terminalCallbackHandled = false;
         const beginFade = (): void => {
-            if (generationRef.current !== request.generation || terminalCallbackHandled) return;
+            if (generationRef.current !== generation || terminalCallbackHandled) return;
             terminalCallbackHandled = true;
             clearFadeTimer();
             clearThinkingTimeout();
             updatePhase('fading');
             fadeTimerRef.current = setTimeout(() => {
-                if (generationRef.current !== request.generation) return;
+                if (generationRef.current !== generation) return;
                 fadeTimerRef.current = null;
                 updatePhase('hidden');
-                setRequest(null);
             }, PRISMA_ORB_FADE_DURATION_MS);
         };
         // T17: never stay in "thinking" forever -- if onStarted never fires
@@ -155,16 +241,17 @@ export function usePrismaOrbPresentation(
             thinkingTimeoutRef.current = null;
             beginFade();
         }, PRISMA_ORB_THINKING_TIMEOUT_MS);
-        engine.play(request.audioSource, orb, {
+
+        engineRef.current?.play(audioSource, deferredTarget, {
             onStarted: () => {
-                if (generationRef.current !== request.generation || terminalCallbackHandled) return;
+                if (generationRef.current !== generation || terminalCallbackHandled) return;
                 clearThinkingTimeout();
                 updatePhase('visible');
             },
             onEnded: beginFade,
             onError: beginFade,
         });
-    }, [request]);
+    };
 
     useLayoutEffect(() => () => {
         generationRef.current += 1;
@@ -178,9 +265,44 @@ export function usePrismaOrbPresentation(
         clearFadeTimer();
         clearThinkingTimeout();
         engineRef.current?.stop();
-        setRequest(null);
         updatePhase('hidden');
     }), []);
+
+    // T21: browser autoplay policy generally allows an AudioContext to
+    // start/resume only after a user gesture. Warm it up on the page's
+    // first pointer/keyboard/touch interaction -- well before any voice
+    // event -- so a real answer's own warm-up (`PrismaVoiceAudioEngine.play`)
+    // usually finds the context already running. Best-effort and silent:
+    // `warmAudioContext()` never throws, and a failed/suspended resume here
+    // simply falls back to the ordinary per-playback resume path.
+    useLayoutEffect(() => {
+        const engine = engineRef.current;
+        if (!engine) return undefined;
+
+        const interactionEvents = ['pointerdown', 'keydown', 'touchstart'] as const;
+        const options: AddEventListenerOptions = { passive: true };
+
+        // Arrow function expressions (not hoisted `function` declarations)
+        // so TypeScript narrows the `const engine` above to non-null inside
+        // them; `warmUp` referencing `removeListeners` ahead of its own
+        // declaration is safe -- neither body runs until a real user
+        // interaction fires, by which point both are initialized.
+        const warmUp = (): void => {
+            engine.warmAudioContext();
+            removeListeners();
+        };
+
+        const removeListeners = (): void => {
+            for (const type of interactionEvents) {
+                window.removeEventListener(type, warmUp, options);
+            }
+        };
+
+        for (const type of interactionEvents) {
+            window.addEventListener(type, warmUp, options);
+        }
+        return removeListeners;
+    }, []);
 
     return { phase, orbRef, presentVoiceEvent };
 }
