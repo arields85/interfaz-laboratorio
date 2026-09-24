@@ -31,6 +31,7 @@ import dataclasses
 import io
 import sys
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -454,6 +455,7 @@ from prisma_runtime.channel_a_lifecycle import (
     DISPOSITION_BUSY,
     DISPOSITION_COMPLETED,
     DISPOSITION_FAILED,
+    DISPOSITION_POLL_RETRY,
     DISPOSITION_RESTART_REQUIRED,
     DISPOSITION_STOPPED,
     PHASE_FAILED,
@@ -461,6 +463,7 @@ from prisma_runtime.channel_a_lifecycle import (
     PHASE_PREPARED,
     PHASE_PREPARING,
     PHASE_RETIRED,
+    PHASE_RUNNING,
     PHASE_STOPPED,
     PHASE_STOPPING,
     PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE,
@@ -1149,6 +1152,7 @@ class ChannelARunnerCase(ChannelALifecycleTestCase):
             read_timeout=2.0,
             join_timeout=2.0,
             poll_pause=0.01,
+            poll_retry_delay=0.01,
             on_outcome=self.received.append if on_outcome is _UNSET else on_outcome,
             reservation=reservation,
         )
@@ -1428,7 +1432,7 @@ class ChannelARunnerConstructionTest(ChannelARunnerCase):
         self.make_rig(poll_timeout=1, read_timeout=1.0001)
 
     def test_constructor_bounds_join_timeout_and_poll_pause(self) -> None:
-        for field in ("join_timeout", "poll_pause"):
+        for field in ("join_timeout", "poll_pause", "poll_retry_delay"):
             for value in (0, -1, float("nan"), float("inf"), threading.TIMEOUT_MAX, True):
                 with self.subTest(field=field, value=value):
                     with self.assertRaises(ChannelALifecycleError) as caught:
@@ -1464,6 +1468,7 @@ class ChannelARunnerConstructionTest(ChannelARunnerCase):
             ("read_timeout", _CanaryFloat(2.0)),
             ("join_timeout", _CanaryFloat(2.0)),
             ("poll_pause", _CanaryFloat(0.01)),
+            ("poll_retry_delay", _CanaryFloat(0.01)),
         ):
             with self.subTest(field=field):
                 with self.assertRaises(ChannelALifecycleError) as caught:
@@ -2113,18 +2118,30 @@ class ChannelARunnerPollingTest(ChannelARunnerCase):
         runner.poll_once()
         self.assertEqual(received, [6, 8])
 
-    def test_transport_failure_is_terminal_and_never_retried(self) -> None:
+    def test_transient_transport_failure_is_retried_not_terminal(self) -> None:
+        """T8: an ordinary get_updates failure is transient. A direct
+        poll_once() caller sees exactly one failed attempt per call (never
+        internally retried) and the runner stays owned/prepared, not failed."""
         transport = _FakeTransport()
         transport.get_updates_error = RuntimeError(CANARY)
         runner = self.make_rig(transport=transport)
         self.assertTrue(runner.prepare())
 
         result = runner.poll_once()
-        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+        self.assertEqual(result.disposition, DISPOSITION_POLL_RETRY)
+        self.assertEqual(result.reason, PRISMA_CHANNEL_A_POLL_FAILED)
         self.assertNotIn(CANARY, repr(result))
+        self.assertEqual(runner.status().phase, PHASE_RUNNING)
+        self.assertIsNone(runner.status().reason)
         attempts = len(transport.get_updates_calls)
-        self.assertEqual(runner.poll_once().disposition, DISPOSITION_FAILED)
-        self.assertEqual(len(transport.get_updates_calls), attempts)
+        # A second direct call retries -- it is not "never retried" anymore.
+        self.assertEqual(runner.poll_once().disposition, DISPOSITION_POLL_RETRY)
+        self.assertEqual(len(transport.get_updates_calls), attempts + 1)
+
+        # Recovery: once the transport stops failing, the SAME runner (same
+        # activation) completes normally -- it was never terminated.
+        transport.get_updates_error = None
+        self.assertEqual(runner.poll_once().disposition, DISPOSITION_COMPLETED)
 
     def test_external_poll_is_busy_while_a_runner_owns_admission(self) -> None:
         entered = threading.Event()
@@ -2687,8 +2704,10 @@ class ChannelARunnerStopTest(ChannelARunnerCase):
         self.assertEqual(self.capture.escaped_errors(), [])
 
     def test_a_failed_runner_cannot_reactivate(self) -> None:
+        # T8: a bare get_updates failure is transient, not terminal, so a
+        # genuinely terminal trigger (revoked token) is used to reach FAILED.
         transport = _FakeTransport()
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         runner = self.make_rig(transport=transport)
         self.assertTrue(runner.prepare())
         self.assertEqual(runner.poll_once().disposition, DISPOSITION_FAILED)
@@ -2702,9 +2721,11 @@ class ChannelARunnerStopTest(ChannelARunnerCase):
         self.assertTrue(runner.stop())
 
     def test_finalization_after_failure_is_idempotent_and_never_releases_twice(self) -> None:
+        # T8: a bare get_updates failure is transient, not terminal, so a
+        # genuinely terminal trigger (revoked token) is used to reach FAILED.
         reservation = _FakeReservation()
         transport = _FakeTransport()
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         runner = self.make_rig(transport=transport, reservation=reservation)
         self.assertTrue(runner.prepare())
         runner.poll_once()
@@ -2713,9 +2734,7 @@ class ChannelARunnerStopTest(ChannelARunnerCase):
         self.assertTrue(runner.stop())
         self.assertEqual(len(reservation.releases), 1)
         self.assertEqual(runner.status().phase, PHASE_FAILED)
-        # T16: a bare ``get_updates`` failure is now the distinct, retryable
-        # "poll failed" code, not the generic dependency-failure code.
-        self.assertEqual(runner.status().reason, PRISMA_CHANNEL_A_POLL_FAILED)
+        self.assertEqual(runner.status().reason, PRISMA_CHANNEL_A_UNAUTHORIZED)
 
 
 # -- sanitizer canaries ----------------------------------------------------
@@ -2748,15 +2767,21 @@ class ChannelARunnerFailureClassificationTest(ChannelARunnerCase):
         self.assertEqual(result.reason, PRISMA_CHANNEL_A_UNAUTHORIZED)
         self.assertEqual(runner.status().reason, PRISMA_CHANNEL_A_UNAUTHORIZED)
 
-    def test_poll_fails_with_the_distinct_poll_failed_code_for_an_ordinary_transport_error(self) -> None:
+    def test_poll_reports_the_distinct_poll_failed_code_as_a_retry_not_a_failure(self) -> None:
+        """T8: an ordinary transport error is the retryable "poll failed" code
+        on a NOT-terminal DISPOSITION_POLL_RETRY result; the runner's own
+        status stays untouched (never FAILED, no reason recorded)."""
         transport = _FakeTransport()
         runner = self.make_rig(transport=transport)
         self.assertTrue(runner.prepare())
         transport.get_updates_error = RuntimeError(CANARY)
         result = runner.poll_once()
-        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+        self.assertEqual(result.disposition, DISPOSITION_POLL_RETRY)
         self.assertEqual(result.reason, PRISMA_CHANNEL_A_POLL_FAILED)
         self.assertNotIn(CANARY, repr(result))
+        status = runner.status()
+        self.assertEqual(status.phase, PHASE_RUNNING)
+        self.assertIsNone(status.reason)
 
 
 class ChannelARunnerTerminalObserverTest(ChannelARunnerCase):
@@ -2766,14 +2791,16 @@ class ChannelARunnerTerminalObserverTest(ChannelARunnerCase):
     callback can never crash the caller or corrupt lifecycle state."""
 
     def test_on_terminal_is_invoked_exactly_once_with_the_terminal_reason(self) -> None:
+        # T8: a bare get_updates failure is transient, not terminal, so a
+        # genuinely terminal trigger (revoked token) is used here.
         observed: list = []
         transport = _FakeTransport()
         runner = self.make_rig(transport=transport, on_terminal=observed.append)
         self.assertTrue(runner.prepare())
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         runner.poll_once()
         runner.poll_once()  # already terminal: must not notify again
-        self.assertEqual(observed, [PRISMA_CHANNEL_A_POLL_FAILED])
+        self.assertEqual(observed, [PRISMA_CHANNEL_A_UNAUTHORIZED])
 
     def test_on_terminal_is_invoked_for_a_reservation_conflict_too(self) -> None:
         observed: list = []
@@ -2793,20 +2820,22 @@ class ChannelARunnerTerminalObserverTest(ChannelARunnerCase):
         self.assertEqual(observed, [])
 
     def test_a_hostile_on_terminal_callback_is_swallowed(self) -> None:
+        # T8: a genuinely terminal trigger (revoked token), not a transient
+        # get_updates failure.
         def hostile(reason):
             raise _Escaped("escaped-on-terminal-internal")
 
         transport = _FakeTransport()
         runner = self.make_rig(transport=transport, on_terminal=hostile)
         self.assertTrue(runner.prepare())
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         result = runner.poll_once()
         self.assertEqual(result.disposition, DISPOSITION_FAILED)
         self.assertEqual(runner.status().phase, PHASE_FAILED)
 
     def test_a_default_runner_without_on_terminal_is_unaffected(self) -> None:
         transport = _FakeTransport()
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         runner = self.make_rig(transport=transport)
         self.assertTrue(runner.prepare())
         result = runner.poll_once()
@@ -2825,7 +2854,7 @@ class ChannelARunnerTerminalObserverTest(ChannelARunnerCase):
         transport = _FakeTransport()
         runner = self.make_rig(transport=transport, on_terminal=reentrant)
         self.assertTrue(runner.prepare())
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         result = runner.poll_once()
         self.assertEqual(result.disposition, DISPOSITION_FAILED)
         self.assertEqual(observed, [PHASE_FAILED, False])
@@ -2836,18 +2865,181 @@ class ChannelARunnerTerminalObserverTest(ChannelARunnerCase):
         runner = self.make_rig(transport=transport)
         runner.set_on_terminal(observed.append)
         self.assertTrue(runner.prepare())
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         runner.poll_once()
-        self.assertEqual(observed, [PRISMA_CHANNEL_A_POLL_FAILED])
+        self.assertEqual(observed, [PRISMA_CHANNEL_A_UNAUTHORIZED])
 
     def test_set_on_terminal_with_a_non_callable_disables_the_observer(self) -> None:
         transport = _FakeTransport()
         runner = self.make_rig(transport=transport)
         runner.set_on_terminal("not-callable")
         self.assertTrue(runner.prepare())
-        transport.get_updates_error = RuntimeError(CANARY)
+        transport.get_updates_error = ChannelATransportUnauthorized(PRISMA_CHANNEL_A_UNAUTHORIZED)
         result = runner.poll_once()  # must not raise despite the garbage observer
         self.assertEqual(result.disposition, DISPOSITION_FAILED)
+
+
+class ChannelARunnerPollRetryTest(ChannelARunnerCase):
+    """T8: an ordinary get_updates failure retries the SAME activation in
+    place within the managed loop (session, dialogue and cursor unchanged),
+    instead of ending it; interruptible by stop like every other pacing wait.
+    """
+
+    def test_managed_loop_retries_in_place_and_recovers(self) -> None:
+        transport = _FakeTransport()
+        state = {"n": 0}
+
+        def on_get_updates(offset):
+            state["n"] += 1
+            if state["n"] > 2:
+                transport.get_updates_error = None
+
+        transport.on_get_updates = on_get_updates
+        transport.get_updates_error = RuntimeError(CANARY)
+        observed: list = []
+        recovered = self.activity.watch(threading.Event())
+
+        def on_poll_retry(retrying, gap):
+            observed.append((retrying, gap))
+            if retrying is False:
+                recovered.set()
+
+        runner = self.make_rig(transport=transport, poll_retry_delay=0.01, on_poll_retry=on_poll_retry)
+        self.assertTrue(runner.prepare())
+
+        result_holder: list = []
+        worker = self.activity.start(
+            lambda: result_holder.append(runner.run()), label="managed-retry-loop"
+        )
+        self.assertTrue(self.activity.await_event(recovered, "poll-retry-recovered"))
+        # A run()-driven loop has no owned managed thread for stop() to join
+        # (that only exists via start()): the first stop() only sets the
+        # sticky fence, this test's own join is what waits for the loop to
+        # actually exit, and only then does a second stop() observe settlement.
+        self.assertFalse(runner.stop())
+        self.join_owned(worker)
+        self.assertTrue(runner.stop())
+
+        self.assertGreaterEqual(state["n"], 3, "must have retried past the two scripted failures")
+        # Exactly one "entered retry" notification even though get_updates
+        # failed twice: the observer fires once per outage, not per attempt.
+        self.assertEqual(observed[0], (True, None))
+        self.assertEqual(len([o for o in observed if o[0] is True]), 1)
+        self.assertEqual(observed[-1][0], False)
+        self.assertIsInstance(observed[-1][1], float)
+        self.assertGreaterEqual(observed[-1][1], 0.0)
+        self.assertEqual(result_holder[0].disposition, DISPOSITION_STOPPED)
+
+    def test_stop_during_the_retry_wait_returns_promptly(self) -> None:
+        transport = _FakeTransport()
+        transport.get_updates_error = RuntimeError(CANARY)
+        entered_retry = self.activity.watch(threading.Event())
+
+        def on_poll_retry(retrying, gap):
+            if retrying is True:
+                entered_retry.set()
+
+        runner = self.make_rig(transport=transport, poll_retry_delay=5.0, on_poll_retry=on_poll_retry)
+        self.assertTrue(runner.prepare())
+
+        result_holder: list = []
+        worker = self.activity.start(
+            lambda: result_holder.append(runner.run()), label="managed-retry-wait"
+        )
+        self.assertTrue(self.activity.await_event(entered_retry, "entered-poll-retry"))
+
+        # The run()-driven loop has no owned managed thread for stop() to
+        # join, so what actually proves the 5-second retry wait was
+        # interrupted is how fast THIS test's own join observes the loop
+        # exit after the sticky fence + pause_event.set() inside stop().
+        started = time.monotonic()
+        self.assertFalse(runner.stop())
+        self.join_owned(worker)
+        elapsed = time.monotonic() - started
+        self.assertTrue(runner.stop())
+
+        self.assertLess(elapsed, 2.0, "stop must interrupt the retry wait, not wait out the full delay")
+        self.assertEqual(result_holder[0].disposition, DISPOSITION_STOPPED)
+
+    def test_a_terminal_failure_still_ends_the_activation_during_a_retry_cycle(self) -> None:
+        """Unauthorized stays terminal even after ordinary failures retried."""
+        transport = _FakeTransport()
+        state = {"n": 0}
+
+        def on_get_updates(offset):
+            state["n"] += 1
+            if state["n"] > 1:
+                transport.get_updates_error = ChannelATransportUnauthorized(
+                    PRISMA_CHANNEL_A_UNAUTHORIZED
+                )
+
+        transport.on_get_updates = on_get_updates
+        transport.get_updates_error = RuntimeError(CANARY)
+        runner = self.make_rig(transport=transport, poll_retry_delay=0.01)
+        self.assertTrue(runner.prepare())
+
+        result = runner.run()
+        self.assertEqual(result.disposition, DISPOSITION_FAILED)
+        self.assertEqual(result.reason, PRISMA_CHANNEL_A_UNAUTHORIZED)
+        self.assertEqual(runner.status().phase, PHASE_FAILED)
+
+
+class ChannelARunnerPollRetryObserverTest(ChannelARunnerCase):
+    """T8: ``on_poll_retry`` mirrors ``on_terminal``'s diagnostic-only leniency
+    (never load-bearing, a hostile callback is swallowed, late-binding works),
+    proven synchronously through direct ``poll_once()`` calls."""
+
+    def test_on_poll_retry_is_invoked_on_entry_and_recovery(self) -> None:
+        observed: list = []
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport, on_poll_retry=lambda r, g: observed.append((r, g)))
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        runner.poll_once()
+        runner.poll_once()  # already retrying: must not notify entry again
+        self.assertEqual(observed, [(True, None)])
+        transport.get_updates_error = None
+        runner.poll_once()
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(observed[1][0], False)
+        self.assertIsInstance(observed[1][1], float)
+
+    def test_on_poll_retry_is_never_invoked_without_a_poll_failure(self) -> None:
+        observed: list = []
+        runner = self.make_rig(on_poll_retry=lambda r, g: observed.append((r, g)))
+        self.assertTrue(runner.prepare())
+        runner.poll_once()
+        self.assertEqual(observed, [])
+
+    def test_a_hostile_on_poll_retry_callback_is_swallowed(self) -> None:
+        def hostile(retrying, gap):
+            raise _Escaped("escaped-on-poll-retry-internal")
+
+        transport = _FakeTransport()
+        transport.get_updates_error = RuntimeError(CANARY)
+        runner = self.make_rig(transport=transport, on_poll_retry=hostile)
+        self.assertTrue(runner.prepare())
+        result = runner.poll_once()  # must not raise despite the hostile observer
+        self.assertEqual(result.disposition, DISPOSITION_POLL_RETRY)
+
+    def test_set_on_poll_retry_binds_late_before_any_poll_failure(self) -> None:
+        observed: list = []
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport)
+        runner.set_on_poll_retry(lambda r, g: observed.append((r, g)))
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        runner.poll_once()
+        self.assertEqual(observed, [(True, None)])
+
+    def test_set_on_poll_retry_with_a_non_callable_disables_the_observer(self) -> None:
+        transport = _FakeTransport()
+        runner = self.make_rig(transport=transport)
+        runner.set_on_poll_retry("not-callable")
+        self.assertTrue(runner.prepare())
+        transport.get_updates_error = RuntimeError(CANARY)
+        result = runner.poll_once()  # must not raise despite the garbage observer
+        self.assertEqual(result.disposition, DISPOSITION_POLL_RETRY)
 
 
 class ChannelARunnerSanitizerTest(ChannelARunnerCase):
@@ -3157,6 +3349,7 @@ class ChannelARunnerResidualRegressionTest(ChannelARunnerCase):
             read_timeout=2.0,
             join_timeout=2.0,
             poll_pause=0.01,
+            poll_retry_delay=0.01,
             on_outcome=self.received.append,
         )
         options.update(overrides)

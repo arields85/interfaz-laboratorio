@@ -169,7 +169,7 @@ class AuthorityCase(unittest.TestCase):
                 on_outcome=lambda outcome: None,
                 clock=self.clock, pairing_clock=self.pairing_clock, query_clock=self.clock,
                 warning_lead=60, max_question_bytes=4096, poll_timeout=1,
-                read_timeout=2, join_timeout=3, poll_pause=0.1,
+                read_timeout=2, join_timeout=3, poll_pause=0.1, poll_retry_delay=0.1,
             )
         self.runner = self.runners[-1]
 

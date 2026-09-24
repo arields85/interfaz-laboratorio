@@ -525,6 +525,7 @@ class ActivationHarnessTestCase(unittest.TestCase):
             read_timeout=2.0,
             join_timeout=1.0,
             poll_pause=0.05,
+            poll_retry_delay=0.05,
             reservation=self.reservation if reservation is None else reservation,
         )
         self.activations.append(activation)
@@ -1029,6 +1030,9 @@ class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
             def set_on_terminal(self, callback):
                 calls.append(("set_on_terminal", callback))
 
+            def set_on_poll_retry(self, callback):
+                calls.append(("set_on_poll_retry", callback))
+
         # Patch only the composition's constructor dependency. No private runner,
         # lease or dialogue is inspected, and Thread.start is never called.
         with patch.object(module, "ChannelARunner", LocalRunner):
@@ -1061,6 +1065,17 @@ class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
 
         activation.set_on_terminal(callback)
         self.assertEqual(calls, ["construct", ("set_on_terminal", callback)])
+
+    def test_set_on_poll_retry_forwards_the_exact_callback_to_the_runner(self):
+        """T8: the activation is a pure forwarding seam for the manager's
+        in-place poll-retry observer -- it never wraps or inspects it."""
+        activation, calls, _ = self.injected_activation()
+
+        def callback(retrying, gap_seconds):
+            return retrying, gap_seconds
+
+        activation.set_on_poll_retry(callback)
+        self.assertEqual(calls, ["construct", ("set_on_poll_retry", callback)])
 
 
 from prisma_runtime.channel_a_pairing import (

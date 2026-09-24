@@ -146,10 +146,43 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   `close()`. Full suite:
   `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
   -p "test_*.py"` → 1276 passed. Commit: `fix(prisma): reuse Channel A HTTP session per activation`.
-- [ ] **T8 — In-place poll retry.** Port back the old behavior: a transient `getUpdates` failure
+- [x] **T8 — In-place poll retry.** Port back the old behavior: a transient `getUpdates` failure
   retries in place after a flat 5 s within the same activation (status surfaces "reconnecting");
   terminal failures (e.g. invalid token) still end the activation; the manager backoff remains only
   for activation-level failures.
+  Evidence (2026-09-23): `channel_a_lifecycle.py` — an ordinary (non-`ChannelATransportUnauthorized`)
+  `get_updates` exception is no longer terminal: `_poll_iteration` returns the new, non-terminal
+  `DISPOSITION_POLL_RETRY` (reason `PRISMA_CHANNEL_A_POLL_FAILED`, unchanged code) instead of calling
+  `_terminal_result`; `_loop` (the managed thread `start()` actually uses) treats that disposition by
+  waiting `poll_retry_delay` on the SAME interruptible `_pause_event` used for normal pacing, then
+  retrying the SAME activation (session/dialogue/cursor untouched) — `stop()` interrupts the wait
+  immediately. A direct `poll_once()` call still returns after exactly one attempt (never blocks
+  internally), matching its existing "exactly one iteration" contract; only the managed loop actually
+  retries. `ChannelATransportUnauthorized` is unchanged (still terminal). New optional
+  `poll_retry_delay` (required keyword, validated like `poll_pause`, no default) and `on_poll_retry`
+  observer (mirrors `on_terminal`: `set_on_poll_retry`, fires once entering a poll-retry outage and
+  once on recovery with the elapsed gap, hostile callback swallowed). `channel_a_manager.py` —
+  `_bind_poll_retry_observer`/`_handle_poll_retry` mirror the T16 background-failure wiring and write
+  the SAME `retrying`/`retryAttempt` status fields the admin "reconnecting" indicator already reads
+  (`status()`), so in-place retries surface identically to the old backoff-reconnect UI; new
+  `Channel A poll retry: started` / `recovered gap_s=` log lines (English, mirroring the T16 log
+  shape). Activation-level backoff (`_handle_background_failure`/`_retry_tick`) is untouched and now
+  reserved for genuinely terminal failures only, since `PRISMA_CHANNEL_A_POLL_FAILED` is no longer
+  produced as a background-failure reason. `channel_a_activation.py` forwards `poll_retry_delay` to
+  the runner and `set_on_poll_retry` (pure forwarding seam). `local_presentation.py` adds
+  `CHANNEL_A_POLL_RETRY_DELAY_SECONDS = 5.0` (flat 5 s, matching the old `hmi_tts` behavior) passed
+  into `build_channel_a_activation`. RED confirmed via `git stash` of the 4 source files (lifecycle
+  suite failed to import: `DISPOSITION_POLL_RETRY` undefined; activation suite: 31 errors, missing
+  required `poll_retry_delay`); GREEN after restore. Rewrote 10 existing lifecycle tests whose
+  premise ("any ordinary poll failure is immediately terminal") T8 deliberately reverses — switched
+  their triggers to `ChannelATransportUnauthorized` where the test's real intent was about terminal/
+  `on_terminal` mechanics, and rewrote the 2 tests whose actual subject was the retry-vs-terminal
+  behavior itself. Added 9 new focused tests (managed-loop retry-then-recover, stop interrupts the
+  wait promptly, an unauthorized failure mid-cycle still ends the activation, `on_poll_retry`
+  observer mechanics, activation forwarding). Full suite:
+  `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
+  -p "test_*.py"` → 1285 passed. Commit: `fix(prisma): retry Channel A polling in place after
+  transient failures`.
 - [ ] **T9+ — Further fixes.** From T5/T6 evidence (HMI voice orb/audio).
 
 ## Acceptance criteria
@@ -164,10 +197,23 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
 
 - 2026-09-23: branch created; feature document created. T1 static diagnosis done (no
   confirmed root cause).
+- 2026-09-23: T5 (timing instrumentation), T7 (Channel A session reuse) and T8 (in-place poll
+  retry) implemented and committed (`8da7148`, `1267411`, and the T8 commit above). Full
+  prisma-runtime suite green (1285 tests) after each. Route: delegated writer (multi-file,
+  behavior-changing work across channel_a_transport.py, channel_a_lifecycle.py,
+  channel_a_manager.py, channel_a_activation.py, local_presentation.py, voice_service.py and
+  their tests).
 
 ## Next step
 
-User priority (2026-09-23): resolve the lag first; UX items T2–T4 afterwards. Behavior should match
-pre-migration `C:\hmi_tts`. In progress: read-only side-by-side comparison old vs new (Telegram
-reception/reply, HMI voice delivery, TTS, blocking servers). Then T5 instrumentation and T6 live
-repro, then root-cause fixes (port back the faster old mechanisms where they apply).
+Next: T6 — live repro with the user, using the new T5 timing logs to measure the reported lag
+before/after T7+T8. Tail `%LOCALAPPDATA%\CoreAnalytics\Prisma\logs\prisma-presentation-stderr.log`
+(Channel A: `Channel A sendMessage:`/`Channel A getUpdates:`/`Channel A update:` lines, and on a
+transient poll failure `Canal A background failure:` should no longer appear — instead
+`Channel A poll retry: started` then `Channel A poll retry: recovered gap_s=<N>`, where `<N>`
+is the measured reconnect gap, expected around 5 s instead of the old 5→10→20→40→80 s backoff)
+and `prisma-voice-stderr.log` (`Prisma speak-live: first_chunk_elapsed_ms=`/`stream_end_elapsed_ms=`,
+`Prisma voice event publish: elapsed_ms=`) during a QR pairing and HMI voice queries. Also watch
+the admin Channel A panel's "reconnecting" indicator during a simulated/real network hiccup. Then
+root-cause fixes for the still-unexplained HMI voice orb/audio misses (T9+), followed by the
+parked UX items T2–T4.

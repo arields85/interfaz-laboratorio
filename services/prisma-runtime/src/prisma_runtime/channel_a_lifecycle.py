@@ -31,7 +31,15 @@ Ownership model
   owned work remains.
 * Terminal failure and idle retirement are final. There is no retry, no backoff
   and no reactivation: a stopped, failed or retired instance can only be asked
-  to release-again via ``stop``.
+  to release-again via ``stop``. T8's one deliberate exception: an ordinary
+  (non-unauthorized) ``getUpdates`` failure is transient, not terminal. It
+  never ends the activation; the managed loop retries the SAME activation
+  (same session, same dialogue, same cursor) in place after a flat
+  ``poll_retry_delay``, interruptible by ``stop`` like every other pacing wait.
+  A direct ``poll_once()`` call still returns after exactly the one attempt
+  (``DISPOSITION_POLL_RETRY``) instead of blocking, so only the managed loop
+  actually retries. A manager's own activation-level backoff stays reserved
+  for a genuinely terminal failure; this in-place retry never reaches it.
 
 Identity and freshness
 ----------------------
@@ -87,6 +95,7 @@ __all__ = [
     "DISPOSITION_BUSY",
     "DISPOSITION_COMPLETED",
     "DISPOSITION_FAILED",
+    "DISPOSITION_POLL_RETRY",
     "DISPOSITION_RESTART_REQUIRED",
     "DISPOSITION_STOPPED",
     "MAX_LIFECYCLE_WAIT_SECONDS",
@@ -126,8 +135,12 @@ TELEGRAM_BOT_IDENTITY_RESERVED = "TELEGRAM_BOT_IDENTITY_RESERVED"
 # (``get_me``) or poll time (``get_updates``).
 PRISMA_CHANNEL_A_UNAUTHORIZED = "PRISMA_CHANNEL_A_UNAUTHORIZED"
 # An ordinary ``get_updates`` failure while running (network, timeout, 5xx,
-# Telegram's own concurrent-poller 409, or any other transport exception) --
-# always retryable by a later manager.
+# Telegram's own concurrent-poller 409, or any other transport exception). T8:
+# this is now the ``DISPOSITION_POLL_RETRY`` reason -- retried in place by the
+# managed loop within the SAME activation, never a manager-level activation
+# replacement. The code is preserved for status/observation compatibility
+# (:class:`ChannelAStatus`, :class:`ChannelAManager`) and for a direct
+# ``poll_once()`` caller's one-attempt result.
 PRISMA_CHANNEL_A_POLL_FAILED = "PRISMA_CHANNEL_A_POLL_FAILED"
 
 # The documented Telegram discontinuity horizon. Not the 600-second human idle
@@ -149,6 +162,11 @@ DISPOSITION_BUSY = "busy"
 DISPOSITION_STOPPED = "stopped"
 DISPOSITION_FAILED = "failed"
 DISPOSITION_RESTART_REQUIRED = "restart_required"
+# T8: NOT terminal. One ordinary `get_updates` failure returned to a direct
+# `poll_once()` caller after exactly one attempt, or observed internally by
+# the managed loop, which retries the same activation in place after a flat
+# delay instead of returning this to ITS caller.
+DISPOSITION_POLL_RETRY = "poll_retry"
 
 # The public ``ChannelABotIdentity.username`` bound accepted by RCA-5a. Repeated
 # here so a foreign transport cannot smuggle an unpublishable identity past the
@@ -369,9 +387,11 @@ class ChannelARunner:
         read_timeout,
         join_timeout,
         poll_pause,
+        poll_retry_delay,
         on_outcome,
         reservation=None,
         on_terminal=None,
+        on_poll_retry=None,
     ) -> None:
         if transport is None or not _is_callable(_dependency_attribute(transport, "get_me")):
             raise _unavailable() from None
@@ -391,6 +411,12 @@ class ChannelARunner:
         )
         validated_pause = _validated_positive_bounded(
             poll_pause, upper=float(threading.TIMEOUT_MAX)
+        )
+        # T8: the flat in-place retry delay after a transient `get_updates`
+        # failure. Required and validated like every other timing here --
+        # deliberately no default product timing.
+        validated_poll_retry_delay = _validated_positive_bounded(
+            poll_retry_delay, upper=float(threading.TIMEOUT_MAX)
         )
         validated_connect = _validated_connect_timeout(
             _dependency_attribute(transport, "request_timeout")
@@ -415,6 +441,7 @@ class ChannelARunner:
         self.read_timeout = validated_read
         self.join_timeout = validated_join
         self.poll_pause = validated_pause
+        self.poll_retry_delay = validated_poll_retry_delay
         self.on_outcome = on_outcome
         self.reservation = resolved_reservation
 
@@ -442,6 +469,12 @@ class ChannelARunner:
         # failing construction -- unlike every other dependency above, this
         # one is never load-bearing for correctness.
         self._on_terminal = on_terminal if _is_callable(on_terminal) else None
+        # T8: optional, diagnostic-only observer notified on entering and
+        # leaving an in-place poll retry (never terminal). Same leniency as
+        # `_on_terminal`: never load-bearing for correctness.
+        self._on_poll_retry = on_poll_retry if _is_callable(on_poll_retry) else None
+        self._poll_retrying = False
+        self._last_poll_failure_sample: float | None = None
 
         self._activity = 0
         self._admission: object | None = None
@@ -632,6 +665,18 @@ class ChannelARunner:
         with self._lock:
             self._on_terminal = callback if _is_callable(callback) else None
 
+    def set_on_poll_retry(self, callback) -> None:
+        """Bind or replace the in-place poll-retry observer (T8).
+
+        Late-bound by a manager the same way as :meth:`set_on_terminal`, before
+        ``prepare()`` or ``start()`` ever runs. Not part of the ownership/
+        admission model. A non-callable value silently disables the observer,
+        matching the constructor's own leniency for this diagnostic-only
+        dependency.
+        """
+        with self._lock:
+            self._on_poll_retry = callback if _is_callable(callback) else None
+
     # -- admission ---------------------------------------------------------
 
     def _begin_owned(self, *, phase: str, from_caller_thread: bool):
@@ -724,6 +769,60 @@ class ChannelARunner:
             # the managed loop) must never escape here, not even as a
             # ``BaseException``.
             pass
+
+    def _notify_poll_retry(self, retrying: bool, gap_seconds: float | None) -> None:
+        """Invoke the bound observer on a poll-retry state transition (T8).
+
+        ``retrying=True`` reports the transition into an in-place retry after
+        the first transient failure of a run; ``retrying=False`` reports
+        recovery on the next successful poll, with the elapsed gap since that
+        first failure (or ``None`` if the clock could not produce one). Always
+        outside ``self._lock`` and any callback exception is swallowed, mirror-
+        ing :meth:`_notify_terminal` exactly -- this is diagnostic-only and
+        never terminal.
+        """
+        with self._lock:
+            callback = self._on_poll_retry
+        if callback is None:
+            return
+        try:
+            callback(retrying, gap_seconds)
+        except BaseException:
+            pass
+
+    def _mark_poll_failure(self) -> None:
+        """Record one transient `get_updates` failure and notify only on entry.
+
+        Only the FIRST failure of a run notifies the observer (``retrying``
+        stays sticky), so a long outage logs one "started retrying" line, not
+        one per 5-second attempt; the recovery gap is measured from this first
+        failure's sample.
+        """
+        sample = self._read_clock()
+        newly_retrying = False
+        with self._lock:
+            if not self._poll_retrying:
+                self._poll_retrying = True
+                self._last_poll_failure_sample = sample
+                newly_retrying = True
+        if newly_retrying:
+            self._notify_poll_retry(True, None)
+
+    def _mark_poll_recovered(self) -> None:
+        """Clear a sticky poll-retry state and notify with the recovery gap."""
+        recovered = False
+        failure_sample = None
+        with self._lock:
+            if self._poll_retrying:
+                self._poll_retrying = False
+                recovered = True
+                failure_sample = self._last_poll_failure_sample
+                self._last_poll_failure_sample = None
+        if not recovered:
+            return
+        after = self._read_clock()
+        gap = after - failure_sample if after is not None and failure_sample is not None else None
+        self._notify_poll_retry(False, gap)
 
     def _retire(self) -> None:
         with self._lock:
@@ -1027,15 +1126,22 @@ class ChannelARunner:
             )
         except ChannelATransportUnauthorized:
             # T16: a token revoked mid-run, distinguished from an ordinary
-            # poll failure so a later manager never retries it.
+            # poll failure so a later manager never retries it -- still
+            # terminal (T8 changes nothing here).
             return self._terminal_result(completed, PRISMA_CHANNEL_A_UNAUTHORIZED)
         except Exception:
-            # T16: distinct from PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE (used
-            # by every OTHER failure in this method) so a later manager can
-            # tell "the poll itself failed" (network/timeout/5xx/Telegram's
-            # own concurrent-poller 409 -- always retryable) apart from a
-            # local validation/dependency failure.
-            return self._terminal_result(completed, PRISMA_CHANNEL_A_POLL_FAILED)
+            # T8: an ordinary get_updates failure (network/timeout/5xx/
+            # Telegram's own concurrent-poller 409, or any other transport
+            # exception) is transient, never terminal. It is NOT this
+            # runner's terminal fence: the SAME activation (session,
+            # dialogue, cursor) stays owned and prepared. A direct
+            # poll_once() caller sees exactly this one failed attempt; the
+            # managed loop (`_loop`) is what actually retries, after a flat
+            # `poll_retry_delay`, interruptible by stop.
+            self._mark_poll_failure()
+            return ChannelAPollResult(tuple(completed), DISPOSITION_POLL_RETRY, PRISMA_CHANNEL_A_POLL_FAILED)
+
+        self._mark_poll_recovered()
 
         # A stop that landed during the long poll is honored before any handler,
         # leaving the returned suffix untouched.
@@ -1162,6 +1268,19 @@ class ChannelARunner:
                 if fence is not None:
                     return fence
                 result = self._poll_iteration()
+                if result.disposition == DISPOSITION_POLL_RETRY:
+                    # T8: a transient get_updates failure. NOT a terminal exit
+                    # from the loop: retry the SAME activation in place after a
+                    # flat delay. `carried` (already `()` here -- a failed poll
+                    # produces no outcomes) is left untouched so a later
+                    # terminal result still carries whatever the LAST
+                    # successful iteration completed. Interruptible, exactly
+                    # like the pacing wait below: a stop sets the same event.
+                    fence = self._fence_result(carried)
+                    if fence is not None:
+                        return fence
+                    self._pause_event.wait(self.poll_retry_delay)
+                    continue
                 if result.disposition != DISPOSITION_COMPLETED:
                     return result
                 carried = result.outcomes

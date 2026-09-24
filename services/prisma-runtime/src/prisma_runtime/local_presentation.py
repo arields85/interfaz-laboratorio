@@ -78,6 +78,9 @@ CHANNEL_A_POLL_TIMEOUT_SECONDS = 25
 CHANNEL_A_READ_TIMEOUT_SECONDS = 35
 CHANNEL_A_JOIN_TIMEOUT_SECONDS = 40
 CHANNEL_A_POLL_PAUSE_SECONDS = 0.1
+# T8: flat in-place retry delay after a transient getUpdates failure, ported
+# back from the old hmi_tts behavior (a flat 5 s in-place retry).
+CHANNEL_A_POLL_RETRY_DELAY_SECONDS = 5.0
 CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS = 15.0
 
 
@@ -926,6 +929,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 read_timeout=CHANNEL_A_READ_TIMEOUT_SECONDS,
                 join_timeout=CHANNEL_A_JOIN_TIMEOUT_SECONDS,
                 poll_pause=CHANNEL_A_POLL_PAUSE_SECONDS,
+                poll_retry_delay=CHANNEL_A_POLL_RETRY_DELAY_SECONDS,
                 reservation=reservation,
             )
 

@@ -51,6 +51,7 @@ class ChannelAActivation:
         read_timeout,
         join_timeout,
         poll_pause,
+        poll_retry_delay,
         reservation=None,
     ) -> None:
         self._registry: ChannelAPairingRegistry | None = None
@@ -102,6 +103,7 @@ class ChannelAActivation:
             read_timeout=read_timeout,
             join_timeout=join_timeout,
             poll_pause=poll_pause,
+            poll_retry_delay=poll_retry_delay,
             reservation=reservation,
         )
 
@@ -136,6 +138,11 @@ class ChannelAActivation:
         """Forward the manager's background-failure observer to the owned
         runner (T16). A pure forwarding seam: never wrapped or inspected."""
         self._runner.set_on_terminal(callback)
+
+    def set_on_poll_retry(self, callback) -> None:
+        """Forward the manager's in-place poll-retry observer to the owned
+        runner (T8). A pure forwarding seam: never wrapped or inspected."""
+        self._runner.set_on_poll_retry(callback)
 
     def stop(self) -> bool:
         """Request the runner's sticky stop, even when settlement is uncertain."""

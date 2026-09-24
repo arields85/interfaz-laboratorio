@@ -65,9 +65,14 @@ _ERROR_CODES = _CONFIGURATION_CODES | _CREDENTIAL_CODES | _LIFECYCLE_CODES | fro
 # stay failed with their exact code until the admin acts (a new token, a
 # fixed configuration, or reserving the identity for this channel again).
 # Every other recognized manager error code is TRANSIENT and always retried
-# with backoff (network errors, timeouts, Telegram 5xx, its own concurrent-
-# getUpdates 409, a busy manager, an unconfirmed stop, or any other unexpected
-# runner/manager exception).
+# with backoff (a busy manager, an unconfirmed stop, or any other unexpected
+# runner/manager exception). This activation-level backoff is reserved for a
+# genuinely terminal activation failure; T8's ordinary network/timeout/5xx/
+# Telegram-409 `getUpdates` failures never reach it anymore -- they retry in
+# place within the SAME activation (`ChannelARunner._poll_iteration`'s
+# `DISPOSITION_POLL_RETRY` path, surfaced here via `_handle_poll_retry`), so
+# `PRISMA_CHANNEL_A_POLL_FAILED` is no longer actively produced as a
+# background-failure reason.
 _PERMANENT_RETRY_FAILURE_CODES = frozenset({
     TELEGRAM_BOT_IDENTITY_RESERVED,
     PRISMA_CHANNEL_A_UNAUTHORIZED,
@@ -120,6 +125,19 @@ def _log_channel_a_retries_stopped(code, *, retry_attempt: int) -> None:
     _logger.warning(
         "Canal A retries stopped: code=%s after %s attempts", code, retry_attempt,
     )
+
+
+# T8: the in-place poll retry within one activation is a distinct mechanism
+# from the T16 background-failure backoff above (which rebuilds a NEW
+# activation) -- it never ends the activation, so it gets its own pair of log
+# lines, in English per this project's logging convention, reusing the same
+# "one line, closed fields only" shape as the T16 lines above.
+def _log_channel_a_poll_retry_started() -> None:
+    _logger.warning("Channel A poll retry: started")
+
+
+def _log_channel_a_poll_recovered(gap_seconds: float | None) -> None:
+    _logger.warning("Channel A poll retry: recovered gap_s=%s", _format_delay(gap_seconds))
 
 
 _PHASES = frozenset({
@@ -327,6 +345,43 @@ class ChannelAManager:
         # background failure, logged AFTER the staleness check above and
         # outside the lock (logging is I/O, never performed while held).
         _log_channel_a_background_failure(reason, transient=transient, retry_attempt=attempt, next_delay=delay)
+
+    def _bind_poll_retry_observer(self, candidate) -> None:
+        """Wire the in-place poll-retry observer onto a freshly built candidate
+        (T8), mirroring :meth:`_bind_background_observer` exactly: bound
+        before ``prepare()``/``start()`` ever run, and a candidate without
+        ``set_on_poll_retry`` is left unobserved instead of raising.
+        """
+        bind = getattr(candidate, "set_on_poll_retry", None)
+        if not callable(bind):
+            return
+        try:
+            bind(lambda retrying, gap_seconds: self._handle_poll_retry(candidate, retrying, gap_seconds))
+        except Exception:
+            pass
+
+    def _handle_poll_retry(self, activation, retrying, gap_seconds) -> None:
+        """Observer invoked by the runner's OWN thread on an in-place
+        poll-retry state transition (T8). NEVER terminal: the activation stays
+        exactly the one this manager already publishes, so this never touches
+        the mutation lock, the manager's own backoff timer or ``_activation``
+        itself -- only the SAME ``retrying``/``retryAttempt`` status fields
+        T16's background-failure handling already surfaces (``status()``),
+        so the admin/HMI "reconnecting" signal reads the same regardless of
+        whether the manager is rebuilding a new activation after a terminal
+        failure or this activation is retrying its OWN session/dialogue in
+        place. A stale/superseded activation is recorded nowhere, matching
+        :meth:`_handle_background_failure`.
+        """
+        with self._lock:
+            if self._activation is not activation:
+                return
+            self._retrying = retrying
+            self._retry_attempt = 1 if retrying else 0
+        if retrying:
+            _log_channel_a_poll_retry_started()
+        else:
+            _log_channel_a_poll_recovered(gap_seconds)
 
     def _retry_tick(self) -> None:
         """Timer callback: attempt exactly one automatic ``apply()`` (T16).
@@ -738,6 +793,8 @@ class ChannelAManager:
         # T16: bound BEFORE publication, so the runner can never reach a
         # background failure before the observer exists.
         self._bind_background_observer(candidate)
+        # T8: same reasoning, for the in-place poll-retry observer.
+        self._bind_poll_retry_observer(candidate)
         with self._lock:
             self._activation = candidate
         return candidate, epoch
