@@ -760,7 +760,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
       vacuously passing) by temporarily disabling the SSE branch and confirming exactly the 4 tests
       that depend on it failed, then restoring it. `tsc -b`: clean. `eslint`: clean. Full hmi-app
       suite green (2384 passed, was 2372).
-- [ ] **T13b — Verifier findings on T13 (independent verifier, 2026-09-24).** `5411978`, `74cf145`,
+- [x] **T13b — Verifier findings on T13 (independent verifier, 2026-09-24).** `5411978`, `74cf145`,
   `7e84d4f`, `acea713` PASS. `82345d0` (SSE):
   - **Blocking, confirmed in the real log:** the HMI session capability travels in
     `GET /hmi/voice/events?capability=…` (EventSource cannot send headers) and Werkzeug's dev server
@@ -775,6 +775,111 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     64-session registry; add a bounded limit.
   - Nit (acea713): typing may now arrive after the answer; accepted trade-off, revisit if visible.
   - Pending: live check of SSE through the Vite proxy.
+  - **Fixed (2026-09-24), route: delegated writer (multi-file, behavior-changing work across
+    `local_presentation.py`, `voice_service.py`, `voice_events.py`, `prismaSessionClient.ts`,
+    `voiceEventListener.service.ts` and their tests in both trees; brief forbade starting/stopping
+    the runtime/launcher, so the blocking and should-fix items below are unverified against the real
+    launcher/Vite proxy, same as `82345d0`'s own SSE implementation).**
+    - **Blocking fix — capability out of the URL** (commit `82e9378`, extended by `795f926`).
+      `hmi-app/src/services/voiceEventListener.service.ts`: replaced the native `EventSource`
+      connection with a `fetch`-based reader through `prismaSessionClient.fetch(streamUrl, ...)` —
+      the same transport polling already uses, so capability handling, abort and rotation stay in
+      one place; the capability now travels only in the ordinary `X-Prisma-Session-Capability`
+      header, never in the URL. Parses `text/event-stream` from `response.body`'s
+      `ReadableStream<Uint8Array>` by hand: `TextDecoder`-decodes each chunk, buffers across reads,
+      splits on `\n\n` frame boundaries (correct across arbitrarily split chunks — new dedicated
+      test), extracts `data:` line(s) per frame (comments/heartbeats with no `data:` line are
+      skipped, not treated as malformed), UTF-8 via the stream decoder's own incremental mode. Kept
+      the existing polling fallback and cross-listener dedupe (`lastProcessedKey`,
+      `prismaSessionClient.acceptVoiceEvent`) exactly as-is; falls back to polling on a rejected
+      fetch, a non-ok response (401/429/etc.), a missing/non-streaming `response.body`, a stale
+      response after a mid-connect session reset (`isCurrentResponse`), a rejected read, or the
+      stream ending — one shared code path (`if (!stopped && !usingPolling) startPolling();`) rather
+      than duplicated fallback logic per failure mode. `services/prisma-runtime/src/prisma_runtime/
+      local_presentation.py`: removed the `?capability=` query-parameter fallback from
+      `voice_events_stream()` entirely — header-only now, identical to every other HMI route; no
+      other route ever read a query-string capability (confirmed by repo-wide search). Dead code
+      removed: `PrismaSessionClient.capability()` (only caller was the old `EventSource` URL
+      construction) and its 3 tests. `PRISMA_EVENTS_STREAM_URL` added to `prismaSessionClient.ts`'s
+      `AUTHORIZED_PATHS` so `.fetch()` accepts it. `vite.prismaProxy.config.ts`'s stale comment
+      updated (no proxy behavior change — the route already passed the capability header through
+      unmodified; `stripSessionCapability` was already `false` for it).
+      Follow-up correction (`795f926`, same review pass): the unterminated-frame overflow guard
+      (`MAX_SSE_BUFFERED_CHARS`) originally ran before extracting complete frames from the buffer,
+      so a legitimately large complete frame (or several frames arriving in one chunk) landing right
+      at that size boundary would have been dropped along with a genuinely runaway buffer; reordered
+      to extract every complete frame first and only then clear a leftover unterminated remainder.
+      New regression test proves a single complete frame larger than the guard is still delivered.
+      Tests: backend — `test_local_presentation.py` `VoiceEventsStreamTests`: new
+      `test_query_string_capability_no_longer_authorizes` (a real, valid capability sent only via
+      `?capability=` now gets 401), `test_accepts_a_valid_capability_via_header_only` (renamed from
+      the old EventSource-specific test). Frontend — `voiceEventListener.service.test.ts`: replaced
+      the entire `FakeEventSource`-based SSE describe block with a `FakeSseBody` (a controllable fake
+      `ReadableStreamDefaultReader`) and 15 new tests covering the plain connect/deliver path with no
+      `capability=` in the fetch URL, split-chunk reassembly, heartbeat/comment frames, cross-listener
+      dedupe, malformed JSON, and every fallback trigger listed above, plus the overflow-guard
+      ordering regression and the existing "never attempts SSE when fetchImpl is provided" seam test
+      adapted to the new transport. `prismaSessionClient.test.ts`: removed the 3 `capability()` tests,
+      added one asserting the stream route is authorized and the capability travels as a header with
+      no `capability=` in the URL. RED confirmed for every new/changed assertion (backend query-401
+      test; frontend: 11 of the 15 new SSE tests failed against the old EventSource code path before
+      the rewrite, the other 4 — deliver/dedupe/malformed/never-attempts — already passed
+      coincidentally since jsdom has no native `EventSource` and fell straight to polling, so the
+      rewrite's behavior was independently verified equivalent for those; the overflow-guard fix was
+      RED-verified separately by toggling the two-line reorder back and forth). Full suites:
+      prisma-runtime 1443 passed (`82e9378`); hmi-app 2392 tests / `tsc -b` clean / `eslint` clean
+      (`82e9378` + `795f926`).
+    - **Should-fix — bounded SSE connections** (commit `c590523`). `voice_events.py`:
+      `VoiceEventStore.subscribe_owner()` now enforces a per-owner cap (default 4 — one real tab plus
+      a brief reconnect overlap) and a global cap (default 32 — well below the 64-session HMI
+      registry) via new `max_stream_subscribers_per_owner`/`max_stream_subscribers_total` constructor
+      kwargs, raising new `VoiceEventStreamCapacity` before the new waiter is appended (a rejected
+      caller never holds a slot). `local_presentation.py`'s `voice_events_stream()`: moved the
+      `subscribe_owner()` call out of the `generate()` generator into the view function itself —
+      Flask commits the streaming response's 200 status as soon as the view function returns, before
+      the generator ever yields its first chunk, so a capacity error raised only once the generator
+      started could no longer become a clean rejection (same class of bug T12 documented for
+      `resolve_voice_event`). A capacity error now answers a clean `429` with
+      `{"ok": false, "error": "VOICE_EVENT_STREAM_SUBSCRIBER_LIMIT" | "VOICE_EVENT_STREAM_CAPACITY"}`,
+      which the frontend's fetch-based SSE reader already treats as a non-ok response and falls back
+      to polling for (covered by the frontend's own "falls back to polling on a non-ok SSE response"
+      test from the blocking fix above — no frontend change needed for this unit). `unsubscribe()`
+      (unchanged) still releases both the per-owner and global slot on disconnect. Tests: 6 new in
+      `test_voice_event_delivery.py`'s new `VoiceEventStreamCapacityTests` (per-owner limit, global
+      limit spanning owners, a rejected subscription never holds a slot, unsubscribe releases both
+      kinds of slot for a later subscription) plus 2 new integration tests in
+      `test_local_presentation.py`'s `VoiceEventsStreamTests` (a saturated store answers 429 through
+      the real route before any stream byte is sent; releasing a slot lets a later connection
+      through). `VoiceEventsStreamTests._client()` extended to also build and return its
+      `HmiSessionRegistry` (needed to resolve `owner_id` for direct store pre-saturation in the new
+      tests) — every existing caller in the class updated to the 3-tuple unpack; no behavior change
+      to those tests. RED confirmed: the store-level tests failed on `ImportError:
+      VoiceEventStreamCapacity` before the store change; the two route-level tests failed with an
+      uncaught `VoiceEventStreamCapacity` crashing the response mid-stream (rather than a clean 429)
+      before the view-function restructuring. Full suite: 1459 passed.
+    - **Nit (acea713):** left as the documented accepted trade-off — not revisited (not reported as
+      visible in the 2026-09-24 live test).
+    - **Also confirmed (static check only, per this task's own brief):** the Vite dev proxy's default
+      streaming pass-through needs no SSE-specific configuration (unchanged from `82345d0` — same
+      conclusion, re-verified by reading `vite.prismaProxy.config.ts` again); response headers
+      `Cache-Control: no-cache` and `X-Accel-Buffering: no` were already set by `82345d0` and remain
+      unchanged. The live proxy check itself stays pending for the user's next launcher restart (see
+      Next step).
+    - **Defense in depth — access log query-string redaction** (commit `e29d4c6`, not itself a T13b
+      finding but explicitly requested by this task's brief as belt-and-suspenders alongside the
+      blocking fix). New `access_log_redaction.py`: a `logging.Filter` installed on the `"werkzeug"`
+      logger in both `local_presentation.py`'s and `voice_service.py`'s `main()` (before `app.run()`,
+      source-inspection-tested for ordering, matching this file's existing `MainStartupWiringTests`
+      convention) that rewrites the request-line log argument to redact everything after `?` when
+      Werkzeug logs a request with a query string, leaving method/path/protocol/status/size intact;
+      never drops or crashes on a record it cannot parse. Idempotent install. Tests: 6 in the new
+      `test_access_log_redaction.py` (redacts while preserving the rest, leaves a query-less line
+      untouched, never drops an unparseable record, redacts a multi-parameter query string, installs
+      exactly one filter across repeated calls, and one end-to-end `assertLogs` round trip through the
+      real `"werkzeug"` logger) plus the 2 `MainStartupWiringTests` wiring-order tests above. RED
+      confirmed: the module tests via `ImportError` before the module existed; the two wiring tests by
+      temporarily removing the `install_access_log_query_redaction()` call from each `main()` and
+      confirming both failed, then restoring. Full suite: 1451 passed.
 - [ ] **T14 — "Desvincular" hidden while typing (user report 2026-09-24).** Telegram hides a reply
   keyboard while the system keyboard is open (it shows a keyboard toggle icon instead). **User
   decision (2026-09-24): keep BOTH** — the persistent "Desvincular" reply keyboard and a Telegram
@@ -868,18 +973,39 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   `prismaAssistant.config.ts`, `vite.prismaProxy.config.ts`, `prismaSessionClient.ts`,
   `voiceEventListener.service.ts`, `useVoiceEventListener.ts` and their tests in `hmi-app`; touched
   only those two trees and this doc).
+- 2026-09-24: T13b writer fixed all three verifier findings on T13's SSE unit (c). Blocking: the HMI
+  session capability no longer travels in the SSE URL — the frontend reads the stream with a
+  `fetch`-based reader through `prismaSessionClient.fetch()` (header-only, same transport polling
+  uses), and the server-side `?capability=` fallback is removed (commit `82e9378`); a same-pass
+  review fix reordered the SSE frame parser's overflow guard to extract complete frames before
+  clearing an unterminated remainder (commit `795f926`). Should-fix: concurrent SSE streams are now
+  capped per-owner and globally in `VoiceEventStore`, well below the 64-session registry, with a
+  clean 429 (not a mid-stream crash) once the cap is hit (commit `c590523`). Defense in depth
+  (explicitly requested by the brief): a Werkzeug access-log filter redacts query strings in both
+  Flask processes' request logs (commit `e29d4c6`). Full suites green after every commit
+  (prisma-runtime 1443 → 1443 → 1451 → 1459; hmi-app 2392 tests, `tsc -b` and `eslint` both clean
+  throughout). This writer's brief again forbade starting/stopping the runtime/launcher, so the
+  capability-out-of-URL fix and the bounded-connections fix are unverified against the real
+  launcher/Vite proxy, same as `82345d0` itself — see Next step. Route: delegated writer (multi-file,
+  behavior-changing work across `local_presentation.py`, `voice_service.py`, `voice_events.py` and
+  their tests in `services/prisma-runtime`, plus `prismaSessionClient.ts`,
+  `voiceEventListener.service.ts`, `vite.prismaProxy.config.ts` and their tests in `hmi-app`, plus a
+  new `access_log_redaction.py` and its test; touched only those two trees and this doc).
 
 ## Next step
 
 Next: a live voice test with the user, covering everything still unverified against the real
 runtime:
-1. **T13 unit (c), highest priority**: after the next launcher restart (so it picks up the new SSE
-   code), confirm the orb/audio experience is unchanged and that `GET /hmi/voice/events` streams
-   live through the real Vite dev-server proxy (5173 → 5057) without buffering — open the HMI,
-   check the Network tab for an `EventSource`/`text/event-stream` connection to
-   `/api/prisma/events/stream`, ask a question, and confirm the answer arrives at least as fast as
-   before (no regression), with polling never engaging unless the SSE connection is deliberately
-   broken.
+1. **T13b / T13 unit (c), highest priority**: after the next launcher restart (so it picks up the
+   new SSE code — restarting also deletes the logs and invalidates every in-memory session
+   capability, including any leaked by the pre-T13b query-string fallback), confirm the orb/audio
+   experience is unchanged and that `GET /hmi/voice/events` streams live through the real Vite
+   dev-server proxy (5173 → 5057) without buffering — open the HMI, check the Network tab for a
+   `fetch`/`text/event-stream` connection to `/api/prisma/events/stream` with the session
+   capability in its request header and **no `capability=` in the URL**, ask a question, and confirm
+   the answer arrives at least as fast as before (no regression), with polling never engaging unless
+   the SSE connection is deliberately broken. Also confirm `prisma-presentation-stderr.log` never
+   shows a raw capability value again, even for an unrelated route's query string.
 2. T13 units (a)/(b)/(d)/(e): read the updated `credential_elapsed_ms`, `time_to_first_byte_ms`, and
    Channel A update-handling timings in the logs to confirm the measured improvements hold live
    (in-memory secret cache should show near-zero `credential_elapsed_ms` on repeat requests; Gemini
