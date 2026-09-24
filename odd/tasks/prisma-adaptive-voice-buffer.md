@@ -287,11 +287,120 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
     feed the adaptive prebuffer estimator into progressive playback.
   - Route: delegated writer (confirmed; touched `hmi-app/src/domain/`, `hmi-app/src/hooks/` and
     `hmi-app/src/services/` across 4 non-trivial source files plus their tests).
-- [ ] **T4 — Configuration field.** `playbackBuffer: { mode: 'automatic' | 'manual',
+- [x] **T4 — Configuration field.** `playbackBuffer: { mode: 'automatic' | 'manual',
   manualSeconds }` in the Prisma voice config: HMI domain types/validation/defaults, runtime
   defaults/validation/persistence, backward-compatible defaulting of stored configs. Tests:
   `test_voice_service.py`, `usePrismaVoiceConfig*.test.tsx`, `usePrismaVoiceConfigDraft.test.ts`.
   Route: delegated writer.
+
+  **Evidence (2026-09-24, delegated writer, strict TDD):**
+  - Files (HMI): `hmi-app/src/domain/prismaVoiceConfig.ts` (+ `.test.ts`) — new
+    `PrismaVoicePlaybackBufferMode` (`'automatic' | 'manual'`), `PrismaVoicePlaybackBufferConfig`
+    (`{ mode, manualSeconds }`), `playbackBuffer` added to `PrismaVoiceConfig`/
+    `PRISMA_VOICE_CONFIG_DEFAULTS` (`{ mode: 'automatic', manualSeconds: 0.2 }`,
+    frozen)/`clonePrismaVoiceConfig`/`arePrismaVoiceConfigsEqual`/`createDefaultPrismaVoiceConfig`;
+    named bounds constants `PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN/MAX/STEP`
+    (0.1/3.0/0.1); `validatePrismaVoiceConfig` backfills a missing `playbackBuffer` with the
+    default (backward compatibility) and, when present, validates it strictly (`mode` enum,
+    `manualSeconds` finite + on the 0.1 s grid within float tolerance + in range). `hmi-app/src/
+    hooks/usePrismaVoiceConfigDraft.ts` (+ `.test.ts`) — new `updatePlaybackBufferField`, excluded
+    `playbackBuffer` from the scalar `updateField` key union (same pattern as `robotic`), and
+    `rebaseDraft` merges `playbackBuffer` field-by-field (not the generic per-key loop `robotic`
+    uses, since `mode`/`manualSeconds` have different types — see the code comment).
+    `hmi-app/src/components/admin/PrismaVoiceEffectsSettings.tsx` — `onFieldChange` prop type
+    also excludes `'playbackBuffer'`, to match the narrowed `updateField` (mechanical, required by
+    `tsc -b`; no new UI/copy — that stays T5's job). `hmi-app/src/services/
+    prismaVoicePrebufferController.ts` (+ `.test.ts`) — new `createPrismaVoiceManualPrebufferPolicy`
+    (resolves `manualSeconds * 1000`, `mode: 'manual'`, still forwards
+    `recordNeededPrebufferMs` to the shared controller so Automatic keeps learning per Design item
+    4) and `createPrismaVoiceConfiguredPrebufferPolicy`/`createBrowserPrismaVoiceConfiguredPrebufferPolicy`
+    (picks Automatic/Manual per `getPlaybackBuffer()` call at `resolvePrebufferMs()` time; `null`/
+    `undefined` — unavailable/loading/failed — falls back to Automatic). `hmi-app/src/hooks/
+    usePrismaOrbPresentation.ts` (+ `.test.ts`) — now calls `usePrismaVoiceConfig()` itself (see
+    "config source" below) and builds the production engine with
+    `createBrowserPrismaVoiceConfiguredPrebufferPolicy(() => voiceConfigRef.current?.playbackBuffer
+    ?? null)`; `voiceConfigRef` is a plain ref written on every render (not an effect) from the
+    query's `.data`, so the policy — built once, for the engine's whole lifetime — reads the
+    *current* config at resolve time with no engine rebuild on config change. `hmi-app/src/
+    components/PrismaOrbOverlay.test.tsx` — added a `vi.mock('../queries/usePrismaVoiceConfig', ...)`
+    (that suite has no `QueryClientProvider`, and every test injects its own fake `engine`, so it
+    is not exercising config-driven selection).
+  - Files (runtime): `services/prisma-runtime/src/prisma_runtime/voice_service.py` —
+    `DEFAULT_PRISMA_VOICE_CONFIG["playbackBuffer"] = {"mode": "automatic", "manualSeconds": 0.2}`;
+    mirrored bounds constants `PRISMA_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN/MAX/STEP`
+    (0.1/3.0/0.1, same values as the HMI, documented as hand-kept-equal — no shared schema for
+    this plain config); `validate_prisma_voice_config` requires `playbackBuffer` in the exact
+    field set and validates `mode`/`manualSeconds` (same grid-tolerance rule as the HMI: reject
+    off-grid/out-of-range, do not round); new `_migrate_prisma_voice_config()` backfills a missing
+    `playbackBuffer` and is called from both `PrismaVoiceConfigStore._load()` (a config file
+    persisted before this field existed) and `.update_local()` (an old HMI client PUTting a
+    candidate without the field) — in front of the strict validator, not as a route patch, so an
+    actually-unknown top-level field still fails (`test_validate_still_rejects_an_unexpected_top_
+    level_field`, and the pre-existing `test_local_config_update_is_atomic_and_strict` still
+    passes unmodified). `services/prisma-runtime/config/prisma_voice_config.example.json` — added
+    `playbackBuffer` for consistency with the new default shape (the seed template read by
+    `runtime-environment.ps1`; unrelated seeding-mechanics tests write their own synthetic
+    template content and are unaffected).
+  - Backward-compatibility decision: a config missing `playbackBuffer` entirely — old stored
+    file, or old HMI client's PUT body — defaults to `{ mode: 'automatic', manualSeconds: 0.2 }`
+    with no error, on both sides, and the *next* save persists the complete shape. A
+    `playbackBuffer` that IS present is validated strictly (same rigor as every other field); this
+    is not a loophole for other unknown fields (verified: an extra unrelated top-level key still
+    raises `CONFIG_FIELDS_INVALID` / a domain validation issue on both sides).
+  - Step/bounds rule (decided, consistent both sides): **reject, do not round.** `manualSeconds`
+    must be within [0.1, 3.0] (±1e-9 tolerance for the boundaries) and on the 0.1 s grid within
+    1e-6 tolerance (`value/step` must round to a whole number) — chosen because IEEE754 makes
+    exact equality unreliable (e.g. `0.1 + 0.2 !== 0.3`) while a value genuinely off the grid
+    (e.g. 0.25) must still fail, not silently snap to the nearest step.
+  - Config source for the policy (gap found and resolved): the viewer (`App.tsx` ->
+    `usePrismaOrbPresentation`) had no reader of the Prisma voice config before this task — only
+    the admin `VoiceSettingsTab.tsx` called `usePrismaVoiceConfig()`. Chose to call
+    `usePrismaVoiceConfig()` directly inside `usePrismaOrbPresentation` (the hook that already owns
+    the engine/prebuffer-policy wiring) rather than threading a config prop down from `App.tsx`:
+    keeps the concern local to its existing owner, matches the layered query -> hook flow, and
+    TanStack Query dedupes the shared query key so a concurrently open admin tab and the viewer
+    read the same cached config. Cost: every `usePrismaOrbPresentation`/`PrismaOrbOverlay` test
+    needed either an injected `engine` (bypasses the real policy factory, unaffected) or a mock of
+    `../queries/usePrismaVoiceConfig` (both `usePrismaOrbPresentation.test.ts` and
+    `PrismaOrbOverlay.test.tsx` now mock it; neither file had a `QueryClientProvider` in its tree).
+  - RED evidence: `prismaVoiceConfig.test.ts` — 12 new/changed cases failed first (defaults
+    missing `playbackBuffer`, clone/equality checks, validator round-trip and the new
+    accept/reject cases) before the domain implementation; `test_local_config_update_is_atomic_
+    and_strict`-style Python failures for the 7 new runtime cases (`KeyError: 'playbackBuffer'` on
+    the default fixture, `CONFIG_FIELDS_INVALID` on validate) before the runtime implementation;
+    `usePrismaVoiceConfigDraft.test.ts` — `updatePlaybackBufferField is not a function` before the
+    draft hook change; `prismaVoicePrebufferController.test.ts` — 8 new cases failed with
+    `createPrismaVoiceManualPrebufferPolicy`/`createPrismaVoiceConfiguredPrebufferPolicy is not a
+    function` before the controller change; `usePrismaOrbPresentation.test.ts` — 4 cases (the
+    renamed production-engine test plus 3 new) failed with `No
+    "createBrowserPrismaVoiceAutomaticPrebufferPolicy" export is defined on the ... mock` before
+    the hook wiring (the old export name was removed as part of the rename to the Configured
+    factory). All observed by running the exact target suites, then GREEN after each
+    implementation step.
+  - Checks: `cd hmi-app && npx vitest run` -> 224 files / 2548 tests passed (baseline 224/2521 +
+    27 new). `cd hmi-app && npx tsc -b` -> clean, no output. `cd hmi-app && npm run lint` -> clean,
+    no findings. `services/prisma-runtime/.venv/Scripts/python.exe -m unittest discover -s
+    services/prisma-runtime -p "test_*.py"` -> 1532 tests OK (baseline 1522 + 10 new).
+  - Commits (branch `feat/prisma-adaptive-voice-buffer`, GGA review passed on each, split into
+    the runtime/HMI work units the task authorized): `ea03605` feat(prisma-runtime): add
+    playbackBuffer to the voice config with legacy defaulting; `737ab87` feat(hmi): add
+    playbackBuffer to the Prisma voice config and drive playback by mode (GGA flagged one
+    optional, non-blocking nitpick — a named seconds-to-milliseconds constant for
+    `getManualSeconds() * 1_000` in the controller — left as-is, does not break any rule).
+  - Route: delegated writer (confirmed; touched `hmi-app/src/domain/`, `hmi-app/src/hooks/`,
+    `hmi-app/src/services/`, `hmi-app/src/components/` and
+    `services/prisma-runtime/src/prisma_runtime/`, `services/prisma-runtime/tests/`,
+    `services/prisma-runtime/config/`).
+  - What T5 needs: field paths `draft.playbackBuffer.mode` (`'automatic' | 'manual'`) and
+    `draft.playbackBuffer.manualSeconds` (number, seconds); bounds/step constants to reuse for the
+    manual control are `PRISMA_VOICE_PLAYBACK_BUFFER_MANUAL_SECONDS_MIN/MAX/STEP` (0.1/3.0/0.1) in
+    `hmi-app/src/domain/prismaVoiceConfig.ts`; the draft hook exposes
+    `updatePlaybackBufferField('mode' | 'manualSeconds', value)` and `isDirty` already accounts
+    for `playbackBuffer`; `commitDraft`/`commitRemote`/`initializeFromRemote` already handle it
+    (rebase-on-PUT-response included). No UI copy or controls exist yet in
+    `VoiceSettingsTab.tsx`/`PrismaVoiceEffectsSettings.tsx` — T5 adds the "Buffer de audio"
+    section (Automático/Manual + seconds control shown only in Manual), in Spanish (usted),
+    tokens/Lucide only, following `ADMIN_CONVENTIONS.md`/`widget-property-panel`.
 - [ ] **T5 — Prisma tab controls.** In `hmi-app/src/components/admin/VoiceSettingsTab.tsx`:
   "Buffer de audio" with `Automático`/`Manual`; manual seconds control shown only in Manual.
   Copy (usted) drafted by the writer and confirmed with the user before commit. Follow the
@@ -357,7 +466,21 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
   `tsc -b` and lint all green. One commit on `feat/prisma-adaptive-voice-buffer`: `b94c2fd` (GGA
   review passed).
 
+- 2026-09-24: T4 done (delegated writer, strict TDD; RED observed for the domain validator, the
+  runtime store/validator, the draft hook, the prebuffer controller's Manual/Configured policies
+  and the `usePrismaOrbPresentation` wiring before each GREEN). `playbackBuffer: { mode, manualSeconds
+  }` now lives in the shared Prisma voice config on both sides, with backward-compatible
+  defaulting (a config missing the field loads as Automatic/0.2 s, no error, on old stored files
+  and old HMI PUT bodies alike). The viewer now reads the config itself (`usePrismaOrbPresentation`
+  calling `usePrismaVoiceConfig()`, a gap found during this task) and drives playback through a new
+  Automatic/Manual composed policy, re-read per answer with no engine rebuild on config change.
+  hmi-app (224 files / 2548 tests), `tsc -b` and lint all green; prisma-runtime (1532 tests) green.
+  Two commits on `feat/prisma-adaptive-voice-buffer` (runtime/HMI work units): `ea03605`,
+  `737ab87` (both GGA review passed).
+
 ## Next step
 
-Start T4 (configuration field: `playbackBuffer: { mode: 'automatic' | 'manual', manualSeconds }`
-in the Prisma voice config, HMI + runtime; delegated writer, strict TDD).
+Start T5 (Prisma tab controls in `hmi-app/src/components/admin/VoiceSettingsTab.tsx`: "Buffer de
+audio" section, Automático/Manual + seconds control shown only in Manual, Spanish usted copy
+confirmed with the user before commit; field paths and hooks from T4's evidence above; delegated
+writer, strict TDD).
