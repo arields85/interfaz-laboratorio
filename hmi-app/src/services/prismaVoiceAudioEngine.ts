@@ -269,12 +269,15 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     private workletModulePromise: Promise<void> | null = null;
     private active: ActivePlayback | null = null;
     private generation = 0;
-    // T21: the in-flight (or most recently settled) resume attempt for
-    // `this.context`, shared between `warmAudioContext()` and
-    // `ensureContextRunning()` so a resume already started at voice-event
-    // receipt is awaited once, never re-triggered when the first PCM block
-    // is ready to schedule.
+    // T21: the in-flight (or most recently settled) resume attempt, shared
+    // between `warmAudioContext()` and `ensureContextRunning()` so a resume
+    // already started at voice-event receipt is awaited once, never
+    // re-triggered when the first PCM block is ready to schedule.
+    // `contextResumePromiseContext` records which of the two AudioContexts
+    // (`this.context` vs. `this.localWorkletContext`) that promise belongs
+    // to, so a resume for one is never mistakenly reused for the other.
     private contextResumePromise: Promise<void> | null = null;
+    private contextResumePromiseContext: AudioContext | null = null;
 
     public constructor(dependencies: PrismaVoiceAudioEngineDependencies = {}) {
         this.createAudioContext = dependencies.createAudioContext ?? createBrowserAudioContext;
@@ -378,6 +381,10 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         this.localWorkletContext = null;
         this.workletModuleContext = null;
         this.workletModulePromise = null;
+        // T21: an in-flight resume belongs to whichever context is being
+        // disposed; never reused against a context created after dispose.
+        this.contextResumePromise = null;
+        this.contextResumePromiseContext = null;
 
         for (const context of contexts) {
             if (context && context.state !== 'closed') {
@@ -1000,7 +1007,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     // `ensureContextRunning()`'s own post-await state check, exactly as
     // before T21.
     private resumeContext(context: AudioContext): Promise<void> {
-        if (this.contextResumePromise) {
+        if (this.contextResumePromise && this.contextResumePromiseContext === context) {
             return this.contextResumePromise;
         }
 
@@ -1008,9 +1015,11 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             this.warn('Prisma voice AudioContext resume failed.', error);
         });
         this.contextResumePromise = resumePromise;
+        this.contextResumePromiseContext = context;
         void resumePromise.finally(() => {
             if (this.contextResumePromise === resumePromise) {
                 this.contextResumePromise = null;
+                this.contextResumePromiseContext = null;
             }
         });
         return resumePromise;
