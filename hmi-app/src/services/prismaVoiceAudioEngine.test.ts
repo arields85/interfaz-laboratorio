@@ -687,6 +687,58 @@ describe('PrismaVoiceAudioEngine', () => {
         expect(diagnostics.at(-1)?.payload).not.toHaveProperty('prebuffer_mode');
     });
 
+    it('plays a block that arrives late but before its scheduled time right after the previous one', async () => {
+        const reader = {
+            read: vi.fn()
+                .mockResolvedValueOnce({ done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) })
+                .mockImplementationOnce(async () => {
+                    // 100 ms after the first block: later than its 75 ms predecessor, but still
+                    // well inside the 200 ms prebuffer, so it must not open a gap.
+                    audio.setCurrentTime(1.1);
+                    return { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) };
+                })
+                .mockResolvedValueOnce({ done: true, value: undefined }),
+            cancel: vi.fn(async () => undefined),
+        } as unknown as ReadableStreamDefaultReader<Uint8Array>;
+
+        createEngine().play(createLiveSource(reader), createTarget(), {});
+        await settlePlayback(30);
+        timers.runNext();
+
+        expect(audio.sources[0]?.start).toHaveBeenCalledWith(1.2);
+        expect(audio.sources[1]?.start.mock.calls[0]?.[0]).toBeCloseTo(1.275);
+        audio.sources.forEach(({ node }) => node.onended?.(new Event('ended')));
+        expect(diagnostics.at(-1)).toMatchObject({
+            record_type: 'playback-ended',
+            payload: expect.objectContaining({ underflow_count: 0 }),
+        });
+    });
+
+    it('re-primes with the prebuffer after a block misses its scheduled time', async () => {
+        const reader = {
+            read: vi.fn()
+                .mockResolvedValueOnce({ done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) })
+                .mockImplementationOnce(async () => {
+                    // 1.26 + 25 ms scheduling margin is past the 1.275 slot: a real underflow.
+                    audio.setCurrentTime(1.26);
+                    return { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) };
+                })
+                .mockResolvedValueOnce({ done: true, value: undefined }),
+            cancel: vi.fn(async () => undefined),
+        } as unknown as ReadableStreamDefaultReader<Uint8Array>;
+
+        createEngine().play(createLiveSource(reader), createTarget(), {});
+        await settlePlayback(30);
+        timers.runNext();
+
+        expect(audio.sources[1]?.start.mock.calls[0]?.[0]).toBeCloseTo(1.46);
+        audio.sources.forEach(({ node }) => node.onended?.(new Event('ended')));
+        expect(diagnostics.at(-1)).toMatchObject({
+            record_type: 'playback-ended',
+            payload: expect.objectContaining({ underflow_count: 1 }),
+        });
+    });
+
     it('records positive underflow evidence when the audio clock outruns the scheduled block', async () => {
         const reader = {
             read: vi.fn()

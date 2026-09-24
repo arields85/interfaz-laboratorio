@@ -441,6 +441,26 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
   Manual run confirms the fixed value is used. Parent reads the `HMI voice timeline:` lines in
   `%LOCALAPPDATA%\CoreAnalytics\Prisma\logs\prisma-presentation-stderr.log`.
 
+- [x] **T6b — Prebuffer applied per block (found in the T6 live test, 2026-09-24 ~17:40).**
+  T6 log (9 answers: 6 Automático, 3 Manual 0.5 s): the estimator behaved as designed (needed
+  119 ms → next prebuffer 169 ms = 119 + 50, held; Manual used 500 ms and still recorded; cached
+  answer started +171 ms) and the admin section renders above the effects (user screenshot). But
+  `underflow_count=1` appeared in 4 answers — already at `playback-started` — with prebuffer
+  200/169/500 ms while `needed_prebuffer_ms` was only 119/97/100/71. Cause: `schedulePcmBlock`
+  used `max(next, currentTime + prebuffer)` for EVERY block, so a block arriving later than its
+  predecessor's duration was pushed to `now + prebuffer`, opening an avoidable gap; the gap
+  condition was independent of the prebuffer. **Correction of PW-006 T22:** raising the lead
+  25 → 200 ms only delayed the start and could not reduce network gaps; the clean T22 retest is
+  better explained by `latencyHint: 'playback'` plus a good network.
+  Fix (inline, parent, user-authorized): the prebuffer primes only the first block and re-primes
+  after a missed slot; other blocks play at `next` when `currentTime + 25 ms` (shared
+  `PRISMA_PREBUFFER_SCHEDULING_MARGIN_MS`) is within the slot, otherwise it is an underflow.
+  Strict TDD: new test "plays a block that arrives late but before its scheduled time right after
+  the previous one" RED (`expected 1.3 to be close to 1.275`), then GREEN; "re-primes with the
+  prebuffer after a block misses its scheduled time" added as a regression guard (passes before
+  and after). Checks: `cd hmi-app && npx vitest run` → 224 files / 2554 tests; `npx tsc -b` clean;
+  `npm run lint` clean. Route: direct inline (one understood source file plus its test).
+  **Next:** repeat the T6 live voice test.
 - [ ] **T7 — Delete the unused 2.5 s `buffer-before-playback` transport (user decision 2026-09-24).**
   Only after T6 passes, so a fallback exists until the adaptive prebuffer is proven live. Remove
   `prismaLocalAudioPlayback.ts` (2.5 s policy), `PrismaPcmWorkletBuffer`, `playLocalWorklet`, the PCM
@@ -507,6 +527,7 @@ None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Des
   Two commits on `feat/prisma-adaptive-voice-buffer` (runtime/HMI work units): `ea03605`,
   `737ab87` (both GGA review passed).
 - 2026-09-24: T5 approved by the user (copy change + section order) and committed.
+- 2026-09-24: T6 live test found the per-block prebuffer bug; T6b fixed it (inline). T6 to repeat.
 
 ## Next step
 

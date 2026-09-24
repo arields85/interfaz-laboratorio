@@ -21,7 +21,7 @@ import {
 } from './prismaLocalAudioPlayback';
 import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
 import { PRISMA_PCM_WORKLET_PROCESSOR_NAME } from './prismaPcmWorkletBuffer';
-import { PrismaPrebufferNeedTracker } from './prismaPrebufferNeedTracker';
+import { PRISMA_PREBUFFER_SCHEDULING_MARGIN_MS, PrismaPrebufferNeedTracker } from './prismaPrebufferNeedTracker';
 import { PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS } from './prismaVoicePrebufferEstimator';
 import type { PrismaAudioMetricPrebufferMode } from '../domain/prismaAudioMetric.types';
 
@@ -912,13 +912,18 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         const sourceNode = context.createBufferSource();
         sourceNode.buffer = audioBuffer;
         sourceNode.connect(analyser);
-        const startTime = Math.max(
-            active.nextPlaybackTime,
-            context.currentTime + active.prebufferMs / 1_000,
-        );
-        if (active.nextPlaybackTime > 0 && startTime > active.nextPlaybackTime) {
+        // The prebuffer only primes playback: before the first block and again after a block
+        // misses its slot. Every other block plays right after its predecessor, as long as it
+        // arrives within the scheduling margin of that slot.
+        const isFirstBlock = active.nextPlaybackTime === 0;
+        const missedSlot = !isFirstBlock
+            && context.currentTime + PRISMA_PREBUFFER_SCHEDULING_MARGIN_MS / 1_000 > active.nextPlaybackTime;
+        if (missedSlot) {
             active.underflowCount += 1;
         }
+        const startTime = isFirstBlock || missedSlot
+            ? context.currentTime + active.prebufferMs / 1_000
+            : active.nextPlaybackTime;
         active.firstPlaybackTime ??= startTime;
         active.nextPlaybackTime = startTime + audioBuffer.duration;
         active.pcmDurationSeconds += audioBuffer.duration;
