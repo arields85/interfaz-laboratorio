@@ -7921,6 +7921,9 @@ describe('ActivityAnalyticsWidget', () => {
             expect(node).toHaveClass('truncate');
             expect(node).not.toHaveClass('break-words');
             expect(node).not.toHaveClass('hyphens-auto');
+            // Truncated text keeps its full value available as a tooltip.
+            expect(node).toHaveAttribute('title', node.textContent ?? '');
+            expect(node.getAttribute('title')).not.toBe('');
         });
     });
 

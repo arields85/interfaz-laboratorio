@@ -329,7 +329,9 @@ end together with PW-006; NO push.
   shows on one line instead of two. Route: inline (one mechanical component file + its test).
   RED observed on the updated regression test, then GREEN (150/150); `tsc -b` and eslint clean.
   Visual check on the T5c reproduction (132 px comparison column, headless Chrome): "sin comp…" in
-  both columns, no overlap.
+  both columns, no overlap. User confirmed on the laptop (2026-09-24). Follow-up (user request): the
+  truncated captions carry `title` with the full text (native tooltip); regression test asserts it
+  (RED then GREEN, 150/150; `tsc -b` and eslint clean).
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
   2560×1440 CSS px; calibrate `k`.
 
