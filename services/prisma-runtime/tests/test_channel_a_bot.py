@@ -24,11 +24,13 @@ from prisma_runtime.channel_a_bot import (
     BUTTON_CONFIRM,
     BUTTON_KEEP_CONNECTED,
     BUTTON_UNLINK,
+    BUTTON_UNLINK_CONFIRM,
     CALLBACK_CANCEL,
     CALLBACK_CONFIRM,
     CALLBACK_DATA_MAX_BYTES,
     CALLBACK_KEEP_CONNECTED,
     CALLBACK_UNLINK,
+    CALLBACK_UNLINK_CANCEL,
     CONFIRMATION_PROMPT_TEMPLATE,
     COPY_ACTION_REFUSED,
     COPY_CANCELLED,
@@ -37,6 +39,7 @@ from prisma_runtime.channel_a_bot import (
     COPY_INACTIVITY_WARNING,
     COPY_KEEP_CONNECTED,
     COPY_REFUSED,
+    COPY_UNLINK_CONFIRM_PROMPT,
     COPY_UNLINKED,
     INGRESS_IGNORED_AMBIGUOUS,
     INGRESS_IGNORED_MALFORMED,
@@ -64,6 +67,8 @@ from prisma_runtime.channel_a_bot import (
     SEND_NONE,
     SEND_REJECTED,
     SEND_UNKNOWN,
+    UNLINK_CANCELLED,
+    UNLINK_PROMPT_DELIVERED,
     UNLINKED,
     URLSAFE_ALPHABET,
     VARIANT_CALLBACK,
@@ -325,7 +330,15 @@ class ChannelABotTestCase(unittest.TestCase):
         return self.button_data(0).split(":", 1)[1]
 
     def footer_nonce(self):
-        return self.button_data(0).split(":", 1)[1]
+        # T3: the welcome message no longer carries an inline keyboard (it
+        # carries the persistent unlink reply keyboard instead, which embeds
+        # no nonce at all), so the nonce is read straight from the action
+        # record the confirm just admitted -- the most recently inserted one,
+        # since two independent phones may each hold their own live record.
+        records = list(self.dialogue._actions.values())
+        if not records:
+            raise AssertionError("no action record exists yet")
+        return records[-1].nonce
 
     def pair_up(self, claim_id, confirm_id, *, owner=OWNER, chat=CHAT_ID):
         self.prompted(claim_id, owner=owner, chat=chat)
@@ -1147,8 +1160,12 @@ class ChannelAClaimTests(ChannelABotTestCase):
 
 
 class ChannelAConfirmTests(ChannelABotTestCase):
-    def test_confirm_links_and_sends_the_welcome_with_the_two_footer_buttons(self):
-        nonce = self.pair_up(4, 5)
+    def test_confirm_links_and_sends_the_welcome_with_the_persistent_unlink_keyboard(self):
+        """T3: the welcome message carries the persistent "Desvincular" reply
+        keyboard instead of the old inline Keep-connected/Unlink buttons --
+        Telegram allows only one reply_markup per message, and this keyboard
+        stays visible under the input for every later message too."""
+        self.pair_up(4, 5)
         link = self.registry.phone_link(PHONE)
         self.assertIsNotNone(link)
         self.assertEqual(link.owner_id, OWNER)
@@ -1156,11 +1173,10 @@ class ChannelAConfirmTests(ChannelABotTestCase):
         self.assertEqual(payload["chat_id"], CHAT_ID)
         self.assertEqual(payload["text"], WELCOME_TEMPLATE.format(label=self.labels["value"]))
         self.assertNotIn("parse_mode", payload)
-        rows = payload["reply_markup"]["inline_keyboard"]
-        self.assertEqual(rows[0][0]["text"], BUTTON_KEEP_CONNECTED)
-        self.assertEqual(rows[1][0]["text"], BUTTON_UNLINK)
-        self.assertEqual(rows[0][0]["callback_data"], CALLBACK_KEEP_CONNECTED + ":" + nonce)
-        self.assertEqual(rows[1][0]["callback_data"], CALLBACK_UNLINK + ":" + nonce)
+        self.assertEqual(
+            payload["reply_markup"],
+            {"keyboard": [[{"text": BUTTON_UNLINK}]], "resize_keyboard": True, "is_persistent": True},
+        )
 
     def test_confirm_acknowledges_before_the_welcome_is_sent(self):
         self.prompted(4)
@@ -1178,8 +1194,8 @@ class ChannelAConfirmTests(ChannelABotTestCase):
         self.assertEqual(len(nonce), OPAQUE_CHARS)
         self.assertTrue(set(nonce) <= URLSAFE_CHARS)
         self.assertNotEqual(nonce, str(link.generation))
-        self.assertEqual(self.button_data(0).split(":", 1)[0], CALLBACK_KEEP_CONNECTED)
-        self.assertEqual(self.button_data(1).split(":", 1)[0], CALLBACK_UNLINK)
+        record = next(iter(self.dialogue._actions.values()))
+        self.assertEqual(record.nonce, nonce)
 
     def test_each_link_gets_its_own_action_nonce(self):
         first = self.pair_up(4, 5)
@@ -1636,6 +1652,8 @@ class ChannelALinkActionTests(ChannelABotTestCase):
         )
         self.assertEqual(self.transport.answered[-1]["text"], COPY_UNLINKED)
         self.assertEqual(self.transport.sent[-1]["text"], COPY_UNLINKED)
+        # T3: unlinking removes the persistent reply keyboard.
+        self.assertEqual(self.transport.sent[-1]["reply_markup"], {"remove_keyboard": True})
         self.assertIsNone(self.registry.phone_link(PHONE))
         self.assertEqual(self.dialogue._actions, {})
 
@@ -1831,14 +1849,118 @@ class ChannelALinkActionTests(ChannelABotTestCase):
         self.assertNotIn(token, repr(outcome))
 
 
+class ChannelAUnlinkKeyboardTests(ChannelABotTestCase):
+    """T3: the persistent "Desvincular" reply-keyboard button."""
+
+    def test_desvincular_text_sends_a_confirmation_prompt_not_a_query(self):
+        nonce = self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "Desvincular", chat=CHAT_ID))
+        self.assert_outcome(
+            outcome,
+            UNLINK_PROMPT_DELIVERED,
+            variant=VARIANT_MESSAGE,
+            delivery=SEND_DELIVERED,
+            update_id=6,
+        )
+        payload = self.transport.sent[-1]
+        self.assertEqual(payload["text"], COPY_UNLINK_CONFIRM_PROMPT)
+        rows = payload["reply_markup"]["inline_keyboard"]
+        self.assertEqual(rows[0][0]["text"], BUTTON_UNLINK_CONFIRM)
+        self.assertEqual(rows[1][0]["text"], BUTTON_CANCEL)
+        self.assertEqual(rows[0][0]["callback_data"], CALLBACK_UNLINK + ":" + nonce)
+        self.assertEqual(rows[1][0]["callback_data"], CALLBACK_UNLINK_CANCEL + ":" + nonce)
+        self.assertIsNotNone(self.registry.phone_link(PHONE))
+
+    def test_desvincular_text_bypasses_the_query_coordinator_even_when_attached(self):
+        sessions = HmiSessionRegistry(
+            clock=lambda: 1000.0, owner_factory=lambda: OWNER, entropy=sequential_entropy(),
+        )
+        capability, _info = sessions.create()
+        sessions.set_context(capability, {"widgets": []})
+        parses = []
+
+        def parse(snapshot, question):
+            parses.append((snapshot, question))
+            return answer_from_snapshot(snapshot, question)
+
+        self.dialogue.enable_queries(
+            read_context=sessions.capture_owner_context,
+            context_is_current=sessions.is_owner_context_current,
+            parse=parse,
+            freshness_bound=30.0,
+            max_question_bytes=4096,
+            max_answer_chars=4096,
+        )
+        self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "Desvincular", chat=CHAT_ID))
+        self.assert_outcome(outcome, UNLINK_PROMPT_DELIVERED, variant=VARIANT_MESSAGE, update_id=6)
+        self.assertEqual(parses, [])
+
+    def test_desvincular_match_is_tolerant_of_whitespace_and_case(self):
+        for text in ("Desvincular", "desvincular", "  Desvincular  ", "DESVINCULAR", "\tdesvincular\n"):
+            with self.subTest(text=text):
+                self.setUp()
+                self.pair_up(4, 5)
+                outcome = self.handle(message_update(6, text, chat=CHAT_ID))
+                self.assert_outcome(outcome, UNLINK_PROMPT_DELIVERED, variant=VARIANT_MESSAGE, update_id=6)
+
+    def test_a_sentence_merely_mentioning_the_word_is_not_matched(self):
+        self.pair_up(4, 5)
+        outcome = self.handle(message_update(6, "cómo me desvinculo?", chat=CHAT_ID))
+        self.assertNotEqual(outcome.kind, UNLINK_PROMPT_DELIVERED)
+
+    def test_desvincular_text_without_a_live_link_is_ignored(self):
+        outcome = self.handle(message_update(4, "Desvincular", chat=CHAT_ID))
+        self.assert_outcome(outcome, INGRESS_IGNORED_UNRELATED, variant=VARIANT_MESSAGE, update_id=4)
+        self.assertEqual(self.transport.sent, [])
+
+    def test_desvincular_confirm_reuses_the_existing_unlink_callback_and_removes_the_keyboard(self):
+        self.pair_up(4, 5)
+        self.handle(message_update(6, "Desvincular", chat=CHAT_ID))
+        confirm_data = self.button_data(0)
+        outcome = self.handle(callback_update(7, confirm_data))
+        self.assert_outcome(
+            outcome, UNLINKED, variant=VARIANT_CALLBACK, delivery=SEND_DELIVERED,
+            update_id=7, acknowledged=True,
+        )
+        self.assertIsNone(self.registry.phone_link(PHONE))
+        self.assertEqual(self.transport.sent[-1]["text"], COPY_UNLINKED)
+        self.assertEqual(self.transport.sent[-1]["reply_markup"], {"remove_keyboard": True})
+
+    def test_desvincular_cancel_keeps_the_link_and_answers_without_a_chat_message(self):
+        self.pair_up(4, 5)
+        self.handle(message_update(6, "Desvincular", chat=CHAT_ID))
+        cancel_data = self.button_data(1)
+        sent_before = len(self.transport.sent)
+        outcome = self.handle(callback_update(7, cancel_data))
+        self.assert_outcome(
+            outcome, UNLINK_CANCELLED, variant=VARIANT_CALLBACK, delivery=SEND_NONE,
+            update_id=7, acknowledged=True,
+        )
+        self.assertIsNotNone(self.registry.phone_link(PHONE))
+        self.assertEqual(len(self.transport.sent), sent_before)
+
+    def test_unlink_cancel_from_a_foreign_phone_is_refused(self):
+        self.pair_up(4, 5)
+        self.handle(message_update(6, "Desvincular", chat=CHAT_ID))
+        cancel_data = self.button_data(1)
+        outcome = self.handle(callback_update(7, cancel_data, chat=CHAT_ID_2))
+        self.assert_outcome(outcome, ACTION_REFUSED, update_id=7, acknowledged=True)
+        self.assertIsNotNone(self.registry.phone_link(PHONE))
+
+
 class ChannelALeakTests(ChannelABotTestCase):
     def test_chat_text_never_carries_the_ticket_or_the_action_nonce(self):
         nonce = self.pair_up(4, 5)
         keyboards = [payload for payload in self.transport.sent if payload["reply_markup"] is not None]
         self.assertEqual(len(keyboards), 2)
         ticket = keyboards[0]["reply_markup"]["inline_keyboard"][0][0]["callback_data"].split(":", 1)[1]
-        welcome = keyboards[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"].split(":", 1)[1]
-        self.assertEqual(welcome, nonce)
+        # T3: the welcome message's markup is now the persistent unlink reply
+        # keyboard, which never embeds the action nonce at all.
+        self.assertEqual(
+            keyboards[1]["reply_markup"],
+            {"keyboard": [[{"text": BUTTON_UNLINK}]], "resize_keyboard": True, "is_persistent": True},
+        )
         for payload in self.transport.sent:
             self.assertNotIn(ticket, payload["text"])
             self.assertNotIn(nonce, payload["text"])
@@ -2440,7 +2562,12 @@ class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
     def warning_nonce(self):
         return self.button_data(0).split(":", 1)[1]
 
-    def test_sweep_sends_one_plain_warning_with_the_existing_action_buttons(self):
+    def test_sweep_sends_one_plain_warning_with_the_keep_connected_button(self):
+        """T3: the inline "Desvincular" button was dropped from this message
+        -- the persistent reply keyboard already covers unlinking everywhere,
+        and duplicating the affordance here would be confusing. "Seguir
+        conectado" keeps its real function here (proactively renewing the
+        idle window without needing to send an ordinary query first)."""
         nonce = self.pair_up(4, 5)
         sent_before = len(self.transport.sent)
         self.now[0] = 1540.0
@@ -2457,10 +2584,9 @@ class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
         payload = self.transport.sent[-1]
         self.assertEqual(payload["text"], COPY_INACTIVITY_WARNING)
         keyboard = payload["reply_markup"]["inline_keyboard"]
+        self.assertEqual(len(keyboard), 1)
         self.assertEqual(keyboard[0][0]["text"], BUTTON_KEEP_CONNECTED)
         self.assertEqual(keyboard[0][0]["callback_data"], CALLBACK_KEEP_CONNECTED + ":" + nonce)
-        self.assertEqual(keyboard[1][0]["text"], BUTTON_UNLINK)
-        self.assertEqual(keyboard[1][0]["callback_data"], CALLBACK_UNLINK + ":" + nonce)
         self.assertTrue(self.registry.phone_link(PHONE).warning_issued)
         # The reservation is one attempt per window: a second sweep is empty.
         self.assertEqual(self.dialogue.send_inactivity_warnings(), ())

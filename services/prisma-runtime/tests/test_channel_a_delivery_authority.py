@@ -107,10 +107,12 @@ class AuthorityCase(unittest.TestCase):
             self.addCleanup(guard.stop)
         self.addCleanup(lambda: self.assertEqual(self.forbidden, []))
         from prisma_runtime import channel_a_activation as activation
+        from prisma_runtime.channel_a_bot import CALLBACK_UNLINK
         from prisma_runtime.channel_a_lifecycle import ChannelAStatus
         from prisma_runtime.channel_a_query import QueryEnvelope
         from prisma_runtime.hmi_sessions import HmiSessionRegistry
         self.module = activation
+        self.CALLBACK_UNLINK = CALLBACK_UNLINK
         self.Status = ChannelAStatus
         self.Envelope = QueryEnvelope
         self.clock = Clock()
@@ -186,7 +188,13 @@ class AuthorityCase(unittest.TestCase):
         self.assertEqual(prompt.kind, "pairing_prompt_delivered")
         confirmed = self.dialogue.handle_update(callback(first + 1, self.transport.button(0)))
         self.assertEqual(confirmed.kind, "pairing_confirmed")
-        self.unlink_button = self.transport.button(1)
+        # T3: the welcome message no longer carries an inline keyboard (it
+        # carries the persistent unlink reply keyboard instead, which embeds
+        # no nonce at all), so the unlink callback data is rebuilt from the
+        # action record the confirm just admitted -- the most recently
+        # inserted one, matching the still-live CALLBACK_UNLINK contract.
+        nonce = list(self.dialogue._actions.values())[-1].nonce
+        self.unlink_button = self.CALLBACK_UNLINK + ":" + nonce
         outcome = self.dialogue.handle_update(message(first + 2, "What is visible?"))
         self.assertEqual(outcome.kind, "query_answer_delivered")
         self.assertIs(type(outcome.answer_envelope), self.Envelope)

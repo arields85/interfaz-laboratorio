@@ -126,6 +126,10 @@ CALLBACK_CONFIRM = "cf"
 CALLBACK_CANCEL = "cn"
 CALLBACK_KEEP_CONNECTED = "kc"
 CALLBACK_UNLINK = "ul"
+# T3: cancels a pending unlink confirmation without touching the link. The
+# real unlink reuses CALLBACK_UNLINK (the existing, already-proven callback)
+# rather than minting a parallel confirm action.
+CALLBACK_UNLINK_CANCEL = "uc"
 
 INGRESS_IGNORED_STALE = "ignored_stale"
 INGRESS_IGNORED_MALFORMED = "ignored_malformed"
@@ -145,11 +149,20 @@ PAIRING_DESTINATION_UNAVAILABLE = "pairing_destination_unavailable"
 KEEP_CONNECTED = "keep_connected"
 UNLINKED = "unlinked"
 ACTION_REFUSED = "action_refused"
+# T3: the "Desvincular" persistent reply-keyboard button never unlinks
+# directly -- it opens a SEPARATE confirmation prompt first.
+UNLINK_PROMPT_DELIVERED = "unlink_prompt_delivered"
+UNLINK_PROMPT_REJECTED = "unlink_prompt_rejected"
+UNLINK_PROMPT_UNKNOWN = "unlink_prompt_unknown"
+UNLINK_CANCELLED = "unlink_cancelled"
 
 BUTTON_CONFIRM = "Confirmar"
 BUTTON_CANCEL = "Cancelar"
 BUTTON_KEEP_CONNECTED = "Seguir conectado"
 BUTTON_UNLINK = "Desvincular"
+# T3: the confirm button on the SEPARATE unlink-confirmation prompt (guards
+# against an accidental tap of the persistent reply-keyboard button below).
+BUTTON_UNLINK_CONFIRM = "Confirmar desvinculación"
 
 CONFIRMATION_PROMPT_TEMPLATE = (
     "Un teléfono quiere conectarse con:\n"
@@ -161,7 +174,8 @@ WELCOME_TEMPLATE = (
     "Vinculación confirmada con:\n"
     "{label}\n"
     "\n"
-    "Use los botones para seguir conectado o desvincular este teléfono."
+    "Ya puede realizar sus consultas. Use el botón «Desvincular» de este chat para dejar de "
+    "recibir respuestas en este teléfono."
 )
 COPY_REFUSED = (
     "No se pudo iniciar la vinculación: el código no es válido, ya venció o este teléfono ya está vinculado."
@@ -178,7 +192,13 @@ COPY_ACTION_REFUSED = (
 )
 COPY_INACTIVITY_WARNING = (
     "La vinculación con este documento se va a cerrar por inactividad.\n"
-    "Use los botones para seguir conectado o desvincular este teléfono."
+    "Use el botón para seguir conectado, o el botón «Desvincular» de este chat para desvincular "
+    "este teléfono."
+)
+# T3: shown when the persistent "Desvincular" button is pressed, before any
+# unlink actually happens -- guards against an accidental tap.
+COPY_UNLINK_CONFIRM_PROMPT = (
+    "¿Confirma que desea desvincular este teléfono? Ya no recibirá respuestas de Prisma en este chat."
 )
 
 # One warning reservation is one *attempt*. A skipped, rejected or unknown
@@ -229,7 +249,10 @@ _START_PATTERN = re.compile(r"^/start(?:[ \t]+(?P<rest>.*))?\Z")
 _URLSAFE_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{" + str(OPAQUE_CHARS) + r"}\Z")
 _CALLBACK_DATA_PATTERN = re.compile(
     r"^(?P<action>"
-    + "|".join((CALLBACK_CONFIRM, CALLBACK_CANCEL, CALLBACK_KEEP_CONNECTED, CALLBACK_UNLINK))
+    + "|".join((
+        CALLBACK_CONFIRM, CALLBACK_CANCEL, CALLBACK_KEEP_CONNECTED,
+        CALLBACK_UNLINK, CALLBACK_UNLINK_CANCEL,
+    ))
     + r"):(?P<token>[A-Za-z0-9_-]{"
     + str(OPAQUE_CHARS)
     + r"})\Z"
@@ -241,11 +264,13 @@ __all__ = [
     "BUTTON_CONFIRM",
     "BUTTON_KEEP_CONNECTED",
     "BUTTON_UNLINK",
+    "BUTTON_UNLINK_CONFIRM",
     "CALLBACK_CANCEL",
     "CALLBACK_CONFIRM",
     "CALLBACK_DATA_MAX_BYTES",
     "CALLBACK_KEEP_CONNECTED",
     "CALLBACK_UNLINK",
+    "CALLBACK_UNLINK_CANCEL",
     "CONFIRMATION_PROMPT_TEMPLATE",
     "COPY_ACTION_REFUSED",
     "COPY_CANCELLED",
@@ -254,6 +279,7 @@ __all__ = [
     "COPY_INACTIVITY_WARNING",
     "COPY_KEEP_CONNECTED",
     "COPY_REFUSED",
+    "COPY_UNLINK_CONFIRM_PROMPT",
     "COPY_UNLINKED",
     "ChannelABotConfigInvalid",
     "ChannelABotError",
@@ -291,6 +317,10 @@ __all__ = [
     "SEND_NONE",
     "SEND_REJECTED",
     "SEND_UNKNOWN",
+    "UNLINK_CANCELLED",
+    "UNLINK_PROMPT_DELIVERED",
+    "UNLINK_PROMPT_REJECTED",
+    "UNLINK_PROMPT_UNKNOWN",
     "UNLINKED",
     "URLSAFE_ALPHABET",
     "VARIANT_CALLBACK",
@@ -491,6 +521,35 @@ def _keyboard(*buttons) -> dict:
     }
 
 
+def _is_unlink_button_text(text: str) -> bool:
+    """Match the persistent "Desvincular" reply-keyboard button text (T3).
+
+    Exact match only, tolerant of surrounding whitespace and case: a longer
+    sentence that merely mentions the word is never mistaken for the button,
+    and this check runs before the query coordinator ever sees the text, so
+    the button press is never treated as a data query.
+    """
+    return text.strip().casefold() == BUTTON_UNLINK.casefold()
+
+
+def _unlink_reply_keyboard() -> dict:
+    """Build the persistent reply keyboard (T3) shown once a phone is linked.
+
+    Telegram allows only one ``reply_markup`` per message, so this replaces
+    -- never joins -- an inline keyboard on the same send.
+    """
+    return {
+        "keyboard": [[{"text": BUTTON_UNLINK}]],
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }
+
+
+def _remove_reply_keyboard() -> dict:
+    """Remove any reply keyboard (T3): sent on every path that unlinks."""
+    return {"remove_keyboard": True}
+
+
 class ChannelAPairingDialogue:
     """Serialize one Telegram update at a time into one declared outcome.
 
@@ -672,6 +731,12 @@ class ChannelAPairingDialogue:
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True)
         if not isinstance(text, str):
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True)
+        if _is_unlink_button_text(text):
+            # T3: the persistent reply-keyboard button sends this exact text
+            # as an ordinary message. Intercepted before both the command
+            # path and the query coordinator below -- never treated as a
+            # data query, regardless of whether one is attached.
+            return self._request_unlink(update_id, chat_id, actor_id)
         if self.query is None or text.startswith("/"):
             # The command path keeps the historical 128-character bound. Only an
             # ordinary query, when the correlated coordinator is attached, is
@@ -902,6 +967,35 @@ class ChannelAPairingDialogue:
             outcome.envelope,
         )
 
+    def _request_unlink(self, update_id, chat_id, actor_id) -> IngressOutcome:
+        """Handle the persistent "Desvincular" reply-keyboard button (T3).
+
+        Never unlinks directly: it opens a separate confirmation prompt with
+        its own inline confirm/cancel buttons, guarding against an
+        accidental tap. Without a live admitted action record for this phone
+        there is nothing to unlink, so the text is simply unrelated -- the
+        same outcome ordinary unrecognized text gets.
+        """
+        phone_id = phone_identity(actor_id)
+        record = self._record_for_phone(phone_id)
+        if record is None:
+            return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True)
+        delivery = self._send(
+            chat_id,
+            COPY_UNLINK_CONFIRM_PROMPT,
+            _keyboard(
+                (BUTTON_UNLINK_CONFIRM, CALLBACK_UNLINK + ":" + record.nonce),
+                (BUTTON_CANCEL, CALLBACK_UNLINK_CANCEL + ":" + record.nonce),
+            ),
+        )
+        if delivery == SEND_REJECTED:
+            kind = UNLINK_PROMPT_REJECTED
+        elif delivery == SEND_UNKNOWN:
+            kind = UNLINK_PROMPT_UNKNOWN
+        else:
+            kind = UNLINK_PROMPT_DELIVERED
+        return IngressOutcome(update_id, VARIANT_MESSAGE, kind, True, delivery)
+
     def _record_for_phone(self, phone_id):
         """Return the single bounded local action record for one phone, or ``None``."""
         for record in self._actions.values():
@@ -999,6 +1093,8 @@ class ChannelAPairingDialogue:
             return self._confirm(update_id, actor_id, callback_id, token)
         if action == CALLBACK_CANCEL:
             return self._cancel(update_id, actor_id, callback_id, token)
+        if action == CALLBACK_UNLINK_CANCEL:
+            return self._cancel_unlink(update_id, actor_id, callback_id, token)
         return self._link_action(update_id, actor_id, callback_id, action, token)
 
     def _confirm(self, update_id, actor_id, callback_id, ticket) -> IngressOutcome:
@@ -1089,13 +1185,15 @@ class ChannelAPairingDialogue:
             return IngressOutcome(
                 update_id, VARIANT_CALLBACK, PAIRING_REFUSED, True, SEND_NONE, acknowledged
             )
+        # T3: the welcome message carries the persistent "Desvincular" reply
+        # keyboard instead of the old inline Keep-connected/Unlink buttons --
+        # Telegram allows only one reply_markup per message, and this
+        # keyboard, once shown, stays visible under the input for every
+        # later message regardless of what markup those carry.
         delivery = self._send(
             actor_id,
             WELCOME_TEMPLATE.format(label=label),
-            _keyboard(
-                (BUTTON_KEEP_CONNECTED, CALLBACK_KEEP_CONNECTED + ":" + nonce),
-                (BUTTON_UNLINK, CALLBACK_UNLINK + ":" + nonce),
-            ),
+            _unlink_reply_keyboard(),
         )
         if delivery == SEND_REJECTED:
             kind = PAIRING_WELCOME_REJECTED
@@ -1118,6 +1216,22 @@ class ChannelAPairingDialogue:
         delivery = self._send(actor_id, COPY_CANCELLED)
         return IngressOutcome(
             update_id, VARIANT_CALLBACK, PAIRING_CANCELLED, True, delivery, acknowledged
+        )
+
+    def _cancel_unlink(self, update_id, actor_id, callback_id, nonce) -> IngressOutcome:
+        """Cancel a pending unlink confirmation (T3): the link is untouched.
+
+        A foreign actor or an already-superseded action record is refused the
+        same way every other action nonce refuses (T15's existing pattern);
+        a real cancellation performs no registry mutation at all.
+        """
+        phone_id = phone_identity(actor_id)
+        record = self._actions.get(_digest(nonce))
+        if record is None or record.phone_id != phone_id:
+            return self._refuse_action(update_id, callback_id)
+        acknowledged = self._answer(callback_id, COPY_KEEP_CONNECTED)
+        return IngressOutcome(
+            update_id, VARIANT_CALLBACK, UNLINK_CANCELLED, True, SEND_NONE, acknowledged
         )
 
     def _link_action(self, update_id, actor_id, callback_id, action, nonce) -> IngressOutcome:
@@ -1160,7 +1274,9 @@ class ChannelAPairingDialogue:
         self._actions.pop(digest, None)
         self._forget_claims_for_owner(record.owner_id)
         acknowledged = self._answer(callback_id, COPY_UNLINKED)
-        delivery = self._send(actor_id, COPY_UNLINKED)
+        # T3: the only unlink path this module has -- remove the persistent
+        # reply keyboard along with the unlink notice.
+        delivery = self._send(actor_id, COPY_UNLINKED, _remove_reply_keyboard())
         return IngressOutcome(
             update_id, VARIANT_CALLBACK, UNLINKED, True, delivery, acknowledged
         )
@@ -1402,12 +1518,16 @@ class ChannelAPairingDialogue:
             # An uncertain read never erases the live control; a stale, replaced
             # or human-refreshed window is simply no longer due.
             return self._skipped_warning(snapshot)
+        # T3: only "Seguir conectado" is kept here -- it has a real function
+        # (proactively renewing the idle window without needing an ordinary
+        # query first). The inline "Desvincular" button was dropped: the
+        # persistent reply keyboard already covers unlinking at any time, and
+        # duplicating the affordance here would be confusing.
         delivery = self._send(
             chat_id,
             COPY_INACTIVITY_WARNING,
             _keyboard(
                 (BUTTON_KEEP_CONNECTED, CALLBACK_KEEP_CONNECTED + ":" + record.nonce),
-                (BUTTON_UNLINK, CALLBACK_UNLINK + ":" + record.nonce),
             ),
         )
         return InactivityWarningOutcome(

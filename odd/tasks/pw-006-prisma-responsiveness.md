@@ -84,11 +84,74 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   so it needed no change. RED confirmed (old copy did not contain the new sentence). Full suite:
   `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s services\prisma-runtime
   -p "test_*.py"` → 1353 passed. Commit: `fix(prisma): clarify Channel A pairing confirmation copy`.
-- [ ] **T3 — Keep/unlink buttons reachable.** Decided by the user (2026-09-23): persistent reply
+- [x] **T3 — Keep/unlink buttons reachable.** Decided by the user (2026-09-23): persistent reply
   keyboard (`is_persistent`) with a "Desvincular" button, always visible under the input. Tapping it
   sends "Desvincular" as a user message; Prisma answers asking for confirmation with an inline
   button (guards against accidental unlinking). Pinned message discarded (two taps, pin service
   message, unpin on relink). Remove the keyboard when the chat is unlinked.
+  Evidence (2026-09-23): `channel_a_bot.py`:
+  - New `_unlink_reply_keyboard()` (`{"keyboard": [[{"text": "Desvincular"}]], "resize_keyboard":
+    true, "is_persistent": true}`) and `_remove_reply_keyboard()` (`{"remove_keyboard": true}`).
+  - `_confirm`'s welcome send now uses `_unlink_reply_keyboard()` instead of the old inline
+    Keep-connected/Unlink buttons (Telegram allows only one `reply_markup` per message, so the
+    persistent keyboard REPLACES them there, not joins them). Once shown it stays visible under the
+    input for every later message regardless of what markup that message itself carries (inline
+    keyboards are a separate UI element from the reply keyboard).
+  - New `_is_unlink_button_text()` matches the exact button text, `.strip().casefold()`-tolerant of
+    whitespace/case. `_handle_message` checks it BEFORE both the `/`-command path and the query
+    coordinator, so it is never treated as a data query (proved by
+    `test_desvincular_text_bypasses_the_query_coordinator_even_when_attached`, which attaches a real
+    coordinator and asserts zero parse calls).
+  - New `_request_unlink()`: with no live action record for the phone, the text is simply
+    `INGRESS_IGNORED_UNRELATED` (nothing to unlink); otherwise it sends `COPY_UNLINK_CONFIRM_PROMPT`
+    ("¿Confirma que desea desvincular este teléfono? Ya no recibirá respuestas de Prisma en este
+    chat.") with two inline buttons: "Confirmar desvinculación" (reuses the existing, already-proven
+    `CALLBACK_UNLINK` callback and nonce — the real unlink is the SAME code path `_link_action` always
+    used, not a duplicate) and "Cancelar" (new `CALLBACK_UNLINK_CANCEL`, handled by new
+    `_cancel_unlink()`, which performs no registry mutation — the link is simply left untouched).
+  - `_link_action`'s UNLINK success branch now sends `COPY_UNLINKED` with `_remove_reply_keyboard()`.
+    This is the ONLY place in the runtime that ever calls `registry.unlink_phone(...)` or sends an
+    unlink notice (confirmed by search — no admin-side or inactivity-expiry path sends a separate
+    unlink message), so it is also the only place that needed the removal call.
+  - Inline-button decision on the two other messages (documented in code comments at both sites):
+    kept "Seguir conectado" only where it has a real function — the inactivity WARNING message
+    (`_warn_one`) — because tapping it proactively renews the idle window without needing to send an
+    ordinary query first, which is exactly the situation the warning fires in (no recent query
+    already proved activity). Dropped the inline "Desvincular" button from that same warning message:
+    the persistent reply keyboard already covers unlinking at any time, and a second unlink
+    affordance on the same message would be confusing. The welcome message drops BOTH inline buttons
+    entirely (persistent keyboard replaces them, and "Seguir conectado" there was redundant — the
+    very next ordinary query already proves activity).
+  - Transport check: `ChannelATransport.send_message`/`ChannelAPairingDialogue._send` pass
+    `reply_markup` through opaquely (no shape validation), so inline keyboards, the persistent reply
+    keyboard and `remove_keyboard` all transport unchanged — confirmed by reading
+    `channel_a_transport.py`, no transport change needed. Every call site sends exactly one
+    `reply_markup` value per message (never both an inline keyboard and a reply keyboard at once),
+    respecting the Telegram one-`reply_markup`-per-message constraint.
+  - All new/changed user-visible Spanish is formal "usted" ("¿Confirma que desea desvincular...?",
+    "Ya no recibirá...", "Ya puede realizar sus consultas...").
+  - Test fallout from removing the welcome message's inline keyboard: `test_channel_a_bot.py`'s
+    `footer_nonce()` helper (used by `pair_up()`, load-bearing for ~20 existing tests) now reads the
+    nonce from `self.dialogue._actions` directly instead of parsing a button; rewrote the two tests
+    that asserted the welcome message's old inline-keyboard shape directly
+    (`test_confirm_links_and_sends_the_welcome_with_the_persistent_unlink_keyboard`,
+    `test_chat_text_never_carries_the_ticket_or_the_action_nonce`) and the warning-keyboard test
+    (`test_sweep_sends_one_plain_warning_with_the_keep_connected_button`, renamed from
+    `..._with_the_existing_action_buttons`). `test_channel_a_delivery_authority.py`'s `relink()`
+    helper (used across ~30 tests) similarly rebuilds `self.unlink_button` from
+    `self.dialogue._actions` plus the imported `CALLBACK_UNLINK` constant instead of reading it off
+    the welcome message's (now absent) inline keyboard.
+  - New tests: 8 in `ChannelAUnlinkKeyboardTests` (prompt sent + not a query even with a live
+    coordinator attached + case/whitespace tolerance + a sentence merely mentioning the word is not
+    matched + no live link is ignored + confirm reuses the real unlink and removes the keyboard +
+    cancel keeps the link + a foreign phone cannot cancel another phone's prompt).
+  - RED confirmed: `ImportError` for the new names before implementation; after implementing
+    production code, RED also independently confirmed via the initial `KeyError: 'inline_keyboard'`
+    failures surfaced by the pre-existing welcome/warning-keyboard tests and by
+    `test_channel_a_delivery_authority.py` (27 errors) before those were rewritten to the new shape.
+  Full suite: `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
+  services\prisma-runtime -p "test_*.py"` → 1361 passed. Commit: `feat(prisma): add persistent
+  unlink keyboard to Channel A chats`.
 - [ ] **T4 — Typing indicator.** Send Telegram "typing…" while an answer is being prepared.
 - [x] **T1b — Old vs new comparison (read-only, delegated).** Findings (2026-09-23), static code:
   - Same library (raw `requests`), same poll cadence (25 s / 35 s), same Gemini TTS model, both
