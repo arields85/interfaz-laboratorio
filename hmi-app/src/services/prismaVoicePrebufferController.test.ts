@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { PrismaVoicePrebufferHistory } from '../domain/prismaVoicePrebufferHistory.types';
 import { PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS, PRISMA_PREBUFFER_ESTIMATE_SAFETY_MS } from './prismaVoicePrebufferEstimator';
-import { PrismaVoicePrebufferController } from './prismaVoicePrebufferController';
+import {
+    createPrismaVoiceAutomaticPrebufferPolicy,
+    PrismaVoicePrebufferController,
+} from './prismaVoicePrebufferController';
 import { PrismaVoicePrebufferHistoryStorage } from './prismaVoicePrebufferHistoryStorage';
 
 function fakeStorageSource() {
@@ -71,5 +74,40 @@ describe('PrismaVoicePrebufferController', () => {
         const [entry] = storage.read();
         expect(entry.recordedAtMs).toBeGreaterThanOrEqual(before);
         expect(entry.recordedAtMs).toBeLessThanOrEqual(Date.now());
+    });
+});
+
+describe('createPrismaVoiceAutomaticPrebufferPolicy', () => {
+    it('T3: resolves the controller\'s next prebuffer, tagged as automatic', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 1_000);
+        const policy = createPrismaVoiceAutomaticPrebufferPolicy(controller);
+
+        expect(policy.resolvePrebufferMs()).toEqual({
+            prebufferMs: PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS,
+            mode: 'automatic',
+        });
+    });
+
+    it('T3: forwards a recorded measurement to the controller, which persists it', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        const controller = new PrismaVoicePrebufferController(storage, () => 5_000);
+        const policy = createPrismaVoiceAutomaticPrebufferPolicy(controller);
+
+        policy.recordNeededPrebufferMs(300);
+
+        expect(storage.read()).toEqual([{ neededPrebufferMs: 300, recordedAtMs: 5_000 }]);
+    });
+
+    it('T3: reflects a measurement recorded through the policy in the next resolved prebuffer', () => {
+        const storage = new PrismaVoicePrebufferHistoryStorage(fakeStorageSource());
+        let now = 1_000;
+        const controller = new PrismaVoicePrebufferController(storage, () => now);
+        const policy = createPrismaVoiceAutomaticPrebufferPolicy(controller);
+
+        policy.recordNeededPrebufferMs(900);
+        now = 2_000;
+
+        expect(policy.resolvePrebufferMs().prebufferMs).toBe(900 + PRISMA_PREBUFFER_ESTIMATE_SAFETY_MS);
     });
 });

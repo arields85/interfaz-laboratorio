@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
     PrismaOrbAudioTarget,
     PrismaVoiceAudioDiagnostic,
+    PrismaVoiceAudioEngineDependencies,
     PrismaVoiceAudioSource,
     PrismaVoicePcmStream,
+    PrismaVoicePrebufferPolicy,
+    PrismaVoicePrebufferResolution,
     VoicePlaybackLifecycle,
 } from './prismaVoiceAudioEngine';
 import {
@@ -325,7 +328,7 @@ describe('PrismaVoiceAudioEngine', () => {
         diagnostics = [];
     });
 
-    function createEngine(): PrismaVoiceAudioEngine {
+    function createEngine(overrides: Partial<PrismaVoiceAudioEngineDependencies> = {}): PrismaVoiceAudioEngine {
         return new PrismaVoiceAudioEngine({
             createAudioContext: audio.createAudioContext,
             createAudioWorkletNode: audio.createAudioWorkletNode,
@@ -337,7 +340,20 @@ describe('PrismaVoiceAudioEngine', () => {
             warn,
             log,
             onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+            ...overrides,
         });
+    }
+
+    function createFakePrebufferPolicy(
+        resolution: PrismaVoicePrebufferResolution = { prebufferMs: 500, mode: 'automatic' },
+    ): PrismaVoicePrebufferPolicy & {
+        resolvePrebufferMs: ReturnType<typeof vi.fn<() => PrismaVoicePrebufferResolution>>;
+        recordNeededPrebufferMs: ReturnType<typeof vi.fn<(neededPrebufferMs: number) => void>>;
+    } {
+        return {
+            resolvePrebufferMs: vi.fn(() => resolution),
+            recordNeededPrebufferMs: vi.fn(),
+        };
     }
 
     it('schedules 75 ms PCM blocks contiguously through one analyser and completes on the final source end', async () => {
@@ -1155,5 +1171,117 @@ describe('PrismaVoiceAudioEngine', () => {
         expect(target.level).toBe(0);
         expect(target.setSpeaking).toHaveBeenLastCalledWith(false);
         expect(audio.close).toHaveBeenCalledTimes(1);
+    });
+
+    describe('T3: per-answer prebuffer policy', () => {
+        it('uses the resolved per-answer prebuffer for the first block and reports it as automatic', async () => {
+            const policy = createFakePrebufferPolicy({ prebufferMs: 500, mode: 'automatic' });
+            const reader = createReader([
+                { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) },
+                { done: true, value: undefined },
+            ]);
+            const engine = createEngine({ prebufferPolicy: policy });
+
+            engine.play(createLiveSource(reader), createTarget(), {});
+            await settlePlayback();
+
+            expect(audio.sources[0]?.start).toHaveBeenCalledWith(1.5);
+            expect(timers.delays()[0]).toBeCloseTo(500);
+
+            audio.sources.forEach(({ node }) => node.onended?.(new Event('ended')));
+
+            expect(diagnostics.at(-1)).toMatchObject({
+                record_type: 'playback-ended',
+                payload: expect.objectContaining({
+                    transport: 'progressive',
+                    prebuffer_ms: 500,
+                    prebuffer_mode: 'automatic',
+                }),
+            });
+        });
+
+        it('snapshots the resolved prebuffer once per answer, even across several blocks', async () => {
+            const policy = createFakePrebufferPolicy({ prebufferMs: 300, mode: 'automatic' });
+            const reader = createReader([
+                { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES * 2) },
+                { done: true, value: undefined },
+            ]);
+            const engine = createEngine({ prebufferPolicy: policy });
+
+            engine.play(createLiveSource(reader), createTarget(), {});
+            await settlePlayback();
+
+            expect(audio.buffers.length).toBeGreaterThan(1);
+            expect(policy.resolvePrebufferMs).toHaveBeenCalledTimes(1);
+        });
+
+        it('records the measured needed prebuffer exactly once when a progressive answer ends normally', async () => {
+            // Same arrival timeline as the "measures the needed prebuffer..."
+            // test above: block 1 at t0 = 1_000 (deficit 0), block 2 at
+            // 1_115 (40 ms after block 1's own 75 ms would have been
+            // consumed), margin 25 ms -> needed 65 ms.
+            const policy = createFakePrebufferPolicy();
+            const reader = {
+                read: vi.fn()
+                    .mockImplementationOnce(async () => {
+                        now = 1_000;
+                        return { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) };
+                    })
+                    .mockImplementationOnce(async () => {
+                        now = 1_115;
+                        return { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) };
+                    })
+                    .mockResolvedValueOnce({ done: true, value: undefined }),
+                cancel: vi.fn(async () => undefined),
+            } as unknown as ReadableStreamDefaultReader<Uint8Array>;
+            const engine = createEngine({ prebufferPolicy: policy });
+
+            engine.play(createLiveSource(reader), createTarget(), {});
+            await settlePlayback(30);
+            audio.sources.forEach(({ node }) => node.onended?.(new Event('ended')));
+
+            expect(policy.recordNeededPrebufferMs).toHaveBeenCalledTimes(1);
+            expect(policy.recordNeededPrebufferMs).toHaveBeenCalledWith(65);
+            expect(diagnostics.at(-1)).toMatchObject({
+                record_type: 'playback-ended',
+                payload: expect.objectContaining({ needed_prebuffer_ms: 65 }),
+            });
+        });
+
+        it('never records the needed prebuffer when playback is stopped before the answer completes', async () => {
+            const pendingRead = deferred<ReadableStreamReadResult<Uint8Array>>();
+            const reader = {
+                read: vi.fn()
+                    .mockResolvedValueOnce({ done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) })
+                    .mockImplementationOnce(() => pendingRead.promise),
+                cancel: vi.fn(async () => undefined),
+            } as unknown as ReadableStreamDefaultReader<Uint8Array>;
+            const policy = createFakePrebufferPolicy();
+            const engine = createEngine({ prebufferPolicy: policy });
+
+            engine.play(createLiveSource(reader), createTarget(), {});
+            await settlePlayback();
+            engine.stop();
+            await settlePlayback();
+
+            expect(policy.recordNeededPrebufferMs).not.toHaveBeenCalled();
+        });
+
+        it('never records the needed prebuffer when Live fails and falls back to WAV', async () => {
+            const loadWav = vi.fn(async () => new ArrayBuffer(16));
+            const source: PrismaVoiceAudioSource = {
+                playbackTransport: 'progressive',
+                openLive: vi.fn(async () => { throw new Error('Live unavailable'); }),
+                loadWav,
+            };
+            const policy = createFakePrebufferPolicy();
+            const engine = createEngine({ prebufferPolicy: policy });
+
+            engine.play(source, createTarget(), { onStarted: vi.fn(), onError: vi.fn() });
+            await settlePlayback();
+
+            expect(loadWav).toHaveBeenCalledTimes(1);
+            expect(policy.recordNeededPrebufferMs).not.toHaveBeenCalled();
+        });
     });
 });

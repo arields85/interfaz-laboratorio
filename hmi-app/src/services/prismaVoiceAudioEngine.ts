@@ -22,6 +22,8 @@ import {
 import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
 import { PRISMA_PCM_WORKLET_PROCESSOR_NAME } from './prismaPcmWorkletBuffer';
 import { PrismaPrebufferNeedTracker } from './prismaPrebufferNeedTracker';
+import { PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS } from './prismaVoicePrebufferEstimator';
+import type { PrismaAudioMetricPrebufferMode } from '../domain/prismaAudioMetric.types';
 
 export const PRISMA_PCM_SAMPLE_RATE = PRISMA_PCM_AUDIO_FORMAT.sampleRate;
 export const PRISMA_PCM_BLOCK_SAMPLES = 1_800;
@@ -31,8 +33,15 @@ export const PRISMA_LOCAL_PCM_MAX_BYTES = PRISMA_PCM_SAMPLE_RATE
     * PRISMA_PCM_AUDIO_FORMAT.channels
     * PRISMA_PCM_AUDIO_FORMAT.bytesPerSample
     * PRISMA_LOCAL_PCM_MAX_DURATION_SECONDS;
-// Prebuffer before the first block (and after any underflow) so bursty Live chunks do not starve playback.
-const PRISMA_PCM_PLAYBACK_LEAD_SECONDS = 0.2;
+// T3: fallback/default prebuffer (ms), used before the first block (and after
+// any underflow) only when no `prebufferPolicy` dependency is injected --
+// unit tests, or a caller that has not wired Automatic/Manual mode yet. When
+// a policy is injected (production, via usePrismaOrbPresentation.ts), each
+// answer's own resolved `ActivePlayback.prebufferMs` is used instead (see
+// `play()` and `schedulePcmBlock()`). Single source of truth with
+// PrismaVoicePrebufferEstimator's own no-history default -- both are the
+// PW-006 T22 value (200 ms) proven live before this feature.
+const PRISMA_PCM_PLAYBACK_LEAD_MS = PRISMA_PREBUFFER_ESTIMATE_DEFAULT_MS;
 // Larger device buffer: voice playback tolerates latency better than render-thread underruns under UI load.
 const PRISMA_PLAYBACK_CONTEXT_OPTIONS: AudioContextOptions = { latencyHint: 'playback' };
 
@@ -61,6 +70,38 @@ export interface VoicePlaybackLifecycle {
     onStarted?: () => void;
     onEnded?: () => void;
     onError?: (error: unknown) => void;
+}
+
+// T3: 'fixed' is never resolved by a policy -- it is exactly the value the
+// engine itself reports when no `prebufferPolicy` dependency is injected
+// (see PRISMA_PCM_PLAYBACK_LEAD_MS above), so it is excluded here.
+export type PrismaVoicePrebufferMode = Exclude<PrismaAudioMetricPrebufferMode, 'fixed'>;
+
+export interface PrismaVoicePrebufferResolution {
+    prebufferMs: number;
+    mode: PrismaVoicePrebufferMode;
+}
+
+/**
+ * T3: optional engine dependency that feeds the continuous prebuffer
+ * estimator (T2, `prismaVoicePrebufferController.ts`) into playback,
+ * without the engine itself knowing anything about browser storage or the
+ * Automatic/Manual distinction beyond the `mode` label it reports.
+ *
+ * `resolvePrebufferMs()` is called exactly once per answer, at `play()`
+ * time, and its result is snapshotted for that whole answer (no mid-answer
+ * changes) -- see `ActivePlayback.prebufferMs`/`prebufferMode`.
+ * `recordNeededPrebufferMs()` is called exactly once, only when a
+ * progressive answer completes normally (see `completeLiveIfFinished()`):
+ * never for a stopped/cancelled/errored answer and never for the
+ * buffer-before-playback transport, which cannot measure per-block arrival
+ * (T1). The engine never branches on `mode` itself -- a Manual-mode policy
+ * (T4) still receives this call ("still measured and logged", per the
+ * feature design) and decides internally whether/how to use it.
+ */
+export interface PrismaVoicePrebufferPolicy {
+    resolvePrebufferMs(): PrismaVoicePrebufferResolution;
+    recordNeededPrebufferMs(neededPrebufferMs: number): void;
 }
 
 export interface PrismaVoiceAudioEngineContract {
@@ -99,6 +140,7 @@ export interface PrismaVoiceAudioEngineDependencies {
     warn?: (message: string, error: unknown) => void;
     onDiagnostic?: PrismaBrowserMetricSink;
     levelPolicy?: AudioLevelPolicy;
+    prebufferPolicy?: PrismaVoicePrebufferPolicy;
 }
 
 interface ActivePlayback {
@@ -134,6 +176,13 @@ interface ActivePlayback {
     // worklet transport is out of scope for this measurement (see the
     // feature document), so the tracker stays harmless and unused there.
     prebufferNeedTracker: PrismaPrebufferNeedTracker;
+    // T3: snapshotted once at play() time from the injected
+    // `prebufferPolicy` (or the fixed fallback when none is injected) --
+    // never re-read mid-answer. `prebufferMs` is what schedulePcmBlock()
+    // actually uses as the lead; `prebufferMode` is reported verbatim on
+    // this answer's playback-ended.
+    prebufferMs: number;
+    prebufferMode: PrismaAudioMetricPrebufferMode;
 }
 
 export class PcmS16LeBlockAssembler {
@@ -272,6 +321,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     private readonly warn: (message: string, error: unknown) => void;
     private readonly onDiagnostic: (diagnostic: PrismaVoiceAudioDiagnostic) => void;
     private readonly levelPolicy: AudioLevelPolicy;
+    private readonly prebufferPolicy: PrismaVoicePrebufferPolicy | null;
     private context: AudioContext | null = null;
     private localWorkletContext: AudioContext | null = null;
     private workletModuleContext: AudioContext | null = null;
@@ -305,6 +355,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         this.warn = dependencies.warn ?? ((message, error) => console.warn(message, error));
         this.onDiagnostic = dependencies.onDiagnostic ?? dispatchPrismaBrowserMetric;
         this.levelPolicy = dependencies.levelPolicy ?? DEFAULT_AUDIO_LEVEL_POLICY;
+        this.prebufferPolicy = dependencies.prebufferPolicy ?? null;
     }
 
     public play(
@@ -314,6 +365,13 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     ): void {
         this.generation += 1;
         this.cleanupActive('cancel', true);
+
+        // T3: snapshotted once per answer, here -- never re-read mid-answer
+        // even if resolvePrebufferMs() would return a different value later
+        // (e.g. the estimator learning from a concurrent answer, which
+        // cannot happen today since play() replaces any in-flight answer,
+        // but keeps this call site the single point of resolution).
+        const prebufferResolution = this.prebufferPolicy?.resolvePrebufferMs();
 
         const active: ActivePlayback = {
             generation: this.generation,
@@ -344,6 +402,8 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             mode: 'live',
             metricSequence: 0,
             prebufferNeedTracker: new PrismaPrebufferNeedTracker(),
+            prebufferMs: prebufferResolution?.prebufferMs ?? PRISMA_PCM_PLAYBACK_LEAD_MS,
+            prebufferMode: prebufferResolution?.mode ?? 'fixed',
         };
         target.level = 0;
         target.setSpeaking(false);
@@ -854,7 +914,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         sourceNode.connect(analyser);
         const startTime = Math.max(
             active.nextPlaybackTime,
-            context.currentTime + PRISMA_PCM_PLAYBACK_LEAD_SECONDS,
+            context.currentTime + active.prebufferMs / 1_000,
         );
         if (active.nextPlaybackTime > 0 && startTime > active.nextPlaybackTime) {
             active.underflowCount += 1;
@@ -1085,6 +1145,15 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         }
 
         this.log('Prisma Live playback completed');
+        // T3: the only point where a progressive answer both measures its
+        // needed prebuffer for reporting AND (when a policy is injected)
+        // feeds that measurement back to the estimator -- this function
+        // only ever runs on normal completion (guarded by streamCompleted
+        // and an empty sourceNodes set above), never for a
+        // stopped/cancelled/errored answer, so recordNeededPrebufferMs is
+        // called exactly once per completed answer and never otherwise.
+        const neededPrebufferMs = active.prebufferNeedTracker.neededPrebufferMs();
+        this.prebufferPolicy?.recordNeededPrebufferMs(neededPrebufferMs);
         this.emitDiagnostic(active, {
             record_type: 'playback-ended',
             payload: {
@@ -1093,15 +1162,19 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
                 pcm_bytes: active.pcmBytes,
                 pcm_duration_seconds: active.pcmDurationSeconds,
                 underflow_count: active.underflowCount,
-                // T1: prebuffer_ms is the lead actually used (fixed for now,
-                // see PRISMA_PCM_PLAYBACK_LEAD_SECONDS); needed_prebuffer_ms
-                // is measured independently of it. Only the progressive
-                // transport measures block arrivals, so only it reports
-                // these -- the worklet transport's playback-ended leaves
-                // them unset (optional in the schema).
-                prebuffer_ms: PRISMA_PCM_PLAYBACK_LEAD_SECONDS * 1_000,
-                needed_prebuffer_ms: active.prebufferNeedTracker.neededPrebufferMs(),
-                prebuffer_mode: 'fixed',
+                // T1/T3: prebuffer_ms/prebuffer_mode are this answer's own
+                // snapshotted values (see play()) -- the fixed
+                // PRISMA_PCM_PLAYBACK_LEAD_MS fallback when no
+                // prebufferPolicy is injected, or the policy's resolved
+                // value otherwise. needed_prebuffer_ms is measured
+                // independently of whichever lead was actually used. Only
+                // the progressive transport measures block arrivals, so
+                // only it reports these -- the worklet transport's
+                // playback-ended leaves them unset (optional in the
+                // schema).
+                prebuffer_ms: active.prebufferMs,
+                needed_prebuffer_ms: neededPrebufferMs,
+                prebuffer_mode: active.prebufferMode,
             },
         });
         this.cleanupActive('complete', false);

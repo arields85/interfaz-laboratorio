@@ -12,6 +12,7 @@ export type {
     PrismaAudioMetricTransport,
     PrismaAudioMetricSource,
     PrismaAudioMetricPhase,
+    PrismaAudioMetricPrebufferMode,
     PrismaAudioMetricReason,
     PrismaAudioMetricState,
     PrismaAudioMetricWhen,

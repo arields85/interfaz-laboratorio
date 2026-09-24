@@ -9,6 +9,7 @@ import type {
     PrismaVoiceAudioEngineContract,
 } from '../services/prismaVoiceAudioEngine';
 import { prismaSessionClient } from '../services/prismaSessionClient';
+import { createBrowserPrismaVoiceAutomaticPrebufferPolicy } from '../services/prismaVoicePrebufferController';
 import { recordOrbPhase } from '../services/prismaVoiceTimelineRecorder';
 import { createPrismaVoiceTtsAudioSource } from '../services/prismaVoiceTtsAudioSource';
 import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAudioSource';
@@ -156,7 +157,14 @@ export function usePrismaOrbPresentation(
     const thinkingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     if (engineRef.current === null) {
-        engineRef.current = options.engine ?? new PrismaVoiceAudioEngine();
+        // T3: production answers always resolve the prebuffer through the
+        // browser-backed Automatic policy (T2's continuous estimator +
+        // localStorage history) -- mode selection between Automatic and
+        // Manual (T4) will choose which policy is built here instead, but
+        // the engine's own `PrismaVoicePrebufferPolicy` dependency and call
+        // sites do not change.
+        engineRef.current = options.engine
+            ?? new PrismaVoiceAudioEngine({ prebufferPolicy: createBrowserPrismaVoiceAutomaticPrebufferPolicy() });
     }
 
     const clearFadeTimer = (): void => {

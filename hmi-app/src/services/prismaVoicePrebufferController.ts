@@ -5,14 +5,17 @@
  * playback path (T3) needs: read the prebuffer to use for the next answer,
  * and record the measurement of the answer that just finished.
  *
- * Not wired into playback yet -- that wiring is T3
- * (`prismaVoiceAudioEngine.ts` / `usePrismaOrbPresentation.ts`).
+ * `createPrismaVoiceAutomaticPrebufferPolicy()` below adapts this
+ * controller to the engine's `PrismaVoicePrebufferPolicy` dependency
+ * (`prismaVoiceAudioEngine.ts`); `createBrowserPrismaVoiceAutomaticPrebufferPolicy()`
+ * is the one-call production factory wired in `usePrismaOrbPresentation.ts`.
  */
 import { estimateNextPrismaVoicePrebufferMs, appendPrismaVoicePrebufferMeasurement } from './prismaVoicePrebufferEstimator';
 import {
     createBrowserPrismaVoicePrebufferHistoryStorage,
     type PrismaVoicePrebufferHistoryStorage,
 } from './prismaVoicePrebufferHistoryStorage';
+import type { PrismaVoicePrebufferPolicy } from './prismaVoiceAudioEngine';
 
 export class PrismaVoicePrebufferController {
     private readonly storage: PrismaVoicePrebufferHistoryStorage;
@@ -40,4 +43,25 @@ export class PrismaVoicePrebufferController {
 
 export function createBrowserPrismaVoicePrebufferController(): PrismaVoicePrebufferController {
     return new PrismaVoicePrebufferController(createBrowserPrismaVoicePrebufferHistoryStorage());
+}
+
+/**
+ * T3: adapts a `PrismaVoicePrebufferController` to the engine's
+ * `PrismaVoicePrebufferPolicy` dependency, always resolving/reporting mode
+ * `'automatic'`. Mode selection between Automatic and Manual (T4) picks
+ * which policy to build here -- the engine itself never sees the
+ * distinction beyond the `mode` label.
+ */
+export function createPrismaVoiceAutomaticPrebufferPolicy(
+    controller: PrismaVoicePrebufferController,
+): PrismaVoicePrebufferPolicy {
+    return {
+        resolvePrebufferMs: () => ({ prebufferMs: controller.getNextPrebufferMs(), mode: 'automatic' }),
+        recordNeededPrebufferMs: (neededPrebufferMs) => controller.recordMeasurement(neededPrebufferMs),
+    };
+}
+
+/** One-call production factory: a browser-backed Automatic prebuffer policy. */
+export function createBrowserPrismaVoiceAutomaticPrebufferPolicy(): PrismaVoicePrebufferPolicy {
+    return createPrismaVoiceAutomaticPrebufferPolicy(createBrowserPrismaVoicePrebufferController());
 }

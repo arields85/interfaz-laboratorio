@@ -7,6 +7,42 @@ import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAu
 import { prismaSessionClient } from '../services/prismaSessionClient';
 import { PRISMA_BROWSER_METRIC_EVENT } from '../services/prismaVoiceMetrics';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
+
+// T3: the hook builds a real engine (mocked here) with a browser-backed
+// Automatic prebuffer policy (also mocked) when the caller injects no
+// `engine` option -- every other test in this file injects one, so the
+// real `PrismaVoiceAudioEngine` constructor path below is only exercised
+// by the dedicated "builds the production engine" test.
+const { engineConstructorSpy, fakePrebufferPolicy, prebufferPolicyFactorySpy } = vi.hoisted(() => {
+    const engineConstructorSpy = vi.fn();
+    const fakePrebufferPolicy = {
+        resolvePrebufferMs: vi.fn(() => ({ prebufferMs: 777, mode: 'automatic' as const })),
+        recordNeededPrebufferMs: vi.fn(),
+    };
+    const prebufferPolicyFactorySpy = vi.fn(() => fakePrebufferPolicy);
+    return { engineConstructorSpy, fakePrebufferPolicy, prebufferPolicyFactorySpy };
+});
+
+vi.mock('../services/prismaVoiceAudioEngine', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../services/prismaVoiceAudioEngine')>();
+    return {
+        ...actual,
+        PrismaVoiceAudioEngine: vi.fn().mockImplementation(function FakePrismaVoiceAudioEngine(dependencies: unknown) {
+            engineConstructorSpy(dependencies);
+            return {
+                play: vi.fn(),
+                warmAudioContext: vi.fn(),
+                stop: vi.fn(),
+                dispose: vi.fn(),
+            } satisfies PrismaVoiceAudioEngineContract;
+        }),
+    };
+});
+
+vi.mock('../services/prismaVoicePrebufferController', () => ({
+    createBrowserPrismaVoiceAutomaticPrebufferPolicy: prebufferPolicyFactorySpy,
+}));
+
 import {
     PRISMA_ORB_FADE_DURATION_MS,
     PRISMA_ORB_THINKING_TIMEOUT_MS,
@@ -334,5 +370,14 @@ describe('usePrismaOrbPresentation', () => {
 
             expect(orb.setSpeaking).toHaveBeenCalledWith(true);
         });
+    });
+
+    it('T3: builds the production engine with a browser-backed Automatic prebuffer policy when no engine is injected', () => {
+        const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
+
+        renderHook(() => usePrismaOrbPresentation({ audioSourceFactory: factory }));
+
+        expect(prebufferPolicyFactorySpy).toHaveBeenCalledTimes(1);
+        expect(engineConstructorSpy).toHaveBeenCalledWith({ prebufferPolicy: fakePrebufferPolicy });
     });
 });
