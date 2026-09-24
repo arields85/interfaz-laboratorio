@@ -1377,7 +1377,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   **Next step (user, live check):** run the dev launcher from a real interactive terminal and confirm
   an animated "Starting Prisma voice..." line fills the previously silent gap, then disappears
   cleanly right as "Prisma voice is ready..." prints (and again for "Prisma is ready...").
-- [ ] **T22 — Voice micro-cuts (live test 2026-09-24 ~14:55 and ~15:05).** User heard micro-cuts
+- [x] **T22 — Voice micro-cuts (live test 2026-09-24 ~14:55 and ~15:05).** User heard micro-cuts
   in some answers ("hard to tell"). Timeline: first run 1 underflow in 3 answers; retest (4
   answers, Q1 and Q4 same text) `underflow_count` 1/0/0/1 while the user perceived cuts in Q3 and
   Q4, not Q1. Q4 was regenerated, not served from the audio cache (first audio 572 ms, different
@@ -1401,6 +1401,11 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   both files clean. Route: direct inline (one understood source file plus its test).
   **Next step (user, live check):** relaunch and ask 3–4 voice questions; report which ones cut.
   If cuts persist with `underflow_count=0`, cause D (source audio) becomes the lead suspect.
+  **Live retest (2026-09-24 ~15:25): passed.** 5 answers (Q5 = Q1 served from the audio cache),
+  `underflow_count=0` in all, playback started ~200 ms after first audio (866–963 ms; 272 ms for
+  the cached one), wall-clock playback equal to PCM duration within 20 ms; the user heard all five
+  perfectly and agreed independently with the log reading. Follow-up: the fixed 200 ms is replaced
+  by a continuously learned prebuffer in `odd/tasks/prisma-adaptive-voice-buffer.md` (PW-010).
 
 ## Progress
 
@@ -1502,9 +1507,12 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
 
 ## Next step
 
-**Update 2026-09-24 afternoon:** the live test of T18–T21 passed (latency targets met; pairing
-modal and launcher as designed) except for audible micro-cuts, now tracked as T22 on branch
-`fix/prisma-voice-playback-buffer`. PW-006 closes only after the T22 retest.
+**PW-006 CLOSED 2026-09-24.** The live test of T18–T21 passed (latency targets met; pairing
+modal and launcher as designed); the audible micro-cuts were fixed by T22 (`c7efaf1`, retest
+passed), integrated into local `main` by fast-forward (no push). Leftovers moved: T15 buffer modes
+→ PW-010 (`odd/tasks/prisma-adaptive-voice-buffer.md`); T16 follow-ups and the minor items below
+→ PW-011 (`backlog/prisma-voice-minor-followups`). The historical return point below is kept for
+reference only.
 
 **Session closed 2026-09-24 — return point for the next session.** Branch
 `feat/prisma-responsiveness-and-scaling` integrated into local `main` by fast-forward (no push).
