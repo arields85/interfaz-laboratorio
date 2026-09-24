@@ -203,7 +203,7 @@ end together with PW-006; NO push.
   element placed via the layout-px conversion lands at the intended real coordinates; `innerWidth`
   is unaffected by zoom (no feedback loop). `npm test` 215 files / 2372 tests, `tsc -b` and lint
   clean.
-- [ ] **T4 — Per-device fine-tune. DEFERRED by the user (2026-09-23):** build it only if T5 manual
+- [x] **T4 — Per-device fine-tune. NOT NEEDED (user, 2026-09-24); previously DEFERRED (2026-09-23):** build it only if T5 manual
   acceptance on the laptop and the 4K monitor shows the automatic curve is not enough. Per-browser factor (default 100%, fine steps) combined with the
   automatic zoom; UI placement to be agreed with the user.
 - [x] **T5b — Minimum layout width floor (user-approved 2026-09-24).** Evidence from T5 manual
@@ -332,8 +332,12 @@ end together with PW-006; NO push.
   both columns, no overlap. User confirmed on the laptop (2026-09-24). Follow-up (user request): the
   truncated captions carry `title` with the full text (native tooltip); regression test asserts it
   (RED then GREEN, 150/150; `tsc -b` and eslint clean).
-- [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
-  2560×1440 CSS px; calibrate `k`.
+- [x] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
+  2560×1440 CSS px; calibrate `k`. **Accepted by the user (2026-09-24):** 4K (2560×1440 CSS),
+  1920×1080, laptop (1440×900) and TV (1280×720) all look right without browser zoom, including
+  the Activity Analysis captions ("sin com…" + tooltip) on the TV; `k = 0.6` and
+  `MIN_LAYOUT_WIDTH_PX = 1760` kept as is. T4 (per-device fine-tune) declared not needed by the
+  user. **PW-007 closed.**
 
 ## Acceptance criteria
 
@@ -398,15 +402,7 @@ end together with PW-006; NO push.
 
 ## Next step
 
-User re-check needed on both the laptop and the TV — this is T5c's **second** fix attempt after the
-first (`min-w-0` + `break-words` alone) failed the user's live re-check, so please verify directly
-rather than assuming it's fixed: (1) the Activity Analysis widget's "MEJOR"/"PEOR" columns no
-longer overlap ("sin comparación" or any other caption), and (2) the TV
-(1280×720 CSS) no longer truncates/wraps widget titles ("ACTIVIDAD DE MÁQUINA", "PRODUCCIÓN",
-"RENDIMIENTO DIARIO (ÚLTIMOS 7 DÍAS)"). If the 1760 px floor still isn't enough on the real TV,
-increase `MIN_LAYOUT_WIDTH_PX` in `hmi-app/src/utils/viewportScale.ts` — recalibration never
-requires touching call sites. After that, resume T4 (needs a user decision on UI placement for the
-per-browser fine-tune factor: admin settings page vs. a viewer-accessible control) and T5 (full
-manual acceptance and `k` calibration across 1440×900, 1920×1080, 2560×1440 CSS px, plus T3b's
-manual-check list: overlay/tooltip positioning, drag tracking, trend chart selection, shader
-sharpness at non-1920 widths).
+**Feature closed (2026-09-24), accepted by the user.** T4 not needed. Remaining delivery: the
+shared branch `feat/prisma-responsiveness-and-scaling` is integrated into `main` by fast-forward
+together with PW-006 (no push). Related but separate: PW-008 (activity index chart clipped, also
+at zoom 1).
