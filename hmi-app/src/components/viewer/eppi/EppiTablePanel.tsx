@@ -158,8 +158,8 @@ export default function EppiTablePanel({
                 <div className={`flex flex-none items-center justify-between gap-3 ${usesCapturedTableChrome ? 'pb-3.5' : 'pb-3'}`}>
                     <label className={`flex items-center gap-2 rounded-2xl border border-industrial-border bg-industrial-hover px-3 text-industrial-muted focus-within:border-admin-accent ${
                         usesCapturedTableChrome
-                            ? 'h-[34px] w-[min(20rem,35vw)]'
-                            : 'h-9 w-[min(20rem,45vw)]'
+                            ? 'h-[34px] w-[min(20rem,calc(var(--viewport-width)*0.35))]'
+                            : 'h-9 w-[min(20rem,calc(var(--viewport-width)*0.45))]'
                     }`}>
                         <Search size={16} aria-hidden="true" />
                         <span className="sr-only">Buscar en {definition.ariaLabel}</span>

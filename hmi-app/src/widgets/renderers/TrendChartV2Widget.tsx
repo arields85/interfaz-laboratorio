@@ -84,6 +84,7 @@ import {
     recordTrendChartV2PerformanceDiagnostic,
     startTrendChartV2PerformanceTransition,
 } from '../../utils/trendChartV2PerformanceDiagnostics';
+import { visualToLayoutPx } from '../../utils/zoomCoordinates';
 
 const SYSTEM_TEXT_STYLE = {
     fontSize: 'var(--font-size-system)',
@@ -333,8 +334,13 @@ function TrendChartV2PresentationRenderer({ widget, className, renderContext, pr
         const element = chartShellRef.current;
         if (!element || typeof ResizeObserver === 'undefined') return;
         const update = (width: number, height: number) => { if (width > 0 && height > 0) setDimensions({ width: Math.round(width), height: Math.round(height) }); };
+        // getBoundingClientRect() is REAL/visual px; every later update comes
+        // from ResizeObserver's contentRect (LAYOUT px) and dimensions.width/
+        // height is later written into a CSS length, so this one-time initial
+        // read must be converted to match (PW-007 T3b) — otherwise the chart
+        // flashes oversized at zoom > 1 until the observer's own callback fires.
         const initial = element.getBoundingClientRect();
-        update(initial.width, initial.height);
+        update(visualToLayoutPx(initial.width), visualToLayoutPx(initial.height));
         const observer = new ResizeObserver(([entry]) => update(entry.contentRect.width, entry.contentRect.height));
         observer.observe(element);
         return () => observer.disconnect();
@@ -560,8 +566,12 @@ function LegacyTrendChartV2Widget({
             return;
         }
 
+        // See the matching comment in TrendChartV2PresentationRenderer above:
+        // convert this one-time getBoundingClientRect() read to LAYOUT px so
+        // it matches every subsequent ResizeObserver-based measurement
+        // (PW-007 T3b).
         const initialRect = element.getBoundingClientRect();
-        applyMeasuredDimensions(initialRect.width, initialRect.height);
+        applyMeasuredDimensions(visualToLayoutPx(initialRect.width), visualToLayoutPx(initialRect.height));
 
         const observer = new ResizeObserver(([entry]) => {
             applyMeasuredDimensions(entry.contentRect.width, entry.contentRect.height);

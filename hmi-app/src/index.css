@@ -332,6 +332,27 @@ h1, h2, h3, h4, h5, h6 {
   --animate-pulse-fast: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* ── PW-007 T3b: viewport-corrected length tokens ─────────────────────────
+ * `--viewport-zoom` is mirrored here by useAutomaticViewportZoom.ts onto
+ * <html>, next to the `zoom` style it applies; it defaults to 1 (no-op) when
+ * the hook hasn't run yet (tests, first paint).
+ *
+ * Standardized CSS `zoom` pre-multiplies plain lengths — including `vh`/
+ * `vw` — by the effective zoom, but NOT percentages/`auto` (measured in
+ * Chrome, zoom 1.25: `height:100vh` overflows to 1001px in an 801px real
+ * viewport; `position:fixed;inset:0` still fills it exactly). Dividing by
+ * `--viewport-zoom` here cancels that pre-multiplication, so anything built
+ * from these tokens fills the true viewport exactly at any zoom, while any
+ * length added/subtracted alongside them (rem, a raw px constant) keeps
+ * scaling normally with the rest of the UI. Always use these instead of raw
+ * `vh`/`vw`/`dvh`/`svh` literals or `h-screen`/`w-screen`/`min-h-screen`.
+ * ──────────────────────────────────────────────────────────────────────── */
+:root {
+  --viewport-zoom: 1;
+  --viewport-height: calc(100vh / var(--viewport-zoom));
+  --viewport-width: calc(100vw / var(--viewport-zoom));
+}
+
 /* ── Scrollbar delgado y discreto para paneles scrolleables ───────────────
  * Usa únicamente CSS Scrollbar Styling Level 1 para evitar conflictos con
  * pseudo-elementos webkit en Chromium moderno.
@@ -528,6 +549,19 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @layer utilities {
+
+  /* PW-007 T3b: zoom-corrected replacements for h-screen/w-screen/min-h-screen. */
+  .h-viewport {
+    height: var(--viewport-height);
+  }
+
+  .min-h-viewport {
+    min-height: var(--viewport-height);
+  }
+
+  .w-viewport {
+    width: var(--viewport-width);
+  }
 
   .font-mono {
     font-family: var(--font-mono);

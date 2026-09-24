@@ -61,6 +61,47 @@ describe('TrendChartV2InteractionLayer', () => {
         expect(onHoverChange).toHaveBeenCalledTimes(1);
     });
 
+    it('divides the pointer-to-plot delta by the effective zoom before combining with plotLeft (PW-007 T3b)', () => {
+        document.documentElement.style.setProperty('--viewport-zoom', '2');
+
+        try {
+            const onZoomSelection = vi.fn();
+
+            render(
+                <svg>
+                    <TrendChartV2InteractionLayer
+                        plotLeft={10}
+                        plotTop={5}
+                        plotWidth={100}
+                        plotHeight={40}
+                        domainStartMs={0}
+                        domainEndMs={1000}
+                        points={[]}
+                        hoveredTimestampMs={null}
+                        onHoverChange={() => undefined}
+                        onZoomSelection={onZoomSelection}
+                        minimumSelectionWidthPx={10}
+                    />
+                </svg>,
+            );
+
+            const overlay = screen.getByTestId('trend-chart-v2-interaction-overlay');
+            mockRect(overlay, 120, 60, 10);
+
+            // Real-space clientX delta from rect.left (10): 90-10=80, 30-10=20.
+            // At zoom 2 that's 40 and 10 layout px from plotLeft(10) ->
+            // x=50 and x=20; ratio into the 0..1000ms domain over
+            // plotWidth(100): startMs=(20-10)/100*1000=100, endMs=(50-10)/100*1000=400.
+            fireEvent.mouseDown(overlay, { clientX: 90, clientY: 20 });
+            fireEvent.mouseMove(overlay, { clientX: 30, clientY: 20 });
+            fireEvent.mouseUp(overlay, { clientX: 30, clientY: 20 });
+
+            expect(onZoomSelection).toHaveBeenCalledWith({ startMs: 100, endMs: 400 });
+        } finally {
+            document.documentElement.style.removeProperty('--viewport-zoom');
+        }
+    });
+
     it('finds nearest timestamps with logarithmic comparisons while preserving earlier-point ties', () => {
         const points = Array.from({ length: 1500 }, (_, index) => ({
             timestampMs: index * 10,

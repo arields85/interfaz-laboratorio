@@ -10,7 +10,7 @@ export default function EppiTopbarNavigation() {
     return (
         <nav
             aria-label="Navegación EPPI"
-            className="hmi-scrollbar flex max-w-[calc(100vw-22rem)] items-center gap-1 overflow-x-auto overflow-y-hidden"
+            className="hmi-scrollbar flex max-w-[calc(var(--viewport-width)-22rem)] items-center gap-1 overflow-x-auto overflow-y-hidden"
         >
             {EPPI_NAVIGATION_ITEMS.map(({ icon: Icon, label, path }) => {
                 const isActive = location.pathname === path;

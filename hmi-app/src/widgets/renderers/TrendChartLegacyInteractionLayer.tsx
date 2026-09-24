@@ -60,6 +60,11 @@ export default function TrendChartLegacyInteractionLayer({
 
     const handlePointerX = (element: SVGRectElement, clientX: number) => {
         const rect = element.getBoundingClientRect();
+        // clientX, rect.left and rect.width are all REAL/visual px from the
+        // same rect (see ../../utils/zoomCoordinates.ts): this ratio is
+        // real/real and zoom-invariant (PW-007 T3b), unlike
+        // TrendChartV2InteractionLayer's getRelativeX which adds a raw delta
+        // to a LAYOUT-space plotLeft — left unchanged.
         const ratio = clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
         const chartX = plotLeft + (ratio * plotWidth);
         emitIndex(resolveTrendChartLegacyHoverIndex({ chartX, x0, step, dataLength: data.length }));

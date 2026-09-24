@@ -761,6 +761,71 @@ describe('BuilderCanvas', () => {
         expect(onLayoutCommit).toHaveBeenCalledWith({ widgetId: 'widget-1', x: 2, y: 1, w: 5, h: 3 });
     });
 
+    it('converts pointer coordinates to layout px under CSS zoom so drag/resize tracks the pointer (PW-007 T3b)', async () => {
+        document.documentElement.style.setProperty('--viewport-zoom', '2');
+
+        try {
+            const user = userEvent.setup();
+            const onLayoutCommit = vi.fn();
+
+            const { item } = await renderInteractiveCanvas({
+                onLayoutCommit,
+                layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 4, h: 3 })],
+                cols: 16,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+            });
+
+            await waitFor(() => {
+                expect(item.style.gridColumnStart).toBe('3');
+            });
+
+            // Same real-space pointer delta as the zoom-1 move test above
+            // (clientX 120 -> -300, delta -420), but at zoom 2 the tentative
+            // pixel bounds (layout space, matching cellWidth from
+            // ResizeObserver) must move by -420/2 = -210 from the
+            // startBounds.left of 150 (x=2 * cellWidth=75) — not the full
+            // -420, which would overshoot the actual pointer movement.
+            await pressPointer(user, item, { clientX: 120, clientY: 75 });
+            await movePointer(user, document.body, { clientX: -300, clientY: 75 });
+
+            expect(Number.parseFloat(screen.getByTestId('builder-canvas-item-widget-1').style.left)).toBeCloseTo(-60, 4);
+
+            await releasePointer(user, document.body, { clientX: -300, clientY: 75 });
+        } finally {
+            document.documentElement.style.removeProperty('--viewport-zoom');
+        }
+    });
+
+    it('divides the resize tooltip cursor position by the effective zoom (PW-007 T3b)', async () => {
+        document.documentElement.style.setProperty('--viewport-zoom', '2');
+
+        try {
+            const user = userEvent.setup();
+
+            await renderInteractiveCanvas({
+                selectedWidgetId: 'widget-1',
+                layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+                cols: 16,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+            });
+
+            const handle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
+
+            await pressPointer(user, handle, { clientX: 300, clientY: 150 });
+            await movePointer(user, document.body, { clientX: 420, clientY: 225 });
+
+            const tooltip = screen.getByTestId('builder-canvas-resize-tooltip');
+            expect(tooltip.style.left).toBe(`${420 / 2}px`);
+            expect(tooltip.style.top).toBe(`${225 / 2}px`);
+
+            await releasePointer(user, document.body, { clientX: 420, clientY: 225 });
+        } finally {
+            document.documentElement.style.removeProperty('--viewport-zoom');
+        }
+    });
+
     it('shows a floating resize tooltip with tentative grid dimensions and hides it on release', async () => {
         const user = userEvent.setup();
 

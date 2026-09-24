@@ -108,6 +108,11 @@ export default function PrismaPairingControl() {
         if (panel === null || typeof ResizeObserver === 'undefined') return;
 
         // A degenerate zero rect (layout not resolved) must never become a measurement.
+        // width/height stay REAL/visual px (PW-007 T3b, ../../utils/zoomCoordinates.ts):
+        // they only feed AnchoredOverlay's estimatedHeight/minWidth props, and
+        // resolveAnchoredOverlayStyle (anchoredOverlayStyle.ts) already converts
+        // its own real-space output to layout px before writing it as a CSS
+        // length, so no conversion is needed here.
         const applyRect = ({ width, height }: { width: number; height: number }) => {
             if (width <= 0 || height <= 0) return;
             setPanelSize((previous) => (

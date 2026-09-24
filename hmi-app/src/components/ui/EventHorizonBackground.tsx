@@ -15,6 +15,7 @@ import type {
     ShaderParams,
 } from '../../store/shaderParams.store';
 import { SHADER_READY_ATTRIBUTE, WEBGL_FIRST_DRAW_EVENT } from '../../hooks/useBootShield';
+import { getEffectiveZoom } from '../../utils/zoomCoordinates';
 
 const BLEND_MODE_VALUES: Record<ShaderBlendMode, number> = {
     normal: 0,
@@ -517,8 +518,13 @@ export default function EventHorizonBackground() {
         function resize() {
             if (!gl) return false;
             const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-            const w = Math.floor(shaderCanvas.clientWidth * dpr);
-            const h = Math.floor(shaderCanvas.clientHeight * dpr);
+            // clientWidth/clientHeight are LAYOUT px (pre-zoom-multiplication);
+            // this canvas paints at its VISUAL size (clientWidth * effective
+            // zoom — measured in headless Chrome, PW-007 T3b), so the backing
+            // store must account for zoom too or it under-resolves at zoom > 1.
+            const zoom = getEffectiveZoom(shaderCanvas);
+            const w = Math.floor(shaderCanvas.clientWidth * dpr * zoom);
+            const h = Math.floor(shaderCanvas.clientHeight * dpr * zoom);
             if (w === 0 || h === 0) return false;
             if (shaderCanvas.width !== w || shaderCanvas.height !== h) {
                 shaderCanvas.width = w;
@@ -671,6 +677,11 @@ export default function EventHorizonBackground() {
             rafId = requestAnimationFrame(frame);
         }
 
+        // clientX/clientY and window.innerWidth/innerHeight are both
+        // REAL/visual px (see ../../utils/zoomCoordinates.ts) and this canvas
+        // is percentage-sized (`inset-0 h-full w-full`), so it always paints
+        // at the true viewport size too — the ratio below is real/real and
+        // zoom-invariant (PW-007 T3b): left unchanged.
         const handleMouseMove = (e: MouseEvent) => {
             mouse.x = e.clientX / window.innerWidth;
             mouse.y = 1 - e.clientY / window.innerHeight;

@@ -104,7 +104,7 @@ describe('EppiViewer', () => {
         const toolbar = search.parentElement?.parentElement;
         expect(toolbar).not.toBeNull();
         expect(toolbar).toHaveClass('pb-3.5');
-        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,35vw)]');
+        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,calc(var(--viewport-width)*0.35))]');
         expect(within(toolbar!).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim())).toEqual([
             'Ordenar', 'Crear nuevo',
         ]);
@@ -183,7 +183,7 @@ describe('EppiViewer', () => {
         const toolbar = search.parentElement?.parentElement;
         expect(toolbar).not.toBeNull();
         expect(toolbar).toHaveClass('pb-3.5');
-        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,35vw)]');
+        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,calc(var(--viewport-width)*0.35))]');
         expect(within(toolbar!).getAllByRole('button').map((button) => button.textContent?.trim())).toEqual(['Crear nuevo']);
         expect(screen.queryByRole('button', { name: /Ordenar|Orden ascendente|Orden descendente/ })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Exportar' })).not.toBeInTheDocument();
@@ -239,7 +239,7 @@ describe('EppiViewer', () => {
         const toolbar = search.parentElement?.parentElement;
         expect(toolbar).not.toBeNull();
         expect(toolbar).toHaveClass('pb-3.5');
-        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,35vw)]');
+        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,calc(var(--viewport-width)*0.35))]');
         expect(search.parentElement?.querySelector('.lucide-search')).toBeInTheDocument();
 
         const toolbarButtons = within(toolbar!).getAllByRole('button');
@@ -438,7 +438,7 @@ describe('EppiViewer', () => {
 
         const search = screen.getByRole('searchbox', { name: 'Buscar en Locales' });
         expect(search).toHaveAttribute('placeholder', 'Buscar...');
-        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,35vw)]');
+        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,calc(var(--viewport-width)*0.35))]');
         expect(screen.queryByRole('button', { name: /Ordenar|Orden ascendente|Orden descendente/ })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Exportar' })).not.toBeInTheDocument();
 
@@ -498,7 +498,7 @@ describe('EppiViewer', () => {
         expect(toolbar).not.toBeNull();
         expect(toolbar).toHaveClass('pb-3.5');
         expect(search).toHaveAttribute('placeholder', 'Buscar...');
-        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,35vw)]');
+        expect(search.parentElement).toHaveClass('h-[34px]', 'w-[min(20rem,calc(var(--viewport-width)*0.35))]');
         expect(within(toolbar!).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim())).toEqual([
             'Ordenar', 'Exportar', 'Generar rótulo',
         ]);

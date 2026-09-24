@@ -161,7 +161,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                 </div>
             )}
         >
-            <div className="flex max-h-[calc(100vh-12rem)] min-h-[520px] flex-col">
+            <div className="flex max-h-[calc(var(--viewport-height)-12rem)] min-h-[520px] flex-col">
                 <div className="shrink-0 border-b border-white/10">
                     <div className="flex flex-row gap-1">
                         {TABS.map(({ id, label, icon: Icon }) => {

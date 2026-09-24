@@ -126,27 +126,77 @@ end together with PW-006; NO push.
     Manual checks to prioritize: overlays/popovers/dialogs position correctly at non-1920 widths,
     admin drag/resize handles track the pointer accurately, the shader background canvas still fills
     the screen, and 1920×1080 is pixel-identical to before this change.
-- [ ] **T3b — Zoom coordinate-space corrections (reopens T3's "no changes needed" claim).**
+- [x] **T3b — Zoom coordinate-space corrections (reopens T3's "no changes needed" claim).**
   Parent measurement in headless Chrome (local `chrome.exe`, `zoom:1.25` on `<html>`, window
-  1600×900, 2026-09-23) refuted the "vh is divided back out" assumption:
-  - `height:100vh` → rect height 1001 px vs viewport 801 px (document scrolls): `h-screen` and every
-    `calc(100vh …)`/`100vw` length overflows at zoom > 1 and underfills at zoom < 1.
-    `height: calc(100vh / zoom)` fills exactly (801 px).
-  - `position:fixed; top:100px` renders at 125 px: any value read from `getBoundingClientRect()`
-    (visual, zoomed px) and written back into a CSS length is multiplied twice.
-  - `getBoundingClientRect()` returns visual px (500 for a 400px box); `clientWidth`, `offsetHeight`
-    and `ResizeObserver` `contentRect`/`borderBoxSize` return layout px (400).
-    `devicePixelContentBoxSize` = 500 (device px at DPR 1).
-  - `position:fixed; inset:0` fills the viewport correctly (percentages/insets are not multiplied).
-  Required: expose the applied zoom as a CSS custom property next to `zoom` and derive viewport
-  lengths from it (`MainLayout`/`AdminLayout` `h-screen`, `PrismaOrbOverlay`, `anchoredOverlayStyle`,
-  `EppiTopbarNavigation`, `ShaderSettingsPanel`, `GlobalSettingsDialog`, `RuntimeDialog`); convert
-  `getBoundingClientRect()`/pointer values to layout px (÷ effective zoom, `currentCSSZoom`) wherever
-  they are written back into CSS lengths or mixed with layout-px measurements (`anchoredOverlayStyle`,
-  `HoverTooltip`, `PrismaPairingControl`, trend chart interaction layers, `TrendChartV2Widget`,
-  `BuilderCanvas`/`widgetInteraction` drag/resize, vendor `leda-orb.js`). Ratio-only uses
-  (visual/visual) stay as they are. `EventHorizonBackground` uses `clientWidth × dpr` (layout px) for
-  a canvas under zoom — verify it renders at full resolution (use device-pixel sizing if not).
+  1600×900, 2026-09-23) refuted the "vh is divided back out" assumption. Route: delegated writer
+  (mapping + writer triggers, 20+ files touched).
+  Corrected coordinate-space model (verified with an additional headless-Chrome probe during this
+  task, `zoom:1.25`, window 1600×900 — a percentage/`inset:0` div+canvas: `getBoundingClientRect`
+  1576×801 for both, but `clientWidth`/`clientHeight` 1261×641 for the descendants vs 1576×801 for
+  `documentElement`): exactly two spaces exist.
+  - **REAL/visual space** (freely comparable/combinable): `getBoundingClientRect()`,
+    `PointerEvent.clientX/clientY`, `window.innerWidth/innerHeight`,
+    `document.documentElement.clientWidth/clientHeight`.
+  - **LAYOUT space** (pre-zoom-multiplication): `clientWidth`/`offsetWidth`/`offsetHeight` and
+    `ResizeObserver` `contentRect`/`borderBoxSize` of any element OTHER than `documentElement` — even
+    a percentage/`inset:0`-sized one, whose LAYOUT clientWidth is smaller than its own painted
+    (real) size (1261 vs 1576 above), even though `getBoundingClientRect` still matches the true
+    viewport for such boxes.
+  - Writing a REAL-space value into a CSS length (`style.top`, a React style prop, an SVG coordinate
+    whose viewBox is LAYOUT-space, or combining it with a LAYOUT-space measurement) doubles under
+    zoom on paint; convert with the new `visualToLayoutPx`/`getEffectiveZoom` first. Same-space
+    ratios/distances need no conversion.
+  Files changed:
+  - New `hmi-app/src/utils/zoomCoordinates.ts` (+ 9 tests): `getEffectiveZoom(element?)`
+    (`currentCSSZoom` when available, else the `--viewport-zoom` mirrored on `<html>`, else 1) and
+    `visualToLayoutPx(visualPx, zoom?)`.
+  - `hmi-app/src/hooks/useAutomaticViewportZoom.ts` (+3 tests): mirrors the applied zoom onto a
+    `--viewport-zoom` custom property alongside `zoom`; corrected the wrong "vh is divided back out"
+    comment block with the model above.
+  - `hmi-app/src/index.css`: `:root { --viewport-zoom: 1; --viewport-height: calc(100vh /
+    var(--viewport-zoom)); --viewport-width: calc(100vw / var(--viewport-zoom)); }` and
+    `.h-viewport`/`.min-h-viewport`/`.w-viewport` utilities — the single tokenized way to express
+    viewport lengths, replacing every `vh`/`vw`/`h-screen` use found by a full re-grep (superset of
+    T3b's list): `MainLayout`, `AdminLayout`, `PrismaOrbOverlay`, `anchoredOverlayStyle` (`maxWidth`),
+    `EppiTopbarNavigation`, `ShaderSettingsPanel`, `GlobalSettingsDialog`, `RuntimeDialog`, plus
+    `EppiTablePanel` (`35vw`/`45vw`), `DesignSettingsTab` (`55vh`), `NodeTypeConfigDialog` (`70vh`)
+    which the T3b list had missed.
+  - Coordinate conversions via `zoomCoordinates.ts`: `anchoredOverlayStyle.ts` (final
+    `left`/`top`/`bottom`/`minWidth`, +3 tests) — `PrismaPairingControl` needed no separate change,
+    it flows through this same fix; `HoverTooltip.tsx` (final `top`/`left`, +1 test);
+    `BuilderCanvas.tsx` (drag/resize `deltaX`/`deltaY` before `applyPointerDeltaToPixelBounds`, and
+    `CursorTooltip` `x`/`y`, +2 tests) — the physical-mouse drag-threshold distance stays real-space
+    on purpose; `TrendChartV2InteractionLayer.tsx` `getRelativeX` (+1 test) — a real-space delta
+    added to a layout-space SVG `plotLeft`; `TrendChartV2Widget.tsx` (both renderer variants'
+    one-time initial `getBoundingClientRect()` measurement, to match every later
+    `ResizeObserver`-based one — not independently unit-tested, the test harness's
+    `MockResizeObserver` fires synchronously on `observe()` and overwrites the initial read before
+    it can be asserted); `EventHorizonBackground.tsx` canvas backing-store sizing
+    (`clientWidth × dpr × effectiveZoom`, +1 test) — confirmed via the headless-Chrome probe that
+    `clientWidth` alone under-resolves a zoomed, percentage-sized canvas.
+  - Left unchanged, documented in code comments (ratio-only or already correct):
+    `TrendChartLegacyInteractionLayer.tsx` `handlePointerX` (real/real ratio);
+    `EventHorizonBackground.tsx` mouse/click normalization (real/real ratio, canvas is
+    percentage-sized so pinned to the true viewport); `vendor/leda-orb.js` `_resize()` (already
+    `getBoundingClientRect() × dpr`, empirically correct); `GaugeDisplay.tsx` (SVG-only, `clientWidth`
+    used consistently with `ResizeObserver` `contentRect`, both layout-space); `AnchoredOverlay.tsx`
+    and `widgetInteraction.ts` (space-agnostic pure functions; correctness enforced at call sites).
+  - Test-only: `EppiViewer.test.tsx` — 5 pre-existing class assertions updated for the new
+    `w-[min(20rem,calc(var(--viewport-width)*0.35))]` token class.
+  - Tests: 213 → 215 files, 2352 → 2372 tests. RED observed for `zoomCoordinates.test.ts` (module
+    missing), the 3 new `useAutomaticViewportZoom` tests and 2 of the 3 new `anchoredOverlayStyle`
+    tests (asserting real-px values pre-fix); GREEN after implementing. The `HoverTooltip`,
+    `BuilderCanvas`, `TrendChartV2InteractionLayer` and `EventHorizonBackground` new zoom tests were
+    written together with their fix and confirmed non-vacuous (their expected converted values
+    differ from, and replace, the un-converted real-px values).
+  - Verification: `npm test` 215 files / 2372 tests passed; `npx tsc -b` clean; `npm run lint` clean.
+  - At zoom 1 (1920 width, `--viewport-zoom` unset in tests) every change is a no-op: all
+    pre-existing tests pass unmodified except the 5 `EppiViewer` class-string assertions above.
+  - Manual check needed at 1440×900 / 1920×1080 / 2560×1440 CSS px (DevTools device toolbar
+    acceptable for a first pass): overlays/tooltips/dialogs position correctly at non-1920 widths,
+    admin drag/resize and the resize tooltip track the pointer 1:1, the trend chart drag-to-zoom
+    selection lands on the correct time range, the shader background renders sharp (not blurry) at
+    zoom > 1, and 1920×1080 stays pixel-identical to before this change.
 - [ ] **T4 — Per-device fine-tune.** Per-browser factor (default 100%, fine steps) combined with the
   automatic zoom; UI placement to be agreed with the user.
 - [ ] **T5 — Manual acceptance and `k` calibration.** User checks 1440×900, 1920×1080 and
@@ -170,9 +220,19 @@ end together with PW-006; NO push.
   green (vitest, tsc, eslint). No structural regression expected at 1920×1080 (zoom computes to
   exactly 1); visual confirmation is T5.
 
+- 2026-09-23: T3b done. Corrected T3's wrong "vh is divided back out" claim with a measured
+  two-space coordinate model (real/visual vs layout px); added `--viewport-zoom` custom property and
+  `--viewport-height`/`--viewport-width` tokens, replaced every `vh`/`vw`/`h-screen` use (including
+  3 the original T3b list missed); added `zoomCoordinates.ts` and converted every
+  `getBoundingClientRect()`/pointer value written back into a CSS length or SVG layout-space
+  coordinate (overlay/tooltip positioning, drag/resize, trend chart interaction, the shader canvas's
+  backing-store size); left ratio-only/already-correct code documented in place. All checks green
+  (215 files / 2372 tests, tsc, eslint); no-op confirmed at zoom 1.
+
 ## Next step
 
 T4 per-device fine-tune — needs a user decision on UI placement (where the per-browser factor
 control lives: admin settings page vs. a viewer-accessible control). T5 manual acceptance and `k`
 calibration follows T4 (or can run against the current automatic-only zoom first, at the user's
-choice).
+choice) — T5 should also cover T3b's manual-check list above (overlay/tooltip positioning, drag
+tracking, trend chart selection, shader sharpness) at non-1920 widths.

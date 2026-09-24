@@ -29,7 +29,7 @@ export default function AdminLayout({ controller = adminSessionController }: Adm
     const session = useAuthStore((state) => state.session);
 
     return (
-        <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-industrial-bg text-industrial-text">
+        <div className="flex h-viewport min-h-0 flex-col overflow-hidden bg-industrial-bg text-industrial-text">
             
             {/* TOPBAR ADMIN */}
             <header className="z-20 flex h-14 shrink-0 items-center justify-between border-b border-industrial-border bg-industrial-surface px-6">

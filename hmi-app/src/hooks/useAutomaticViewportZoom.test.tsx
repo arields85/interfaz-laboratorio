@@ -15,12 +15,17 @@ function readRootZoom(): string {
     return document.documentElement.style.getPropertyValue('zoom');
 }
 
+function readRootZoomCustomProperty(): string {
+    return document.documentElement.style.getPropertyValue('--viewport-zoom');
+}
+
 describe('useAutomaticViewportZoom', () => {
     const originalInnerWidth = window.innerWidth;
 
     afterEach(() => {
         setInnerWidth(originalInnerWidth);
         document.documentElement.style.removeProperty('zoom');
+        document.documentElement.style.removeProperty('--viewport-zoom');
     });
 
     it('applies the computed damped zoom to the root element on mount', () => {
@@ -71,5 +76,33 @@ describe('useAutomaticViewportZoom', () => {
         renderHook(() => useAutomaticViewportZoom(1.1));
 
         expect(readRootZoom()).toBe(String(computeDampedViewportZoom(1440, 1.1)));
+    });
+
+    it('mirrors the applied zoom on the --viewport-zoom custom property (PW-007 T3b)', () => {
+        setInnerWidth(1440);
+
+        renderHook(() => useAutomaticViewportZoom());
+
+        expect(readRootZoomCustomProperty()).toBe(String(computeDampedViewportZoom(1440)));
+    });
+
+    it('keeps the --viewport-zoom custom property in sync with the zoom style on resize', () => {
+        setInnerWidth(1440);
+        renderHook(() => useAutomaticViewportZoom());
+
+        setInnerWidth(2560);
+        window.dispatchEvent(new Event('resize'));
+
+        expect(readRootZoomCustomProperty()).toBe(String(computeDampedViewportZoom(2560)));
+    });
+
+    it('clears the --viewport-zoom custom property on unmount', () => {
+        setInnerWidth(1440);
+        const { unmount } = renderHook(() => useAutomaticViewportZoom());
+        expect(readRootZoomCustomProperty()).toBe(String(computeDampedViewportZoom(1440)));
+
+        unmount();
+
+        expect(readRootZoomCustomProperty()).toBe('');
     });
 });

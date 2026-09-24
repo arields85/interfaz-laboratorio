@@ -300,7 +300,7 @@ export default function NodeTypeConfigDialog({
                     </>
                 )}
             >
-                <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1 hmi-scrollbar">
+                <div className="max-h-[calc(var(--viewport-height)*0.7)] space-y-4 overflow-y-auto pr-1 hmi-scrollbar">
                     {draftTypes.map((type, index) => {
                         const iconDefinition = AVAILABLE_NODE_ICONS[type.icon] ?? AVAILABLE_NODE_ICONS[DEFAULT_ICON_KEY];
                         const Icon = iconDefinition?.component ?? Square;

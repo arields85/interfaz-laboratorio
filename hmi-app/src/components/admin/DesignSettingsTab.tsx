@@ -1163,7 +1163,7 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
     }, [onDirtyChange, revertRef]);
 
     return (
-        <div className="max-h-[55vh] overflow-y-auto hmi-scrollbar pr-1">
+        <div className="max-h-[calc(var(--viewport-height)*0.55)] overflow-y-auto hmi-scrollbar pr-1">
             <section>
                 <div className="space-y-3">
                     {FONT_TOKENS.filter((fontToken) => fontToken.key !== '--font-widget-value-gauge').map((fontToken) => {

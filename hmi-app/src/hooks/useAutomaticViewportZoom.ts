@@ -14,10 +14,9 @@ import { computeDampedViewportZoom } from '../utils/viewportScale';
 //     the used value of length properties (including viewport units) by the
 //     element's effective (accumulated) zoom, and does not create a new
 //     containing block the way `transform` does — so `position: fixed`
-//     descendants stay anchored to the true viewport and
-//     getBoundingClientRect()/getClientRects() report already-scaled,
-//     viewport-relative coordinates (CSS Viewport Module Level 1,
-//     https://drafts.csswg.org/css-viewport/#zoom-property; corroborated by
+//     descendants stay anchored to the true viewport (CSS Viewport Module
+//     Level 1, https://drafts.csswg.org/css-viewport/#zoom-property;
+//     corroborated by
 //     https://developer.mozilla.org/en-US/docs/Web/API/Element/currentCSSZoom,
 //     which defines the "effective" zoom as the element's own zoom combined
 //     with every ancestor's zoom).
@@ -28,25 +27,37 @@ import { computeDampedViewportZoom } from '../utils/viewportScale';
 //     — i.e. `<html>`. Zooming an inner div (e.g. an app-root wrapper) would
 //     leave portaled content outside the zoomed subtree, rendering it at 1x
 //     while the rest of the app is scaled, breaking visual consistency.
+//
+// PW-007 T3b correction (measured in headless Chrome, zoom 1.25 on <html>,
+// window 1600x900, 2026-09-23) — the paragraph this replaced claimed "100vh
+// is divided back out" and that getBoundingClientRect()-based code needs no
+// correction. Both claims were WRONG; the measured facts:
+//   - `height: 100vh` renders at 1001px in an 801px real viewport (overflow):
+//     `vh`/`vw` are plain lengths, so they DO get pre-multiplied by the
+//     effective zoom, and NOTHING divides that back out. Every `h-screen`/
+//     `100vh`/`100vw` length must instead be built from the app's
+//     `--viewport-height`/`--viewport-width` tokens (`calc(100vh /
+//     var(--viewport-zoom))`, see ../index.css), which this hook maintains by
+//     mirroring the applied zoom onto `--viewport-zoom` alongside the `zoom`
+//     style below.
 //   - `height:/width: 100%`, `inset-0`, and percentage-based layout (the
-//     fluid widget grid, `h-full`/`w-full` canvases) are NOT affected by the
-//     zoom pre-multiplication (percentages and `auto` are excluded per spec),
-//     so they keep resolving proportionally against their already-correct
-//     zoomed ancestor box — no changes needed there.
-//   - `vh`/`vw`/`h-screen`/`w-screen`/`min-h-screen` ARE plain lengths, so
-//     they DO get pre-multiplied by the effective zoom; because they resolve
-//     against the true (unzoomed) viewport first and are then divided back
-//     out again when the zoomed subtree is painted, a `100vh` element still
-//     visually fills exactly the real viewport height at any zoom level. This
-//     is the documented purpose of the property (replacing `transform:scale()`
-//     hacks that break `vh`/`vw` and fixed positioning) but is not spelled
-//     out verbatim as a worked example in the spec text itself — verify
-//     visually at all three PW-007 T5 viewports.
-//   - `getBoundingClientRect()`-based pointer/positioning code (AnchoredOverlay,
-//     HoverTooltip, BuilderCanvas drag/resize via widgetInteraction.ts) needs
-//     no manual zoom-factor correction: PointerEvent.clientX/clientY and
-//     getBoundingClientRect() both report the same already-scaled,
-//     viewport-relative coordinate space under standardized zoom.
+//     fluid widget grid, `h-full`/`w-full` canvases) are correctly NOT
+//     affected the same way (percentages and `auto` are excluded from the
+//     pre-multiplication) — verified: `position: fixed; inset: 0` still
+//     paints at the exact real viewport size at any zoom. No changes needed
+//     there.
+//   - `getBoundingClientRect()`, PointerEvent.clientX/clientY/pageX/pageY and
+//     window.innerWidth/innerHeight all report the same REAL/visual
+//     viewport-relative px space and can be freely compared with each other.
+//     But writing one of those REAL-space values straight into a CSS length
+//     (an inline style, a React style prop, an SVG coordinate whose viewBox
+//     is sized in layout-space units, or combining it with a
+//     clientWidth/offsetHeight/ResizeObserver-measured LAYOUT-space value)
+//     gets it multiplied by zoom AGAIN on paint (`position: fixed; top:
+//     100px` measured at 125px). Code doing this (AnchoredOverlay's
+//     anchoredOverlayStyle.ts, HoverTooltip, the trend chart interaction
+//     layers, BuilderCanvas drag/resize) must convert with
+//     ../utils/zoomCoordinates.ts's `visualToLayoutPx` first.
 //
 // Recompute trigger: a single `resize` listener covers both real viewport
 // resizes and devicePixelRatio/browser-zoom changes, since both change
@@ -68,6 +79,11 @@ export function useAutomaticViewportZoom(factor: number = 1): void {
         const applyZoom = () => {
             const zoom = computeDampedViewportZoom(window.innerWidth, factor);
             root.style.setProperty('zoom', String(zoom));
+            // Mirrored so CSS can derive corrected viewport lengths (see
+            // --viewport-height/--viewport-width in ../index.css) and so
+            // ../utils/zoomCoordinates.ts can read the applied zoom without a
+            // DOM reference of its own.
+            root.style.setProperty('--viewport-zoom', String(zoom));
         };
 
         applyZoom();
@@ -76,6 +92,7 @@ export function useAutomaticViewportZoom(factor: number = 1): void {
         return () => {
             window.removeEventListener('resize', applyZoom);
             root.style.removeProperty('zoom');
+            root.style.removeProperty('--viewport-zoom');
         };
     }, [factor]);
 }

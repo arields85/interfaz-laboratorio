@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { getEffectiveZoom, visualToLayoutPx } from '../../utils/zoomCoordinates';
 
 const TOOLTIP_OFFSET_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
@@ -210,6 +211,22 @@ export default function HoverTooltip({
     const [isVisible, setIsVisible] = useState(false);
     const [coordinates, setCoordinates] = useState<TooltipCoordinates | null>(null);
 
+    // All positioning math above (getTooltipCoordinates/getMeasuredTooltipCoordinates)
+    // stays in REAL/visual px — getBoundingClientRect() and window.innerWidth/
+    // innerHeight share that space (see ../../utils/zoomCoordinates.ts), so
+    // combining them needs no conversion. The tooltip below writes `top`/
+    // `left` straight into a `position: fixed` inline style, which the
+    // browser's own CSS zoom pre-multiplies again on paint (PW-007 T3b), so
+    // only these final CSS-length outputs are converted to layout px here.
+    const toLayoutCoordinates = useCallback((coordinates: TooltipCoordinates): TooltipCoordinates => {
+        const zoom = getEffectiveZoom();
+        return {
+            ...coordinates,
+            top: visualToLayoutPx(coordinates.top, zoom),
+            left: visualToLayoutPx(coordinates.left, zoom),
+        };
+    }, []);
+
     const updatePosition = useCallback(() => {
         if (!triggerRef.current) {
             return;
@@ -219,14 +236,16 @@ export default function HoverTooltip({
         const tooltipRect = tooltipRef.current?.getBoundingClientRect();
 
         if (!tooltipRect || tooltipRect.width === 0 || tooltipRect.height === 0) {
-            setCoordinates(getTooltipCoordinates(triggerRect, position));
+            setCoordinates(toLayoutCoordinates(getTooltipCoordinates(triggerRect, position)));
             return;
         }
 
         setCoordinates(
-            getMeasuredTooltipCoordinates(triggerRect, { width: tooltipRect.width, height: tooltipRect.height }, position),
+            toLayoutCoordinates(
+                getMeasuredTooltipCoordinates(triggerRect, { width: tooltipRect.width, height: tooltipRect.height }, position),
+            ),
         );
-    }, [position]);
+    }, [position, toLayoutCoordinates]);
 
     const showTooltip = useCallback(() => {
         updatePosition();

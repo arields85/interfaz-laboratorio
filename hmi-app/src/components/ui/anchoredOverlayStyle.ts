@@ -1,4 +1,5 @@
 import type { AnchoredOverlayAlign } from './AnchoredOverlay';
+import { getEffectiveZoom, visualToLayoutPx } from '../../utils/zoomCoordinates';
 
 export interface ResolvedAnchoredOverlayStyle {
     position: 'fixed';
@@ -39,17 +40,26 @@ export function resolveAnchoredOverlayStyle(
         window.innerWidth - overlayWidth - viewportPadding,
     );
 
+    // Every value above is REAL/visual px (getBoundingClientRect() and
+    // window.innerWidth/innerHeight all share that space, see
+    // ../../utils/zoomCoordinates.ts) — consistent to compare/combine
+    // directly. AnchoredOverlay writes the fields below straight into
+    // `element.style.{left,top,bottom,minWidth}` as CSS lengths, which the
+    // browser's own zoom pre-multiplies again on paint (PW-007 T3b), so they
+    // must be converted to layout px here first.
+    const zoom = getEffectiveZoom();
+
     const base: ResolvedAnchoredOverlayStyle = {
         position: 'fixed',
-        left: clampedLeft,
+        left: visualToLayoutPx(clampedLeft, zoom),
         zIndex: 9999,
-        minWidth: resolvedMinWidth,
-        maxWidth: `calc(100vw - ${viewportPadding * 2}px)`,
+        minWidth: visualToLayoutPx(resolvedMinWidth, zoom),
+        maxWidth: `calc(var(--viewport-width) - ${viewportPadding * 2}px)`,
     };
 
     if (spaceBelow < estimatedHeight + gap) {
-        return { ...base, bottom: window.innerHeight - rect.top + gap };
+        return { ...base, bottom: visualToLayoutPx(window.innerHeight - rect.top + gap, zoom) };
     }
 
-    return { ...base, top: rect.bottom + gap };
+    return { ...base, top: visualToLayoutPx(rect.bottom + gap, zoom) };
 }

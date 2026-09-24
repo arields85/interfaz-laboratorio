@@ -29,6 +29,7 @@ import {
 } from '../../utils/widgetInteraction';
 import type { TrendChartV2RenderContext } from '../../widgets/renderers/trendChartV2RenderContext';
 import WidgetPresentationBoundary from '../viewer/WidgetPresentationBoundary';
+import { getEffectiveZoom, visualToLayoutPx } from '../../utils/zoomCoordinates';
 
 interface BuilderCanvasProps {
     widgets: WidgetConfig[];
@@ -267,6 +268,10 @@ export default function BuilderCanvas({
                 return;
             }
 
+            // clientX/clientY are REAL/visual px (see ../../utils/zoomCoordinates.ts);
+            // the threshold check below compares the physical pointer-movement
+            // distance against a fixed px tolerance, so it stays in real space
+            // (independent of app zoom, matching actual mouse precision).
             const deltaX = moveEvent.clientX - currentInteraction.startPointer.x;
             const deltaY = moveEvent.clientY - currentInteraction.startPointer.y;
             const distance = Math.hypot(deltaX, deltaY);
@@ -274,13 +279,22 @@ export default function BuilderCanvas({
                 ? true
                 : currentInteraction.hasExceededThreshold || distance > DRAG_THRESHOLD_PX;
 
+            // startBounds/cellWidth/rowHeight are LAYOUT-space (ResizeObserver
+            // contentRect, see ../../utils/useCanvasReference.ts), so the
+            // real-space pointer delta must be converted before combining with
+            // them (PW-007 T3b) — otherwise dragging overshoots the pointer at
+            // zoom > 1 and undershoots it at zoom < 1.
+            const zoom = getEffectiveZoom();
+            const layoutDeltaX = visualToLayoutPx(deltaX, zoom);
+            const layoutDeltaY = visualToLayoutPx(deltaY, zoom);
+
             const tentativeBounds = currentInteraction.type === 'move' && !hasExceededThreshold
                 ? currentInteraction.startBounds
                 : applyPointerDeltaToPixelBounds(
                     currentInteraction.type,
                     currentInteraction.startBounds,
-                    deltaX,
-                    deltaY,
+                    layoutDeltaX,
+                    layoutDeltaY,
                 );
 
             const nextInteraction: InteractionState = {
@@ -600,8 +614,12 @@ export default function BuilderCanvas({
                                 data-testid="builder-canvas-resize-tooltip"
                                 data-offset-px={RESIZE_TOOLTIP_OFFSET_PX}
                                 label={`${resizeTooltipLayout.w} × ${resizeTooltipLayout.h}`}
-                                x={interaction.currentPointer.x}
-                                y={interaction.currentPointer.y}
+                                // CursorTooltip writes x/y straight into a
+                                // `position: fixed` CSS length; currentPointer
+                                // is raw (real-space) clientX/clientY, so it
+                                // must be converted first (PW-007 T3b).
+                                x={visualToLayoutPx(interaction.currentPointer.x)}
+                                y={visualToLayoutPx(interaction.currentPointer.y)}
                                 anchor={isLeftHandle ? (isTopHandle ? 'nw' : 'sw') : (isTopHandle ? 'ne' : 'se')}
                             />
                         );

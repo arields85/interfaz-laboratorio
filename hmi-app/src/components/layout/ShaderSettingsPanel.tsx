@@ -80,7 +80,7 @@ export default function ShaderSettingsPanel({ open, onClose }: ShaderSettingsPan
     return (
         <div
             data-shader-panel
-            className="fixed top-16 right-4 z-50 w-80 max-h-[calc(100vh-5rem)] overflow-hidden rounded-xl border border-industrial-border bg-industrial-surface/90 shadow-2xl backdrop-blur-xl flex flex-col"
+            className="fixed top-16 right-4 z-50 w-80 max-h-[calc(var(--viewport-height)-5rem)] overflow-hidden rounded-xl border border-industrial-border bg-industrial-surface/90 shadow-2xl backdrop-blur-xl flex flex-col"
         >
             <div className="shrink-0 flex items-center justify-between border-b border-industrial-border bg-industrial-surface/95 px-4 py-3 backdrop-blur-sm">
                 <div className="flex min-w-0 items-center gap-2">

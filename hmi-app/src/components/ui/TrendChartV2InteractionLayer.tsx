@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getNearestTimestampPoint } from '../../utils/trendChartV2Interaction';
+import { visualToLayoutPx } from '../../utils/zoomCoordinates';
 
 interface TrendChartV2InteractionPoint {
     timestampMs: number;
@@ -169,7 +170,13 @@ export default function TrendChartV2InteractionLayer({
 
 function getRelativeX(element: SVGRectElement, clientX: number, plotLeft: number, plotWidth: number): number {
     const rect = element.getBoundingClientRect();
-    const relativeX = plotLeft + (clientX - rect.left);
+    // clientX and rect.left are both REAL/visual px (see
+    // ../../utils/zoomCoordinates.ts), so their difference is a valid
+    // real-space delta — but plotLeft is a LAYOUT-space SVG user-unit
+    // (the <svg> viewBox is sized from ResizeObserver-measured layout px,
+    // see WidgetChartLayout.tsx), so the delta must be converted before
+    // combining with it (PW-007 T3b), unlike a same-space rect.width ratio.
+    const relativeX = plotLeft + visualToLayoutPx(clientX - rect.left);
     return Math.max(plotLeft, Math.min(plotLeft + plotWidth, relativeX));
 }
 

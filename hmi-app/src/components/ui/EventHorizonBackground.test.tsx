@@ -147,6 +147,24 @@ describe('EventHorizonBackground', () => {
         vi.unstubAllGlobals();
     });
 
+    it('sizes the canvas backing store for the effective zoom so it renders at full resolution (PW-007 T3b)', () => {
+        document.documentElement.style.setProperty('--viewport-zoom', '1.25');
+
+        try {
+            const { container } = render(<EventHorizonBackground />);
+            const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+
+            // clientWidth/clientHeight (120/80, stubbed above) are LAYOUT px;
+            // the canvas actually paints at 120*1.25=150 x 80*1.25=100 visual
+            // px, so the backing store must match that (dpr defaults to 1 in
+            // jsdom), not the unconverted 120x80.
+            expect(canvas.width).toBe(150);
+            expect(canvas.height).toBe(100);
+        } finally {
+            document.documentElement.style.removeProperty('--viewport-zoom');
+        }
+    });
+
     it('requests an opaque WebGL context and marks the first draw as ready', () => {
         const readyListener = vi.fn();
         document.addEventListener('webgl-first-draw', readyListener);

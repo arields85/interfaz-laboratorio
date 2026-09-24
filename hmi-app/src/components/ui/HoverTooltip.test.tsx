@@ -226,6 +226,33 @@ describe('HoverTooltip', () => {
         });
     });
 
+    it('divides the tooltip top/left by the effective zoom before writing the fixed-position style (PW-007 T3b)', () => {
+        document.documentElement.style.setProperty('--viewport-zoom', '1.25');
+
+        try {
+            render(
+                <HoverTooltip label="Duplicar widget" position="bottom">
+                    <button type="button">Duplicar</button>
+                </HoverTooltip>,
+            );
+
+            const trigger = screen.getByRole('button', { name: 'Duplicar' });
+            vi.spyOn(trigger.parentElement as HTMLDivElement, 'getBoundingClientRect').mockReturnValue(
+                createRect({ x: 100, y: 200, width: 48, height: 24 }),
+            );
+
+            fireEvent.mouseEnter(trigger);
+
+            const tooltip = screen.getByRole('tooltip');
+            // Real/visual coordinates would be top:230px, left:124px (as in the
+            // zoom-1 test above); at zoom 1.25 both must be divided so the
+            // browser's own zoom pre-multiplication repaints them there.
+            expect(tooltip).toHaveStyle({ top: `${230 / 1.25}px`, left: `${124 / 1.25}px` });
+        } finally {
+            document.documentElement.style.removeProperty('--viewport-zoom');
+        }
+    });
+
     it('renders the tooltip through document.body so transformed parents do not shift viewport positioning', () => {
         render(
             <div data-testid="transformed-parent" style={{ transform: 'translate3d(0, 0, 0)' }}>

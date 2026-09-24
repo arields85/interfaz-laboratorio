@@ -49,7 +49,7 @@ export default function RuntimeDialog({
                 role="dialog"
                 aria-modal="true"
                 aria-label={title}
-                className={`glass-panel flex w-full ${maxWidth} max-h-[calc(100vh-3rem)] min-h-0 flex-col p-6`}
+                className={`glass-panel flex w-full ${maxWidth} max-h-[calc(var(--viewport-height)-3rem)] min-h-0 flex-col p-6`}
             >
                 <div className="flex flex-none items-start justify-between gap-4 pb-5">
                     <h2 className="font-system text-industrial-text">{title}</h2>
