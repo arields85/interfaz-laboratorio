@@ -1125,7 +1125,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   of a separate test request (no extra Gemini calls, adapts within the day; trade-off: the first
   answer after the network degrades may still cut once). The earlier "automatic underflow
   detection rejected" note is superseded by this user request.
-- [ ] **T17 — Orb "thinking" state (user decision 2026-09-24, option B).** Evidence (browser
+- [x] **T17 — Orb "thinking" state (user decision 2026-09-24, option B).** Evidence (browser
   timeline after a real restart, 2026-09-24 ~11:30): orb visible → first sound 0.58–0.79 s (1.11 s
   on the first answer after startup, of which 0.38 s is the first AudioContext start), 0.15 s for a
   cached answer; ~0.5–0.7 s of it is Gemini's first-audio time, our own share ~0.07 s; all events
@@ -1143,6 +1143,73 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   `buffering` declared but unused in `usePrismaOrbPresentation.ts`, engine `onStarted` wired to a
   no-op. Durations/scales as named constants; `prefers-reduced-motion` keeps the current
   no-transition behavior.
+  Evidence (2026-09-24, commit `2c2f68f`) — implemented exactly as agreed, engine untouched:
+  - **Schema/generated bindings.** Renamed the `orb-phase` payload's `phase` enum value
+    `buffering` → `thinking` in `schemas/prisma-audio-record.v1.schema.json` (both the
+    `x-payload-enums` and `properties.payload.properties.phase` copies) and regenerated both
+    projections via `schemas/generate_prisma_audio_bindings.py`
+    (`services/prisma-runtime/src/prisma_runtime/audio_record_types.py`,
+    `hmi-app/src/domain/prismaAudioMetric.generated.ts`) — the unrelated `buffering-complete`
+    record type (PCM pre-buffering, a different concept) was left untouched, confirmed by grep
+    before and after. No test hardcoded the old `"buffering"` phase value, so only the schema-drift
+    tests needed the regeneration to turn green.
+  - **`usePrismaOrbPresentation.ts`.** Phase type is now `'hidden' | 'thinking' | 'visible' |
+    'fading'`. New named constants: `PRISMA_ORB_FADE_DURATION_MS = 700` (was 200 — chosen at the
+    low end of the user's 600-800 ms range: long enough to read as a fade, short enough not to
+    linger), `PRISMA_ORB_GROW_DURATION_MS = 400` (thinking→visible), `PRISMA_ORB_THINKING_TIMEOUT_MS
+    = 9_000` (chosen from the user's 8-10 s range — comfortably above every first-chunk time T13
+    measured live, 0.6-2.1 s typical, up to 8.7 s stream end on the retired TTS model). Comments
+    document that the two duration constants must be kept in sync **by hand** with the literal
+    `duration-[400ms]`/`duration-[700ms]` Tailwind classes in `PrismaOrbOverlay.tsx`, since
+    Tailwind's arbitrary-value scanner needs literal class text and cannot read a JS constant.
+    `presentVoiceEvent` now sets phase `thinking` (was `visible`) and starts a bounded
+    `thinkingTimeoutRef` timer alongside `engine.play(...)`; `onStarted` (previously a no-op) now
+    clears that timer and moves to `visible`; the thinking-timeout callback and `onEnded`/`onError`
+    all route through the same `beginFade` used before (guarded by generation +
+    `terminalCallbackHandled`, unchanged pattern). A new voice event arriving during `visible` or
+    `fading` always re-enters `thinking` unconditionally (no special-casing by current phase) — the
+    "no hard jump" requirement is satisfied by the overlay's own CSS transition interpolating from
+    wherever it currently is, not by any extra state-machine logic. `engine.play`'s call signature
+    and the `VoicePlaybackLifecycle` contract (`onStarted`/`onEnded`/`onError`) are unchanged; no
+    edits to `prismaVoiceAudioEngine.ts` or `leda-orb.js` (verified: `git status` shows neither
+    file touched).
+  - **`PrismaOrbOverlay.tsx`.** Renders for `thinking`/`visible`/`fading` (still `null` for
+    `hidden`, so the overlay stays mounted through the whole fade as required). Three named class
+    constants (`PRISMA_ORB_THINKING_CLASSES = 'scale-75 opacity-60 duration-[400ms]'`,
+    `_VISIBLE_ = 'scale-100 opacity-100 duration-[400ms]'`, `_FADING_ = 'scale-75 opacity-0
+    duration-[700ms]'`) picked by a small `phaseClasses()` switch, using Tailwind's own default
+    scale/opacity steps (both include 60/75/100 without arbitrary values) plus one arbitrary-value
+    duration class per phase-with-a-different-duration. Fading eases the scale back toward the
+    thinking scale (75%) instead of staying at 100% while fading out, per the brief's "optionally
+    ease scale back" — avoids the orb ballooning to full size right before disappearing. Transition
+    property changed from `transition-opacity` to `transition-[opacity,transform]` (GPU-friendly:
+    opacity + transform only); `motion-reduce:transition-none motion-reduce:duration-0` kept
+    unchanged, so reduced-motion still snaps instantly in every phase (verified by a new test
+    re-asserting the same base classes across thinking/visible/fading).
+  - **TDD.** RED confirmed for the schema-drift tests (4 failures: stale hash + stale body, both
+    languages) before regenerating bindings; full prisma-runtime suite green after regeneration
+    (1517 passed, unchanged count — pure rename, no new record types). RED confirmed for the
+    frontend behavior change itself by running the pre-existing hook/overlay tests against the new
+    code before touching the tests: 6 failures, all exactly the expected ones (phase `'visible'` →
+    `'thinking'` right after `presentVoiceEvent`, stale `data-testid` lookups once `opacity-100`
+    stopped being the immediate post-event class). Rewrote both test files (hook: 10→16 tests;
+    overlay: 7→9 tests) adding: thinking→visible on `onStarted`; fade uses the new 700 ms duration
+    and stays mounted until it elapses; bounded thinking-timeout fade when `onStarted` never fires;
+    timeout is cleared once `onStarted` does fire; new event mid-fade restarts at thinking without
+    unmounting; `orb-phase` timeline records for the full `thinking→visible→fading→hidden` cycle and
+    for the never-started `thinking→fading→hidden` path; reduced-motion classes present in every
+    phase; the engine's `play()` lifecycle-callback contract (`onStarted`/`onEnded`/`onError`, 3
+    keys, nothing added) is unchanged; the hook itself never calls `orb.setSpeaking` (that stays the
+    engine's job). All GREEN after implementation.
+  - **Checks:** `cd hmi-app && npm test` → 2427 passed (was 2418). `npx tsc -b` clean. `npm run
+    lint` clean. `services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s
+    services\prisma-runtime -p "test_*.py"` → 1517 passed (unchanged — pure schema rename).
+  - **Next step (user, live check):** open the HMI and ask Prisma a voice question. Look for: (1)
+    the orb appearing smaller/dimmer ("thinking") right when the question lands, still breathing
+    natively, no extra pulsing; (2) a smooth grow to full size/opacity exactly when the voice starts
+    speaking (no snap); (3) a smooth ~0.7 s fade-out at the end instead of the old abrupt
+    disappearance; (4) if practical to test, a stalled/failed answer should still fade the orb out
+    after a few seconds rather than leaving it stuck "thinking".
 
 ## Progress
 

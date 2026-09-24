@@ -76,7 +76,7 @@
     "transport": ["progressive", "buffer-before-playback"],
     "error_code": ["audio-failure"],
     "source": ["sse", "poll"],
-    "phase": ["hidden", "buffering", "visible", "fading"],
+    "phase": ["hidden", "thinking", "visible", "fading"],
     "reason": ["unauthorized-401", "explicit"],
     "state": ["suspended", "running", "closed", "interrupted"],
     "when": ["at-play", "after-resume"]
@@ -107,7 +107,7 @@
         "underflow_count": {"type": "integer", "minimum": 0},
         "error_code": {"enum": ["audio-failure"]},
         "source": {"enum": ["sse", "poll"]},
-        "phase": {"enum": ["hidden", "buffering", "visible", "fading"]},
+        "phase": {"enum": ["hidden", "thinking", "visible", "fading"]},
         "http_status": {"type": "integer", "minimum": 0},
         "reason": {"enum": ["unauthorized-401", "explicit"]},
         "epoch_after": {"type": "integer", "minimum": 0},

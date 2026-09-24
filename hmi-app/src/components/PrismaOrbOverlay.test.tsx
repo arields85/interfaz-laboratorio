@@ -61,7 +61,7 @@ describe('PrismaOrbOverlay', () => {
         expect(engine.play).not.toHaveBeenCalled();
     });
 
-    it('starts exactly one progressive presentation in StrictMode', () => {
+    it('starts exactly one progressive presentation in StrictMode and shows the thinking look', () => {
         const { engine } = createEngine();
         const ref = createRef<HarnessHandle>();
         render(<StrictMode><Harness ref={ref} engine={engine} /></StrictMode>);
@@ -69,19 +69,41 @@ describe('PrismaOrbOverlay', () => {
         emit(ref);
 
         expect(engine.play).toHaveBeenCalledTimes(1);
-        expect(screen.getByTestId('prisma-orb-overlay')).toHaveAttribute('data-phase', 'visible');
+        const overlay = screen.getByTestId('prisma-orb-overlay');
+        expect(overlay).toHaveAttribute('data-phase', 'thinking');
+        expect(overlay).toHaveClass('scale-75', 'opacity-60');
     });
 
-    it('fades only after the playback terminal callback', () => {
+    it('grows to the visible/speaking look once the engine reports playback started', () => {
         const { engine, lifecycles } = createEngine();
         const ref = createRef<HarnessHandle>();
         render(<Harness ref={ref} engine={engine} />);
         emit(ref);
 
-        expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-100');
+        expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('scale-75', 'opacity-60');
+
+        act(() => lifecycles[0]?.onStarted?.());
+
+        const overlay = screen.getByTestId('prisma-orb-overlay');
+        expect(overlay).toHaveAttribute('data-phase', 'visible');
+        expect(overlay).toHaveClass('scale-100', 'opacity-100');
+    });
+
+    it('fades smoothly after the playback terminal callback, staying mounted until the fade completes', () => {
+        const { engine, lifecycles } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+        emit(ref);
+        act(() => lifecycles[0]?.onStarted?.());
+
         act(() => lifecycles[0]?.onEnded?.());
-        expect(screen.getByTestId('prisma-orb-overlay')).toHaveClass('opacity-0');
-        act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
+        const overlay = screen.getByTestId('prisma-orb-overlay');
+        expect(overlay).toHaveAttribute('data-phase', 'fading');
+        expect(overlay).toHaveClass('opacity-0');
+        // Still mounted right up to the fade duration.
+        act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS - 1));
+        expect(screen.getByTestId('prisma-orb-overlay')).toBeInTheDocument();
+        act(() => vi.advanceTimersByTime(1));
         expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
     });
 
@@ -109,34 +131,63 @@ describe('PrismaOrbOverlay', () => {
         expect(screen.queryByTestId('prisma-orb-overlay')).not.toBeInTheDocument();
     });
 
-    it('keeps fixed transparent geometry and reduced-motion fade classes', () => {
-        const { engine } = createEngine();
+    it('keeps fixed transparent geometry and reduced-motion transition classes in every visible phase', () => {
+        const { engine, lifecycles } = createEngine();
         const ref = createRef<HarnessHandle>();
         render(<Harness ref={ref} engine={engine} />);
         emit(ref);
 
+        const assertBaseClasses = (): void => {
+            const overlay = screen.getByTestId('prisma-orb-overlay');
+            expect(overlay).toHaveClass(
+                'fixed',
+                'left-1/2',
+                'top-[46px]',
+                'z-[100]',
+                '-translate-x-1/2',
+                'pointer-events-none',
+                'bg-transparent',
+                'transition-[opacity,transform]',
+                'motion-reduce:transition-none',
+                'motion-reduce:duration-0',
+            );
+            expect(overlay).toHaveStyle('--prisma-orb-size: 290px');
+            expect(overlay.querySelector('leda-orb')).toHaveAttribute('rays', String(PRISMA_ORB_VISUAL_DEFAULTS.rays));
+            expect(overlay.querySelector('iframe, button, input, textarea, select')).toBeNull();
+        };
+
+        // thinking
+        assertBaseClasses();
+        act(() => lifecycles[0]?.onStarted?.());
+        // visible
+        assertBaseClasses();
+        act(() => lifecycles[0]?.onEnded?.());
+        // fading
+        assertBaseClasses();
+    });
+
+    it('restarts at the thinking look when a new event arrives mid-fade, without unmounting', () => {
+        const { engine, lifecycles } = createEngine();
+        const ref = createRef<HarnessHandle>();
+        render(<Harness ref={ref} engine={engine} />);
+        emit(ref);
+        act(() => lifecycles[0]?.onStarted?.());
+        act(() => lifecycles[0]?.onEnded?.());
+        expect(screen.getByTestId('prisma-orb-overlay')).toHaveAttribute('data-phase', 'fading');
+
+        act(() => ref.current?.presentVoiceEvent({ ...EVENT, id: 'voice-3' }));
+
         const overlay = screen.getByTestId('prisma-orb-overlay');
-        expect(overlay).toHaveClass(
-            'fixed',
-            'left-1/2',
-            'top-[46px]',
-            'z-[100]',
-            '-translate-x-1/2',
-            'pointer-events-none',
-            'bg-transparent',
-            'motion-reduce:transition-none',
-            'motion-reduce:duration-0',
-        );
-        expect(overlay).toHaveStyle('--prisma-orb-size: 290px');
-        expect(overlay.querySelector('leda-orb')).toHaveAttribute('rays', String(PRISMA_ORB_VISUAL_DEFAULTS.rays));
-        expect(overlay.querySelector('iframe, button, input, textarea, select')).toBeNull();
+        expect(overlay).toHaveAttribute('data-phase', 'thinking');
+        expect(overlay).toHaveClass('scale-75', 'opacity-60');
     });
 
     it('updates visual configuration during playback without restarting audio', () => {
-        const { engine } = createEngine();
+        const { engine, lifecycles } = createEngine();
         const ref = createRef<HarnessHandle>();
         render(<Harness ref={ref} engine={engine} />);
         emit(ref);
+        act(() => lifecycles[0]?.onStarted?.());
         const overlay = screen.getByTestId('prisma-orb-overlay');
 
         act(() => {

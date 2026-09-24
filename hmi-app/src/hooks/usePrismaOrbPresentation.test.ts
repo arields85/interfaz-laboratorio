@@ -7,7 +7,11 @@ import type { PrismaVoiceAudioSourceFactory } from '../services/prismaVoiceTtsAu
 import { prismaSessionClient } from '../services/prismaSessionClient';
 import { PRISMA_BROWSER_METRIC_EVENT } from '../services/prismaVoiceMetrics';
 import type { LedaOrbElement } from '../vendor/leda-orb.js';
-import { PRISMA_ORB_FADE_DURATION_MS, usePrismaOrbPresentation } from './usePrismaOrbPresentation';
+import {
+    PRISMA_ORB_FADE_DURATION_MS,
+    PRISMA_ORB_THINKING_TIMEOUT_MS,
+    usePrismaOrbPresentation,
+} from './usePrismaOrbPresentation';
 
 function collectOrbPhaseRecords(run: () => void): string[] {
     const phases: string[] = [];
@@ -34,51 +38,67 @@ const EVENT: VoiceEvent = {
 };
 const SOURCE: PrismaVoiceAudioSource = { playbackTransport: 'progressive', openLive: vi.fn() };
 
-function createEngine(): PrismaVoiceAudioEngineContract {
-    return { play: vi.fn(), stop: vi.fn(), dispose: vi.fn() };
+function createEngine(): { engine: PrismaVoiceAudioEngineContract; lifecycles: VoicePlaybackLifecycle[] } {
+    const lifecycles: VoicePlaybackLifecycle[] = [];
+    const engine: PrismaVoiceAudioEngineContract = {
+        play: vi.fn((_source, _target, lifecycle) => lifecycles.push(lifecycle)),
+        stop: vi.fn(),
+        dispose: vi.fn(),
+    };
+    return { engine, lifecycles };
 }
 
-function attachOrb(result: { current: { orbRef: { current: LedaOrbElement | null } } }): void {
-    result.current.orbRef.current = { level: 0, setSpeaking: vi.fn() } as unknown as LedaOrbElement;
+function attachOrb(result: { current: { orbRef: { current: LedaOrbElement | null } } }): { setSpeaking: ReturnType<typeof vi.fn> } {
+    const orb = { level: 0, setSpeaking: vi.fn() };
+    result.current.orbRef.current = orb as unknown as LedaOrbElement;
+    return orb;
 }
 
 describe('usePrismaOrbPresentation', () => {
     afterEach(() => vi.useRealTimers());
 
-    it('creates one progressive source request without endpoint or mode fields', () => {
+    it('creates one progressive source request and enters the thinking phase', () => {
         const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
-        const { result } = renderHook(() => usePrismaOrbPresentation({ engine: createEngine(), audioSourceFactory: factory }));
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine: createEngine().engine, audioSourceFactory: factory }));
 
         act(() => result.current.presentVoiceEvent(EVENT));
 
         expect(factory).toHaveBeenCalledWith({ eventId: 'voice-1' });
-        expect(result.current.phase).toBe('visible');
+        expect(result.current.phase).toBe('thinking');
     });
 
     it('never forwards Telegram identity or transcript', () => {
         const factory = vi.fn<PrismaVoiceAudioSourceFactory>(() => SOURCE);
-        const { result } = renderHook(() => usePrismaOrbPresentation({ engine: createEngine(), audioSourceFactory: factory }));
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine: createEngine().engine, audioSourceFactory: factory }));
 
         act(() => result.current.presentVoiceEvent({ ...EVENT, telegramChatId: -100123 }));
 
         expect(factory).toHaveBeenCalledWith({ eventId: EVENT.id });
     });
 
-    it('fades once after progressive playback ends', () => {
-        vi.useFakeTimers();
-        const lifecycle: Array<{ onEnded?: () => void }> = [];
-        const engine: PrismaVoiceAudioEngineContract = {
-            play: vi.fn((_source, _target, next) => lifecycle.push(next)),
-            stop: vi.fn(),
-            dispose: vi.fn(),
-        };
+    it('moves to visible once the engine reports playback started', () => {
+        const { engine, lifecycles } = createEngine();
         const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
         attachOrb(result);
 
         act(() => result.current.presentVoiceEvent(EVENT));
+        expect(result.current.phase).toBe('thinking');
+
+        act(() => lifecycles[0]?.onStarted?.());
+        expect(result.current.phase).toBe('visible');
+    });
+
+    it('fades once after progressive playback ends', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
         act(() => {
-            lifecycle[0]?.onEnded?.();
-            lifecycle[0]?.onEnded?.();
+            lifecycles[0]?.onEnded?.();
+            lifecycles[0]?.onEnded?.();
         });
         expect(result.current.phase).toBe('fading');
         act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
@@ -87,42 +107,80 @@ describe('usePrismaOrbPresentation', () => {
 
     it('uses the same fade cleanup after a controlled playback error', () => {
         vi.useFakeTimers();
-        const lifecycle: VoicePlaybackLifecycle[] = [];
-        const engine: PrismaVoiceAudioEngineContract = {
-            play: vi.fn((_source, _target, next) => lifecycle.push(next)),
-            stop: vi.fn(),
-            dispose: vi.fn(),
-        };
+        const { engine, lifecycles } = createEngine();
         const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
         attachOrb(result);
         act(() => result.current.presentVoiceEvent(EVENT));
 
-        act(() => lifecycle[0]?.onError?.(new Error('Playback failed')));
+        act(() => lifecycles[0]?.onError?.(new Error('Playback failed')));
         expect(result.current.phase).toBe('fading');
         act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
 
         expect(result.current.phase).toBe('hidden');
     });
 
+    it('fades out after the bounded thinking timeout when onStarted never fires', () => {
+        vi.useFakeTimers();
+        const { engine } = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        expect(result.current.phase).toBe('thinking');
+
+        act(() => vi.advanceTimersByTime(PRISMA_ORB_THINKING_TIMEOUT_MS));
+        expect(result.current.phase).toBe('fading');
+
+        act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
+        expect(result.current.phase).toBe('hidden');
+    });
+
+    it('clears the thinking timeout once playback actually starts', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
+
+        act(() => vi.advanceTimersByTime(PRISMA_ORB_THINKING_TIMEOUT_MS));
+        expect(result.current.phase).toBe('visible');
+    });
+
     it('ignores stale terminal callbacks after a newer event', () => {
-        const lifecycle: Array<{ onEnded?: () => void }> = [];
-        const engine: PrismaVoiceAudioEngineContract = {
-            play: vi.fn((_source, _target, next) => lifecycle.push(next)),
-            stop: vi.fn(),
-            dispose: vi.fn(),
-        };
+        const { engine, lifecycles } = createEngine();
         const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
         attachOrb(result);
 
         act(() => result.current.presentVoiceEvent(EVENT));
         act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
-        act(() => lifecycle[0]?.onEnded?.());
+        act(() => lifecycles[0]?.onEnded?.());
 
-        expect(result.current.phase).toBe('visible');
+        expect(result.current.phase).toBe('thinking');
+    });
+
+    it('restarts at thinking when a new event arrives while the previous answer is fading', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
+        act(() => lifecycles[0]?.onEnded?.());
+        expect(result.current.phase).toBe('fading');
+
+        act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
+        expect(result.current.phase).toBe('thinking');
+
+        // The superseded fade timer must not fire "hidden" for the new request.
+        act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
+        expect(result.current.phase).toBe('thinking');
     });
 
     it('disposes the engine on unmount', () => {
-        const engine = createEngine();
+        const { engine } = createEngine();
         const { unmount } = renderHook(() => usePrismaOrbPresentation({ engine }));
 
         unmount();
@@ -131,7 +189,7 @@ describe('usePrismaOrbPresentation', () => {
     });
 
     it('stops buffered playback when the local document session resets', () => {
-        const engine = createEngine();
+        const { engine } = createEngine();
         const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
         attachOrb(result);
         act(() => result.current.presentVoiceEvent(EVENT));
@@ -142,28 +200,39 @@ describe('usePrismaOrbPresentation', () => {
         expect(result.current.phase).toBe('hidden');
     });
 
-    it('records a T16 orb-phase timeline entry for every phase change', () => {
+    it('records a T16 orb-phase timeline entry for a full thinking-to-hidden lifecycle', () => {
         vi.useFakeTimers();
-        const lifecycle: Array<{ onEnded?: () => void }> = [];
-        const engine: PrismaVoiceAudioEngineContract = {
-            play: vi.fn((_source, _target, next) => lifecycle.push(next)),
-            stop: vi.fn(),
-            dispose: vi.fn(),
-        };
+        const { engine, lifecycles } = createEngine();
         const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
         attachOrb(result);
 
         const phases = collectOrbPhaseRecords(() => {
             act(() => result.current.presentVoiceEvent(EVENT));
-            act(() => lifecycle[0]?.onEnded?.());
+            act(() => lifecycles[0]?.onStarted?.());
+            act(() => lifecycles[0]?.onEnded?.());
             act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
         });
 
-        expect(phases).toEqual(['visible', 'fading', 'hidden']);
+        expect(phases).toEqual(['thinking', 'visible', 'fading', 'hidden']);
+    });
+
+    it('records thinking then fading then hidden when playback ends without ever starting', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        const phases = collectOrbPhaseRecords(() => {
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onError?.(new Error('never started')));
+            act(() => vi.advanceTimersByTime(PRISMA_ORB_FADE_DURATION_MS));
+        });
+
+        expect(phases).toEqual(['thinking', 'fading', 'hidden']);
     });
 
     it('records a hidden orb-phase entry when the session resets mid-playback', () => {
-        const engine = createEngine();
+        const { engine } = createEngine();
         const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
         attachOrb(result);
         act(() => result.current.presentVoiceEvent(EVENT));
@@ -173,5 +242,28 @@ describe('usePrismaOrbPresentation', () => {
         });
 
         expect(phases).toEqual(['hidden']);
+    });
+
+    it('keeps the engine speaking contract untouched: play still receives exactly the three lifecycle callbacks', () => {
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        expect(engine.play).toHaveBeenCalledTimes(1);
+        expect(Object.keys(lifecycles[0] ?? {}).sort()).toEqual(['onEnded', 'onError', 'onStarted']);
+    });
+
+    it('never calls setSpeaking itself; that stays the engine\'s responsibility', () => {
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        const orb = attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
+        act(() => lifecycles[0]?.onEnded?.());
+
+        expect(orb.setSpeaking).not.toHaveBeenCalled();
     });
 });
