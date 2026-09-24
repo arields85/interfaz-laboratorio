@@ -192,6 +192,12 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
   Manual run confirms the fixed value is used. Parent reads the `HMI voice timeline:` lines in
   `%LOCALAPPDATA%\CoreAnalytics\Prisma\logs\prisma-presentation-stderr.log`.
 
+- [ ] **T7 — Delete the unused 2.5 s `buffer-before-playback` transport (user decision 2026-09-24).**
+  Only after T6 passes, so a fallback exists until the adaptive prebuffer is proven live. Remove
+  `prismaLocalAudioPlayback.ts` (2.5 s policy), `PrismaPcmWorkletBuffer`, `playLocalWorklet`, the PCM
+  audio worklet and the local worklet context, plus their tests; the `playback-ended` optional-field
+  handling for that transport goes with it. Route: delegated writer.
+
 ## Acceptance criteria
 
 - Every progressive answer logs `prebuffer_ms`, `needed_prebuffer_ms` and `prebuffer_mode`.
@@ -204,8 +210,7 @@ chosen over a startup self-test (no extra Gemini calls, adapts during the day, n
 
 ## Open questions
 
-- Delete the unused 2.5 s `buffer-before-playback` worklet transport, or keep it? (Not needed by
-  this feature; user decision.)
+None. (Legacy transport: delete after T6, see T7. Manual range: decided, see Design item 4.)
 
 ## Progress
 
