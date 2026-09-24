@@ -551,6 +551,32 @@ describe('startVoiceEventListener', () => {
             stop();
         });
 
+        it('delivers a complete frame even when it alone exceeds the unterminated-frame overflow guard', async () => {
+            const body = new FakeSseBody();
+            sessionClientMock.fetch.mockResolvedValueOnce(sseResponse(body));
+            const onEvent = vi.fn();
+
+            const stop = startVoiceEventListener({
+                url: '/api/prisma/events/latest',
+                streamUrl: '/api/prisma/events/stream',
+                onEvent,
+            });
+            await vi.advanceTimersByTimeAsync(0);
+
+            // A single, complete, well-terminated frame larger than the
+            // overflow guard must still be delivered -- the guard exists
+            // for an unterminated frame that never completes, not for a
+            // legitimately large one. Arrives as one chunk carrying the
+            // full frame including its closing `\n\n`.
+            const oversizedEvent = { ...FIRST_EVENT, text: 'x'.repeat(80 * 1024) };
+            body.push(`data: ${JSON.stringify(oversizedEvent)}\n\n`);
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(onEvent).toHaveBeenCalledExactlyOnceWith(oversizedEvent);
+
+            stop();
+        });
+
         it('ignores heartbeat/comment frames and keeps reading for the next real event', async () => {
             const body = new FakeSseBody();
             sessionClientMock.fetch.mockResolvedValueOnce(sseResponse(body));

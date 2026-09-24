@@ -203,17 +203,21 @@ export function startVoiceEventListener({
                 }
 
                 buffer += decoder.decode(value, { stream: true });
-                if (buffer.length > MAX_SSE_BUFFERED_CHARS) {
-                    // An unterminated frame this large is not a well-formed
-                    // SSE stream; drop it rather than buffering forever.
-                    buffer = '';
-                }
 
                 let boundary = buffer.indexOf('\n\n');
                 while (boundary !== -1) {
                     handleSseFrame(buffer.slice(0, boundary));
                     buffer = buffer.slice(boundary + 2);
                     boundary = buffer.indexOf('\n\n');
+                }
+
+                if (buffer.length > MAX_SSE_BUFFERED_CHARS) {
+                    // Every complete frame in this chunk was already
+                    // extracted above; what remains is one unterminated
+                    // frame that is not a well-formed SSE stream (or a
+                    // malicious/broken one). Drop it rather than buffering
+                    // forever -- a later `\n\n` still resynchronizes.
+                    buffer = '';
                 }
             }
         } catch {
