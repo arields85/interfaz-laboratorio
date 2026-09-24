@@ -91,10 +91,14 @@ on its own — without any HMI browser open and without anything playing or show
   the runtime test suite hermetic for Telegram/Gemini token env vars, closing the token-fragment leak
   risk observed during B1 development. Route: delegated writer (multi-file: `local_presentation.py`,
   `tests/__init__.py`, tests). **Done 2026-09-24** — see Evidence below.
-- [ ] **B2 — Documentation.** Update `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §1 table and §6.3
+- [x] **B2 — Documentation.** Update `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §1 table and §6.3
   with the user's Channel B definition (remote personal, receives text now and voice notes later,
   responds text + voice note in Telegram, never on the HMI, provisional screen-snapshot source) and
   point to PW-012/PW-013/PW-003. Route: inline.
+  Evidence (2026-09-24, parent, inline): `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §1 channel bullet,
+  §1.1 status row (reactivated 2026-09-24, PW-012) and §6.3 (remote personal definition, text +
+  voice note in the chat only, never on the HMI, provisional active-screen source, queue of 3,
+  migration to the autonomous source with PW-003) plus a dated clarification block.
 - [ ] **B3 — Live verification (user).** With the HMI showing a dashboard, ask the Channel B bot a
   few questions: the text answer arrives as today, then a voice note replying to the same question
   with Prisma's voice; nothing plays or shows on the HMI; overlapping questions keep their audio
@@ -291,8 +295,10 @@ on its own — without any HMI browser open and without anything playing or show
 - 2026-09-24: B1b implemented and verified (delegated writer, strict TDD) — overlapping Channel B
   voice notes are now queued (bounded FIFO of 3) instead of dropped; the runtime test suite is now
   hermetic for Telegram/Gemini token env vars. See Evidence above.
+- 2026-09-24: branch rebased onto main; B2 done (master doc).
 
 ## Next step
 
-B2 (inline — update `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §1/§6.3), then B3 (live verification,
-user).
+B3 live verification (user). The branch was rebased onto `main` (now includes the PW-008 fix
+`30f84ca`); runtime suite 1576 OK after the rebase. The runtime must be relaunched to load the
+Channel B changes.

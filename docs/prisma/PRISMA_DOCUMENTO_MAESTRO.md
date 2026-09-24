@@ -31,9 +31,9 @@ separadas:
 - **Canal A — HMI:** conversación por voz, búsqueda de equipos o variables aunque no
   estén en la vista actual, aclaración de ambigüedades, navegación de la sesión que
   originó la consulta y respuesta audible.
-- **Canal B — Telegram personal:** consultas de texto sobre una instalación
-  autorizada, sin navegador, sin publicador de snapshots y sin producir audio ni
-  navegación global en la HMI.
+- **Canal B — Telegram personal:** consultas a distancia por el bot dedicado sobre una
+  instalación autorizada; responde en el chat con texto y nota de voz, y nunca produce audio,
+  orbe ni navegación en la HMI (definición vigente en §6.3).
 
 El objetivo completo está **aprobado y parcialmente implementado**. El repositorio ya contiene un
 runtime de presentación y voz, integración HMI y contratos parciales, pero su flujo
@@ -50,7 +50,7 @@ pero su validación productiva sigue pendiente.
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
 | Canal A — QR/status y panel manual | Wiring offline y aceptación de respuestas/voz reportada por el usuario | Proyección protegida, cliente/proxy y QR local desde Pyramid, a la derecha de Logs en Core; alcance manual acotado en §11.1, sin afirmar una matriz E2E integral. No hay auto-Apply. |
-| Canal B — Telegram autónomo | Pendiente y aplazado por el usuario el 2026-09-20 | Lee el archivo de instalación y responde **solo texto privado** por chat; **no** publica eventos de voz en la HMI y su fuente de datos autónoma sigue pendiente (conciliación de fuentes: §4.2; checkpoint vigente: §11.1). |
+| Canal B — Telegram autónomo | Reactivado por el usuario el 2026-09-24 (PW-012) | Responde por chat con texto y **nota de voz** generada por el runtime, sin depender de una HMI abierta; **no** publica eventos de voz en la HMI. Fuente provisoria: la pantalla activa de la HMI; la fuente autónoma sigue pendiente (§4.2, PW-003). Preguntas por nota de voz: PW-013. |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
 | Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Prisma y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
@@ -600,14 +600,17 @@ extenderla.
 
 ### 6.3 Canal B — Telegram personal autónomo
 
-El Canal B recibe texto y responde texto. Debe funcionar sin navegador, snapshot o
-publicador de pantalla. Consulta una instalación previamente autorizada mediante la
-misma frontera de datos que el Canal A.
+El Canal B es la consulta personal a distancia: la persona ya tiene acceso al bot dedicado
+del Canal B (no se vincula desde la HMI; el QR pertenece solo al Canal A). Recibe texto (y, en
+PW-013, notas de voz) y responde en el chat con **texto y nota de voz**. El audio llega a
+Telegram porque la persona está lejos: la HMI nunca reproduce ni muestra nada por el Canal B.
+Debe funcionar sin navegador, snapshot o publicador de pantalla. Consulta una instalación
+previamente autorizada mediante la misma frontera de datos que el Canal A.
 
 Reglas obligatorias:
 
 - no publica eventos globales de HMI;
-- no reproduce audio ni navega una HMI;
+- no reproduce audio en la HMI ni la navega (la nota de voz se entrega solo en el chat);
 - separa credencial del bot, cuenta personal y asociación de chat;
 - autoriza explícitamente qué instalación puede consultar cada identidad;
 - impide mezcla de datos entre usuarios, instalaciones y sesiones;
@@ -621,6 +624,14 @@ emparejado y su fuente de archivo obsoleta: este acuerdo **no** habilita ampliar
 integrar su código. El bot dedicado del Canal A es un proveedor y una entrada separados; nunca es un
 modo, comando o bandera dentro del bot del Canal B, y el Canal B sigue sin poder afectar el
 contexto, la voz ni la navegación de la HMI.
+
+**Aclaración 2026-09-24 (decisión del usuario, PW-012).** Mientras no exista la fuente de datos
+autónoma, el Canal B responde de forma **provisoria** según la pantalla que la HMI muestra en ese
+momento (el contexto más reciente de una sesión HMI viva; sin sesión viva informa que no hay datos
+cargados), como antes de la migración. Cada respuesta se envía como texto y, a continuación, como
+nota de voz de Prisma en respuesta al mismo mensaje, generada por el runtime (fila de hasta 3
+notas pendientes por chat). Cuando exista la fuente autónoma (PW-003), ambos canales migran a
+ella. Detalle y evidencia: `odd/tasks/prisma-channel-b-voice-replies.md`.
 
 ### 6.4 Datos reales y presentación
 
