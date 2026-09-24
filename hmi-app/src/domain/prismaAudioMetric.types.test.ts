@@ -161,6 +161,64 @@ describe('Prisma audio metric contract', () => {
         }
     });
 
+    it('round-trips a progressive playback-ended record with the T1 prebuffer fields, and accepts one without them', () => {
+        const withPrebuffer = {
+            schema_version: '1' as const,
+            run_id: 'prisma-0123456789abcdef',
+            layer: 'browser' as const,
+            record_type: 'playback-ended' as const,
+            sequence: 3,
+            monotonic_ms: 20,
+            elapsed_ms: 20,
+            payload: {
+                elapsed_ms: 20,
+                transport: 'progressive' as const,
+                pcm_bytes: 48_000,
+                pcm_duration_seconds: 1,
+                underflow_count: 0,
+                prebuffer_ms: 200,
+                needed_prebuffer_ms: 65,
+                prebuffer_mode: 'fixed' as const,
+            },
+        };
+        const withoutPrebuffer = {
+            ...withPrebuffer,
+            record_type: 'playback-ended' as const,
+            payload: {
+                elapsed_ms: 20,
+                transport: 'buffer-before-playback' as const,
+                pcm_bytes: 48_000,
+                pcm_duration_seconds: 1,
+                underflow_count: 0,
+            },
+        };
+
+        expect(parsePrismaAudioMetric(withPrebuffer)).toEqual(withPrebuffer);
+        expect(parsePrismaAudioMetric(withoutPrebuffer)).toEqual(withoutPrebuffer);
+    });
+
+    it('rejects an unknown prebuffer_mode value', () => {
+        expect(() => parsePrismaAudioMetric({
+            schema_version: '1' as const,
+            run_id: 'prisma-0123456789abcdef',
+            layer: 'browser' as const,
+            record_type: 'playback-ended' as const,
+            sequence: 4,
+            monotonic_ms: 21,
+            elapsed_ms: 21,
+            payload: {
+                elapsed_ms: 21,
+                transport: 'progressive' as const,
+                pcm_bytes: 48_000,
+                pcm_duration_seconds: 1,
+                underflow_count: 0,
+                prebuffer_ms: 200,
+                needed_prebuffer_ms: 65,
+                prebuffer_mode: 'adaptive',
+            },
+        } as never)).toThrow('allowlist');
+    });
+
     it('rejects booleans and non-finite numbers', () => {
         const invalidValues: unknown[] = [true, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
         for (const pcmBytes of invalidValues) {

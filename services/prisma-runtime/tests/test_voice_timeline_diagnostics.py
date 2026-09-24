@@ -50,6 +50,52 @@ class ValidateTimelineBatchTests(unittest.TestCase):
                 )
                 self.assertEqual(records[0]["record_type"], record_type)
 
+    def test_accepts_a_progressive_playback_ended_record_with_t1_prebuffer_fields(self) -> None:
+        records = validate_timeline_batch({"records": [sample_record(
+            record_type="playback-ended",
+            payload={
+                "elapsed_ms": 20,
+                "transport": "progressive",
+                "pcm_bytes": 48_000,
+                "pcm_duration_seconds": 1,
+                "underflow_count": 0,
+                "prebuffer_ms": 200,
+                "needed_prebuffer_ms": 65,
+                "prebuffer_mode": "fixed",
+            },
+        )]})
+        self.assertEqual(records[0]["payload"]["prebuffer_mode"], "fixed")
+        self.assertEqual(records[0]["payload"]["needed_prebuffer_ms"], 65)
+
+    def test_accepts_a_playback_ended_record_without_the_optional_prebuffer_fields(self) -> None:
+        records = validate_timeline_batch({"records": [sample_record(
+            record_type="playback-ended",
+            payload={
+                "elapsed_ms": 20,
+                "transport": "buffer-before-playback",
+                "pcm_bytes": 48_000,
+                "pcm_duration_seconds": 1,
+                "underflow_count": 0,
+            },
+        )]})
+        self.assertNotIn("prebuffer_mode", records[0]["payload"])
+
+    def test_rejects_an_unknown_prebuffer_mode_value(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_timeline_batch({"records": [sample_record(
+                record_type="playback-ended",
+                payload={
+                    "elapsed_ms": 20,
+                    "transport": "progressive",
+                    "pcm_bytes": 48_000,
+                    "pcm_duration_seconds": 1,
+                    "underflow_count": 0,
+                    "prebuffer_ms": 200,
+                    "needed_prebuffer_ms": 65,
+                    "prebuffer_mode": "adaptive",
+                },
+            )]})
+
     def test_rejects_a_non_dict_envelope(self) -> None:
         for candidate in (None, [], "records", 5):
             with self.subTest(candidate=candidate), self.assertRaises(ValueError):

@@ -663,6 +663,12 @@ describe('PrismaVoiceAudioEngine', () => {
                 underflow_count: 0,
             },
         });
+        // T1: the non-progressive worklet transport cannot measure per-block
+        // arrival, so its playback-ended never carries the prebuffer fields
+        // (optional in the schema) instead of reporting a fabricated value.
+        expect(diagnostics.at(-1)?.payload).not.toHaveProperty('prebuffer_ms');
+        expect(diagnostics.at(-1)?.payload).not.toHaveProperty('needed_prebuffer_ms');
+        expect(diagnostics.at(-1)?.payload).not.toHaveProperty('prebuffer_mode');
     });
 
     it('records positive underflow evidence when the audio clock outruns the scheduled block', async () => {
@@ -692,7 +698,49 @@ describe('PrismaVoiceAudioEngine', () => {
         audio.sources.forEach(({ node }) => node.onended?.(new Event('ended')));
         expect(diagnostics.at(-1)).toMatchObject({
             record_type: 'playback-ended',
-            payload: expect.objectContaining({ transport: 'progressive', underflow_count: 1 }),
+            payload: expect.objectContaining({
+                transport: 'progressive',
+                underflow_count: 1,
+                prebuffer_mode: 'fixed',
+                prebuffer_ms: expect.any(Number),
+                needed_prebuffer_ms: expect.any(Number),
+            }),
+        });
+    });
+
+    it('measures the needed prebuffer independent of the fixed lead and logs it in progressive playback-ended', async () => {
+        // Block 1 arrives at t0 = 1_000 (deficit 0 by construction). Block 2
+        // arrives at 1_115, 40 ms after block 1's own 75 ms audio duration
+        // would have been consumed by gap-free playback (deficit 40). The
+        // measured need is independent of the fixed 200 ms lead actually
+        // used to schedule this answer.
+        const reader = {
+            read: vi.fn()
+                .mockImplementationOnce(async () => {
+                    now = 1_000;
+                    return { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) };
+                })
+                .mockImplementationOnce(async () => {
+                    now = 1_115;
+                    return { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) };
+                })
+                .mockResolvedValueOnce({ done: true, value: undefined }),
+            cancel: vi.fn(async () => undefined),
+        } as unknown as ReadableStreamDefaultReader<Uint8Array>;
+        const engine = createEngine();
+
+        engine.play(createLiveSource(reader), createTarget(), {});
+        await settlePlayback(30);
+        audio.sources.forEach(({ node }) => node.onended?.(new Event('ended')));
+
+        expect(diagnostics.at(-1)).toMatchObject({
+            record_type: 'playback-ended',
+            payload: {
+                transport: 'progressive',
+                prebuffer_ms: 200,
+                needed_prebuffer_ms: 65,
+                prebuffer_mode: 'fixed',
+            },
         });
     });
 

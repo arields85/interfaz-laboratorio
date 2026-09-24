@@ -21,6 +21,7 @@ import {
 } from './prismaLocalAudioPlayback';
 import { PRISMA_PCM_AUDIO_FORMAT } from './prismaPcmAudioFormat';
 import { PRISMA_PCM_WORKLET_PROCESSOR_NAME } from './prismaPcmWorkletBuffer';
+import { PrismaPrebufferNeedTracker } from './prismaPrebufferNeedTracker';
 
 export const PRISMA_PCM_SAMPLE_RATE = PRISMA_PCM_AUDIO_FORMAT.sampleRate;
 export const PRISMA_PCM_BLOCK_SAMPLES = 1_800;
@@ -128,6 +129,10 @@ interface ActivePlayback {
     lastMetricAt: number;
     mode: 'live' | 'fallback';
     metricSequence: number;
+    // T1: only the progressive path records block arrivals (the worklet
+    // transport is out of scope, see prismaPrebufferNeedTracker.ts), but the
+    // tracker is harmless and unused for that transport.
+    prebufferNeedTracker: PrismaPrebufferNeedTracker;
 }
 
 export class PcmS16LeBlockAssembler {
@@ -337,6 +342,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             lastMetricAt: -Infinity,
             mode: 'live',
             metricSequence: 0,
+            prebufferNeedTracker: new PrismaPrebufferNeedTracker(),
         };
         target.level = 0;
         target.setSpeaking(false);
@@ -472,6 +478,10 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             active.pcmBytes += result.value.byteLength;
 
             for (const block of assembler.push(result.value)) {
+                // T1: capture arrival the moment the block becomes available
+                // here, before any scheduling/awaiting can skew the clock
+                // reading the prebuffer-need measurement depends on.
+                const blockArrivalMs = this.now();
                 if (!active.firstAudioReceived) {
                     active.firstAudioReceived = true;
                     const elapsedMs = this.now() - requestStartedAt;
@@ -481,6 +491,8 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
                         payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
                     });
                 }
+                const blockDurationMs = (block.length / stream.sampleRate) * 1_000;
+                active.prebufferNeedTracker.recordBlockArrival(blockArrivalMs, blockDurationMs);
                 this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, block.length / stream.sampleRate);
                 await this.schedulePcmBlock(block, stream.sampleRate, active);
                 scheduledSamples += block.length;
@@ -489,6 +501,7 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
 
         const finalBlock = assembler.finish();
         if (finalBlock && this.isCurrent(active)) {
+            const blockArrivalMs = this.now();
             if (!active.firstAudioReceived) {
                 active.firstAudioReceived = true;
                 const elapsedMs = this.now() - requestStartedAt;
@@ -498,6 +511,8 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
                     payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
                 });
             }
+            const blockDurationMs = (finalBlock.length / stream.sampleRate) * 1_000;
+            active.prebufferNeedTracker.recordBlockArrival(blockArrivalMs, blockDurationMs);
             this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, finalBlock.length / stream.sampleRate);
             await this.schedulePcmBlock(finalBlock, stream.sampleRate, active);
             scheduledSamples += finalBlock.length;
@@ -1079,6 +1094,15 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
                 pcm_bytes: active.pcmBytes,
                 pcm_duration_seconds: active.pcmDurationSeconds,
                 underflow_count: active.underflowCount,
+                // T1: prebuffer_ms is the lead actually used (fixed for now,
+                // see PRISMA_PCM_PLAYBACK_LEAD_SECONDS); needed_prebuffer_ms
+                // is measured independently of it. Only the progressive
+                // transport measures block arrivals, so only it reports
+                // these -- the worklet transport's playback-ended leaves
+                // them unset (optional in the schema).
+                prebuffer_ms: PRISMA_PCM_PLAYBACK_LEAD_SECONDS * 1_000,
+                needed_prebuffer_ms: active.prebufferNeedTracker.neededPrebufferMs(),
+                prebuffer_mode: 'fixed',
             },
         });
         this.cleanupActive('complete', false);
