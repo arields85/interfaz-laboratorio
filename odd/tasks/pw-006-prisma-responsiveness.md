@@ -694,7 +694,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
     (`elapsed=2.008s not less than 1.0s`) before implementation; the full `ChannelAQueryIntegrationTests`
     class also dropped from 2.018 s to 0.014 s wall time now that no test in it pays the old
     synchronous chat-action cost. Full suite green (1429 passed).
-  - **Unit (c) — push voice events to the HMI, T10 unit 5** (2026-09-24, commit pending). The
+  - **Unit (c) — push voice events to the HMI, T10 unit 5** (2026-09-24, commit `82345d0`). The
     launcher was running throughout (ports 5056/5057/5173 in use) and this writer's brief forbids
     starting/stopping it, so this could not be verified live through the real Vite proxy against the
     newly written code (the running processes still serve the pre-this-unit code; only a restart
@@ -844,7 +844,7 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   b: prefetch for Channel A answers via a new short-lived event-scoped token; e: fire-and-forget
   Telegram typing indicator; c: push voice events to the HMI over SSE, backend+frontend, with full
   test coverage but a pending live Vite-proxy check since the launcher was running and could not be
-  restarted). Commits `5411978`, `74cf145`, `7e84d4f`, `acea713`, and one more for unit (c). Full
+  restarted). Commits `5411978`, `74cf145`, `7e84d4f`, `acea713`, `82345d0`. Full
   prisma-runtime suite green after each (1417 → 1418 → 1428 → 1429 → 1442 tests); full hmi-app suite
   green for unit (c)'s frontend half (2384 tests, `tsc -b` and `eslint` both clean). Route: delegated
   writer (multi-file, behavior-changing work across `gemini_credentials.py`, `voice_events.py`,
