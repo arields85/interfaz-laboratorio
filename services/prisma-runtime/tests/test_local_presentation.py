@@ -74,6 +74,55 @@ class LocalPresentationTests(unittest.TestCase):
             self.assertEqual(len(matching), 1)
             self.assertNotIn("OEE", matching[0])
 
+    def test_local_ask_fires_a_background_prefetch_without_delaying_the_response(self) -> None:
+        """T10 unit 3: /local/ask must trigger voice-service prefetch for its
+        own freshly published event, on a background thread, carrying this
+        exact request's own capability -- and never block on it."""
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        fired = threading.Event()
+        captured = {}
+
+        def fake_prefetch(local_http, voice_url, event_id, capability):
+            captured["event_id"] = event_id
+            captured["capability"] = capability
+            fired.set()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            store = JsonFileStore(Path(temporary) / "snapshot.json")
+            events = VoiceEventStore()
+            client = create_app(store, events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            headers = session_headers(client)
+            client.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": demo_snapshot()}, headers=headers)
+            with patch.object(local_presentation_module, "_fire_voice_prefetch", side_effect=fake_prefetch):
+                response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        event_id = response.get_json()["voiceEvent"]["id"]
+        self.assertTrue(fired.wait(2), "prefetch was never fired")
+        self.assertEqual(captured["event_id"], event_id)
+        self.assertEqual(captured["capability"], headers["X-Prisma-Session-Capability"])
+
+    def test_fire_voice_prefetch_posts_the_event_id_with_the_capability_header(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        local_http = Mock()
+        local_presentation_module._fire_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "cap-one")
+
+        local_http.post.assert_called_once_with(
+            "http://127.0.0.1:5056/internal/prisma/prefetch",
+            json={"eventId": "event-one"},
+            headers={"X-Prisma-Session-Capability": "cap-one"},
+            timeout=3,
+        )
+
+    def test_fire_voice_prefetch_swallows_every_exception(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        local_http = Mock()
+        local_http.post.side_effect = requests.RequestException("boom")
+
+        local_presentation_module._fire_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "cap-one")  # must not raise
+
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()

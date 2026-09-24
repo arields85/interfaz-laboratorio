@@ -221,6 +221,53 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertNotIn(event_id, first_chunk[0])
         self.assertNotIn(event_id, stream_end[0])
 
+    def test_prefetch_requires_a_capability(self):
+        response = service.app.test_client().post("/internal/prisma/prefetch", json={"eventId": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "PRISMA_SESSION_REQUIRED")
+
+    def test_prefetch_rejects_malformed_bodies(self):
+        for body in ({}, {"eventId": 1}, {"eventId": "x", "extra": 1}):
+            with self.subTest(body=body):
+                response = service.app.test_client().post("/internal/prisma/prefetch", json=body, headers={"X-Prisma-Session-Capability": "cap"})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "INVALID_VOICE_EVENT_REQUEST")
+
+    def test_prefetch_admits_a_subscription_then_closes_it_immediately(self):
+        """T10 unit 3: prefetch triggers generation via the exact same
+        resolve+admit path as /prisma/speak-live, then releases its own
+        subscriber slot right away -- AudioCoordinator's existing buffered
+        replay (already exercised by test_event_audio.py's multi-subscriber
+        tests) is what lets a later real subscriber attach to the same,
+        already-in-flight or already-buffered generation."""
+        event_id = str(uuid.uuid4())
+        event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999}
+        subscription = Mock()
+        coordinator = Mock()
+        coordinator.subscribe.return_value = subscription
+        with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+            response = service.app.test_client().post("/internal/prisma/prefetch", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "cap"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True})
+        coordinator.subscribe.assert_called_once()
+        subscription.close.assert_called_once_with()
+
+    def test_prefetch_maps_admission_errors_the_same_way_speak_live_does(self):
+        event_id = str(uuid.uuid4())
+        cases = (
+            (LookupError("VOICE_EVENT_NOT_FOUND"), 404, "VOICE_EVENT_NOT_FOUND"),
+            (service.VoiceSessionUnauthorized("PRISMA_SESSION_REQUIRED"), 401, "PRISMA_SESSION_REQUIRED"),
+            (service.GeminiCredentialUnavailable("GEMINI_CREDENTIAL_UNAVAILABLE"), 503, "GEMINI_CREDENTIAL_UNAVAILABLE"),
+            (service.AudioCapacityError("VOICE_SUBSCRIBER_LIMIT"), 429, "VOICE_SUBSCRIBER_LIMIT"),
+            (RuntimeError("boom"), 503, "VOICE_SERVICE_UNAVAILABLE"),
+        )
+        for error, expected_status, expected_body in cases:
+            with self.subTest(error=type(error).__name__):
+                with patch.object(service, "resolve_voice_event", side_effect=error):
+                    response = service.app.test_client().post("/internal/prisma/prefetch", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "cap"})
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.get_json()["error"], expected_body)
+
     def test_http_response_close_releases_unstarted_audio_subscription(self):
         stream = Mock()
         stream.__iter__ = Mock(return_value=iter(()))

@@ -159,6 +159,27 @@ def _probe_voice(local_http: requests.Session, voice_url: str) -> tuple[bool, di
     return False, probe
 
 
+def _fire_voice_prefetch(local_http: requests.Session, voice_url: str, event_id: str, capability: str) -> None:
+    """T10 unit 3: best-effort call to the voice service's internal prefetch
+    endpoint right after publishing a voice event, so Gemini synthesis
+    starts immediately instead of waiting for the HMI's own poll-then-POST
+    /prisma/speak-live round trip. Always called on its own background
+    thread by the caller (never awaited), so nothing here may ever raise --
+    a slow or failed prefetch degrades back to the pre-T10 behavior (the
+    browser's own request starts generation, same as before) and must never
+    affect the /local/ask response that already returned by the time this
+    runs."""
+    try:
+        local_http.post(
+            f"{voice_url}/internal/prisma/prefetch",
+            json={"eventId": event_id},
+            headers={CAPABILITY_HEADER: capability},
+            timeout=3,
+        )
+    except Exception:
+        pass
+
+
 def normalize(value: Any) -> str:
     text = unicodedata.normalize("NFD", str(value or "").lower())
     return "".join(char for char in text if unicodedata.category(char) != "Mn")
@@ -1130,6 +1151,19 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 "Prisma voice event publish: elapsed_ms=%d",
                 round((time.monotonic() - publish_started) * 1000),
             )
+        # T10 unit 3: kick off Gemini synthesis now, on a background thread,
+        # instead of waiting for the HMI's own poll-then-POST
+        # /prisma/speak-live round trip. Fire-and-forget: never awaited,
+        # never allowed to delay this response. The Channel A on-outcome
+        # publish site does not have a live browser capability to forward at
+        # publish time, so it is intentionally out of scope here.
+        capability = request.headers.get(CAPABILITY_HEADER, "")
+        threading.Thread(
+            target=_fire_voice_prefetch,
+            args=(local_http, voice_url, event["id"], capability),
+            name="PrismaVoicePrefetch",
+            daemon=True,
+        ).start()
         return jsonify({**answer.as_dict(), "voiceEvent": event})
 
     @app.route("/hmi/channel-a/pairing", methods=["GET", "POST", "OPTIONS"])

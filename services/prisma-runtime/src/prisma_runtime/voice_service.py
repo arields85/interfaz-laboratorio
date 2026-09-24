@@ -855,6 +855,56 @@ def prisma_speak_live():
     return _pcm_stream_response(lambda: _timed_pcm_stream(stream, request_received))
 
 
+@app.route("/internal/prisma/prefetch", methods=["POST"])
+def prisma_prefetch():
+    """T10 unit 3: presentation calls this right after publishing a voice
+    event (fire-and-forget, on its own background thread, never blocking the
+    HMI answer response) so synthesis starts immediately instead of waiting
+    for the browser's own poll-then-POST /prisma/speak-live round trip.
+
+    Reuses the exact same resolve+admission path, capability/session/auth
+    checks, and error taxonomy as /prisma/speak-live: prefetch can never see
+    or generate audio the caller isn't already authorized for.
+
+    No separate TTL/reaper is needed for an abandoned prefetch: the
+    subscription is closed immediately below (this endpoint never streams
+    audio back), and AudioCoordinator already buffers the shared generation
+    for a later subscriber under the event's own existing expiry and
+    capacity-eviction rules -- the same rules that already bound how long
+    any completed generation stays buffered, prefetch or not. Subscribing
+    again for the same event id from the real /prisma/speak-live request
+    attaches to that same buffered/in-flight generation instead of starting
+    a duplicate one, exactly as two ordinary concurrent subscribers would.
+    """
+    if request.content_length is not None and request.content_length > 1024:
+        return jsonify({"ok": False, "error": "INVALID_VOICE_EVENT_REQUEST"}), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {"eventId"} or not isinstance(data.get("eventId"), str):
+        return jsonify({"ok": False, "error": "INVALID_VOICE_EVENT_REQUEST"}), 400
+    capability = request.headers.get(CAPABILITY_HEADER, "")
+    if not capability:
+        return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
+    try:
+        event = resolve_voice_event(data["eventId"], capability)
+        event["_capability"] = capability
+        subscription = audio_coordinator.subscribe(event, prisma_voice_config_store.get())
+    except ValueError:
+        return jsonify({"ok": False, "error": "INVALID_VOICE_EVENT_REQUEST"}), 400
+    except LookupError:
+        return jsonify({"ok": False, "error": "VOICE_EVENT_NOT_FOUND"}), 404
+    except VoiceSessionUnauthorized:
+        return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
+    except GeminiCredentialUnavailable:
+        return _gemini_unavailable_response()
+    except AudioCapacityError as error:
+        status = 429 if str(error) == "VOICE_SUBSCRIBER_LIMIT" else 503
+        return jsonify({"ok": False, "error": str(error)}), status
+    except (AudioCoordinatorError, RuntimeError):
+        return jsonify({"ok": False, "error": "VOICE_SERVICE_UNAVAILABLE"}), 503
+    subscription.close()
+    return jsonify({"ok": True})
+
+
 def _validate_single_process_environment(environ=None):
     values = environ if environ is not None else os.environ
     worker_count = values.get("WEB_CONCURRENCY", "").strip()
