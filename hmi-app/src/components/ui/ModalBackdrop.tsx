@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalBackdropProps {
     /** Controls mount/unmount of the whole backdrop + panel. */
@@ -16,6 +17,9 @@ interface ModalBackdropProps {
 // centered panel, with Escape-to-close and click-outside-to-close. Originally owned by
 // AdminDialog (T20); extracted so every centered modal — admin or not — gets the identical
 // backdrop treatment instead of a copy-pasted div, per the project's anti-parche convention.
+// Rendered through a portal into document.body: an ancestor with `backdrop-filter`, `filter`
+// or `transform` (e.g. the topbar's `backdrop-blur-xl`) becomes the containing block of
+// `position: fixed` descendants, which would confine the backdrop to that ancestor.
 export default function ModalBackdrop({
     open,
     onClose,
@@ -39,7 +43,7 @@ export default function ModalBackdrop({
 
     if (!open) return null;
 
-    return (
+    return createPortal(
         <div
             className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm ${className}`.trim()}
             onMouseDown={(event) => {
@@ -50,7 +54,8 @@ export default function ModalBackdrop({
             role="presentation"
         >
             {children}
-        </div>
+        </div>,
+        document.body,
     );
 }
 
