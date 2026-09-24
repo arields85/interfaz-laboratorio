@@ -609,6 +609,11 @@ Integrate to `main` by fast-forward at the end together with PW-007; NO push.
   unverified against the real API/runtime and need the user's next live voice test. Route: delegated
   writer (multi-file, behavior-changing work across `voice_service.py`, `gemini_credentials.py`,
   `event_audio.py` and their tests; touched only `services/prisma-runtime` and this doc).
+- 2026-09-23 (parent, authorized real-API smoke test of the committed T11 helpers at `9521bbe`):
+  `_create_tts_stream` + `_iter_tts_audio_parts` + `_decode_audio_inline_data` against
+  `gemini-3.8-flash-lite-tts` → first audio 0.62 s and 0.70 s (3.4 s and 7.1 s of audio); the real
+  mime type `audio/l16; rate=24000; channels=1` passes validation. Full suite 1408 passed
+  (parent spot check).
 
 ## Next step
 
@@ -621,8 +626,8 @@ changes behavior when Gemini credentials are entirely unconfigured, which should
 the user's normal setup). After that: a follow-up pass for T10 unit 5 (SSE push), run with the
 launcher available so the Vite proxy can be checked live. In parallel, **user manual check of
 T2/T3/T4 in Telegram**, since these are UX changes best confirmed live:
-- **T2**: pair a phone via QR; the confirmation prompt should read "Está a un paso: confirme y
-  Prisma responderá sus consultas en este chat." (no "documento").
+- **T2**: pair a phone via QR; the confirmation prompt should read "Confirme para hacerle preguntas
+  a Prisma desde aquí; le responderá en pantalla y con voz." (no "documento").
 - **T3**: after confirming, a persistent "Desvincular" button should appear under the input and
   stay visible through later messages. Tapping it should ask for confirmation with "Confirmar
   desvinculación"/"Cancelar" inline buttons — confirming should unlink and remove the persistent
