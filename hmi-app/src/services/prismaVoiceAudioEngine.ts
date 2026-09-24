@@ -478,43 +478,14 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             active.pcmBytes += result.value.byteLength;
 
             for (const block of assembler.push(result.value)) {
-                // T1: capture arrival the moment the block becomes available
-                // here, before any scheduling/awaiting can skew the clock
-                // reading the prebuffer-need measurement depends on.
-                const blockArrivalMs = this.now();
-                if (!active.firstAudioReceived) {
-                    active.firstAudioReceived = true;
-                    const elapsedMs = this.now() - requestStartedAt;
-                    this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
-                    this.emitDiagnostic(active, {
-                        record_type: 'first-readable-audio',
-                        payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
-                    });
-                }
-                const blockDurationMs = (block.length / stream.sampleRate) * 1_000;
-                active.prebufferNeedTracker.recordBlockArrival(blockArrivalMs, blockDurationMs);
-                this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, block.length / stream.sampleRate);
-                await this.schedulePcmBlock(block, stream.sampleRate, active);
+                await this.handleProgressiveBlock(block, stream.sampleRate, active, requestStartedAt);
                 scheduledSamples += block.length;
             }
         }
 
         const finalBlock = assembler.finish();
         if (finalBlock && this.isCurrent(active)) {
-            const blockArrivalMs = this.now();
-            if (!active.firstAudioReceived) {
-                active.firstAudioReceived = true;
-                const elapsedMs = this.now() - requestStartedAt;
-                this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
-                this.emitDiagnostic(active, {
-                    record_type: 'first-readable-audio',
-                    payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
-                });
-            }
-            const blockDurationMs = (finalBlock.length / stream.sampleRate) * 1_000;
-            active.prebufferNeedTracker.recordBlockArrival(blockArrivalMs, blockDurationMs);
-            this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, finalBlock.length / stream.sampleRate);
-            await this.schedulePcmBlock(finalBlock, stream.sampleRate, active);
+            await this.handleProgressiveBlock(finalBlock, stream.sampleRate, active, requestStartedAt);
             scheduledSamples += finalBlock.length;
         }
         if (!this.isCurrent(active)) {
@@ -538,6 +509,33 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         active.streamCompleted = true;
         this.log('Prisma Live stream completed');
         this.completeLiveIfFinished(active);
+    }
+
+    // T1: shared by both the streaming loop and the final flushed block in
+    // playProgressiveLive -- captures the block's arrival (before any
+    // scheduling/awaiting can skew the clock reading the prebuffer-need
+    // measurement depends on), records first-audio if needed, feeds the
+    // tracker, then schedules it.
+    private async handleProgressiveBlock(
+        block: Float32Array<ArrayBuffer>,
+        sampleRate: number,
+        active: ActivePlayback,
+        requestStartedAt: number,
+    ): Promise<void> {
+        const blockArrivalMs = this.now();
+        if (!active.firstAudioReceived) {
+            active.firstAudioReceived = true;
+            const elapsedMs = this.now() - requestStartedAt;
+            this.log(`Prisma Live first audio: ${Math.round(elapsedMs)} ms`);
+            this.emitDiagnostic(active, {
+                record_type: 'first-readable-audio',
+                payload: { elapsed_ms: elapsedMs, pcm_bytes: active.pcmBytes },
+            });
+        }
+        const blockDurationMs = (block.length / sampleRate) * 1_000;
+        active.prebufferNeedTracker.recordBlockArrival(blockArrivalMs, blockDurationMs);
+        this.emitCanonicalDecode(active, 'progressive', active.pcmBytes, block.length / sampleRate);
+        await this.schedulePcmBlock(block, sampleRate, active);
     }
 
     private async playLocalWorklet(

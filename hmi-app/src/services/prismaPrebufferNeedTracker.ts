@@ -7,7 +7,7 @@
  * arrival time `a_i` (ms, from the engine's injectable clock) and let
  * `D_i` be the cumulative audio duration (ms) of every block scheduled
  * before it. With `t0` = the arrival of the first block, the deficit of
- * block `i` is `a_i - t0 - D_i`: how far ahead of the "ideal, gap-free"
+ * block `i` is `a_i - t0 - D_i`: how far behind the "ideal, gap-free"
  * playback timeline that block actually arrived. A positive deficit means
  * the block arrived after the point where gap-free playback would have
  * already needed it, so the prebuffer must absorb that much slack up
@@ -20,8 +20,10 @@
  * ~0 (just the scheduling margin).
  */
 
-// Matches the historical PRISMA_PCM_PLAYBACK_LEAD_SECONDS margin
-// (0.025 s = 25 ms) that this measurement replaces as a named constant.
+// Named after the historical PRISMA_PCM_PLAYBACK_LEAD_SECONDS margin value
+// (0.025 s = 25 ms, before c7efaf1 raised the lead itself to 0.2 s) -- this
+// scheduling margin is the same fixed safety pad, kept as a named constant
+// independent of whatever lead is actually in effect.
 export const PRISMA_PREBUFFER_SCHEDULING_MARGIN_MS = 25;
 
 export class PrismaPrebufferNeedTracker {
