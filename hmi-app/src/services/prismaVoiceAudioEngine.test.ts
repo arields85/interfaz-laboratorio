@@ -49,6 +49,7 @@ interface AudioHarness {
     ) => AudioWorkletNode;
     setCurrentTime: (time: number) => void;
     setTimeDomainData: (samples: readonly number[]) => void;
+    setState: (next: AudioContextState) => void;
 }
 
 function createAudioHarness(initialState: AudioContextState = 'running'): AudioHarness {
@@ -165,6 +166,9 @@ function createAudioHarness(initialState: AudioContextState = 'running'): AudioH
         },
         setTimeDomainData: (samples) => {
             timeDomainData = samples;
+        },
+        setState: (next) => {
+            state = next;
         },
     };
 }
@@ -400,6 +404,16 @@ describe('PrismaVoiceAudioEngine', () => {
 
     it('T16: records audio-context-state before and after a resume, only when one was needed', async () => {
         audio = createAudioHarness('suspended');
+        // T21: play() now warms the AudioContext immediately (in parallel
+        // with the live request) instead of only discovering the suspended
+        // state once the first PCM block is ready. Hold that warm-up resume
+        // open (a real resume genuinely takes time) so this test can still
+        // exercise ensureContextRunning's own "still suspended when the
+        // first block wants to schedule" diagnostic path.
+        const resumeGate = deferred<void>();
+        audio.resume.mockImplementationOnce(() => resumeGate.promise.then(() => {
+            audio.setState('running');
+        }));
         const reader = createReader([
             { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) },
             { done: true, value: undefined },
@@ -408,6 +422,8 @@ describe('PrismaVoiceAudioEngine', () => {
         const engine = createEngine();
 
         engine.play(createLiveSource(reader), target, { onStarted: vi.fn(), onEnded: vi.fn() });
+        await settlePlayback();
+        resumeGate.resolve();
         await settlePlayback();
 
         expect(audio.resume).toHaveBeenCalledTimes(1);
@@ -431,6 +447,77 @@ describe('PrismaVoiceAudioEngine', () => {
 
         expect(audio.resume).not.toHaveBeenCalled();
         expect(diagnostics.some((diagnostic) => diagnostic.record_type === 'audio-context-state')).toBe(false);
+    });
+
+    it('T21: warmAudioContext() resumes a suspended context ahead of any playback', () => {
+        audio = createAudioHarness('suspended');
+        const engine = createEngine();
+
+        engine.warmAudioContext();
+
+        expect(audio.createAudioContext).toHaveBeenCalledTimes(1);
+        expect(audio.resume).toHaveBeenCalledTimes(1);
+    });
+
+    it('T21: warmAudioContext() is a no-op when the context is already running', () => {
+        const engine = createEngine();
+
+        engine.warmAudioContext();
+
+        expect(audio.resume).not.toHaveBeenCalled();
+    });
+
+    it('T21: play() warms the AudioContext in parallel with the live request, not after the first chunk', async () => {
+        audio = createAudioHarness('suspended');
+        const { promise: openLivePromise, resolve: resolveOpenLive } = deferred<PrismaVoicePcmStream>();
+        const openLive = vi.fn(() => openLivePromise);
+        const source: PrismaVoiceAudioSource = { playbackTransport: 'progressive', openLive };
+        const target = createTarget();
+        const engine = createEngine();
+
+        engine.play(source, target, { onStarted: vi.fn(), onEnded: vi.fn() });
+        await settlePlayback();
+
+        // The warm-up resume already ran even though the live request has
+        // not resolved yet -- it runs in parallel with openLive(), not
+        // sequentially after it.
+        expect(openLive).toHaveBeenCalledTimes(1);
+        expect(audio.resume).toHaveBeenCalledTimes(1);
+
+        const reader = createReader([
+            { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) },
+            { done: true, value: undefined },
+        ]);
+        resolveOpenLive({ reader, sampleRate: PRISMA_PCM_SAMPLE_RATE, channels: 1 });
+        await settlePlayback();
+
+        // Scheduling the first block reused the already-settled warm-up
+        // resume instead of issuing a second, fresh one.
+        expect(audio.resume).toHaveBeenCalledTimes(1);
+        expect(audio.sources[0]?.start).toHaveBeenCalled();
+    });
+
+    it('T21: a rejected warm-up resume falls back safely to an ordinary resume when scheduling audio', async () => {
+        audio = createAudioHarness('suspended');
+        audio.resume.mockRejectedValueOnce(new Error('NotAllowedError'));
+        const reader = createReader([
+            { done: false, value: pcmBytes(PRISMA_PCM_BLOCK_SAMPLES) },
+            { done: true, value: undefined },
+        ]);
+        const target = createTarget();
+        const lifecycle: VoicePlaybackLifecycle = { onStarted: vi.fn(), onEnded: vi.fn(), onError: vi.fn() };
+        const engine = createEngine();
+
+        engine.play(createLiveSource(reader), target, lifecycle);
+        await settlePlayback();
+
+        // First call (the warm-up at play()) rejected; ensureContextRunning
+        // made its own resume attempt when the first block was ready to
+        // schedule, which this harness's default implementation resolves.
+        expect(audio.resume).toHaveBeenCalledTimes(2);
+        expect(warn).toHaveBeenCalled();
+        expect(lifecycle.onError).not.toHaveBeenCalled();
+        expect(audio.sources[0]?.start).toHaveBeenCalled();
     });
 
     it('starts Local at the fixed target regardless of delivery rate and drains one worklet exactly once', async () => {

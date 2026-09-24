@@ -65,6 +65,16 @@ export interface PrismaVoiceAudioEngineContract {
         target: PrismaOrbAudioTarget,
         lifecycle: VoicePlaybackLifecycle,
     ): void;
+    // T21: create/resume the shared AudioContext ahead of any playback --
+    // called both at voice-event receipt (in parallel with the live
+    // request, from `play()` itself) and as early as the page's first user
+    // interaction (`usePrismaOrbPresentation.ts`), so a real answer's own
+    // `ensureContextRunning` usually finds the context already running
+    // instead of paying the resume latency after the first audio chunk.
+    // Safe to call at any time, including with no active playback; never
+    // throws (a failed/suspended resume is only ever surfaced later, by the
+    // ordinary `ensureContextRunning` path at actual scheduling time).
+    warmAudioContext(): void;
     stop(): void;
     dispose(): void;
 }
@@ -259,6 +269,12 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
     private workletModulePromise: Promise<void> | null = null;
     private active: ActivePlayback | null = null;
     private generation = 0;
+    // T21: the in-flight (or most recently settled) resume attempt for
+    // `this.context`, shared between `warmAudioContext()` and
+    // `ensureContextRunning()` so a resume already started at voice-event
+    // receipt is awaited once, never re-triggered when the first PCM block
+    // is ready to schedule.
+    private contextResumePromise: Promise<void> | null = null;
 
     public constructor(dependencies: PrismaVoiceAudioEngineDependencies = {}) {
         this.createAudioContext = dependencies.createAudioContext ?? createBrowserAudioContext;
@@ -321,7 +337,33 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         this.active = active;
         this.emitDiagnostic(active, { record_type: 'request-start', payload: {} });
 
+        // T21: warm the shared progressive-playback AudioContext in
+        // parallel with the live request below, instead of only
+        // discovering it needs a resume once the first PCM block is ready
+        // to schedule (previously ~0.4 s after the first audio chunk on the
+        // first answer after startup). Scoped to the 'progressive' transport
+        // only -- the only one HMI voice actually uses
+        // (prismaVoiceTtsAudioSource.ts) -- so this never pre-creates the
+        // plain `getAudioContext()` instance for a 'buffer-before-playback'
+        // request, which needs its own, differently-configured
+        // `getLocalWorkletContext()` instead.
+        if (source.playbackTransport === 'progressive') {
+            this.warmAudioContext();
+        }
+
         void this.startPlayback(source, active);
+    }
+
+    public warmAudioContext(): void {
+        try {
+            const context = this.getAudioContext();
+            if (isAudioContextRunning(context)) {
+                return;
+            }
+            void this.resumeContext(context);
+        } catch (error) {
+            this.warn('Prisma voice AudioContext warm-up failed.', error);
+        }
     }
 
     public stop(): void {
@@ -938,7 +980,10 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
             record_type: 'audio-context-state',
             payload: { state: context.state, when: 'at-play' },
         });
-        await context.resume();
+        // T21: reuse a resume already started by `warmAudioContext()` (at
+        // voice-event receipt or the page's first user interaction) instead
+        // of issuing a second, redundant `context.resume()` call here.
+        await this.resumeContext(context);
         this.emitDiagnostic(active, {
             record_type: 'audio-context-state',
             payload: { state: context.state, when: 'after-resume' },
@@ -946,6 +991,29 @@ export class PrismaVoiceAudioEngine implements PrismaVoiceAudioEngineContract {
         if (!isAudioContextRunning(context)) {
             throw new Error('AudioContext remained suspended after resume');
         }
+    }
+
+    // T21: the single place that ever calls `context.resume()`. Both
+    // `warmAudioContext()` and `ensureContextRunning()` go through this so a
+    // resume already in flight is awaited exactly once, never restarted.
+    // Never rejects -- a failed/suspended resume is only surfaced later, by
+    // `ensureContextRunning()`'s own post-await state check, exactly as
+    // before T21.
+    private resumeContext(context: AudioContext): Promise<void> {
+        if (this.contextResumePromise) {
+            return this.contextResumePromise;
+        }
+
+        const resumePromise: Promise<void> = context.resume().catch((error: unknown) => {
+            this.warn('Prisma voice AudioContext resume failed.', error);
+        });
+        this.contextResumePromise = resumePromise;
+        void resumePromise.finally(() => {
+            if (this.contextResumePromise === resumePromise) {
+                this.contextResumePromise = null;
+            }
+        });
+        return resumePromise;
     }
 
     private getAnalyser(context: AudioContext, active: ActivePlayback): AnalyserNode {
