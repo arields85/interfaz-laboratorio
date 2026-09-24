@@ -78,10 +78,15 @@ HMI_PAIRING_STATES = ("free", "pending", "linked")
 TELEGRAM_STOPPING = "TELEGRAM_STOPPING"
 
 # T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
-# comment in `channel_a_manager.py`); relying on the same WARNING-or-above
-# "handler of last resort" keeps this timing visible in
-# `prisma-presentation-stderr.log` without adding runtime-wide configuration.
-# Only a duration is ever logged, never a question, answer or owner id.
+# comment in `channel_a_manager.py`), so a module logger with no handler
+# falls back to `logging`'s own WARNING-or-above "handler of last resort",
+# which writes directly to `sys.stderr` -- the stream the launcher redirects
+# to `prisma-presentation-stderr.log`. PW-011 M4: only the lines that are
+# genuinely worth surfacing by default stay at WARNING here -- the
+# `HMI voice timeline:` lines (`format_timeline_log_line`) the parent reads
+# from that log, and any real failure/notice. Routine per-request timing is
+# logged at INFO instead, so it no longer competes with those in the default
+# log. Only a duration is ever logged, never a question, answer or owner id.
 _logger = logging.getLogger(__name__)
 
 # Approved Channel A composition settings: the accepted Channel B request/poll/
@@ -1090,7 +1095,8 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                     is_current=lambda: channel_a_manager.is_query_envelope_current(envelope),
                 )
             finally:
-                _logger.warning(
+                # PW-011 M4: routine per-answer timing, not a warning-worthy condition.
+                _logger.info(
                     "Prisma voice event publish (channel A): elapsed_ms=%d",
                     round((time.monotonic() - publish_started) * 1000),
                 )
@@ -1444,7 +1450,8 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         except VoiceEventCapacity:
             return jsonify({"ok": False, "error": "VOICE_EVENT_CAPACITY"}), 503
         finally:
-            _logger.warning(
+            # PW-011 M4: routine per-request timing, not a warning-worthy condition.
+            _logger.info(
                 "Prisma voice event publish: elapsed_ms=%d",
                 round((time.monotonic() - publish_started) * 1000),
             )

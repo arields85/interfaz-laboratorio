@@ -126,18 +126,20 @@ class VoiceServiceTests(unittest.TestCase):
         http = Mock()
         http.get.return_value = response
 
-        with self.assertLogs(service._logger, level="WARNING") as observed:
+        with self.assertLogs(service._logger, level="INFO") as observed:
             service.resolve_voice_event(event_id, "test-capability", http=http)
 
         lines = [line for line in observed.output if "Prisma voice event resolve" in line]
         self.assertEqual(len(lines), 1)
         self.assertIn("elapsed_ms=", lines[0])
         self.assertNotIn(event_id, lines[0])
+        # PW-011 M4: routine per-call timing, not a warning-worthy condition.
+        self.assertTrue(lines[0].startswith("INFO:"))
 
     def test_event_lookup_logs_elapsed_ms_even_on_failure(self):
         http = Mock()
         http.get.side_effect = RuntimeError("boom")
-        with self.assertLogs(service._logger, level="WARNING") as observed:
+        with self.assertLogs(service._logger, level="INFO") as observed:
             with self.assertRaises(RuntimeError):
                 service.resolve_voice_event(str(uuid.uuid4()), "cap", http=http)
         self.assertTrue(any("Prisma voice event resolve" in line for line in observed.output))
@@ -226,7 +228,7 @@ class VoiceServiceTests(unittest.TestCase):
         coordinator = Mock()
         coordinator.subscribe.return_value = iter([b"\x12\x34", b"\x56\x78"])
         with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
-            with self.assertLogs(service._logger, level="WARNING") as observed:
+            with self.assertLogs(service._logger, level="INFO") as observed:
                 response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.data, b"\x12\x34\x56\x78")
@@ -234,6 +236,9 @@ class VoiceServiceTests(unittest.TestCase):
         stream_end = [line for line in observed.output if "stream_end_elapsed_ms" in line]
         self.assertEqual(len(first_chunk), 1)
         self.assertEqual(len(stream_end), 1)
+        # PW-011 M4: routine per-request timing, not a warning-worthy condition.
+        self.assertTrue(first_chunk[0].startswith("INFO:"))
+        self.assertTrue(stream_end[0].startswith("INFO:"))
         self.assertNotIn(event_id, first_chunk[0])
         self.assertNotIn(event_id, stream_end[0])
 
@@ -525,12 +530,14 @@ class VoiceServiceTests(unittest.TestCase):
         get_client.assert_not_called()
 
     def test_job_creation_logs_elapsed_ms(self):
-        with self.assertLogs(service._logger, level="WARNING") as observed:
+        with self.assertLogs(service._logger, level="INFO") as observed:
             service._create_interactions_tts_job("Some transcript")
         lines = [line for line in observed.output if "Prisma TTS job create" in line]
         self.assertEqual(len(lines), 1)
         self.assertIn("elapsed_ms=", lines[0])
         self.assertNotIn("Some transcript", lines[0])
+        # PW-011 M4: routine per-job timing, not a warning-worthy condition.
+        self.assertTrue(lines[0].startswith("INFO:"))
 
     def test_tts_stream_request_sends_the_plain_transcript_with_no_wrapping_prompt(self):
         """T11: "normal" style is the only style implemented -- the exact
@@ -602,7 +609,7 @@ class VoiceServiceTests(unittest.TestCase):
         fake_client = object()
         with patch.object(service.gemini_credentials, "resolve", return_value="secret-value") as resolve, \
                 patch.object(service._warm_gemini_client, "get", return_value=(fake_client, True)) as warm_get:
-            with self.assertLogs(service._logger, level="WARNING") as observed:
+            with self.assertLogs(service._logger, level="INFO") as observed:
                 result = service.get_gemini_client()
         self.assertIs(result, fake_client)
         resolve.assert_called_once_with()
@@ -613,6 +620,8 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertIn("build_elapsed_ms=", lines[0])
         self.assertIn("reused=True", lines[0])
         self.assertNotIn("secret-value", lines[0])
+        # PW-011 M4: routine per-call timing, not a warning-worthy condition.
+        self.assertTrue(lines[0].startswith("INFO:"))
 
     def test_generate_tts_audio_never_closes_the_warm_client(self):
         """T10 unit 2: the client is a shared warm singleton now, so neither
@@ -638,7 +647,7 @@ class VoiceServiceTests(unittest.TestCase):
         client = FakeClient([stream])
         with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "PrismaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_prisma_audio_to_telegram"):
             job = service._create_interactions_tts_job("Lazy transcript")
-            with self.assertLogs(service._logger, level="WARNING") as observed:
+            with self.assertLogs(service._logger, level="INFO") as observed:
                 output = service._generate_tts_audio(job)
                 self.assertEqual(next(output), b"\x12\x34")
                 self.assertEqual(list(output), [])
@@ -646,6 +655,9 @@ class VoiceServiceTests(unittest.TestCase):
         first_yield = [line for line in observed.output if "first_yield_processing_elapsed_ms" in line]
         self.assertEqual(len(first_byte), 1)
         self.assertEqual(len(first_yield), 1)
+        # PW-011 M4: routine per-request timing, not a warning-worthy condition.
+        self.assertTrue(first_byte[0].startswith("INFO:"))
+        self.assertTrue(first_yield[0].startswith("INFO:"))
         self.assertNotIn("Lazy transcript", first_byte[0] + first_yield[0])
 
     def test_speak_live_logs_event_publish_to_received_delta_from_event_timestamp(self):
@@ -657,13 +669,15 @@ class VoiceServiceTests(unittest.TestCase):
         coordinator = Mock()
         coordinator.subscribe.return_value = iter([b"\x12\x34"])
         with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
-            with self.assertLogs(service._logger, level="WARNING") as observed:
+            with self.assertLogs(service._logger, level="INFO") as observed:
                 response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
                 self.assertEqual(response.status_code, 200)
         lines = [line for line in observed.output if "event_publish_to_received_ms" in line]
         self.assertEqual(len(lines), 1)
         self.assertNotIn(event_id, lines[0])
         self.assertNotIn("event_publish_to_received_ms=None", lines[0])
+        # PW-011 M4: routine per-request timing, not a warning-worthy condition.
+        self.assertTrue(lines[0].startswith("INFO:"))
 
     def test_speak_live_logs_none_delta_when_event_timestamp_is_missing_or_invalid(self):
         for timestamp in (None, "not-a-time"):
@@ -675,7 +689,7 @@ class VoiceServiceTests(unittest.TestCase):
                 coordinator = Mock()
                 coordinator.subscribe.return_value = iter([b"\x12\x34"])
                 with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
-                    with self.assertLogs(service._logger, level="WARNING") as observed:
+                    with self.assertLogs(service._logger, level="INFO") as observed:
                         response = service.app.test_client().post("/prisma/speak-live", json={"eventId": event_id}, headers={"X-Prisma-Session-Capability": "test-capability"}, buffered=True)
                         self.assertEqual(response.status_code, 200)
                 lines = [line for line in observed.output if "event_publish_to_received_ms" in line]
@@ -739,13 +753,16 @@ class VoiceServiceTests(unittest.TestCase):
             self.assertEqual(first_output, [b"\x12\x34\x56\x78"])
 
             job_two = service._create_interactions_tts_job("Repeated transcript")
-            with self.assertLogs(service._logger, level="WARNING") as observed:
+            with self.assertLogs(service._logger, level="INFO") as observed:
                 second_output = list(service._generate_tts_audio(job_two))
         self.assertEqual(second_output, [b"\x12\x34\x56\x78"])
         # Only the first job's stream was ever created; the SDK's
         # generate_content_stream was never called a second time.
         self.assertEqual(len(client.models.calls), 1)
-        self.assertTrue(any("Prisma TTS cache: hit" in line for line in observed.output))
+        cache_hit_lines = [line for line in observed.output if "Prisma TTS cache: hit" in line]
+        self.assertEqual(len(cache_hit_lines), 1)
+        # PW-011 M4: routine cache-stat noise, not a warning-worthy condition.
+        self.assertTrue(cache_hit_lines[0].startswith("INFO:"))
 
     def test_different_text_or_voice_config_is_a_cache_miss(self):
         def run(text, config=None):

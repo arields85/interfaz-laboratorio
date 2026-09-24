@@ -95,7 +95,8 @@ _logger = logging.getLogger(__name__)
 
 
 def _log_send_message_elapsed(elapsed_seconds: float) -> None:
-    _logger.warning("Channel A sendMessage: elapsed_ms=%d", round(elapsed_seconds * 1000))
+    # PW-011 M4: routine per-send timing, not a warning-worthy condition.
+    _logger.info("Channel A sendMessage: elapsed_ms=%d", round(elapsed_seconds * 1000))
 
 
 def _log_get_updates_elapsed(count: int | None, elapsed_seconds: float) -> None:

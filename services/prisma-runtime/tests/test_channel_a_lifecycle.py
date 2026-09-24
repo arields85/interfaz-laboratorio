@@ -1951,11 +1951,15 @@ class ChannelARunnerPollingTest(ChannelARunnerCase):
             ],
             handler=self._echo_handler(),
         )
-        with self.assertLogs(lifecycle_module._logger, level="WARNING") as observed:
+        with self.assertLogs(lifecycle_module._logger, level="INFO") as observed:
             result = runner.poll_once()
         self.assertEqual(result.disposition, DISPOSITION_COMPLETED)
         matching = [line for line in observed.output if "Channel A update:" in line]
         self.assertEqual(len(matching), 2)
+        # PW-011 M4: routine per-update timing is diagnostic noise, not a
+        # warning -- it must no longer compete with real WARNING-level
+        # signals (retries, recoveries, failures) in the presentation log.
+        self.assertTrue(matching[0].startswith("INFO:"))
         self.assertIn("type=message", matching[0])
         self.assertIn("elapsed_ms=", matching[0])
         self.assertIn("type=callback_query", matching[1])

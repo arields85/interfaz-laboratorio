@@ -42,9 +42,12 @@ from .voice_events import validate_voice_event
 
 app = Flask(__name__)
 # T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
-# comment in `channel_a_manager.py`); relying on the same WARNING-or-above
-# "handler of last resort" keeps these timings visible in
-# `prisma-voice-stderr.log` without adding runtime-wide configuration. Only a
+# comment in `channel_a_manager.py`), so a module logger with no handler
+# falls back to `logging`'s own WARNING-or-above "handler of last resort".
+# PW-011 M4: every timing/diagnostic line in this module is routine, not a
+# warning-worthy condition, so it is logged at INFO -- invisible to that
+# last-resort handler by default, exactly as intended; enable it locally
+# (e.g. `logging.basicConfig(level=logging.INFO)`) to see it. Only a
 # duration is ever logged, never an event id, question or answer text.
 _logger = logging.getLogger(__name__)
 # T11: switched from gemini-3.1-flash-tts-preview (Interactions API,
@@ -373,7 +376,7 @@ def get_gemini_client(secret=None):
     build_start = time.monotonic()
     client, reused = _warm_gemini_client.get(resolved)
     build_elapsed_ms = round((time.monotonic() - build_start) * 1000)
-    _logger.warning(
+    _logger.info(
         "Prisma Gemini client: resolve_elapsed_ms=%d build_elapsed_ms=%d reused=%s",
         resolve_elapsed_ms,
         build_elapsed_ms,
@@ -641,7 +644,7 @@ def _create_interactions_tts_job(text, event_id=None, telegram_chat_id=None, voi
     prisma_audio_sink.emit("backend", "receipt", {})
     if valid_chat is not None and _telegram_token(): job["telegram_encoder"] = TelegramOpusStreamEncoder(job["event_id"])
     if valid_chat is not None: _start_telegram_recording_indicator(job)
-    _logger.warning(
+    _logger.info(
         "Prisma TTS job create: elapsed_ms=%d telegram=%s",
         round((time.monotonic() - create_start) * 1000),
         valid_chat is not None,
@@ -681,7 +684,7 @@ def _generate_tts_audio(job, secret=None, control=None):
     cache_key = _voice_audio_cache_key(job)
     cached = _voice_audio_cache.get(cache_key)
     if cached is not None:
-        _logger.warning("Prisma TTS cache: hit bytes=%d", len(cached))
+        _logger.info("Prisma TTS cache: hit bytes=%d", len(cached))
         try:
             if control is not None and control.cancelled.is_set(): return
             delivered = _append_post_dsp_pcm(job, cached)
@@ -698,7 +701,7 @@ def _generate_tts_audio(job, secret=None, control=None):
             _discard_tts_job(job)
             raise PrismaTtsProviderError("TTS_STREAM_INTERNAL_FAILURE") from None
         return
-    _logger.warning("Prisma TTS cache: miss")
+    _logger.info("Prisma TTS cache: miss")
 
     client = stream = idle_guard = None; audio_accepted = False
     prisma_audio_sink.emit("provider", "dispatch", {})
@@ -719,7 +722,7 @@ def _generate_tts_audio(job, secret=None, control=None):
                 if control is not None and control.cancelled.is_set(): return
                 if first_byte_at is None:
                     first_byte_at = time.monotonic()
-                    _logger.warning(
+                    _logger.info(
                         "Prisma Gemini TTS: time_to_first_byte_ms=%d",
                         round((first_byte_at - stream_requested_at) * 1000),
                     )
@@ -729,7 +732,7 @@ def _generate_tts_audio(job, secret=None, control=None):
                     prisma_audio_sink.emit("backend", "dsp", {"sample_count": len(delivered or b"") // SAMPLE_WIDTH})
                     if delivered is not None:
                         if not first_yield_logged:
-                            _logger.warning(
+                            _logger.info(
                                 "Prisma Gemini TTS: first_yield_processing_elapsed_ms=%d",
                                 round((time.monotonic() - first_byte_at) * 1000),
                             )
@@ -831,7 +834,7 @@ def resolve_voice_event(event_id, capability="", http=None):
         if response is not None:
             try: response.close()
             except Exception: pass
-        _logger.warning(
+        _logger.info(
             "Prisma voice event resolve: elapsed_ms=%d",
             round((time.monotonic() - resolve_start) * 1000),
         )
@@ -954,14 +957,14 @@ def _timed_pcm_stream(stream, request_received):
     try:
         for chunk in stream:
             if not first_chunk_logged:
-                _logger.warning(
+                _logger.info(
                     "Prisma speak-live: first_chunk_elapsed_ms=%d",
                     round((time.monotonic() - request_received) * 1000),
                 )
                 first_chunk_logged = True
             yield chunk
     finally:
-        _logger.warning(
+        _logger.info(
             "Prisma speak-live: stream_end_elapsed_ms=%d",
             round((time.monotonic() - request_received) * 1000),
         )
@@ -986,7 +989,7 @@ def prisma_speak_live():
     try:
         event = resolve_voice_event(data["eventId"], capability)
         published_epoch = _parse_event_publish_epoch(event.get("timestamp"))
-        _logger.warning(
+        _logger.info(
             "Prisma speak-live: event_publish_to_received_ms=%s",
             round((time.time() - published_epoch) * 1000) if published_epoch is not None else None,
         )

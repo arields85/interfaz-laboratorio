@@ -201,7 +201,8 @@ def _log_update_handled(update_type: str, started: float, clock) -> None:
         elapsed_ms = round((clock() - started) * 1000)
     except Exception:
         return
-    _logger.warning("Channel A update: type=%s elapsed_ms=%d", update_type, elapsed_ms)
+    # PW-011 M4: routine per-update timing, not a warning-worthy condition.
+    _logger.info("Channel A update: type=%s elapsed_ms=%d", update_type, elapsed_ms)
 
 
 class ChannelALifecycleError(RuntimeError):

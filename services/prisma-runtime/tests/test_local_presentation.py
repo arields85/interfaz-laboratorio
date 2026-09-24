@@ -69,12 +69,14 @@ class LocalPresentationTests(unittest.TestCase):
             client = create_app(store, events, None, **DISABLED_HTTP_OPTIONS).test_client()
             headers = session_headers(client)
             client.post("/hmi/current-snapshot", json={"version": 1, "command": "publish", "order": 1, "snapshot": demo_snapshot()}, headers=headers)
-            with self.assertLogs(local_presentation_module._logger, level="WARNING") as observed:
+            with self.assertLogs(local_presentation_module._logger, level="INFO") as observed:
                 response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=headers)
             self.assertEqual(response.status_code, 200)
             matching = [line for line in observed.output if "Prisma voice event publish: elapsed_ms=" in line]
             self.assertEqual(len(matching), 1)
             self.assertNotIn("OEE", matching[0])
+            # PW-011 M4: routine per-request timing, not a warning-worthy condition.
+            self.assertTrue(matching[0].startswith("INFO:"))
 
     def test_local_ask_fires_a_background_prefetch_without_delaying_the_response(self) -> None:
         """T10 unit 3: /local/ask must trigger voice-service prefetch for its

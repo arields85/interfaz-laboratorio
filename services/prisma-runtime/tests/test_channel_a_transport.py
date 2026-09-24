@@ -948,14 +948,16 @@ class TimingLogTests(ChannelATransportTestCase):
     def test_send_message_logs_elapsed_ms_on_success_and_failure(self):
         session = FakeSession(FakeResponse(200, {"ok": True}))
         transport = self.build(session)
-        with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+        with self.assertLogs(transport_module._logger, level="INFO") as observed:
             transport.send_message(chat_id=CHAT_ID, text="hola")
         self.assertEqual(len(observed.output), 1)
+        # PW-011 M4: routine per-send timing, not a warning-worthy condition.
+        self.assertTrue(observed.output[0].startswith("INFO:"))
         self.assertIn("Channel A sendMessage: elapsed_ms=", observed.output[0])
 
         session2 = FakeSession(FakeResponse(500, {"ok": False}))
         transport2 = self.build(session2)
-        with self.assertLogs(transport_module._logger, level="WARNING") as observed2:
+        with self.assertLogs(transport_module._logger, level="INFO") as observed2:
             with self.assertRaises(ChannelATransportError):
                 transport2.send_message(chat_id=CHAT_ID, text="hola")
         self.assertEqual(len(observed2.output), 1)
@@ -1009,7 +1011,7 @@ class TimingLogTests(ChannelATransportTestCase):
     def test_timing_logs_never_contain_the_token_or_message_text(self):
         session = FakeSession(FakeResponse(200, {"ok": True}))
         transport = self.build(session)
-        with self.assertLogs(transport_module._logger, level="WARNING") as observed:
+        with self.assertLogs(transport_module._logger, level="INFO") as observed:
             transport.send_message(chat_id=CHAT_ID, text="secreto-de-usuario")
         self.assertNotIn(TOKEN, observed.output[0])
         self.assertNotIn("secreto-de-usuario", observed.output[0])
