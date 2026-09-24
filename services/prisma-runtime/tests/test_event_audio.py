@@ -143,6 +143,29 @@ class AudioCoordinatorTests(unittest.TestCase):
         self.assertNotIn("_capability", failed_state.event)
         self.assertIsNone(getattr(failed_state, "capability", None))
 
+    def test_attaching_to_an_already_complete_job_never_reintroduces_a_capability(self):
+        """PW-011 M1 review follow-up: the capability-refresh-on-attach fix
+        must not reintroduce a capability into a state whose own generation
+        already finished (and was already scrubbed) -- only a job that
+        hasn't started generating yet (admitting/queued) should have its
+        stored capability refreshed by a later attach."""
+
+        def complete(_event, _config, _secret):
+            yield b"done"
+
+        self.coordinator = AudioCoordinator(self.credentials, complete, clock=self.clock, wall_clock=self.clock)
+        event = {"id": "complete", "ownerId": "owner", "text": "a", "expiresAt": 200.0, "_capability": "first-capability"}
+        self.assertEqual(list(self.coordinator.subscribe(event, {})), [b"done"])
+        state = self.coordinator.states[("owner", "complete")]
+        self.assertIsNone(state.capability)
+
+        # A later subscriber attaches to the now-complete job with its own
+        # capability -- it replays the buffered audio, but must never leave
+        # a capability sitting on an already-finished state.
+        late_event = {**event, "_capability": "second-capability"}
+        self.assertEqual(list(self.coordinator.subscribe(late_event, {})), [b"done"])
+        self.assertIsNone(state.capability)
+
     def test_zero_pcm_retry_uses_only_newly_validated_authority(self):
         attempts = 0
         validated = []

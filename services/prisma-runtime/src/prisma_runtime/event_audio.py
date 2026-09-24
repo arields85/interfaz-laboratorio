@@ -364,19 +364,26 @@ class AudioCoordinator:
             with self.lock:
                 if self.closed:
                     raise AudioCapacityError("VOICE_COORDINATOR_CLOSED")
-                if not created:
+                if not created and (retry or state.status in {"admitting", "queued"}):
                     # PW-011 M1: refresh the stored capability on every
-                    # attach to an existing, not-yet-dequeued job -- not
-                    # just on retry. Without this, a job admitted first by
-                    # Channel A's short-lived (60s-TTL) prefetch token, then
-                    # later attached to by the real HMI session with its own
+                    # attach to an existing job that has not started
+                    # generating yet -- not just on retry (retry's own
+                    # about-to-restart job is included above via `retry`,
+                    # since its status is still "failed"/"timed_out" here,
+                    # before the block below moves it back to "queued").
+                    # Without this, a job admitted first by Channel A's
+                    # short-lived (60s-TTL) prefetch token, then later
+                    # attached to by the real HMI session with its own
                     # capability, would still be revalidated at dequeue with
                     # the stale prefetch token, producing a spurious 401 if
                     # dequeue happens after that token expires. Safe: state
                     # is keyed by (owner_id, event_id), and owner_id is
                     # already authoritative by the time subscribe() is
                     # called, so a later attacher can never belong to a
-                    # different owner.
+                    # different owner. Gated otherwise to admitting/queued
+                    # only (mirrors the terminal-state scrub elsewhere): a
+                    # job that is already active, complete or evicted must
+                    # never have a capability reintroduced onto it.
                     state.capability = event.get("_capability", state.capability)
                 if created or retry:
                     state.status = "queued"
