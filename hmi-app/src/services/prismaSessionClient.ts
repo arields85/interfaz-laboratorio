@@ -267,6 +267,8 @@ export class PrismaSessionClient {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', [CAPABILITY_HEADER]: capability },
             body,
+            cache: 'no-store',
+            redirect: 'error',
             keepalive: true,
         }).catch(() => undefined);
     }
