@@ -328,3 +328,41 @@ it will not crash, but voice-note questions will not work until the id is correc
 
 V7 live verification (user) — see Tasks above. The model id (`GEMINI_TRANSCRIPTION_MODEL`) also
 needs explicit confirmation before that live test can succeed; see "Model id decision" above.
+
+## Integration
+
+Rebased onto `fix/pw-011-prisma-minor-followups` (main + PW-011), using
+`git rebase --onto fix/pw-011-prisma-minor-followups 7da1131` so only PW-013's own 20 commits
+(everything after `7da1131`) replayed — the Channel B commits already present on `main` were not
+re-applied. New tip: `51dd0eb`.
+
+One conflicting commit: `95c0e27` (`feat(prisma-voice-notes): thread transcribe through
+ChannelAActivation (V4c)`), touching:
+- `services/prisma-runtime/src/prisma_runtime/channel_a_activation.py` — both sides added a new
+  keyword-only constructor parameter (PW-011's `sweep_interval_seconds`/`sweep_timer_factory` for
+  the periodic housekeeping sweep, PW-013's `transcribe` for voice-note transcription). Resolved by
+  keeping all three parameters.
+- `services/prisma-runtime/tests/test_channel_a_activation.py` — the `activate()` test helper had
+  the same two-sided parameter addition (`sweep_timer_factory` vs `transcribe`). Resolved by keeping
+  both parameters on the helper signature and forwarding both to the real constructor call.
+
+No other files conflicted. Spot-checked the files called out as merge-risk in the integration
+instructions even though git reported no conflict on them: `channel_a_bot.py` (PW-011's `_typing`
+`threading.Event`/sweep-skip plumbing and HMI label fallback both present alongside PW-013's
+`_handle_voice_note`/`enable_voice_notes`), `local_presentation.py` (main's Channel B
+active-screen/FIFO voice-reply queue and PW-013's `_transcribe_voice_note` path both present), and
+`channel_a_query.py` (PW-011's `resolve_label` dependency intact; PW-013 added no test construction
+that omitted it, so no test update was needed there).
+
+Checks after rebase:
+- Runtime suite (`python -m unittest discover -s services/prisma-runtime -p "test_*.py"`): 1730
+  tests, 2 failures, 2 skipped. Same known environment-only cases as PW-011 (worktree-local `.venv`
+  missing), not caused by the rebase.
+- hmi-app: `node_modules` was missing in this worktree, ran `npm ci` first (343 packages).
+- hmi-app `npx vitest run`: 221 test files, 2551 tests, all passed.
+- hmi-app `npx tsc -b`: clean, no output.
+- hmi-app `npm run lint`: clean, no findings.
+
+`feat/pw-013-voice-note-questions` is confirmed a descendant of `fix/pw-011-prisma-minor-followups`
+(`git merge-base --is-ancestor fix/pw-011-prisma-minor-followups HEAD` succeeds), which is itself a
+descendant of `main`.
