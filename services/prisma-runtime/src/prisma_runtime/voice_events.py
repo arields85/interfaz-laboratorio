@@ -86,6 +86,8 @@ class VoiceEventStore:
         max_prefetch_tokens=64,
         channel_b_reply_token_ttl_seconds=60.0,
         max_channel_b_reply_tokens=64,
+        voice_transcription_token_ttl_seconds=60.0,
+        max_voice_transcription_tokens=64,
         max_stream_subscribers_per_owner=4,
         max_stream_subscribers_total=32,
     ):
@@ -97,6 +99,8 @@ class VoiceEventStore:
         self.max_prefetch_tokens = max_prefetch_tokens
         self.channel_b_reply_token_ttl_seconds = channel_b_reply_token_ttl_seconds
         self.max_channel_b_reply_tokens = max_channel_b_reply_tokens
+        self.voice_transcription_token_ttl_seconds = voice_transcription_token_ttl_seconds
+        self.max_voice_transcription_tokens = max_voice_transcription_tokens
         # T13b should-fix: an open SSE stream holds one Werkzeug thread for
         # as long as the connection lives, with no explicit cap of its own
         # before this -- only the 64-session HMI registry indirectly bounded
@@ -124,6 +128,14 @@ class VoiceEventStore:
         # once, with no AudioCoordinator multi-admission revalidation to
         # support.
         self._channel_b_reply_tokens: OrderedDict[str, tuple[dict, float]] = OrderedDict()
+        # PW-013: a voice-note question's already-downloaded, already-bounded
+        # audio has no HMI owner or chat to bind to at mint time -- unlike the
+        # channel B reply token above, which is bound to a specific chat --
+        # it is purely a single-use bearer carrying the payload the voice
+        # process needs to run Gemini transcription. Same fully separate
+        # table discipline: never touches _events/_latest, single-use, own
+        # TTL/capacity.
+        self._voice_transcription_tokens: OrderedDict[str, tuple[dict, float]] = OrderedDict()
         # T13 unit (c): per-owner wake flags so a push (SSE) endpoint can
         # block-wait for the next publish instead of polling the store.
         self._owner_waiters: dict[str, list[threading.Event]] = {}
@@ -348,6 +360,51 @@ class VoiceEventStore:
         expired = [token for token, (_payload, expires_at) in self._channel_b_reply_tokens.items() if expires_at <= now]
         for token in expired:
             self._channel_b_reply_tokens.pop(token, None)
+
+    def mint_voice_transcription_token(self, audio_base64, mime_type, extra_terms=()):
+        """PW-013: mint a single-use bearer token carrying one already-
+        downloaded, already-bounded voice note's base64-encoded audio, its
+        MIME type and cheap domain-vocabulary hints, so the voice process can
+        fetch it back over one loopback GET. See the table's own docstring
+        above for why this never touches _events/_latest."""
+        if not isinstance(audio_base64, str) or not audio_base64:
+            raise ValueError("VOICE_TRANSCRIPTION_AUDIO_INVALID")
+        if not isinstance(mime_type, str) or not mime_type:
+            raise ValueError("VOICE_TRANSCRIPTION_MIME_INVALID")
+        terms = [term.strip() for term in extra_terms if isinstance(term, str) and term.strip()]
+        now = self.clock()
+        with self.lock:
+            self._purge_voice_transcription_tokens_locked(now)
+            if len(self._voice_transcription_tokens) >= self.max_voice_transcription_tokens:
+                self._voice_transcription_tokens.popitem(last=False)
+            token = secrets.token_urlsafe(32)
+            payload = {"audioBase64": audio_base64, "mimeType": mime_type, "extraTerms": terms}
+            self._voice_transcription_tokens[token] = (payload, now + self.voice_transcription_token_ttl_seconds)
+        return token
+
+    def resolve_voice_transcription_token(self, token):
+        """Single-use: a valid token is consumed by its first resolution."""
+        if not isinstance(token, str) or not token:
+            return None
+        now = self.clock()
+        with self.lock:
+            self._purge_voice_transcription_tokens_locked(now)
+            record = self._voice_transcription_tokens.pop(token, None)
+        if record is None:
+            return None
+        payload, expires_at = record
+        if expires_at <= now:
+            return None
+        return dict(payload)
+
+    def _purge_voice_transcription_tokens_locked(self, now):
+        expired = [
+            token
+            for token, (_payload, expires_at) in self._voice_transcription_tokens.items()
+            if expires_at <= now
+        ]
+        for token in expired:
+            self._voice_transcription_tokens.pop(token, None)
 
     def remove_owner(self, owner_id):
         owner_id = str(owner_id)

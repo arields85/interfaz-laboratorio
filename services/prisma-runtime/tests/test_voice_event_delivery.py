@@ -523,3 +523,82 @@ class ChannelBReplyTokenTests(unittest.TestCase):
             with self.subTest(chat_id=invalid_chat_id):
                 with self.assertRaises(ValueError):
                     self.store.mint_channel_b_reply_token(invalid_chat_id, "answer")
+
+
+class VoiceTranscriptionTokenTests(unittest.TestCase):
+    """PW-013: presentation downloads and bounds a voice note's audio, then
+    mints a single-use bearer token carrying the already-base64-encoded audio
+    bytes, MIME type and domain-vocabulary hints, so the voice process can
+    fetch it back over one loopback GET -- same fully separate-table
+    discipline as mint_channel_b_reply_token, never the shared _events/
+    _latest store."""
+
+    def setUp(self):
+        self.now = 10.0
+        self.store = VoiceEventStore(clock=lambda: self.now)
+
+    def test_mint_and_resolve_round_trip_returns_the_bound_payload(self):
+        token = self.store.mint_voice_transcription_token("YXVkaW8=", "audio/ogg", ("Prensa 3",))
+
+        self.assertIsInstance(token, str)
+        self.assertGreaterEqual(len(token), 32)
+        self.assertEqual(
+            self.store.resolve_voice_transcription_token(token),
+            {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": ["Prensa 3"]},
+        )
+
+    def test_extra_terms_default_to_an_empty_list(self):
+        token = self.store.mint_voice_transcription_token("YXVkaW8=", "audio/ogg")
+
+        self.assertEqual(
+            self.store.resolve_voice_transcription_token(token),
+            {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": []},
+        )
+
+    def test_mint_never_touches_the_shared_events_or_latest_store(self):
+        self.store.mint_voice_transcription_token("YXVkaW8=", "audio/ogg")
+
+        self.assertEqual(len(self.store._events), 0)
+        self.assertEqual(len(self.store._latest), 0)
+
+    def test_token_is_single_use(self):
+        token = self.store.mint_voice_transcription_token("YXVkaW8=", "audio/ogg")
+
+        first = self.store.resolve_voice_transcription_token(token)
+        second = self.store.resolve_voice_transcription_token(token)
+
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+
+    def test_resolve_rejects_an_unknown_or_malformed_token(self):
+        self.assertIsNone(self.store.resolve_voice_transcription_token("not-a-real-token"))
+        self.assertIsNone(self.store.resolve_voice_transcription_token(""))
+        self.assertIsNone(self.store.resolve_voice_transcription_token(None))
+
+    def test_resolve_rejects_an_expired_token(self):
+        token = self.store.mint_voice_transcription_token("YXVkaW8=", "audio/ogg")
+
+        self.now += 61.0  # past the short voice-transcription token TTL
+
+        self.assertIsNone(self.store.resolve_voice_transcription_token(token))
+
+    def test_mint_rejects_an_invalid_audio_payload(self):
+        for invalid_audio in ("", None, 42):
+            with self.subTest(audio=invalid_audio):
+                with self.assertRaises(ValueError):
+                    self.store.mint_voice_transcription_token(invalid_audio, "audio/ogg")
+
+    def test_mint_rejects_an_invalid_mime_type(self):
+        for invalid_mime in ("", None, 42):
+            with self.subTest(mime=invalid_mime):
+                with self.assertRaises(ValueError):
+                    self.store.mint_voice_transcription_token("YXVkaW8=", invalid_mime)
+
+    def test_extra_terms_ignores_non_string_or_blank_entries(self):
+        token = self.store.mint_voice_transcription_token(
+            "YXVkaW8=", "audio/ogg", (None, 42, "  ", "Horno 1")
+        )
+
+        self.assertEqual(
+            self.store.resolve_voice_transcription_token(token)["extraTerms"], ["Horno 1"]
+        )
