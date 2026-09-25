@@ -1609,6 +1609,21 @@ class ChannelBVoiceNoteQuestionTests(unittest.TestCase):
         request.assert_not_called()
         bot.send_message.assert_called_once()
 
+    def test_an_empty_downloaded_file_replies_and_never_raises(self):
+        """A 0-byte download must never escape as an uncaught ValueError from
+        mint_voice_transcription_token (which rejects an empty payload) --
+        that would break the caller's update-offset bookkeeping and cause
+        the same update to be reprocessed forever."""
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        self.wire_download(bot, audio_chunks=())
+        with patch.object(local_presentation_module, "_request_voice_transcription") as request:
+            bot._handle_message(voice_note_message(7, 49))
+
+        request.assert_not_called()
+        bot.send_message.assert_called_once()
+
     def test_an_empty_transcript_replies_and_never_answers(self):
         import prisma_runtime.local_presentation as local_presentation_module
 

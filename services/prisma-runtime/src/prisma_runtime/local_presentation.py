@@ -899,16 +899,18 @@ class TelegramLocalBot:
         try:
             file_path = self._call("getFile", timeout=20, data={"file_id": file_id}).get("result", {}).get("file_path")
             audio_bytes = self._download_voice_file(file_path)
+            if not audio_bytes:
+                raise RuntimeError("TELEGRAM_VOICE_FILE_EMPTY")
         except Exception:
             self.send_message(chat_id, VOICE_NOTE_DOWNLOAD_FAILED_REPLY)
             return None
         if not self.voice_url or self.local_http is None:
             self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
             return None
-        audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
         extra_terms = self._voice_note_domain_terms()
-        token = self.voice_events.mint_voice_transcription_token(audio_base64, mime_type, extra_terms)
         try:
+            audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+            token = self.voice_events.mint_voice_transcription_token(audio_base64, mime_type, extra_terms)
             return _request_voice_transcription(self.local_http, self.voice_url, token)
         except VoiceTranscriptionEmpty:
             self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
