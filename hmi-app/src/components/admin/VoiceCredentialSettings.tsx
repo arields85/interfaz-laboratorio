@@ -194,6 +194,14 @@ interface ResultGlyph {
     tone: StatusTone;
     Icon?: LucideIcon;
     iconLabel?: string;
+    // F5 (2026-09-25): set only for a row's own in-flight
+    // save/verify/delete -- renders the shared blinking-underscore caret
+    // (`.widget-runtime-state-caret`, index.css) right after `text`, the
+    // exact same mechanism `WidgetRuntimeState` uses for "Cargando_" (see
+    // that component and the ODD tracker's caret-mechanism research for why
+    // this one was reused instead of the viewer->builder boot shield's own
+    // separate caret).
+    caret?: boolean;
 }
 
 // Credential-presence icon shared by every row (Gemini, Telegram, Canal A):
@@ -263,14 +271,58 @@ function channelAVerifiedResultText(paired: boolean): string {
     return paired ? 'Bot vinculado' : 'Bot disponible, sin vincular';
 }
 
+// F5 (2026-09-25, user report + coordinator wording clarification): while a
+// row's own save/verify/delete is in flight, its trailing result area used
+// to show nothing distinctive for a noticeable time (Gemini/Telegram family
+// showed their resting display unchanged; the old "Verificando…" text had no
+// caret at all). These present participles (formal usted-compatible: they
+// carry no subject) name the in-progress action with the same
+// blinking-underscore mechanism `WidgetRuntimeState` uses for "Cargando_".
+// Save/delete use one fixed generic phrase on every row; verify ("Probar" in
+// the coordinator's own wording -- this component has only one such button,
+// the existing Verificar/`VerifyIconButton`, confirmed by reading the whole
+// file: no separate "Probar" control exists) instead names what is actually
+// being tested on that row, per the coordinator's explicit "check the
+// button's real behavior" instruction -- Verificar never sends anything or
+// starts/stops/restarts the provider, it only checks whether the stored
+// credential is currently valid, so "Probando" fits its real behavior better
+// than "Verificando" here.
+const SAVE_DELETE_PROGRESS_TEXT: Record<'saving' | 'deleting', string> = {
+    saving: 'Guardando credencial',
+    deleting: 'Borrando credencial',
+};
+
+function actionProgressResult(text: string): ResultGlyph {
+    return { text, tone: 'muted', caret: true };
+}
+
+// administration.pendingActions[provider] carries the exact mutation action
+// string runOperation was called with (`save-${provider}` / `delete-${provider}`
+// / `apply-...`); this maps it back to which progress copy to show, without
+// re-deriving it from any other state.
+function progressKindFromPendingAction(action: string | null): 'saving' | 'deleting' | null {
+    if (!action) return null;
+    if (action.startsWith('save-')) return 'saving';
+    if (action.startsWith('delete-')) return 'deleting';
+    return null;
+}
+
+// The Gemini row's Verificar tests the voice provider's API key; both
+// Telegram-family rows (Canal A / Canal B) test a bot token instead.
+function verifyProgressText(provider: CredentialProvider): string {
+    return provider === 'gemini' ? 'Probando voz' : 'Probando bot';
+}
+
 // Telegram's live connection state, mapped from the existing status fields
-// only (running/lastError) -- never from a derived "not running" guess.
-// `pending` covers the client-side window while a save (which now
-// applies/restarts inline) or a delete (which stops) is in flight, since the
-// health payload has no own "connecting" state.
-function telegramConnectionResult(telegram: TelegramPassiveHealth | null, pending: boolean): ResultGlyph | null {
+// only (running/lastError) -- never from a derived "not running" guess. F4/F5
+// (2026-09-25): the client-side window while a save/delete is in flight used
+// to be folded in here as a generic "Conectando…", via a `pending` argument;
+// it is now handled one level up, before this function is even called, as a
+// specific "Guardando_"/"Borrando_" progress state (see
+// renderTelegramFamilyProvider's resultGlyph), so this function no longer
+// needs to know about it.
+function telegramConnectionResult(telegram: TelegramPassiveHealth | null): ResultGlyph | null {
     if (!telegram || !telegram.configured) return null;
-    if (pending) return { text: 'Conectando…', tone: 'muted' };
     if (telegram.lastError) return { text: 'No se pudo conectar el bot', tone: 'critical' };
     if (telegram.running) {
         return { text: telegram.botUsername ? `@${telegram.botUsername}` : 'Bot conectado', tone: 'success', Icon: Check, iconLabel: 'Bot conectado' };
@@ -296,9 +348,11 @@ function telegramConnectionResult(telegram: TelegramPassiveHealth | null, pendin
 // instead of the generic fallback. Only 'retired' (the 7-day idle horizon,
 // still out of T16's scope) or a running phase with a pending restart stays
 // genuinely unknown.
-function channelAConnectionResult(channelA: ChannelAAdministrationStatus | null, pending: boolean): ResultGlyph | null {
+// F4/F5 (2026-09-25): same simplification as telegramConnectionResult above
+// -- the in-flight save/delete window is now a specific progress state
+// handled before this function is called, so it drops the `pending` param.
+function channelAConnectionResult(channelA: ChannelAAdministrationStatus | null): ResultGlyph | null {
     if (!channelA || !channelA.configured) return null;
-    if (pending) return { text: 'Conectando…', tone: 'muted' };
     if (channelA.retrying) return { text: 'Reconectando…', tone: 'warning' };
     if (channelA.lastError === 'PRISMA_CHANNEL_A_UNAUTHORIZED') return { text: 'Token inválido', tone: 'critical' };
     if (channelA.lastError === 'TELEGRAM_BOT_IDENTITY_RESERVED') return { text: 'Bot en uso por el otro canal', tone: 'critical' };
@@ -322,11 +376,24 @@ function channelAConnectionResult(channelA: ChannelAAdministrationStatus | null,
 // meaning isn't lost. An identity string ("@username", never a status
 // claim) stays neutral/muted regardless of tone. RESULT_AREA_WIDTH_CLS
 // keeps every row's result area the same width so the three rows line up.
-function ResultDisplay({ text, tone, Icon, iconLabel, testId }: ResultGlyph & { testId: string }) {
+function ResultDisplay({ text, tone, Icon, iconLabel, caret, testId }: ResultGlyph & { testId: string }) {
     const isIdentityText = text.startsWith('@');
     return (
-        <div data-testid={testId} className={`ml-auto flex items-center gap-1 ${RESULT_AREA_WIDTH_CLS}`}>
-            <span className={isIdentityText ? 'text-industrial-muted' : STATUS_TONE_CLS[tone]}>{text}</span>
+        <div
+            data-testid={testId}
+            // F5: an in-progress state (Guardando_/Verificando_/Borrando_) is
+            // announced as it changes, matching the existing role="status"
+            // pattern this file already uses for the panel-level feedback
+            // region below; the resting/settled display stays silent so
+            // screen readers aren't spammed on every ordinary re-render.
+            role={caret ? 'status' : undefined}
+            aria-live={caret ? 'polite' : undefined}
+            className={`ml-auto flex items-center gap-1 ${RESULT_AREA_WIDTH_CLS}`}
+        >
+            <span className={isIdentityText ? 'text-industrial-muted' : STATUS_TONE_CLS[tone]}>
+                {text}
+                {caret ? <span aria-hidden="true" className="widget-runtime-state-caret">_</span> : null}
+            </span>
             {Icon ? (
                 <span role="img" aria-label={iconLabel ?? text} className={STATUS_TONE_CLS[tone]}>
                     <Icon size={16} aria-hidden="true" />
@@ -447,8 +514,16 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     const secretRevisionRef = useRef<Record<CredentialProvider, number>>({ gemini: 0, telegram: 0, telegram_channel_a: 0 });
     const dialogRevisionRef = useRef(0);
     const unavailable = Boolean(administration.error);
-    const disabled = !authenticated || !administration.data || unavailable || administration.pendingAction !== null;
-    const retryDisabled = !authenticated || administration.pendingAction !== null;
+    // F4 fix (2026-09-25): this must stay provider-agnostic (auth/data/global
+    // error only). It used to also fold in administration.pendingAction, a
+    // single GLOBAL save/delete/apply lock shared by every provider, so
+    // saving or deleting in one row disabled Save/Delete/Verify (and the
+    // input) in every OTHER row too. Each row now derives its own pending
+    // flag from administration.pendingActions[provider] instead -- see
+    // renderGeminiProvider / renderTelegramFamilyProvider below.
+    const disabled = !authenticated || !administration.data || unavailable;
+    const retryDisabled = !authenticated
+        || (stopRetryProvider !== null && administration.pendingActions[stopRetryProvider] !== null);
     const credentials = administration.data?.credentials;
     const telegram = administration.data?.telegram;
     const stale = unavailable && administration.data !== null;
@@ -636,15 +711,22 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const gemini = credentials?.gemini;
         const geminiConfigured = gemini?.configured;
         const verifying = administration.verifyingProviders.gemini;
+        // F4/F5: this row's own save/delete pending state, scoped to
+        // 'gemini' only -- never derived from another provider's operation.
+        const geminiProgressKind = progressKindFromPendingAction(administration.pendingActions.gemini);
+        const geminiPending = administration.pendingActions.gemini !== null;
+        const geminiDisabled = disabled || geminiPending;
         const credentialGlyph = geminiConfigured === undefined ? null : credentialConfiguredGlyph(geminiConfigured);
         const showsMask = value === '' && geminiConfigured === true;
         const showingJustVerified = verificationResultVisible.gemini && gemini?.verification.state === 'verified';
         const resultGlyph: ResultGlyph | null = gemini
-            ? (verifying
-                ? { text: 'Verificando…', tone: 'muted' }
-                : showingJustVerified
-                    ? { text: 'Verificado', tone: 'success', Icon: Check }
-                    : geminiRestingResult(gemini.verification.state, gemini.model))
+            ? (geminiProgressKind
+                ? actionProgressResult(SAVE_DELETE_PROGRESS_TEXT[geminiProgressKind])
+                : verifying
+                    ? actionProgressResult(verifyProgressText('gemini'))
+                    : showingJustVerified
+                        ? { text: 'Verificado', tone: 'success', Icon: Check }
+                        : geminiRestingResult(gemini.verification.state, gemini.model))
             : null;
 
         return (
@@ -676,7 +758,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             setProviderDraft('gemini', nextValue);
                         }}
                         className={`${ADMIN_SIDEBAR_INPUT_CLS} hmi-masked-text ${CREDENTIAL_INPUT_WIDTH_CLS}`}
-                        disabled={disabled}
+                        disabled={geminiDisabled}
                     />
                     {credentialGlyph ? <StatusIcon {...credentialGlyph} /> : (
                         <span className="text-industrial-muted">
@@ -689,7 +771,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             variant="primary"
                             aria-label="Guardar credencial"
                             title="Guardar credencial"
-                            disabled={disabled || !value}
+                            disabled={geminiDisabled || !value}
                             onClick={() => void save('gemini')}
                         >
                             <Save size={14} aria-hidden="true" />
@@ -701,7 +783,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             variant="secondary"
                             aria-label="Eliminar credencial"
                             title="Eliminar credencial"
-                            disabled={disabled}
+                            disabled={geminiDisabled}
                             onClick={() => updateDeleteProvider('gemini')}
                         >
                             <Trash2 size={14} aria-hidden="true" />
@@ -711,7 +793,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                         <VerifyIconButton
                             configured={gemini.configured}
                             verifying={verifying}
-                            disabled={disabled}
+                            disabled={geminiDisabled}
                             disabledTooltip="Configure una API key para verificarla."
                             onVerify={() => void verifyProvider('gemini')}
                         />
@@ -737,10 +819,16 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         // A channel A status failure disables only that channel's controls;
         // Gemini and Telegram keep working from their own metadata.
         const channelAUnavailable = isChannelA && Boolean(administration.channelAError);
-        const providerDisabled = disabled || channelAUnavailable;
+        // F4 fix (2026-09-25): scoped to THIS row's own provider only --
+        // administration.pendingActions[provider] is never set by another
+        // row's save/delete, so this can no longer block Canal A while
+        // Gemini (or Canal B) is saving/deleting, and vice versa.
+        const pendingAction = administration.pendingActions[provider];
+        const progressKind = progressKindFromPendingAction(pendingAction);
+        const providerPending = pendingAction !== null;
+        const providerDisabled = disabled || channelAUnavailable || providerPending;
         const showsMask = value === '' && providerConfigured === true;
         const credentialGlyph = providerConfigured === undefined ? null : credentialConfiguredGlyph(providerConfigured);
-        const pending = administration.pendingAction === `save-${provider}` || administration.pendingAction === `delete-${provider}`;
         const runtimeErrorCode = isChannelA
             ? channelA?.lastError ?? null
             : (telegram?.lastError ?? telegram?.configurationError ?? null);
@@ -751,18 +839,23 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const verifying = administration.verifyingProviders[provider];
         const verification = credentials?.[provider].verification ?? null;
         const showingVerificationResult = verificationResultVisible[provider] && verification !== null;
-        const resultGlyph: ResultGlyph | null = verifying
-            ? { text: 'Verificando…', tone: 'muted' }
-            : (showingVerificationResult && verification)
-                ? (isChannelA && verification.state === 'verified'
-                    // T15 (user decision): Canal A's post-Verificar success message
-                    // names whether the token is already paired to a chat, instead
-                    // of jumping straight to "@username" like the live connection
-                    // state does; it reverts to that connection state after the
-                    // display duration (see verifyProvider's timer above).
-                    ? { text: channelAVerifiedResultText(Boolean(channelA?.paired)), tone: 'muted' }
-                    : telegramTokenVerificationResult(verification))
-                : (isChannelA ? channelAConnectionResult(channelA, pending) : telegramConnectionResult(telegram ?? null, pending));
+        // F5: a same-row save/delete takes precedence over a still-settling
+        // verify display (it resets verification anyway -- see save/remove's
+        // resetVerificationResult call) and over the live connection state.
+        const resultGlyph: ResultGlyph | null = progressKind
+            ? actionProgressResult(SAVE_DELETE_PROGRESS_TEXT[progressKind])
+            : verifying
+                ? actionProgressResult(verifyProgressText(provider))
+                : (showingVerificationResult && verification)
+                    ? (isChannelA && verification.state === 'verified'
+                        // T15 (user decision): Canal A's post-Verificar success message
+                        // names whether the token is already paired to a chat, instead
+                        // of jumping straight to "@username" like the live connection
+                        // state does; it reverts to that connection state after the
+                        // display duration (see verifyProvider's timer above).
+                        ? { text: channelAVerifiedResultText(Boolean(channelA?.paired)), tone: 'muted' }
+                        : telegramTokenVerificationResult(verification))
+                    : (isChannelA ? channelAConnectionResult(channelA) : telegramConnectionResult(telegram ?? null));
 
         return (
             <CredentialFieldset

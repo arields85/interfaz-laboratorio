@@ -28,6 +28,16 @@ const configuredA = {
     ...metadata,
     telegram_channel_a: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
 };
+// F4 regression matrix fixture (2026-09-25): every row configured, so
+// Guardar/Eliminar/Verificar are all meaningfully enableable on all three
+// rows at once -- an "enabled" assertion for an unrelated row is never
+// confused with an unrelated, legitimate disablement reason (missing
+// credential, empty draft).
+const allConfiguredMetadata = {
+    gemini: { ...GEMINI_NOT_CHECKED, configured: true },
+    telegram: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+    telegram_channel_a: { configured: true, verified: false, verification: TELEGRAM_TOKEN_NOT_CHECKED },
+};
 const TELEGRAM_VERIFIED = {
     configured: true, verified: true,
     verification: { state: 'verified', checkedAt: 1_700_000_002, username: 'prisma_bot' },
@@ -1040,9 +1050,12 @@ describe('VoiceCredentialSettings', () => {
     });
 
     // T15: the pressed Verify button must NOT swap to a spinner -- it keeps
-    // its Play icon, just disabled; the result area's "Verificando…" is text
-    // only (no icon at all).
-    it('shows Verificando as text only while a Gemini verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
+    // its Play icon, just disabled. F5 (2026-09-25 coordinator decision): the
+    // RESULT AREA text is "Probando voz_" (named after what Verificar
+    // actually tests on this row -- the voice provider's API key), with the
+    // shared blinking-underscore caret; the button's own accessible name
+    // ("Verificando…") is unrelated and unchanged.
+    it('shows "Probando voz_" with the caret in the result area while a Gemini verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
         const user = userEvent.setup();
         let release!: (value: typeof GEMINI_VERIFIED) => void;
         const pending = new Promise<typeof GEMINI_VERIFIED>((resolve) => { release = resolve; });
@@ -1060,8 +1073,12 @@ describe('VoiceCredentialSettings', () => {
         const verifyingButton = await within(gemini).findByRole('button', { name: 'Verificando…' });
         expect(verifyingButton).toBeDisabled();
         expectLucideIcon(verifyingButton, 'play');
-        expect(within(gemini).queryByRole('img', { name: 'Verificando…' })).not.toBeInTheDocument();
-        expect(within(gemini).getByText('Verificando…')).toBeInTheDocument();
+        const resultArea = within(gemini).getByTestId('gemini-verification-result');
+        expect(resultArea).toHaveTextContent('Probando voz_');
+        expect(resultArea).toHaveAttribute('role', 'status');
+        expect(resultArea).toHaveAttribute('aria-live', 'polite');
+        expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
+        expect(within(resultArea).queryByRole('img')).not.toBeInTheDocument();
         await act(async () => { release(GEMINI_VERIFIED); });
     });
 
@@ -1383,7 +1400,149 @@ describe('VoiceCredentialSettings', () => {
         expect(within(channelB).getByRole('button', { name: 'Verificar' })).toBeEnabled();
     });
 
-    it('shows Verificando as text only while a Canal B verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
+    // F4 full matrix (2026-09-25 coordinator clarification): every row x
+    // every action must be checked against every OTHER row, not just the
+    // Verificar case T15 already covered. "Probar" (the coordinator's own
+    // wording) is the existing Verificar button -- this component has no
+    // separate fourth control (confirmed: no "Probar" string or button
+    // anywhere in this file) -- so the matrix below is the 3 real actions
+    // (save/delete/verify) across the 3 rows.
+    const CREDENTIAL_ROWS = [
+        { groupName: 'Proveedor de voz', provider: 'gemini' as const, inputLabel: 'API Key de Gemini' },
+        { groupName: 'Canal A', provider: 'telegram_channel_a' as const, inputLabel: 'Telegram bot API Token' },
+        { groupName: 'Canal B', provider: 'telegram' as const, inputLabel: 'Telegram bot API Token' },
+    ] as const;
+
+    function createHangingClient(
+        hangingProvider: 'gemini' | 'telegram' | 'telegram_channel_a',
+        hangingAction: 'save' | 'delete' | 'verify',
+    ): Partial<CredentialAdministrationClient> {
+        const pending = new Promise<never>(() => undefined);
+        return {
+            saveCredential: vi.fn((provider: string) => (hangingAction === 'save' && provider === hangingProvider
+                ? pending
+                : Promise.resolve({ provider, configured: true }))),
+            deleteCredential: vi.fn((provider: string) => (hangingAction === 'delete' && provider === hangingProvider
+                ? pending
+                : Promise.resolve(undefined))),
+            verifyGemini: hangingAction === 'verify' && hangingProvider === 'gemini' ? vi.fn(() => pending) : vi.fn(async () => GEMINI_VERIFIED),
+            verifyTelegram: hangingAction === 'verify' && hangingProvider === 'telegram' ? vi.fn(() => pending) : vi.fn(async () => TELEGRAM_VERIFIED),
+            verifyChannelA: hangingAction === 'verify' && hangingProvider === 'telegram_channel_a' ? vi.fn(() => pending) : vi.fn(async () => CHANNEL_A_VERIFIED),
+        };
+    }
+
+    it.each(
+        CREDENTIAL_ROWS.flatMap((row) => (['save', 'delete', 'verify'] as const).map((action) => ({ ...row, action }))),
+    )('an in-flight $action on $groupName never disables the other two rows\' Guardar/Eliminar/Verificar (F4 matrix)', async ({ groupName, provider, action }) => {
+        const user = userEvent.setup();
+        renderSettings({
+            credentialMetadata: vi.fn(async () => allConfiguredMetadata),
+            channelAStatus: vi.fn(async () => channelARunning),
+            ...createHangingClient(provider, action),
+        });
+        const pressedRow = await screen.findByRole('group', { name: groupName });
+        const otherRows = CREDENTIAL_ROWS
+            .filter((row) => row.groupName !== groupName)
+            .map((row) => screen.getByRole('group', { name: row.groupName }));
+
+        // Give every row (including the pressed one) a non-empty draft up
+        // front, so an unrelated row's Guardar being enabled is never masked
+        // by it simply having no typed value.
+        for (const row of [pressedRow, ...otherRows]) {
+            const input = within(row).getByLabelText(/API Key de Gemini|Telegram bot API Token/);
+            await waitFor(() => expect(input).toBeEnabled());
+            await user.type(input, 'draft-secret');
+        }
+
+        if (action === 'save') {
+            await user.click(within(pressedRow).getByRole('button', { name: 'Guardar credencial' }));
+        } else if (action === 'delete') {
+            await user.click(within(pressedRow).getByRole('button', { name: 'Eliminar credencial' }));
+            await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
+        } else {
+            await waitFor(() => expect(within(pressedRow).getByRole('button', { name: 'Verificar' })).toBeEnabled());
+            await user.click(within(pressedRow).getByRole('button', { name: 'Verificar' }));
+        }
+
+        if (action === 'verify') {
+            // T15: verify disables only itself on the pressed row; Save/Delete
+            // on that SAME row stay enabled by design (verification is
+            // read-only and does not conflict with a same-row mutation).
+            expect(await within(pressedRow).findByRole('button', { name: 'Verificando…' })).toBeDisabled();
+        } else {
+            // Save/Delete gate all three of the pressed row's own controls
+            // (the existing double-submit guard, unchanged by F4).
+            await waitFor(() => expect(within(pressedRow).getByRole('button', { name: 'Guardar credencial' })).toBeDisabled());
+            expect(within(pressedRow).getByRole('button', { name: 'Eliminar credencial' })).toBeDisabled();
+            expect(within(pressedRow).getByRole('button', { name: 'Verificar' })).toBeDisabled();
+        }
+
+        // The actual F4 assertion: every OTHER row's Guardar/Eliminar/Verificar
+        // stay fully enabled, regardless of which row/action is pending.
+        for (const otherRow of otherRows) {
+            expect(within(otherRow).getByRole('button', { name: 'Guardar credencial' })).toBeEnabled();
+            expect(within(otherRow).getByRole('button', { name: 'Eliminar credencial' })).toBeEnabled();
+            expect(within(otherRow).getByRole('button', { name: 'Verificar' })).toBeEnabled();
+            expect(within(otherRow).getByLabelText(/API Key de Gemini|Telegram bot API Token/)).toBeEnabled();
+        }
+    });
+
+    // F4 concurrent case (2026-09-25 coordinator clarification): two DIFFERENT
+    // rows with truly simultaneous in-flight operations must each disable
+    // only themselves, never each other, and never the third (idle) row.
+    it('lets two different rows run independent in-flight operations at the same time (F4 concurrent case)', async () => {
+        const user = userEvent.setup();
+        let releaseSave!: () => void;
+        const pendingSave = new Promise<{ provider: string; configured: boolean }>((resolve) => {
+            releaseSave = () => resolve({ provider: 'gemini', configured: true });
+        });
+        let releaseDelete!: () => void;
+        const pendingDelete = new Promise<void>((resolve) => { releaseDelete = () => resolve(undefined); });
+        const saveCredential = vi.fn((provider: string) => (provider === 'gemini' ? pendingSave : Promise.resolve({ provider, configured: true })));
+        const deleteCredential = vi.fn((provider: string) => (provider === 'telegram_channel_a' ? pendingDelete : Promise.resolve(undefined)));
+        renderSettings({
+            credentialMetadata: vi.fn(async () => allConfiguredMetadata),
+            channelAStatus: vi.fn(async () => channelARunning),
+            saveCredential,
+            deleteCredential,
+        });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        const channelA = screen.getByRole('group', { name: 'Canal A' });
+        const channelB = screen.getByRole('group', { name: 'Canal B' });
+
+        const geminiInput = within(gemini).getByLabelText('API Key de Gemini');
+        await waitFor(() => expect(geminiInput).toBeEnabled());
+        await user.type(geminiInput, 'gemini-secret');
+        // Canal B needs a draft too, purely so its own Guardar can be
+        // meaningfully asserted "enabled" below instead of disabled for the
+        // unrelated reason of having no typed value.
+        const channelBInput = within(channelB).getByLabelText('Telegram bot API Token');
+        await user.type(channelBInput, 'channel-b-draft');
+        await user.click(within(gemini).getByRole('button', { name: 'Guardar credencial' }));
+
+        await user.click(within(channelA).getByRole('button', { name: 'Eliminar credencial' }));
+        await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
+
+        // Both pressed rows disable only their own three controls...
+        await waitFor(() => expect(within(gemini).getByRole('button', { name: 'Guardar credencial' })).toBeDisabled());
+        expect(within(gemini).getByRole('button', { name: 'Eliminar credencial' })).toBeDisabled();
+        expect(within(gemini).getByRole('button', { name: 'Verificar' })).toBeDisabled();
+        expect(within(channelA).getByRole('button', { name: 'Guardar credencial' })).toBeDisabled();
+        expect(within(channelA).getByRole('button', { name: 'Eliminar credencial' })).toBeDisabled();
+        expect(within(channelA).getByRole('button', { name: 'Verificar' })).toBeDisabled();
+        // ...never each other, and Canal B (idle) stays fully usable.
+        expect(within(channelB).getByRole('button', { name: 'Guardar credencial' })).toBeEnabled();
+        expect(within(channelB).getByRole('button', { name: 'Eliminar credencial' })).toBeEnabled();
+        expect(within(channelB).getByRole('button', { name: 'Verificar' })).toBeEnabled();
+
+        await act(async () => { releaseSave(); });
+        await act(async () => { releaseDelete(); });
+    });
+
+    // F5 (2026-09-25 coordinator decision): the Telegram-family rows test a
+    // bot token, so their result-area progress text is "Probando bot_",
+    // distinct from Gemini's "Probando voz_".
+    it('shows "Probando bot_" with the caret in the result area while a Canal B verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
         const user = userEvent.setup();
         let release!: (value: typeof TELEGRAM_VERIFIED) => void;
         const pending = new Promise<typeof TELEGRAM_VERIFIED>((resolve) => { release = resolve; });
@@ -1401,9 +1560,68 @@ describe('VoiceCredentialSettings', () => {
         const verifyingButton = await within(channelB).findByRole('button', { name: 'Verificando…' });
         expect(verifyingButton).toBeDisabled();
         expectLucideIcon(verifyingButton, 'play');
-        expect(within(channelB).queryByRole('img', { name: 'Verificando…' })).not.toBeInTheDocument();
-        expect(within(channelB).getByText('Verificando…')).toBeInTheDocument();
+        const resultArea = within(channelB).getByTestId('telegram-verification-result');
+        expect(resultArea).toHaveTextContent('Probando bot_');
+        expect(resultArea).toHaveAttribute('role', 'status');
+        expect(resultArea).toHaveAttribute('aria-live', 'polite');
+        expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
+        expect(within(resultArea).queryByRole('img')).not.toBeInTheDocument();
         await act(async () => { release(TELEGRAM_VERIFIED); });
+    });
+
+    // F5 (2026-09-25): Guardar/Eliminar get the same generic caret-based
+    // progress copy on every row, unlike Verificar's per-row wording above.
+    it.each([
+        ['Proveedor de voz', 'gemini', 'gemini-verification-result'] as const,
+        ['Canal A', 'telegram_channel_a', 'telegram_channel_a-verification-result'] as const,
+        ['Canal B', 'telegram', 'telegram-verification-result'] as const,
+    ])('shows "Guardando credencial_" with the caret in %s\'s result area while its own save is in flight', async (groupName, provider, testId) => {
+        const user = userEvent.setup();
+        const pending = new Promise<never>(() => undefined);
+        const saveCredential = vi.fn((savedProvider: string) => (savedProvider === provider ? pending : Promise.resolve({ provider: savedProvider, configured: true })));
+        renderSettings({
+            credentialMetadata: vi.fn(async () => allConfiguredMetadata),
+            channelAStatus: vi.fn(async () => channelARunning),
+            saveCredential,
+        });
+        const row = await screen.findByRole('group', { name: groupName });
+        const input = within(row).getByLabelText(/API Key de Gemini|Telegram bot API Token/);
+        await waitFor(() => expect(input).toBeEnabled());
+        await user.type(input, 'new-secret');
+
+        await user.click(within(row).getByRole('button', { name: 'Guardar credencial' }));
+
+        const resultArea = await within(row).findByTestId(testId);
+        await waitFor(() => expect(resultArea).toHaveTextContent('Guardando credencial_'));
+        expect(resultArea).toHaveAttribute('role', 'status');
+        expect(resultArea).toHaveAttribute('aria-live', 'polite');
+        expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
+    });
+
+    it.each([
+        ['Proveedor de voz', 'gemini', 'gemini-verification-result'] as const,
+        ['Canal A', 'telegram_channel_a', 'telegram_channel_a-verification-result'] as const,
+        ['Canal B', 'telegram', 'telegram-verification-result'] as const,
+    ])('shows "Borrando credencial_" with the caret in %s\'s result area while its own delete is in flight', async (groupName, provider, testId) => {
+        const user = userEvent.setup();
+        const pending = new Promise<never>(() => undefined);
+        const deleteCredential = vi.fn((deletedProvider: string) => (deletedProvider === provider ? pending : Promise.resolve(undefined)));
+        renderSettings({
+            credentialMetadata: vi.fn(async () => allConfiguredMetadata),
+            channelAStatus: vi.fn(async () => channelARunning),
+            deleteCredential,
+        });
+        const row = await screen.findByRole('group', { name: groupName });
+        await waitFor(() => expect(within(row).getByRole('button', { name: 'Eliminar credencial' })).toBeEnabled());
+
+        await user.click(within(row).getByRole('button', { name: 'Eliminar credencial' }));
+        await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
+
+        const resultArea = await within(row).findByTestId(testId);
+        await waitFor(() => expect(resultArea).toHaveTextContent('Borrando credencial_'));
+        expect(resultArea).toHaveAttribute('role', 'status');
+        expect(resultArea).toHaveAttribute('aria-live', 'polite');
+        expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
     });
 
     // T15: a failed verification result REPLACES the live connection state
