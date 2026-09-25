@@ -50,6 +50,14 @@ export const PRISMA_ORB_ENTRY_DURATION_MS = 250;
 // bounded, so the orb never waits in "thinking" forever.
 export const PRISMA_ORB_THINKING_TIMEOUT_MS = 9_000;
 
+// V3 (voice-overlap): bounded FIFO depth for voice events that arrive while
+// the current one is still being presented (thinking or visibly speaking --
+// see isActiveRef below). Generous for the real scenario this fixes (a
+// couple of consecutive/overlapping Channel A voice notes for the same HMI
+// session): only a sustained burst beyond this depth ever drops the newest
+// overflow event instead of growing the queue without bound.
+export const PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT = 4;
+
 // Tied to the generated T16 timeline's own phase enum (schemas/prisma-audio-
 // record.v1.schema.json -> prismaAudioMetric.generated.ts) instead of a
 // separately hand-maintained union, so the two can never silently drift
@@ -156,6 +164,15 @@ export function usePrismaOrbPresentation(
     const generationRef = useRef(0);
     const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const thinkingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // V3 (voice-overlap): true from the moment an event starts being
+    // presented (thinking) until its own terminal fires (onStarted's answer
+    // finishing, onError, or the bounded thinking timeout) -- NOT until the
+    // cosmetic fade/hidden transition completes, since by the time the
+    // terminal fires the answer has already fully played and the fade is
+    // pure UI wind-down. A new event arriving while this is true is queued
+    // (pendingQueueRef) instead of aborting the in-progress answer.
+    const isActiveRef = useRef(false);
+    const pendingQueueRef = useRef<VoiceEvent[]>([]);
 
     // T4: the shared Prisma voice config carries the user's Automatic/Manual
     // mode choice (`playbackBuffer`). This is the viewer's only current
@@ -228,9 +245,15 @@ export function usePrismaOrbPresentation(
     // before the request can begin. The deferred target below stands in for
     // the real orb until it mounts; `orbRef`'s setter (above) attaches it
     // the instant the DOM node commits.
-    const presentVoiceEvent = (event: VoiceEvent): void => {
+    // V3 (voice-overlap): the actual presentation start, extracted from the
+    // old presentVoiceEvent body unchanged -- only ever called either
+    // directly (nothing else is active) or from beginFade below (dequeuing
+    // the next queued event the moment the current one's own terminal
+    // fires).
+    const beginPresenting = (event: VoiceEvent): void => {
         const eventId = event.id?.trim();
         if (!eventId) return;
+        isActiveRef.current = true;
         generationRef.current += 1;
         const generation = generationRef.current;
         clearFadeTimer();
@@ -252,6 +275,20 @@ export function usePrismaOrbPresentation(
         const beginFade = (): void => {
             if (generationRef.current !== generation || terminalCallbackHandled) return;
             terminalCallbackHandled = true;
+            // V3: the answer this generation was presenting has now fully
+            // finished (played to completion, errored, or timed out waiting
+            // to start) -- no longer "active" for queueing purposes, even
+            // though the cosmetic fade/hidden transition below has not run
+            // yet. If another voice event queued up while this one was
+            // active, start it immediately instead of fading: the fade is
+            // pure UI wind-down with no audio behind it, so skipping it here
+            // never drops or overlaps any answer.
+            isActiveRef.current = false;
+            const next = pendingQueueRef.current.shift();
+            if (next) {
+                beginPresenting(next);
+                return;
+            }
             clearFadeTimer();
             clearThinkingTimeout();
             updatePhase('fading');
@@ -280,10 +317,32 @@ export function usePrismaOrbPresentation(
         });
     };
 
+    // V3 (voice-overlap): every new voice event still reaches this same
+    // public entry point. One arriving while the previous answer is still
+    // actively being presented (thinking or visibly speaking) is queued
+    // (bounded FIFO) instead of aborting the in-progress playback --
+    // consecutive/overlapping answers for the same HMI session must each
+    // play, in order, never dropped. One arriving during the previous
+    // answer's cosmetic fade-out still starts immediately, unchanged from
+    // before: by then the previous answer has already fully played.
+    const presentVoiceEvent = (event: VoiceEvent): void => {
+        const eventId = event.id?.trim();
+        if (!eventId) return;
+        if (isActiveRef.current) {
+            if (pendingQueueRef.current.length < PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT) {
+                pendingQueueRef.current.push(event);
+            }
+            return;
+        }
+        beginPresenting(event);
+    };
+
     useLayoutEffect(() => () => {
         generationRef.current += 1;
         clearFadeTimer();
         clearThinkingTimeout();
+        isActiveRef.current = false;
+        pendingQueueRef.current = [];
         engineRef.current?.dispose();
     }, []);
 
@@ -291,6 +350,8 @@ export function usePrismaOrbPresentation(
         generationRef.current += 1;
         clearFadeTimer();
         clearThinkingTimeout();
+        isActiveRef.current = false;
+        pendingQueueRef.current = [];
         engineRef.current?.stop();
         updatePhase('hidden');
     }), []);

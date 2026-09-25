@@ -62,6 +62,7 @@ vi.mock('../queries/usePrismaVoiceConfig', () => ({
 import {
     PRISMA_ORB_FADE_DURATION_MS,
     PRISMA_ORB_THINKING_TIMEOUT_MS,
+    PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT,
     usePrismaOrbPresentation,
 } from './usePrismaOrbPresentation';
 
@@ -214,16 +215,86 @@ describe('usePrismaOrbPresentation', () => {
         expect(result.current.phase).toBe('visible');
     });
 
-    it('ignores stale terminal callbacks after a newer event', () => {
-        const { engine, lifecycles } = createEngine();
-        const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
-        attachOrb(result);
+    describe('V3 (voice-overlap): overlapping answers queue instead of aborting', () => {
+        it('queues a voice event that arrives while the previous one is still thinking, instead of aborting it', () => {
+            const factory = vi.fn<PrismaVoiceAudioSourceFactory>(({ eventId }) => ({ ...SOURCE, id: eventId } as unknown as PrismaVoiceAudioSource));
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: factory }));
+            attachOrb(result);
 
-        act(() => result.current.presentVoiceEvent(EVENT));
-        act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
-        act(() => lifecycles[0]?.onEnded?.());
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
 
-        expect(result.current.phase).toBe('thinking');
+            // The second event never interrupted the first: exactly one
+            // engine.play() call so far, and the first answer's own phase.
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(lifecycles).toHaveLength(1);
+            expect(result.current.phase).toBe('thinking');
+            expect(factory).toHaveBeenCalledTimes(1);
+        });
+
+        it('plays a queued voice event immediately once the previous one finishes, in order', () => {
+            const factory = vi.fn<PrismaVoiceAudioSourceFactory>(({ eventId }) => ({ ...SOURCE, id: eventId } as unknown as PrismaVoiceAudioSource));
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: factory }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
+            act(() => lifecycles[0]?.onStarted?.());
+            act(() => lifecycles[0]?.onEnded?.());
+
+            // The queued second answer starts immediately -- straight back
+            // to "thinking", never visiting "fading"/"hidden" in between,
+            // since the fade is pure cosmetic wind-down with no audio
+            // behind it and would otherwise delay the next answer for
+            // nothing.
+            expect(engine.play).toHaveBeenCalledTimes(2);
+            expect(factory).toHaveBeenNthCalledWith(1, { eventId: 'voice-1' });
+            expect(factory).toHaveBeenNthCalledWith(2, { eventId: 'voice-2' });
+            expect(result.current.phase).toBe('thinking');
+        });
+
+        it('queues a voice event that arrives while the previous one is visibly speaking', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onStarted?.());
+            expect(result.current.phase).toBe('visible');
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('visible');
+
+            act(() => lifecycles[0]?.onEnded?.());
+            expect(engine.play).toHaveBeenCalledTimes(2);
+            expect(result.current.phase).toBe('thinking');
+        });
+
+        it('drops the newest overflow event once the bounded queue is full, never growing it unbounded', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            // One more than the bound arrives while the first is still active.
+            for (let index = 0; index < PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT + 1; index += 1) {
+                act(() => result.current.presentVoiceEvent({ ...EVENT, id: `queued-${index}` }));
+            }
+
+            // Drain the queue: each onEnded should immediately start the
+            // next queued answer.
+            for (let index = 0; index < PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT; index += 1) {
+                act(() => lifecycles[index]?.onEnded?.());
+            }
+
+            // Exactly 1 (the first) + the bound worth of queued answers
+            // played -- the one that overflowed the bound never did.
+            expect(engine.play).toHaveBeenCalledTimes(1 + PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT);
+        });
     });
 
     it('restarts at thinking when a new event arrives while the previous answer is fading', () => {
