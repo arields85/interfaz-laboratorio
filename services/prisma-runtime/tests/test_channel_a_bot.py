@@ -3002,7 +3002,10 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         outcome = self.handle(message_update(6, "¿cuál es el oee?", chat=CHAT_ID))
         self.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=SEND_DELIVERED)
         self.assertIsNone(outcome.answer_envelope)
-        self.assertEqual(self.transport.sent[-1]["text"], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.transport.sent[-1]["text"],
+            COPY_QUERY_UNAVAILABLE.format(label=self.labels["value"]),
+        )
         self.assertEqual(len(self.transport.sent), sent_before + 1)
 
     def test_a_stale_context_fails_closed_with_a_generic_notice(self):
@@ -3011,7 +3014,10 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         outcome = self.handle(message_update(6, "hola", chat=CHAT_ID))
         self.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=SEND_DELIVERED)
         self.assertIsNone(outcome.answer_envelope)
-        self.assertEqual(self.transport.sent[-1]["text"], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.transport.sent[-1]["text"],
+            COPY_QUERY_UNAVAILABLE.format(label=self.labels["value"]),
+        )
         self.assertEqual(self.parses, [])
 
     def test_the_envelope_repr_never_carries_the_nonce_or_the_question(self):

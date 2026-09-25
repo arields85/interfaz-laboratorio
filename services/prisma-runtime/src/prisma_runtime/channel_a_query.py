@@ -78,8 +78,17 @@ PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID = "PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID"
 # snapshot or any freshness detail, and it is sent only while the binding is
 # still current.
 COPY_QUERY_UNAVAILABLE = (
-    "No se pudo leer el documento del HMI en este momento. Intente de nuevo en unos segundos."
+    "No se pudieron leer los datos de {label} en este momento. Intente de nuevo en unos segundos."
 )
+
+# PW-011 M7: this module deliberately has no access to the Telegram/pairing
+# destination label (see the module docstring's "deliberately absent" list);
+# the caller that does (ChannelAPairingDialogue) injects `resolve_label`
+# below. Foreign code, so it is treated exactly like parse/read_context/
+# deliver: any failure or unusable value fails closed to this same generic
+# reference channel_a_bot.py's own _display_label() falls back to for a
+# mid-sentence placeholder (never duplicated logic, just the same text).
+_FALLBACK_LABEL = "la HMI"
 
 # An explicit upper bound on injected numeric policies: a caller must choose a
 # real bound, not an arbitrary enormous one.
@@ -264,6 +273,7 @@ class ChannelAQueryCoordinator:
         context_is_current,
         parse,
         deliver,
+        resolve_label,
         freshness_bound,
         max_question_bytes,
         max_answer_chars,
@@ -284,6 +294,8 @@ class ChannelAQueryCoordinator:
             raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
         if not callable(deliver):
             raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
+        if not callable(resolve_label):
+            raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
         if not callable(clock):
             raise ChannelAQueryConfigInvalid(PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
         delivered = _label(delivered_label)
@@ -298,6 +310,7 @@ class ChannelAQueryCoordinator:
         self.context_is_current = context_is_current
         self.parse = parse
         self.deliver = deliver
+        self.resolve_label = resolve_label
         self.freshness_bound = _positive_bound(freshness_bound)
         self.max_question_bytes = _positive_policy(max_question_bytes)
         self.max_answer_chars = _positive_policy(max_answer_chars)
@@ -562,9 +575,21 @@ class ChannelAQueryCoordinator:
             return self.unknown_label
         return value
 
+    def _resolved_label(self, owner_id) -> str:
+        """Resolve the destination label for one notice, foreign code -- any
+        failure or unusable value fails closed to the generic fallback,
+        exactly like ``_attempt_deliver``/``parse``/``read_context`` treat
+        their own injected callables."""
+        try:
+            value = self.resolve_label(owner_id)
+        except Exception:
+            return _FALLBACK_LABEL
+        return value if isinstance(value, str) and value else _FALLBACK_LABEL
+
     def _fail_closed(self, binding) -> QueryOutcome:
         """Fail closed: a generic notice only while the binding is still current."""
         if not self._binding_current(binding):
             return QueryOutcome(QUERY_IGNORED_STALE)
-        delivery = self._attempt_deliver(binding, COPY_QUERY_UNAVAILABLE)
+        text = COPY_QUERY_UNAVAILABLE.format(label=self._resolved_label(binding.owner_id))
+        delivery = self._attempt_deliver(binding, text)
         return QueryOutcome(QUERY_UNAVAILABLE, delivery)

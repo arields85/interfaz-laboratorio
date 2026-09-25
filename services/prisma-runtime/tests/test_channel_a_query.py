@@ -115,6 +115,11 @@ class QueryHarness:
         self.validate_hook = None
         self.context_override = None
         self.parser_product = _UNSET
+        # PW-011 M7: same trusted label source channel_a_bot.py's
+        # destination_label/_read_label already provide -- resolve_label_calls
+        # records every owner_id this coordinator asked for.
+        self.labels = {"value": "Sala 3 — Reactor"}
+        self.resolve_label_calls = []
         self._wrap_touch()
         self.coordinator = self.build()
 
@@ -196,6 +201,13 @@ class QueryHarness:
             return self.delivery_script.pop(0)
         return DELIVERED
 
+    def resolve_label(self, owner_id):
+        self.resolve_label_calls.append(owner_id)
+        value = self.labels["value"]
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
     def build(self, **overrides):
         options = {
             "registry": self.registry,
@@ -204,6 +216,7 @@ class QueryHarness:
             "context_is_current": self.context_is_current,
             "parse": self.parse,
             "deliver": self.deliver,
+            "resolve_label": self.resolve_label,
             "freshness_bound": self.freshness_bound,
             "max_question_bytes": self.max_question_bytes,
             "max_answer_chars": self.max_answer_chars,
@@ -260,7 +273,10 @@ class ChannelAQueryConfigTests(unittest.TestCase):
                 self.assertEqual(str(captured.exception), PRISMA_CHANNEL_A_QUERY_CONFIG_INVALID)
 
     def test_injected_callables_must_be_callable(self):
-        for name in ("validate", "read_context", "context_is_current", "parse", "deliver", "clock"):
+        for name in (
+            "validate", "read_context", "context_is_current", "parse", "deliver", "clock",
+            "resolve_label",
+        ):
             for value in (None, 5, "callable"):
                 with self.subTest(name=name, value=value):
                     with self.assertRaises(ChannelAQueryConfigInvalid):
@@ -616,7 +632,10 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
         self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
         self.assertIsNone(outcome.envelope)
         self.assertEqual(len(self.harness.deliveries), 1)
-        self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.harness.deliveries[0][1],
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]),
+        )
 
     def test_a_missing_context_fails_closed_with_a_generic_notice(self):
         self.harness.sessions = HmiSessionRegistry(
@@ -661,14 +680,20 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
         self.assertEqual(len(self.harness.parses), 1)
         self.assertEqual(self.harness.parses[0][0], SNAPSHOT)
         self.assertEqual(len(self.harness.deliveries), 1)
-        self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.harness.deliveries[0][1],
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]),
+        )
 
     def test_an_expired_deadline_before_the_send_never_delivers_the_answer(self):
         self.harness.context_override = lambda owner_id, max_age_seconds: (29.5, SNAPSHOT, 1)
         self.harness.parser_hook = lambda: self.harness.mono.__setitem__(0, self.harness.mono[0] + 1.0)
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.assert_notice(outcome)
-        self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.harness.deliveries[0][1],
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]),
+        )
 
     def test_an_invalid_start_clock_refuses_silently_without_touch(self):
         harness = QueryHarness()
@@ -736,6 +761,58 @@ class ChannelAQueryFreshnessTests(unittest.TestCase):
         self.assertEqual(self.harness.parses, [])
 
 
+class ChannelAQueryUnavailableLabelTests(unittest.TestCase):
+    """PW-011 M7: the generic unavailable notice names the same HMI
+    destination label CONFIRMATION_PROMPT_TEMPLATE/WELCOME_TEMPLATE already
+    show, sourced from the injected resolve_label -- foreign code, so it
+    fails closed to the generic fallback like every other injected
+    callable here (parse/read_context/deliver)."""
+
+    def setUp(self):
+        self.harness = QueryHarness()
+        self.harness.open_session(OWNER, snapshot=None)  # forces the notice path
+        self.link = self.harness.pair()
+        self.binding = self.harness.binding(self.link)
+
+    def test_the_notice_names_the_resolved_label_for_the_bindings_owner(self):
+        self.harness.labels["value"] = "Sala 9 — Compresor"
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
+        self.assertEqual(
+            self.harness.deliveries[0][1],
+            COPY_QUERY_UNAVAILABLE.format(label="Sala 9 — Compresor"),
+        )
+        self.assertEqual(self.harness.resolve_label_calls, [self.binding.owner_id])
+
+    def test_a_raising_resolve_label_falls_back_without_failing_the_notice(self):
+        self.harness.labels["value"] = RuntimeError("label backend down")
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
+        self.assertEqual(
+            self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE.format(label="la HMI")
+        )
+
+    def test_an_unusable_resolved_label_falls_back(self):
+        for value in (None, "", 42, ["Sala"]):
+            with self.subTest(value=value):
+                harness = QueryHarness()
+                harness.open_session(OWNER, snapshot=None)
+                link = harness.pair()
+                binding = harness.binding(link)
+                harness.labels["value"] = value
+                outcome = harness.coordinator.handle_query(binding, QUESTION)
+                harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
+                self.assertEqual(
+                    harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE.format(label="la HMI")
+                )
+
+    def test_the_notice_never_leaks_the_owner_id(self):
+        self.harness.labels["value"] = "Sala 9 — Compresor"
+        outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
+        self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
+        self.assertNotIn(self.binding.owner_id, self.harness.deliveries[0][1])
+
+
 class ChannelAQueryAnswerTests(unittest.TestCase):
     def setUp(self):
         self.harness = QueryHarness()
@@ -746,14 +823,19 @@ class ChannelAQueryAnswerTests(unittest.TestCase):
     def assert_unavailable(self, outcome):
         self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
         self.assertIsNone(outcome.envelope)
-        self.assertEqual(self.harness.deliveries[-1][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.harness.deliveries[-1][1],
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]),
+        )
 
     def test_a_raising_parser_fails_closed_without_leaking_input(self):
         self.harness.answer_text = RuntimeError("parser exploded")
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.assert_unavailable(outcome)
         self.assertNotIn(QUESTION, repr(outcome))
-        self.assertNotIn(COPY_QUERY_UNAVAILABLE, repr(outcome))
+        self.assertNotIn(
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]), repr(outcome)
+        )
 
     def test_answers_without_a_string_answer_text_are_never_coerced(self):
         for value in ({}, {"answer_text": "dict answer"}, 5, ["answer"], None, "plain string"):
@@ -780,7 +862,9 @@ class ChannelAQueryAnswerTests(unittest.TestCase):
         outcome = harness.coordinator.handle_query(harness.binding(link), QUESTION)
         harness.assert_outcome(outcome, QUERY_UNAVAILABLE)
         self.assertIsNone(outcome.envelope)
-        self.assertEqual(harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE.format(label=harness.labels["value"])
+        )
 
     def test_an_answer_object_with_answer_text_uses_the_exact_text(self):
         self.harness.answer_text = "  spaced answer  "
@@ -974,7 +1058,10 @@ class ChannelAQueryDeadlineRaceTests(unittest.TestCase):
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
         self.assertIsNone(outcome.envelope)
-        self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.harness.deliveries[0][1],
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]),
+        )
 
     def test_a_post_send_validation_that_expires_the_deadline_withholds_the_envelope(self):
         self.harness.context_override = lambda owner_id, max_age_seconds: (29.9, SNAPSHOT, 1)
@@ -1003,7 +1090,10 @@ class ChannelAQueryDeadlineRaceTests(unittest.TestCase):
         self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
         self.assertIsNone(outcome.envelope)
         self.assertEqual(self.harness.parses, [])
-        self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.harness.deliveries[0][1],
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]),
+        )
 
     def test_a_slow_validator_that_crosses_the_deadline_sends_no_answer(self):
         self.harness.context_override = lambda owner_id, max_age_seconds: (28.0, SNAPSHOT, 1)
@@ -1020,7 +1110,10 @@ class ChannelAQueryDeadlineRaceTests(unittest.TestCase):
         outcome = self.harness.coordinator.handle_query(self.binding, QUESTION)
         self.harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
         self.assertIsNone(outcome.envelope)
-        self.assertEqual(self.harness.deliveries[0][1], COPY_QUERY_UNAVAILABLE)
+        self.assertEqual(
+            self.harness.deliveries[0][1],
+            COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]),
+        )
 
 
 class ChannelAQueryDeliveryTests(unittest.TestCase):
@@ -1114,7 +1207,10 @@ class ChannelAContextRevisionTests(unittest.TestCase):
         self.assertNotIn(ANSWER, [text for _binding, text in self.harness.deliveries])
         # Preserve the generic-notice path while the phone binding stays valid.
         self.assertEqual(outcome.kind, QUERY_UNAVAILABLE)
-        self.assertEqual(self.harness.deliveries, [(self.binding, COPY_QUERY_UNAVAILABLE)])
+        self.assertEqual(
+            self.harness.deliveries,
+            [(self.binding, COPY_QUERY_UNAVAILABLE.format(label=self.harness.labels["value"]))],
+        )
 
     def test_unchanged_answer_carries_the_exact_captured_context_revision(self):
         self.replace_context()

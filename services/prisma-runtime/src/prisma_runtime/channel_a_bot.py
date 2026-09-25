@@ -918,6 +918,7 @@ class ChannelAPairingDialogue:
                 context_is_current=context_is_current,
                 parse=parse,
                 deliver=self.send_query,
+                resolve_label=self._resolve_display_label,
                 freshness_bound=freshness_bound,
                 max_question_bytes=max_question_bytes,
                 max_answer_chars=max_answer_chars,
@@ -1506,6 +1507,14 @@ class ChannelAPairingDialogue:
         except Exception:
             return None, False
         return _safe_label(value), True
+
+    def _resolve_display_label(self, owner_id) -> str:
+        """PW-011 M7: the same trusted label source/fallback every other
+        user-facing notice in this module already uses, injected into the
+        query coordinator as its ``resolve_label`` seam (that module has
+        deliberately no Telegram/pairing-label access of its own)."""
+        label, _lookup_ok = self._read_label(owner_id)
+        return _display_label(label)
 
     def _read_link(self, phone_id):
         """Return ``(link, read_ok)`` for one phone's current link."""

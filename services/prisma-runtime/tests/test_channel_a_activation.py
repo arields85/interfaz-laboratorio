@@ -759,7 +759,8 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertEqual(stale.outcomes[0].delivery, SEND_DELIVERED)
         self.assertIsNone(stale.outcomes[0].answer_envelope)
         self.assertEqual(
-            [message["text"] for message in transport.sent[before:]], [COPY_QUERY_UNAVAILABLE]
+            [message["text"] for message in transport.sent[before:]],
+            [COPY_QUERY_UNAVAILABLE.format(label=LABEL_A)],
         )
         # The external ledger proves the parser itself was never consulted, and
         # the already-published fresh evidence is neither lost nor duplicated.
@@ -793,7 +794,8 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertEqual(len(fixture.parse_calls), 1)
         self.assertEqual(published_envelopes(fixture.observed), [])
         self.assertEqual(
-            [message["text"] for message in transport.sent[before:]], [COPY_QUERY_UNAVAILABLE]
+            [message["text"] for message in transport.sent[before:]],
+            [COPY_QUERY_UNAVAILABLE.format(label=LABEL_A)],
         )
         self.assertNotIn(ANSWER_A, [message["text"] for message in transport.sent])
         # The wall/receipt domain never moved: pairing, query and runner domains
@@ -901,7 +903,7 @@ class ChannelAActivationRevisionTests(ActivationHarnessTestCase):
         self.assertEqual(published_envelopes(fixture.observed), [])
         self.assertEqual(
             [message["text"] for message in fixture.transport.sent[sent_before:]],
-            [COPY_QUERY_UNAVAILABLE],
+            [COPY_QUERY_UNAVAILABLE.format(label=LABEL_A)],
         )
 
     def test_post_send_replacement_is_delivered_but_never_published(self):
