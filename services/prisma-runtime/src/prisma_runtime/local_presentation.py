@@ -50,10 +50,20 @@ from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepositor
 from .telegram_verification import TelegramTokenVerificationService
 from .voice_events import VoiceEventCapacity, VoiceEventStore, VoiceEventStreamCapacity
 from .voice_transcription import (
-    VoiceNoteDownloadFailed,
+    DEFAULT_VOICE_NOTE_MIME_TYPE,
+    MAX_VOICE_NOTE_FILE_SIZE_BYTES,
+    VOICE_NOTE_DOWNLOAD_FAILED_REPLY,
+    VOICE_NOTE_TOO_LARGE_REPLY,
+    VOICE_NOTE_TOO_LONG_REPLY,
+    VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY,
+    VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY,
+    VoiceNoteTooLarge,
+    VoiceNoteTooLong,
     VoiceTranscriptionEmpty,
     VoiceTranscriptionError,
     VoiceTranscriptionUnavailable,
+    validate_voice_note_duration,
+    validate_voice_note_size,
 )
 from .voice_timeline_diagnostics import (
     MAX_TIMELINE_BATCH_RECORDS, VoiceTimelineRateLimiter, format_timeline_log_line, validate_timeline_batch,
@@ -835,9 +845,11 @@ class TelegramLocalBot:
                 raise
 
     def _handle_message(self, message, *, migration_active=False):
-        chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}; chat_id, text = chat.get("id"), message.get("text")
-        if chat.get("type") != "private" or isinstance(chat_id, bool) or not isinstance(chat_id, int) or not isinstance(text, str): return
-        command, paired = normalize(text.split()[0]) if text.strip() else "", self.paired_chat_ids
+        chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}; chat_id = chat.get("id")
+        text, voice = message.get("text"), message.get("voice")
+        has_text, has_voice = isinstance(text, str), isinstance(message.get("voice"), dict) and not isinstance(text, str)
+        if chat.get("type") != "private" or isinstance(chat_id, bool) or not isinstance(chat_id, int) or not (has_text or has_voice): return
+        command, paired = normalize(text.split()[0]) if has_text and text.strip() else "", self.paired_chat_ids
         if command.startswith("/start"):
             if migration_active:
                 self.send_message(chat_id, "Envíe /start nuevamente cuando finalice la migración.")
@@ -846,12 +858,98 @@ class TelegramLocalBot:
             else: self.send_message(chat_id, "Este bot ya está vinculado a otro chat.")
             return
         if chat_id not in paired: self.send_message(chat_id, "Envíe /start para vincular este bot."); return
+        # PW-013: a voice note is only ever routed to the ordinary answer
+        # path below, exactly like typed text -- authorization (the pairing
+        # check above) already ran before this point, and nothing is
+        # downloaded for an unpaired chat.
+        if has_voice:
+            transcript = self._transcribe_voice_note(chat_id, message.get("message_id"), voice)
+            if transcript is None:
+                return
+            text = transcript
         if command.startswith("/status"):
             snapshot = self._active_snapshot(); self.send_message(chat_id, f"Prisma está activa. Última actualización de datos: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
         if command.startswith("/help"):
             self.send_message(chat_id, "Puede consultar lote, producto, orden, cliente, OEE, estado, actividad, potencia, progreso, tiempo restante, alertas o pedir un resumen."); return
         answer = answer_from_snapshot(self._active_snapshot(), text); self.send_message(chat_id, answer.answer_text)
         self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
+
+    def _transcribe_voice_note(self, chat_id, message_id, voice):
+        """Download and transcribe one voice-note question (PW-013).
+
+        Returns the transcript string, or ``None`` after already sending a
+        short formal-usted failure reply -- the caller (``_handle_message``)
+        simply stops in that case. Duration/size are validated BEFORE any
+        download (user decision); every failure is caught here so a Gemini
+        or network problem can never crash the receive loop.
+        """
+        duration, file_id, file_size = voice.get("duration"), voice.get("file_id"), voice.get("file_size")
+        mime_type = voice.get("mime_type") if isinstance(voice.get("mime_type"), str) else DEFAULT_VOICE_NOTE_MIME_TYPE
+        if not isinstance(file_id, str) or not file_id:
+            return None
+        try:
+            validate_voice_note_duration(duration)
+            validate_voice_note_size(file_size)
+        except VoiceNoteTooLong:
+            self.send_message(chat_id, VOICE_NOTE_TOO_LONG_REPLY)
+            return None
+        except VoiceNoteTooLarge:
+            self.send_message(chat_id, VOICE_NOTE_TOO_LARGE_REPLY)
+            return None
+        try:
+            file_path = self._call("getFile", timeout=20, data={"file_id": file_id}).get("result", {}).get("file_path")
+            audio_bytes = self._download_voice_file(file_path)
+        except Exception:
+            self.send_message(chat_id, VOICE_NOTE_DOWNLOAD_FAILED_REPLY)
+            return None
+        if not self.voice_url or self.local_http is None:
+            self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
+            return None
+        audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+        extra_terms = self._voice_note_domain_terms()
+        token = self.voice_events.mint_voice_transcription_token(audio_base64, mime_type, extra_terms)
+        try:
+            return _request_voice_transcription(self.local_http, self.voice_url, token)
+        except VoiceTranscriptionEmpty:
+            self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
+            return None
+        except Exception:
+            self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
+            return None
+
+    def _download_voice_file(self, file_path):
+        """Bounded download of one Telegram file from its separate file
+        host (never the Bot API JSON host), reusing this bot's own owned
+        session (PW-013)."""
+        if not isinstance(file_path, str) or not file_path or ".." in file_path.split("/"):
+            raise RuntimeError("TELEGRAM_VOICE_FILE_PATH_INVALID")
+        response = self.session.get(f"{self.api_base}/file/bot{self.token}/{file_path}", timeout=20, stream=True)
+        try:
+            response.raise_for_status()
+            chunks, total = [], 0
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_VOICE_NOTE_FILE_SIZE_BYTES:
+                    raise RuntimeError("TELEGRAM_VOICE_FILE_TOO_LARGE")
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            response.close()
+
+    def _voice_note_domain_terms(self):
+        """Cheaply reuse the already-read active snapshot's machine/screen
+        name as a transcription hint (PW-013); never a new data source, and
+        never blocking -- a missing or malformed snapshot simply yields no
+        extra terms."""
+        snapshot = self._active_snapshot()
+        if not isinstance(snapshot, dict):
+            return ()
+        machine = snapshot.get("machine") if isinstance(snapshot.get("machine"), dict) else {}
+        screen = snapshot.get("screen") if isinstance(snapshot.get("screen"), dict) else {}
+        name = machine.get("name") or screen.get("ownerNodeName")
+        return (name,) if isinstance(name, str) and name.strip() else ()
 
     def _active_snapshot(self):
         """B1c: the active screen for Channel B -- the most recently updated

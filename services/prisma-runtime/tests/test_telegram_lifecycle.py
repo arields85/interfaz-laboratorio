@@ -34,6 +34,12 @@ from prisma_runtime.telegram_lifecycle import (
     TelegramStateUnavailable,
 )
 from prisma_runtime.voice_events import VoiceEventStore
+from prisma_runtime.voice_transcription import (
+    MAX_VOICE_NOTE_DURATION_SECONDS,
+    MAX_VOICE_NOTE_FILE_SIZE_BYTES,
+    VoiceTranscriptionEmpty,
+    VoiceTranscriptionUnavailable,
+)
 
 
 class MemoryStateStore:
@@ -1499,6 +1505,162 @@ class ChannelBVoiceReplyTests(unittest.TestCase):
         bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 14, "text": "¿Cuál es el OEE?"})
 
         bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+
+
+def voice_note_message(chat_id, message_id, *, duration=5, file_id="voice-file-1", file_size=1024, mime_type="audio/ogg"):
+    """One private voice-note message envelope for Channel B (PW-013)."""
+    return {
+        "chat": {"id": chat_id, "type": "private"},
+        "message_id": message_id,
+        "voice": {"duration": duration, "file_id": file_id, "file_size": file_size, "mime_type": mime_type},
+    }
+
+
+class ChannelBVoiceNoteQuestionTests(unittest.TestCase):
+    """PW-013: Channel B accepts a voice note as a spoken question, transcribes
+    it, and answers exactly like the equivalent typed text -- no transcript
+    echo, same downstream (answer_from_snapshot + the existing voice-reply
+    pipeline)."""
+
+    def setUp(self):
+        install_offline_dispatch_guard(self)
+
+    def build_bot(self, *, voice_url="http://127.0.0.1:5056", local_http=None, paired=True):
+        paired_ids = [7] if paired else []
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": paired_ids, "nextUpdateOffset": None, "migrationActive": False}}}
+        bot = TelegramLocalBot(
+            "secret-token", Mock(), MemoryStateStore(state), VoiceEventStore(),
+            reservation=BotIdentityReservation(), voice_url=voice_url, local_http=local_http,
+        )
+        bot._call = identity_transport()
+        bot.prepare()
+        bot.snapshot_store.read = Mock(return_value=channel_b_snapshot())
+        bot.send_message = Mock()
+        return bot
+
+    def wire_download(self, bot, *, file_path="voice/file_1.oga", audio_chunks=(b"fake-ogg-audio",), get_file_error=None, download_error=None):
+        def fake_call(method, *, timeout=35, **kwargs):
+            if method == "getFile":
+                if get_file_error is not None:
+                    raise get_file_error
+                return {"ok": True, "result": {"file_path": file_path}}
+            raise AssertionError(f"unexpected _call in a voice-note test: {method}")
+
+        bot._call = fake_call
+        response = Mock()
+        if download_error is not None:
+            response.raise_for_status = Mock(side_effect=download_error)
+        else:
+            response.raise_for_status = Mock()
+        response.iter_content = Mock(return_value=list(audio_chunks))
+        response.close = Mock()
+        bot.session = Mock()
+        bot.session.get = Mock(return_value=response)
+        return response
+
+    def test_a_voice_note_is_transcribed_and_answered_like_typed_text(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        self.wire_download(bot)
+        with patch.object(local_presentation_module, "_request_voice_transcription", return_value="¿cuál es el oee?") as request, \
+                patch.object(local_presentation_module, "_fire_channel_b_voice_reply"):
+            bot._handle_message(voice_note_message(7, 40))
+
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+        request.assert_called_once()
+        # No transcript echo: the only reply sent is the answer, never the
+        # transcript itself.
+        self.assertNotIn("¿cuál es el oee?", [call.args[1] for call in bot.send_message.call_args_list])
+
+    def test_authorization_runs_before_any_download(self):
+        bot = self.build_bot(local_http=Mock(), paired=False)
+        self.wire_download(bot)
+        with patch.object(bot.session, "get") as session_get:
+            bot._handle_message(voice_note_message(7, 41))
+
+        bot.send_message.assert_called_once_with(7, "Envíe /start para vincular este bot.")
+        session_get.assert_not_called()
+
+    def test_a_voice_note_over_the_duration_cap_is_rejected_before_any_download(self):
+        bot = self.build_bot(local_http=Mock())
+        with patch.object(bot.session, "get") as session_get:
+            bot._handle_message(voice_note_message(7, 42, duration=MAX_VOICE_NOTE_DURATION_SECONDS + 1))
+
+        session_get.assert_not_called()
+        self.assertIn("30 segundos", bot.send_message.call_args.args[1])
+
+    def test_a_voice_note_over_the_size_cap_is_rejected_before_any_download(self):
+        bot = self.build_bot(local_http=Mock())
+        with patch.object(bot.session, "get") as session_get:
+            bot._handle_message(voice_note_message(7, 43, file_size=MAX_VOICE_NOTE_FILE_SIZE_BYTES + 1))
+
+        session_get.assert_not_called()
+        bot.send_message.assert_called_once()
+
+    def test_a_download_failure_replies_and_never_reaches_transcription(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        self.wire_download(bot, get_file_error=RuntimeError("boom"))
+        with patch.object(local_presentation_module, "_request_voice_transcription") as request:
+            bot._handle_message(voice_note_message(7, 44))
+
+        request.assert_not_called()
+        bot.send_message.assert_called_once()
+
+    def test_an_empty_transcript_replies_and_never_answers(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        self.wire_download(bot)
+        with patch.object(local_presentation_module, "_request_voice_transcription", side_effect=VoiceTranscriptionEmpty("x")), \
+                patch.object(local_presentation_module, "answer_from_snapshot") as parse:
+            bot._handle_message(voice_note_message(7, 45))
+
+        parse.assert_not_called()
+        bot.send_message.assert_called_once()
+
+    def test_a_provider_failure_replies_and_never_crashes(self):
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        self.wire_download(bot)
+        with patch.object(local_presentation_module, "_request_voice_transcription", side_effect=VoiceTranscriptionUnavailable("x")):
+            bot._handle_message(voice_note_message(7, 46))
+
+        bot.send_message.assert_called_once()
+
+    def test_missing_voice_wiring_replies_and_never_crashes(self):
+        bot = self.build_bot(voice_url=None, local_http=None)
+        self.wire_download(bot)
+
+        bot._handle_message(voice_note_message(7, 47))
+
+        bot.send_message.assert_called_once()
+
+    def test_domain_terms_from_the_active_snapshot_reach_the_minted_token(self):
+        events = VoiceEventStore()
+        bot = TelegramLocalBot(
+            "secret-token", Mock(), MemoryStateStore({"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}),
+            events, reservation=BotIdentityReservation(), voice_url="http://127.0.0.1:5056", local_http=Mock(),
+        )
+        bot._call = identity_transport()
+        bot.prepare()
+        bot.snapshot_store.read = Mock(return_value={
+            "widgets": channel_b_snapshot()["widgets"],
+            "machine": {"machineId": 10, "name": "FT2000"},
+        })
+        bot.send_message = Mock()
+        self.wire_download(bot)
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        with patch.object(local_presentation_module, "_request_voice_transcription", return_value="¿cuál es el oee?") as request:
+            bot._handle_message(voice_note_message(7, 48))
+
+        token = request.call_args.args[2]
+        payload = events.resolve_voice_transcription_token(token)
+        self.assertEqual(payload["extraTerms"], ["FT2000"])
 
 
 class ChannelBActiveScreenTests(unittest.TestCase):
