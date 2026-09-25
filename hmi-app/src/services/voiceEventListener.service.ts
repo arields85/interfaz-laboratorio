@@ -1,5 +1,5 @@
 import type { VoiceEvent } from '../domain/voice.types';
-import { normalizeTelegramChatId } from '../domain/voice';
+import { isVoiceEventKind, normalizeTelegramChatId } from '../domain/voice';
 import { PRISMA_EVENTS_URL } from '../config/prismaAssistant.config';
 import { prismaSessionClient } from './prismaSessionClient';
 import { recordVoiceEventReceived } from './prismaVoiceTimelineRecorder';
@@ -373,7 +373,7 @@ function normalizeVoiceEvent(value: unknown): VoiceEvent | null {
     const telegramChatId = 'telegramChatId' in value
         ? normalizeTelegramChatId(value.telegramChatId)
         : undefined;
-    const kind = 'kind' in value && (value.kind === 'thinking' || value.kind === 'cancel')
+    const kind = 'kind' in value && isVoiceEventKind(value.kind)
         ? value.kind
         : undefined;
     return {
