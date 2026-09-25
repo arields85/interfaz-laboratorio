@@ -272,3 +272,33 @@ saving/verifying/deleting. GREEN: 99/99 component tests. Full suite: 221
 files / 2571 tests pass; `tsc -b` clean; `lint` clean. Commit `e719e9f` (GGA
 PASSED, one optional non-blocking note about `progressKindFromPendingAction`
 parsing the hook's action-string prefix instead of a typed field).
+
+## F8 — close the delete dialog on confirm (live retest, 2026-09-25)
+
+User report (worktree `credential-delete`, branch
+`fix/credential-delete-dialog`): the "ELIMINAR CREDENCIAL" confirmation
+dialog stays open for the whole deletion, with a disabled "Confirmar
+eliminación" button covering the page, so the row's own F5 "Borrando
+credencial_" progress text (already implemented and tested above) is never
+visible to the user.
+
+- [ ] **F8** `VoiceCredentialSettings.tsx`'s `remove(provider)`: close the
+  confirmation dialog immediately on confirm (before awaiting
+  `administration.deleteCredential`), instead of only closing it from the
+  `finally` block once the delete settles. The row's own per-provider
+  pending state (F4's `administration.pendingActions[provider]`) already
+  disables that row's Eliminar/Guardar/Verificar and drives the F5 "Borrando
+  credencial_" caret independent of the dialog, so success/error feedback
+  keeps showing in the row exactly as Guardar/Verificar already do. Keep the
+  double-submit guard: the row's own Eliminar stays disabled while its
+  delete is in flight (so the dialog cannot be reopened for that row), and
+  the hook's own synchronous `operationRefs` lock
+  (`usePrismaCredentialAdministration.ts`'s `runOperation`) still rejects a
+  concurrent same-provider delete regardless. Other rows stay fully
+  independent (unchanged, F4). Expected simplification: once the dialog
+  closes synchronously at confirm-click time, the `finally`-block's
+  `dialogRevisionRef`-guarded conditional close (added earlier to stop a
+  stale delete from closing a freshly reopened dialog) becomes structurally
+  unreachable dead code and should be removed together with
+  `dialogRevisionRef` itself, not left in place. Route: direct (single file
+  + its test, already understood from F1-F5 above).
