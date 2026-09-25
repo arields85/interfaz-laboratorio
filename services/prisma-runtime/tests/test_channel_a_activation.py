@@ -144,6 +144,7 @@ from prisma_runtime.channel_a_bot import (
     PAIRING_REFUSED,
     SEND_DELIVERED,
     SEND_NONE,
+    phone_identity,
 )
 from prisma_runtime.channel_a_lifecycle import (
     DISPOSITION_COMPLETED,
@@ -402,19 +403,60 @@ class ScriptedChannelATransport:
         return True
 
 
+class FakeSweepTimer:
+    """PW-011 M3: records start/cancel without ever running on a real thread,
+    mirroring channel_a_manager.py's own FakeRetryTimer test double exactly."""
+
+    def __init__(self, delay, function):
+        self.delay = delay
+        self.function = function
+        self.started = False
+        self.cancelled = False
+        self.daemon = False
+
+    def start(self):
+        self.started = True
+
+    def cancel(self):
+        self.cancelled = True
+
+
+class FakeSweepTimerFactory:
+    """Injected in place of threading.Timer for every activation this module
+    builds, so no test here ever starts a real background thread -- matching
+    this module's own stated "no thread created" design."""
+
+    def __init__(self):
+        self.created: list[FakeSweepTimer] = []
+
+    def __call__(self, delay, function):
+        timer = FakeSweepTimer(delay, function)
+        self.created.append(timer)
+        return timer
+
+    def fire_latest(self):
+        """Synchronously run the most recently scheduled tick's own function,
+        exactly as the real Timer would on its own thread -- deterministic,
+        no real waiting."""
+        self.created[-1].function()
+
+
 class ActivationUnderTest:
     """Test-owned handle: the real composition, its boundary and its ledgers.
 
     ``observed`` receives each published ingress outcome exactly as the runner
     hands it to the caller-injected ``on_outcome``; ``parse_calls`` records every
     real parse request. Both ledgers live here, never inside the composition.
+    ``sweep_timers`` is the fake timer factory injected into this activation's
+    periodic housekeeping sweep (PW-011 M3).
     """
 
-    def __init__(self, activation, transport, observed, parse_calls):
+    def __init__(self, activation, transport, observed, parse_calls, sweep_timers):
         self.activation = activation
         self.transport = transport
         self.observed = observed
         self.parse_calls = parse_calls
+        self.sweep_timers = sweep_timers
 
 
 class ActivationHarnessTestCase(unittest.TestCase):
@@ -496,13 +538,16 @@ class ActivationHarnessTestCase(unittest.TestCase):
             fail_get_me=fail_get_me,
         )
 
-    def activate(self, *, transport=None, reservation=None, parse=None, pairing_clock=None):
+    def activate(self, *, transport=None, reservation=None, parse=None, pairing_clock=None, sweep_timer_factory=None):
         """Build the real composition over inert boundaries and fake clocks.
 
         The absent production module is imported here, after the containment
         layers are installed, with no ``ImportError`` catch and no fallback.
         ``pairing_clock`` optionally replaces the default fixture pairing clock
-        for tests that must retarget individual clock samples.
+        for tests that must retarget individual clock samples. ``sweep_timer_factory``
+        (PW-011 M3) always defaults to a fresh ``FakeSweepTimerFactory``, so the
+        periodic housekeeping sweep never starts a real thread in this offline
+        module -- exactly like the poll timeout/pause fixtures below.
         """
         from prisma_runtime.channel_a_activation import ChannelAActivation
 
@@ -510,6 +555,7 @@ class ActivationHarnessTestCase(unittest.TestCase):
         parse_calls: list = []
         observed: list = []
         injected_parse = answer_from_snapshot if parse is None else parse
+        sweep_timers = FakeSweepTimerFactory() if sweep_timer_factory is None else sweep_timer_factory
         activation = ChannelAActivation(
             transport=transport,
             sessions=self.sessions,
@@ -527,9 +573,10 @@ class ActivationHarnessTestCase(unittest.TestCase):
             poll_pause=0.05,
             poll_retry_delay=0.05,
             reservation=self.reservation if reservation is None else reservation,
+            sweep_timer_factory=sweep_timers,
         )
         self.activations.append(activation)
-        return ActivationUnderTest(activation, transport, observed, parse_calls)
+        return ActivationUnderTest(activation, transport, observed, parse_calls, sweep_timers)
 
     def link(self, fixture, phone_id, owner_id, update_id):
         """Link one phone through the real challenge -> start -> confirm flow."""
@@ -1076,6 +1123,120 @@ class ChannelAActivationForwardingTests(ActivationHarnessTestCase):
 
         activation.set_on_poll_retry(callback)
         self.assertEqual(calls, ["construct", ("set_on_poll_retry", callback)])
+
+
+class ChannelAActivationSweepSchedulerTests(ActivationHarnessTestCase):
+    """PW-011 M3: the periodic Channel A housekeeping sweep (inactivity-expiry
+    cleanup, then inactivity warnings) starts and stops with the activation,
+    on a named bounded interval, never a busy loop or a real thread here.
+
+    ``_start_sweep``/``_stop_sweep``/``_run_sweep`` are read directly, the
+    same way ``ChannelAActivationForwardingTests`` above replaces the whole
+    runner to test start()/stop() forwarding without a real background
+    thread: the scheduler's own wiring is exactly what is under test here,
+    and driving it through the real runner's poll thread would reintroduce
+    the very real-thread dependency this module is built to avoid.
+    """
+
+    def fake_runner_activation(self, *, start_result=True):
+        from unittest.mock import patch
+        from prisma_runtime import channel_a_activation as module
+        from prisma_runtime.channel_a_lifecycle import ChannelAStatus
+
+        status = ChannelAStatus("running", None, False, False)
+
+        class LocalRunner:
+            def __init__(self, **kwargs):
+                pass
+
+            def start(self):
+                return start_result
+
+            def status(self):
+                return status
+
+            def stop(self):
+                return True
+
+            def set_on_terminal(self, callback):
+                pass
+
+            def set_on_poll_retry(self, callback):
+                pass
+
+        with patch.object(module, "ChannelARunner", LocalRunner):
+            fixture = self.activate()
+        return fixture
+
+    def test_start_arms_one_sweep_timer_at_the_named_interval(self):
+        from prisma_runtime.channel_a_activation import CHANNEL_A_SWEEP_INTERVAL_SECONDS
+
+        fixture = self.fake_runner_activation()
+        self.assertEqual(fixture.sweep_timers.created, [])
+        self.assertTrue(fixture.activation.start())
+        self.assertEqual(len(fixture.sweep_timers.created), 1)
+        timer = fixture.sweep_timers.created[0]
+        self.assertEqual(timer.delay, CHANNEL_A_SWEEP_INTERVAL_SECONDS)
+        self.assertTrue(timer.started)
+        self.assertTrue(timer.daemon)
+
+    def test_a_second_start_never_arms_a_second_timer(self):
+        fixture = self.fake_runner_activation()
+        self.assertTrue(fixture.activation.start())
+        self.assertTrue(fixture.activation.start())
+        self.assertEqual(len(fixture.sweep_timers.created), 1)
+
+    def test_a_failed_start_never_arms_a_sweep_timer(self):
+        fixture = self.fake_runner_activation(start_result=False)
+        self.assertFalse(fixture.activation.start())
+        self.assertEqual(fixture.sweep_timers.created, [])
+
+    def test_stop_cancels_the_pending_sweep_timer(self):
+        fixture = self.fake_runner_activation()
+        fixture.activation.start()
+        timer = fixture.sweep_timers.created[0]
+        self.assertTrue(fixture.activation.stop())
+        self.assertTrue(timer.cancelled)
+
+    def test_a_tick_that_fires_after_stop_never_reschedules(self):
+        """A timer already fired (racing a concurrent stop) must not arm a
+        new one -- _run_sweep re-checks its own running flag."""
+        fixture = self.fake_runner_activation()
+        fixture.activation.start()
+        fixture.activation.stop()
+        fixture.sweep_timers.fire_latest()
+        self.assertEqual(len(fixture.sweep_timers.created), 1)
+
+    def test_a_tick_with_no_dialogue_yet_is_a_quiet_no_op_and_still_reschedules(self):
+        fixture = self.fake_runner_activation()
+        fixture.activation.start()
+        fixture.sweep_timers.fire_latest()
+        self.assertEqual(len(fixture.sweep_timers.created), 2)
+
+    def test_sweep_tick_cleans_up_an_expired_link_before_the_next_warning_pass(self):
+        """The end-to-end proof, over the REAL dialogue/registry (prepared,
+        never the fake runner above): a tick past the idle deadline sends
+        the expiry notice with the reply-keyboard removed, releases the
+        link, and reschedules -- all through the real send_expiry_cleanup()/
+        send_inactivity_warnings() pair, ordered exactly like their own
+        docstrings require."""
+        owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()
+        self.assertTrue(fixture.activation.prepare())
+        self.link(fixture, PHONE_A, owner_a, 1)
+
+        self.pairing_now[0] += 600.0  # human_idle_ttl default
+        fixture.activation._start_sweep()
+        self.assertEqual(len(fixture.sweep_timers.created), 1)
+        fixture.sweep_timers.fire_latest()
+
+        sent = fixture.transport.sent[-1]
+        self.assertEqual(sent["chatId"], PHONE_A)
+        self.assertEqual(sent["replyMarkup"], {"remove_keyboard": True})
+        self.assertIn("inactividad", sent["text"])
+        self.assertIsNone(fixture.activation._registry.phone_link(phone_identity(PHONE_A)))
+        # Reschedules for the next tick.
+        self.assertEqual(len(fixture.sweep_timers.created), 2)
 
 
 from prisma_runtime.channel_a_pairing import (

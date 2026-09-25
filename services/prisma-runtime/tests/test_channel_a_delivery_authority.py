@@ -36,6 +36,26 @@ class Clock:
         return self.now
 
 
+class InertSweepTimer:
+    """PW-011 M3: never a real thread -- start()/cancel() are no-ops, so the
+    module-wide threading.Thread.start guard in AuthorityCase is never
+    reached by the periodic housekeeping sweep this module now arms."""
+
+    def __init__(self, delay, function):
+        self.delay = delay
+        self.function = function
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+
+def inert_sweep_timer_factory(delay, function):
+    return InertSweepTimer(delay, function)
+
+
 def entropy_sequence():
     counter = itertools.count(1)
     return lambda size: next(counter).to_bytes(size, "big")
@@ -172,6 +192,7 @@ class AuthorityCase(unittest.TestCase):
                 clock=self.clock, pairing_clock=self.pairing_clock, query_clock=self.clock,
                 warning_lead=60, max_question_bytes=4096, poll_timeout=1,
                 read_timeout=2, join_timeout=3, poll_pause=0.1, poll_retry_delay=0.1,
+                sweep_timer_factory=inert_sweep_timer_factory,
             )
         self.runner = self.runners[-1]
 

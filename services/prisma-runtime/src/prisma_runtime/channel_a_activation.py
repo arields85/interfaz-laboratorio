@@ -9,6 +9,7 @@ to later integration layers.
 from __future__ import annotations
 
 import math
+import threading
 
 from .channel_a_bot import ChannelAPairingDialogue
 from .channel_a_lifecycle import (
@@ -22,13 +23,19 @@ from .channel_a_pairing import ChannelAPairingRegistry, QrChallenge
 from .channel_a_query import is_query_envelope_well_formed
 from .channel_a_transport import MESSAGE_MAX_CHARS, ChannelABotIdentity
 
-__all__ = ["ChannelAActivation"]
+__all__ = ["CHANNEL_A_SWEEP_INTERVAL_SECONDS", "ChannelAActivation"]
 
 _CONTEXT_FRESHNESS_SECONDS = 15.0
 # The pairing projections are active only while the runner holds a prepared or
 # running phase without a pending restart; every other phase is unavailable.
 _PAIRING_ACTIVE_PHASES = (PHASE_PREPARED, PHASE_RUNNING)
 _PAIRING_STATES = frozenset({"free", "pending", "linked"})
+# PW-011 M3: how often the periodic Channel A housekeeping sweep runs
+# (inactivity-expiry cleanup, then inactivity warnings) while this
+# activation is running. Comfortably below the default 600s idle TTL and
+# the 60s warning lead, so neither a release nor a warning sits unnoticed
+# for long, without polling so tightly it floods the adapter's own lock.
+CHANNEL_A_SWEEP_INTERVAL_SECONDS = 30.0
 
 
 class ChannelAActivation:
@@ -53,11 +60,22 @@ class ChannelAActivation:
         poll_pause,
         poll_retry_delay,
         reservation=None,
+        sweep_interval_seconds=CHANNEL_A_SWEEP_INTERVAL_SECONDS,
+        sweep_timer_factory=None,
     ) -> None:
         self._registry: ChannelAPairingRegistry | None = None
         self._dialogue: ChannelAPairingDialogue | None = None
         self._bot_username: str | None = None
         self._sessions = sessions
+        # PW-011 M3: periodic housekeeping sweep state. Injectable only for
+        # tests (a fake recording start()/cancel() without a real thread);
+        # production always uses the real `threading.Timer`, mirroring
+        # ChannelAManager's own `_timer_factory` retry-backoff pattern.
+        self._sweep_interval = sweep_interval_seconds
+        self._sweep_timer_factory = sweep_timer_factory if callable(sweep_timer_factory) else threading.Timer
+        self._sweep_lock = threading.Lock()
+        self._sweep_timer = None
+        self._sweep_running = False
         # T7: this activation owns the transport's one reused HTTP session and
         # closes it exactly once, on its own teardown (see `stop()`).
         self._transport = transport
@@ -123,8 +141,15 @@ class ChannelAActivation:
         return self._runner.prepare()
 
     def start(self) -> bool:
-        """Forward explicit managed start without adding lifecycle ownership."""
-        return self._runner.start()
+        """Forward explicit managed start without adding lifecycle ownership.
+
+        PW-011 M3: a successful start also arms the periodic housekeeping
+        sweep (see ``_start_sweep``); a refused start arms nothing.
+        """
+        started = self._runner.start()
+        if started:
+            self._start_sweep()
+        return started
 
     def status(self) -> ChannelAStatus:
         """Return the runner's actual immutable lifecycle snapshot."""
@@ -146,6 +171,10 @@ class ChannelAActivation:
 
     def stop(self) -> bool:
         """Request the runner's sticky stop, even when settlement is uncertain."""
+        # PW-011 M3: disarm the sweep before withdrawing the dialogue/registry
+        # it reads, so a concurrent tick never observes a half-torn-down
+        # activation.
+        self._stop_sweep()
         # Withdraw issuance and the retained bot identity before settlement can
         # call a foreign reservation.
         self._dialogue = None
@@ -160,6 +189,67 @@ class ChannelAActivation:
         # the time this runs the owned polling/send activity has quiesced.
         self._transport.close()
         return confirmed
+
+    # -- periodic housekeeping sweep (PW-011 M3) ----------------------------
+
+    def _start_sweep(self) -> None:
+        """Arm the periodic Channel A housekeeping sweep: inactivity-expiry
+        cleanup, then inactivity warnings, on ``CHANNEL_A_SWEEP_INTERVAL_SECONDS``.
+
+        Idempotent: a second call while already running is a no-op. Bounded,
+        no busy loop -- a self-rescheduling ``Timer``, mirroring
+        ``ChannelAManager``'s own backoff-retry timer pattern exactly,
+        including its injectable factory (never a real thread in tests).
+        """
+        with self._sweep_lock:
+            if self._sweep_running:
+                return
+            self._sweep_running = True
+            self._schedule_sweep_locked()
+
+    def _schedule_sweep_locked(self) -> None:
+        timer = self._sweep_timer_factory(self._sweep_interval, self._run_sweep)
+        timer.daemon = True
+        self._sweep_timer = timer
+        timer.start()
+
+    def _stop_sweep(self) -> None:
+        with self._sweep_lock:
+            self._sweep_running = False
+            timer = self._sweep_timer
+            self._sweep_timer = None
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+
+    def _run_sweep(self) -> None:
+        """Run on the timer's own thread (or synchronously, in a test).
+
+        Collects due sweep work through whichever dialogue exists right now
+        and acts entirely outside this activation's own state -- the
+        dialogue's own lock, never this one, serializes its Telegram
+        effects, exactly like ``handle_update``'s own calls. Expiry cleanup
+        runs BEFORE inactivity warnings, per ``due_expirations()``'s own
+        ordering note. Never raises; reschedules itself unless stopped
+        meanwhile (checked again under the lock, so a stop racing a tick
+        already in flight never leaves a stray timer armed).
+        """
+        dialogue = self._dialogue
+        if dialogue is not None:
+            try:
+                dialogue.send_expiry_cleanup()
+            except Exception:
+                pass
+            try:
+                dialogue.send_inactivity_warnings()
+            except Exception:
+                pass
+        with self._sweep_lock:
+            if not self._sweep_running:
+                return
+            self._schedule_sweep_locked()
 
     def _capture_delivery_witness(self, envelope):
         """Capture ephemeral references before callbacks; this is not admission."""

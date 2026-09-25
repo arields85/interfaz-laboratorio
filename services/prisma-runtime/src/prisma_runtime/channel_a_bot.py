@@ -13,11 +13,11 @@ unlink buttons, and cancellation.
 
 Deliberately absent from this stage: answer parsing, snapshot capture and
 freshness checks (all injected through the RCA-3b coordinator), HMI/audio
-publication, the scheduler that invokes the warning sweep, offset bookkeeping,
-batching, and any real HTTP client. The polling loop that owns ``getUpdates``
-offsets, the long-poll cadence and the per-bot transport wiring belongs to the
-later runtime integration stage. This module never imports an HTTP, socket,
-subprocess, lifecycle or operator-secret module.
+publication, offset bookkeeping, batching, and any real HTTP client. The
+polling loop that owns ``getUpdates`` offsets, the long-poll cadence and the
+per-bot transport wiring belongs to the later runtime integration stage. This
+module never imports an HTTP, socket, subprocess, lifecycle or
+operator-secret module.
 
 Unknown ordinary text is ignored by default. When the optional correlated
 query coordinator (RCA-3b) is attached through ``enable_queries``, ordinary text
@@ -25,13 +25,17 @@ from a currently linked phone is answered through it under a captured owner,
 generation, confirmation fence and adapter epoch; without that attachment the
 accepted RCA-3a behavior is unchanged and ordinary text is never routed.
 
-The proactive inactivity warning (RCA-3c) is an explicit, synchronous sweep, not
-a background loop: ``send_inactivity_warnings`` uses only the public registry
-sweep and this adapter's own admitted action records, re-reads the authoritative
-link immediately before each send, and returns a bounded tuple of
-delivered/rejected/unknown/skipped attempts. A reservation is one attempt per
-human-activity window; a skipped, rejected or unknown attempt is never retried
-or re-armed, and a warning that already reached the phone cannot be retracted.
+The proactive inactivity warning (RCA-3c) and idle-expiry cleanup (PW-011 M3)
+are explicit, synchronous sweeps, not background loops themselves:
+``send_inactivity_warnings``/``send_expiry_cleanup`` use only the public
+registry sweep and this adapter's own admitted action records, and return a
+bounded tuple of delivered/rejected/unknown/skipped attempts. A reservation
+(warning) or a release (expiry) is one attempt per window; a skipped,
+rejected or unknown attempt is never retried or re-armed, and an effect that
+already reached the phone cannot be retracted. ``ChannelAActivation`` (PW-011
+M3) is what actually calls both, periodically, on a named interval, starting
+and stopping with the activation itself -- this module still starts no loop,
+thread or timer of its own.
 
 Authority model
 ---------------
@@ -1686,14 +1690,15 @@ class ChannelAPairingDialogue:
     def send_inactivity_warnings(self) -> tuple[InactivityWarningOutcome, ...]:
         """Attempt one reserved inactivity warning per due link, and no more.
 
-        Synchronous and serialized: a future RCA-5 scheduler calls this
-        explicitly; this adapter starts no loop, thread, timer or ``getUpdates``.
-        The public registry sweep runs under the serial adapter lock -- never
-        under the domain lock across I/O -- and its per-window reservation is one
-        attempt, not a guaranteed delivery. A rejected or unknown send is never
-        retried or re-armed, and an uncertain registry read never deletes a live
-        local control. The returned tuple is bounded by the live links and
-        carries no secret.
+        Synchronous and serialized: ``ChannelAActivation``'s periodic sweep
+        (PW-011 M3) calls this explicitly, right after
+        ``send_expiry_cleanup``; this adapter itself starts no loop, thread,
+        timer or ``getUpdates``. The public registry sweep runs under the
+        serial adapter lock -- never under the domain lock across I/O -- and
+        its per-window reservation is one attempt, not a guaranteed delivery.
+        A rejected or unknown send is never retried or re-armed, and an
+        uncertain registry read never deletes a live local control. The
+        returned tuple is bounded by the live links and carries no secret.
         """
         with self._lock:
             try:
