@@ -732,6 +732,42 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertIn("WARNING", joined)
         self.assertNotIn("test-token", joined)
 
+    def test_telegram_chat_action_sends_record_voice_when_a_protected_mode_token_resolves(self):
+        """F6 (live test 2026-09-25): proves F1's protected-mode token fix
+        and the existing record_voice chat-action indicator (Channel B's
+        voice-reply pipeline; unrelated to F6's own Channel B typing
+        indicator, which lives on the presentation process) compose
+        correctly -- this is the exact call _start_telegram_recording_
+        indicator's background worker makes on every tick."""
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"}), \
+                patch.object(service.telegram_credentials, "resolve", return_value="protected-token"), \
+                patch.object(service, "_telegram_post", return_value=Mock(ok=True)) as telegram_post:
+            result = service._telegram_chat_action(995701520, "record_voice")
+        self.assertTrue(result)
+        telegram_post.assert_called_once_with(
+            "https://api.telegram.org/botprotected-token/sendChatAction",
+            data={"chat_id": "995701520", "action": "record_voice"},
+            timeout=5,
+        )
+
+    def test_recording_indicator_actually_starts_in_protected_mode_once_a_token_resolves(self):
+        """F6: before F1's fix, _telegram_token() always returned "" in
+        protected mode, so this indicator (gated on it) never started at
+        all for Channel B -- proves the gate now opens once the protected
+        store resolves a token."""
+        job = {
+            "telegram_chat_id": 995701520,
+            "telegram_chat_action_stop": threading.Event(),
+            "event_id": "protected-record-voice",
+        }
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"}), \
+                patch.object(service.telegram_credentials, "resolve", return_value="protected-token"), \
+                patch.object(service.threading, "Thread") as thread_cls:
+            service._start_telegram_recording_indicator(job)
+        thread_cls.assert_called_once()
+        thread_cls.return_value.start.assert_called_once_with()
+        self.assertIs(job["telegram_action_thread"], thread_cls.return_value)
+
     def test_local_health_is_ready_but_provider_is_unconfigured_without_key(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(service, "get_gemini_client") as get_client:
             response = service.app.test_client().get("/health")
