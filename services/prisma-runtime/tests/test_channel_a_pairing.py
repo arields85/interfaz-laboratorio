@@ -1217,6 +1217,97 @@ class ChannelAPairingWarningSweepTests(ChannelAPairingTestCase):
         self.assertFalse(registry._links[OWNER].warning_issued)
 
 
+class ChannelAPairingExpirySweepTests(ChannelAPairingTestCase):
+    """PW-011 M3: the public atomic sweep that captures every link an idle
+    deadline just released, so a caller can clean up its own side effects
+    (Telegram menu/keyboard) for exactly the link this call released --
+    mirrors ``due_warnings()``'s own shape, never a foreign callback under
+    the lock."""
+
+    def test_due_expirations_is_empty_before_the_idle_deadline(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at - 0.001
+        self.assertEqual(registry.due_expirations(), ())
+        self.assertIsNotNone(registry.phone_link(PHONE))
+
+    def test_due_expirations_returns_and_purges_the_link_at_the_deadline(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at
+        due = registry.due_expirations()
+        self.assertIsInstance(due, tuple)
+        self.assertEqual(len(due), 1)
+        released = due[0]
+        self.assertIsInstance(released, PairingLink)
+        self.assertEqual(released.owner_id, OWNER)
+        self.assertEqual(released.phone_id, PHONE)
+        self.assertEqual(released.generation, link.generation)
+        self.assertEqual(released.idle_expires_at, link.idle_expires_at)
+        with self.assertRaises(FrozenInstanceError):
+            released.generation = 0
+        self.assertIsNone(registry.owner_link(OWNER))
+        self.assertIsNone(registry.phone_link(PHONE))
+        self.assertEqual(registry._links, {})
+
+    def test_due_expirations_never_double_reports_the_same_release(self):
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at
+        self.assertEqual(len(registry.due_expirations()), 1)
+        self.assertEqual(registry.due_expirations(), ())
+
+    def test_due_expirations_covers_independent_pairs_once(self):
+        registry = self.registry()
+        first = self.pair(registry)
+        self.pair(registry, owner=OWNER2, phone=PHONE2)
+        self.now[0] = first.idle_expires_at
+        due = registry.due_expirations()
+        self.assertEqual({item.owner_id for item in due}, {OWNER, OWNER2})
+        self.assertEqual(len(due), 2)
+        self.assertEqual(registry.due_expirations(), ())
+
+    def test_due_expirations_never_releases_a_link_that_is_still_within_its_window(self):
+        registry = self.registry()
+        first = self.pair(registry)
+        second = self.pair(registry, owner=OWNER2, phone=PHONE2)
+        self.now[0] = 1200.0
+        registry.human_touch(PHONE, first.generation)
+        self.now[0] = second.idle_expires_at
+        due = registry.due_expirations()
+        self.assertEqual([item.owner_id for item in due], [OWNER2])
+        self.assertIsNotNone(registry.phone_link(PHONE))
+
+    def test_due_expirations_called_before_due_warnings_still_captures_the_link(self):
+        """The key ordering contract a periodic sweep must honor: calling
+        due_expirations() first captures a just-expired link before
+        due_warnings()'s own _purge_locked would otherwise drop it
+        unobserved (see test_due_warnings_is_empty_at_expiry_and_purges_the_link
+        above, which proves due_warnings() ALONE loses it silently)."""
+        registry = self.registry()
+        link = self.pair(registry)
+        self.now[0] = link.idle_expires_at
+        expired = registry.due_expirations()
+        self.assertEqual(len(expired), 1)
+        self.assertEqual(registry.due_warnings(), ())
+
+    def test_due_expirations_rejects_a_regressing_clock_without_releasing(self):
+        registry = self.registry()
+        self.pair(registry)
+        self.now[0] = 1500.0
+        self.assertEqual(registry.due_expirations(), ())
+        self.now[0] = 1499.0
+        self.assert_error(ChannelAPairingConfigInvalid, PRISMA_CHANNEL_A_CLOCK_INVALID, registry.due_expirations)
+        self.assertEqual(len(registry._links), 1)
+
+    def test_due_expirations_fails_closed_on_an_unusable_clock(self):
+        registry = self.registry()
+        self.pair(registry)
+        registry.clock = lambda: float("nan")
+        self.assert_error(ChannelAPairingConfigInvalid, PRISMA_CHANNEL_A_CLOCK_INVALID, registry.due_expirations)
+        self.assertEqual(len(registry._links), 1)
+
+
 class ChannelAPairingOwnerStateTests(ChannelAPairingTestCase):
     """RCA-5l additive read-only owner-state projection for the QR/status view.
 

@@ -598,6 +598,28 @@ class ChannelAPairingRegistry:
             link.warning_issued = True
             return True
 
+    def due_expirations(self) -> tuple[PairingLink, ...]:
+        """Purge every link whose idle window just passed and return an
+        immutable, bounded snapshot of each one THIS call released (PW-011
+        M3).
+
+        Public and atomic, mirroring :meth:`due_warnings`'s own shape: under
+        the registry lock it samples the validated monotonic clock and
+        purges every expired challenge/pending/link, capturing the links.
+        No callback runs under this lock -- the caller's own cleanup
+        (Telegram menu/keyboard teardown for the released link) happens
+        outside, exactly like ``due_warnings()``'s own delivery.
+
+        A periodic sweep MUST call this before :meth:`due_warnings` in the
+        same tick: ``due_warnings()``'s own purge silently drops an expired
+        link with no way to observe what was lost (see its own docstring
+        and `test_due_warnings_is_empty_at_expiry_and_purges_the_link`).
+        Calling this one first is the only way to capture the release.
+        """
+        with self.lock:
+            now = self._now()
+            return tuple(self._purge_locked(now, collect_expired_links=True))
+
     def due_warnings(self) -> tuple[PairingLink, ...]:
         """Reserve, at most once per human-activity window, every due live link.
 
@@ -694,7 +716,16 @@ class ChannelAPairingRegistry:
             raise ChannelAPairingError(PRISMA_CHANNEL_A_UNAVAILABLE)
         return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("="), digest
 
-    def _purge_locked(self, now: float) -> None:
+    def _purge_locked(self, now: float, *, collect_expired_links: bool = False) -> list[PairingLink]:
+        """Drop every challenge/pending/link whose own deadline has passed.
+
+        ``collect_expired_links`` (PW-011 M3) additionally captures a
+        snapshot of each link released BY THIS CALL, before it is dropped --
+        used by :meth:`due_expirations` so a periodic caller can act on
+        exactly the release it caused, instead of the link silently
+        vanishing through an ordinary purge elsewhere (every other call site
+        keeps the default and ignores the return value, unchanged).
+        """
         for digest, challenge in list(self._challenges.items()):
             if now >= challenge.expires_at:
                 self._challenges.pop(digest, None)
@@ -703,10 +734,14 @@ class ChannelAPairingRegistry:
         for pending_digest, pending in list(self._pendings.items()):
             if now >= pending.expires_at:
                 self._release_pending_locked(pending_digest)
+        expired_links: list[PairingLink] = []
         for owner in list(self._links):
             link = self._links[owner]
             if now >= link.idle_expires_at:
+                if collect_expired_links:
+                    expired_links.append(_link_snapshot(link))
                 self._release_link_locked(owner)
+        return expired_links
 
     def _release_pending_locked(self, digest: bytes) -> None:
         pending = self._pendings.pop(digest, None)
