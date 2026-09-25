@@ -4,13 +4,16 @@ Scope (RCA-5a)
 --------------
 
 This module is the HTTP boundary of the dedicated Channel A bot and nothing
-else. It performs exactly eight Bot API calls — ``sendMessage``,
+else. It performs exactly nine Bot API calls — ``sendMessage``,
 ``answerCallbackQuery``, ``getMe``, ``getUpdates``, ``sendChatAction`` (T4),
-``setMyCommands``, ``deleteMyCommands`` and ``setChatMenuButton`` (T14) —
-against the fixed official HTTPS host and returns the raw response mapping to
-its caller. The adapter (RCA-3a) keeps deciding what ``delivered``,
-``rejected`` and ``unknown`` mean; this module never classifies a receipt
-beyond the status/boundary rules the frozen contract declares.
+``setMyCommands``, ``deleteMyCommands``, ``setChatMenuButton`` (T14) and
+``getFile`` (PW-013) — against the fixed official HTTPS host, plus one
+bounded download from Telegram's separate file host (``download_file``,
+PW-013), and returns the raw response mapping (or, for a download, the raw
+bytes) to its caller. The adapter (RCA-3a) keeps deciding what
+``delivered``, ``rejected`` and ``unknown`` mean; this module never
+classifies a receipt beyond the status/boundary rules the frozen contract
+declares.
 
 Boundary rules that deliberately stay here:
 
@@ -183,8 +186,8 @@ __all__ = [
     "ALLOWED_UPDATES",
     "ANSWER_CALLBACK_QUERY_METHOD",
     "CHANNEL_A_API_BASE",
-    "CHAT_ACTION_TYPING",
     "CHANNEL_A_FILE_BASE",
+    "CHAT_ACTION_TYPING",
     "ChannelABotIdentity",
     "ChannelATransport",
     "ChannelATransportError",
@@ -220,8 +223,9 @@ class ChannelATransportError(RuntimeError):
 class ChannelATransportUnauthorized(ChannelATransportError):
     """The provider rejected the bot token itself (HTTP 401) on a discovery call.
 
-    Raised only by :meth:`ChannelATransport.get_me`/:meth:`get_updates` (the
-    two calls the lifecycle layer depends on); ``send_message`` and
+    Raised by every call routed through :meth:`ChannelATransport._discovery`
+    -- :meth:`get_me`, :meth:`get_updates` (the two calls the lifecycle layer
+    depends on) and, since PW-013, :meth:`get_file`; ``send_message`` and
     ``answer_callback_query`` are unaffected and keep collapsing every non-2xx
     status into the base error. Still the same closed, non-disclosing
     contract: the message is always the fixed
