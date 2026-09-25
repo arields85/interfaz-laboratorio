@@ -62,6 +62,7 @@ class ChannelAActivation:
         reservation=None,
         sweep_interval_seconds=CHANNEL_A_SWEEP_INTERVAL_SECONDS,
         sweep_timer_factory=None,
+        transcribe=None,
     ) -> None:
         self._registry: ChannelAPairingRegistry | None = None
         self._dialogue: ChannelAPairingDialogue | None = None
@@ -103,6 +104,12 @@ class ChannelAActivation:
                 max_answer_chars=MESSAGE_MAX_CHARS,
                 clock=query_clock,
             )
+            # PW-013: optional -- a caller that never supplies transcribe
+            # (every existing test/composition) keeps ordinary RCA-3a/3b
+            # behavior untouched; only the production factory in
+            # local_presentation.py supplies a real one.
+            if transcribe is not None:
+                dialogue.enable_voice_notes(transcribe=transcribe)
             # Publication here is not issuance permission: only the runner's
             # successful preparation can open the public status gate below.
             self._registry = registry

@@ -316,6 +316,20 @@ def question_update(update_id, chat_id, text):
     }
 
 
+def voice_note_update(update_id, chat_id, *, duration=5, file_id="voice-file-1", file_size=1024):
+    """One private voice-note message envelope (PW-013)."""
+    return {
+        "update_id": update_id,
+        "message": {
+            "message_id": update_id,
+            "date": 1700000000,
+            "chat": {"id": chat_id, "type": "private"},
+            "from": {"id": chat_id, "is_bot": False, "first_name": "Phone"},
+            "voice": {"duration": duration, "file_id": file_id, "file_size": file_size, "mime_type": "audio/ogg"},
+        },
+    }
+
+
 def callback_update(update_id, chat_id, callback_data):
     """One private callback-press envelope on a message this bot sent."""
     return {
@@ -367,6 +381,12 @@ class ScriptedChannelATransport:
         self.fail_get_me = fail_get_me
         self._message_id = 9000
         self.close_calls = 0
+        # PW-013: voice-note download doubles -- one canned success each,
+        # never touching a real transport.
+        self.get_file_calls: list = []
+        self.download_file_calls: list = []
+        self.get_file_result = "voice/file_1.oga"
+        self.download_file_result = b"fake-ogg-audio"
 
     def get_me(self):
         self.get_me_calls += 1
@@ -401,6 +421,14 @@ class ScriptedChannelATransport:
     def answer_callback_query(self, *, callback_query_id, text=None):
         self.acknowledged.append(callback_query_id)
         return True
+
+    def get_file(self, *, file_id):
+        self.get_file_calls.append(file_id)
+        return self.get_file_result
+
+    def download_file(self, *, file_path, max_bytes):
+        self.download_file_calls.append({"filePath": file_path, "maxBytes": max_bytes})
+        return self.download_file_result
 
 
 class FakeSweepTimer:
@@ -538,7 +566,16 @@ class ActivationHarnessTestCase(unittest.TestCase):
             fail_get_me=fail_get_me,
         )
 
-    def activate(self, *, transport=None, reservation=None, parse=None, pairing_clock=None, sweep_timer_factory=None):
+    def activate(
+        self,
+        *,
+        transport=None,
+        reservation=None,
+        parse=None,
+        pairing_clock=None,
+        sweep_timer_factory=None,
+        transcribe=None,
+    ):
         """Build the real composition over inert boundaries and fake clocks.
 
         The absent production module is imported here, after the containment
@@ -574,6 +611,7 @@ class ActivationHarnessTestCase(unittest.TestCase):
             poll_retry_delay=0.05,
             reservation=self.reservation if reservation is None else reservation,
             sweep_timer_factory=sweep_timers,
+            transcribe=transcribe,
         )
         self.activations.append(activation)
         return ActivationUnderTest(activation, transport, observed, parse_calls, sweep_timers)
@@ -659,6 +697,34 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertEqual([outcome.kind for outcome in oversized.outcomes], [QUERY_IGNORED_OVERSIZE])
         self.assertEqual(len(transport.sent), before)
         self.assertEqual(len(published_envelopes(fixture.observed)), 1)
+
+    def test_a_voice_note_question_is_transcribed_downloaded_and_answered(self):
+        """PW-013: end to end through the real ChannelAActivation composition
+        -- transcribe is wired through to the dialogue, the file is resolved
+        and downloaded via the transport, and the resulting transcript is
+        answered exactly like the equivalent typed question."""
+        owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
+        transcribe_calls = []
+
+        def transcribe(audio_bytes, mime_type):
+            transcribe_calls.append((audio_bytes, mime_type))
+            return QUESTION
+
+        fixture = self.activate(transcribe=transcribe)
+        activation = fixture.activation
+        transport = fixture.transport
+        self.assertTrue(activation.prepare())
+
+        self.link(fixture, PHONE_A, owner_a, 1)
+
+        transport.batches.append((voice_note_update(3, PHONE_A),))
+        answered = activation.poll_once()
+
+        self.assertEqual([outcome.kind for outcome in answered.outcomes], [QUERY_ANSWER_DELIVERED])
+        self.assertEqual(transport.get_file_calls, ["voice-file-1"])
+        self.assertEqual(len(transport.download_file_calls), 1)
+        self.assertEqual(transcribe_calls, [(b"fake-ogg-audio", "audio/ogg")])
+        self.assertEqual(transport.sent[-1]["text"], ANSWER_A)
 
     def test_two_linked_phones_receive_their_own_owner_snapshot(self):
         owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
