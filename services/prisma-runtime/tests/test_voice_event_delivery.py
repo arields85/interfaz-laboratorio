@@ -602,3 +602,10 @@ class VoiceTranscriptionTokenTests(unittest.TestCase):
         self.assertEqual(
             self.store.resolve_voice_transcription_token(token)["extraTerms"], ["Horno 1"]
         )
+
+    def test_a_bare_extra_terms_string_is_treated_as_one_term_not_split_into_letters(self):
+        token = self.store.mint_voice_transcription_token("YXVkaW8=", "audio/ogg", "Prensa 3")
+
+        self.assertEqual(
+            self.store.resolve_voice_transcription_token(token)["extraTerms"], ["Prensa 3"]
+        )

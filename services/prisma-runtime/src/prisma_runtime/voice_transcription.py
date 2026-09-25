@@ -132,7 +132,10 @@ def build_transcription_prompt(extra_terms: Iterable[str] = ()) -> str:
     non-string or blank entries are silently ignored.
     """
     terms = list(DOMAIN_VOCABULARY_TERMS)
-    for term in extra_terms:
+    # A bare string is iterable character-by-character; never split one term
+    # into its individual letters.
+    normalized_extra_terms = (extra_terms,) if isinstance(extra_terms, str) else extra_terms
+    for term in normalized_extra_terms:
         if isinstance(term, str) and term.strip():
             terms.append(term.strip())
     vocabulary = ", ".join(dict.fromkeys(terms))

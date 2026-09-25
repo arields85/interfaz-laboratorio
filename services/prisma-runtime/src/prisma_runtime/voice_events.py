@@ -371,7 +371,10 @@ class VoiceEventStore:
             raise ValueError("VOICE_TRANSCRIPTION_AUDIO_INVALID")
         if not isinstance(mime_type, str) or not mime_type:
             raise ValueError("VOICE_TRANSCRIPTION_MIME_INVALID")
-        terms = [term.strip() for term in extra_terms if isinstance(term, str) and term.strip()]
+        # A bare string is iterable character-by-character; never split one
+        # term into its individual letters.
+        normalized_extra_terms = (extra_terms,) if isinstance(extra_terms, str) else extra_terms
+        terms = [term.strip() for term in normalized_extra_terms if isinstance(term, str) and term.strip()]
         now = self.clock()
         with self.lock:
             self._purge_voice_transcription_tokens_locked(now)

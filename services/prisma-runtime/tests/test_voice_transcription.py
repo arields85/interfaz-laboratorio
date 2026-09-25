@@ -56,6 +56,11 @@ class PromptBuilderTests(unittest.TestCase):
         prompt = vt.build_transcription_prompt(extra_terms=(None, 42, "  ", "Horno 1"))
         self.assertIn("Horno 1", prompt)
 
+    def test_a_bare_extra_terms_string_is_treated_as_one_term_not_split_into_letters(self):
+        prompt = vt.build_transcription_prompt(extra_terms="Prensa 3")
+        self.assertIn("Prensa 3", prompt)
+        self.assertNotIn(", P, r, e", prompt)
+
     def test_prompt_is_formal_usted_spanish(self):
         prompt = vt.build_transcription_prompt()
         self.assertIn("Transcriba", prompt)
