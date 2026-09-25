@@ -847,7 +847,7 @@ class TelegramLocalBot:
     def _handle_message(self, message, *, migration_active=False):
         chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}; chat_id = chat.get("id")
         text, voice = message.get("text"), message.get("voice")
-        has_text, has_voice = isinstance(text, str), isinstance(message.get("voice"), dict) and not isinstance(text, str)
+        has_text, has_voice = isinstance(text, str), isinstance(voice, dict) and not isinstance(text, str)
         if chat.get("type") != "private" or isinstance(chat_id, bool) or not isinstance(chat_id, int) or not (has_text or has_voice): return
         command, paired = normalize(text.split()[0]) if has_text and text.strip() else "", self.paired_chat_ids
         if command.startswith("/start"):
