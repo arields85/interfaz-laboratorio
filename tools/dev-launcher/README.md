@@ -67,9 +67,21 @@ is the opt-in flag `hmi-app/scripts/dev.mjs` checks before opening a browser at 
    `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\tools\dev-launcher\CoreAnalytics.cmd`.
 3. Start in: leave it as the folder containing the target (the script does not depend on the
    working directory it was launched from).
-4. Optionally set a custom icon and rename the shortcut.
+4. Icon: Properties > Change Icon… > browse to `coreanalytics.ico` in this folder (a prism in
+   the HMI's blue-to-violet chart gradient; `coreanalytics-icon.svg` is its editable source).
 
-Replace the old `CoreAnalitycs.bat` Desktop shortcut with one pointing at this file instead.
+Or create it in one step from PowerShell (run from this folder):
+
+```powershell
+$ws = New-Object -ComObject WScript.Shell
+$lnk = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'CoreAnalytics.lnk'))
+$lnk.TargetPath = (Resolve-Path .\CoreAnalytics.cmd).Path
+$lnk.WorkingDirectory = (Get-Location).Path
+$lnk.IconLocation = (Resolve-Path .\coreanalytics.ico).Path + ',0'
+$lnk.Save()
+```
+
+Replace the old `CoreAnalitycs.bat` Desktop launcher with this shortcut.
 
 ## Not part of the build
 
