@@ -298,6 +298,43 @@ class LocalPresentationTests(unittest.TestCase):
         with self.assertRaises(VoiceTranscriptionEmpty):
             _request_voice_transcription(http, "http://127.0.0.1:5056", "a-token")
 
+    def test_request_voice_transcription_logs_elapsed_ms_on_a_network_failure(self) -> None:
+        """F2 (live test 2026-09-25): the presentation side of a slow or
+        failed transcription round trip must be diagnosable from the log
+        alone -- elapsed_ms and a redacted reason, never the token."""
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        http = Mock(post=Mock(side_effect=requests.RequestException("boom")))
+        with self.assertLogs(local_presentation_module._logger, level="WARNING") as captured:
+            with self.assertRaises(VoiceTranscriptionUnavailable):
+                _request_voice_transcription(http, "http://127.0.0.1:5056", "a-secret-token")
+        joined = "\n".join(captured.output)
+        self.assertIn("elapsed_ms", joined)
+        self.assertNotIn("a-secret-token", joined)
+
+    def test_request_voice_transcription_logs_elapsed_ms_on_a_non_200_status(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        response = Mock(status_code=502)
+        http = Mock(post=Mock(return_value=response))
+        with self.assertLogs(local_presentation_module._logger, level="WARNING") as captured:
+            with self.assertRaises(VoiceTranscriptionUnavailable):
+                _request_voice_transcription(http, "http://127.0.0.1:5056", "a-secret-token")
+        joined = "\n".join(captured.output)
+        self.assertIn("elapsed_ms", joined)
+        self.assertNotIn("a-secret-token", joined)
+
+    def test_request_voice_transcription_logs_elapsed_ms_on_an_empty_transcript(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        response = Mock(status_code=422)
+        http = Mock(post=Mock(return_value=response))
+        with self.assertLogs(local_presentation_module._logger, level="WARNING") as captured:
+            with self.assertRaises(VoiceTranscriptionEmpty):
+                _request_voice_transcription(http, "http://127.0.0.1:5056", "a-secret-token")
+        joined = "\n".join(captured.output)
+        self.assertIn("elapsed_ms", joined)
+
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None, **DISABLED_HTTP_OPTIONS).test_client()

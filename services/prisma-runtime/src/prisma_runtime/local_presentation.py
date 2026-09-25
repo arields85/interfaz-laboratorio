@@ -285,7 +285,15 @@ def _request_voice_transcription(local_http: requests.Session, voice_url: str, t
     needs the transcript text back to answer the question, so this blocks its
     own caller and is never itself spawned on a background thread. Raises a
     ``voice_transcription.VoiceTranscriptionError`` subtype on any failure;
-    never returns an empty/blank string."""
+    never returns an empty/blank string.
+
+    F2 (live test 2026-09-25): every failure/timeout on this side of the
+    round trip is logged at WARNING with elapsed_ms and a redacted reason
+    (never the token, the audio or the transcript) -- a slow first call
+    (observed live: ~30s against this call's own
+    VOICE_TRANSCRIPTION_REQUEST_TIMEOUT_SECONDS=25 client timeout) must be
+    diagnosable from the log alone."""
+    request_started = time.monotonic()
     try:
         response = local_http.post(
             f"{voice_url}/internal/prisma/voice-transcription",
@@ -293,21 +301,44 @@ def _request_voice_transcription(local_http: requests.Session, voice_url: str, t
             headers={CAPABILITY_HEADER: token},
             timeout=VOICE_TRANSCRIPTION_REQUEST_TIMEOUT_SECONDS,
         )
-    except Exception:
+    except Exception as error:
+        _logger.warning(
+            "Prisma voice transcription request failed: elapsed_ms=%d reason=%s",
+            round((time.monotonic() - request_started) * 1000),
+            type(error).__name__,
+        )
         raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE") from None
     try:
         if response.status_code == 422:
+            _logger.warning(
+                "Prisma voice transcription request: elapsed_ms=%d reason=empty_transcript",
+                round((time.monotonic() - request_started) * 1000),
+            )
             raise VoiceTranscriptionEmpty("VOICE_NOTE_TRANSCRIPT_EMPTY")
         if response.status_code != 200:
+            _logger.warning(
+                "Prisma voice transcription request failed: elapsed_ms=%d reason=status_%d",
+                round((time.monotonic() - request_started) * 1000),
+                response.status_code,
+            )
             raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE")
         payload = response.json()
         transcript = payload.get("transcript") if isinstance(payload, dict) else None
         if not isinstance(transcript, str) or not transcript.strip():
+            _logger.warning(
+                "Prisma voice transcription request: elapsed_ms=%d reason=blank_transcript",
+                round((time.monotonic() - request_started) * 1000),
+            )
             raise VoiceTranscriptionEmpty("VOICE_NOTE_TRANSCRIPT_EMPTY")
         return transcript.strip()
     except VoiceTranscriptionError:
         raise
-    except Exception:
+    except Exception as error:
+        _logger.warning(
+            "Prisma voice transcription request failed: elapsed_ms=%d reason=%s",
+            round((time.monotonic() - request_started) * 1000),
+            type(error).__name__,
+        )
         raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE") from None
     finally:
         response.close()
