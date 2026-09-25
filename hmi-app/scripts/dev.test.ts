@@ -825,7 +825,7 @@ describe('createBrowserOpener (control Chrome)', () => {
       log,
       env: {},
       chromeExecutable: String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-      userDataDir: String.raw`C:\Users\Ariel De Simone\AppData\Local\CoreAnalytics\ChromeControl`,
+      userDataDir: String.raw`C:\Users\Some User\AppData\Local\CoreAnalytics\ChromeControl`,
       remoteDebuggingPort: '9222',
     })
 
@@ -834,7 +834,7 @@ describe('createBrowserOpener (control Chrome)', () => {
     expect(spawn).toHaveBeenCalledWith(
       String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
       [
-        String.raw`--user-data-dir=C:\Users\Ariel De Simone\AppData\Local\CoreAnalytics\ChromeControl`,
+        String.raw`--user-data-dir=C:\Users\Some User\AppData\Local\CoreAnalytics\ChromeControl`,
         '--remote-debugging-port=9222',
         '--remote-debugging-address=127.0.0.1',
         '--no-first-run',
