@@ -195,6 +195,14 @@ COPY_INACTIVITY_WARNING = (
     "Use el botón para seguir conectado, o el botón «Desvincular» de este chat para desvincular "
     "este teléfono."
 )
+# PW-011 M3: sent once, to the phone, when a periodic sweep finds a link the
+# registry already released by idle expiry -- never a delivery contract (the
+# release already happened), just the visible counterpart of the cleanup
+# below (removing the reply keyboard requires sending some message with
+# remove_keyboard; without this notice the release stayed completely
+# silent). Deliberately distinct from COPY_UNLINKED: this was never an
+# explicit "Desvincular" tap.
+COPY_EXPIRED = "Esta vinculación se cerró por inactividad."
 # T3: shown when the persistent "Desvincular" button is pressed, before any
 # unlink actually happens -- guards against an accidental tap.
 COPY_UNLINK_CONFIRM_PROMPT = (
@@ -212,6 +220,10 @@ UNLINK_COMMAND_DESCRIPTION = "Desvincular este teléfono de la HMI"
 # One warning reservation is one *attempt*. A skipped, rejected or unknown
 # attempt is reported honestly and is never automatically retried or re-armed.
 WARNING_SKIPPED = "skipped"
+# PW-011 M3: the release itself already happened (the registry sweep already
+# dropped the link) -- only the notice/menu-clear attempt for it can be
+# skipped, when no chat id can be recovered for the phone.
+EXPIRY_SKIPPED = "skipped"
 
 # Every other update kind Telegram may deliver alongside a supported variant.
 # Presence of any of them turns the update into an ambiguous envelope that is
@@ -293,15 +305,18 @@ __all__ = [
     "COPY_CANCELLED",
     "COPY_CONFIRMED",
     "COPY_DESTINATION_UNAVAILABLE",
+    "COPY_EXPIRED",
     "COPY_INACTIVITY_WARNING",
     "COPY_KEEP_CONNECTED",
     "COPY_REFUSED",
     "COPY_UNLINK_CONFIRM_PROMPT",
     "COPY_UNLINKED",
+    "EXPIRY_SKIPPED",
     "ChannelABotConfigInvalid",
     "ChannelABotError",
     "ChannelAPairingDialogue",
     "ChannelATextTransport",
+    "ExpiryCleanupOutcome",
     "INGRESS_IGNORED_AMBIGUOUS",
     "INGRESS_IGNORED_MALFORMED",
     "INGRESS_IGNORED_STALE",
@@ -440,6 +455,32 @@ class InactivityWarningOutcome:
     honored. No token, nonce or envelope is carried, so the bounded tuple is
     safe to report verbatim. A reservation is a single attempt: a failure or an
     unknown outcome is never retried or re-armed automatically.
+    """
+
+    owner_id: str
+    phone_id: str
+    generation: int
+    status: str
+
+    def as_dict(self) -> dict:
+        return {
+            "ownerId": self.owner_id,
+            "phoneId": self.phone_id,
+            "generation": self.generation,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class ExpiryCleanupOutcome:
+    """One declared cleanup attempt for one link the registry just released
+    by idle expiry (PW-011 M3).
+
+    ``status`` is the existing ``delivered``/``rejected``/``unknown`` send
+    classification for the expiry notice, or ``skipped`` when no chat could
+    be recovered for the phone. The release itself already happened (the
+    registry sweep already dropped the link) before this outcome is ever
+    produced -- this only reports the notice/menu-clear attempt.
     """
 
     owner_id: str
@@ -1699,6 +1740,67 @@ class ChannelAPairingDialogue:
         )
         return InactivityWarningOutcome(
             snapshot.owner_id, snapshot.phone_id, snapshot.generation, delivery
+        )
+
+    # -- proactive expiry cleanup (PW-011 M3) -------------------------------
+
+    def send_expiry_cleanup(self) -> tuple[ExpiryCleanupOutcome, ...]:
+        """Clean up every link the registry just released by idle expiry,
+        and no more.
+
+        Synchronous and serialized, mirroring ``send_inactivity_warnings``'s
+        own contract: a scheduler calls this explicitly; this adapter starts
+        no loop, thread or timer of its own here (the menu-clear effect
+        below still runs on its own short-lived background thread, exactly
+        like every other menu-maintenance call). The registry sweep
+        (``due_expirations``) runs under the domain lock; every Telegram
+        effect below runs outside it, under this adapter's own serializing
+        lock instead -- the same one ``handle_update``/
+        ``send_inactivity_warnings`` already hold across their own I/O.
+
+        Must be called BEFORE ``send_inactivity_warnings`` in the same sweep
+        tick: see ``due_expirations()``'s own docstring for why the order
+        matters (otherwise ``due_warnings()``'s own purge could drop an
+        expired link unobserved, before this ever sees it).
+        """
+        with self._lock:
+            try:
+                expired = self.registry.due_expirations()
+            except Exception:
+                # A whole-sweep registry failure is reported as a controlled
+                # error: nothing is claimed delivered and no live action
+                # record is lost.
+                raise ChannelABotError(PRISMA_CHANNEL_A_BOT_UNAVAILABLE) from None
+            outcomes = tuple(self._cleanup_one(link) for link in expired)
+            if expired:
+                # The link is already gone; drop any local action record
+                # still pointing at it (mirrors _confirm's own _purge_actions
+                # call, and the explicit unlink path's _actions.pop).
+                self._purge_actions()
+            return outcomes
+
+    def _cleanup_one(self, link) -> ExpiryCleanupOutcome:
+        """Reuse the exact same unlink-cleanup effects the explicit
+        "Desvincular" flow already uses (_link_action's CALLBACK_UNLINK
+        branch) -- the module's only unlink-cleanup shape, now also reached
+        by a silent inactivity release instead of only an explicit tap. The
+        link is already released by the time this runs; there is no
+        authoritative re-read here (unlike _warn_one, there is no live
+        window left to still be current against)."""
+        chat_id = self._chat_from_phone(link.phone_id)
+        if chat_id is None:
+            return ExpiryCleanupOutcome(
+                link.owner_id, link.phone_id, link.generation, EXPIRY_SKIPPED
+            )
+        self._forget_claims_for_owner(link.owner_id)
+        # T3: the only unlink-notice path this module has -- remove the
+        # persistent reply keyboard along with the expiry notice.
+        delivery = self._send(chat_id, COPY_EXPIRED, _remove_reply_keyboard())
+        # T14: clear the per-chat menu entry along with the reply keyboard --
+        # same fire-and-forget shape as _clear_unlink_menu's other caller.
+        self._clear_unlink_menu(chat_id)
+        return ExpiryCleanupOutcome(
+            link.owner_id, link.phone_id, link.generation, delivery
         )
 
     def _action_for(self, phone_id, owner_id, generation):

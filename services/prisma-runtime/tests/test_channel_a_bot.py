@@ -37,11 +37,13 @@ from prisma_runtime.channel_a_bot import (
     COPY_CANCELLED,
     COPY_CONFIRMED,
     COPY_DESTINATION_UNAVAILABLE,
+    COPY_EXPIRED,
     COPY_INACTIVITY_WARNING,
     COPY_KEEP_CONNECTED,
     COPY_REFUSED,
     COPY_UNLINK_CONFIRM_PROMPT,
     COPY_UNLINKED,
+    EXPIRY_SKIPPED,
     INGRESS_IGNORED_AMBIGUOUS,
     INGRESS_IGNORED_MALFORMED,
     INGRESS_IGNORED_STALE,
@@ -83,6 +85,7 @@ from prisma_runtime.channel_a_bot import (
     ChannelABotError,
     ChannelAPairingDialogue,
     ChannelATextTransport,
+    ExpiryCleanupOutcome,
     InactivityWarningOutcome,
     IngressOutcome,
     phone_identity,
@@ -3210,6 +3213,102 @@ class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         self.assertEqual(sorted(results), [0, 1])
         self.assertEqual(len(self.transport.sent), sent_before + 1)
+
+
+class ChannelAExpiryCleanupSweepTests(ChannelABotTestCase):
+    """PW-011 M3: cleaning up the Telegram UI (reply keyboard + T14 menu
+    entry) for a link the registry just released by idle expiry -- reusing
+    the exact same effects the explicit "Desvincular" flow already uses."""
+
+    def _wait_for(self, predicate, timeout=2):
+        deadline = time.monotonic() + timeout
+        while not predicate() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    def test_sweep_before_expiry_does_nothing(self):
+        self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1599.999
+        self.assertEqual(self.dialogue.send_expiry_cleanup(), ())
+        self.assertEqual(len(self.transport.sent), sent_before)
+        self.assertIsNotNone(self.registry.phone_link(PHONE))
+
+    def test_sweep_at_expiry_sends_the_expiry_notice_and_clears_reply_keyboard(self):
+        self.pair_up(4, 5)
+        sent_before = len(self.transport.sent)
+        self.now[0] = 1600.0
+        outcomes = self.dialogue.send_expiry_cleanup()
+        self.assertIsInstance(outcomes, tuple)
+        self.assertEqual(len(outcomes), 1)
+        outcome = outcomes[0]
+        self.assertIsInstance(outcome, ExpiryCleanupOutcome)
+        self.assertEqual(outcome.status, SEND_DELIVERED)
+        self.assertEqual(outcome.owner_id, OWNER)
+        self.assertEqual(outcome.phone_id, PHONE)
+        self.assertIsNone(self.registry.phone_link(PHONE))
+        self.assertEqual(len(self.transport.sent), sent_before + 1)
+        payload = self.transport.sent[-1]
+        self.assertEqual(payload["chat_id"], CHAT_ID)
+        self.assertEqual(payload["text"], COPY_EXPIRED)
+        self.assertEqual(payload["reply_markup"], {"remove_keyboard": True})
+
+    def test_the_expiry_copy_states_inactivity_without_mentioning_unlink(self):
+        self.pair_up(4, 5)
+        self.now[0] = 1600.0
+        self.dialogue.send_expiry_cleanup()
+        text = self.transport.sent[-1]["text"]
+        self.assertEqual(text, COPY_EXPIRED)
+        self.assertIn("inactividad", text)
+        self.assertNotEqual(text, COPY_UNLINKED)
+
+    def test_sweep_clears_the_t14_menu_entry_same_as_an_explicit_unlink(self):
+        self.pair_up(4, 5)
+        self._wait_for(lambda: self.transport.set_commands_calls)
+        self.now[0] = 1600.0
+        self.dialogue.send_expiry_cleanup()
+        self._wait_for(lambda: self.transport.deleted_commands_calls)
+        self._wait_for(lambda: len(self.transport.menu_button_calls) >= 2)
+        self.assertEqual(self.transport.deleted_commands_calls[-1], {"chat_id": CHAT_ID})
+        self.assertEqual(self.transport.menu_button_calls[-1], {"chat_id": CHAT_ID, "button_type": "default"})
+
+    def test_sweep_never_resends_for_the_same_release(self):
+        self.pair_up(4, 5)
+        self.now[0] = 1600.0
+        self.assertEqual(len(self.dialogue.send_expiry_cleanup()), 1)
+        self.assertEqual(self.dialogue.send_expiry_cleanup(), ())
+
+    def test_sweep_purges_the_local_action_record_for_the_expired_phone(self):
+        self.pair_up(4, 5)
+        self.assertIsNotNone(self.dialogue._record_for_phone(PHONE))
+        self.now[0] = 1600.0
+        self.dialogue.send_expiry_cleanup()
+        self.assertIsNone(self.dialogue._record_for_phone(PHONE))
+
+    def test_sweep_covers_independent_pairs_once(self):
+        self.pair_up(4, 5, owner=OWNER, chat=CHAT_ID)
+        self.pair_up(6, 7, owner=OWNER2, chat=CHAT_ID_2)
+        self.now[0] = 1600.0
+        outcomes = self.dialogue.send_expiry_cleanup()
+        self.assertEqual({item.owner_id for item in outcomes}, {OWNER, OWNER2})
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual(self.dialogue.send_expiry_cleanup(), ())
+
+    def test_sweep_before_due_warnings_still_cleans_up_the_expired_link(self):
+        """The ordering contract a scheduler must honor: calling
+        send_expiry_cleanup() before send_inactivity_warnings() in the same
+        tick still catches a link that just crossed its idle deadline
+        (see due_expirations()'s own docstring for why the order matters)."""
+        self.pair_up(4, 5)
+        self.now[0] = 1600.0
+        cleanup = self.dialogue.send_expiry_cleanup()
+        self.assertEqual(len(cleanup), 1)
+        self.assertEqual(self.dialogue.send_inactivity_warnings(), ())
+
+    def test_the_sweep_never_exposes_the_owner_id_in_the_notice_text(self):
+        self.pair_up(4, 5)
+        self.now[0] = 1600.0
+        self.dialogue.send_expiry_cleanup()
+        self.assertNotIn(OWNER, self.transport.sent[-1]["text"])
 
 
 if __name__ == "__main__":
