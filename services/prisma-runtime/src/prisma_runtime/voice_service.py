@@ -31,11 +31,14 @@ from flask import Flask, Response, jsonify, request
 
 from .access_log_redaction import install_access_log_query_redaction
 from .audio_observability import BoundedAudioSink
+from .credential_store import CredentialService
 from .event_audio import AudioCapacityError, AudioCoordinator, AudioCoordinatorError
 from .hmi_sessions import CAPABILITY_HEADER
 from .gemini_credentials import GeminiCredentialResolver, GeminiCredentialUnavailable, WarmGeminiClient, create_gemini_client
 from .paths import runtime_paths
-from .telegram_config import telegram_token
+from .storage_permissions import SecureStoragePermissions
+from .telegram_config import read_telegram_config
+from .telegram_credentials import TelegramCredentialError, TelegramCredentialResolver
 from .voice_dsp import PrismaStreamingDSP, apply_prisma_dsp_full_pcm
 from .voice_events import validate_voice_event
 from .voice_transcription import (
@@ -102,6 +105,30 @@ voice_event_http = requests.Session()
 voice_event_http.trust_env = False
 
 
+def _default_telegram_credential_service() -> CredentialService:
+    # F1 (live test 2026-09-25): identical construction to
+    # gemini_credentials._default_service -- the same protected store, same
+    # permission checker, same runtime paths -- so the Channel B bot token
+    # (provider "telegram") resolves from exactly the store the presentation
+    # process's own TelegramLifecycleManager already reads it from.
+    paths = runtime_paths()
+    permissions = SecureStoragePermissions()
+    return CredentialService(
+        paths.credential_database,
+        os.environ.get("PRISMA_CREDENTIAL_MASTER_KEY_FILE", ""),
+        paths.root,
+        permissions.verify,
+    )
+
+
+# F1: mirrors gemini_credentials's own module-level resolver -- cached
+# (mtime-based, see TelegramCredentialResolver) so a chat action or a TTS
+# job creation (both call _telegram_token() far more often than
+# presentation's own construction-time-only resolve) never pays a fresh
+# protected-store read on every call.
+telegram_credentials = TelegramCredentialResolver(credential_service_factory=_default_telegram_credential_service)
+
+
 def _telegram_post(url, **kwargs):
     with _TELEGRAM_HTTP_LOCK:
         return _TELEGRAM_HTTP_SESSION.post(url, **kwargs)
@@ -117,7 +144,26 @@ def _safe_event_id(value):
 
 
 def _telegram_token():
-    return telegram_token()
+    # F1 (live test 2026-09-25): telegram_config.telegram_token() always
+    # returns "" in protected mode (PRISMA_CREDENTIAL_MASTER_KEY_FILE set) --
+    # that silently cancelled every Channel B voice-note reply job
+    # (_send_same_prisma_audio_to_telegram / _create_interactions_tts_job's
+    # encoder creation, both gated on this). Protected mode resolves the
+    # SAME "telegram" secret the presentation process's own Channel B bot
+    # construction already reads (see local_presentation.create_app's
+    # TelegramCredentialResolver(os.environ, lambda: credentials)); the
+    # PRISMA_LOCAL_TELEGRAM_ENABLED opt-in gate still applies in both modes,
+    # exactly as read_telegram_config already enforced for environment mode.
+    config = read_telegram_config()
+    if not config.enabled:
+        return ""
+    if config.source != "protected":
+        return config.token
+    try:
+        return telegram_credentials.resolve()
+    except TelegramCredentialError:
+        _logger.warning("Telegram voice delivery: protected bot token unavailable")
+        return ""
 
 
 def _telegram_chat_action(chat_id, action):
@@ -236,10 +282,18 @@ def _cancel_telegram_job(job):
 
 def _send_same_prisma_audio_to_telegram(job):
     if not job or not _valid_telegram_chat_id(job.get("telegram_chat_id")): return
+    event_id = _safe_event_id(job.get("event_id"))
     if job.get("cancelled") is not None and job["cancelled"].is_set(): _cancel_telegram_job(job); return
     token, encoder = _telegram_token(), job.get("telegram_encoder")
-    if not token: _cancel_telegram_job(job); return
-    ogg_data = encoder.finish_and_get(timeout=15) if encoder else None; base = os.environ.get("TELEGRAM_BOT_API_BASE", "https://api.telegram.org").rstrip("/"); chat_id = job["telegram_chat_id"]; event_id = _safe_event_id(job.get("event_id"))
+    if not token:
+        # F1 (live test 2026-09-25): this used to cancel silently -- the
+        # exact failure mode that made every Channel B voice-note reply
+        # vanish with no trace in protected credential mode. No secret here
+        # (there is none to log): only the safe, already-sanitized event id.
+        _logger.warning("Telegram voice delivery cancelled: no bot token available (event_id=%s)", event_id)
+        _cancel_telegram_job(job)
+        return
+    ogg_data = encoder.finish_and_get(timeout=15) if encoder else None; base = os.environ.get("TELEGRAM_BOT_API_BASE", "https://api.telegram.org").rstrip("/"); chat_id = job["telegram_chat_id"]
     # B1: reply to the question message when one was bound at job creation
     # (Channel B), so text and audio stay visually paired under overlapping
     # questions. Absent for every other caller (Channel A, HMI prefetch),
@@ -261,6 +315,11 @@ def _send_same_prisma_audio_to_telegram(job):
     if pcm:
         try: _telegram_post(f"{base}/bot{token}/sendDocument", data={"chat_id": str(chat_id), "caption": "Respuesta por voz de Prisma", **reply_data}, files={"document": (f"prisma_{event_id}.wav", pcm_to_wav(pcm), "audio/wav")}, timeout=15)
         except Exception: pass
+    # F1: every earlier branch above returns as soon as a 2xx response is
+    # observed; reaching here means sendVoice and sendDocument(ogg) both
+    # failed (and the pcm/wav fallback, if attempted, is fire-and-forget
+    # with no observable outcome) -- never silent.
+    _logger.warning("Telegram voice delivery: exhausted sendVoice/sendDocument attempts (event_id=%s)", event_id)
 
 
 def _queue_same_prisma_audio_to_telegram(job):
@@ -1195,14 +1254,25 @@ def voice_transcription():
         client = get_gemini_client()
     except GeminiCredentialUnavailable:
         return _gemini_unavailable_response()
+    # F2 (live test 2026-09-25): every transcription failure/timeout must be
+    # diagnosable from the log alone -- elapsed_ms and a redacted reason,
+    # never the audio, the transcript or a secret.
+    transcribe_started = time.monotonic()
     try:
         transcript = transcribe_voice_note(
             client, audio_bytes, payload["mimeType"], extra_terms=payload["extraTerms"]
         )
     except VoiceTranscriptionEmpty:
+        _logger.warning(
+            "Prisma voice transcription: empty transcript elapsed_ms=%d",
+            round((time.monotonic() - transcribe_started) * 1000),
+        )
         return jsonify({"ok": False, "error": "VOICE_NOTE_TRANSCRIPT_EMPTY"}), 422
     except VoiceTranscriptionError:
-        _logger.warning("Prisma voice transcription: provider failed")
+        _logger.warning(
+            "Prisma voice transcription: provider failed elapsed_ms=%d",
+            round((time.monotonic() - transcribe_started) * 1000),
+        )
         return jsonify({"ok": False, "error": "VOICE_TRANSCRIPTION_UNAVAILABLE"}), 502
     return jsonify({"ok": True, "transcript": transcript})
 
@@ -1219,11 +1289,33 @@ def _validate_single_process_environment(environ=None):
 def _warm_up_gemini_client_in_background():
     """T10 unit 2: pre-build the Gemini client at boot so the first real
     voice request does not pay for it. Runs on its own daemon thread so it
-    can never block process startup or the /health endpoint; failures
-    (missing credential, unreachable provider) are swallowed by
-    WarmGeminiClient.warm_up itself and simply leave the client to be built
-    lazily on the first request instead, exactly as before this task."""
-    _warm_gemini_client.warm_up(gemini_credentials.resolve)
+    can never block process startup or the /health endpoint; every step is
+    best-effort (missing credential, unreachable provider) and never raises
+    or logs the secret, leaving the client to be built/warmed lazily on the
+    first real request instead.
+
+    F2 (live test 2026-09-25): building the client OBJECT alone never opens
+    a real TCP/TLS connection -- the genai SDK's httpx client connects
+    lazily on the first real call. Without a genuine network round trip
+    here, the very first live request after boot (often a voice-note
+    transcription, blocking a human-facing reply) pays the full
+    cold-connection cost instead of this warm-up (~30s vs ~3s once warm,
+    observed live 2026-09-25). A cheap, non-generating client.models.get(...)
+    lookup -- the same call GeminiVerificationService already uses to
+    verify a key, consuming no generation quota -- forces that connection
+    now, at boot, where nobody is waiting on it."""
+    try:
+        secret = gemini_credentials.resolve()
+    except Exception:
+        return
+    try:
+        client, _reused = _warm_gemini_client.get(secret)
+    except Exception:
+        return
+    try:
+        client.models.get(model=TTS_MODEL)
+    except Exception:
+        pass
 
 
 def main():

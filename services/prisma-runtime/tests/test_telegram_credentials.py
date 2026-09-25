@@ -125,6 +125,48 @@ class TelegramCredentialTests(unittest.TestCase):
         store.get_secret.return_value = "  protected-token  "
         self.assertEqual(resolver.resolve(), "  protected-token  ")
 
+    def test_protected_resolver_caches_while_the_credential_database_mtime_is_unchanged(self):
+        """F1 (live test 2026-09-25): mirrors GeminiCredentialResolver's own
+        mtime-based cache exactly, so a caller that resolves the Telegram
+        token on every outbound Telegram call (the voice process, unlike
+        presentation's construction-time-only resolve) does not pay a fresh
+        protected-store read every time."""
+        store = Mock()
+        store.get_secret.return_value = "protected-token"
+        resolver = TelegramCredentialResolver(
+            {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"},
+            lambda: store,
+            mtime_probe=lambda: 100.0,
+        )
+        self.assertEqual(resolver.resolve(), "protected-token")
+        store.get_secret.return_value = "changed-but-should-not-be-read"
+        self.assertEqual(resolver.resolve(), "protected-token")
+        self.assertEqual(store.get_secret.call_count, 1)
+
+    def test_protected_resolver_invalidates_the_cache_when_the_mtime_changes(self):
+        store = Mock()
+        store.get_secret.return_value = "first-token"
+        mtime = {"value": 100.0}
+        resolver = TelegramCredentialResolver(
+            {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"},
+            lambda: store,
+            mtime_probe=lambda: mtime["value"],
+        )
+        self.assertEqual(resolver.resolve(), "first-token")
+        mtime["value"] = 200.0
+        store.get_secret.return_value = "rotated-token"
+        self.assertEqual(resolver.resolve(), "rotated-token")
+        self.assertEqual(store.get_secret.call_count, 2)
+
+    def test_environment_resolver_is_never_cached(self):
+        """Only protected-mode reads are cached -- environment mode is a
+        plain, cheap os.environ read that must always reflect the live
+        value (matches read_telegram_config's own no-caching contract)."""
+        resolver = TelegramCredentialResolver({"PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "one"}, None, mtime_probe=lambda: 100.0)
+        self.assertEqual(resolver.resolve(), "one")
+        resolver.environ = {"PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "two"}
+        self.assertEqual(resolver.resolve(), "two")
+
     def test_save_advances_desired_without_resolve_or_bot_activity(self):
         config = read_telegram_config({"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "old"})
         resolver = Mock(source="environment")

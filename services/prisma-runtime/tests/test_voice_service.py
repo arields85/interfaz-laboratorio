@@ -485,6 +485,36 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.get_json()["error"], "VOICE_TRANSCRIPTION_UNAVAILABLE")
 
+    def test_voice_transcription_provider_failure_logs_elapsed_ms(self):
+        """F2 (live test 2026-09-25): every transcription failure/timeout must
+        log its elapsed time (never a secret) so a slow provider call is
+        diagnosable from the log alone."""
+        payload = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": []}
+        with patch.object(service, "_resolve_voice_transcription_payload", return_value=payload), \
+                patch.object(service, "get_gemini_client", return_value="fake-client"), \
+                patch.object(service, "transcribe_voice_note", side_effect=service.VoiceTranscriptionUnavailable("x")):
+            with self.assertLogs(service._logger, level="WARNING") as captured:
+                service.app.test_client().post(
+                    "/internal/prisma/voice-transcription",
+                    headers={"X-Prisma-Session-Capability": "transcription-token"},
+                )
+        joined = "\n".join(captured.output)
+        self.assertIn("elapsed_ms", joined)
+        self.assertNotIn("YXVkaW8=", joined)
+
+    def test_voice_transcription_empty_transcript_logs_elapsed_ms(self):
+        payload = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": []}
+        with patch.object(service, "_resolve_voice_transcription_payload", return_value=payload), \
+                patch.object(service, "get_gemini_client", return_value="fake-client"), \
+                patch.object(service, "transcribe_voice_note", side_effect=service.VoiceTranscriptionEmpty("x")):
+            with self.assertLogs(service._logger, level="WARNING") as captured:
+                service.app.test_client().post(
+                    "/internal/prisma/voice-transcription",
+                    headers={"X-Prisma-Session-Capability": "transcription-token"},
+                )
+        joined = "\n".join(captured.output)
+        self.assertIn("elapsed_ms", joined)
+
     def test_resolve_voice_transcription_payload_round_trip(self):
         response = Mock(status_code=200)
         response.json.return_value = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": ["Prensa 3"]}
@@ -521,14 +551,42 @@ class VoiceServiceTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     service._resolve_voice_transcription_payload("token", http=http)
 
-    def test_boot_warm_up_delegates_to_the_warm_client_without_blocking(self):
-        """T10 unit 2: main() must never block on Gemini reachability, so the
-        warm-up entry point is a plain, synchronous, already-safe delegation
-        that main() runs on its own daemon thread (not exercised here)."""
-        with patch.object(service, "_warm_gemini_client") as warm_client, \
-                patch.object(service.gemini_credentials, "resolve") as resolve:
+    def test_boot_warm_up_builds_the_client_and_performs_one_real_network_touch(self):
+        """F2 (live test 2026-09-25): building the client object alone never
+        opens a real TCP/TLS connection to Gemini -- the genai SDK's httpx
+        client connects lazily on the first real call. Without a genuine
+        network round trip here, the very first live request (often a
+        voice-note transcription, user-facing) pays the full cold-connection
+        cost instead of this best-effort boot warm-up. A cheap,
+        non-generating client.models.get(...) lookup -- the same call
+        GeminiVerificationService already uses to verify a key, consuming no
+        generation quota -- forces that real connection now. main() must
+        never block on Gemini reachability; this stays a plain, synchronous,
+        already-safe delegation that main() runs on its own daemon thread
+        (not exercised here)."""
+        fake_client = Mock()
+        with patch.object(service.gemini_credentials, "resolve", return_value="secret-value") as resolve, \
+                patch.object(service._warm_gemini_client, "get", return_value=(fake_client, False)) as get:
             service._warm_up_gemini_client_in_background()
-        warm_client.warm_up.assert_called_once_with(resolve)
+        resolve.assert_called_once_with()
+        get.assert_called_once_with("secret-value")
+        fake_client.models.get.assert_called_once_with(model=service.TTS_MODEL)
+
+    def test_boot_warm_up_never_raises_when_credential_resolution_fails(self):
+        with patch.object(service.gemini_credentials, "resolve", side_effect=service.GeminiCredentialUnavailable("x")):
+            service._warm_up_gemini_client_in_background()  # must not raise
+
+    def test_boot_warm_up_never_raises_when_the_client_build_fails(self):
+        with patch.object(service.gemini_credentials, "resolve", return_value="secret-value"), \
+                patch.object(service._warm_gemini_client, "get", side_effect=RuntimeError("boom")):
+            service._warm_up_gemini_client_in_background()  # must not raise
+
+    def test_boot_warm_up_never_raises_when_the_network_touch_fails(self):
+        fake_client = Mock()
+        fake_client.models.get.side_effect = RuntimeError("boom")
+        with patch.object(service.gemini_credentials, "resolve", return_value="secret-value"), \
+                patch.object(service._warm_gemini_client, "get", return_value=(fake_client, False)):
+            service._warm_up_gemini_client_in_background()  # must not raise
 
     def test_known_multiworker_and_reloader_modes_fail_closed(self):
         with self.assertRaisesRegex(RuntimeError, "SINGLE_PROCESS"):
@@ -602,6 +660,77 @@ class VoiceServiceTests(unittest.TestCase):
             with self.subTest(value=invalid):
                 job = service._create_interactions_tts_job("text", telegram_reply_to_message_id=invalid)
                 self.assertIsNone(job["telegram_reply_to_message_id"])
+
+    def test_telegram_token_resolves_from_the_protected_credential_store_in_protected_mode(self):
+        """F1 (live test 2026-09-25): telegram_token() alone always returns ""
+        in protected mode (PRISMA_CREDENTIAL_MASTER_KEY_FILE set) -- this is
+        what silently cancelled every Channel B voice-note reply job. The
+        voice process must resolve the SAME "telegram" secret the
+        presentation process's own Channel B bot construction reads."""
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"}), \
+                patch.object(service.telegram_credentials, "resolve", return_value="protected-token") as resolve:
+            token = service._telegram_token()
+        self.assertEqual(token, "protected-token")
+        resolve.assert_called_once_with()
+
+    def test_telegram_token_returns_empty_and_logs_a_warning_when_the_protected_store_has_no_secret(self):
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"}), \
+                patch.object(service.telegram_credentials, "resolve", side_effect=service.TelegramCredentialError("TELEGRAM_CREDENTIAL_MISSING")):
+            with self.assertLogs(service._logger, level="WARNING") as captured:
+                token = service._telegram_token()
+        self.assertEqual(token, "")
+        joined = "\n".join(captured.output)
+        self.assertIn("WARNING", joined)
+        self.assertNotIn("protected-token", joined)
+
+    def test_telegram_token_stays_empty_when_not_enabled_even_in_protected_mode(self):
+        with patch.dict(os.environ, {"PRISMA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"}, clear=True), \
+                patch.object(service.telegram_credentials, "resolve") as resolve:
+            token = service._telegram_token()
+        self.assertEqual(token, "")
+        resolve.assert_not_called()
+
+    def test_telegram_token_reads_the_environment_value_directly_when_not_protected(self):
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "env-token"}), \
+                patch.object(service.telegram_credentials, "resolve") as resolve:
+            token = service._telegram_token()
+        self.assertEqual(token, "env-token")
+        resolve.assert_not_called()
+
+    def test_send_same_prisma_audio_to_telegram_logs_a_warning_when_cancelled_for_a_missing_token(self):
+        job = {
+            "telegram_chat_id": 995701520,
+            "telegram_encoder": None,
+            "telegram_pcm_parts": [b"pcm"],
+            "cancelled": Mock(is_set=Mock(return_value=False)),
+            "telegram_chat_action_stop": threading.Event(),
+            "event_id": "missing-token",
+        }
+        with patch.dict(os.environ, {}, clear=True), patch.object(service, "_telegram_post") as telegram_post:
+            with self.assertLogs(service._logger, level="WARNING") as captured:
+                service._send_same_prisma_audio_to_telegram(job)
+        telegram_post.assert_not_called()
+        joined = "\n".join(captured.output)
+        self.assertIn("WARNING", joined)
+        self.assertIn("missing-token", joined)
+
+    def test_send_same_prisma_audio_to_telegram_logs_a_warning_when_every_delivery_attempt_fails(self):
+        encoder = Mock()
+        encoder.finish_and_get.return_value = b"ogg-bytes"
+        job = {
+            "telegram_chat_id": 995701520,
+            "telegram_encoder": encoder,
+            "telegram_pcm_parts": [b"pcm"],
+            "cancelled": Mock(is_set=Mock(return_value=False)),
+            "event_id": "exhausted",
+        }
+        with patch.dict(os.environ, {"PRISMA_LOCAL_TELEGRAM_ENABLED": "1", "PRISMA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}), \
+                patch.object(service, "_telegram_post", return_value=Mock(ok=False, status_code=500)):
+            with self.assertLogs(service._logger, level="WARNING") as captured:
+                service._send_same_prisma_audio_to_telegram(job)
+        joined = "\n".join(captured.output)
+        self.assertIn("WARNING", joined)
+        self.assertNotIn("test-token", joined)
 
     def test_local_health_is_ready_but_provider_is_unconfigured_without_key(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(service, "get_gemini_client") as get_client:
