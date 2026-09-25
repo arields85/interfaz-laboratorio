@@ -634,6 +634,135 @@ class GetMeTests(ChannelATransportTestCase):
                 self.assert_unauthorized(raised.exception)
 
 
+class FakeFileResponse:
+    """A controlled streaming download response for download_file tests."""
+
+    def __init__(self, status_code=200, chunks=(), *, iter_error=None):
+        self.status_code = status_code
+        self._chunks = list(chunks)
+        self._iter_error = iter_error
+        self.close_calls = 0
+
+    def iter_content(self, chunk_size=None):
+        if self._iter_error is not None:
+            raise self._iter_error
+        yield from self._chunks
+
+    def close(self):
+        self.close_calls += 1
+
+
+class FakeGetSession(FakeSession):
+    """Extends FakeSession with a ``get`` method for file downloads, sharing
+    the same owned-session/T7 discipline the rest of the suite already
+    exercises for ``post``."""
+
+    def __init__(self, *args, get_response=None, get_error=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.get_response = get_response
+        self.get_error = get_error
+        self.get_calls = []
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, kwargs))
+        if self.get_error is not None:
+            raise self.get_error
+        return self.get_response
+
+
+class GetFileTests(ChannelATransportTestCase):
+    def test_get_file_posts_the_file_id_and_returns_the_file_path(self):
+        session = FakeSession(FakeResponse(200, ok_body({"file_path": "voice/file_1.oga"})))
+        transport = self.build(session)
+
+        file_path = transport.get_file(file_id="AwADBAADbXXXXXXXXXXXGBdw")
+
+        self.assert_posted(session, transport_module.GET_FILE_METHOD, {"file_id": "AwADBAADbXXXXXXXXXXXGBdw"})
+        self.assertEqual(file_path, "voice/file_1.oga")
+
+    def test_get_file_rejects_an_invalid_file_id_before_any_io(self):
+        for file_id in ("", None, 5, "a" * 300):
+            with self.subTest(file_id=file_id):
+                self.assert_rejected_before_io(lambda transport, file_id=file_id: transport.get_file(file_id=file_id))
+
+    def test_get_file_rejects_a_non_mapping_or_missing_file_path(self):
+        for result in ({"file_path": ""}, {"file_path": 5}, {"no_file_path": True}, [1, 2], True):
+            with self.subTest(result=result):
+                session = FakeSession(FakeResponse(200, ok_body(result)))
+                transport = self.build(session)
+                with self.assertRaises(ChannelATransportError) as raised:
+                    transport.get_file(file_id="AwADBAADbXXXXXXXXXXXGBdw")
+                self.assert_unavailable(raised.exception)
+
+    def test_get_file_raises_a_distinct_unauthorized_error_on_401(self):
+        session = FakeSession(FakeResponse(401, {"ok": False, "error_code": 401, "description": "Unauthorized"}))
+        transport = self.build(session)
+        with self.assertRaises(ChannelATransportUnauthorized) as raised:
+            transport.get_file(file_id="AwADBAADbXXXXXXXXXXXGBdw")
+        self.assert_unauthorized(raised.exception)
+
+
+class DownloadFileTests(ChannelATransportTestCase):
+    def build_get(self, *sessions, token=TOKEN, timeout=TIMEOUT):
+        self.factory = SessionFactory(*sessions)
+        return ChannelATransport(token, request_timeout=timeout, session_factory=self.factory)
+
+    def test_download_file_returns_the_concatenated_bytes(self):
+        session = FakeGetSession(get_response=FakeFileResponse(200, [b"abc", b"def"]))
+        transport = self.build_get(session)
+
+        result = transport.download_file(file_path="voice/file_1.oga", max_bytes=1000)
+
+        self.assertEqual(result, b"abcdef")
+        [(url, kwargs)] = session.get_calls
+        self.assertEqual(url, f"{transport_module.CHANNEL_A_FILE_BASE}/bot{TOKEN}/voice/file_1.oga")
+        self.assertEqual(kwargs["timeout"], TIMEOUT)
+        self.assertFalse(kwargs.get("allow_redirects", False))
+
+    def test_download_file_rejects_a_response_over_the_bound(self):
+        session = FakeGetSession(get_response=FakeFileResponse(200, [b"a" * 6, b"b" * 6]))
+        transport = self.build_get(session)
+
+        with self.assertRaises(ChannelATransportError) as raised:
+            transport.download_file(file_path="voice/file_1.oga", max_bytes=10)
+        self.assert_unavailable(raised.exception)
+
+    def test_download_file_rejects_a_non_2xx_status(self):
+        session = FakeGetSession(get_response=FakeFileResponse(404, []))
+        transport = self.build_get(session)
+
+        with self.assertRaises(ChannelATransportError) as raised:
+            transport.download_file(file_path="voice/file_1.oga", max_bytes=1000)
+        self.assert_unavailable(raised.exception)
+
+    def test_download_file_rejects_an_invalid_file_path_or_bound_before_any_io(self):
+        for file_path, max_bytes in (("", 1000), ("../etc/passwd", 1000), ("voice/file_1.oga", 0), ("voice/file_1.oga", -1)):
+            with self.subTest(file_path=file_path, max_bytes=max_bytes):
+                factory = SessionFactory()
+                transport = ChannelATransport(TOKEN, request_timeout=TIMEOUT, session_factory=factory)
+                with self.assertRaises(ChannelATransportError) as raised:
+                    transport.download_file(file_path=file_path, max_bytes=max_bytes)
+                self.assert_unavailable(raised.exception)
+                self.assertEqual(factory.calls, [])
+
+    def test_download_file_wraps_a_network_error(self):
+        session = FakeGetSession(get_error=RuntimeError("boom"))
+        transport = self.build_get(session)
+
+        with self.assertRaises(ChannelATransportError) as raised:
+            transport.download_file(file_path="voice/file_1.oga", max_bytes=1000)
+        self.assert_unavailable(raised.exception)
+
+    def test_download_file_closes_the_response(self):
+        response = FakeFileResponse(200, [b"abc"])
+        session = FakeGetSession(get_response=response)
+        transport = self.build_get(session)
+
+        transport.download_file(file_path="voice/file_1.oga", max_bytes=1000)
+
+        self.assertEqual(response.close_calls, 1)
+
+
 class GetUpdatesTests(ChannelATransportTestCase):
     def test_get_updates_posts_the_exact_payload_without_an_offset(self):
         session = FakeSession(FakeResponse(200, ok_body([])))

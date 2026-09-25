@@ -129,6 +129,10 @@ PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE = "PRISMA_CHANNEL_A_TRANSPORT_UNAVAILABLE
 PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED = "PRISMA_CHANNEL_A_TRANSPORT_UNAUTHORIZED"
 
 CHANNEL_A_API_BASE = "https://api.telegram.org"
+# PW-013: Telegram serves downloadable files from a separate host path (never
+# the JSON Bot API host above); getFile only ever returns a file_path to be
+# joined onto this base, never a full URL.
+CHANNEL_A_FILE_BASE = "https://api.telegram.org/file"
 MESSAGE_MAX_CHARS = 4096
 GET_UPDATES_LIMIT = 100
 ALLOWED_UPDATES = ("message", "callback_query")
@@ -141,6 +145,17 @@ SEND_CHAT_ACTION_METHOD = "sendChatAction"
 SET_MY_COMMANDS_METHOD = "setMyCommands"
 DELETE_MY_COMMANDS_METHOD = "deleteMyCommands"
 SET_CHAT_MENU_BUTTON_METHOD = "setChatMenuButton"
+# PW-013: resolves a voice note's file_id into its downloadable file_path.
+GET_FILE_METHOD = "getFile"
+
+# PW-013: Telegram's own file_id bound is generous; this is a closed safety
+# cap, not the provider's documented limit.
+MAX_FILE_ID_CHARS = 256
+# Telegram's file_path is always a relative, forward-slash path under a known
+# prefix (e.g. "voice/file_1.oga"); the charset excludes backslash, and every
+# "." segment is rejected below (never just a leading "..") before this is
+# ever joined into a URL.
+_FILE_PATH_PATTERN = re.compile(r"\A[A-Za-z0-9_./-]{1,512}\Z")
 
 # T4: the only chat action this runtime ever sends; the transport's own
 # closed, non-disclosing validation accepts nothing else.
@@ -169,11 +184,13 @@ __all__ = [
     "ANSWER_CALLBACK_QUERY_METHOD",
     "CHANNEL_A_API_BASE",
     "CHAT_ACTION_TYPING",
+    "CHANNEL_A_FILE_BASE",
     "ChannelABotIdentity",
     "ChannelATransport",
     "ChannelATransportError",
     "ChannelATransportUnauthorized",
     "DELETE_MY_COMMANDS_METHOD",
+    "GET_FILE_METHOD",
     "GET_ME_METHOD",
     "GET_UPDATES_LIMIT",
     "GET_UPDATES_METHOD",
@@ -318,6 +335,28 @@ def _validated_read_timeout(value: object, poll_timeout: int) -> int | float:
     if validated <= poll_timeout:
         raise _unavailable() from None
     return validated
+
+
+def _validated_file_id(value: object) -> str:
+    if not isinstance(value, str) or not value or len(value) > MAX_FILE_ID_CHARS:
+        raise _unavailable() from None
+    return value
+
+
+def _validated_file_path(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or _FILE_PATH_PATTERN.fullmatch(value) is None
+        or ".." in value.split("/")
+    ):
+        raise _unavailable() from None
+    return value
+
+
+def _validated_max_bytes(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise _unavailable() from None
+    return value
 
 
 def _validated_offset(value: object) -> int:
@@ -502,6 +541,63 @@ class ChannelATransport:
         if not isinstance(username, str) or _USERNAME_PATTERN.fullmatch(username) is None:
             raise _unavailable() from None
         return ChannelABotIdentity(id=bot_id, username=username)
+
+    def get_file(self, *, file_id: str) -> str:
+        """Resolve a voice note's file_id into its downloadable file_path.
+
+        Never downloads anything itself: the caller (PW-013's
+        ``ChannelAPairingDialogue._handle_voice_note``) checks the reported
+        duration/size before this is ever called, then downloads separately
+        with :meth:`download_file`, so the two effects stay independently
+        bounded."""
+        payload: dict[str, object] = {"file_id": _validated_file_id(file_id)}
+        _, body = self._discovery(GET_FILE_METHOD, payload, self.request_timeout)
+        result = _field(body, "result")
+        if not isinstance(result, Mapping):
+            raise _unavailable() from None
+        file_path = _field(result, "file_path")
+        if not isinstance(file_path, str) or _FILE_PATH_PATTERN.fullmatch(file_path) is None:
+            raise _unavailable() from None
+        return file_path
+
+    def download_file(self, *, file_path: str, max_bytes: int) -> bytes:
+        """Download one file's raw bytes from Telegram's separate file host.
+
+        Bounded by ``max_bytes``: a response that exceeds it raises the same
+        closed transport error rather than buffering an unbounded body in
+        memory. Reuses this transport's one owned/reused session (T7), same
+        as every other call, but never the JSON Bot API host -- Telegram
+        serves files from :data:`CHANNEL_A_FILE_BASE`.
+        """
+        validated_path = _validated_file_path(file_path)
+        validated_max_bytes = _validated_max_bytes(max_bytes)
+        session = self._ensure_session()
+        response = None
+        try:
+            response = session.get(
+                f"{CHANNEL_A_FILE_BASE}/bot{self._token}/{validated_path}",
+                timeout=self.request_timeout,
+                allow_redirects=False,
+            )
+            status = getattr(response, "status_code", None)
+            if isinstance(status, bool) or not isinstance(status, int) or not 200 <= status < 300:
+                raise _unavailable() from None
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > validated_max_bytes:
+                    raise _unavailable() from None
+                chunks.append(chunk)
+            return b"".join(chunks)
+        except ChannelATransportError:
+            raise
+        except Exception:
+            raise _unavailable() from None
+        finally:
+            _close_quietly(response)
 
     def get_updates(self, *, poll_timeout: int, read_timeout: float, offset: int | None = None) -> tuple[Mapping, ...]:
         """Fetch one ordered batch of updates without owning the offset.
