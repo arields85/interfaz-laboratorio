@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { Fragment, useCallback, useRef, useState } from 'react';
 import { Clock3, Palette, Pyramid, SlidersHorizontal, Wifi } from 'lucide-react';
 import AdminDialog from './AdminDialog';
 import AdminActionButton from './AdminActionButton';
@@ -42,7 +42,19 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         temporal: null,
         voice: null,
     }));
-    const dirty = connectionDirty || designDirty || optionsDirty || temporalDirty || voiceDirty;
+    const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+
+    // Per-tab lookup so Guardar's enablement and the tab indicators can read each
+    // tab's dirty flag by id without a parallel switch statement per consumer.
+    const dirtyByTab: Record<TabId, boolean> = {
+        connection: connectionDirty,
+        design: designDirty,
+        options: optionsDirty,
+        temporal: temporalDirty,
+        voice: voiceDirty,
+    };
+    const activeTabDirty = dirtyByTab[activeTab];
+    const anyTabDirty = Object.values(dirtyByTab).some(Boolean);
 
     const updateTabSaveStatus = useCallback((tabId: TabId, status: SaveStatus) => {
         setSaveStatusByTab((previous) => (
@@ -108,7 +120,10 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         optionsSaveRef.current?.();
     };
 
-    const handleClose = () => {
+    // Discards every tab's draft (reverting Diseño's live preview) and closes.
+    // This is the confirmed path: either the user accepted the discard prompt,
+    // or there was nothing to discard in the first place.
+    const discardAndClose = () => {
         if (designDirty) {
             designRevertRef.current?.();
         }
@@ -124,14 +139,34 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
             temporal: null,
             voice: null,
         });
+        setConfirmDiscardOpen(false);
         onClose();
     };
 
+    // Entry point for Cerrar, Escape and a backdrop click. When the confirm
+    // dialog is already open it owns those gestures instead (guarded below),
+    // so this never re-opens it out from under an in-flight cancel/confirm.
+    const handleRequestClose = () => {
+        if (confirmDiscardOpen) {
+            return;
+        }
+        if (anyTabDirty) {
+            setConfirmDiscardOpen(true);
+            return;
+        }
+        discardAndClose();
+    };
+
+    const handleCancelDiscard = () => {
+        setConfirmDiscardOpen(false);
+    };
+
     return (
+        <>
         <AdminDialog
             open={open}
             title="CONFIGURACION GENERAL"
-            onClose={handleClose}
+            onClose={handleRequestClose}
             maxWidth="max-w-3xl"
             actions={(
                 <div
@@ -141,7 +176,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                 >
                     {activeSaveStatus ? (
                         <p
-                            className={`mr-2 text-sm ${SAVE_STATUS_UI[activeSaveStatus].className}`}
+                            className={`mr-2 text-xs ${SAVE_STATUS_UI[activeSaveStatus].className}`}
                             aria-live="polite"
                             aria-atomic="true"
                         >
@@ -151,11 +186,11 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <AdminActionButton
                         variant="primary"
                         onClick={handleSave}
-                        disabled={!dirty}
+                        disabled={!activeTabDirty}
                     >
                         Guardar
                     </AdminActionButton>
-                    <AdminActionButton variant="secondary" onClick={handleClose}>
+                    <AdminActionButton variant="secondary" onClick={handleRequestClose}>
                         Cerrar
                     </AdminActionButton>
                 </div>
@@ -166,25 +201,45 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                     <div className="flex flex-row gap-1">
                         {TABS.map(({ id, label, icon: Icon }) => {
                             const isActive = activeTab === id;
+                            // Only surfaced on an inactive tab: the active tab's own
+                            // status already renders in the footer next to Guardar.
+                            const showUnsavedIndicator = !isActive && dirtyByTab[id];
+                            const unsavedIndicatorId = `global-settings-tab-${id}-unsaved`;
 
                             return (
-                                <button
-                                    key={id}
-                                    type="button"
-                                    onClick={() => {
-                                    setActiveTab(id);
-                                    localStorage.setItem('hmi-global-settings-tab', id);
-                                }}
-                                    className={[
-                                        'flex items-center gap-2 px-4 py-2 uppercase transition-colors',
-                                        isActive
-                                            ? 'border-b-2 border-admin-accent text-white'
-                                            : 'text-industrial-muted hover:text-white',
-                                    ].join(' ')}
-                                >
-                                    <Icon size={14} />
-                                    <span>{label}</span>
-                                </button>
+                                <Fragment key={id}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                        setActiveTab(id);
+                                        localStorage.setItem('hmi-global-settings-tab', id);
+                                    }}
+                                        aria-describedby={showUnsavedIndicator ? unsavedIndicatorId : undefined}
+                                        className={[
+                                            'flex items-center gap-2 px-4 py-2 uppercase transition-colors',
+                                            isActive
+                                                ? 'border-b-2 border-admin-accent text-white'
+                                                : 'text-industrial-muted hover:text-white',
+                                        ].join(' ')}
+                                    >
+                                        <Icon size={14} />
+                                        <span>{label}</span>
+                                        {showUnsavedIndicator ? (
+                                            <span
+                                                aria-hidden="true"
+                                                className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-warning"
+                                            />
+                                        ) : null}
+                                    </button>
+                                    {/* Sibling of the button, not a child: keeps the button's
+                                        accessible NAME stable for exact-name role queries while
+                                        still exposing the state via aria-describedby. */}
+                                    {showUnsavedIndicator ? (
+                                        <span id={unsavedIndicatorId} className="sr-only">
+                                            Cambios sin guardar
+                                        </span>
+                                    ) : null}
+                                </Fragment>
                             );
                         })}
                     </div>
@@ -239,5 +294,26 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                 </div>
             </div>
         </AdminDialog>
+
+        <AdminDialog
+            open={confirmDiscardOpen}
+            title="¿Descartar los cambios?"
+            onClose={handleCancelDiscard}
+            actions={(
+                <>
+                    <AdminActionButton variant="secondary" onClick={handleCancelDiscard}>
+                        Cancelar
+                    </AdminActionButton>
+                    <AdminActionButton variant="critical" onClick={discardAndClose}>
+                        Descartar cambios
+                    </AdminActionButton>
+                </>
+            )}
+        >
+            <p className="text-industrial-muted">
+                Hay cambios sin guardar en esta ventana. Si continúa, se perderán.
+            </p>
+        </AdminDialog>
+        </>
     );
 }

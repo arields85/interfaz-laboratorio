@@ -234,6 +234,14 @@ function getSaveButton() {
     return screen.getByRole('button', { name: 'Guardar' });
 }
 
+function queryConfirmDiscardDialog() {
+    return screen.queryByRole('dialog', { name: '¿Descartar los cambios?' });
+}
+
+function getConfirmDiscardDialog() {
+    return screen.getByRole('dialog', { name: '¿Descartar los cambios?' });
+}
+
 describe('GlobalSettingsDialog', () => {
     beforeEach(() => {
         localStorage.clear();
@@ -302,6 +310,39 @@ describe('GlobalSettingsDialog', () => {
         expect(scrollPanel).toHaveClass('min-h-0');
     });
 
+    it('enables Guardar based only on the active tab, ignoring other tabs left dirty', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.type(screen.getByLabelText('Connection draft'), 'X');
+        expect(getSaveButton()).toBeEnabled();
+
+        await user.click(screen.getByRole('button', { name: 'Diseno' }));
+        expect(getSaveButton()).toBeDisabled();
+
+        await user.click(screen.getByRole('button', { name: 'Conexion' }));
+        expect(getSaveButton()).toBeEnabled();
+    });
+
+    it('shows an accessible unsaved-changes indicator on inactive dirty tabs, not on the active one, without changing the tab button name', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        const dialog = screen.getByRole('dialog', { name: 'CONFIGURACION GENERAL' });
+
+        await user.type(screen.getByLabelText('Connection draft'), 'X');
+        expect(within(dialog).queryByText('Cambios sin guardar', { selector: '.sr-only' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Diseno' }));
+
+        const connectionTab = screen.getByRole('button', { name: 'Conexion' });
+        const designTab = screen.getByRole('button', { name: 'Diseno' });
+        const indicator = within(dialog).getByText('Cambios sin guardar', { selector: '.sr-only' });
+        expect(indicator).toHaveClass('sr-only');
+        expect(connectionTab).toHaveAttribute('aria-describedby', indicator.id);
+        expect(designTab).not.toHaveAttribute('aria-describedby');
+    });
+
     it('projects the dirty Prisma effect status immediately before Save in the footer only on VOZ', async () => {
         const user = userEvent.setup();
         render(<Harness />);
@@ -315,6 +356,8 @@ describe('GlobalSettingsDialog', () => {
         const content = screen.getByRole('region', { name: 'Contenido de configuración general' });
         const status = within(actions).getByText('Cambios sin guardar');
         expect(status).toHaveClass('text-status-warning');
+        expect(status).toHaveClass('text-xs');
+        expect(status).not.toHaveClass('text-sm');
         expect(status).toHaveAttribute('aria-live', 'polite');
         expect(status).toHaveAttribute('aria-atomic', 'true');
         expect(getSaveButton().previousElementSibling).toBe(status);
@@ -347,6 +390,7 @@ describe('GlobalSettingsDialog', () => {
         expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
 
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
 
         await waitFor(() => {
@@ -376,6 +420,7 @@ describe('GlobalSettingsDialog', () => {
         expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
 
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
 
         await waitFor(() => {
@@ -405,6 +450,7 @@ describe('GlobalSettingsDialog', () => {
         expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
 
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
 
         await waitFor(() => {
@@ -434,6 +480,7 @@ describe('GlobalSettingsDialog', () => {
         expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
 
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
 
         await waitFor(() => {
@@ -454,12 +501,14 @@ describe('GlobalSettingsDialog', () => {
         const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
         const saving = within(actions).getByText('Guardando...');
         expect(saving).toHaveClass('text-admin-accent');
+        expect(saving).toHaveClass('text-xs');
         expect(getSaveButton().previousElementSibling).toBe(saving);
 
         await act(async () => resolveVoiceSave?.());
 
         const saved = await within(actions).findByText('Guardado');
         expect(saved).toHaveClass('text-status-normal');
+        expect(saved).toHaveClass('text-xs');
         expect(getSaveButton().previousElementSibling).toBe(saved);
     });
 
@@ -478,9 +527,11 @@ describe('GlobalSettingsDialog', () => {
         const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
         const error = await within(actions).findByText('Error al guardar');
         expect(error).toHaveClass('text-status-critical');
+        expect(error).toHaveClass('text-xs');
         expect(getSaveButton().previousElementSibling).toBe(error);
 
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
         await user.click(screen.getByRole('button', { name: 'Prisma' }));
 
@@ -521,6 +572,7 @@ describe('GlobalSettingsDialog', () => {
         await user.type(screen.getByLabelText('Voice draft'), 'Voice unsaved');
 
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
 
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         expect(document.documentElement.dataset.designPreview).toBe('Persisted design');
@@ -546,6 +598,64 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Prisma' }));
         expect(screen.getByLabelText('Voice draft')).toHaveValue('Persisted voice');
+    });
+
+    it('cancelling the close confirmation keeps the dialog open with every draft intact', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.type(screen.getByLabelText('Connection draft'), 'X');
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+        const confirmDialog = getConfirmDiscardDialog();
+        await user.click(within(confirmDialog).getByRole('button', { name: 'Cancelar' }));
+
+        expect(queryConfirmDiscardDialog()).not.toBeInTheDocument();
+        expect(screen.getByRole('dialog', { name: 'CONFIGURACION GENERAL' })).toBeInTheDocument();
+        expect(screen.getByLabelText('Connection draft')).toHaveValue('Persisted connectionX');
+    });
+
+    it('closes immediately without a confirmation prompt when no tab is dirty', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+        expect(queryConfirmDiscardDialog()).not.toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('asks for confirmation on Escape while dirty, and Escape on the confirm dialog only cancels it', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.type(screen.getByLabelText('Connection draft'), 'X');
+        fireEvent.keyDown(window, { key: 'Escape' });
+
+        const confirmDialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios?' });
+        fireEvent.keyDown(window, { key: 'Escape' });
+
+        await waitFor(() => {
+            expect(queryConfirmDiscardDialog()).not.toBeInTheDocument();
+        });
+        expect(screen.getByRole('dialog', { name: 'CONFIGURACION GENERAL' })).toBeInTheDocument();
+        expect(screen.getByLabelText('Connection draft')).toHaveValue('Persisted connectionX');
+        expect(confirmDialog).not.toBeInTheDocument();
+    });
+
+    it('asks for confirmation on a backdrop click while dirty, and confirming discards and closes', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.type(screen.getByLabelText('Connection draft'), 'X');
+
+        const backdrops = document.querySelectorAll('[role="presentation"]');
+        fireEvent.mouseDown(backdrops[backdrops.length - 1], { target: backdrops[backdrops.length - 1] });
+
+        const confirmDialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios?' });
+        await user.click(within(confirmDialog).getByRole('button', { name: 'Descartar cambios' }));
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
 
     it('saves the active connection draft through the connection save branch only', async () => {

@@ -296,6 +296,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await user.click(screen.getByRole('checkbox', { name: 'Mostrar deslizador' }));
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeEnabled();
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(screen.getByRole('dialog', { name: '¿Descartar los cambios?' })).getByRole('button', { name: 'Descartar cambios' }));
 
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
         expect(localStorage.getItem(PRISMA_ORB_STORAGE_KEY)).toBeNull();
