@@ -40,7 +40,7 @@ from .storage_permissions import SecureStoragePermissions
 from .telegram_config import read_telegram_config
 from .telegram_credentials import TelegramCredentialError, TelegramCredentialResolver
 from .voice_dsp import PrismaStreamingDSP, apply_prisma_dsp_full_pcm
-from .voice_events import validate_voice_event
+from .voice_events import VOICE_EVENT_KIND_ANSWER, validate_voice_event
 from .voice_transcription import (
     MAX_VOICE_NOTE_FILE_SIZE_BYTES,
     VoiceTranscriptionEmpty,
@@ -1138,7 +1138,7 @@ def prisma_speak_live():
         # and must never be able to trigger TTS generation -- reject it the
         # same way a malformed request is rejected, before ever reaching
         # AudioCoordinator.
-        if event.get("kind", "answer") != "answer":
+        if event.get("kind", VOICE_EVENT_KIND_ANSWER) != VOICE_EVENT_KIND_ANSWER:
             raise ValueError("VOICE_EVENT_KIND_INVALID")
         published_epoch = _parse_event_publish_epoch(event.get("timestamp"))
         _logger.info(
@@ -1204,7 +1204,7 @@ def prisma_prefetch():
         event = resolve_voice_event(data["eventId"], capability)
         # voice-ux U1: same guard as /prisma/speak-live -- a signal-only
         # event must never be admitted into a generation either.
-        if event.get("kind", "answer") != "answer":
+        if event.get("kind", VOICE_EVENT_KIND_ANSWER) != VOICE_EVENT_KIND_ANSWER:
             raise ValueError("VOICE_EVENT_KIND_INVALID")
         event["_capability"] = capability
         subscription = audio_coordinator.subscribe(event, prisma_voice_config_store.get())

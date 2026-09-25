@@ -49,7 +49,13 @@ from .telegram_config import TelegramConfig, read_telegram_config
 from .telegram_credentials import TelegramCredentialResolver
 from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, project_telegram_diagnostic, validate_telegram_state
 from .telegram_verification import TelegramTokenVerificationService
-from .voice_events import VoiceEventCapacity, VoiceEventStore, VoiceEventStreamCapacity
+from .voice_events import (
+    VOICE_EVENT_KIND_CANCEL,
+    VOICE_EVENT_KIND_THINKING,
+    VoiceEventCapacity,
+    VoiceEventStore,
+    VoiceEventStreamCapacity,
+)
 from .voice_transcription import (
     DEFAULT_VOICE_NOTE_MIME_TYPE,
     MAX_VOICE_NOTE_FILE_SIZE_BYTES,
@@ -1445,14 +1451,14 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             calling this is the only freshness this relies on. Best-effort:
             _handle_voice_note's own _signal_thinking already wraps this call
             in try/except, so a raise here never breaks voice-note handling."""
-            voice_events.publish("", "", owner_id=owner_id, kind="thinking")
+            voice_events.publish("", "", owner_id=owner_id, kind=VOICE_EVENT_KIND_THINKING)
 
         def channel_a_notify_cancelled(owner_id):
             """voice-ux U1: publish a signal-only "cancel" event so the HMI
             orb can hide immediately on a rejection/failure instead of
             waiting out its own bounded timeout. Same best-effort contract as
             channel_a_notify_thinking above."""
-            voice_events.publish("", "", owner_id=owner_id, kind="cancel")
+            voice_events.publish("", "", owner_id=owner_id, kind=VOICE_EVENT_KIND_CANCEL)
 
         def build_channel_a_activation(token, desired, epoch, reservation):
             """Compose one real activation; the manager keeps this call lazy, so no
