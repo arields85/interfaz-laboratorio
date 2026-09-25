@@ -22,6 +22,11 @@ the typing indicator once the answer for that message has already been sent, via
 checked deterministically. Both are now implemented; see the updated M3/M5 entries and the
 "2026-09-24 follow-up" sections below. The original report text is kept for the record.
 
+**2026-09-24 second follow-up — M6, "documento" leaked into user-facing copy.** The internal term
+"documento" (referring to the HMI destination) leaked into three Telegram messages instead of the
+same `{label}` the pairing flow already shows in `CONFIRMATION_PROMPT_TEMPLATE`/`WELCOME_TEMPLATE`.
+Fixed; see M6 below.
+
 ## TDD
 
 Strict TDD: enabled (source: session/global orchestrator config).
@@ -231,9 +236,40 @@ PW-011). hmi-app: 221 files / 2532 tests, `tsc -b` clean, `npm run lint` clean.
   - **Commit:** `2ccddef`.
   - Original report (needs-a-decision framing, now resolved) kept below for the record.
 
+- [x] **M6 — "documento" leaked into user-facing Telegram copy.** Route: inline (one file,
+  `channel_a_bot.py`). Fixed.
+  - **Fix.** `COPY_DESTINATION_UNAVAILABLE`, `COPY_INACTIVITY_WARNING` and `COPY_EXPIRED` became
+    `{label}` templates. New `_display_label(label, *, sentence_start=False)` returns `label`
+    verbatim when usable, else the fallback ("la HMI" mid-sentence, "La HMI" at a sentence start).
+    Each call site formats with the SAME trusted label source `CONFIRMATION_PROMPT_TEMPLATE`/
+    `WELCOME_TEMPLATE` already use, no new data source: `_claim`'s branch (no label was ever
+    established) uses the fallback; `_confirm`'s branch uses `claim.label` (the destination the
+    human actually confirmed against, never the new/changed one the fresh lookup returned);
+    `_warn_one`/`_cleanup_one` (the M3 sweep) call `self._read_label(owner_id)` fresh, falling back
+    on a lookup failure or an unusable value rather than skipping the notice.
+  - **Final strings (usted, verbatim):**
+    - `COPY_INACTIVITY_WARNING`: `"La vinculación con {label} se va a cerrar por inactividad.\nUse el botón para seguir conectado, o el botón «Desvincular» de este chat para desvincular este teléfono."`
+    - `COPY_EXPIRED`: `"La vinculación con {label} se cerró por inactividad."`
+    - `COPY_DESTINATION_UNAVAILABLE`: `"{label} ya no está disponible. Genere un código nuevo desde la pantalla."`
+    - Fallback: `"la HMI"` mid-sentence, `"La HMI"` at a sentence start (only `COPY_DESTINATION_UNAVAILABLE` opens with the placeholder).
+  - **Other "documento" occurrences found, not changed (out of scope, reported per instruction):**
+    `channel_a_query.py`'s `COPY_QUERY_UNAVAILABLE` = `"No se pudo leer el documento del HMI en este
+    momento. Intente de nuevo en unos segundos."` — a different concept (the snapshot/document
+    itself failed to read, not the destination's display name), not one of the three listed messages.
+  - **TDD.** Updated 8 existing exact-copy assertions (`test_missing_destination_label_...`,
+    `test_unusable_label_values_all_fail_closed`, `test_confirm_needs_a_fresh_label_...`,
+    `test_confirm_refuses_when_the_presented_label_changed`, the warning/expiry sweep copy tests) to
+    expect the formatted string; added 2 new fallback tests (warning sweep, expiry sweep) and 3
+    direct tests on `_display_label`. RED confirmed: 15 failures (`AssertionError` comparing the
+    sent text against the old literal constant, since the source now sends an unformatted
+    `"...{label}..."` template) before updating the call sites; GREEN after.
+  - **Checks:** `tests.test_channel_a_bot` — 227 OK. Full prisma-runtime suite — 1567 tests, same 2
+    pre-existing environmental failures, no new failures.
+  - **Commit:** `dcabe50`.
+
 ## Verification (final, all items)
 
-- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — 1562 tests, 2 pre-existing environmental failures (same as baseline; `test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference` and `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`, both expecting a worktree-local `.venv\Scripts\python.exe` this worktree doesn't have), no new failures.
+- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — 1567 tests, 2 pre-existing environmental failures (same as baseline; `test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference` and `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`, both expecting a worktree-local `.venv\Scripts\python.exe` this worktree doesn't have), no new failures.
 - `cd hmi-app && npx vitest run` — 221 files / 2532 tests OK. `npx tsc -b` clean. `npm run lint` clean. (hmi-app untouched in this follow-up; re-verified unchanged.)
 
 ## M3 report (needs a product/scope decision)
