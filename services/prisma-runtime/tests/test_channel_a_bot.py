@@ -1130,7 +1130,11 @@ class ChannelAClaimTests(ChannelABotTestCase):
             outcome, PAIRING_DESTINATION_UNAVAILABLE, variant=VARIANT_MESSAGE, update_id=4,
             delivery=SEND_DELIVERED,
         )
-        self.assertEqual(self.transport.sent[-1]["text"], COPY_DESTINATION_UNAVAILABLE)
+        # PW-011: no label was ever established for this claim -- the generic
+        # HMI fallback applies, capitalized (the placeholder opens the sentence).
+        self.assertEqual(
+            self.transport.sent[-1]["text"], COPY_DESTINATION_UNAVAILABLE.format(label="La HMI")
+        )
         self.assertEqual(self.registry._pendings, {})
         self.assertEqual(self.dialogue._pending_claims, {})
         self.assertIsNone(self.registry.phone_link(PHONE))
@@ -1166,7 +1170,10 @@ class ChannelAClaimTests(ChannelABotTestCase):
                 outcome = dialogue.handle_update(update)
                 self.assertEqual(outcome.kind, PAIRING_DESTINATION_UNAVAILABLE)
                 self.assertEqual(registry._pendings, {})
-                self.assertEqual(transport.sent[-1]["text"], COPY_DESTINATION_UNAVAILABLE)
+                self.assertEqual(
+                    transport.sent[-1]["text"],
+                    COPY_DESTINATION_UNAVAILABLE.format(label="La HMI"),
+                )
 
     def test_markup_characters_in_the_label_stay_plain_text(self):
         self.labels["value"] = "<b>Sala</b> *3* _x_"
@@ -1343,6 +1350,7 @@ class ChannelAConfirmTests(ChannelABotTestCase):
     def test_confirm_needs_a_fresh_label_and_cancels_pending_when_it_is_gone(self):
         self.prompted(4)
         ticket = self.prompt_ticket()
+        originally_prompted_label = self.labels["value"]
         self.labels["value"] = None
         outcome = self.handle(callback_update(5, CALLBACK_CONFIRM + ":" + ticket))
         self.assert_outcome(
@@ -1353,8 +1361,12 @@ class ChannelAConfirmTests(ChannelABotTestCase):
             update_id=5,
             acknowledged=True,
         )
-        self.assertEqual(self.transport.answered[-1]["text"], COPY_DESTINATION_UNAVAILABLE)
-        self.assertEqual(self.transport.sent[-1]["text"], COPY_DESTINATION_UNAVAILABLE)
+        # PW-011: the ORIGINALLY prompted label is still available on the
+        # pending claim even though the fresh lookup is now gone -- the
+        # notice names the destination the human actually confirmed against.
+        expected = COPY_DESTINATION_UNAVAILABLE.format(label=originally_prompted_label)
+        self.assertEqual(self.transport.answered[-1]["text"], expected)
+        self.assertEqual(self.transport.sent[-1]["text"], expected)
         self.assertIsNone(self.registry.phone_link(PHONE))
         self.assertEqual(self.registry._pendings, {})
         self.assertEqual(self.dialogue._pending_claims, {})
@@ -1373,6 +1385,7 @@ class ChannelAConfirmTests(ChannelABotTestCase):
     def test_confirm_refuses_when_the_presented_label_changed(self):
         self.prompted(4)
         ticket = self.prompt_ticket()
+        originally_prompted_label = self.labels["value"]
         self.labels["value"] = "Sala 9 — Compresor"
         outcome = self.handle(callback_update(5, CALLBACK_CONFIRM + ":" + ticket))
         self.assert_outcome(
@@ -1383,7 +1396,11 @@ class ChannelAConfirmTests(ChannelABotTestCase):
             update_id=5,
             acknowledged=True,
         )
-        self.assertEqual(self.transport.answered[-1]["text"], COPY_DESTINATION_UNAVAILABLE)
+        # PW-011: names the ORIGINALLY prompted destination, never the new one.
+        self.assertEqual(
+            self.transport.answered[-1]["text"],
+            COPY_DESTINATION_UNAVAILABLE.format(label=originally_prompted_label),
+        )
         self.assertIsNone(self.registry.phone_link(PHONE))
         self.assertEqual(self.registry._pendings, {})
         self.assertEqual(self.dialogue._pending_claims, {})
@@ -3033,7 +3050,7 @@ class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
         self.assertEqual(outcome.generation, self.registry.phone_link(PHONE).generation)
         self.assertEqual(len(self.transport.sent), sent_before + 1)
         payload = self.transport.sent[-1]
-        self.assertEqual(payload["text"], COPY_INACTIVITY_WARNING)
+        self.assertEqual(payload["text"], COPY_INACTIVITY_WARNING.format(label=self.labels["value"]))
         keyboard = payload["reply_markup"]["inline_keyboard"]
         self.assertEqual(len(keyboard), 1)
         self.assertEqual(keyboard[0][0]["text"], BUTTON_KEEP_CONNECTED)
@@ -3048,8 +3065,21 @@ class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
         self.now[0] = 1540.0
         self.dialogue.send_inactivity_warnings()
         text = self.transport.sent[-1]["text"]
-        self.assertEqual(text, COPY_INACTIVITY_WARNING)
+        self.assertEqual(text, COPY_INACTIVITY_WARNING.format(label=self.labels["value"]))
         self.assertIn("inactividad", text)
+        self.assertIn(self.labels["value"], text)
+
+    def test_the_warning_copy_falls_back_to_a_generic_hmi_reference_when_the_label_is_gone(self):
+        """PW-011: a fresh label lookup failure/absence at sweep time must
+        never surface as a broken "{label}" placeholder -- fall back to the
+        same generic reference used everywhere else in this module."""
+        self.pair_up(4, 5)
+        self.labels["value"] = None
+        self.now[0] = 1540.0
+        self.dialogue.send_inactivity_warnings()
+        text = self.transport.sent[-1]["text"]
+        self.assertEqual(text, COPY_INACTIVITY_WARNING.format(label="la HMI"))
+        self.assertIn("la HMI", text)
 
     def test_sweep_waits_for_the_exact_lead_boundary(self):
         self.pair_up(4, 5)
@@ -3330,7 +3360,7 @@ class ChannelAExpiryCleanupSweepTests(ChannelABotTestCase):
         self.assertEqual(len(self.transport.sent), sent_before + 1)
         payload = self.transport.sent[-1]
         self.assertEqual(payload["chat_id"], CHAT_ID)
-        self.assertEqual(payload["text"], COPY_EXPIRED)
+        self.assertEqual(payload["text"], COPY_EXPIRED.format(label=self.labels["value"]))
         self.assertEqual(payload["reply_markup"], {"remove_keyboard": True})
 
     def test_the_expiry_copy_states_inactivity_without_mentioning_unlink(self):
@@ -3338,9 +3368,19 @@ class ChannelAExpiryCleanupSweepTests(ChannelABotTestCase):
         self.now[0] = 1600.0
         self.dialogue.send_expiry_cleanup()
         text = self.transport.sent[-1]["text"]
-        self.assertEqual(text, COPY_EXPIRED)
+        self.assertEqual(text, COPY_EXPIRED.format(label=self.labels["value"]))
         self.assertIn("inactividad", text)
+        self.assertIn(self.labels["value"], text)
         self.assertNotEqual(text, COPY_UNLINKED)
+
+    def test_the_expiry_copy_falls_back_to_a_generic_hmi_reference_when_the_label_is_gone(self):
+        self.pair_up(4, 5)
+        self.labels["value"] = None
+        self.now[0] = 1600.0
+        self.dialogue.send_expiry_cleanup()
+        text = self.transport.sent[-1]["text"]
+        self.assertEqual(text, COPY_EXPIRED.format(label="la HMI"))
+        self.assertIn("la HMI", text)
 
     def test_sweep_clears_the_t14_menu_entry_same_as_an_explicit_unlink(self):
         self.pair_up(4, 5)
@@ -3390,6 +3430,25 @@ class ChannelAExpiryCleanupSweepTests(ChannelABotTestCase):
         self.now[0] = 1600.0
         self.dialogue.send_expiry_cleanup()
         self.assertNotIn(OWNER, self.transport.sent[-1]["text"])
+
+
+class DisplayLabelFallbackTests(unittest.TestCase):
+    """PW-011: the shared fallback behind COPY_DESTINATION_UNAVAILABLE,
+    COPY_INACTIVITY_WARNING and COPY_EXPIRED, tested directly."""
+
+    def test_a_usable_label_is_returned_verbatim_regardless_of_position(self):
+        self.assertEqual(bot_module._display_label("Sala 3 — Reactor"), "Sala 3 — Reactor")
+        self.assertEqual(
+            bot_module._display_label("Sala 3 — Reactor", sentence_start=True), "Sala 3 — Reactor"
+        )
+
+    def test_a_missing_label_falls_back_lowercase_mid_sentence_by_default(self):
+        self.assertEqual(bot_module._display_label(None), "la HMI")
+        self.assertEqual(bot_module._display_label(""), "la HMI")
+
+    def test_a_missing_label_falls_back_capitalized_at_a_sentence_start(self):
+        self.assertEqual(bot_module._display_label(None, sentence_start=True), "La HMI")
+        self.assertEqual(bot_module._display_label("", sentence_start=True), "La HMI")
 
 
 if __name__ == "__main__":

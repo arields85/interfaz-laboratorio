@@ -185,7 +185,7 @@ COPY_REFUSED = (
     "No se pudo iniciar la vinculación: el código no es válido, ya venció o este teléfono ya está vinculado."
 )
 COPY_DESTINATION_UNAVAILABLE = (
-    "Ese documento del HMI ya no está disponible. Genere un código nuevo desde la pantalla."
+    "{label} ya no está disponible. Genere un código nuevo desde la pantalla."
 )
 COPY_CANCELLED = "Vinculación cancelada."
 COPY_CONFIRMED = "Vinculación confirmada."
@@ -195,7 +195,7 @@ COPY_ACTION_REFUSED = (
     "Ese botón ya no es válido. Genere un código nuevo desde la pantalla del HMI."
 )
 COPY_INACTIVITY_WARNING = (
-    "La vinculación con este documento se va a cerrar por inactividad.\n"
+    "La vinculación con {label} se va a cerrar por inactividad.\n"
     "Use el botón para seguir conectado, o el botón «Desvincular» de este chat para desvincular "
     "este teléfono."
 )
@@ -206,7 +206,7 @@ COPY_INACTIVITY_WARNING = (
 # remove_keyboard; without this notice the release stayed completely
 # silent). Deliberately distinct from COPY_UNLINKED: this was never an
 # explicit "Desvincular" tap.
-COPY_EXPIRED = "Esta vinculación se cerró por inactividad."
+COPY_EXPIRED = "La vinculación con {label} se cerró por inactividad."
 # T3: shown when the persistent "Desvincular" button is pressed, before any
 # unlink actually happens -- guards against an accidental tap.
 COPY_UNLINK_CONFIRM_PROMPT = (
@@ -594,6 +594,25 @@ def _safe_label(value, *, limit: int = MAX_LABEL_CHARS) -> str | None:
     if not label or len(label) > limit or not label.isprintable():
         return None
     return " ".join(label.split())[:limit]
+
+
+# PW-011: "el documento" leaked into user-facing Telegram copy that should
+# instead name the same HMI destination label CONFIRMATION_PROMPT_TEMPLATE/
+# WELCOME_TEMPLATE already show. When no usable label exists -- a fresh
+# lookup failed or returned nothing, or (at first claim time) none was ever
+# established -- fall back to a generic, still-grammatical reference to the
+# HMI. Two forms because {label} sits at different positions across the
+# affected templates: mid-sentence keeps the lowercase article, a
+# sentence-initial placeholder needs it capitalized.
+_FALLBACK_LABEL = "la HMI"
+_FALLBACK_LABEL_SENTENCE_START = "La HMI"
+
+
+def _display_label(label: str | None, *, sentence_start: bool = False) -> str:
+    """Return ``label`` verbatim when usable, otherwise the generic fallback."""
+    if label:
+        return label
+    return _FALLBACK_LABEL_SENTENCE_START if sentence_start else _FALLBACK_LABEL
 
 
 def _keyboard(*buttons) -> dict:
@@ -1139,12 +1158,17 @@ class ChannelAPairingDialogue:
             )
         if label is None:
             self._cancel_claim(ticket, phone_id)
+            # PW-011: no label was ever established for this claim -- the
+            # generic HMI fallback names the placeholder that opens the
+            # sentence, so it is capitalized.
             return self._notice(
                 update_id,
                 VARIANT_MESSAGE,
                 PAIRING_DESTINATION_UNAVAILABLE,
                 chat_id,
-                COPY_DESTINATION_UNAVAILABLE,
+                COPY_DESTINATION_UNAVAILABLE.format(
+                    label=_display_label(None, sentence_start=True)
+                ),
             )
         self._pending_claims[_digest(ticket)] = _Claim(
             claim.owner_id, phone_id, claim.expires_at, label
@@ -1217,8 +1241,15 @@ class ChannelAPairingDialogue:
             # human never approved the current destination, so fail closed.
             self._forget_claim(ticket)
             self._cancel_claim(ticket, phone_id)
-            acknowledged = self._answer(callback_id, COPY_DESTINATION_UNAVAILABLE)
-            delivery = self._send(actor_id, COPY_DESTINATION_UNAVAILABLE)
+            # PW-011: names the destination the human actually confirmed
+            # against (claim.label, always usable -- see its own assignment
+            # below), never the new/changed one, and never the internal
+            # "documento" term.
+            unavailable_text = COPY_DESTINATION_UNAVAILABLE.format(
+                label=_display_label(claim.label, sentence_start=True)
+            )
+            acknowledged = self._answer(callback_id, unavailable_text)
+            delivery = self._send(actor_id, unavailable_text)
             return IngressOutcome(
                 update_id,
                 VARIANT_CALLBACK,
@@ -1766,9 +1797,14 @@ class ChannelAPairingDialogue:
         # query first). The inline "Desvincular" button was dropped: the
         # persistent reply keyboard already covers unlinking at any time, and
         # duplicating the affordance here would be confusing.
+        # PW-011: same trusted label source the welcome/prompt already use
+        # (destination_label, via _read_label); a lookup failure or an
+        # unusable value falls back to the generic HMI reference rather than
+        # skipping a warning that is otherwise due.
+        label, _lookup_ok = self._read_label(snapshot.owner_id)
         delivery = self._send(
             chat_id,
-            COPY_INACTIVITY_WARNING,
+            COPY_INACTIVITY_WARNING.format(label=_display_label(label)),
             _keyboard(
                 (BUTTON_KEEP_CONNECTED, CALLBACK_KEEP_CONNECTED + ":" + record.nonce),
             ),
@@ -1828,9 +1864,15 @@ class ChannelAPairingDialogue:
                 link.owner_id, link.phone_id, link.generation, EXPIRY_SKIPPED
             )
         self._forget_claims_for_owner(link.owner_id)
+        # PW-011: same trusted label source the welcome/prompt already use;
+        # a lookup failure or an unusable value falls back to the generic
+        # HMI reference rather than skipping the cleanup itself.
+        label, _lookup_ok = self._read_label(link.owner_id)
         # T3: the only unlink-notice path this module has -- remove the
         # persistent reply keyboard along with the expiry notice.
-        delivery = self._send(chat_id, COPY_EXPIRED, _remove_reply_keyboard())
+        delivery = self._send(
+            chat_id, COPY_EXPIRED.format(label=_display_label(label)), _remove_reply_keyboard()
+        )
         # T14: clear the per-chat menu entry along with the reply keyboard --
         # same fire-and-forget shape as _clear_unlink_menu's other caller.
         self._clear_unlink_menu(chat_id)
