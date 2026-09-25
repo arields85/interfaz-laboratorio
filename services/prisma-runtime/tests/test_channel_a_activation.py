@@ -139,6 +139,7 @@ from prisma_runtime.channel_a_bot import (
     BUTTON_CONFIRM,
     CALLBACK_CONFIRM,
     COPY_REFUSED,
+    INGRESS_IGNORED_UNRELATED,
     PAIRING_CONFIRMED,
     PAIRING_PROMPT_DELIVERED,
     PAIRING_REFUSED,
@@ -725,6 +726,24 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertEqual(len(transport.download_file_calls), 1)
         self.assertEqual(transcribe_calls, [(b"fake-ogg-audio", "audio/ogg")])
         self.assertEqual(transport.sent[-1]["text"], ANSWER_A)
+
+    def test_without_transcribe_a_voice_note_is_ignored_and_never_downloaded(self):
+        owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
+        fixture = self.activate()  # transcribe defaults to None
+        activation = fixture.activation
+        transport = fixture.transport
+        self.assertTrue(activation.prepare())
+
+        self.link(fixture, PHONE_A, owner_a, 1)
+        sent_before = len(transport.sent)
+
+        transport.batches.append((voice_note_update(3, PHONE_A),))
+        outcome = activation.poll_once()
+
+        self.assertEqual([o.kind for o in outcome.outcomes], [INGRESS_IGNORED_UNRELATED])
+        self.assertEqual(transport.get_file_calls, [])
+        self.assertEqual(transport.download_file_calls, [])
+        self.assertEqual(len(transport.sent), sent_before)
 
     def test_two_linked_phones_receive_their_own_owner_snapshot(self):
         owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
