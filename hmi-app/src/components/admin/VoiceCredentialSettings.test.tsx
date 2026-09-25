@@ -1625,13 +1625,16 @@ describe('VoiceCredentialSettings', () => {
         expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
     });
 
-    // GGA review finding on the F4 commit (2026-09-25): the delete
-    // confirmation dialog's own "Confirmar eliminación" button used to read
-    // the removed global `disabled` (which folded in pendingAction), so it
-    // was incidentally disabled while its own delete was in flight. Now that
-    // `disabled` is provider-agnostic only, this button needs its own
-    // explicit guard against a double-submit for the SAME provider's delete.
-    it('disables "Confirmar eliminación" while its own delete is still in flight, without needing an unrelated row to be busy', async () => {
+    // F8 (2026-09-25, live retest): the delete confirmation dialog used to
+    // stay open for the whole deletion, with a disabled "Confirmar
+    // eliminación" button covering the page, so the row's own F5 "Borrando
+    // credencial_" progress text was never visible. Confirming now closes
+    // the dialog immediately, and the row's own per-provider pending state
+    // (F4's administration.pendingActions[provider]) carries the in-flight
+    // indication and the double-submit guard instead: the row's Eliminar
+    // stays disabled while its delete is in flight, so the dialog cannot be
+    // reopened for that row either.
+    it('closes the confirmation dialog immediately on confirm, letting the row show its own delete in flight', async () => {
         const user = userEvent.setup();
         const pending = new Promise<never>(() => undefined);
         const deleteCredential = vi.fn(() => pending);
@@ -1644,11 +1647,19 @@ describe('VoiceCredentialSettings', () => {
         await waitFor(() => expect(within(gemini).getByRole('button', { name: 'Eliminar credencial' })).toBeEnabled());
 
         await user.click(within(gemini).getByRole('button', { name: 'Eliminar credencial' }));
-        const confirm = screen.getByRole('button', { name: 'Confirmar eliminación' });
-        expect(confirm).toBeEnabled();
-        await user.click(confirm);
+        expect(screen.getByRole('dialog', { name: 'Eliminar credencial' })).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
 
-        await waitFor(() => expect(confirm).toBeDisabled());
+        expect(screen.queryByRole('dialog', { name: 'Eliminar credencial' })).not.toBeInTheDocument();
+        expect(deleteCredential).toHaveBeenCalledTimes(1);
+        const deleteButton = within(gemini).getByRole('button', { name: 'Eliminar credencial' });
+        expect(deleteButton).toBeDisabled();
+
+        // Re-opening the dialog for this row while it is deleting must not
+        // be possible: the row's own Eliminar stays disabled, so clicking it
+        // is a no-op and the dialog stays closed, with no second delete call.
+        await user.click(deleteButton);
+        expect(screen.queryByRole('dialog', { name: 'Eliminar credencial' })).not.toBeInTheDocument();
         expect(deleteCredential).toHaveBeenCalledTimes(1);
     });
 

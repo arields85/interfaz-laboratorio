@@ -542,7 +542,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
     });
     const panelGenerationRef = useRef(0);
     const secretRevisionRef = useRef<Record<CredentialProvider, number>>({ gemini: 0, telegram: 0, telegram_channel_a: 0 });
-    const dialogRevisionRef = useRef(0);
     const unavailable = Boolean(administration.error);
     // F4 fix (2026-09-25): this must stay provider-agnostic (auth/data/global
     // error only). It used to also fold in administration.pendingAction, a
@@ -580,7 +579,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         secretRevisionRef.current.gemini += 1;
         secretRevisionRef.current.telegram += 1;
         secretRevisionRef.current.telegram_channel_a += 1;
-        dialogRevisionRef.current += 1;
         setSecretDrafts(emptySecretDrafts());
         setDeleteProvider(null);
         setFeedback(null);
@@ -637,12 +635,27 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         }
     };
 
+    // F8 (2026-09-25, live retest): the confirmation dialog used to stay
+    // open (its own "Confirmar eliminación" disabled, covering the page)
+    // for the whole deletion, so the row's own F5 "Borrando credencial_"
+    // progress text was never visible. The dialog now closes immediately on
+    // confirm, before the delete is awaited; the row's own per-provider
+    // pending state (F4's administration.pendingActions[provider]) takes
+    // over from there -- it already disables that row's Eliminar (so the
+    // dialog cannot be reopened for that row while its delete is in flight)
+    // and drives the F5 caret, and success/error feedback shows in the row
+    // exactly as Guardar/Verificar already do. Closing synchronously here
+    // also removes the need for the dialogRevisionRef-guarded conditional
+    // close this function used to run from its `finally` block (added
+    // earlier only to stop a stale delete from closing a freshly reopened
+    // dialog): with no later close call left, that race is now structurally
+    // impossible.
     const remove = async (provider: CredentialProvider) => {
         const panelGeneration = panelGenerationRef.current;
-        const dialogRevision = dialogRevisionRef.current;
         const secretRevision = secretRevisionRef.current[provider];
         resetVerificationResult(provider);
         setFeedback(null);
+        setDeleteProvider(null);
         try {
             const outcome = await administration.deleteCredential(provider);
             if (panelGenerationRef.current === panelGeneration) {
@@ -657,10 +670,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 setFeedback({ kind: 'error', text: errorText(error) });
             }
         } finally {
-            if (panelGenerationRef.current === panelGeneration && dialogRevisionRef.current === dialogRevision) {
-                dialogRevisionRef.current += 1;
-                setDeleteProvider(null);
-            }
             clearProviderDraftIfUnchanged(provider, secretRevision, panelGeneration);
         }
     };
@@ -723,11 +732,6 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 setFeedback({ kind: 'error', text: errorText(error) });
             }
         }
-    };
-
-    const updateDeleteProvider = (provider: CredentialProvider | null) => {
-        dialogRevisionRef.current += 1;
-        setDeleteProvider(provider);
     };
 
     // Gemini keeps its own single-row layout (T9b/T9c/T9d, approved and
@@ -814,7 +818,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             aria-label="Eliminar credencial"
                             title="Eliminar credencial"
                             disabled={geminiDisabled}
-                            onClick={() => updateDeleteProvider('gemini')}
+                            onClick={() => setDeleteProvider('gemini')}
                         >
                             <Trash2 size={14} aria-hidden="true" />
                         </HmiButton>
@@ -943,7 +947,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                             aria-label="Eliminar credencial"
                             title="Eliminar credencial"
                             disabled={providerDisabled}
-                            onClick={() => updateDeleteProvider(provider)}
+                            onClick={() => setDeleteProvider(provider)}
                         >
                             <Trash2 size={14} aria-hidden="true" />
                         </HmiButton>
@@ -1010,10 +1014,10 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
             <AdminDialog
                 open={deleteProvider !== null}
                 title="Eliminar credencial"
-                onClose={() => updateDeleteProvider(null)}
+                onClose={() => setDeleteProvider(null)}
                 actions={(
                     <>
-                        <HmiButton onClick={() => updateDeleteProvider(null)}>Cancelar</HmiButton>
+                        <HmiButton onClick={() => setDeleteProvider(null)}>Cancelar</HmiButton>
                         <HmiButton
                             variant="danger"
                             // GGA review finding (2026-09-25): `disabled` alone is
