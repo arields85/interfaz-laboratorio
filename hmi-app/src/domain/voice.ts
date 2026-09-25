@@ -1,3 +1,4 @@
+import { VOICE_EVENT_KINDS } from './voice.types';
 import type { VoiceEventKind } from './voice.types';
 
 export function normalizeTelegramChatId(value: unknown): number | undefined {
@@ -6,12 +7,10 @@ export function normalizeTelegramChatId(value: unknown): number | undefined {
         : undefined;
 }
 
-/** voice-ux U1: the single place the recognized non-answer voice-event
- * kinds are listed, so a caller checking one value against the whole set
- * (isVoiceEventKind below) and a caller needing the individual literal
- * types (VoiceEventKind in voice.types.ts) can never silently drift apart. */
-const VOICE_EVENT_KINDS: readonly VoiceEventKind[] = ['thinking', 'cancel'];
-
+/** voice-ux U1: checks a value against the exact same VOICE_EVENT_KINDS
+ * list VoiceEventKind is derived from (voice.types.ts) -- a kind added to
+ * that list is automatically recognized here too, never the other way
+ * around. */
 export function isVoiceEventKind(value: unknown): value is VoiceEventKind {
     return typeof value === 'string' && (VOICE_EVENT_KINDS as readonly string[]).includes(value);
 }
