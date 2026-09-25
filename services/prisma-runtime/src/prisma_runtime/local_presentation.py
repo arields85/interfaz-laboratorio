@@ -48,6 +48,12 @@ from .telegram_credentials import TelegramCredentialResolver
 from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, project_telegram_diagnostic, validate_telegram_state
 from .telegram_verification import TelegramTokenVerificationService
 from .voice_events import VoiceEventCapacity, VoiceEventStore, VoiceEventStreamCapacity
+from .voice_transcription import (
+    VoiceNoteDownloadFailed,
+    VoiceTranscriptionEmpty,
+    VoiceTranscriptionError,
+    VoiceTranscriptionUnavailable,
+)
 from .voice_timeline_diagnostics import (
     MAX_TIMELINE_BATCH_RECORDS, VoiceTimelineRateLimiter, format_timeline_log_line, validate_timeline_batch,
 )
@@ -115,6 +121,14 @@ CHANNEL_B_VOICE_REPLY_TIMEOUT_SECONDS = 45
 # chat at once; a newer question arriving once the bound is reached still
 # gets its text answer, just no voice note (logged, silent to the user).
 CHANNEL_B_VOICE_QUEUE_MAX_PENDING = 3
+
+# PW-013: bounds the presentation -> voice process call for a voice-note
+# QUESTION's transcription (both channels). Unlike CHANNEL_B_VOICE_REPLY_
+# TIMEOUT_SECONDS, this call is never fired on a background thread: its
+# caller (ChannelABot/TelegramLocalBot's receive loop) blocks on the
+# response to continue answering the question, so this stays short enough
+# that a stuck provider call cannot stall a poll cycle indefinitely.
+VOICE_TRANSCRIPTION_REQUEST_TIMEOUT_SECONDS = 25
 
 
 def utc_now_iso() -> str:
@@ -250,6 +264,42 @@ def _fire_channel_a_voice_prefetch(local_http: requests.Session, voice_url: str,
         name="PrismaVoicePrefetchChannelA",
         daemon=True,
     ).start()
+
+
+def _request_voice_transcription(local_http: requests.Session, voice_url: str, token: str) -> str:
+    """PW-013: synchronous request/response call to the voice service's
+    transcription route -- unlike every ``_fire_*`` helper above (always
+    fire-and-forget on a background thread), the caller here
+    (ChannelABot/TelegramLocalBot, already off any browser-facing request)
+    needs the transcript text back to answer the question, so this blocks its
+    own caller and is never itself spawned on a background thread. Raises a
+    ``voice_transcription.VoiceTranscriptionError`` subtype on any failure;
+    never returns an empty/blank string."""
+    try:
+        response = local_http.post(
+            f"{voice_url}/internal/prisma/voice-transcription",
+            json={},
+            headers={CAPABILITY_HEADER: token},
+            timeout=VOICE_TRANSCRIPTION_REQUEST_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE") from None
+    try:
+        if response.status_code == 422:
+            raise VoiceTranscriptionEmpty("VOICE_NOTE_TRANSCRIPT_EMPTY")
+        if response.status_code != 200:
+            raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE")
+        payload = response.json()
+        transcript = payload.get("transcript") if isinstance(payload, dict) else None
+        if not isinstance(transcript, str) or not transcript.strip():
+            raise VoiceTranscriptionEmpty("VOICE_NOTE_TRANSCRIPT_EMPTY")
+        return transcript.strip()
+    except VoiceTranscriptionError:
+        raise
+    except Exception:
+        raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE") from None
+    finally:
+        response.close()
 
 
 def normalize(value: Any) -> str:
@@ -1382,6 +1432,22 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         if not token:
             return session_error()
         payload = voice_events.resolve_channel_b_reply_token(token)
+        if payload is None:
+            return session_error()
+        return jsonify({"ok": True, **payload})
+
+    @app.route("/internal/prisma/voice-transcription", methods=["GET"])
+    def voice_transcription_token():
+        """PW-013: resolves a voice-transcription bearer token (minted by
+        either bot right after downloading and bounding a voice note, see
+        VoiceEventStore.mint_voice_transcription_token) into its bound
+        base64 audio, MIME type and domain-vocabulary hints. Same fully
+        separate token table/discipline as channel_b_voice_reply_token:
+        single-use, own TTL/capacity, never touches _events/_latest."""
+        token = request.headers.get(CAPABILITY_HEADER, "")
+        if not token:
+            return session_error()
+        payload = voice_events.resolve_voice_transcription_token(token)
         if payload is None:
             return session_error()
         return jsonify({"ok": True, **payload})

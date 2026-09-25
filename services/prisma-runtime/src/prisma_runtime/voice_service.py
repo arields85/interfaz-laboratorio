@@ -38,6 +38,13 @@ from .paths import runtime_paths
 from .telegram_config import telegram_token
 from .voice_dsp import PrismaStreamingDSP, apply_prisma_dsp_full_pcm
 from .voice_events import validate_voice_event
+from .voice_transcription import (
+    MAX_VOICE_NOTE_FILE_SIZE_BYTES,
+    VoiceTranscriptionEmpty,
+    VoiceTranscriptionError,
+    VoiceTranscriptionUnavailable,
+    transcribe_voice_note,
+)
 
 
 app = Flask(__name__)
@@ -76,6 +83,15 @@ _VOICE_EVENT_MAX_BYTES = 32 * 1024
 # VoiceEventStore.mint_channel_b_reply_token's own docstring).
 _CHANNEL_B_VOICE_REPLY_URL = "http://127.0.0.1:5057/internal/prisma/channel-b/voice-reply"
 _CHANNEL_B_VOICE_REPLY_MAX_TEXT_BYTES = 16 * 1024
+# PW-013: same loopback round-trip discipline as the Channel B reply token
+# above, for a voice-note *question* -- presentation downloads and bounds
+# the audio, mints a token, and this process resolves it back here before
+# running Gemini transcription (see VoiceEventStore.mint_voice_transcription_
+# token's own docstring). The base64 bound is sized off the same audio-size
+# cap both bots already enforce before minting (MAX_VOICE_NOTE_FILE_SIZE_
+# BYTES), plus base64's ~4/3 expansion and a small fixed margin.
+_VOICE_TRANSCRIPTION_URL = "http://127.0.0.1:5057/internal/prisma/voice-transcription"
+_VOICE_TRANSCRIPTION_MAX_AUDIO_BASE64_CHARS = (MAX_VOICE_NOTE_FILE_SIZE_BYTES * 4 // 3) + 64
 gemini_credentials = GeminiCredentialResolver()
 # T10 unit 2: one warm Gemini client reused across requests instead of one
 # new client per request; see WarmGeminiClient's docstring for the
@@ -890,6 +906,62 @@ def _resolve_channel_b_voice_reply_payload(token, http=None):
         )
 
 
+def _resolve_voice_transcription_payload(token, http=None):
+    """PW-013: resolve a voice-transcription bearer token (minted by either
+    bot right after downloading and bounding a voice note, see
+    VoiceEventStore.mint_voice_transcription_token) into its bound base64
+    audio, MIME type and domain-vocabulary hints. Same shape as
+    _resolve_channel_b_voice_reply_payload (fixed target, disabled proxy,
+    bounded, no redirect), against its own dedicated presentation route --
+    this never touches the shared voice_events store either."""
+    session = http or voice_event_http
+    session.trust_env = False
+    response = None
+    resolve_start = time.monotonic()
+    try:
+        response = session.get(
+            _VOICE_TRANSCRIPTION_URL,
+            headers={CAPABILITY_HEADER: token},
+            timeout=2,
+            allow_redirects=False,
+        )
+        if response.status_code == 401:
+            raise VoiceSessionUnauthorized("PRISMA_SESSION_REQUIRED")
+        if response.status_code != 200:
+            raise RuntimeError("VOICE_TRANSCRIPTION_LOOKUP_UNAVAILABLE")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("VOICE_TRANSCRIPTION_LOOKUP_UNAVAILABLE")
+        audio_base64, mime_type, extra_terms = (
+            payload.get("audioBase64"),
+            payload.get("mimeType"),
+            payload.get("extraTerms"),
+        )
+        if (
+            not isinstance(audio_base64, str)
+            or not audio_base64
+            or len(audio_base64) > _VOICE_TRANSCRIPTION_MAX_AUDIO_BASE64_CHARS
+            or not isinstance(mime_type, str)
+            or not mime_type
+            or not isinstance(extra_terms, list)
+            or not all(isinstance(term, str) for term in extra_terms)
+        ):
+            raise RuntimeError("VOICE_TRANSCRIPTION_LOOKUP_UNAVAILABLE")
+        return {"audioBase64": audio_base64, "mimeType": mime_type, "extraTerms": extra_terms}
+    except VoiceSessionUnauthorized:
+        raise
+    except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError):
+        raise RuntimeError("VOICE_TRANSCRIPTION_LOOKUP_UNAVAILABLE") from None
+    finally:
+        if response is not None:
+            try: response.close()
+            except Exception: pass
+        _logger.warning(
+            "Prisma voice transcription resolve: elapsed_ms=%d",
+            round((time.monotonic() - resolve_start) * 1000),
+        )
+
+
 def _deliver_channel_b_voice_reply(payload):
     """B1: the exact same Gemini TTS + Opus + Telegram delivery pipeline
     Channel A's telegramChatId path already exercises (_create_interactions_
@@ -1089,6 +1161,50 @@ def channel_b_telegram_voice_reply():
         _logger.warning("Prisma channel B voice reply: synthesis or delivery failed")
         return jsonify({"ok": False, "error": "CHANNEL_B_VOICE_REPLY_FAILED"}), 502
     return jsonify({"ok": True})
+
+
+@app.route("/internal/prisma/voice-transcription", methods=["POST"])
+def voice_transcription():
+    """PW-013: transcribe one already-downloaded Telegram voice-note question
+    for either channel. Presentation downloads and bounds the audio
+    (transport-specific), mints a single-use bearer token carrying the audio
+    bytes and domain terms (mirrors channel_b_telegram_voice_reply's token
+    indirection), and fires this route; this process resolves the token back
+    via one loopback GET (_resolve_voice_transcription_payload), then runs
+    the shared Gemini transcription and returns the transcript text
+    synchronously -- unlike the fire-and-forget Channel B voice-reply route,
+    the caller here blocks on this response to continue answering the
+    question, so a failure must be reported with a real status, never
+    swallowed."""
+    if request.content_length is not None and request.content_length > 1024:
+        return jsonify({"ok": False, "error": "INVALID_VOICE_TRANSCRIPTION_REQUEST"}), 400
+    capability = request.headers.get(CAPABILITY_HEADER, "")
+    if not capability:
+        return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
+    try:
+        payload = _resolve_voice_transcription_payload(capability)
+    except VoiceSessionUnauthorized:
+        return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
+    except RuntimeError:
+        return jsonify({"ok": False, "error": "VOICE_TRANSCRIPTION_LOOKUP_UNAVAILABLE"}), 503
+    try:
+        audio_bytes = base64.b64decode(payload["audioBase64"], validate=True)
+    except (binascii.Error, ValueError):
+        return jsonify({"ok": False, "error": "INVALID_VOICE_TRANSCRIPTION_REQUEST"}), 400
+    try:
+        client = get_gemini_client()
+    except GeminiCredentialUnavailable:
+        return _gemini_unavailable_response()
+    try:
+        transcript = transcribe_voice_note(
+            client, audio_bytes, payload["mimeType"], extra_terms=payload["extraTerms"]
+        )
+    except VoiceTranscriptionEmpty:
+        return jsonify({"ok": False, "error": "VOICE_NOTE_TRANSCRIPT_EMPTY"}), 422
+    except VoiceTranscriptionError:
+        _logger.warning("Prisma voice transcription: provider failed")
+        return jsonify({"ok": False, "error": "VOICE_TRANSCRIPTION_UNAVAILABLE"}), 502
+    return jsonify({"ok": True, "transcript": transcript})
 
 
 def _validate_single_process_environment(environ=None):

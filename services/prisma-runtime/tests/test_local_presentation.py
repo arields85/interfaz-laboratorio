@@ -14,10 +14,17 @@ import requests
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
-from prisma_runtime.local_presentation import JsonFileStore, VoiceEventStore, answer_from_snapshot, create_app
+from prisma_runtime.local_presentation import (
+    JsonFileStore,
+    VoiceEventStore,
+    _request_voice_transcription,
+    answer_from_snapshot,
+    create_app,
+)
 from prisma_runtime.voice_events import VoiceEventCapacity
 from prisma_runtime.hmi_sessions import HmiSessionRegistry
 from prisma_runtime.voice_timeline_diagnostics import VoiceTimelineRateLimiter
+from prisma_runtime.voice_transcription import VoiceTranscriptionEmpty, VoiceTranscriptionUnavailable
 
 
 # Explicitly inert collaborators for these HTTP fixtures, never runtime defaults.
@@ -211,6 +218,75 @@ class LocalPresentationTests(unittest.TestCase):
         self.assertEqual(bad_token.status_code, 401)
         self.assertEqual(first_use.status_code, 200)
         self.assertEqual(reused.status_code, 401)
+
+    def test_voice_transcription_route_resolves_a_valid_token(self) -> None:
+        """PW-013: same fully separate internal-auth discipline as the
+        Channel B voice-reply route -- a single-use bearer token minted by
+        VoiceEventStore.mint_voice_transcription_token, resolved through its
+        own route, never the shared HMI voice-event store."""
+        with tempfile.TemporaryDirectory() as temporary:
+            events = VoiceEventStore()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            token = events.mint_voice_transcription_token("YXVkaW8=", "audio/ogg", ["Prensa 3"])
+
+            response = client.get("/internal/prisma/voice-transcription", headers={"X-Prisma-Session-Capability": token})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["audioBase64"], "YXVkaW8=")
+        self.assertEqual(body["mimeType"], "audio/ogg")
+        self.assertEqual(body["extraTerms"], ["Prensa 3"])
+
+    def test_voice_transcription_route_rejects_missing_unknown_or_reused_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            events = VoiceEventStore()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            token = events.mint_voice_transcription_token("YXVkaW8=", "audio/ogg")
+
+            no_header = client.get("/internal/prisma/voice-transcription")
+            bad_token = client.get("/internal/prisma/voice-transcription", headers={"X-Prisma-Session-Capability": "not-a-real-token"})
+            first_use = client.get("/internal/prisma/voice-transcription", headers={"X-Prisma-Session-Capability": token})
+            reused = client.get("/internal/prisma/voice-transcription", headers={"X-Prisma-Session-Capability": token})
+
+        self.assertEqual(no_header.status_code, 401)
+        self.assertEqual(bad_token.status_code, 401)
+        self.assertEqual(first_use.status_code, 200)
+        self.assertEqual(reused.status_code, 401)
+
+    def test_request_voice_transcription_returns_the_stripped_transcript(self) -> None:
+        response = Mock(status_code=200)
+        response.json.return_value = {"transcript": "  lote 42 en progreso  "}
+        http = Mock(post=Mock(return_value=response))
+
+        result = _request_voice_transcription(http, "http://127.0.0.1:5056", "a-token")
+
+        self.assertEqual(result, "lote 42 en progreso")
+        response.close.assert_called_once_with()
+
+    def test_request_voice_transcription_raises_empty_on_422(self) -> None:
+        response = Mock(status_code=422)
+        http = Mock(post=Mock(return_value=response))
+
+        with self.assertRaises(VoiceTranscriptionEmpty):
+            _request_voice_transcription(http, "http://127.0.0.1:5056", "a-token")
+
+    def test_request_voice_transcription_raises_unavailable_on_non_200_or_network_error(self) -> None:
+        response = Mock(status_code=502)
+        http = Mock(post=Mock(return_value=response))
+        with self.assertRaises(VoiceTranscriptionUnavailable):
+            _request_voice_transcription(http, "http://127.0.0.1:5056", "a-token")
+
+        http = Mock(post=Mock(side_effect=requests.RequestException("boom")))
+        with self.assertRaises(VoiceTranscriptionUnavailable):
+            _request_voice_transcription(http, "http://127.0.0.1:5056", "a-token")
+
+    def test_request_voice_transcription_raises_empty_on_blank_transcript(self) -> None:
+        response = Mock(status_code=200)
+        response.json.return_value = {"transcript": "   "}
+        http = Mock(post=Mock(return_value=response))
+
+        with self.assertRaises(VoiceTranscriptionEmpty):
+            _request_voice_transcription(http, "http://127.0.0.1:5056", "a-token")
 
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

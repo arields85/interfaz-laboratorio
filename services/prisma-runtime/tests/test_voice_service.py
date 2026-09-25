@@ -405,6 +405,122 @@ class VoiceServiceTests(unittest.TestCase):
 
         self.assertGreaterEqual(stream.close.call_count, 1)
 
+    def test_voice_transcription_requires_a_capability(self):
+        response = service.app.test_client().post("/internal/prisma/voice-transcription")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "PRISMA_SESSION_REQUIRED")
+
+    def test_voice_transcription_resolves_decodes_and_returns_the_transcript(self):
+        payload = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": ["Prensa 3"]}
+        with patch.object(service, "_resolve_voice_transcription_payload", return_value=payload) as resolve, \
+                patch.object(service, "get_gemini_client", return_value="fake-client") as get_client, \
+                patch.object(service, "transcribe_voice_note", return_value="lote 42") as transcribe:
+            response = service.app.test_client().post(
+                "/internal/prisma/voice-transcription",
+                headers={"X-Prisma-Session-Capability": "transcription-token"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True, "transcript": "lote 42"})
+        resolve.assert_called_once_with("transcription-token")
+        get_client.assert_called_once_with()
+        transcribe.assert_called_once_with("fake-client", b"audio", "audio/ogg", extra_terms=["Prensa 3"])
+
+    def test_voice_transcription_maps_resolve_failures(self):
+        cases = (
+            (service.VoiceSessionUnauthorized("PRISMA_SESSION_REQUIRED"), 401, "PRISMA_SESSION_REQUIRED"),
+            (RuntimeError("VOICE_TRANSCRIPTION_LOOKUP_UNAVAILABLE"), 503, "VOICE_TRANSCRIPTION_LOOKUP_UNAVAILABLE"),
+        )
+        for error, expected_status, expected_body in cases:
+            with self.subTest(error=type(error).__name__):
+                with patch.object(service, "_resolve_voice_transcription_payload", side_effect=error):
+                    response = service.app.test_client().post(
+                        "/internal/prisma/voice-transcription",
+                        headers={"X-Prisma-Session-Capability": "transcription-token"},
+                    )
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.get_json()["error"], expected_body)
+
+    def test_voice_transcription_rejects_invalid_base64(self):
+        payload = {"audioBase64": "not-valid-base64!!", "mimeType": "audio/ogg", "extraTerms": []}
+        with patch.object(service, "_resolve_voice_transcription_payload", return_value=payload):
+            response = service.app.test_client().post(
+                "/internal/prisma/voice-transcription",
+                headers={"X-Prisma-Session-Capability": "transcription-token"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "INVALID_VOICE_TRANSCRIPTION_REQUEST")
+
+    def test_voice_transcription_maps_missing_gemini_credential(self):
+        payload = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": []}
+        with patch.object(service, "_resolve_voice_transcription_payload", return_value=payload), \
+                patch.object(service, "get_gemini_client", side_effect=service.GeminiCredentialUnavailable("x")):
+            response = service.app.test_client().post(
+                "/internal/prisma/voice-transcription",
+                headers={"X-Prisma-Session-Capability": "transcription-token"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "GEMINI_CREDENTIAL_UNAVAILABLE")
+
+    def test_voice_transcription_maps_empty_transcript_to_422(self):
+        payload = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": []}
+        with patch.object(service, "_resolve_voice_transcription_payload", return_value=payload), \
+                patch.object(service, "get_gemini_client", return_value="fake-client"), \
+                patch.object(service, "transcribe_voice_note", side_effect=service.VoiceTranscriptionEmpty("x")):
+            response = service.app.test_client().post(
+                "/internal/prisma/voice-transcription",
+                headers={"X-Prisma-Session-Capability": "transcription-token"},
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["error"], "VOICE_NOTE_TRANSCRIPT_EMPTY")
+
+    def test_voice_transcription_maps_provider_failure_to_502(self):
+        payload = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": []}
+        with patch.object(service, "_resolve_voice_transcription_payload", return_value=payload), \
+                patch.object(service, "get_gemini_client", return_value="fake-client"), \
+                patch.object(service, "transcribe_voice_note", side_effect=service.VoiceTranscriptionUnavailable("x")):
+            response = service.app.test_client().post(
+                "/internal/prisma/voice-transcription",
+                headers={"X-Prisma-Session-Capability": "transcription-token"},
+            )
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json()["error"], "VOICE_TRANSCRIPTION_UNAVAILABLE")
+
+    def test_resolve_voice_transcription_payload_round_trip(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": ["Prensa 3"]}
+        http = Mock()
+        http.get.return_value = response
+
+        payload = service._resolve_voice_transcription_payload("transcription-token", http=http)
+
+        self.assertEqual(payload, {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": ["Prensa 3"]})
+        http.get.assert_called_once_with(
+            "http://127.0.0.1:5057/internal/prisma/voice-transcription",
+            headers={"X-Prisma-Session-Capability": "transcription-token"},
+            timeout=2,
+            allow_redirects=False,
+        )
+        response.close.assert_called_once_with()
+
+    def test_resolve_voice_transcription_payload_rejects_unauthorized_and_malformed(self):
+        unauthorized = Mock(status_code=401)
+        http = Mock(get=Mock(return_value=unauthorized))
+        with self.assertRaises(service.VoiceSessionUnauthorized):
+            service._resolve_voice_transcription_payload("bad-token", http=http)
+
+        for body in (
+            {"audioBase64": "", "mimeType": "audio/ogg", "extraTerms": []},
+            {"audioBase64": "YXVkaW8=", "mimeType": "", "extraTerms": []},
+            {"audioBase64": "YXVkaW8=", "mimeType": "audio/ogg", "extraTerms": "not-a-list"},
+            [],
+        ):
+            with self.subTest(body=body):
+                response = Mock(status_code=200)
+                response.json.return_value = body
+                http = Mock(get=Mock(return_value=response))
+                with self.assertRaises(RuntimeError):
+                    service._resolve_voice_transcription_payload("token", http=http)
+
     def test_boot_warm_up_delegates_to_the_warm_client_without_blocking(self):
         """T10 unit 2: main() must never block on Gemini reachability, so the
         warm-up entry point is a plain, synchronous, already-safe delegation
