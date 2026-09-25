@@ -56,12 +56,15 @@ Strict TDD, per session configuration ("Strict TDD Mode: enabled").
       Opt-in is the `PRISMA_DEV_AUTO_OPEN=1` env var (not a CLI flag, to avoid colliding with
       Vite's own built-in `--open`). Done, commit pending below.
 - [x] L3 — `console-progress.ps1`'s interactive animation becomes a `| / - \` spinner glyph before
-      the label, orange (ANSI truecolor/256-color when VT is supported, `DarkYellow` ConsoleColor
-      fallback otherwise, unchanged plain non-TTY line). `start-local.ps1`'s two wait loops tick
-      the indicator every 100 ms (10 ticks per 1 s health-check attempt) instead of once per
-      attempt. Existing dot-based assertions rewritten; new tests added for the spinner sequence,
-      the VT-orange path and the non-VT fallback. TDD: RED observed on the rewritten/new Python
-      tests before implementation.
+      the label, orange (ANSI truecolor `38;2;255;140;0` when VT is supported, detected once at
+      dot-source time via a `kernel32.dll` `GetConsoleMode`/`SetConsoleMode` P/Invoke helper;
+      `DarkYellow` ConsoleColor fallback otherwise; unchanged plain non-TTY line, now also
+      `DarkYellow` for visual consistency). `start-local.ps1`'s two wait loops tick the indicator
+      every 100 ms (10 ticks per 1 s health-check attempt, `$tick` drives the frame) instead of
+      once per attempt — same ~30 s overall budget. Existing dot-based assertions rewritten; new
+      tests added for the spinner sequence/wrap, the VT-orange escape path and the non-VT
+      fallback (no escape garbage). TDD: RED observed on the rewritten/new Python tests before
+      implementation. Done, commit pending below.
 
 ## Checks (per task, from the delegation brief)
 
@@ -79,4 +82,4 @@ Strict TDD, per session configuration ("Strict TDD Mode: enabled").
 |---|---|---|---|
 | L1 | n/a (no test harness for batch scripts) | grep evidence, static review | pending |
 | L2 | 11 new vitest cases RED (import/undefined failures) | vitest 221 files/2543 tests, tsc clean, lint clean | pending |
-| L3 | python unittest new/rewritten cases fail before implementation | python unittest pass (same 2 known env failures) | pending |
+| L3 | 3 new/rewritten cases RED (old dot-based text, no ANSI) | python unittest 1533 tests, same 2 known env failures + 2 known skipped | pending |

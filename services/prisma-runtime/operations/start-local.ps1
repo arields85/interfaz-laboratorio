@@ -60,10 +60,17 @@ function Wait-VoiceReady {
     $label = 'Starting Prisma voice'
     Start-PrismaWaitIndicator -Label $label
     try {
+        $tick = 0
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
             if (Test-PrismaDevelopmentCancellation) { return $false }
-            Update-PrismaWaitIndicator -Label $label -FrameIndex $attempt
-            Start-Sleep -Seconds 1
+            # m1 spinner (user request): tick the indicator every 100 ms (10 ticks per 1 s
+            # attempt, a 0.4 s full `|/-\` cycle) instead of once per attempt, so the animation
+            # reads as a smooth spinner. The overall ~30 s health-check budget is unchanged.
+            for ($subTick = 0; $subTick -lt 10; $subTick++) {
+                Update-PrismaWaitIndicator -Label $label -FrameIndex $tick
+                Start-Sleep -Milliseconds 100
+                $tick++
+            }
             try {
                 $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5056/health' -TimeoutSec 2
                 if ($health.ok -eq $true -and $health.ready -eq $true -and $health.service -eq 'prisma-voice' -and $health.mode -eq 'local') { return $true }
@@ -83,10 +90,17 @@ function Wait-PresentationReady {
     $label = 'Starting Prisma'
     Start-PrismaWaitIndicator -Label $label
     try {
+        $tick = 0
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
             if (Test-PrismaDevelopmentCancellation) { return $false }
-            Update-PrismaWaitIndicator -Label $label -FrameIndex $attempt
-            Start-Sleep -Seconds 1
+            # m1 spinner (user request): tick the indicator every 100 ms (10 ticks per 1 s
+            # attempt, a 0.4 s full `|/-\` cycle) instead of once per attempt, so the animation
+            # reads as a smooth spinner. The overall ~30 s health-check budget is unchanged.
+            for ($subTick = 0; $subTick -lt 10; $subTick++) {
+                Update-PrismaWaitIndicator -Label $label -FrameIndex $tick
+                Start-Sleep -Milliseconds 100
+                $tick++
+            }
             try {
                 $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5057/health' -TimeoutSec 2
                 if ($health.ok -eq $true -and $health.ready -eq $true -and $health.service -eq 'prisma-local-presentation' -and $health.mode -eq 'local' -and $health.prismaVoiceReady -eq $true) { return $true }

@@ -1032,7 +1032,15 @@ try {{
         exercise the indicator's own behavior in isolation): both health-wait
         loops start/tick/clear the indicator, and clearing happens in a
         `finally` block so it runs whether the wait succeeds, times out, or
-        is cancelled."""
+        is cancelled.
+
+        User request (m1 spinner): the indicator must tick every 100 ms (0.1 s/frame, a 0.4 s
+        full `|/-\\` cycle across the 4 spinner frames) rather than once per 1 s health-check
+        attempt, so the animation reads as a smooth spinner instead of a slow, choppy tick. The
+        overall 30-attempt health-check budget (~30 s) is unchanged: each attempt now ticks the
+        indicator 10 times at 100 ms apart instead of once, and `$tick` (not the outer per-second
+        `$attempt`) drives the spinner frame so the glyph keeps advancing independently of the
+        health-check cadence."""
         source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
         self.assertIn("console-progress.ps1", source)
         for function_name, label in (("Wait-VoiceReady", "Starting Prisma voice"), ("Wait-PresentationReady", "Starting Prisma")):
@@ -1041,7 +1049,8 @@ try {{
             body = source[start:end]
             self.assertIn(f"Start-PrismaWaitIndicator -Label $label", body)
             self.assertIn(f"'{label}'", body)
-            self.assertIn("Update-PrismaWaitIndicator -Label $label -FrameIndex $attempt", body)
+            self.assertIn("Update-PrismaWaitIndicator -Label $label -FrameIndex $tick", body)
+            self.assertIn("Start-Sleep -Milliseconds 100", body)
             finally_index = body.index("finally {")
             self.assertIn("Clear-PrismaWaitIndicator", body[finally_index:])
 
@@ -1067,13 +1076,22 @@ Write-Output 'Prisma voice is ready at http://127.0.0.1:5056.'
         self.assertEqual(result.stdout.count("Starting Prisma voice"), 1, result.stdout)
         self.assertIn("Starting Prisma voice...", result.stdout)
         self.assertIn("Prisma voice is ready at http://127.0.0.1:5056.", result.stdout)
+        # User request: no VT/ANSI escape garbage may leak into a non-TTY (redirected) stream --
+        # this must stay the plain, unanimated line it always was.
+        self.assertNotIn("\x1b", result.stdout)
 
-    def test_wait_indicator_overwrites_a_single_line_and_clears_it_when_the_console_is_interactive(self) -> None:
-        """T19: on a real interactive console the indicator must animate in
-        place (carriage-return overwrites, no scrolling spam) and leave the
-        line blank once cleared, so the next real output line starts clean.
-        `$script:prismaConsoleIsInteractive` is forced true here because a
-        test runner's own captured stdout is never a real TTY."""
+    def test_wait_indicator_cycles_the_orange_spinner_glyph_and_clears_it_when_the_console_is_interactive(self) -> None:
+        """User request (m1 spinner): the grey animated "..." must become an orange `|/-\\`
+        spinner glyph printed BEFORE the label (not dots appended after it), cycling through all
+        4 frames and wrapping back to the first. On a real interactive console the indicator must
+        still animate in place (carriage-return overwrites, no scrolling spam) and leave the line
+        blank once cleared. `$script:prismaConsoleIsInteractive` is forced true here because a
+        test runner's own captured stdout is never a real TTY; `$script:prismaVirtualTerminalEnabled`
+        is deliberately left at its real dot-source-time value (false, since actual stdout here is
+        a redirected pipe, not a console handle) so this test also proves the "sensible fallback"
+        path: still orange (`DarkYellow`, the closest legacy `ConsoleColor`), but via
+        `-ForegroundColor`, never via raw ANSI escape codes -- no escape garbage leaks out of a
+        console that only claims to be interactive without actually supporting VT."""
         helper = OPERATIONS_ROOT / "console-progress.ps1"
         command = fr"""
 $ErrorActionPreference = 'Stop'
@@ -1083,6 +1101,8 @@ Start-PrismaWaitIndicator -Label 'Starting Prisma voice'
 Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 0
 Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 1
 Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 2
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 3
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 4
 Clear-PrismaWaitIndicator
 Write-Output '###END###'
 """
@@ -1103,15 +1123,47 @@ Write-Output '###END###'
         # carriage return is empty, confirming Start-PrismaWaitIndicator
         # wrote nothing at all under an interactive console.
         self.assertEqual(segments[0], "")
-        self.assertIn("Starting Prisma voice.", segments[1])
-        self.assertIn("Starting Prisma voice..", segments[2])
-        self.assertIn("Starting Prisma voice...", segments[3])
+        self.assertIn("| Starting Prisma voice", segments[1])
+        self.assertIn("/ Starting Prisma voice", segments[2])
+        self.assertIn("- Starting Prisma voice", segments[3])
+        self.assertIn("\\ Starting Prisma voice", segments[4])
+        # FrameIndex 4 wraps back to the first spinner glyph.
+        self.assertIn("| Starting Prisma voice", segments[5])
         # The final overwrite (Clear-PrismaWaitIndicator) leaves the line
         # blank right before the real "###END###" output.
-        cleared_segment = segments[4]
+        cleared_segment = segments[6]
         self.assertNotIn("Starting Prisma voice", cleared_segment)
         self.assertTrue(cleared_segment.split("\n")[0].strip() == "", stdout)
         self.assertIn("###END###", stdout)
+        self.assertNotIn("\x1b", stdout)
+
+    def test_wait_indicator_uses_orange_ansi_truecolor_around_the_spinner_when_vt_is_supported(self) -> None:
+        """User request (m1 spinner): where the console actually supports VT, the spinner glyph
+        and the label must share the SAME orange, produced with a real ANSI truecolor/256-color
+        escape sequence rather than the legacy `ConsoleColor` fallback. This test forces
+        `$script:prismaVirtualTerminalEnabled = $true` directly (real VT auto-detection is
+        exercised by `Test-PrismaVirtualTerminalSupport` itself and is environment-dependent) to
+        prove the color-selection branch in isolation."""
+        helper = OPERATIONS_ROOT / "console-progress.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$script:prismaConsoleIsInteractive = $true
+$script:prismaVirtualTerminalEnabled = $true
+Update-PrismaWaitIndicator -Label 'Starting Prisma voice' -FrameIndex 0
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("\x1b[38;2;255;140;0m", result.stdout)
+        self.assertIn("| Starting Prisma voice", result.stdout)
+        self.assertIn("\x1b[0m", result.stdout)
+        # The reset must come after the label text, i.e. the whole "glyph + label" segment is
+        # wrapped in the same orange, not just the glyph.
+        orange_index = result.stdout.index("\x1b[38;2;255;140;0m")
+        label_index = result.stdout.index("| Starting Prisma voice")
+        reset_index = result.stdout.index("\x1b[0m")
+        self.assertLess(orange_index, label_index)
+        self.assertLess(label_index, reset_index)
 
 
 class ViteDevPortGuardTests(unittest.TestCase):
