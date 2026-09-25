@@ -242,6 +242,79 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertNotIn(event_id, first_chunk[0])
         self.assertNotIn(event_id, stream_end[0])
 
+    def test_speak_live_closes_the_underlying_subscription_on_early_response_teardown(self):
+        """V1 (voice-overlap): the HMI orb aborts the previous answer's fetch
+        the instant a new voice event supersedes it
+        (PrismaVoiceAudioEngine.play -> cleanupActive -> abortController.abort()).
+        The AudioCoordinator subscription behind /prisma/speak-live must be
+        released on that early teardown, exactly like a fully-drained stream
+        already self-closes via AudioSubscription._next_chunk -- otherwise the
+        subscriber slot (and the job's state) is never reaped, and
+        consecutive/overlapping answers for the same owner can eventually
+        exhaust real coordinator capacity. _pcm_stream_response's
+        call_on_close only ever saw _timed_pcm_stream's own wrapping
+        generator, never the inner AudioSubscription it wraps."""
+        event_id = str(uuid.uuid4())
+        event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999}
+        subscription = Mock()
+        subscription.__iter__ = Mock(return_value=iter([b"\x12\x34", b"\x56\x78"]))
+        coordinator = Mock()
+        coordinator.subscribe.return_value = subscription
+        with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+            response = service.app.test_client().post(
+                "/prisma/speak-live",
+                json={"eventId": event_id},
+                headers={"X-Prisma-Session-Capability": "test-capability"},
+                buffered=False,
+            )
+            # Simulate the browser aborting mid-stream instead of reading to
+            # completion: consume only the first chunk, then tear the
+            # response down early -- exactly what an aborted fetch does.
+            next(iter(response.response))
+            response.close()
+        subscription.close.assert_called_once_with()
+
+    def test_speak_live_logs_the_admission_rejection_reason(self):
+        """V2 (voice-overlap): a rejected admission was never logged at all,
+        so the reported live incident's exact rejection reason was
+        unrecoverable from the log. No event id, owner id or secret."""
+        event_id = str(uuid.uuid4())
+        event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999}
+        coordinator = Mock()
+        coordinator.subscribe.side_effect = service.AudioCapacityError("VOICE_CAPACITY_EXCEEDED")
+        with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+            with self.assertLogs(service._logger, level="WARNING") as observed:
+                response = service.app.test_client().post(
+                    "/prisma/speak-live",
+                    json={"eventId": event_id},
+                    headers={"X-Prisma-Session-Capability": "test-capability"},
+                )
+        self.assertEqual(response.status_code, 503)
+        rejection_lines = [line for line in observed.output if "admission rejected" in line]
+        self.assertEqual(len(rejection_lines), 1)
+        self.assertIn("VOICE_CAPACITY_EXCEEDED", rejection_lines[0])
+        self.assertTrue(rejection_lines[0].startswith("WARNING:"))
+        self.assertNotIn(event_id, rejection_lines[0])
+
+    def test_prefetch_logs_the_admission_rejection_reason(self):
+        """V2 (voice-overlap): same logging contract on the prefetch route."""
+        event_id = str(uuid.uuid4())
+        event = {"id": event_id, "text": "answer", "question": "q", "expiresAt": 9999999999}
+        coordinator = Mock()
+        coordinator.subscribe.side_effect = service.AudioCapacityError("VOICE_CAPACITY_EXCEEDED")
+        with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+            with self.assertLogs(service._logger, level="WARNING") as observed:
+                response = service.app.test_client().post(
+                    "/internal/prisma/prefetch",
+                    json={"eventId": event_id},
+                    headers={"X-Prisma-Session-Capability": "cap"},
+                )
+        self.assertEqual(response.status_code, 503)
+        rejection_lines = [line for line in observed.output if "admission rejected" in line]
+        self.assertEqual(len(rejection_lines), 1)
+        self.assertIn("VOICE_CAPACITY_EXCEEDED", rejection_lines[0])
+        self.assertNotIn(event_id, rejection_lines[0])
+
     def test_prefetch_requires_a_capability(self):
         response = service.app.test_client().post("/internal/prisma/prefetch", json={"eventId": str(uuid.uuid4())})
         self.assertEqual(response.status_code, 401)

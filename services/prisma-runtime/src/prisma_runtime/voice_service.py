@@ -1083,6 +1083,18 @@ def _timed_pcm_stream(stream, request_received):
     Logs the elapsed time from the request being received to the first yielded
     chunk (once), and again from the request being received to stream end
     (always, including on an early close or a generator error).
+
+    V1 (voice-overlap): the ``finally`` below also closes ``stream`` itself
+    (the AudioCoordinator subscription) on every teardown path. A fully
+    drained stream already self-closes via AudioSubscription._next_chunk on
+    StopIteration (close() is idempotent, so this is a harmless no-op then),
+    but an EARLY teardown -- the HMI orb aborting this answer's fetch because
+    a new voice event superseded it -- previously left this generator's own
+    ``close()`` (the only one ``_pcm_stream_response`` below ever registers
+    via ``call_on_close``) as the sole thing torn down, never forwarding to
+    the inner subscription. That leaked the subscriber slot (and the job's
+    non-terminal state) forever, since AudioCoordinator only reaps a state
+    once its subscriber count reaches zero.
     """
     first_chunk_logged = False
     try:
@@ -1095,6 +1107,9 @@ def _timed_pcm_stream(stream, request_received):
                 first_chunk_logged = True
             yield chunk
     finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            close()
         _logger.info(
             "Prisma speak-live: stream_end_elapsed_ms=%d",
             round((time.monotonic() - request_received) * 1000),
@@ -1136,8 +1151,16 @@ def prisma_speak_live():
         return _gemini_unavailable_response()
     except AudioCapacityError as error:
         status = 429 if str(error) == "VOICE_SUBSCRIBER_LIMIT" else 503
+        # V2 (voice-overlap): the 2026-09-25 live incident had no log line at
+        # all recording why two overlapping answers got rejected -- WARNING,
+        # reason only, never the event/owner id.
+        _logger.warning("Prisma speak-live: admission rejected reason=%s", str(error))
         return jsonify({"ok": False, "error": str(error)}), status
-    except (AudioCoordinatorError, RuntimeError):
+    except (AudioCoordinatorError, RuntimeError) as error:
+        _logger.warning(
+            "Prisma speak-live: admission rejected reason=%s",
+            str(error) or type(error).__name__,
+        )
         return jsonify({"ok": False, "error": "VOICE_SERVICE_UNAVAILABLE"}), 503
     return _pcm_stream_response(lambda: _timed_pcm_stream(stream, request_received))
 
@@ -1185,8 +1208,14 @@ def prisma_prefetch():
         return _gemini_unavailable_response()
     except AudioCapacityError as error:
         status = 429 if str(error) == "VOICE_SUBSCRIBER_LIMIT" else 503
+        # V2 (voice-overlap): same logging contract as /prisma/speak-live.
+        _logger.warning("Prisma prefetch: admission rejected reason=%s", str(error))
         return jsonify({"ok": False, "error": str(error)}), status
-    except (AudioCoordinatorError, RuntimeError):
+    except (AudioCoordinatorError, RuntimeError) as error:
+        _logger.warning(
+            "Prisma prefetch: admission rejected reason=%s",
+            str(error) or type(error).__name__,
+        )
         return jsonify({"ok": False, "error": "VOICE_SERVICE_UNAVAILABLE"}), 503
     subscription.close()
     return jsonify({"ok": True})
