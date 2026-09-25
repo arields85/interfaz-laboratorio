@@ -253,6 +253,16 @@ class LocalPresentationTests(unittest.TestCase):
         self.assertEqual(first_use.status_code, 200)
         self.assertEqual(reused.status_code, 401)
 
+    def test_voice_transcription_route_response_is_never_cached(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            events = VoiceEventStore()
+            client = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), events, None, **DISABLED_HTTP_OPTIONS).test_client()
+            token = events.mint_voice_transcription_token("YXVkaW8=", "audio/ogg")
+
+            response = client.get("/internal/prisma/voice-transcription", headers={"X-Prisma-Session-Capability": token})
+
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+
     def test_request_voice_transcription_returns_the_stripped_transcript(self) -> None:
         response = Mock(status_code=200)
         response.json.return_value = {"transcript": "  lote 42 en progreso  "}

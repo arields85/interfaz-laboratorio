@@ -1240,7 +1240,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         origin = request.headers.get("Origin"); allowed = {"http://127.0.0.1:5173", "http://localhost:5173"}
         response.headers["Access-Control-Allow-Origin"] = origin if origin in allowed else "http://127.0.0.1:5173"; response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Headers"] = f"Content-Type, X-CSRF-Token, {CAPABILITY_HEADER}"; response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        if request.path in {"/hmi/session", "/hmi/channel-a/pairing", "/hmi/current-snapshot", "/hmi/voice/latest", "/local/ask", "/hmi/voice/timeline"} or request.path.startswith("/internal/prisma/voice-events/"):
+        if request.path in {"/hmi/session", "/hmi/channel-a/pairing", "/hmi/current-snapshot", "/hmi/voice/latest", "/local/ask", "/hmi/voice/timeline", "/internal/prisma/voice-transcription"} or request.path.startswith("/internal/prisma/voice-events/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
