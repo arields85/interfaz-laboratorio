@@ -61,6 +61,7 @@ vi.mock('../queries/usePrismaVoiceConfig', () => ({
 
 import {
     PRISMA_ORB_FADE_DURATION_MS,
+    PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS,
     PRISMA_ORB_THINKING_TIMEOUT_MS,
     PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT,
     usePrismaOrbPresentation,
@@ -518,5 +519,103 @@ describe('usePrismaOrbPresentation', () => {
 
         const getPlaybackBuffer = prebufferPolicyFactorySpy.mock.calls.at(-1)?.[0] as () => unknown;
         expect(getPlaybackBuffer()).toBeNull();
+    });
+
+    describe('voice-ux U1: orb "thinking" signal events (no playback)', () => {
+        it('shows the thinking phase without starting playback for a thinking-kind event', () => {
+            const { engine } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+
+            expect(result.current.phase).toBe('thinking');
+            expect(engine.play).not.toHaveBeenCalled();
+        });
+
+        it('starts playback normally once the real answer event follows a thinking signal', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+            act(() => result.current.presentVoiceEvent(EVENT));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('thinking');
+            act(() => lifecycles[0]?.onStarted?.());
+            expect(result.current.phase).toBe('visible');
+        });
+
+        it('returns to hidden after the bounded thinking-signal timeout when no answer ever follows', () => {
+            vi.useFakeTimers();
+            const { engine } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+            expect(result.current.phase).toBe('thinking');
+
+            act(() => vi.advanceTimersByTime(PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS));
+
+            expect(result.current.phase).toBe('hidden');
+            expect(engine.play).not.toHaveBeenCalled();
+        });
+
+        it('hides immediately on an explicit cancel signal while awaiting an answer', () => {
+            vi.useFakeTimers();
+            const { engine } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'cancel' }));
+
+            expect(result.current.phase).toBe('hidden');
+            expect(engine.play).not.toHaveBeenCalled();
+
+            // The now-cleared timeout must never fire a stray transition later.
+            act(() => vi.advanceTimersByTime(PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS));
+            expect(result.current.phase).toBe('hidden');
+        });
+
+        it('a cancel signal with nothing awaited is a no-op', () => {
+            const { engine } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'cancel' }));
+
+            expect(result.current.phase).toBe('hidden');
+            expect(engine.play).not.toHaveBeenCalled();
+        });
+
+        it('a thinking signal never aborts an answer currently playing', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onStarted?.());
+            expect(result.current.phase).toBe('visible');
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2', kind: 'thinking' }));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('visible');
+        });
+
+        it('a cancel signal never hides an answer currently playing', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => usePrismaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onStarted?.());
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2', kind: 'cancel' }));
+
+            expect(result.current.phase).toBe('visible');
+        });
     });
 });

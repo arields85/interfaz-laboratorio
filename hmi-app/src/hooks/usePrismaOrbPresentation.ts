@@ -58,6 +58,18 @@ export const PRISMA_ORB_THINKING_TIMEOUT_MS = 9_000;
 // overflow event instead of growing the queue without bound.
 export const PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT = 4;
 
+// voice-ux U1: bounds how long the orb can wait in "thinking" for the real
+// answer event after a signal-only "thinking" event (Channel A voice-note
+// receipt, before download/transcription) -- distinct from
+// PRISMA_ORB_THINKING_TIMEOUT_MS above, which bounds the wait for playback
+// to actually start once engine.play() has already been called for a real
+// answer. Chosen comfortably above the backend's own worst-case round-trip
+// ceiling (VOICE_TRANSCRIPTION_REQUEST_TIMEOUT_SECONDS = 25 s in
+// local_presentation.py) so the orb is never hidden out from under a
+// transcription that is still legitimately in flight, while staying bounded
+// per the requirement ("never stay stuck in thinking").
+export const PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS = 30_000;
+
 // Tied to the generated T16 timeline's own phase enum (schemas/prisma-audio-
 // record.v1.schema.json -> prismaAudioMetric.generated.ts) instead of a
 // separately hand-maintained union, so the two can never silently drift
@@ -173,6 +185,14 @@ export function usePrismaOrbPresentation(
     // (pendingQueueRef) instead of aborting the in-progress answer.
     const isActiveRef = useRef(false);
     const pendingQueueRef = useRef<VoiceEvent[]>([]);
+    // voice-ux U1: true from a signal-only "thinking" event (Channel A voice
+    // note accepted, before download/transcription) until either the real
+    // answer event arrives, an explicit "cancel" signal arrives, or the
+    // bounded signalTimeoutRef below fires -- never while isActiveRef is
+    // true (a thinking/cancel signal is a no-op while an answer is actively
+    // being presented, per the user's explicit requirement).
+    const awaitingSignalAnswerRef = useRef(false);
+    const signalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // T4: the shared Prisma voice config carries the user's Automatic/Manual
     // mode choice (`playbackBuffer`). This is the viewer's only current
@@ -217,6 +237,16 @@ export function usePrismaOrbPresentation(
         if (thinkingTimeoutRef.current !== null) {
             clearTimeout(thinkingTimeoutRef.current);
             thinkingTimeoutRef.current = null;
+        }
+    };
+
+    // voice-ux U1: bounds how long the orb can wait for a real answer after
+    // a signal-only "thinking" event -- cleared once the real answer
+    // arrives, an explicit cancel arrives, or this timeout itself fires.
+    const clearSignalTimeout = (): void => {
+        if (signalTimeoutRef.current !== null) {
+            clearTimeout(signalTimeoutRef.current);
+            signalTimeoutRef.current = null;
         }
     };
 
@@ -317,6 +347,27 @@ export function usePrismaOrbPresentation(
         });
     };
 
+    // voice-ux U1: shows "thinking" for a signal-only event (no answer,
+    // never played) and starts a bounded wait for the real answer that
+    // should follow. Only ever called while no answer is currently active
+    // (presentVoiceEvent below guards that) -- a thinking signal must never
+    // abort an answer already playing.
+    const beginThinkingSignal = (): void => {
+        generationRef.current += 1;
+        const generation = generationRef.current;
+        clearFadeTimer();
+        clearThinkingTimeout();
+        clearSignalTimeout();
+        awaitingSignalAnswerRef.current = true;
+        updatePhase('thinking');
+        signalTimeoutRef.current = setTimeout(() => {
+            signalTimeoutRef.current = null;
+            if (generationRef.current !== generation || !awaitingSignalAnswerRef.current) return;
+            awaitingSignalAnswerRef.current = false;
+            updatePhase('hidden');
+        }, PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS);
+    };
+
     // V3 (voice-overlap): every new voice event still reaches this same
     // public entry point. One arriving while the previous answer is still
     // actively being presented (thinking or visibly speaking) is queued
@@ -325,9 +376,37 @@ export function usePrismaOrbPresentation(
     // play, in order, never dropped. One arriving during the previous
     // answer's cosmetic fade-out still starts immediately, unchanged from
     // before: by then the previous answer has already fully played.
+    //
+    // voice-ux U1: event.kind branches before any of that. "thinking"/
+    // "cancel" are signal-only (see voice.types.ts) -- while an answer is
+    // currently active, either kind is silently dropped (never aborts it;
+    // a real answer arriving during that window still queues, unchanged
+    // above). While nothing is active, "thinking" shows the thinking phase
+    // and awaits the real answer (beginThinkingSignal); "cancel" clears that
+    // wait and hides immediately, and is otherwise a no-op.
     const presentVoiceEvent = (event: VoiceEvent): void => {
         const eventId = event.id?.trim();
         if (!eventId) return;
+        if (event.kind === 'thinking') {
+            if (isActiveRef.current) return;
+            beginThinkingSignal();
+            return;
+        }
+        if (event.kind === 'cancel') {
+            if (isActiveRef.current || !awaitingSignalAnswerRef.current) return;
+            generationRef.current += 1;
+            clearSignalTimeout();
+            awaitingSignalAnswerRef.current = false;
+            updatePhase('hidden');
+            return;
+        }
+        // A real answer event always clears any pending signal-only wait --
+        // it is either about to start playing (below) or about to queue
+        // behind an answer already active, in which case the signal wait was
+        // already impossible (isActiveRef and awaitingSignalAnswerRef are
+        // never both true).
+        awaitingSignalAnswerRef.current = false;
+        clearSignalTimeout();
         if (isActiveRef.current) {
             if (pendingQueueRef.current.length < PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT) {
                 pendingQueueRef.current.push(event);
@@ -341,7 +420,9 @@ export function usePrismaOrbPresentation(
         generationRef.current += 1;
         clearFadeTimer();
         clearThinkingTimeout();
+        clearSignalTimeout();
         isActiveRef.current = false;
+        awaitingSignalAnswerRef.current = false;
         pendingQueueRef.current = [];
         engineRef.current?.dispose();
     }, []);
@@ -350,7 +431,9 @@ export function usePrismaOrbPresentation(
         generationRef.current += 1;
         clearFadeTimer();
         clearThinkingTimeout();
+        clearSignalTimeout();
         isActiveRef.current = false;
+        awaitingSignalAnswerRef.current = false;
         pendingQueueRef.current = [];
         engineRef.current?.stop();
         updatePhase('hidden');

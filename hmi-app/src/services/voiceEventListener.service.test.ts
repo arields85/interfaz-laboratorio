@@ -311,6 +311,48 @@ describe('startVoiceEventListener', () => {
         stop();
     });
 
+    it('passes through a thinking/cancel kind', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(FIRST_EVENT))
+            .mockResolvedValueOnce(jsonResponse({ ...FIRST_EVENT, id: 'voice-2', kind: 'thinking' }))
+            .mockResolvedValueOnce(jsonResponse({ ...FIRST_EVENT, id: 'voice-3', kind: 'cancel' }));
+        const onEvent = vi.fn();
+
+        const stop = startVoiceEventListener({
+            url: 'https://node-red.local/hmi/voice/latest',
+            onEvent,
+            fetchImpl: fetchMock,
+            intervalMs: 1_000,
+        });
+
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(onEvent).toHaveBeenNthCalledWith(1, { ...FIRST_EVENT, id: 'voice-2', kind: 'thinking' });
+        expect(onEvent).toHaveBeenNthCalledWith(2, { ...FIRST_EVENT, id: 'voice-3', kind: 'cancel' });
+
+        stop();
+    });
+
+    it('omits an unrecognized kind without rejecting the event', async () => {
+        const fetchMock = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(FIRST_EVENT))
+            .mockResolvedValueOnce(jsonResponse({ ...FIRST_EVENT, id: 'voice-2', kind: 'bogus' }));
+        const onEvent = vi.fn();
+
+        const stop = startVoiceEventListener({
+            url: 'https://node-red.local/hmi/voice/latest',
+            onEvent,
+            fetchImpl: fetchMock,
+            intervalMs: 1_000,
+        });
+
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(onEvent).toHaveBeenCalledWith({ ...FIRST_EVENT, id: 'voice-2' });
+
+        stop();
+    });
+
     it('distinguishes legacy events for different chats and deduplicates the same chat', async () => {
         const legacyEvent = {
             timestamp: FIRST_EVENT.timestamp,

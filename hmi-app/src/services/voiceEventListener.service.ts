@@ -373,9 +373,13 @@ function normalizeVoiceEvent(value: unknown): VoiceEvent | null {
     const telegramChatId = 'telegramChatId' in value
         ? normalizeTelegramChatId(value.telegramChatId)
         : undefined;
+    const kind = 'kind' in value && (value.kind === 'thinking' || value.kind === 'cancel')
+        ? value.kind
+        : undefined;
     return {
         ...(id === undefined ? {} : { id }),
         ...(telegramChatId === undefined ? {} : { telegramChatId }),
+        ...(kind === undefined ? {} : { kind }),
         timestamp: value.timestamp,
         text: value.text,
         question: value.question,
