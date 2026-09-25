@@ -156,8 +156,9 @@ GET_FILE_METHOD = "getFile"
 MAX_FILE_ID_CHARS = 256
 # Telegram's file_path is always a relative, forward-slash path under a known
 # prefix (e.g. "voice/file_1.oga"); the charset excludes backslash, and every
-# "." segment is rejected below (never just a leading "..") before this is
-# ever joined into a URL.
+# ".." segment (traversal), anywhere in the path -- not just a leading one --
+# is rejected below (_validated_file_path) before this is ever joined into a
+# URL.
 _FILE_PATH_PATTERN = re.compile(r"\A[A-Za-z0-9_./-]{1,512}\Z")
 
 # T4: the only chat action this runtime ever sends; the transport's own
@@ -559,10 +560,7 @@ class ChannelATransport:
         result = _field(body, "result")
         if not isinstance(result, Mapping):
             raise _unavailable() from None
-        file_path = _field(result, "file_path")
-        if not isinstance(file_path, str) or _FILE_PATH_PATTERN.fullmatch(file_path) is None:
-            raise _unavailable() from None
-        return file_path
+        return _validated_file_path(_field(result, "file_path"))
 
     def download_file(self, *, file_path: str, max_bytes: int) -> bytes:
         """Download one file's raw bytes from Telegram's separate file host.
