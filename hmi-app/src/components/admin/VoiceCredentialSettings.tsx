@@ -984,7 +984,15 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
                 actions={(
                     <>
                         <HmiButton onClick={() => updateDeleteProvider(null)}>Cancelar</HmiButton>
-                        <HmiButton variant="danger" disabled={disabled} onClick={() => deleteProvider && void remove(deleteProvider)}>
+                        <HmiButton
+                            variant="danger"
+                            // GGA review finding (2026-09-25): `disabled` alone is
+                            // provider-agnostic now (F4), so this button needs its
+                            // own explicit guard against double-submitting the
+                            // SAME provider's delete while it is still in flight.
+                            disabled={disabled || (deleteProvider !== null && administration.pendingActions[deleteProvider] !== null)}
+                            onClick={() => deleteProvider && void remove(deleteProvider)}
+                        >
                             <Trash2 size={14} aria-hidden="true" />
                             Confirmar eliminación
                         </HmiButton>

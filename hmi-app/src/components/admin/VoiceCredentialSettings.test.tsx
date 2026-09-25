@@ -1624,6 +1624,33 @@ describe('VoiceCredentialSettings', () => {
         expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
     });
 
+    // GGA review finding on the F4 commit (2026-09-25): the delete
+    // confirmation dialog's own "Confirmar eliminación" button used to read
+    // the removed global `disabled` (which folded in pendingAction), so it
+    // was incidentally disabled while its own delete was in flight. Now that
+    // `disabled` is provider-agnostic only, this button needs its own
+    // explicit guard against a double-submit for the SAME provider's delete.
+    it('disables "Confirmar eliminación" while its own delete is still in flight, without needing an unrelated row to be busy', async () => {
+        const user = userEvent.setup();
+        const pending = new Promise<never>(() => undefined);
+        const deleteCredential = vi.fn(() => pending);
+        renderSettings({
+            credentialMetadata: vi.fn(async () => allConfiguredMetadata),
+            channelAStatus: vi.fn(async () => channelARunning),
+            deleteCredential,
+        });
+        const gemini = await screen.findByRole('group', { name: 'Proveedor de voz' });
+        await waitFor(() => expect(within(gemini).getByRole('button', { name: 'Eliminar credencial' })).toBeEnabled());
+
+        await user.click(within(gemini).getByRole('button', { name: 'Eliminar credencial' }));
+        const confirm = screen.getByRole('button', { name: 'Confirmar eliminación' });
+        expect(confirm).toBeEnabled();
+        await user.click(confirm);
+
+        await waitFor(() => expect(confirm).toBeDisabled());
+        expect(deleteCredential).toHaveBeenCalledTimes(1);
+    });
+
     // T15: a failed verification result REPLACES the live connection state
     // in the one shared result area, text only (no icon).
     it.each([
