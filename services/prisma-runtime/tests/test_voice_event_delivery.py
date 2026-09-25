@@ -63,6 +63,39 @@ class VoiceEventDeliveryTests(unittest.TestCase):
         internal = self.store.get_internal(event["id"], OWNER)
         self.assertEqual(validate_voice_event(internal, event["id"], now=lambda: self.now, require_owner=True), internal)
 
+    def test_the_default_answer_kind_never_adds_a_kind_key(self):
+        """voice-ux U1: every event published before this task, and every
+        ordinary answer today, must keep its exact prior wire shape."""
+        event = self.publish(None)
+        self.assertNotIn("kind", event)
+
+    def test_a_non_answer_kind_is_published_with_an_empty_text_and_validates(self):
+        """voice-ux U1: a thinking/cancel signal carries no answer -- unlike
+        an ordinary answer, an empty text is valid for these kinds."""
+        for kind in ("thinking", "cancel"):
+            with self.subTest(kind=kind):
+                event = self.store.publish("", "", owner_id=OWNER, kind=kind)
+                self.assertEqual(event["kind"], kind)
+                self.assertEqual(event["text"], "")
+                self.assertEqual(validate_voice_event(event, event["id"], now=lambda: self.now), event)
+
+    def test_publish_rejects_an_unknown_kind_without_storing_anything(self):
+        with self.assertRaises(ValueError):
+            self.store.publish("q", "a", owner_id=OWNER, kind="bogus")
+        self.assertIsNone(self.store.latest(OWNER))
+
+    def test_validate_voice_event_rejects_an_unknown_kind(self):
+        event = self.publish(None)
+        tampered = dict(event, kind="bogus")
+        with self.assertRaises(ValueError):
+            validate_voice_event(tampered, event["id"], now=lambda: self.now)
+
+    def test_validate_voice_event_still_requires_nonempty_text_for_the_answer_kind(self):
+        event = self.store.publish("", "", owner_id=OWNER, kind="thinking")
+        tampered = dict(event, kind="answer")
+        with self.assertRaises(ValueError):
+            validate_voice_event(tampered, event["id"], now=lambda: self.now)
+
     def test_unguarded_legacy_none_owner_and_ttl_regressions(self):
         legacy = self.store.publish("q", "a", -123)
         self.assertEqual(set(legacy), {"id", "timestamp", "expiresAt", "text", "question"})
@@ -307,6 +340,30 @@ class VoiceEventOwnerNotificationTests(unittest.TestCase):
         try:
             self.store.publish("q", "a", owner_id=OWNER, is_current=lambda: False)
             self.assertFalse(flag.wait(0.1))
+        finally:
+            unsubscribe()
+
+    def test_publish_with_notify_false_stores_the_event_without_waking_subscribers(self):
+        """voice-ux U2: a caller that wants to start a side effect (the
+        Channel A prefetch) strictly before the owner is told a new event
+        exists needs to store the event without the automatic wake-up
+        publish() otherwise performs."""
+        flag, unsubscribe = self.store.subscribe_owner(OWNER)
+        try:
+            event = self.store.publish("q", "a", owner_id=OWNER, notify=False)
+            self.assertIsNotNone(event)
+            self.assertEqual(self.store.latest(OWNER)["id"], event["id"])
+            self.assertFalse(flag.wait(0.1))
+        finally:
+            unsubscribe()
+
+    def test_notify_owner_wakes_a_subscriber_after_a_deferred_publish(self):
+        flag, unsubscribe = self.store.subscribe_owner(OWNER)
+        try:
+            self.store.publish("q", "a", owner_id=OWNER, notify=False)
+            self.assertFalse(flag.is_set())
+            self.store.notify_owner(OWNER)
+            self.assertTrue(flag.wait(1))
         finally:
             unsubscribe()
 

@@ -3096,6 +3096,11 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.transcribe_calls = []
         self.transcribe_result = "¿cuál es el oee?"
         self.transcribe_error = None
+        # voice-ux U1
+        self.thinking_calls = []
+        self.cancelled_calls = []
+        self.notify_thinking_error = None
+        self.notify_cancelled_error = None
 
     def transcribe(self, audio_bytes, mime_type, owner_id=None):
         # F7 (live test 2026-09-25): owner_id is an optional hint the
@@ -3106,8 +3111,22 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
             raise self.transcribe_error
         return self.transcribe_result
 
+    def notify_thinking(self, owner_id):
+        self.thinking_calls.append(owner_id)
+        if self.notify_thinking_error is not None:
+            raise self.notify_thinking_error
+
+    def notify_cancelled(self, owner_id):
+        self.cancelled_calls.append(owner_id)
+        if self.notify_cancelled_error is not None:
+            raise self.notify_cancelled_error
+
     def enable_voice_notes(self):
-        self.dialogue.enable_voice_notes(transcribe=self.transcribe)
+        self.dialogue.enable_voice_notes(
+            transcribe=self.transcribe,
+            notify_thinking=self.notify_thinking,
+            notify_cancelled=self.notify_cancelled,
+        )
 
     def voice(self, *, owner=OWNER, chat=CHAT_ID, claim_id=4, confirm_id=5, query_id=6, **overrides):
         self.pair_up(claim_id, confirm_id, owner=owner, chat=chat)
@@ -3123,6 +3142,14 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
     def test_enable_voice_notes_rejects_a_noncallable_transcribe(self):
         with self.assertRaises(ChannelABotConfigInvalid):
             self.dialogue.enable_voice_notes(transcribe=None)
+
+    def test_enable_voice_notes_rejects_a_noncallable_notify_thinking(self):
+        with self.assertRaises(ChannelABotConfigInvalid):
+            self.dialogue.enable_voice_notes(transcribe=self.transcribe, notify_thinking="not-callable")
+
+    def test_enable_voice_notes_rejects_a_noncallable_notify_cancelled(self):
+        with self.assertRaises(ChannelABotConfigInvalid):
+            self.dialogue.enable_voice_notes(transcribe=self.transcribe, notify_cancelled="not-callable")
 
     def test_enable_voice_notes_rejects_a_transport_missing_download_support(self):
         class TextOnlyTransport(FakeTransport):
@@ -3158,6 +3185,11 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assertEqual(self.transcribe_calls, [(b"fake-ogg-audio", "audio/ogg", OWNER)])
         self.assertEqual(self.parses[-1][1], "¿cuál es el oee?")
         self.assertIn("88,5", self.transport.sent[-1]["text"])
+        # voice-ux U1: "thinking" fires once, for the exact owner, and the
+        # happy path never cancels it -- the real answer event supersedes it
+        # on the HMI side.
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [])
 
     def test_authorization_runs_before_any_download(self):
         """The phone-to-owner binding check must reject an unbound phone
@@ -3168,6 +3200,33 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assertEqual(self.transport.get_file_calls, [])
         self.assertEqual(self.transport.download_file_calls, [])
         self.assertEqual(self.transcribe_calls, [])
+        # voice-ux U1: authorization failed -- never signal thinking either.
+        self.assertEqual(self.thinking_calls, [])
+        self.assertEqual(self.cancelled_calls, [])
+
+    def test_without_notify_thinking_or_notify_cancelled_voice_notes_still_work_unsignaled(self):
+        """voice-ux U1: both callables are optional -- omitting them keeps
+        voice-note handling exactly as it was before this task existed."""
+        self.dialogue.enable_voice_notes(transcribe=self.transcribe)
+        outcome = self.voice()
+        self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED)
+        self.assertEqual(self.thinking_calls, [])
+        self.assertEqual(self.cancelled_calls, [])
+
+    def test_a_thinking_signal_failure_never_breaks_voice_note_handling(self):
+        """voice-ux U1: best-effort -- a raising notify_thinking must never
+        prevent the note from being answered."""
+        self.enable_voice_notes()
+        self.notify_thinking_error = RuntimeError("boom")
+        outcome = self.voice()
+        self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED)
+
+    def test_a_cancelled_signal_failure_never_breaks_the_rejection_reply(self):
+        """voice-ux U1: same best-effort contract on notify_cancelled."""
+        self.enable_voice_notes()
+        self.notify_cancelled_error = RuntimeError("boom")
+        outcome = self.voice(duration=MAX_VOICE_NOTE_DURATION_SECONDS + 1)
+        self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
 
     # -- duration/size limits --------------------------------------------------
 
@@ -3179,12 +3238,19 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assertEqual(self.transport.download_file_calls, [])
         self.assertEqual(self.transcribe_calls, [])
         self.assertIn("30 segundos", self.transport.sent[-1]["text"])
+        # voice-ux U1: thinking fired on acceptance, then cancelled on
+        # rejection -- the orb must not stay stuck waiting for an answer
+        # that will never come.
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [OWNER])
 
     def test_a_voice_note_with_a_missing_or_invalid_duration_is_rejected(self):
         self.enable_voice_notes()
         outcome = self.voice(duration=None)
         self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
         self.assertEqual(self.transport.get_file_calls, [])
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [OWNER])
 
     def test_a_voice_note_over_the_size_cap_is_rejected_before_any_download(self):
         self.enable_voice_notes()
@@ -3192,12 +3258,18 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
         self.assertEqual(self.transport.get_file_calls, [])
         self.assertEqual(self.transport.download_file_calls, [])
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [OWNER])
 
     def test_a_voice_note_missing_a_file_id_is_ignored_as_malformed(self):
         self.enable_voice_notes()
         outcome = self.voice(file_id=None)
         self.assert_outcome(outcome, INGRESS_IGNORED_MALFORMED)
         self.assertEqual(self.transport.get_file_calls, [])
+        # voice-ux U1: a malformed (non-)voice note was never really
+        # "accepted" -- no signal either way.
+        self.assertEqual(self.thinking_calls, [])
+        self.assertEqual(self.cancelled_calls, [])
 
     # -- download/transcription failures ----------------------------------------
 
@@ -3207,6 +3279,8 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         outcome = self.voice()
         self.assert_outcome(outcome, VOICE_NOTE_DOWNLOAD_FAILED, delivery=SEND_DELIVERED)
         self.assertEqual(self.transcribe_calls, [])
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [OWNER])
 
     def test_an_empty_transcript_replies_and_never_reaches_the_query_coordinator(self):
         self.enable_voice_notes()
@@ -3214,6 +3288,8 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         outcome = self.voice()
         self.assert_outcome(outcome, VOICE_NOTE_TRANSCRIPTION_FAILED, delivery=SEND_DELIVERED)
         self.assertEqual(self.parses, [])
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [OWNER])
 
     def test_a_provider_failure_replies_and_never_crashes(self):
         self.enable_voice_notes()
@@ -3221,6 +3297,8 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         outcome = self.voice()
         self.assert_outcome(outcome, VOICE_NOTE_TRANSCRIPTION_FAILED, delivery=SEND_DELIVERED)
         self.assertEqual(self.parses, [])
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [OWNER])
 
     def test_an_unexpected_transcribe_exception_never_crashes_the_poll_loop(self):
         """The injected transcribe callable is caller-built, not part of this
@@ -3231,6 +3309,8 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         outcome = self.voice()
         self.assert_outcome(outcome, VOICE_NOTE_TRANSCRIPTION_FAILED, delivery=SEND_DELIVERED)
         self.assertEqual(self.parses, [])
+        self.assertEqual(self.thinking_calls, [OWNER])
+        self.assertEqual(self.cancelled_calls, [OWNER])
 
 
 class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):

@@ -63,6 +63,8 @@ class ChannelAActivation:
         sweep_interval_seconds=CHANNEL_A_SWEEP_INTERVAL_SECONDS,
         sweep_timer_factory=None,
         transcribe=None,
+        notify_thinking=None,
+        notify_cancelled=None,
     ) -> None:
         self._registry: ChannelAPairingRegistry | None = None
         self._dialogue: ChannelAPairingDialogue | None = None
@@ -108,8 +110,15 @@ class ChannelAActivation:
             # (every existing test/composition) keeps ordinary RCA-3a/3b
             # behavior untouched; only the production factory in
             # local_presentation.py supplies a real one.
+            # voice-ux U1: notify_thinking/notify_cancelled thread through
+            # the same way -- both optional, both no-ops unless transcribe
+            # is also supplied (enable_voice_notes itself requires it).
             if transcribe is not None:
-                dialogue.enable_voice_notes(transcribe=transcribe)
+                dialogue.enable_voice_notes(
+                    transcribe=transcribe,
+                    notify_thinking=notify_thinking,
+                    notify_cancelled=notify_cancelled,
+                )
             # Publication here is not issuance permission: only the runner's
             # successful preparation can open the public status gate below.
             self._registry = registry

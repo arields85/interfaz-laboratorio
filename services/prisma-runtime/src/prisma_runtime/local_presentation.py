@@ -1360,6 +1360,11 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                     # Late-bound: the manager is inert during construction and only
                     # its already-published running authority may authorize delivery.
                     is_current=lambda: channel_a_manager.is_query_envelope_current(envelope),
+                    # voice-ux U2: deferred -- see the notify_owner() call
+                    # below, fired only after the prefetch has already been
+                    # dispatched, so the HMI can never race the prefetch to
+                    # /prisma/speak-live.
+                    notify=False,
                 )
             finally:
                 # PW-011 M4: routine per-answer timing, not a warning-worthy condition.
@@ -1378,9 +1383,22 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             # token stands in for it -- see VoiceEventStore.mint_prefetch_token.
             # A missing token (event already gone) simply skips the prefetch;
             # never blocks or fails the Channel A poll loop.
+            #
+            # voice-ux U2: the prefetch is minted and dispatched BEFORE the
+            # owner's SSE/poll waiter is notified below (publish() above was
+            # called with notify=False specifically for this) -- previously
+            # notify happened synchronously inside publish(), strictly before
+            # this point, so a fast HMI tab could already be racing its own
+            # /prisma/speak-live request to the voice process before the
+            # prefetch thread had even been created. Both requests still
+            # attach to the same generation either way (state keyed by
+            # (owner_id, event_id), see event_audio.py), so this was never an
+            # unsafe race -- only a missed opportunity for the HMI to find the
+            # answer already buffered.
             token = voice_events.mint_prefetch_token(event["id"], envelope.owner_id)
             if token is not None:
                 _fire_channel_a_voice_prefetch(local_http, voice_url, event["id"], token)
+            voice_events.notify_owner(envelope.owner_id)
 
         def channel_a_transcribe(audio_bytes, mime_type, owner_id=None):
             """PW-013: transcribe one already-downloaded, already-bounded
@@ -1417,6 +1435,25 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             token = voice_events.mint_voice_transcription_token(audio_base64, mime_type, extra_terms)
             return _request_voice_transcription(local_http, voice_url, token)
 
+        def channel_a_notify_thinking(owner_id):
+            """voice-ux U1: publish a signal-only "thinking" event for
+            owner_id so the HMI orb shows feedback the moment a voice note is
+            accepted, before download/transcription. No is_current guard is
+            available here -- unlike channel_a_on_outcome's published
+            answer, there is no query envelope yet to check against; the
+            phone-to-owner binding _handle_voice_note already verified before
+            calling this is the only freshness this relies on. Best-effort:
+            _handle_voice_note's own _signal_thinking already wraps this call
+            in try/except, so a raise here never breaks voice-note handling."""
+            voice_events.publish("", "", owner_id=owner_id, kind="thinking")
+
+        def channel_a_notify_cancelled(owner_id):
+            """voice-ux U1: publish a signal-only "cancel" event so the HMI
+            orb can hide immediately on a rejection/failure instead of
+            waiting out its own bounded timeout. Same best-effort contract as
+            channel_a_notify_thinking above."""
+            voice_events.publish("", "", owner_id=owner_id, kind="cancel")
+
         def build_channel_a_activation(token, desired, epoch, reservation):
             """Compose one real activation; the manager keeps this call lazy, so no
             credential, transport effect, thread or provider call runs here."""
@@ -1439,6 +1476,8 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 poll_retry_delay=CHANNEL_A_POLL_RETRY_DELAY_SECONDS,
                 reservation=reservation,
                 transcribe=channel_a_transcribe,
+                notify_thinking=channel_a_notify_thinking,
+                notify_cancelled=channel_a_notify_cancelled,
             )
 
         # The root builds Channel A before its admin boundary and injects that

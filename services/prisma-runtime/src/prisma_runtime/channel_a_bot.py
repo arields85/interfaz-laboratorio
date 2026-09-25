@@ -788,6 +788,12 @@ class ChannelAPairingDialogue:
         # is simply ignored (INGRESS_IGNORED_UNRELATED), same as before this
         # task existed.
         self._transcribe = None
+        # voice-ux U1: optional -- when supplied, _handle_voice_note signals
+        # the HMI orb's "thinking" state on acceptance and a "cancel" signal
+        # on rejection/failure. Left unset (every existing caller/test),
+        # voice-note handling is completely unchanged.
+        self._notify_thinking = None
+        self._notify_cancelled = None
 
     # -- ingress -----------------------------------------------------------
 
@@ -1008,7 +1014,7 @@ class ChannelAPairingDialogue:
             self.query = coordinator
             return coordinator
 
-    def enable_voice_notes(self, *, transcribe) -> None:
+    def enable_voice_notes(self, *, transcribe, notify_thinking=None, notify_cancelled=None) -> None:
         """Attach voice-note question support (PW-013).
 
         Requires :meth:`enable_queries` to already be attached: a voice
@@ -1021,17 +1027,51 @@ class ChannelAPairingDialogue:
         resolves a provider secret or talks to Telegram itself (downloading
         is this class's own job, via ``self.transport``). Construction runs
         under the serial adapter lock, matching ``enable_queries``.
+
+        voice-ux U1: ``notify_thinking(owner_id)`` and
+        ``notify_cancelled(owner_id)`` are optional. When supplied,
+        ``_handle_voice_note`` calls ``notify_thinking`` the moment a voice
+        note is accepted (authorized, well-formed, before any duration/size
+        check or download) and ``notify_cancelled`` on every rejection or
+        failure path that follows it -- both best-effort, never allowed to
+        affect voice-note handling itself. Left unset, voice-note handling
+        is unchanged from before this task existed.
         """
         with self._lock:
             if self.query is None:
                 raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
             if not callable(transcribe):
                 raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+            if notify_thinking is not None and not callable(notify_thinking):
+                raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+            if notify_cancelled is not None and not callable(notify_cancelled):
+                raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
             if not callable(getattr(self.transport, "get_file", None)) or not callable(
                 getattr(self.transport, "download_file", None)
             ):
                 raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
             self._transcribe = transcribe
+            self._notify_thinking = notify_thinking
+            self._notify_cancelled = notify_cancelled
+
+    def _signal_thinking(self, owner_id) -> None:
+        """voice-ux U1: best-effort -- a failure here must never affect
+        voice-note handling itself."""
+        if self._notify_thinking is None:
+            return
+        try:
+            self._notify_thinking(owner_id)
+        except Exception:
+            pass
+
+    def _signal_cancelled(self, owner_id) -> None:
+        """voice-ux U1: same best-effort contract as _signal_thinking."""
+        if self._notify_cancelled is None:
+            return
+        try:
+            self._notify_cancelled(owner_id)
+        except Exception:
+            pass
 
     def binding_admitted(self, binding) -> bool:
         """Prove the captured binding still matches this adapter's live record.
@@ -1210,14 +1250,21 @@ class ChannelAPairingDialogue:
         mime_type = voice.get("mime_type") if isinstance(voice.get("mime_type"), str) else DEFAULT_VOICE_NOTE_MIME_TYPE
         if not isinstance(file_id, str) or not file_id:
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True)
+        # voice-ux U1: this is a well-formed voice note from an authorized/
+        # paired actor -- signal "thinking" to the HMI now, before any
+        # duration/size check or download, so the orb shows feedback for the
+        # whole download+transcribe window instead of staying invisible.
+        self._signal_thinking(record.owner_id)
         try:
             validate_voice_note_duration(duration)
             validate_voice_note_size(file_size)
         except VoiceNoteTooLong:
             delivery = self._send(chat_id, VOICE_NOTE_TOO_LONG_REPLY)
+            self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
         except VoiceNoteTooLarge:
             delivery = self._send(chat_id, VOICE_NOTE_TOO_LARGE_REPLY)
+            self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
         # T4-style feedback for the dead time while the note is downloaded
         # and transcribed, same as _handle_query does before parsing.
@@ -1229,6 +1276,7 @@ class ChannelAPairingDialogue:
             )
         except Exception:
             delivery = self._send(chat_id, VOICE_NOTE_DOWNLOAD_FAILED_REPLY)
+            self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_DOWNLOAD_FAILED, True, delivery)
         try:
             # F7 (live test 2026-09-25): owner_id is this record's own
@@ -1240,6 +1288,7 @@ class ChannelAPairingDialogue:
             transcript = self._transcribe(audio_bytes, mime_type, owner_id=record.owner_id)
         except VoiceTranscriptionEmpty:
             delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
+            self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
         except Exception:
             # Any other injected-transcribe failure -- VoiceTranscriptionError
@@ -1247,7 +1296,12 @@ class ChannelAPairingDialogue:
             # callable -- must still never crash the poll loop (user
             # decision): fail closed with the same generic unavailable reply.
             delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
+            self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
+        # voice-ux U1: no explicit "cancel" here on the happy path -- the real
+        # answer event _handle_query is about to publish supersedes the
+        # thinking signal on the HMI side (usePrismaOrbPresentation treats
+        # any real answer event as clearing the awaited-signal state).
         return self._handle_query(update_id, actor_id, transcript)
 
     def _request_unlink(self, update_id, chat_id, actor_id) -> IngressOutcome:

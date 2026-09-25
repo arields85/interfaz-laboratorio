@@ -27,15 +27,30 @@ class VoiceEventStreamCapacity(RuntimeError):
     new waiter is appended."""
 
 
+# voice-ux U1: the wire event's optional "kind" discriminator. Absent (every
+# event published before this task, and every ordinary answer) means
+# "answer" -- the existing, TTS-eligible shape. "thinking"/"cancel" are
+# signal-only: no answer text is ever required for them, and (see
+# voice_service.py's /prisma/speak-live and /internal/prisma/prefetch) they
+# can never be used to start TTS generation.
+VOICE_EVENT_KIND_ANSWER = "answer"
+VOICE_EVENT_KIND_THINKING = "thinking"
+VOICE_EVENT_KIND_CANCEL = "cancel"
+_VOICE_EVENT_KINDS = frozenset({VOICE_EVENT_KIND_ANSWER, VOICE_EVENT_KIND_THINKING, VOICE_EVENT_KIND_CANCEL})
+
+
 def validate_voice_event(payload, expected_id, *, now=time.time, max_text_bytes=16 * 1024, require_owner=False):
     """Validate an event returned by the canonical in-process registry boundary."""
     required = {"id", "timestamp", "expiresAt", "text", "question"}
-    allowed = required | {"telegramChatId", "ownerId"}
+    allowed = required | {"telegramChatId", "ownerId", "kind"}
     if not isinstance(payload, dict) or set(payload) - allowed or not required.issubset(payload):
         raise ValueError("VOICE_EVENT_SHAPE_INVALID")
     canonical = str(uuid.UUID(str(expected_id)))
     if payload["id"] != canonical:
         raise ValueError("VOICE_EVENT_ID_INVALID")
+    kind = payload.get("kind", VOICE_EVENT_KIND_ANSWER)
+    if kind not in _VOICE_EVENT_KINDS:
+        raise ValueError("VOICE_EVENT_KIND_INVALID")
     owner_id = payload.get("ownerId")
     if require_owner:
         try:
@@ -51,7 +66,7 @@ def validate_voice_event(payload, expected_id, *, now=time.time, max_text_bytes=
         datetime.fromisoformat(timestamp[:-1] + "+00:00")
     except ValueError:
         raise ValueError("VOICE_EVENT_TIMESTAMP_INVALID") from None
-    for field, allow_empty in (("text", False), ("question", True)):
+    for field, allow_empty in (("text", kind != VOICE_EVENT_KIND_ANSWER), ("question", True)):
         value = payload[field]
         if not isinstance(value, str) or (not allow_empty and not value.strip()) or len(value.encode("utf-8")) > max_text_bytes:
             raise ValueError(f"VOICE_EVENT_{field.upper()}_INVALID")
@@ -150,9 +165,15 @@ class VoiceEventStore:
         except Exception:
             return False
 
-    def publish(self, question, answer_text, chat_id=None, *, paired_bot_producer=False, owner_id="legacy", is_current=None):
+    def publish(
+        self, question, answer_text, chat_id=None, *,
+        paired_bot_producer=False, owner_id="legacy", is_current=None, notify=True,
+        kind=VOICE_EVENT_KIND_ANSWER,
+    ):
         if is_current is not None and not callable(is_current):
             raise ValueError("VOICE_EVENT_GUARD_INVALID")
+        if kind not in _VOICE_EVENT_KINDS:
+            raise ValueError("VOICE_EVENT_KIND_INVALID")
         if not self._is_current(is_current):
             return None
         now = self.clock()
@@ -163,6 +184,11 @@ class VoiceEventStore:
             "text": str(answer_text),
             "question": str(question),
         }
+        # voice-ux U1: never add the key for the default/implicit "answer"
+        # kind -- every event published before this task, and every ordinary
+        # answer today, must keep its exact prior wire shape.
+        if kind != VOICE_EVENT_KIND_ANSWER:
+            event["kind"] = kind
         if paired_bot_producer and isinstance(chat_id, int) and not isinstance(chat_id, bool) and chat_id != 0:
             event["telegramChatId"] = chat_id
         with self.lock:
@@ -174,8 +200,24 @@ class VoiceEventStore:
                 raise VoiceEventCapacity("VOICE_EVENT_CAPACITY")
             self._events[event["id"]] = (str(owner_id), copy.deepcopy(event), is_current)
             self._latest[str(owner_id)] = event["id"]
-        self._notify_owner(str(owner_id))
+        # voice-ux U2: notify=False lets a caller store the event first, run
+        # its own side effect (the Channel A prefetch dispatch), and only
+        # THEN wake any blocked /hmi/voice/events SSE waiter via the public
+        # notify_owner() below -- see that method's own docstring for why
+        # the ordering matters.
+        if notify:
+            self._notify_owner(str(owner_id))
         return copy.deepcopy(event)
+
+    def notify_owner(self, owner_id):
+        """voice-ux U2: public counterpart to publish()'s own automatic
+        notify, for a caller that passed notify=False to publish() and needs
+        to control exactly when the owner's SSE/poll waiter is woken -- e.g.
+        after a background prefetch for the just-published answer has
+        already been dispatched, so the HMI can never race that prefetch to
+        /prisma/speak-live and start its own generation instead of attaching
+        to the prefetch's already-admitted one."""
+        self._notify_owner(str(owner_id))
 
     def subscribe_owner(self, owner_id):
         """T13 unit (c): returns (flag, unsubscribe). ``flag`` is a

@@ -576,6 +576,8 @@ class ActivationHarnessTestCase(unittest.TestCase):
         pairing_clock=None,
         sweep_timer_factory=None,
         transcribe=None,
+        notify_thinking=None,
+        notify_cancelled=None,
     ):
         """Build the real composition over inert boundaries and fake clocks.
 
@@ -613,6 +615,8 @@ class ActivationHarnessTestCase(unittest.TestCase):
             reservation=self.reservation if reservation is None else reservation,
             sweep_timer_factory=sweep_timers,
             transcribe=transcribe,
+            notify_thinking=notify_thinking,
+            notify_cancelled=notify_cancelled,
         )
         self.activations.append(activation)
         return ActivationUnderTest(activation, transport, observed, parse_calls, sweep_timers)
@@ -726,6 +730,35 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertEqual(len(transport.download_file_calls), 1)
         self.assertEqual(transcribe_calls, [(b"fake-ogg-audio", "audio/ogg", owner_a)])
         self.assertEqual(transport.sent[-1]["text"], ANSWER_A)
+
+    def test_notify_thinking_and_notify_cancelled_thread_through_to_the_dialogue(self):
+        """voice-ux U1: end to end through the real ChannelAActivation
+        composition -- both optional signals reach the dialogue and fire
+        exactly where _handle_voice_note calls them."""
+        owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
+        thinking_calls = []
+        cancelled_calls = []
+
+        def transcribe(audio_bytes, mime_type, owner_id=None):
+            return QUESTION
+
+        fixture = self.activate(
+            transcribe=transcribe,
+            notify_thinking=thinking_calls.append,
+            notify_cancelled=cancelled_calls.append,
+        )
+        activation = fixture.activation
+        transport = fixture.transport
+        self.assertTrue(activation.prepare())
+
+        self.link(fixture, PHONE_A, owner_a, 1)
+
+        transport.batches.append((voice_note_update(3, PHONE_A),))
+        answered = activation.poll_once()
+
+        self.assertEqual([outcome.kind for outcome in answered.outcomes], [QUERY_ANSWER_DELIVERED])
+        self.assertEqual(thinking_calls, [owner_a])
+        self.assertEqual(cancelled_calls, [])
 
     def test_without_transcribe_a_voice_note_is_ignored_and_never_downloaded(self):
         owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)

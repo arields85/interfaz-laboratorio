@@ -120,9 +120,99 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
 
 ## Evidence
 
-(filled in as each task completes)
+### U2 — prefetch/notify ordering
+
+- RED: new `test_on_outcome_starts_the_prefetch_before_notifying_the_owners_sse_waiter`
+  (`test_channel_a_root.py`) subscribed the owner's SSE flag before calling `on_outcome`, and
+  recorded `flag.is_set()` at the moment the patched `_fire_channel_a_voice_prefetch` ran:
+  `AssertionError: Lists differ: [True] != [False]` (notify had already fired). Also RED:
+  `VoiceEventStore.publish() got an unexpected keyword argument 'notify'` on the two new
+  `test_voice_event_delivery.py` tests.
+- Fix: `voice_events.py`'s `publish()` gained `notify=True` (default preserves every other caller's
+  behavior) and a new public `notify_owner(owner_id)`. `local_presentation.py`'s `channel_a_on_outcome`
+  now publishes with `notify=False`, mints the prefetch token and fires `_fire_channel_a_voice_prefetch`
+  first, and only then calls `voice_events.notify_owner(...)` — unconditionally, even when no token was
+  minted, so the event is never silently withheld from the HMI.
+- GREEN: `test_voice_event_delivery.py` (56 tests), `test_channel_a_root.py` (66 tests, both classes).
+- Also confirmed (not re-tested, cited): `AudioCoordinator.subscribe()` keys generation state by
+  `(owner_id, event_id)` — the prefetch-token path and the real-session path resolve to the identical
+  key for the same event, so whichever request wins the race still shares one generation (existing
+  `test_two_subscribers_share_one_generation_and_replay_without_side_effects` in
+  `test_event_audio.py`). This was never an unsafe race, only a missed prefetch opportunity — now fixed.
+
+### U1 — thinking/cancel signal + kind guard
+
+- **`voice_events.py`** — `kind` field (`answer`/`thinking`/`cancel`) on `validate_voice_event` and
+  `publish()`; absent/`"answer"` never adds the key (verified: `test_the_default_answer_kind_never_adds_a_kind_key`).
+  RED confirmed by temporarily reverting the file: `TypeError: publish() got an unexpected keyword
+  argument 'kind'` on all 4 new tests.
+- **`voice_service.py`** — `/prisma/speak-live` and `/internal/prisma/prefetch` both reject
+  `event.get("kind", "answer") != "answer"` as `INVALID_VOICE_EVENT_REQUEST` (400) before ever calling
+  `audio_coordinator.subscribe()`. RED: `coordinator.subscribe.assert_not_called()` failed (`Called 2
+  times`) before the guard existed. GREEN: `test_voice_service.py` (90 tests).
+- **`channel_a_bot.py`** — `enable_voice_notes` gained optional `notify_thinking`/`notify_cancelled`
+  (validated callable-or-None, same precedent as `transcribe`). `_handle_voice_note` calls
+  `_signal_thinking(record.owner_id)` right after the malformed-file-id check (authorized, well-formed
+  voice note, before any duration/size check or download) and `_signal_cancelled(record.owner_id)` on
+  every rejection/failure branch that follows (too long, too large, download failed, transcription
+  empty/unavailable/unexpected). Both are best-effort (wrapped in try/except, never break voice-note
+  handling — verified by `test_a_thinking_signal_failure_never_breaks_voice_note_handling` and
+  `test_a_cancelled_signal_failure_never_breaks_the_rejection_reply`). A malformed (non-)voice note
+  signals neither. RED confirmed by temporarily reverting the file: 14 errors, all
+  `TypeError: enable_voice_notes() got an unexpected keyword argument 'notify_thinking'`/`'notify_cancelled'`.
+  GREEN: `test_channel_a_bot.py` (280 tests, was 275).
+- **`channel_a_activation.py`** — `notify_thinking`/`notify_cancelled` threaded through to
+  `dialogue.enable_voice_notes(...)` alongside `transcribe`, same optional/backward-compatible pattern
+  as PW-013's own V4c. RED confirmed: `TypeError: ChannelAActivation.__init__() got an unexpected
+  keyword argument 'notify_thinking'` on the new end-to-end test. GREEN: `test_channel_a_activation.py`
+  (42 tests, was 41).
+- **`local_presentation.py`** — new `channel_a_notify_thinking`/`channel_a_notify_cancelled` closures
+  publish a signal-only `thinking`/`cancel` event for the owner (no `is_current` guard available at
+  this point — no query envelope exists yet; the phone-to-owner binding `_handle_voice_note` already
+  checked is the only freshness this relies on); both wired into `build_channel_a_activation`'s
+  `ChannelAActivation(...)` call. RED confirmed: `KeyError: 'notify_thinking'`/`'notify_cancelled'` on
+  the 3 new `test_runtime_safety.py` tests (production-wiring + both closures' actual publish
+  behavior). GREEN: `test_runtime_safety.py` (56 tests, was 53, 1 known pre-existing environmental
+  failure unrelated).
+- **Frontend (`voice.types.ts`, `voiceEventListener.service.ts`, `usePrismaOrbPresentation.ts`)** —
+  `VoiceEvent.kind?: 'thinking' | 'cancel'` (absent means answer); `normalizeVoiceEvent` passes through
+  a recognized kind and drops an unrecognized one without rejecting the event (RED:
+  `voiceEventListener.service.test.ts`'s new "passes through a thinking/cancel kind" test failed —
+  `kind` field missing from the received payload — before the parser change; GREEN after, 39 tests).
+  `usePrismaOrbPresentation.ts`'s `presentVoiceEvent` branches on `event.kind`: `"thinking"` shows the
+  `'thinking'` phase without calling `engine.play()` and starts a new bounded
+  `PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS` (30 000 ms) wait for the real answer, returning to `'hidden'`
+  if nothing follows; `"cancel"` clears that wait and hides immediately; either kind is a no-op while
+  an answer is currently active (`isActiveRef`). RED confirmed: 4 of 8 new hook tests failed before the
+  change (`engine.play` called for a thinking-kind event; phase stuck at `'thinking'` instead of
+  reaching `'hidden'` on timeout/cancel) — the other 4 (queueing/no-abort-while-active tests) already
+  passed by coincidence of the pre-existing queue mechanism, confirmed as a legitimate regression guard
+  rather than a false RED. GREEN after: `usePrismaOrbPresentation.test.ts` (34 tests, was 27).
+
+### Full verification (after both tasks)
+
+- Runtime: `unittest discover` → **1791 tests** (baseline 1772 + 19 new), same 2 pre-existing
+  environmental failures (`test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference`,
+  `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`), 2 skipped, no new
+  failures.
+- hmi-app: `npx vitest run` → **221 files / 2583 tests** (baseline 221/2574 + 9 new), all passing.
+  `npx tsc -b` clean (no output). `npm run lint` clean (no findings).
+
+## Progress
+
+- 2026-09-25: read-only investigation (AGENTS.md, docs/CONVENTIONS.md, docs/TESTING.md, the three
+  referenced PW/voice-overlap feature documents; `voice_events.py`, `local_presentation.py`,
+  `voice_service.py`, `event_audio.py`, `channel_a_bot.py`, `channel_a_activation.py`,
+  `voiceEventListener.service.ts`, `usePrismaOrbPresentation.ts`) confirmed U2's root cause (notify
+  fires inside `publish()` before the prefetch is even minted) and designed U1's `kind`-discriminated
+  signal event. Feature document created before the first source edit.
+- 2026-09-25: U2 and U1 implemented and verified (strict TDD throughout; every RED independently
+  confirmed, most by a failing assertion from the test itself, the rest by temporarily reverting the
+  just-written source file and observing the exact expected failure) — see Evidence above. Full runtime
+  suite 1791/1791 modulo the 2 known pre-existing environmental failures; hmi-app 221/2583, `tsc -b`
+  and `lint` both clean.
 
 ## Next step
 
-Live retest by the user once both tasks are done — see the final report for exactly what to look for
-in the HMI voice timeline log.
+Live retest by the user — see the final report for exactly what to look for in the HMI voice timeline
+log.

@@ -98,6 +98,70 @@ class TelegramOptInTests(unittest.TestCase):
         _, kwargs = activation_cls.call_args
         self.assertTrue(callable(kwargs["transcribe"]))
 
+    def test_production_factory_wires_notify_thinking_and_notify_cancelled_for_channel_a(self) -> None:
+        """voice-ux U1: the production ChannelAManager activation factory
+        must also thread the two orb-signal callables into every
+        ChannelAActivation it constructs -- same wiring precedent as
+        transcribe above."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        self.assertTrue(callable(kwargs["notify_thinking"]))
+        self.assertTrue(callable(kwargs["notify_cancelled"]))
+
+    def test_channel_a_notify_thinking_publishes_a_thinking_kind_event_for_the_owner(self) -> None:
+        """voice-ux U1: the production closure publishes a signal-only
+        "thinking" event through the exact same voice_events store the HMI's
+        SSE/poll channel already reads -- no answer text, never eligible for
+        TTS (see voice_service.py's kind guard)."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        notify_thinking = kwargs["notify_thinking"]
+        voice_events = app.config["voice_events"]
+
+        notify_thinking("owner-1")
+
+        event = voice_events.latest("owner-1")
+        self.assertIsNotNone(event)
+        self.assertEqual(event["kind"], "thinking")
+        self.assertEqual(event["text"], "")
+
+    def test_channel_a_notify_cancelled_publishes_a_cancel_kind_event_for_the_owner(self) -> None:
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        notify_cancelled = kwargs["notify_cancelled"]
+        voice_events = app.config["voice_events"]
+
+        notify_cancelled("owner-1")
+
+        event = voice_events.latest("owner-1")
+        self.assertIsNotNone(event)
+        self.assertEqual(event["kind"], "cancel")
+        self.assertEqual(event["text"], "")
+
     def test_channel_a_transcribe_adds_the_owners_active_machine_and_screen_names_as_extra_terms(self) -> None:
         """F7 (live test 2026-09-25): the production channel_a_transcribe
         closure must bias the transcription prompt with the owner's own

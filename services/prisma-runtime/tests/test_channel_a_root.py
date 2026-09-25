@@ -580,6 +580,33 @@ class ChannelARootCompositionTests(RootHarness, unittest.TestCase):
         self.assertEqual(prefetch_event_id, event["id"])
         self.assertEqual(self.events.resolve_prefetch_token(prefetch_token, event["id"]), OWNER_A)
 
+    def test_on_outcome_starts_the_prefetch_before_notifying_the_owners_sse_waiter(self):
+        """voice-ux U2: VoiceEventStore.publish() wakes any blocked
+        /hmi/voice/events SSE waiter synchronously, before returning -- so if
+        channel_a_on_outcome minted the prefetch token and fired the prefetch
+        only AFTER publish() returned (the pre-fix ordering), the HMI could
+        already be racing its own /prisma/speak-live request to the voice
+        process before the prefetch was even dispatched. This test proves the
+        prefetch is always dispatched (this test's own patched
+        _fire_channel_a_voice_prefetch, from setUp, records the SSE flag's
+        state at the moment it runs) strictly before the owner is notified."""
+        arguments = self.activation_arguments()
+        envelope = self.envelope(OWNER_A)
+        flag, unsubscribe = self.events.subscribe_owner(OWNER_A)
+        self.addCleanup(unsubscribe)
+
+        flag_state_at_prefetch = []
+        self.patch_target(
+            self.module,
+            "_fire_channel_a_voice_prefetch",
+            lambda local_http, voice_url, event_id, token: flag_state_at_prefetch.append(flag.is_set()),
+        )
+
+        arguments["on_outcome"](self.ingress(envelope))
+
+        self.assertEqual(flag_state_at_prefetch, [False])
+        self.assertTrue(flag.is_set())
+
     def test_on_outcome_fails_closed_when_the_publication_guard_refuses_or_raises(self):
         arguments = self.activation_arguments()
         manager = self.single(ChannelAManagerDouble)

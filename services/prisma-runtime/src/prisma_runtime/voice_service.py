@@ -1134,6 +1134,12 @@ def prisma_speak_live():
         return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
     try:
         event = resolve_voice_event(data["eventId"], capability)
+        # voice-ux U1: a "thinking"/"cancel" signal event carries no answer
+        # and must never be able to trigger TTS generation -- reject it the
+        # same way a malformed request is rejected, before ever reaching
+        # AudioCoordinator.
+        if event.get("kind", "answer") != "answer":
+            raise ValueError("VOICE_EVENT_KIND_INVALID")
         published_epoch = _parse_event_publish_epoch(event.get("timestamp"))
         _logger.info(
             "Prisma speak-live: event_publish_to_received_ms=%s",
@@ -1196,6 +1202,10 @@ def prisma_prefetch():
         return jsonify({"ok": False, "error": "PRISMA_SESSION_REQUIRED"}), 401
     try:
         event = resolve_voice_event(data["eventId"], capability)
+        # voice-ux U1: same guard as /prisma/speak-live -- a signal-only
+        # event must never be admitted into a generation either.
+        if event.get("kind", "answer") != "answer":
+            raise ValueError("VOICE_EVENT_KIND_INVALID")
         event["_capability"] = capability
         subscription = audio_coordinator.subscribe(event, prisma_voice_config_store.get())
     except ValueError:

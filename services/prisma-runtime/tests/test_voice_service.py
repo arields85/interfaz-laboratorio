@@ -274,6 +274,42 @@ class VoiceServiceTests(unittest.TestCase):
             response.close()
         subscription.close.assert_called_once_with()
 
+    def test_speak_live_rejects_a_non_answer_kind_event_before_ever_subscribing(self):
+        """voice-ux U1: a thinking/cancel signal event must never be able to
+        trigger TTS generation via /prisma/speak-live."""
+        event_id = str(uuid.uuid4())
+        coordinator = Mock()
+        for kind in ("thinking", "cancel"):
+            with self.subTest(kind=kind):
+                event = {"id": event_id, "text": "", "question": "", "expiresAt": 9999999999, "kind": kind}
+                with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+                    response = service.app.test_client().post(
+                        "/prisma/speak-live",
+                        json={"eventId": event_id},
+                        headers={"X-Prisma-Session-Capability": "test-capability"},
+                    )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "INVALID_VOICE_EVENT_REQUEST")
+        coordinator.subscribe.assert_not_called()
+
+    def test_prefetch_rejects_a_non_answer_kind_event_before_ever_subscribing(self):
+        """voice-ux U1: same guard on the prefetch route -- a thinking/cancel
+        signal must never start (or admit into) a generation either."""
+        event_id = str(uuid.uuid4())
+        coordinator = Mock()
+        for kind in ("thinking", "cancel"):
+            with self.subTest(kind=kind):
+                event = {"id": event_id, "text": "", "question": "", "expiresAt": 9999999999, "kind": kind}
+                with patch.object(service, "resolve_voice_event", return_value=event), patch.object(service, "audio_coordinator", coordinator):
+                    response = service.app.test_client().post(
+                        "/internal/prisma/prefetch",
+                        json={"eventId": event_id},
+                        headers={"X-Prisma-Session-Capability": "cap"},
+                    )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "INVALID_VOICE_EVENT_REQUEST")
+        coordinator.subscribe.assert_not_called()
+
     def test_speak_live_logs_the_admission_rejection_reason(self):
         """V2 (voice-overlap): a rejected admission was never logged at all,
         so the reported live incident's exact rejection reason was
