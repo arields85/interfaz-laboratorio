@@ -271,29 +271,29 @@ function channelAVerifiedResultText(paired: boolean): string {
     return paired ? 'Bot vinculado' : 'Bot disponible, sin vincular';
 }
 
-// F5 (2026-09-25, user report + coordinator wording clarification): while a
-// row's own save/verify/delete is in flight, its trailing result area used
-// to show nothing distinctive for a noticeable time (Gemini/Telegram family
-// showed their resting display unchanged; the old "Verificando…" text had no
-// caret at all). These present participles (formal usted-compatible: they
-// carry no subject) name the in-progress action with the same
-// blinking-underscore mechanism `WidgetRuntimeState` uses for "Cargando_".
-// Save/delete use one fixed generic phrase on every row; verify ("Probar" in
-// the coordinator's own wording -- this component has only one such button,
-// the existing Verificar/`VerifyIconButton`, confirmed by reading the whole
-// file: no separate "Probar" control exists) instead names what is actually
-// being tested on that row, per the coordinator's explicit "check the
-// button's real behavior" instruction -- Verificar never sends anything or
-// starts/stops/restarts the provider, it only checks whether the stored
-// credential is currently valid, so "Probando" fits its real behavior better
-// than "Verificando" here.
-const SAVE_DELETE_PROGRESS_TEXT: Record<'saving' | 'deleting', string> = {
+// F5 (2026-09-25, user report; wording finalized 2026-09-25 after a
+// same-day coordinator correction -- an earlier per-row "Probando voz_"/
+// "Probando bot_" wording for Verificar was withdrawn as a mistake, since
+// there is no separate test action): while a row's own save/verify/delete
+// is in flight, its trailing result area used to show nothing distinctive
+// for a noticeable time (Gemini/Telegram family showed their resting
+// display unchanged; the old "Verificando…" text had no caret at all).
+// These present participles (formal usted-compatible: they carry no
+// subject) name the in-progress action with the same blinking-underscore
+// mechanism the viewer->builder "CARGANDO_" transition and
+// `WidgetRuntimeState`'s "Cargando_" both use (see the `.widget-runtime-
+// state-caret` comment on `ResultDisplay` below for the exact side-by-side
+// CSS evidence). One fixed phrase per action, uniform across every row.
+type CredentialActionKind = 'saving' | 'verifying' | 'deleting';
+
+const ACTION_PROGRESS_TEXT: Record<CredentialActionKind, string> = {
     saving: 'Guardando credencial',
+    verifying: 'Verificando credencial',
     deleting: 'Borrando credencial',
 };
 
-function actionProgressResult(text: string): ResultGlyph {
-    return { text, tone: 'muted', caret: true };
+function actionProgressResult(kind: CredentialActionKind): ResultGlyph {
+    return { text: ACTION_PROGRESS_TEXT[kind], tone: 'muted', caret: true };
 }
 
 // administration.pendingActions[provider] carries the exact mutation action
@@ -305,12 +305,6 @@ function progressKindFromPendingAction(action: string | null): 'saving' | 'delet
     if (action.startsWith('save-')) return 'saving';
     if (action.startsWith('delete-')) return 'deleting';
     return null;
-}
-
-// The Gemini row's Verificar tests the voice provider's API key; both
-// Telegram-family rows (Canal A / Canal B) test a bot token instead.
-function verifyProgressText(provider: CredentialProvider): string {
-    return provider === 'gemini' ? 'Probando voz' : 'Probando bot';
 }
 
 // Telegram's live connection state, mapped from the existing status fields
@@ -376,6 +370,42 @@ function channelAConnectionResult(channelA: ChannelAAdministrationStatus | null)
 // meaning isn't lost. An identity string ("@username", never a status
 // claim) stays neutral/muted regardless of tone. RESULT_AREA_WIDTH_CLS
 // keeps every row's result area the same width so the three rows line up.
+//
+// F5 caret mechanism (2026-09-25, coordinator-requested comparison): the
+// user's original ask was the SAME caret as the viewer->builder "CARGANDO_"
+// transition (`Topbar.tsx`'s `handleAdminNavigation` ->
+// `requestShieldReveal({ profileId: 'short' })`, confirmed by reading it).
+// That transition's actual caret is the boot shield's own
+// `[data-hmi-shield-short-caret]`, defined inline in `hmi-app/index.html`
+// (it must render before any app CSS loads, so it cannot live in
+// `index.css`) -- NOT `.widget-runtime-state-caret`. Its blink keyframe:
+//   @keyframes short-caret-blink {
+//     0%, 49% { color: var(--hmi-shield-ink); }
+//     50%, 100% { color: var(--color-industrial-bg, #05070a); }
+//   }
+//   animation: ... , short-caret-blink 0.6s steps(1) var(--hmi-shield-short-caret-blink-delay) infinite;
+// vs. `.widget-runtime-state-caret` (index.css):
+//   @keyframes widget-runtime-state-caret-blink {
+//     0%, 49% { color: var(--color-industrial-muted); }
+//     50%, 100% { color: var(--color-industrial-bg); }
+//   }
+//   animation: widget-runtime-state-caret-blink 0.6s steps(1) infinite;
+// The blink TIMING/SHAPE is identical byte-for-byte: 0.6s duration,
+// steps(1) (hard cut, no easing), the same 0%/49%/50%/100% duty split,
+// infinite. The only differences are (a) the shield's blink starts after a
+// `--hmi-shield-short-caret-blink-delay` (620ms) pause, because it is
+// sequenced after that profile's own typewriter reveal (`short-caret-move`/
+// `short-caret-idle`, absolute-positioned to walk across the typed text) --
+// choreography this plain inline caret has no use for; and (b) the "on"
+// color token (`--hmi-shield-ink`, i.e. currentColor in the shield's own
+// fixed dark context, vs `--color-industrial-muted`, the correct token for
+// this row's `tone: 'muted'` text). Since the blink primitive itself is
+// provably identical and the boot shield's version is inseparable from
+// pre-CSS inline styles and typewriter positioning that would have to be
+// duplicated (or risk being kept in two places) to reuse here, this keeps
+// `.widget-runtime-state-caret` -- already the same shape/timing -- instead
+// of extracting a new shared class; the boot shield's own markup/CSS in
+// `index.html` and `useBootShield.ts` are untouched.
 function ResultDisplay({ text, tone, Icon, iconLabel, caret, testId }: ResultGlyph & { testId: string }) {
     const isIdentityText = text.startsWith('@');
     return (
@@ -721,9 +751,9 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         const showingJustVerified = verificationResultVisible.gemini && gemini?.verification.state === 'verified';
         const resultGlyph: ResultGlyph | null = gemini
             ? (geminiProgressKind
-                ? actionProgressResult(SAVE_DELETE_PROGRESS_TEXT[geminiProgressKind])
+                ? actionProgressResult(geminiProgressKind)
                 : verifying
-                    ? actionProgressResult(verifyProgressText('gemini'))
+                    ? actionProgressResult('verifying')
                     : showingJustVerified
                         ? { text: 'Verificado', tone: 'success', Icon: Check }
                         : geminiRestingResult(gemini.verification.state, gemini.model))
@@ -843,9 +873,9 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
         // verify display (it resets verification anyway -- see save/remove's
         // resetVerificationResult call) and over the live connection state.
         const resultGlyph: ResultGlyph | null = progressKind
-            ? actionProgressResult(SAVE_DELETE_PROGRESS_TEXT[progressKind])
+            ? actionProgressResult(progressKind)
             : verifying
-                ? actionProgressResult(verifyProgressText(provider))
+                ? actionProgressResult('verifying')
                 : (showingVerificationResult && verification)
                     ? (isChannelA && verification.state === 'verified'
                         // T15 (user decision): Canal A's post-Verificar success message

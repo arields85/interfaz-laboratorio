@@ -1050,12 +1050,13 @@ describe('VoiceCredentialSettings', () => {
     });
 
     // T15: the pressed Verify button must NOT swap to a spinner -- it keeps
-    // its Play icon, just disabled. F5 (2026-09-25 coordinator decision): the
-    // RESULT AREA text is "Probando voz_" (named after what Verificar
-    // actually tests on this row -- the voice provider's API key), with the
-    // shared blinking-underscore caret; the button's own accessible name
+    // its Play icon, just disabled. F5 (2026-09-25, coordinator correction:
+    // the earlier "Probando voz_" wording was a mistake -- there is no
+    // separate test action, this is still Verificar): the RESULT AREA text
+    // is "Verificando credencial_" on every row, with the shared
+    // blinking-underscore caret; the button's own accessible name
     // ("Verificando…") is unrelated and unchanged.
-    it('shows "Probando voz_" with the caret in the result area while a Gemini verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
+    it('shows "Verificando credencial_" with the caret in the result area while a Gemini verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
         const user = userEvent.setup();
         let release!: (value: typeof GEMINI_VERIFIED) => void;
         const pending = new Promise<typeof GEMINI_VERIFIED>((resolve) => { release = resolve; });
@@ -1074,7 +1075,7 @@ describe('VoiceCredentialSettings', () => {
         expect(verifyingButton).toBeDisabled();
         expectLucideIcon(verifyingButton, 'play');
         const resultArea = within(gemini).getByTestId('gemini-verification-result');
-        expect(resultArea).toHaveTextContent('Probando voz_');
+        expect(resultArea).toHaveTextContent('Verificando credencial_');
         expect(resultArea).toHaveAttribute('role', 'status');
         expect(resultArea).toHaveAttribute('aria-live', 'polite');
         expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
@@ -1539,10 +1540,10 @@ describe('VoiceCredentialSettings', () => {
         await act(async () => { releaseDelete(); });
     });
 
-    // F5 (2026-09-25 coordinator decision): the Telegram-family rows test a
-    // bot token, so their result-area progress text is "Probando bot_",
-    // distinct from Gemini's "Probando voz_".
-    it('shows "Probando bot_" with the caret in the result area while a Canal B verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
+    // F5 (2026-09-25, coordinator correction): "Verificando credencial_" is
+    // the same uniform text on every row, including Canal B -- no separate
+    // "Probando bot_" wording.
+    it('shows "Verificando credencial_" with the caret in the result area while a Canal B verification is in flight, and keeps the button\'s Play icon, just disabled', async () => {
         const user = userEvent.setup();
         let release!: (value: typeof TELEGRAM_VERIFIED) => void;
         const pending = new Promise<typeof TELEGRAM_VERIFIED>((resolve) => { release = resolve; });
@@ -1561,7 +1562,7 @@ describe('VoiceCredentialSettings', () => {
         expect(verifyingButton).toBeDisabled();
         expectLucideIcon(verifyingButton, 'play');
         const resultArea = within(channelB).getByTestId('telegram-verification-result');
-        expect(resultArea).toHaveTextContent('Probando bot_');
+        expect(resultArea).toHaveTextContent('Verificando credencial_');
         expect(resultArea).toHaveAttribute('role', 'status');
         expect(resultArea).toHaveAttribute('aria-live', 'polite');
         expect(resultArea.querySelector('.widget-runtime-state-caret')).toBeInTheDocument();
