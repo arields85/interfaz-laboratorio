@@ -282,7 +282,7 @@ eliminación" button covering the page, so the row's own F5 "Borrando
 credencial_" progress text (already implemented and tested above) is never
 visible to the user.
 
-- [ ] **F8** `VoiceCredentialSettings.tsx`'s `remove(provider)`: close the
+- [x] **F8** `VoiceCredentialSettings.tsx`'s `remove(provider)`: close the
   confirmation dialog immediately on confirm (before awaiting
   `administration.deleteCredential`), instead of only closing it from the
   `finally` block once the delete settles. The row's own per-provider
@@ -302,3 +302,29 @@ visible to the user.
   unreachable dead code and should be removed together with
   `dialogRevisionRef` itself, not left in place. Route: direct (single file
   + its test, already understood from F1-F5 above).
+
+### F8 progress
+
+- 2026-09-25: replaced the GGA-added "disables 'Confirmar eliminación' while
+  its own delete is still in flight" test (it asserted the dialog/button
+  stayed in the DOM, disabled -- exactly the reported bug) with "closes the
+  confirmation dialog immediately on confirm, letting the row show its own
+  delete in flight": dialog closes synchronously on confirm, the row's
+  Eliminar stays disabled, a second click on it is a no-op (dialog stays
+  closed, `deleteCredential` still called exactly once). RED (against the
+  unmodified component, deferred/never-resolving `deleteCredential`):
+  `expect(screen.queryByRole('dialog', ...)).not.toBeInTheDocument()` failed
+  -- the dialog and its disabled "Confirmar eliminación" were still in the
+  DOM. Implemented: `remove(provider)` now calls `setDeleteProvider(null)`
+  immediately (before `await administration.deleteCredential(provider)`)
+  instead of only from `finally`. Removed `dialogRevisionRef` and the
+  `updateDeleteProvider` wrapper entirely (both became dead once nothing
+  closes the dialog from `finally` anymore) -- the reset effect, the two
+  Eliminar buttons, the dialog's `onClose` and its Cancelar button now call
+  `setDeleteProvider` directly. GREEN: 99/99 component tests. Full suite:
+  221 files / 2571 tests pass (same count as baseline -- one test replaced,
+  not added); `tsc -b` clean; `lint` clean. Commit `5222b0d` (GGA PASSED;
+  one non-blocking note that the confirm button's own
+  `administration.pendingActions[deleteProvider] !== null` guard is now
+  mostly unused since the dialog unmounts before the delete starts -- kept
+  as a harmless backup, not removed).
