@@ -1352,7 +1352,7 @@ class ChannelAConfirmTests(ChannelABotTestCase):
         names = {field.name for field in dataclasses.fields(record)}
         self.assertEqual(
             names,
-            {"phone_id", "owner_id", "generation", "nonce", "confirmed_update_id"},
+            {"phone_id", "owner_id", "generation", "nonce", "confirmed_update_id", "label"},
         )
         # Additive RCA-3b fence: the update that confirmed this link.
         self.assertEqual(record.confirmed_update_id, 5)
@@ -1360,6 +1360,8 @@ class ChannelAConfirmTests(ChannelABotTestCase):
         self.assertEqual(record.owner_id, OWNER)
         self.assertEqual(record.generation, self.registry.phone_link(PHONE).generation)
         self.assertNotIn(record.nonce, repr(record))
+        # Live test 2026-09-25 (F3): the confirmed label is captured here too.
+        self.assertEqual(record.label, self.labels["value"])
 
     def test_confirm_from_a_foreign_phone_is_refused_without_side_effects(self):
         self.prompted(4)
@@ -3273,12 +3275,30 @@ class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
         self.assertIn("inactividad", text)
         self.assertIn(self.labels["value"], text)
 
-    def test_the_warning_copy_falls_back_to_a_generic_hmi_reference_when_the_label_is_gone(self):
-        """PW-011: a fresh label lookup failure/absence at sweep time must
-        never surface as a broken "{label}" placeholder -- fall back to the
-        same generic reference used everywhere else in this module."""
+    def test_the_warning_copy_uses_the_label_confirmed_at_pairing_even_when_a_fresh_lookup_would_fail(self):
+        """Live test 2026-09-25 (F3): destination_label() is freshness-bound
+        to a live HMI session -- a fresh re-read at sweep time fails exactly
+        when a sweep is due (the session has, by definition, gone idle). The
+        warning must use the label captured at confirmation time (the same
+        one WELCOME_TEMPLATE showed), never re-read it."""
         self.pair_up(4, 5)
-        self.labels["value"] = None
+        calls_before_sweep = list(self.label_calls)
+        self.labels["value"] = None  # a fresh lookup now would fail/return nothing
+        self.now[0] = 1540.0
+        self.dialogue.send_inactivity_warnings()
+        text = self.transport.sent[-1]["text"]
+        self.assertEqual(text, COPY_INACTIVITY_WARNING.format(label="Sala 3 — Reactor"))
+        # No new destination_label() call at sweep time.
+        self.assertEqual(self.label_calls, calls_before_sweep)
+
+    def test_the_warning_copy_falls_back_to_a_generic_hmi_reference_when_no_label_was_ever_captured(self):
+        """The fallback now triggers only when the action record's own
+        captured label is truly absent -- never from a fresh re-read
+        failing (see the test above)."""
+        self.pair_up(4, 5)
+        digest = next(iter(self.dialogue._actions))
+        record = self.dialogue._actions[digest]
+        self.dialogue._actions[digest] = dataclasses.replace(record, label=None)
         self.now[0] = 1540.0
         self.dialogue.send_inactivity_warnings()
         text = self.transport.sent[-1]["text"]
@@ -3577,9 +3597,25 @@ class ChannelAExpiryCleanupSweepTests(ChannelABotTestCase):
         self.assertIn(self.labels["value"], text)
         self.assertNotEqual(text, COPY_UNLINKED)
 
-    def test_the_expiry_copy_falls_back_to_a_generic_hmi_reference_when_the_label_is_gone(self):
+    def test_the_expiry_copy_uses_the_label_confirmed_at_pairing_even_when_a_fresh_lookup_would_fail(self):
+        """Live test 2026-09-25 (F3): same as the warning copy -- the expiry
+        notice must use the label captured at confirmation time, never a
+        fresh destination_label() re-read (which fails exactly when an
+        idle-expiry sweep is due)."""
         self.pair_up(4, 5)
+        calls_before_sweep = list(self.label_calls)
         self.labels["value"] = None
+        self.now[0] = 1600.0
+        self.dialogue.send_expiry_cleanup()
+        text = self.transport.sent[-1]["text"]
+        self.assertEqual(text, COPY_EXPIRED.format(label="Sala 3 — Reactor"))
+        self.assertEqual(self.label_calls, calls_before_sweep)
+
+    def test_the_expiry_copy_falls_back_to_a_generic_hmi_reference_when_no_label_was_ever_captured(self):
+        self.pair_up(4, 5)
+        digest = next(iter(self.dialogue._actions))
+        record = self.dialogue._actions[digest]
+        self.dialogue._actions[digest] = dataclasses.replace(record, label=None)
         self.now[0] = 1600.0
         self.dialogue.send_expiry_cleanup()
         text = self.transport.sent[-1]["text"]

@@ -560,6 +560,15 @@ class _Action:
     generation: int
     nonce: str = field(repr=False)
     confirmed_update_id: int = 0
+    # Live test 2026-09-25 (F3): the exact label WELCOME_TEMPLATE showed the
+    # human at confirmation (claim.label, already validated equal to a fresh
+    # read at that moment -- see _confirm). The M3 sweep uses this captured
+    # value instead of a fresh destination_label() re-read, which is
+    # freshness-bound to a live HMI session and fails exactly when a sweep
+    # is due (the session has, by definition, gone idle by then). None only
+    # for a record that predates this field or was never confirmed with a
+    # usable label -- _display_label's existing fallback still applies.
+    label: str | None = None
 
 
 def phone_identity(actor_id: int) -> str:
@@ -1433,7 +1442,7 @@ class ChannelAPairingDialogue:
                 update_id, VARIANT_CALLBACK, PAIRING_REFUSED, True, delivery, acknowledged
             )
         self._remember_action(
-            nonce, phone_id, link.owner_id, link.generation, update_id
+            nonce, phone_id, link.owner_id, link.generation, update_id, label
         )
         acknowledged = self._answer(callback_id, COPY_CONFIRMED)
         if not self._link_matches(phone_id, link.owner_id, link.generation):
@@ -1583,13 +1592,13 @@ class ChannelAPairingDialogue:
                 self._actions.pop(digest, None)
 
     def _remember_action(
-        self, nonce, phone_id, owner_id, generation, confirmed_update_id
+        self, nonce, phone_id, owner_id, generation, confirmed_update_id, label=None
     ) -> None:
         for digest, record in list(self._actions.items()):
             if record.phone_id == phone_id and record.generation == generation:
                 self._actions.pop(digest, None)
         self._actions[_digest(nonce)] = _Action(
-            phone_id, owner_id, generation, nonce, confirmed_update_id
+            phone_id, owner_id, generation, nonce, confirmed_update_id, label
         )
 
     def _forget_claim(self, ticket) -> None:
@@ -1931,14 +1940,15 @@ class ChannelAPairingDialogue:
         # query first). The inline "Desvincular" button was dropped: the
         # persistent reply keyboard already covers unlinking at any time, and
         # duplicating the affordance here would be confusing.
-        # PW-011: same trusted label source the welcome/prompt already use
-        # (destination_label, via _read_label); a lookup failure or an
-        # unusable value falls back to the generic HMI reference rather than
-        # skipping a warning that is otherwise due.
-        label, _lookup_ok = self._read_label(snapshot.owner_id)
+        # Live test 2026-09-25 (F3): the label captured on this action
+        # record at confirmation time -- never a fresh destination_label()
+        # re-read, which is freshness-bound to a live HMI session and fails
+        # exactly when a sweep is due (the session has gone idle by then).
+        # An unusable/never-captured value still falls back to the generic
+        # HMI reference rather than skipping a warning that is otherwise due.
         delivery = self._send(
             chat_id,
-            COPY_INACTIVITY_WARNING.format(label=_display_label(label)),
+            COPY_INACTIVITY_WARNING.format(label=_display_label(record.label)),
             _keyboard(
                 (BUTTON_KEEP_CONNECTED, CALLBACK_KEEP_CONNECTED + ":" + record.nonce),
             ),
@@ -1998,10 +2008,17 @@ class ChannelAPairingDialogue:
                 link.owner_id, link.phone_id, link.generation, EXPIRY_SKIPPED
             )
         self._forget_claims_for_owner(link.owner_id)
-        # PW-011: same trusted label source the welcome/prompt already use;
-        # a lookup failure or an unusable value falls back to the generic
-        # HMI reference rather than skipping the cleanup itself.
-        label, _lookup_ok = self._read_label(link.owner_id)
+        # Live test 2026-09-25 (F3): the label captured on this action
+        # record at confirmation time -- never a fresh destination_label()
+        # re-read (see _warn_one's own note; the same freshness-bound
+        # failure mode applies here, and by expiry time it is even more
+        # certain to fail). The action record for this exact link is still
+        # present here: send_expiry_cleanup() only purges it AFTER every
+        # _cleanup_one call in this sweep completes. An unusable/
+        # never-captured value falls back to the generic HMI reference
+        # rather than skipping the cleanup itself.
+        record = self._action_for(link.phone_id, link.owner_id, link.generation)
+        label = record.label if record is not None else None
         # T3: the only unlink-notice path this module has -- remove the
         # persistent reply keyboard along with the expiry notice.
         delivery = self._send(
