@@ -98,6 +98,21 @@ from .channel_a_query import (
     QueryBinding,
     is_query_envelope_well_formed,
 )
+from .voice_transcription import (
+    MAX_VOICE_NOTE_DURATION_SECONDS,
+    MAX_VOICE_NOTE_FILE_SIZE_BYTES,
+    VOICE_NOTE_DOWNLOAD_FAILED_REPLY,
+    VOICE_NOTE_TOO_LARGE_REPLY,
+    VOICE_NOTE_TOO_LONG_REPLY,
+    VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY,
+    VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY,
+    VoiceNoteTooLarge,
+    VoiceNoteTooLong,
+    VoiceTranscriptionEmpty,
+    VoiceTranscriptionError,
+    validate_voice_note_duration,
+    validate_voice_note_size,
+)
 
 PRISMA_CHANNEL_A_BOT_CONFIG_INVALID = "PRISMA_CHANNEL_A_BOT_CONFIG_INVALID"
 PRISMA_CHANNEL_A_BOT_UNAVAILABLE = "PRISMA_CHANNEL_A_BOT_UNAVAILABLE"
@@ -140,6 +155,14 @@ INGRESS_IGNORED_MALFORMED = "ignored_malformed"
 INGRESS_IGNORED_UNSUPPORTED = "ignored_unsupported"
 INGRESS_IGNORED_AMBIGUOUS = "ignored_ambiguous"
 INGRESS_IGNORED_UNRELATED = "ignored_unrelated"
+
+# PW-013: voice-note question outcomes, reported on the exact same
+# IngressOutcome shape as every other message kind. A voice note that
+# successfully transcribes never gets its own kind: it is routed through
+# _handle_query and reports the SAME kinds a typed question would.
+VOICE_NOTE_REJECTED = "voice_note_rejected"
+VOICE_NOTE_DOWNLOAD_FAILED = "voice_note_download_failed"
+VOICE_NOTE_TRANSCRIPTION_FAILED = "voice_note_transcription_failed"
 
 PAIRING_PROMPT_DELIVERED = "pairing_prompt_delivered"
 PAIRING_PROMPT_REJECTED = "pairing_prompt_rejected"
@@ -364,6 +387,9 @@ __all__ = [
     "VARIANT_CALLBACK",
     "VARIANT_MESSAGE",
     "VARIANT_UNKNOWN",
+    "VOICE_NOTE_DOWNLOAD_FAILED",
+    "VOICE_NOTE_REJECTED",
+    "VOICE_NOTE_TRANSCRIPTION_FAILED",
     "WARNING_SKIPPED",
     "WELCOME_TEMPLATE",
     "phone_identity",
@@ -411,6 +437,16 @@ class ChannelATextTransport(Protocol):
         """Set or reset the chat menu button for exactly one chat and return
         the raw response body (T14). Optional at runtime -- see
         ``_set_unlink_menu``/``_clear_unlink_menu``."""
+
+    def get_file(self, *, file_id: str) -> str:
+        """Resolve a voice note's file_id into its downloadable file_path
+        (PW-013). Optional at runtime: only required when
+        :meth:`ChannelAPairingDialogue.enable_voice_notes` is attached -- see
+        ``_handle_voice_note``."""
+
+    def download_file(self, *, file_path: str, max_bytes: int) -> bytes:
+        """Download one file's raw bytes, bounded by ``max_bytes`` (PW-013).
+        Optional at runtime, same condition as ``get_file``."""
 
 
 @dataclass(frozen=True)
@@ -717,6 +753,11 @@ class ChannelAPairingDialogue:
         # Optional: attaching a query coordinator is what turns on ordinary
         # text queries. Left unset, the accepted RCA-3a behavior is untouched.
         self.query = None
+        # PW-013: optional -- attaching voice-note support requires the query
+        # coordinator above to already be attached. Left unset, a voice note
+        # is simply ignored (INGRESS_IGNORED_UNRELATED), same as before this
+        # task existed.
+        self._transcribe = None
 
     # -- ingress -----------------------------------------------------------
 
@@ -831,6 +872,13 @@ class ChannelAPairingDialogue:
         chat_id, actor_id = actor
         text = message.get("text")
         if text is None:
+            voice = message.get("voice")
+            if self._transcribe is not None and isinstance(voice, Mapping):
+                # PW-013: a voice note is only ever routed to the ordinary
+                # query coordinator, exactly like typed text below -- it
+                # never reaches the "/start"/unlink/command branches, which
+                # all require actual text.
+                return self._handle_voice_note(update_id, chat_id, actor_id, voice)
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True)
         if not isinstance(text, str):
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True)
@@ -929,6 +977,27 @@ class ChannelAPairingDialogue:
             )
             self.query = coordinator
             return coordinator
+
+    def enable_voice_notes(self, *, transcribe) -> None:
+        """Attach voice-note question support (PW-013).
+
+        Requires :meth:`enable_queries` to already be attached: a voice
+        note's transcript is routed through the exact same query coordinator
+        as typed text (see ``_handle_voice_note``/``_handle_query``), so
+        every binding/freshness/answer rule applies identically -- there is
+        no separate voice-only answer path. ``transcribe(audio_bytes,
+        mime_type)`` must return the transcript text or raise a
+        ``voice_transcription.VoiceTranscriptionError`` subtype; it never
+        resolves a provider secret or talks to Telegram itself (downloading
+        is this class's own job, via ``self.transport``). Construction runs
+        under the serial adapter lock, matching ``enable_queries``.
+        """
+        with self._lock:
+            if self.query is None:
+                raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+            if not callable(transcribe):
+                raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+            self._transcribe = transcribe
 
     def binding_admitted(self, binding) -> bool:
         """Prove the captured binding still matches this adapter's live record.
@@ -1087,6 +1156,55 @@ class ChannelAPairingDialogue:
             None,
             outcome.envelope,
         )
+
+    def _handle_voice_note(self, update_id, chat_id, actor_id, voice) -> IngressOutcome:
+        """Transcribe one voice-note question, then route it through
+        _handle_query exactly like typed text (PW-013). Authorization runs
+        first, before any download: the SAME phone-to-owner binding check
+        _handle_query itself uses, never weakened for a voice note."""
+        phone_id = phone_identity(actor_id)
+        record = self._record_for_phone(phone_id)
+        if record is None:
+            # No adapter-admitted record for this phone: nothing to answer,
+            # and nothing is downloaded.
+            return IngressOutcome(update_id, VARIANT_MESSAGE, QUERY_IGNORED_UNBOUND, True)
+        if update_id <= record.confirmed_update_id:
+            return IngressOutcome(update_id, VARIANT_MESSAGE, QUERY_IGNORED_STALE, True)
+        duration = voice.get("duration")
+        file_id = voice.get("file_id")
+        file_size = voice.get("file_size")
+        mime_type = voice.get("mime_type") if isinstance(voice.get("mime_type"), str) else "audio/ogg"
+        if not isinstance(file_id, str) or not file_id:
+            return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True)
+        try:
+            validate_voice_note_duration(duration)
+            validate_voice_note_size(file_size)
+        except VoiceNoteTooLong:
+            delivery = self._send(chat_id, VOICE_NOTE_TOO_LONG_REPLY)
+            return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
+        except VoiceNoteTooLarge:
+            delivery = self._send(chat_id, VOICE_NOTE_TOO_LARGE_REPLY)
+            return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
+        # T4-style feedback for the dead time while the note is downloaded
+        # and transcribed, same as _handle_query does before parsing.
+        self._typing(actor_id)
+        try:
+            file_path = self.transport.get_file(file_id=file_id)
+            audio_bytes = self.transport.download_file(
+                file_path=file_path, max_bytes=MAX_VOICE_NOTE_FILE_SIZE_BYTES
+            )
+        except Exception:
+            delivery = self._send(chat_id, VOICE_NOTE_DOWNLOAD_FAILED_REPLY)
+            return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_DOWNLOAD_FAILED, True, delivery)
+        try:
+            transcript = self._transcribe(audio_bytes, mime_type)
+        except VoiceTranscriptionEmpty:
+            delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
+            return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
+        except VoiceTranscriptionError:
+            delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
+            return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
+        return self._handle_query(update_id, actor_id, transcript)
 
     def _request_unlink(self, update_id, chat_id, actor_id) -> IngressOutcome:
         """Handle the persistent "Desvincular" reply-keyboard button (T3).

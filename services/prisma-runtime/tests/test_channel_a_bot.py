@@ -80,6 +80,9 @@ from prisma_runtime.channel_a_bot import (
     VARIANT_CALLBACK,
     VARIANT_MESSAGE,
     VARIANT_UNKNOWN,
+    VOICE_NOTE_DOWNLOAD_FAILED,
+    VOICE_NOTE_REJECTED,
+    VOICE_NOTE_TRANSCRIPTION_FAILED,
     WARNING_SKIPPED,
     WELCOME_TEMPLATE,
     ChannelABotConfigInvalid,
@@ -90,6 +93,12 @@ from prisma_runtime.channel_a_bot import (
     InactivityWarningOutcome,
     IngressOutcome,
     phone_identity,
+)
+from prisma_runtime.voice_transcription import (
+    MAX_VOICE_NOTE_DURATION_SECONDS,
+    MAX_VOICE_NOTE_FILE_SIZE_BYTES,
+    VoiceTranscriptionEmpty,
+    VoiceTranscriptionUnavailable,
 )
 from prisma_runtime.channel_a_pairing import ChannelAPairingRegistry
 from prisma_runtime.channel_a_query import (
@@ -158,6 +167,19 @@ def message_update(update_id, text="/start", *, chat, from_id=None, message_id=1
     return {"update_id": update_id, "message": message}
 
 
+def voice_update(update_id, *, chat, from_id=None, message_id=11, duration=5, file_id="voice-file-1", file_size=1024, mime_type="audio/ogg"):
+    """Build one private voice-note ``message`` update (PW-013)."""
+    sender = chat if from_id is None else from_id
+    voice = {"duration": duration, "file_id": file_id, "file_size": file_size, "mime_type": mime_type}
+    message = {
+        "message_id": message_id,
+        "chat": {"id": chat, "type": "private"},
+        "from": {"id": sender, "is_bot": False},
+        "voice": voice,
+    }
+    return {"update_id": update_id, "message": message}
+
+
 def callback_update(update_id, data, *, chat=CHAT_ID, from_id=None, callback_id="cb-1", message_id=7):
     """Build one private ``callback_query`` update authored by the configured bot."""
     sender = chat if from_id is None else from_id
@@ -191,6 +213,10 @@ class FakeTransport:
         set_commands_error=None,
         delete_commands_error=None,
         set_menu_button_error=None,
+        get_file_responses=None,
+        get_file_error=None,
+        download_file_responses=None,
+        download_file_error=None,
     ):
         self.bot_id = bot_id
         self.sent = []
@@ -199,9 +225,19 @@ class FakeTransport:
         self.set_commands_calls = []
         self.deleted_commands_calls = []
         self.menu_button_calls = []
+        self.get_file_calls = []
+        self.download_file_calls = []
         self.calls = []
         self.send_responses = list(send_responses or ())
         self.ack_responses = list(ack_responses or ())
+        # PW-013: voice-note download doubles. get_file/download_file each
+        # default to one canned success and never touch a real transport.
+        self.get_file_responses = list(get_file_responses) if get_file_responses is not None else ["voice/file_1.oga"]
+        self.get_file_error = get_file_error
+        self.download_file_responses = (
+            list(download_file_responses) if download_file_responses is not None else [b"fake-ogg-audio"]
+        )
+        self.download_file_error = download_file_error
         # T4: injectable failure, never surfaced by the dialogue -- proves a
         # chat-action failure never blocks or fails the answer.
         self.chat_action_error = chat_action_error
@@ -274,6 +310,20 @@ class FakeTransport:
         if self.set_menu_button_error is not None:
             raise self.set_menu_button_error
         return {"ok": True, "result": True}
+
+    def get_file(self, **payload):
+        self.calls.append("get_file")
+        self.get_file_calls.append(payload)
+        if self.get_file_error is not None:
+            raise self.get_file_error
+        return self.get_file_responses.pop(0)
+
+    def download_file(self, **payload):
+        self.calls.append("download_file")
+        self.download_file_calls.append(payload)
+        if self.download_file_error is not None:
+            raise self.download_file_error
+        return self.download_file_responses.pop(0)
 
 
 class _ConcurrencyProbe:
@@ -502,11 +552,13 @@ class ChannelABotConfigTests(ChannelABotTestCase):
                 with self.assertRaises(ChannelABotConfigInvalid):
                     phone_identity(value)
 
-    def test_transport_protocol_declares_exactly_six_calls(self):
+    def test_transport_protocol_declares_exactly_eight_calls(self):
         # T4: send_chat_action joins the protocol (optional at runtime --
         # see _typing). T14: the three menu-maintenance calls join it too
-        # (optional at runtime -- see _set_unlink_menu/_clear_unlink_menu) --
-        # declared here for callers implementing them.
+        # (optional at runtime -- see _set_unlink_menu/_clear_unlink_menu).
+        # PW-013: get_file/download_file join it too (optional at runtime --
+        # see enable_voice_notes/_handle_voice_note). All declared here for
+        # callers implementing them.
         names = {name for name in vars(ChannelATextTransport) if not name.startswith("_")}
         self.assertEqual(
             names,
@@ -516,6 +568,8 @@ class ChannelABotConfigTests(ChannelABotTestCase):
                 "send_chat_action",
                 "set_my_commands",
                 "delete_my_commands",
+                "get_file",
+                "download_file",
                 "set_chat_menu_button",
             },
         )
@@ -3028,6 +3082,123 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         rendered = repr(outcome) + repr(outcome.answer_envelope) + str(outcome.as_dict())
         self.assertNotIn(nonce, rendered)
         self.assertNotIn("¿cuál es el oee?", rendered)
+
+
+class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
+    """PW-013: a voice note is transcribed, then answered exactly like the
+    equivalent typed text -- same coordinator, same binding/freshness rules,
+    no separate voice-only answer path."""
+
+    def setUp(self):
+        super().setUp()
+        self.transcribe_calls = []
+        self.transcribe_result = "¿cuál es el oee?"
+        self.transcribe_error = None
+
+    def transcribe(self, audio_bytes, mime_type):
+        self.transcribe_calls.append((audio_bytes, mime_type))
+        if self.transcribe_error is not None:
+            raise self.transcribe_error
+        return self.transcribe_result
+
+    def enable_voice_notes(self):
+        self.dialogue.enable_voice_notes(transcribe=self.transcribe)
+
+    def voice(self, *, owner=OWNER, chat=CHAT_ID, claim_id=4, confirm_id=5, query_id=6, **overrides):
+        self.pair_up(claim_id, confirm_id, owner=owner, chat=chat)
+        return self.handle(voice_update(query_id, chat=chat, **overrides))
+
+    # -- wiring contract -----------------------------------------------------
+
+    def test_enable_voice_notes_requires_the_query_coordinator_first(self):
+        plain = self.build()
+        with self.assertRaises(ChannelABotConfigInvalid):
+            plain.enable_voice_notes(transcribe=self.transcribe)
+
+    def test_enable_voice_notes_rejects_a_noncallable_transcribe(self):
+        with self.assertRaises(ChannelABotConfigInvalid):
+            self.dialogue.enable_voice_notes(transcribe=None)
+
+    def test_without_enable_voice_notes_a_voice_note_stays_ignored_and_is_never_downloaded(self):
+        outcome = self.voice()
+        self.assert_outcome(outcome, INGRESS_IGNORED_UNRELATED)
+        self.assertEqual(self.transport.get_file_calls, [])
+        self.assertEqual(self.transport.download_file_calls, [])
+
+    # -- happy path ------------------------------------------------------------
+
+    def test_a_voice_note_is_transcribed_and_answered_like_typed_text(self):
+        self.enable_voice_notes()
+        outcome = self.voice()
+        self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED)
+        self.assertEqual(self.transport.get_file_calls, [{"file_id": "voice-file-1"}])
+        self.assertEqual(self.transport.download_file_calls, [{"file_path": "voice/file_1.oga", "max_bytes": MAX_VOICE_NOTE_FILE_SIZE_BYTES}])
+        self.assertEqual(self.transcribe_calls, [(b"fake-ogg-audio", "audio/ogg")])
+        self.assertEqual(self.parses[-1][1], "¿cuál es el oee?")
+        self.assertIn("88,5", self.transport.sent[-1]["text"])
+
+    def test_authorization_runs_before_any_download(self):
+        """The phone-to-owner binding check must reject an unbound phone
+        before get_file/download_file are ever called (user decision)."""
+        self.enable_voice_notes()
+        outcome = self.handle(voice_update(4, chat=CHAT_ID))
+        self.assert_outcome(outcome, QUERY_IGNORED_UNBOUND)
+        self.assertEqual(self.transport.get_file_calls, [])
+        self.assertEqual(self.transport.download_file_calls, [])
+        self.assertEqual(self.transcribe_calls, [])
+
+    # -- duration/size limits --------------------------------------------------
+
+    def test_a_voice_note_over_the_duration_cap_is_rejected_before_any_download(self):
+        self.enable_voice_notes()
+        outcome = self.voice(duration=MAX_VOICE_NOTE_DURATION_SECONDS + 1)
+        self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
+        self.assertEqual(self.transport.get_file_calls, [])
+        self.assertEqual(self.transport.download_file_calls, [])
+        self.assertEqual(self.transcribe_calls, [])
+        self.assertIn("30 segundos", self.transport.sent[-1]["text"])
+
+    def test_a_voice_note_with_a_missing_or_invalid_duration_is_rejected(self):
+        self.enable_voice_notes()
+        outcome = self.voice(duration=None)
+        self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
+        self.assertEqual(self.transport.get_file_calls, [])
+
+    def test_a_voice_note_over_the_size_cap_is_rejected_before_any_download(self):
+        self.enable_voice_notes()
+        outcome = self.voice(file_size=MAX_VOICE_NOTE_FILE_SIZE_BYTES + 1)
+        self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
+        self.assertEqual(self.transport.get_file_calls, [])
+        self.assertEqual(self.transport.download_file_calls, [])
+
+    def test_a_voice_note_missing_a_file_id_is_ignored_as_malformed(self):
+        self.enable_voice_notes()
+        outcome = self.voice(file_id=None)
+        self.assert_outcome(outcome, INGRESS_IGNORED_MALFORMED)
+        self.assertEqual(self.transport.get_file_calls, [])
+
+    # -- download/transcription failures ----------------------------------------
+
+    def test_a_download_failure_replies_and_never_reaches_transcription(self):
+        self.enable_voice_notes()
+        self.transport.get_file_error = RuntimeError("boom")
+        outcome = self.voice()
+        self.assert_outcome(outcome, VOICE_NOTE_DOWNLOAD_FAILED, delivery=SEND_DELIVERED)
+        self.assertEqual(self.transcribe_calls, [])
+
+    def test_an_empty_transcript_replies_and_never_reaches_the_query_coordinator(self):
+        self.enable_voice_notes()
+        self.transcribe_error = VoiceTranscriptionEmpty("VOICE_NOTE_TRANSCRIPT_EMPTY")
+        outcome = self.voice()
+        self.assert_outcome(outcome, VOICE_NOTE_TRANSCRIPTION_FAILED, delivery=SEND_DELIVERED)
+        self.assertEqual(self.parses, [])
+
+    def test_a_provider_failure_replies_and_never_crashes(self):
+        self.enable_voice_notes()
+        self.transcribe_error = VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE")
+        outcome = self.voice()
+        self.assert_outcome(outcome, VOICE_NOTE_TRANSCRIPTION_FAILED, delivery=SEND_DELIVERED)
+        self.assertEqual(self.parses, [])
 
 
 class ChannelAInactivityWarningSweepTests(ChannelABotTestCase):
