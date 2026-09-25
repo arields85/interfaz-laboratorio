@@ -98,6 +98,68 @@ class TelegramOptInTests(unittest.TestCase):
         _, kwargs = activation_cls.call_args
         self.assertTrue(callable(kwargs["transcribe"]))
 
+    def test_channel_a_transcribe_adds_the_owners_active_machine_and_screen_names_as_extra_terms(self) -> None:
+        """F7 (live test 2026-09-25): the production channel_a_transcribe
+        closure must bias the transcription prompt with the owner's own
+        active machine/screen names, read through the SAME guarded,
+        freshness-bound session_registry.capture_owner_context the query
+        coordinator's own read_context seam already uses -- not a second,
+        weaker read path. A live benchmark found a machine name
+        ("Reiner") misheard without this hint."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        fake_voice_response = Mock(status_code=200)
+        fake_voice_response.json.return_value = {"transcript": "lote 42"}
+        fake_http.post.return_value = fake_voice_response
+        session_registry = Mock()
+        session_registry.capture_owner_context.return_value = (
+            1.0,
+            {"machine": {"name": "Reiner"}, "screen": {"ownerNodeName": "Pantalla 1"}},
+            7,
+        )
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None, session_registry=session_registry)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        transcribe = kwargs["transcribe"]
+        voice_events = app.config["voice_events"]
+
+        with patch.object(voice_events, "mint_voice_transcription_token", wraps=voice_events.mint_voice_transcription_token) as mint:
+            transcript = transcribe(b"audio-bytes", "audio/ogg", owner_id="owner-1")
+
+        self.assertEqual(transcript, "lote 42")
+        session_registry.capture_owner_context.assert_called_once_with(
+            "owner-1", max_age_seconds=local_presentation.CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS
+        )
+        mint.assert_called_once()
+        self.assertEqual(mint.call_args.args[2], ("Reiner", "Pantalla 1"))
+
+    def test_channel_a_transcribe_never_fails_when_the_owner_context_is_unavailable(self) -> None:
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        fake_voice_response = Mock(status_code=200)
+        fake_voice_response.json.return_value = {"transcript": "lote 42"}
+        fake_http.post.return_value = fake_voice_response
+        session_registry = Mock()
+        session_registry.capture_owner_context.side_effect = local_presentation.HmiSessionContextUnavailable("x")
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None, session_registry=session_registry)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        transcribe = kwargs["transcribe"]
+
+        transcript = transcribe(b"audio-bytes", "audio/ogg", owner_id="owner-1")
+
+        self.assertEqual(transcript, "lote 42")
+
     def test_voice_delivery_is_blocked_when_opt_in_is_disabled(self) -> None:
         job = {
             "telegram_chat_id": 12345,

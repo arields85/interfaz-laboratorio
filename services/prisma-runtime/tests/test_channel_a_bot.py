@@ -3097,8 +3097,11 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.transcribe_result = "¿cuál es el oee?"
         self.transcribe_error = None
 
-    def transcribe(self, audio_bytes, mime_type):
-        self.transcribe_calls.append((audio_bytes, mime_type))
+    def transcribe(self, audio_bytes, mime_type, owner_id=None):
+        # F7 (live test 2026-09-25): owner_id is an optional hint the
+        # transcribe callable may use for prompt-biasing terms; recorded
+        # here so a test can assert what was passed.
+        self.transcribe_calls.append((audio_bytes, mime_type, owner_id))
         if self.transcribe_error is not None:
             raise self.transcribe_error
         return self.transcribe_result
@@ -3152,7 +3155,7 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED)
         self.assertEqual(self.transport.get_file_calls, [{"file_id": "voice-file-1"}])
         self.assertEqual(self.transport.download_file_calls, [{"file_path": "voice/file_1.oga", "max_bytes": MAX_VOICE_NOTE_FILE_SIZE_BYTES}])
-        self.assertEqual(self.transcribe_calls, [(b"fake-ogg-audio", "audio/ogg")])
+        self.assertEqual(self.transcribe_calls, [(b"fake-ogg-audio", "audio/ogg", OWNER)])
         self.assertEqual(self.parses[-1][1], "¿cuál es el oee?")
         self.assertIn("88,5", self.transport.sent[-1]["text"])
 

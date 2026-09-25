@@ -707,8 +707,8 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
         transcribe_calls = []
 
-        def transcribe(audio_bytes, mime_type):
-            transcribe_calls.append((audio_bytes, mime_type))
+        def transcribe(audio_bytes, mime_type, owner_id=None):
+            transcribe_calls.append((audio_bytes, mime_type, owner_id))
             return QUESTION
 
         fixture = self.activate(transcribe=transcribe)
@@ -724,7 +724,7 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertEqual([outcome.kind for outcome in answered.outcomes], [QUERY_ANSWER_DELIVERED])
         self.assertEqual(transport.get_file_calls, ["voice-file-1"])
         self.assertEqual(len(transport.download_file_calls), 1)
-        self.assertEqual(transcribe_calls, [(b"fake-ogg-audio", "audio/ogg")])
+        self.assertEqual(transcribe_calls, [(b"fake-ogg-audio", "audio/ogg", owner_a)])
         self.assertEqual(transport.sent[-1]["text"], ANSWER_A)
 
     def test_without_transcribe_a_voice_note_is_ignored_and_never_downloaded(self):

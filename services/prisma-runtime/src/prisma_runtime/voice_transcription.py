@@ -36,6 +36,18 @@ GEMINI_TRANSCRIPTION_MODEL = "gemini-3.8-flash"
 # never builds a client itself (see transcribe_voice_note's docstring).
 GEMINI_TRANSCRIPTION_TIMEOUT_MS = 20_000
 
+# F7 (live test 2026-09-25): authorized benchmark (google-genai 2.17.0,
+# model gemini-3.8-flash, 5 synthesized Spanish questions) measured warm
+# median 2292 ms with no generation config vs 1224 ms with thinking
+# disabled/deterministic/bounded output -- identical accuracy in that
+# benchmark. Transcription is a closed, short-answer task (a single spoken
+# question, never open-ended generation), so no "thinking" budget or
+# sampling randomness is needed. Named separately from any TTS/other
+# Gemini call site's own config so they can vary independently.
+GEMINI_TRANSCRIPTION_THINKING_BUDGET = 0
+GEMINI_TRANSCRIPTION_TEMPERATURE = 0
+GEMINI_TRANSCRIPTION_MAX_OUTPUT_TOKENS = 128
+
 # Telegram voice notes are always OGG/Opus, but a caller may still receive a
 # message without a reported mime_type; both bots and transcribe_voice_note
 # itself fall back to this one named default instead of a repeated literal.
@@ -179,9 +191,15 @@ def transcribe_voice_note(
 
         genai = importlib.import_module("google.genai")
         part = genai.types.Part.from_bytes(data=bytes(audio_bytes), mime_type=resolved_mime_type)
+        config = genai.types.GenerateContentConfig(
+            thinking_config=genai.types.ThinkingConfig(thinking_budget=GEMINI_TRANSCRIPTION_THINKING_BUDGET),
+            temperature=GEMINI_TRANSCRIPTION_TEMPERATURE,
+            max_output_tokens=GEMINI_TRANSCRIPTION_MAX_OUTPUT_TOKENS,
+        )
         response = client.models.generate_content(
             model=GEMINI_TRANSCRIPTION_MODEL,
             contents=[prompt, part],
+            config=config,
         )
     except VoiceTranscriptionError:
         raise

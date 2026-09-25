@@ -72,10 +72,17 @@ class PromptBuilderTests(unittest.TestCase):
 
 def _fake_genai_module(response_text="lote actual", raise_on_generate=None):
     part_cls = SimpleNamespace(from_bytes=Mock(return_value="AUDIO_PART"))
-    types_ns = SimpleNamespace(Part=part_cls)
+    # F7 (live test 2026-09-25): the config classes echo back whatever
+    # kwargs they were built with, as plain attributes, so a test can
+    # inspect exactly what transcribe_voice_note passed.
+    thinking_config_cls = Mock(side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
+    generate_content_config_cls = Mock(side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
+    types_ns = SimpleNamespace(
+        Part=part_cls, ThinkingConfig=thinking_config_cls, GenerateContentConfig=generate_content_config_cls
+    )
     module = SimpleNamespace(types=types_ns)
 
-    def generate_content(*, model, contents):
+    def generate_content(*, model, contents, config=None):
         if raise_on_generate is not None:
             raise raise_on_generate
         return SimpleNamespace(text=response_text)
@@ -138,6 +145,23 @@ class TranscribeVoiceNoteTests(unittest.TestCase):
             vt.transcribe_voice_note(client, b"audio-bytes", "audio/ogg")
         _, kwargs = client.models.generate_content.call_args
         self.assertEqual(kwargs["model"], vt.GEMINI_TRANSCRIPTION_MODEL)
+
+    def test_generation_config_disables_thinking_and_uses_named_constants(self):
+        """F7 (live test 2026-09-25, authorized benchmark: google-genai
+        2.17.0, model gemini-3.8-flash, 5 synthesized Spanish questions):
+        warm median 2292 ms with no config vs 1224 ms with
+        thinking_budget=0/temperature=0/max_output_tokens=128, identical
+        accuracy -- pass this config on every transcription call."""
+        module, generate_content = _fake_genai_module(response_text="ok")
+        client = self._client_with(generate_content)
+
+        with patch.object(importlib, "import_module", side_effect=self._patched_import(module)):
+            vt.transcribe_voice_note(client, b"audio-bytes", "audio/ogg")
+        _, kwargs = client.models.generate_content.call_args
+        config = kwargs["config"]
+        self.assertEqual(config.temperature, vt.GEMINI_TRANSCRIPTION_TEMPERATURE)
+        self.assertEqual(config.max_output_tokens, vt.GEMINI_TRANSCRIPTION_MAX_OUTPUT_TOKENS)
+        self.assertEqual(config.thinking_config.thinking_budget, vt.GEMINI_TRANSCRIPTION_THINKING_BUDGET)
 
 
 class SpanishCopyTests(unittest.TestCase):

@@ -142,6 +142,36 @@ CHANNEL_B_VOICE_QUEUE_MAX_PENDING = 3
 # that a stuck provider call cannot stall a poll cycle indefinitely.
 VOICE_TRANSCRIPTION_REQUEST_TIMEOUT_SECONDS = 25
 
+# F7 (live test 2026-09-25): a voice-note transcription prompt's extra_terms
+# stays small and deduplicated -- these are cheap recognition hints, not an
+# unbounded vocabulary dump.
+VOICE_NOTE_CONTEXT_TERMS_MAX = 4
+
+
+def _voice_note_context_terms(context):
+    """Extract bounded, deduplicated machine/screen name hints from one
+    active HMI context or snapshot dict (F7, live test 2026-09-25: a
+    misheard machine name, e.g. "Reiner" transcribed as "Rainier"/"Reynier",
+    showed the shared static DOMAIN_VOCABULARY_TERMS alone is not enough).
+
+    Both channels' "context" is the exact same dict shape (whatever the HMI
+    posted to ``POST /hmi/current-snapshot``): Channel B's own
+    ``get_most_recent_context()``/legacy file snapshot, and Channel A's own
+    ``capture_owner_context()`` result, both ultimately read ``session.context``
+    -- so this one helper serves both without a new data source or a second
+    incompatible shape to maintain."""
+    if not isinstance(context, dict):
+        return ()
+    machine = context.get("machine") if isinstance(context.get("machine"), dict) else {}
+    screen = context.get("screen") if isinstance(context.get("screen"), dict) else {}
+    terms: list[str] = []
+    for candidate in (machine.get("name"), screen.get("ownerNodeName")):
+        if isinstance(candidate, str) and candidate.strip():
+            stripped = candidate.strip()
+            if stripped not in terms:
+                terms.append(stripped)
+    return tuple(terms[:VOICE_NOTE_CONTEXT_TERMS_MAX])
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -1018,16 +1048,12 @@ class TelegramLocalBot:
 
     def _voice_note_domain_terms(self):
         """Cheaply reuse the already-read active snapshot's machine/screen
-        name as a transcription hint (PW-013); never a new data source, and
-        never blocking -- a missing or malformed snapshot simply yields no
-        extra terms."""
-        snapshot = self._active_snapshot()
-        if not isinstance(snapshot, dict):
-            return ()
-        machine = snapshot.get("machine") if isinstance(snapshot.get("machine"), dict) else {}
-        screen = snapshot.get("screen") if isinstance(snapshot.get("screen"), dict) else {}
-        name = machine.get("name") or screen.get("ownerNodeName")
-        return (name,) if isinstance(name, str) and name.strip() else ()
+        name(s) as transcription hints (PW-013; F7 live test 2026-09-25:
+        both machine and screen names now, bounded/deduplicated, not just
+        whichever is truthy first); never a new data source, and never
+        blocking -- a missing or malformed snapshot simply yields no extra
+        terms."""
+        return _voice_note_context_terms(self._active_snapshot())
 
     def _active_snapshot(self):
         """B1c: the active screen for Channel B -- the most recently updated
@@ -1343,21 +1369,39 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             if token is not None:
                 _fire_channel_a_voice_prefetch(local_http, voice_url, event["id"], token)
 
-        def channel_a_transcribe(audio_bytes, mime_type):
+        def channel_a_transcribe(audio_bytes, mime_type, owner_id=None):
             """PW-013: transcribe one already-downloaded, already-bounded
             Channel A voice note. Runs on the Channel A poll thread, inside
             ChannelAPairingDialogue._handle_voice_note, which already
             catches every failure here and replies with a fixed Spanish
-            message -- this never needs its own try/except. No per-owner
-            context terms are added to the prompt (unlike Channel B): doing
-            so would require a second, unguarded read of the owner's HMI
-            context outside the query coordinator's own binding/freshness
-            discipline, so this stays with the shared static vocabulary
-            only (see the feature document)."""
+            message -- this never needs its own try/except.
+
+            F7 (live test 2026-09-25, supersedes the earlier "no per-owner
+            terms" decision): ``owner_id`` -- already phone-to-owner bound by
+            _handle_voice_note before this is ever called, the same
+            authenticated id the query coordinator itself is about to use
+            next for this exact update -- is read through
+            session_registry.capture_owner_context, the SAME guarded,
+            freshness-bound accessor (CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS,
+            matching channel_a_activation.py's own query-context freshness
+            bound) the query coordinator's own read_context seam already
+            uses; this is a second CALL to that identical guarded reader,
+            not a second, weaker read path. Best-effort only: any failure
+            (owner unavailable, stale, absent) yields no extra terms rather
+            than failing the transcription."""
             if not voice_url or local_http is None:
                 raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE")
+            extra_terms = ()
+            if owner_id is not None:
+                try:
+                    _age, context, _revision = session_registry.capture_owner_context(
+                        owner_id, max_age_seconds=CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS
+                    )
+                except HmiSessionError:
+                    context = None
+                extra_terms = _voice_note_context_terms(context)
             audio_base64 = base64.b64encode(bytes(audio_bytes)).decode("ascii")
-            token = voice_events.mint_voice_transcription_token(audio_base64, mime_type)
+            token = voice_events.mint_voice_transcription_token(audio_base64, mime_type, extra_terms)
             return _request_voice_transcription(local_http, voice_url, token)
 
         def build_channel_a_activation(token, desired, epoch, reservation):

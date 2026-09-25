@@ -18,6 +18,7 @@ from prisma_runtime.local_presentation import (
     JsonFileStore,
     VoiceEventStore,
     _request_voice_transcription,
+    _voice_note_context_terms,
     answer_from_snapshot,
     create_app,
 )
@@ -334,6 +335,26 @@ class LocalPresentationTests(unittest.TestCase):
                 _request_voice_transcription(http, "http://127.0.0.1:5056", "a-secret-token")
         joined = "\n".join(captured.output)
         self.assertIn("elapsed_ms", joined)
+
+    def test_voice_note_context_terms_returns_both_machine_and_screen_name_deduplicated(self) -> None:
+        """F7 (live test 2026-09-25): both names now, not just whichever is
+        truthy first, bounded and deduplicated."""
+        context = {"machine": {"name": "Reiner"}, "screen": {"ownerNodeName": "Pantalla 1"}}
+        self.assertEqual(_voice_note_context_terms(context), ("Reiner", "Pantalla 1"))
+
+    def test_voice_note_context_terms_deduplicates_an_identical_machine_and_screen_name(self) -> None:
+        context = {"machine": {"name": "Reiner"}, "screen": {"ownerNodeName": "Reiner"}}
+        self.assertEqual(_voice_note_context_terms(context), ("Reiner",))
+
+    def test_voice_note_context_terms_is_bounded(self) -> None:
+        self.assertLessEqual(
+            len(_voice_note_context_terms({"machine": {"name": "a"}, "screen": {"ownerNodeName": "b"}})), 4
+        )
+
+    def test_voice_note_context_terms_tolerates_a_missing_or_malformed_context(self) -> None:
+        for value in (None, {}, "not-a-dict", {"machine": "not-a-dict"}, {"screen": 5}):
+            with self.subTest(value=value):
+                self.assertEqual(_voice_note_context_terms(value), ())
 
     def test_local_ask_rejects_caller_supplied_telegram_recipient(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

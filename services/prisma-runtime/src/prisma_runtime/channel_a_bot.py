@@ -1231,7 +1231,13 @@ class ChannelAPairingDialogue:
             delivery = self._send(chat_id, VOICE_NOTE_DOWNLOAD_FAILED_REPLY)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_DOWNLOAD_FAILED, True, delivery)
         try:
-            transcript = self._transcribe(audio_bytes, mime_type)
+            # F7 (live test 2026-09-25): owner_id is this record's own
+            # already phone-to-owner-bound id -- the exact same one
+            # _handle_query is about to use next for this update -- passed
+            # as an optional hint the caller may use to bias the
+            # transcription prompt toward this owner's active machine/screen
+            # names (see local_presentation.channel_a_transcribe).
+            transcript = self._transcribe(audio_bytes, mime_type, owner_id=record.owner_id)
         except VoiceTranscriptionEmpty:
             delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
