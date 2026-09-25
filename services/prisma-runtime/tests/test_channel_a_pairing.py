@@ -981,6 +981,7 @@ class ChannelAPairingClockDisciplineTests(ChannelAPairingTestCase):
             ("human_touch", lambda: registry.human_touch(PHONE, link.generation)),
             ("warning_due", lambda: registry.warning_due(PHONE, link.generation)),
             ("due_warnings", lambda: registry.due_warnings()),
+            ("due_expirations", lambda: registry.due_expirations()),
             ("unlink_phone", lambda: registry.unlink_phone(PHONE, link.generation)),
             ("invalidate_owner", lambda: registry.invalidate_owner(OWNER)),
         )
