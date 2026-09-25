@@ -3119,6 +3119,23 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         with self.assertRaises(ChannelABotConfigInvalid):
             self.dialogue.enable_voice_notes(transcribe=None)
 
+    def test_enable_voice_notes_rejects_a_transport_missing_download_support(self):
+        class TextOnlyTransport(FakeTransport):
+            get_file = None
+            download_file = None
+
+        dialogue = self.build(transport=TextOnlyTransport())
+        dialogue.enable_queries(
+            read_context=self.sessions.capture_owner_context,
+            context_is_current=self.sessions.is_owner_context_current,
+            parse=self.parse,
+            freshness_bound=30.0,
+            max_question_bytes=4096,
+            max_answer_chars=4096,
+        )
+        with self.assertRaises(ChannelABotConfigInvalid):
+            dialogue.enable_voice_notes(transcribe=self.transcribe)
+
     def test_without_enable_voice_notes_a_voice_note_stays_ignored_and_is_never_downloaded(self):
         outcome = self.voice()
         self.assert_outcome(outcome, INGRESS_IGNORED_UNRELATED)
@@ -3196,6 +3213,16 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
     def test_a_provider_failure_replies_and_never_crashes(self):
         self.enable_voice_notes()
         self.transcribe_error = VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE")
+        outcome = self.voice()
+        self.assert_outcome(outcome, VOICE_NOTE_TRANSCRIPTION_FAILED, delivery=SEND_DELIVERED)
+        self.assertEqual(self.parses, [])
+
+    def test_an_unexpected_transcribe_exception_never_crashes_the_poll_loop(self):
+        """The injected transcribe callable is caller-built, not part of this
+        module's own closed error hierarchy: an unexpected raise must still
+        fail closed with a reply, never escape handle_update."""
+        self.enable_voice_notes()
+        self.transcribe_error = RuntimeError("unexpected")
         outcome = self.voice()
         self.assert_outcome(outcome, VOICE_NOTE_TRANSCRIPTION_FAILED, delivery=SEND_DELIVERED)
         self.assertEqual(self.parses, [])

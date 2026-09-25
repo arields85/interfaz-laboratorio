@@ -109,7 +109,6 @@ from .voice_transcription import (
     VoiceNoteTooLarge,
     VoiceNoteTooLong,
     VoiceTranscriptionEmpty,
-    VoiceTranscriptionError,
     validate_voice_note_duration,
     validate_voice_note_size,
 )
@@ -997,6 +996,10 @@ class ChannelAPairingDialogue:
                 raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
             if not callable(transcribe):
                 raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
+            if not callable(getattr(self.transport, "get_file", None)) or not callable(
+                getattr(self.transport, "download_file", None)
+            ):
+                raise ChannelABotConfigInvalid(PRISMA_CHANNEL_A_BOT_CONFIG_INVALID)
             self._transcribe = transcribe
 
     def binding_admitted(self, binding) -> bool:
@@ -1201,7 +1204,11 @@ class ChannelAPairingDialogue:
         except VoiceTranscriptionEmpty:
             delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
-        except VoiceTranscriptionError:
+        except Exception:
+            # Any other injected-transcribe failure -- VoiceTranscriptionError
+            # subtypes as well as an unexpected raise from the caller-built
+            # callable -- must still never crash the poll loop (user
+            # decision): fail closed with the same generic unavailable reply.
             delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
         return self._handle_query(update_id, actor_id, transcript)
