@@ -193,6 +193,10 @@ class TelegramDiagnosticsTests(unittest.TestCase):
             reservation=reservation if reservation is not None else BotIdentityReservation(),
         )
         bot.stop_event = ImmediateStopEvent()
+        # F6 (live test 2026-09-25): _typing spawns a real background thread
+        # that calls _call("sendChatAction", ...) -- this offline-guarded
+        # suite must never dispatch it unmocked.
+        bot._typing = Mock(return_value=None)
         return bot
 
     def prepared_bot(self, paired=None, offset=None, state_store=None, *, reservation=None):

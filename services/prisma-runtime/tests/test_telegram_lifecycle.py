@@ -329,13 +329,20 @@ class TelegramLifecycleTests(unittest.TestCase):
         install_offline_dispatch_guard(self)
 
     def build_bot(self, state=None, *, reservation=None):
-        return TelegramLocalBot(
+        bot = TelegramLocalBot(
             "secret-token",
             Mock(),
             MemoryStateStore(state),
             Mock(),
             reservation=reservation if reservation is not None else BotIdentityReservation(),
         )
+        # F6 (live test 2026-09-25): _typing spawns a real background thread
+        # that calls _call("sendChatAction", ...) -- this offline-guarded
+        # suite must never dispatch it unmocked. Dedicated typing-indicator
+        # tests (ChannelBTypingIndicatorTests) construct their own bot
+        # directly instead of using this helper.
+        bot._typing = Mock(return_value=None)
+        return bot
 
     def prepared_bot(self, state=None, *, reservation=None):
         bot = self.build_bot(state, reservation=reservation)
@@ -1319,6 +1326,7 @@ class ChannelBVoiceReplyTests(unittest.TestCase):
         bot.prepare()
         bot.snapshot_store.read = Mock(return_value=channel_b_snapshot())
         bot.send_message = Mock()
+        bot._typing = Mock(return_value=None)  # F6: see TelegramLifecycleTests.build_bot
         return bot
 
     def test_answer_triggers_exactly_one_voice_request_for_the_same_text_chat_and_question(self):
@@ -1536,6 +1544,7 @@ class ChannelBVoiceNoteQuestionTests(unittest.TestCase):
         bot.prepare()
         bot.snapshot_store.read = Mock(return_value=channel_b_snapshot())
         bot.send_message = Mock()
+        bot._typing = Mock(return_value=None)  # F6: see TelegramLifecycleTests.build_bot
         return bot
 
     def wire_download(self, bot, *, file_path="voice/file_1.oga", audio_chunks=(b"fake-ogg-audio",), get_file_error=None, download_error=None):
@@ -1697,6 +1706,7 @@ class ChannelBActiveScreenTests(unittest.TestCase):
         bot._call = identity_transport()
         bot.prepare()
         bot.send_message = Mock()
+        bot._typing = Mock(return_value=None)  # F6: see TelegramLifecycleTests.build_bot
         return bot
 
     def test_answers_from_the_active_screen_session_context(self):
@@ -1754,6 +1764,138 @@ class ChannelBActiveScreenTests(unittest.TestCase):
 
         bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 4, "text": "¿Cuál es el OEE?"})
 
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+
+
+class ChannelBTypingIndicatorTests(unittest.TestCase):
+    """Live test 2026-09-25 (F6): Channel B shows "typing…" while it
+    processes a question (text or voice note), non-blocking, and never
+    after its own text answer already went out -- same per-message
+    "answered" design as Channel A's PW-011 M5, reusing
+    channel_a_bot.send_chat_action_unless_answered directly instead of
+    duplicating the dispatch-skip decision."""
+
+    def setUp(self):
+        install_offline_dispatch_guard(self)
+
+    def build_bot(self, *, paired=True):
+        paired_ids = [7] if paired else []
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": paired_ids, "nextUpdateOffset": None, "migrationActive": False}}}
+        bot = TelegramLocalBot(
+            "secret-token", Mock(), MemoryStateStore(state), VoiceEventStore(),
+            reservation=BotIdentityReservation(), typing_enabled=True,
+        )
+        bot._call = identity_transport()
+        bot.prepare()
+        bot.snapshot_store.read = Mock(return_value=channel_b_snapshot())
+        bot.send_message = Mock()
+        return bot
+
+    def test_typing_is_disabled_by_default(self):
+        """F6: opt-in, defaulting to disabled -- every direct construction
+        elsewhere in this test suite (not through this class's own
+        typing_enabled=True build_bot) keeps its exact prior behavior."""
+        bot = TelegramLocalBot("secret-token", Mock(), MemoryStateStore(None), Mock())
+        self.assertIsNone(bot._typing(7))
+
+    def test_typing_spawns_a_background_dispatcher_using_the_shared_channel_a_helper(self):
+        bot = self.build_bot()
+        captured = {}
+
+        class CapturingThread:
+            def __init__(self, *, target, args=(), name=None, daemon=None):
+                captured["target"] = target
+                captured["args"] = args
+                captured["daemon"] = daemon
+
+            def start(self):
+                captured["started"] = True
+
+        with patch("prisma_runtime.local_presentation.threading.Thread", CapturingThread):
+            answered = bot._typing(7)
+
+        self.assertIsInstance(answered, threading.Event)
+        self.assertTrue(captured.get("started"))
+        self.assertTrue(captured.get("daemon"))
+        import prisma_runtime.channel_a_bot as channel_a_bot_module
+
+        self.assertIs(captured["target"], channel_a_bot_module.send_chat_action_unless_answered)
+        self.assertEqual(captured["args"][0], 7)
+        self.assertIs(captured["args"][1], answered)
+
+    def test_send_chat_action_calls_sendchataction(self):
+        bot = self.build_bot()
+        bot._call = Mock(return_value={"ok": True, "result": True})
+
+        bot._send_chat_action(7, "typing")
+
+        bot._call.assert_called_once_with("sendChatAction", timeout=5, data={"chat_id": 7, "action": "typing"})
+
+    def test_a_paired_text_question_starts_and_stops_typing_around_the_answer(self):
+        """Wiring-level proof, mirroring Channel A's own capture-the-worker
+        technique: the indicator is armed before the answer is produced and
+        marked answered right after send_message -- verified by running the
+        captured worker exactly as a very-late OS schedule would."""
+        bot = self.build_bot()
+        captured = {}
+
+        class CapturingThread:
+            def __init__(self, *, target, args=(), name=None, daemon=None):
+                captured["target"] = target
+                captured["args"] = args
+
+            def start(self):
+                pass
+
+        with patch("prisma_runtime.local_presentation.threading.Thread", CapturingThread), \
+                patch.object(bot, "_send_chat_action") as send_chat_action:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 4, "text": "¿Cuál es el OEE?"})
+
+        bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+        self.assertIn("target", captured)
+        # Run the captured worker exactly as a very-late scheduling would:
+        # the answer already went out, so no chat action must fire.
+        captured["target"](*captured["args"])
+        send_chat_action.assert_not_called()
+
+    def test_typing_still_fires_when_the_worker_runs_before_the_answer(self):
+        bot = self.build_bot()
+        captured = {}
+
+        class CapturingThread:
+            def __init__(self, *, target, args=(), name=None, daemon=None):
+                captured["target"] = target
+                captured["args"] = args
+
+            def start(self):
+                # Simulate the worker actually running before the answer.
+                captured["target"](*captured["args"])
+
+        with patch("prisma_runtime.local_presentation.threading.Thread", CapturingThread), \
+                patch.object(bot, "_send_chat_action") as send_chat_action:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 4, "text": "¿Cuál es el OEE?"})
+
+        send_chat_action.assert_called_once_with(chat_id=7, action="typing")
+
+    def test_typing_never_starts_for_an_unpaired_chat(self):
+        bot = self.build_bot(paired=False)
+        with patch.object(bot, "_typing") as typing:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 4, "text": "¿Cuál es el OEE?"})
+        typing.assert_not_called()
+        bot.send_message.assert_called_once_with(7, "Envíe /start para vincular este bot.")
+
+    def test_typing_wraps_voice_note_processing_too(self):
+        bot = self.build_bot()
+        with patch.object(bot, "_typing") as typing, \
+                patch.object(bot, "_transcribe_voice_note", return_value="¿Cuál es el OEE?") as transcribe:
+            bot._handle_message({
+                "chat": {"id": 7, "type": "private"},
+                "message_id": 4,
+                "voice": {"duration": 3, "file_id": "abc", "file_size": 1000},
+            })
+        typing.assert_called_once_with(7)
+        transcribe.assert_called_once()
+        typing.return_value.set.assert_called_once_with()
         bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
 
 

@@ -32,6 +32,7 @@ from .admin_auth import AdminAuthRepository, AdminAuthService, ScryptPasswordHas
 from .admin_http import AdminHttpBoundary
 from .bot_identity_reservation import process_bot_identity_reservation
 from .channel_a_activation import ChannelAActivation
+from .channel_a_bot import send_chat_action_unless_answered
 from .channel_a_configuration import ChannelAConfigurationStore
 from .channel_a_manager import ChannelAManager
 from .channel_a_pairing import OPAQUE_CHARS, PRISMA_CHANNEL_A_CONFLICT, ChannelAPairingConflict
@@ -624,7 +625,7 @@ class TelegramLocalBot:
     never overwrite a live lease.
     """
 
-    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None):
+    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None, typing_enabled=False):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
         # B1: both optional -- a bot built without them (e.g. build_telegram_
@@ -638,6 +639,13 @@ class TelegramLocalBot:
         # answering from the file-based snapshot_store it was built with. See
         # _active_snapshot.
         self.session_registry = session_registry
+        # F6 (live test 2026-09-25): opt-in, defaulting to disabled -- mirrors
+        # voice_url/local_http's own gating precedent above so every existing
+        # test that constructs a bot directly (not through the production
+        # factory) keeps its exact prior behavior with no per-test changes.
+        # The production factory (create_app) is the only caller that turns
+        # this on.
+        self.typing_enabled = typing_enabled
         self._channel_b_voice_lock = threading.Lock()
         # B1b (user decision): per-chat FIFO of pending voice notes (queued or
         # actively being synthesized), bounded by CHANNEL_B_VOICE_QUEUE_MAX_
@@ -728,6 +736,33 @@ class TelegramLocalBot:
         if self.stop_event.is_set():
             raise RuntimeError("TELEGRAM_UPDATE_CANCELLED")
         self._call("sendMessage", timeout=20, data={"chat_id": chat_id, "text": text})
+
+    def _send_chat_action(self, chat_id, action):
+        self._call("sendChatAction", timeout=5, data={"chat_id": chat_id, "action": action})
+
+    def _typing(self, chat_id) -> threading.Event | None:
+        """Live test 2026-09-25 (F6): best-effort "typing…" chat action
+        while Channel B processes a question (text or voice note),
+        non-blocking (own background daemon thread, this bot's own reused
+        ``self.session`` is safe for concurrent use), and never sent once
+        the answer for that message already went out. Reuses Channel A's
+        own PW-011 M5 dispatch-skip decision directly
+        (``channel_a_bot.send_chat_action_unless_answered``) instead of
+        duplicating it -- same per-message ``threading.Event`` contract:
+        the caller sets it right after its own answer send completes.
+        Opt-in via ``self.typing_enabled`` (see __init__) -- ``None`` when
+        disabled, same as when a transport has no chat-action method at
+        all."""
+        if not self.typing_enabled:
+            return None
+        answered = threading.Event()
+        threading.Thread(
+            target=send_chat_action_unless_answered,
+            args=(chat_id, answered, self._send_chat_action),
+            name="PrismaChannelBTypingIndicator",
+            daemon=True,
+        ).start()
+        return answered
 
     def _load_state(self):
         value = self.state_store.read()
@@ -889,21 +924,31 @@ class TelegramLocalBot:
             else: self.send_message(chat_id, "Este bot ya está vinculado a otro chat.")
             return
         if chat_id not in paired: self.send_message(chat_id, "Envíe /start para vincular este bot."); return
-        # PW-013: a voice note is only ever routed to the ordinary answer
-        # path below, exactly like typed text -- authorization (the pairing
-        # check above) already ran before this point, and nothing is
-        # downloaded for an unpaired chat.
-        if has_voice:
-            transcript = self._transcribe_voice_note(chat_id, message.get("message_id"), voice)
-            if transcript is None:
-                return
-            text = transcript
-        if command.startswith("/status"):
-            snapshot = self._active_snapshot(); self.send_message(chat_id, f"Prisma está activa. Última actualización de datos: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
-        if command.startswith("/help"):
-            self.send_message(chat_id, "Puede consultar lote, producto, orden, cliente, OEE, estado, actividad, potencia, progreso, tiempo restante, alertas o pedir un resumen."); return
-        answer = answer_from_snapshot(self._active_snapshot(), text); self.send_message(chat_id, answer.answer_text)
-        self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
+        # Live test 2026-09-25 (F6): "typing…" while this paired chat's
+        # question (text or voice note) is processed, non-blocking, marked
+        # answered in `finally` right after the reply for this exact
+        # message is sent -- whether or not it actually sent anything, same
+        # per-message contract as Channel A's own PW-011 M5 `_typing`.
+        answered = self._typing(chat_id)
+        try:
+            # PW-013: a voice note is only ever routed to the ordinary
+            # answer path below, exactly like typed text -- authorization
+            # (the pairing check above) already ran before this point, and
+            # nothing is downloaded for an unpaired chat.
+            if has_voice:
+                transcript = self._transcribe_voice_note(chat_id, message.get("message_id"), voice)
+                if transcript is None:
+                    return
+                text = transcript
+            if command.startswith("/status"):
+                snapshot = self._active_snapshot(); self.send_message(chat_id, f"Prisma está activa. Última actualización de datos: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
+            if command.startswith("/help"):
+                self.send_message(chat_id, "Puede consultar lote, producto, orden, cliente, OEE, estado, actividad, potencia, progreso, tiempo restante, alertas o pedir un resumen."); return
+            answer = answer_from_snapshot(self._active_snapshot(), text); self.send_message(chat_id, answer.answer_text)
+            self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
+        finally:
+            if answered is not None:
+                answered.set()
 
     def _transcribe_voice_note(self, chat_id, message_id, voice):
         """Download and transcribe one voice-note question (PW-013).
@@ -1251,6 +1296,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 lambda token: TelegramLocalBot(
                     token, snapshot_store, state_store, voice_events, reservation=identity_reservation,
                     voice_url=voice_url, local_http=local_http, session_registry=session_registry,
+                    typing_enabled=True,
                 ),
             )
 

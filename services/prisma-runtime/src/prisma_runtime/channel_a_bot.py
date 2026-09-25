@@ -692,6 +692,28 @@ def _unlink_reply_keyboard() -> dict:
     }
 
 
+def send_chat_action_unless_answered(chat_id, answered, send, *, action="typing") -> None:
+    """Shared PW-011 M5 / live-test-2026-09-25 F6 dispatch check.
+
+    Skips ``send`` once the caller's own per-message ``answered`` signal is
+    already set, so a best-effort "typing…" (or other) chat action can never
+    visibly arrive at the phone after its answer already did. This is the
+    exact decision ``ChannelAPairingDialogue._send_typing_unless_answered``
+    used before PW-011 M5 introduced it (kept there as a thin delegating
+    staticmethod for its own existing tests); Channel B's own typing
+    indicator (``local_presentation.TelegramLocalBot._typing``) reuses this
+    same function directly instead of duplicating the check. Never blocks
+    or fails the caller: any exception ``send`` raises is silently
+    swallowed -- this is UX feedback, not a delivery contract.
+    """
+    if answered.is_set():
+        return
+    try:
+        send(chat_id=chat_id, action=action)
+    except Exception:
+        pass
+
+
 def _remove_reply_keyboard() -> dict:
     """Remove any reply keyboard (T3): sent on every path that unlinks."""
     return {"remove_keyboard": True}
@@ -1775,13 +1797,11 @@ class ChannelAPairingDialogue:
         """The actual dispatch check (PW-011 M5), split out from ``_typing``'s
         thread-spawning wrapper so a test can call it directly -- exercising
         the skip/send decision deterministically, without racing a real
-        background thread against a real answer send."""
-        if answered.is_set():
-            return
-        try:
-            send(chat_id=chat_id, action="typing")
-        except Exception:
-            pass
+        background thread against a real answer send. Delegates to the
+        shared module-level ``send_chat_action_unless_answered`` (live test
+        2026-09-25, F6) -- kept as a staticmethod here only so this class's
+        own existing tests, which call it via the class, keep working."""
+        send_chat_action_unless_answered(chat_id, answered, send)
 
     def _set_unlink_menu(self, chat_id) -> None:
         """Best-effort, fire-and-forget Telegram menu entry for this chat (T14).

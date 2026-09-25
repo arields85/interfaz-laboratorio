@@ -67,6 +67,19 @@ class TelegramOptInTests(unittest.TestCase):
             bot = manager.bot_factory("some-token")
         self.assertIs(bot.session_registry, app.config["session_registry"])
 
+    def test_production_factory_enables_the_channel_b_typing_indicator(self) -> None:
+        """Live test 2026-09-25 (F6): the production TelegramLifecycleManager
+        factory must turn typing_enabled on, mirroring the session_registry
+        wiring test above -- every direct test construction elsewhere keeps
+        its default (disabled) unless it opts in explicitly."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["telegram_manager"]
+            bot = manager.bot_factory("some-token")
+        self.assertTrue(bot.typing_enabled)
+
     def test_production_factory_wires_transcribe_for_channel_a(self) -> None:
         """PW-013: the production ChannelAManager activation factory (built
         by create_app) must thread a real transcribe callable into every
