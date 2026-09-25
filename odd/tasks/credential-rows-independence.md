@@ -222,3 +222,53 @@ Final F5 strings (verbatim, before the blinking caret's trailing `_`):
 
 Commits (work units): `26e95ce` (hook, T1), `d7bbd4e` (component, T2+T3+T4),
 `b47b1b3` (component, GGA double-submit fix).
+
+## Second coordinator correction (2026-09-25, same day)
+
+The coordinator withdrew the "Probar" wording as a mistake: there is no
+separate test action, Verificar is the only such control. Final F5 set,
+uniform across all three rows: **"Guardando credencial_"**,
+**"Verificando credencial_"**, **"Borrando credencial_"**.
+
+Also required: compare the boot shield's actual short-profile caret (the
+real viewer->builder "CARGANDO_" mechanism, `index.html` /
+`useBootShield.ts`) against `.widget-runtime-state-caret`'s blink
+timing/shape, and either extract a shared class or state the identity with
+evidence. Read both CSS blocks in full:
+
+```css
+/* index.html, [data-hmi-shield-short-caret]'s blink component */
+@keyframes short-caret-blink {
+  0%, 49% { color: var(--hmi-shield-ink); }
+  50%, 100% { color: var(--color-industrial-bg, #05070a); }
+}
+/* animation: ..., short-caret-blink 0.6s steps(1) var(--hmi-shield-short-caret-blink-delay) infinite; */
+
+/* index.css, .widget-runtime-state-caret */
+@keyframes widget-runtime-state-caret-blink {
+  0%, 49% { color: var(--color-industrial-muted); }
+  50%, 100% { color: var(--color-industrial-bg); }
+}
+/* animation: widget-runtime-state-caret-blink 0.6s steps(1) infinite; */
+```
+
+**Verdict**: the blink TIMING/SHAPE is identical (0.6s, `steps(1)` hard cut,
+same 0%/49%/50%/100% duty split, infinite). The only differences are (a) the
+shield's blink starts after a 620ms delay because it is sequenced behind
+that profile's own typewriter reveal (`short-caret-move`/`short-caret-idle`,
+absolute-positioned to walk across text as it "types") -- choreography this
+plain inline row caret has no use for; and (b) the "on" color token
+(`--hmi-shield-ink` vs `--color-industrial-muted`, each correct for its own
+context). Kept `.widget-runtime-state-caret` (already the same shape/timing)
+instead of extracting a new shared class -- the shield's markup/CSS must
+render before any app CSS loads and stays untouched in `index.html` /
+`useBootShield.ts`. Evidence recorded inline above `ResultDisplay` in
+`VoiceCredentialSettings.tsx`.
+
+RED: 2 tests failed (`Received: Probando voz_` / `Probando bot_` vs expected
+`Verificando credencial_`) before collapsing `SAVE_DELETE_PROGRESS_TEXT`/
+`verifyProgressText` into one uniform `ACTION_PROGRESS_TEXT` record covering
+saving/verifying/deleting. GREEN: 99/99 component tests. Full suite: 221
+files / 2571 tests pass; `tsc -b` clean; `lint` clean. Commit `e719e9f` (GGA
+PASSED, one optional non-blocking note about `progressKindFromPendingAction`
+parsing the hook's action-string prefix instead of a typed field).
