@@ -135,6 +135,52 @@ class LocalPresentationTests(unittest.TestCase):
 
         local_presentation_module._fire_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "cap-one")  # must not raise
 
+    def test_fire_voice_prefetch_logs_a_warning_on_a_non_ok_response(self) -> None:
+        """voice-overlap follow-up: bursts of 401 on the voice process's
+        prefetch route (2026-09-25 live evidence) previously left no
+        application-level trace at all -- only the bare access-log line.
+        No exception here (no retry, matching the confirmed absence of any
+        retry loop in this fire-and-forget helper); a non-2xx response is
+        logged once, by reason/status only, never the event id or token."""
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        local_http = Mock()
+        local_http.post.return_value = Mock(ok=False, status_code=401)
+
+        with self.assertLogs(local_presentation_module._logger, level="WARNING") as observed:
+            local_presentation_module._fire_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "cap-one")
+
+        rejection_lines = [line for line in observed.output if "prefetch rejected" in line]
+        self.assertEqual(len(rejection_lines), 1)
+        self.assertIn("401", rejection_lines[0])
+        self.assertTrue(rejection_lines[0].startswith("WARNING:"))
+        self.assertNotIn("event-one", rejection_lines[0])
+        self.assertNotIn("cap-one", rejection_lines[0])
+
+    def test_fire_voice_prefetch_logs_a_warning_on_an_exception(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        local_http = Mock()
+        local_http.post.side_effect = requests.RequestException("boom")
+
+        with self.assertLogs(local_presentation_module._logger, level="WARNING") as observed:
+            local_presentation_module._fire_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "cap-one")
+
+        rejection_lines = [line for line in observed.output if "prefetch rejected" in line]
+        self.assertEqual(len(rejection_lines), 1)
+        self.assertIn("RequestException", rejection_lines[0])
+        self.assertNotIn("event-one", rejection_lines[0])
+        self.assertNotIn("cap-one", rejection_lines[0])
+
+    def test_fire_voice_prefetch_never_logs_on_a_successful_response(self) -> None:
+        import prisma_runtime.local_presentation as local_presentation_module
+
+        local_http = Mock()
+        local_http.post.return_value = Mock(ok=True, status_code=200)
+
+        with self.assertNoLogs(local_presentation_module._logger, level="WARNING"):
+            local_presentation_module._fire_voice_prefetch(local_http, "http://127.0.0.1:5056", "event-one", "cap-one")
+
     def test_fire_channel_a_voice_prefetch_starts_a_background_thread(self) -> None:
         """T13 unit (b): reuses _fire_voice_prefetch's own transport/route on
         its own background thread, never inline, never blocking the caller

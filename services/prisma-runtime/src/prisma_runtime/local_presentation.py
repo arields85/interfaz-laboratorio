@@ -257,16 +257,29 @@ def _fire_voice_prefetch(local_http: requests.Session, voice_url: str, event_id:
     a slow or failed prefetch degrades back to the pre-T10 behavior (the
     browser's own request starts generation, same as before) and must never
     affect the /local/ask response that already returned by the time this
-    runs."""
+    runs.
+
+    voice-overlap follow-up (2026-09-25 live evidence): bursts of 401 on
+    this route previously left no application-level trace at all -- only
+    Werkzeug's bare access-log line, with no reason. This never retries (a
+    fire-and-forget prefetch degrading back to the pre-T10 poll-then-POST
+    behavior on ANY failure, exactly as documented above, is already the
+    correct trade-off here -- retrying a 401 would not help, since a prefetch
+    token is only ever attempted once and is not the kind of transient
+    failure a retry fixes); it now logs (WARNING, no event id, no
+    capability/token) so the next occurrence carries the actual reason.
+    """
     try:
-        local_http.post(
+        response = local_http.post(
             f"{voice_url}/internal/prisma/prefetch",
             json={"eventId": event_id},
             headers={CAPABILITY_HEADER: capability},
             timeout=3,
         )
-    except Exception:
-        pass
+        if not response.ok:
+            _logger.warning("Prisma voice prefetch rejected: status=%s", response.status_code)
+    except Exception as error:
+        _logger.warning("Prisma voice prefetch rejected: reason=%s", type(error).__name__)
 
 
 def _fire_channel_b_voice_reply(local_http: requests.Session, voice_url: str, token: str) -> None:
