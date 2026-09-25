@@ -15,6 +15,13 @@ follow-up):
 4. **M4** — runtime timing logs at WARNING level, without losing `HMI voice timeline:` lines.
 5. **M5** — Telegram typing action may arrive after the answer.
 
+**2026-09-24 follow-up — user decisions received for M3 and M5** (both were reported, not fixed,
+in the first pass below): the user explicitly authorized (M3) building the periodic Channel A
+sweep now, covering both the inactivity-warning wiring and idle-expiry cleanup, and (M5) stopping
+the typing indicator once the answer for that message has already been sent, via per-message state
+checked deterministically. Both are now implemented; see the updated M3/M5 entries and the
+"2026-09-24 follow-up" sections below. The original report text is kept for the record.
+
 ## TDD
 
 Strict TDD: enabled (source: session/global orchestrator config).
@@ -84,8 +91,60 @@ PW-011). hmi-app: 221 files / 2532 tests, `tsc -b` clean, `npm run lint` clean.
     hmi-app suite — 221 files / 2532 tests OK. `npx tsc -b` clean. `npm run lint` clean.
   - **Commit:** `d76a871`.
 
-- [ ] **M3 — Channel A inactivity expiry leaves the Telegram menu/keyboard.** Reported, not fixed —
-  larger than a follow-up. See report below.
+- [x] **M3 — Channel A inactivity expiry leaves the Telegram menu/keyboard.** Originally reported
+  (see report below); user decision 2026-09-24: build the periodic sweep now, both the warning
+  wiring and expiry cleanup. Route: delegated direct (3 non-trivial files across registry/bot/
+  activation layers, each with its own tests). Fixed.
+  - **Registry (`channel_a_pairing.py`).** New `due_expirations()`, mirroring `due_warnings()`'s own
+    shape: under the lock, purge and return a snapshot of every link released by idle expiry THIS
+    call. `_purge_locked` gained an internal `collect_expired_links` flag (default `False`, every
+    other call site unchanged) so the existing purge logic isn't duplicated. Must run BEFORE
+    `due_warnings()` in the same sweep tick, or `due_warnings()`'s own purge silently drops the link
+    first (proven by the pre-existing `test_due_warnings_is_empty_at_expiry_and_purges_the_link`).
+    New `ChannelAPairingExpirySweepTests` (8 tests) plus `due_expirations` added to the exhaustive
+    regressing-clock coverage test. RED confirmed (`AttributeError: no attribute 'due_expirations'`).
+  - **Bot (`channel_a_bot.py`).** New `send_expiry_cleanup()` + `_cleanup_one()`, mirroring
+    `send_inactivity_warnings()`/`_warn_one()`'s own synchronous, no-own-loop contract. Reuses the
+    exact effects `_link_action`'s explicit "Desvincular" branch already uses: `_remove_reply_keyboard()`
+    on the notice send, `_clear_unlink_menu()` for the T14 per-chat command/button, `_forget_claims_for_owner()`
+    and `_purge_actions()` for the local index. New `ExpiryCleanupOutcome` dataclass. New
+    `ChannelAExpiryCleanupSweepTests` (9 tests), all GREEN on first implementation after RED
+    (`ImportError: cannot import name 'COPY_EXPIRED'`).
+  - **Activation (`channel_a_activation.py`).** `ChannelAActivation` now arms a self-rescheduling
+    `Timer` (`CHANNEL_A_SWEEP_INTERVAL_SECONDS = 30.0`) on a successful `start()`, calling
+    `send_expiry_cleanup()` then `send_inactivity_warnings()` on the live dialogue each tick, and
+    disarms it in `stop()` before withdrawing the dialogue/registry. Injectable `sweep_timer_factory`
+    (defaults to real `threading.Timer`), mirroring `ChannelAManager`'s own backoff-retry Timer
+    pattern exactly (including never running Telegram effects under the pairing registry's own
+    domain lock). New `ChannelAActivationSweepSchedulerTests` (7 tests) in `test_channel_a_activation.py`,
+    using a `FakeSweepTimerFactory` test double (mirrors `channel_a_manager.py`'s own
+    `FakeRetryTimer`/`FakeTimerFactory`) injected into every activation this offline test module
+    builds, so no test starts a real background thread. RED confirmed
+    (`TypeError: unexpected keyword argument 'sweep_timer_factory'` /
+    `ImportError: cannot import name 'CHANNEL_A_SWEEP_INTERVAL_SECONDS'`).
+  - **Docstrings updated** (per instruction): `channel_a_bot.py`'s module docstring no longer lists
+    "the scheduler that invokes the warning sweep" as deliberately absent, and now names
+    `ChannelAActivation`'s periodic sweep as the real caller; `send_inactivity_warnings()`'s own
+    docstring no longer says "a future RCA-5 scheduler calls this," naming the actual caller and
+    ordering (`send_expiry_cleanup` first) instead.
+  - **New user-facing Spanish (usted), verbatim:** `COPY_EXPIRED = "Esta vinculación se cerró por
+    inactividad."` — sent once, to the phone, in place of the previously completely silent release,
+    with the reply keyboard removed on the same message. Deliberately distinct from `COPY_UNLINKED`
+    ("Este teléfono quedó desvinculado.") since this was never an explicit tap.
+  - **Regression found and fixed during this pass:** `test_channel_a_delivery_authority.py` globally
+    patches `threading.Thread.start` to refuse (an offline-dispatch guard) and constructs a real
+    `ChannelAActivation` whose fake runner's `start()` returns `True` — since `threading.Timer.start()`
+    calls the inherited `Thread.start()`, the new scheduler broke 26 of that file's 36 tests the
+    first time the full suite ran (they passed in isolation runs that didn't include this file).
+    Fixed by injecting an inert `sweep_timer_factory` there too, matching the other two test files.
+  - **Checks:** `tests.test_channel_a_pairing` — 67 OK. `tests.test_channel_a_bot` — 222 OK.
+    `tests.test_channel_a_activation` — 39 OK. `tests.test_channel_a_delivery_authority` — 36 OK.
+    Full prisma-runtime suite — 1562 tests (was 1534 before this follow-up), same 2 pre-existing
+    environmental failures, no new failures.
+  - **Commits:** `a6179e0` (registry `due_expirations()`), `66c3216` (review follow-up: cover
+    `due_expirations` in the regressing-clock test), `16f9971` (bot `send_expiry_cleanup()`),
+    `7ba2c78` (activation scheduler + docstrings + delivery-authority test fix).
+  - Original report (needs-a-decision framing, now resolved) kept below for the record.
 
 - [x] **M4 — routine timing logs at WARNING level.** Route: inline, one file family at a time
   (mechanical, same pattern repeated; no design decision). Fix now.
@@ -135,12 +194,47 @@ PW-011). hmi-app: 221 files / 2532 tests, `tsc -b` clean, `npm run lint` clean.
     commit, just not cleanly isolated for that one file pair), `0930989` (the other four files),
     `47c7f8e` (stale-comment follow-up caught by the pre-commit review).
 
-- [ ] **M5 — typing action may arrive after the answer.** Reported, not fixed — see report below.
+- [x] **M5 — typing action may arrive after the answer.** Originally reported (see report below);
+  user decision 2026-09-24: stop the indicator once the answer for that message is already sent,
+  via per-message state, tested deterministically (inject dispatch points, not thread timing). Route:
+  inline (one file, `channel_a_bot.py`). Fixed.
+  - **Design.** `_typing()` now returns a per-message `threading.Event` ("answered") instead of
+    `None`. Its background worker's actual dispatch logic was split into a new
+    `_send_typing_unless_answered(chat_id, answered, send)` static method — directly callable, no
+    thread — which checks `answered.is_set()` immediately before calling `send_chat_action` and
+    skips the call once it is set. `_handle_query` captures the returned event and calls
+    `.set()` in a `finally` right after `self.query.handle_query(...)` returns, whether or not an
+    answer was actually sent (once query handling is done, "typing…" no longer means anything).
+    T13's non-blocking latency win is unchanged: the worker still runs on its own background
+    thread; the event is a plain flag, never awaited by the caller.
+  - **TDD.** New direct tests on `_send_typing_unless_answered` (skip-when-answered, send-when-not,
+    swallows-a-failure) — fully deterministic, no thread. New wiring-level test that captures the
+    background worker (patches `threading.Thread` to record its target instead of starting it), runs
+    a full query to completion, then invokes the captured worker exactly as a very-late OS schedule
+    would — asserts no chat action fired. RED confirmed for all four
+    (`AttributeError: no attribute '_send_typing_unless_answered'` / an unfixed capture test failing
+    with a chat action present when none was expected).
+  - **Existing-test fallout (expected, not a regression):** three pre-existing tests
+    (`test_typing_indicator_is_sent_without_blocking_the_answer`,
+    `test_typing_indicator_never_delays_the_answer`,
+    `test_typing_indicator_failure_never_blocks_or_fails_the_answer`) asserted the indicator always
+    arrives, relying on real (unsynchronized) thread scheduling — a guarantee the new skip check
+    deliberately removes for a fast-enough answer. Rewrote all three using `parse_hook`-based
+    sequencing (an existing test seam: a hook run synchronously inside `handle_query`'s own parse
+    step) to block answer completion until the real background worker has verifiably passed its
+    "already answered" check, so they still deterministically prove delivery and non-blocking
+    behavior on the path where typing legitimately fires first — reproducible on any platform/timing,
+    not dependent on this machine's own thread-scheduling behavior. Removed the now-unused
+    `_wait_for_chat_action` polling helper.
+  - **Checks:** `tests.test_channel_a_bot` — 222 OK (run 5x back to back, no flake). Full
+    prisma-runtime suite — 1562 tests, same 2 pre-existing environmental failures, no new failures.
+  - **Commit:** `2ccddef`.
+  - Original report (needs-a-decision framing, now resolved) kept below for the record.
 
 ## Verification (final, all items)
 
-- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — 1534 tests, 2 pre-existing environmental failures (same as baseline), no new failures.
-- `cd hmi-app && npx vitest run` — 221 files / 2532 tests OK. `npx tsc -b` clean. `npm run lint` clean.
+- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — 1562 tests, 2 pre-existing environmental failures (same as baseline; `test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference` and `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`, both expecting a worktree-local `.venv\Scripts\python.exe` this worktree doesn't have), no new failures.
+- `cd hmi-app && npx vitest run` — 221 files / 2532 tests OK. `npx tsc -b` clean. `npm run lint` clean. (hmi-app untouched in this follow-up; re-verified unchanged.)
 
 ## M3 report (needs a product/scope decision)
 
