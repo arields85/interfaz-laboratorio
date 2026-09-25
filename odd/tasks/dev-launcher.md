@@ -41,20 +41,42 @@ Strict TDD, per session configuration ("Strict TDD Mode: enabled").
   `npm run dev`). TDD does not apply; verified instead by careful static review plus the
   deployment/build exclusion grep below.
 
+## Mid-cycle user decision (2026-09-24)
+
+Instead of opening the user's default Chrome, the launcher must open a dedicated CONTROL Chrome:
+its own profile (`--user-data-dir`, default `%LOCALAPPDATA%\CoreAnalytics\ChromeControl`), a
+localhost-only remote debugging port (default `9222`), `--no-first-run`,
+`--no-default-browser-check`, and the HMI URL. Rationale (also documented in the README): Chrome
+136+ ignores `--remote-debugging-port` entirely on the *default* user-data-dir, so a dedicated
+profile is required, not optional; a separate profile also means tooling never touches the user's
+personal Chrome profile/history. `createBrowserOpener` (L2) was redesigned to spawn `chrome.exe`
+directly (never through `cmd /c start`) so a `--user-data-dir` value containing spaces (the
+default does) needs no manual quoting and can never silently fall back to the default profile the
+way an incorrectly quoted `cmd /c start` invocation could. Chrome path, user-data-dir and debug
+port are configurable via `PRISMA_DEV_CHROME_PATH` / `PRISMA_DEV_CHROME_USER_DATA_DIR` /
+`PRISMA_DEV_CHROME_DEBUG_PORT`, defaulting from `%ProgramFiles%`/`%LOCALAPPDATA%` (no
+machine-specific absolute path in the repo). A new standalone `tools/dev-launcher/` script opens
+only the control Chrome on the HMI URL (for when the dev server is already running), importing
+`createBrowserOpener` from `hmi-app/scripts/dev.mjs` so the argument-building logic is shared, not
+duplicated. TDD: `createBrowserOpener`'s tests were rewritten first (RED), then reimplemented.
+
 ## Tasks
 
 - [x] L1 — `tools/dev-launcher/CoreAnalytics.cmd` (path derived from `%~dp0`, no hardcoded
       absolute path, master-key env var kept as a default), `tools/dev-launcher/README.md`
       (English), `.gitattributes` marking the folder `export-ignore`; grep evidence that nothing
       in the hmi-app Vite build or Prisma's own bootstrap/packaging scripts references
-      `tools/dev-launcher`.
+      `tools/dev-launcher`. Plus (mid-cycle decision) `tools/dev-launcher/open-control-chrome.mjs`
+      + `OpenControlChrome.cmd`, a standalone control-Chrome-only opener sharing
+      `createBrowserOpener` from `dev.mjs`.
 - [x] L2 — `dev.mjs` gains an opt-in readiness-triggered browser open: Prisma settling (already
       ordered before Vite spawns) + an HTTP poll of the Vite dev server URL, raced against Vite
-      exiting early; opens via the same `cmd /c start "" chrome.exe <url>` semantics as today,
-      with the browser command/spawn and URL injectable for tests; on timeout or Vite exiting
-      first, warns instead of opening. TDD: new vitest cases first (RED), then implementation.
-      Opt-in is the `PRISMA_DEV_AUTO_OPEN=1` env var (not a CLI flag, to avoid colliding with
-      Vite's own built-in `--open`). Done, commit pending below.
+      exiting early; opens the dedicated CONTROL Chrome (mid-cycle decision above), with the
+      browser command/spawn and URL injectable for tests; on timeout or Vite exiting first, warns
+      instead of opening. TDD: new vitest cases first (RED), then implementation; redone in a
+      second RED/GREEN round for the control-Chrome redesign. Opt-in is the
+      `PRISMA_DEV_AUTO_OPEN=1` env var (not a CLI flag, to avoid colliding with Vite's own
+      built-in `--open`).
 - [x] L3 — `console-progress.ps1`'s interactive animation becomes a `| / - \` spinner glyph before
       the label, orange (ANSI truecolor `38;2;255;140;0` when VT is supported, detected once at
       dot-source time via a `kernel32.dll` `GetConsoleMode`/`SetConsoleMode` P/Invoke helper;
@@ -80,6 +102,7 @@ Strict TDD, per session configuration ("Strict TDD Mode: enabled").
 
 | Task | RED evidence | GREEN / checks | Commit |
 |---|---|---|---|
+| L2 | 11 new vitest cases RED (import/undefined failures) | vitest 221 files/2543 tests, tsc clean, lint clean | `320da6e` |
+| L3 | 3 new/rewritten cases RED (old dot-based text, no ANSI) | python unittest 1533 tests, same 2 known env failures + 2 known skipped | `8fae16c` |
+| L2 (control Chrome redesign) | 3 rewritten vitest cases RED (old `cmd start`/`chrome.exe` args) | vitest 221 files/2544 tests, tsc clean, lint clean | pending |
 | L1 | n/a (no test harness for batch scripts) | grep evidence, static review | pending |
-| L2 | 11 new vitest cases RED (import/undefined failures) | vitest 221 files/2543 tests, tsc clean, lint clean | pending |
-| L3 | 3 new/rewritten cases RED (old dot-based text, no ANSI) | python unittest 1533 tests, same 2 known env failures + 2 known skipped | pending |

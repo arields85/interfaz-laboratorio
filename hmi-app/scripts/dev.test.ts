@@ -807,49 +807,111 @@ describe('createServerReadinessWaiter', () => {
   })
 })
 
-describe('createBrowserOpener', () => {
-  it('opens the browser with the same "start" semantics as the previous desktop launcher', () => {
+// User decision (2026-09-24): open a dedicated CONTROL Chrome instead of the user's default
+// Chrome. Its own profile (--user-data-dir) plus a localhost-only remote-debugging port let
+// tooling attach without ever touching the user's personal Chrome profile or its cookies/history
+// -- and Chrome 136+ ignores --remote-debugging-port entirely on the DEFAULT user-data-dir, so a
+// dedicated profile is not optional. Spawned directly (never through `cmd /c start`): Node's
+// spawn (shell:false) passes each argv element to CreateProcess verbatim, so a --user-data-dir
+// value containing spaces needs no manual quoting and cannot fall back to the default profile the
+// way an unquoted `cmd start` invocation would.
+describe('createBrowserOpener (control Chrome)', () => {
+  it('spawns the control Chrome directly with its own profile, a localhost-only debug port, and the HMI URL', () => {
     const spawn = vi.fn(() => ({}))
     const log = vi.fn()
-    const opener = createBrowserOpener({ spawn, platform: 'win32', log })
+    const opener = createBrowserOpener({
+      spawn,
+      platform: 'win32',
+      log,
+      env: {},
+      chromeExecutable: String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+      userDataDir: String.raw`C:\Users\Ariel De Simone\AppData\Local\CoreAnalytics\ChromeControl`,
+      remoteDebuggingPort: '9222',
+    })
 
-    opener.open('http://127.0.0.1:5173')
+    opener.open('http://127.0.0.1:5173/')
 
     expect(spawn).toHaveBeenCalledWith(
-      'cmd.exe',
-      ['/c', 'start', '""', 'chrome.exe', 'http://127.0.0.1:5173'],
+      String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+      [
+        String.raw`--user-data-dir=C:\Users\Ariel De Simone\AppData\Local\CoreAnalytics\ChromeControl`,
+        '--remote-debugging-port=9222',
+        '--remote-debugging-address=127.0.0.1',
+        '--no-first-run',
+        '--no-default-browser-check',
+        'http://127.0.0.1:5173/',
+      ],
       expect.objectContaining({ shell: false }),
     )
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:5173'))
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:5173/'))
   })
 
-  it('uses an injected browser executable instead of the chrome.exe default', () => {
+  it('reads the Chrome path, profile directory and debug port from env vars when not explicitly injected', () => {
     const spawn = vi.fn(() => ({}))
-    const opener = createBrowserOpener({ spawn, platform: 'win32', browserExecutable: 'msedge.exe' })
+    const opener = createBrowserOpener({
+      spawn,
+      platform: 'win32',
+      env: {
+        PRISMA_DEV_CHROME_PATH: String.raw`D:\Apps\Chrome\chrome.exe`,
+        PRISMA_DEV_CHROME_USER_DATA_DIR: String.raw`D:\ChromeControlProfile`,
+        PRISMA_DEV_CHROME_DEBUG_PORT: '9333',
+      },
+    })
 
-    opener.open('http://127.0.0.1:5173')
+    opener.open('http://127.0.0.1:5173/')
 
-    expect(spawn).toHaveBeenCalledWith('cmd.exe', expect.arrayContaining(['msedge.exe']), expect.anything())
+    expect(spawn).toHaveBeenCalledWith(
+      String.raw`D:\Apps\Chrome\chrome.exe`,
+      expect.arrayContaining([
+        String.raw`--user-data-dir=D:\ChromeControlProfile`,
+        '--remote-debugging-port=9333',
+      ]),
+      expect.anything(),
+    )
+  })
+
+  it('defaults the Chrome path and profile directory from standard Windows env vars, never a hardcoded absolute path', () => {
+    const spawn = vi.fn(() => ({}))
+    const opener = createBrowserOpener({
+      spawn,
+      platform: 'win32',
+      env: {
+        ProgramFiles: String.raw`C:\Program Files`,
+        LOCALAPPDATA: String.raw`C:\Users\someone\AppData\Local`,
+      },
+    })
+
+    opener.open('http://127.0.0.1:5173/')
+
+    expect(spawn).toHaveBeenCalledWith(
+      String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+      expect.arrayContaining([
+        String.raw`--user-data-dir=C:\Users\someone\AppData\Local\CoreAnalytics\ChromeControl`,
+        '--remote-debugging-port=9222',
+        '--remote-debugging-address=127.0.0.1',
+      ]),
+      expect.anything(),
+    )
   })
 
   it('warns without spawning anything on non-Windows platforms', () => {
     const spawn = vi.fn()
     const warn = vi.fn()
-    const opener = createBrowserOpener({ spawn, platform: 'linux', warn })
+    const opener = createBrowserOpener({ spawn, platform: 'linux', warn, env: {} })
 
-    opener.open('http://127.0.0.1:5173')
+    opener.open('http://127.0.0.1:5173/')
 
     expect(spawn).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Windows'))
   })
 
-  it('warns instead of throwing when spawning the browser fails', () => {
-    const spawn = vi.fn(() => { throw new Error('spawn EPERM') })
+  it('warns instead of throwing when spawning the control Chrome fails', () => {
+    const spawn = vi.fn(() => { throw new Error('spawn ENOENT') })
     const warn = vi.fn()
-    const opener = createBrowserOpener({ spawn, platform: 'win32', warn })
+    const opener = createBrowserOpener({ spawn, platform: 'win32', warn, env: {} })
 
-    expect(() => opener.open('http://127.0.0.1:5173')).not.toThrow()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('spawn EPERM'))
+    expect(() => opener.open('http://127.0.0.1:5173/')).not.toThrow()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('spawn ENOENT'))
   })
 })
 

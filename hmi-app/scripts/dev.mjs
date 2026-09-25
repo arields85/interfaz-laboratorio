@@ -323,15 +323,61 @@ export function createServerReadinessWaiter({
   }
 }
 
-// L2: same "start '' chrome.exe URL" semantics as the previous desktop launcher (`cmd`'s `start`
-// builtin, detached from this process so closing the terminal never closes the browser).
+// User decision (2026-09-24): open a dedicated CONTROL Chrome instance -- its own profile
+// (--user-data-dir), never the user's default Chrome profile -- with a localhost-only remote
+// debugging port, so tooling can attach to the HMI tab without touching the user's personal
+// browsing data. Chrome 136+ also silently ignores --remote-debugging-port on the DEFAULT
+// user-data-dir, so a dedicated profile is required for the debugging port to work at all, not
+// just a privacy nicety. If that Chrome (same --user-data-dir) is already running, Chrome's own
+// single-instance behavior just opens the URL in it -- this opener does not need to detect that.
+//
+// Spawned directly (never through `cmd /c start`): Node's `spawn` with `shell: false` passes each
+// argv element straight to `CreateProcess`, so a --user-data-dir value containing spaces (the
+// default lives under "...\AppData\Local\...") needs no manual quoting here and can never fall
+// back to the default profile the way an incorrectly quoted `cmd /c start` invocation could --
+// `cmd`'s own command-line re-parsing of an already-quoted argument is exactly the class of bug
+// this sidesteps entirely.
+const DEFAULT_CONTROL_CHROME_DEBUG_PORT = '9222'
+const CONTROL_CHROME_DEBUG_ADDRESS = '127.0.0.1'
+
+function resolveControlChromeConfig(env) {
+  const programFiles = env.ProgramFiles || String.raw`C:\Program Files`
+  const localAppData = env.LOCALAPPDATA || String.raw`C:\Users\Default\AppData\Local`
+  return {
+    chromeExecutable: env.PRISMA_DEV_CHROME_PATH || join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    userDataDir: env.PRISMA_DEV_CHROME_USER_DATA_DIR || join(localAppData, 'CoreAnalytics', 'ChromeControl'),
+    remoteDebuggingPort: env.PRISMA_DEV_CHROME_DEBUG_PORT || DEFAULT_CONTROL_CHROME_DEBUG_PORT,
+  }
+}
+
+// Exported so the standalone "open only the control Chrome" tool
+// (tools/dev-launcher/open-control-chrome.mjs) builds the exact same argument list instead of
+// duplicating it.
+export function buildControlChromeArgs({ userDataDir, remoteDebuggingPort, url }) {
+  return [
+    `--user-data-dir=${userDataDir}`,
+    `--remote-debugging-port=${remoteDebuggingPort}`,
+    `--remote-debugging-address=${CONTROL_CHROME_DEBUG_ADDRESS}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    url,
+  ]
+}
+
 export function createBrowserOpener({
   spawn = spawnChild,
   platform = process.platform,
-  browserExecutable = 'chrome.exe',
+  env = process.env,
+  chromeExecutable,
+  userDataDir,
+  remoteDebuggingPort,
   log = (message) => console.log(message),
   warn = (message) => console.warn(message),
 } = {}) {
+  const defaults = resolveControlChromeConfig(env)
+  const resolvedChromeExecutable = chromeExecutable || defaults.chromeExecutable
+  const resolvedUserDataDir = userDataDir || defaults.userDataDir
+  const resolvedRemoteDebuggingPort = remoteDebuggingPort || defaults.remoteDebuggingPort
   return {
     open(url) {
       if (platform !== 'win32') {
@@ -339,16 +385,15 @@ export function createBrowserOpener({
         return
       }
       try {
-        spawn('cmd.exe', ['/c', 'start', '""', browserExecutable, url], {
-          shell: false,
-          stdio: 'ignore',
-          windowsHide: true,
-          detached: true,
-        })
-        log(`Opened ${browserExecutable} at ${url}.`)
+        spawn(
+          resolvedChromeExecutable,
+          buildControlChromeArgs({ userDataDir: resolvedUserDataDir, remoteDebuggingPort: resolvedRemoteDebuggingPort, url }),
+          { shell: false, stdio: 'ignore', windowsHide: true, detached: true },
+        )
+        log(`Opened the CONTROL Chrome (profile ${resolvedUserDataDir}) at ${url}.`)
       }
       catch (error) {
-        warn(`Could not open the browser automatically: ${error instanceof Error ? error.message : String(error)}. Open ${url} manually.`)
+        warn(`Could not open the CONTROL Chrome automatically: ${error instanceof Error ? error.message : String(error)}. Open ${url} manually.`)
       }
     },
   }
