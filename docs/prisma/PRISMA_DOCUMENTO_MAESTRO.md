@@ -49,8 +49,8 @@ pero su validación productiva sigue pendiente.
 | Voz HMI y orbe | Aceptación manual CL reportada por el usuario | Respuestas a las preguntas ejercitadas, Telegram, voz HMI y orbe aceptados (§11.1); sin prueba separada de cambio de vista/latencia ni garantía universal de continuidad, cancelación o recuperación. |
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
-| Canal A — QR/status y panel manual | Wiring offline y aceptación de respuestas/voz reportada por el usuario | Proyección protegida, cliente/proxy y QR local desde Pyramid, a la derecha de Logs en Core; alcance manual acotado en §11.1, sin afirmar una matriz E2E integral. No hay auto-Apply. |
-| Canal B — Telegram autónomo | Reactivado por el usuario el 2026-09-24 (PW-012) | Responde por chat con texto y **nota de voz** generada por el runtime, sin depender de una HMI abierta; **no** publica eventos de voz en la HMI. Fuente provisoria: la pantalla activa de la HMI; la fuente autónoma sigue pendiente (§4.2, PW-003). Preguntas por nota de voz: PW-013. |
+| Canal A — QR/status y panel manual | Wiring offline y aceptación de respuestas/voz reportada por el usuario | Proyección protegida, cliente/proxy y QR local desde Pyramid, a la derecha de Logs en Core; alcance manual acotado en §11.1, sin afirmar una matriz E2E integral. No hay auto-Apply. Desde el 2026-09-24 (PW-013) el bot dedicado también acepta preguntas por nota de voz, transcriptas con Gemini y respondidas igual que texto (offline; prueba en vivo pendiente, §11.1). |
+| Canal B — Telegram autónomo | Reactivado por el usuario el 2026-09-24 (PW-012) | Responde por chat con texto y **nota de voz** generada por el runtime, sin depender de una HMI abierta; **no** publica eventos de voz en la HMI. Fuente provisoria: la pantalla activa de la HMI; la fuente autónoma sigue pendiente (§4.2, PW-003). Desde el 2026-09-24 (PW-013) también recibe preguntas por nota de voz, transcriptas con Gemini (offline; prueba en vivo pendiente, §11.1). |
 | Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
 | Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Prisma compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
 | Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Prisma y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
@@ -562,6 +562,17 @@ eventos lo renueva. El primer incremento responde por texto sobre el snapshot vi
 parser determinístico existente, y presenta la misma respuesta como texto y audio en la HMI. Esta
 entrada es de solo lectura y nunca habilita comandos industriales.
 
+**Preguntas por nota de voz (2026-09-24, decisión del usuario, PW-013).** El bot dedicado del Canal A
+también acepta una nota de voz de Telegram como pregunta, además de texto: se transcribe con Gemini
+(mismo cliente/credencial que la síntesis de voz) y el texto resultante se responde exactamente igual
+que si se hubiera escrito, sin repetir ni mostrar la transcripción. Reglas: máximo 30 segundos,
+verificados con el dato `duration` del propio mensaje **antes** de descargar el archivo; límite
+independiente de tamaño de archivo; la vinculación teléfono-propietario existente se valida antes de
+cualquier descarga; toda falla (proveedor caído, transcripción vacía o ilegible, descarga fallida) se
+responde con un mensaje breve de usted y nunca deja caer el sondeo. La descarga ocurre en el proceso
+de presentación (bot dedicado); la llamada a Gemini ocurre en el proceso de voz, igual que la nota de
+voz de respuesta del Canal B (PW-012). El mismo soporte se agregó al Canal B (ver §6.3).
+
 **Registro y recuperación automática de fallas del Canal A (2026-09-23, decisión de usuario).**
 El hilo de sondeo propio del Canal A (`channel_a_lifecycle.py`, `ChannelARunner`) podía fallar en
 segundo plano sin que el administrador ni el usuario lo notaran: la falla terminal solo se reflejaba
@@ -601,8 +612,8 @@ extenderla.
 ### 6.3 Canal B — Telegram personal autónomo
 
 El Canal B es la consulta personal a distancia: la persona ya tiene acceso al bot dedicado
-del Canal B (no se vincula desde la HMI; el QR pertenece solo al Canal A). Recibe texto (y, en
-PW-013, notas de voz) y responde en el chat con **texto y nota de voz**. El audio llega a
+del Canal B (no se vincula desde la HMI; el QR pertenece solo al Canal A). Recibe texto **y notas de
+voz** (PW-013) y responde en el chat con **texto y nota de voz**. El audio llega a
 Telegram porque la persona está lejos: la HMI nunca reproduce ni muestra nada por el Canal B.
 Debe funcionar sin navegador, snapshot o publicador de pantalla. Consulta una instalación
 previamente autorizada mediante la misma frontera de datos que el Canal A.
@@ -632,6 +643,16 @@ cargados), como antes de la migración. Cada respuesta se envía como texto y, a
 nota de voz de Prisma en respuesta al mismo mensaje, generada por el runtime (fila de hasta 3
 notas pendientes por chat). Cuando exista la fuente autónoma (PW-003), ambos canales migran a
 ella. Detalle y evidencia: `odd/tasks/prisma-channel-b-voice-replies.md`.
+
+**Preguntas por nota de voz (2026-09-24, decisión del usuario, PW-013).** El Canal B también acepta
+una nota de voz de Telegram como pregunta, con las mismas reglas que el Canal A (§6.2): transcripción
+con Gemini, sin repetir ni mostrar la transcripción, límite de 30 segundos verificado antes de
+descargar el archivo, límite independiente de tamaño, la vinculación de chat único existente se
+valida antes de cualquier descarga, y toda falla responde con un mensaje breve de usted sin afectar
+el sondeo del bot. El nombre de máquina/pantalla de la pantalla activa (cuando está disponible) se
+usa como pista de vocabulario adicional para la transcripción, sin agregar una fuente de datos nueva.
+La transcripción resultante se responde exactamente igual que una pregunta escrita, incluida la nota
+de voz de respuesta (PW-012). Detalle y evidencia: `odd/tasks/pw-013-voice-note-questions.md`.
 
 ### 6.4 Datos reales y presentación
 
