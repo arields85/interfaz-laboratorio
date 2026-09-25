@@ -234,7 +234,7 @@ describe('usePrismaCredentialAdministration', () => {
 
         let first!: Promise<unknown>;
         act(() => { first = result.current.saveCredential('gemini', 'synthetic-secret'); });
-        await waitFor(() => expect(result.current.pendingAction).toBe('save-gemini'));
+        await waitFor(() => expect(result.current.pendingActions.gemini).toBe('save-gemini'));
         await expect(result.current.saveCredential('gemini', 'second')).rejects.toThrow('ADMIN_CREDENTIAL_OPERATION_PENDING');
 
         act(() => { useAuthStore.setState((state) => ({ session: { ...state.session, user: null, isAuthenticated: false } })); });
@@ -277,7 +277,7 @@ describe('usePrismaCredentialAdministration', () => {
         expect(client.deleteCredential).not.toHaveBeenCalled();
         expect(client.saveCredential).not.toHaveBeenCalled();
         expect(controller.handleProtectedRequestError).toHaveBeenCalledWith(collision);
-        expect(result.current.pendingAction).toBeNull();
+        expect(result.current.pendingActions.telegram).toBeNull();
         expect(result.current.error).toBeNull();
     });
 
@@ -491,10 +491,10 @@ describe('usePrismaCredentialAdministration', () => {
         await waitFor(() => expect(hook.result.current.data).not.toBeNull());
         let operation!: Promise<void>;
         act(() => { operation = hook.result.current.saveCredential('gemini', 'synthetic-secret'); });
-        await waitFor(() => expect(hook.result.current.pendingAction).toBe('save-gemini'));
+        await waitFor(() => expect(hook.result.current.pendingActions.gemini).toBe('save-gemini'));
 
         hook.rerender({ active: false });
-        await waitFor(() => expect(hook.result.current.pendingAction).toBeNull());
+        await waitFor(() => expect(hook.result.current.pendingActions.gemini).toBeNull());
         hook.rerender({ active: true });
         releaseSave();
 
@@ -596,9 +596,9 @@ describe('usePrismaCredentialAdministration', () => {
         let operation!: Promise<void>;
         act(() => { operation = result.current.verifyGemini(); });
         await waitFor(() => expect(result.current.verifyingProviders.gemini).toBe(true));
-        // T15: verification never sets the global pendingAction -- it must
-        // never disable another row's Save/Delete/Verify.
-        expect(result.current.pendingAction).toBeNull();
+        // T15: verification never touches the per-provider mutation lock --
+        // it must never disable this (or another) row's Save/Delete/Verify.
+        expect(result.current.pendingActions.gemini).toBeNull();
         await act(async () => { await operation; });
 
         expect(client.verifyGemini).toHaveBeenCalledWith(expect.any(AbortSignal));
@@ -647,7 +647,7 @@ describe('usePrismaCredentialAdministration', () => {
         // T15: another row's verify (Gemini here) must stay usable while
         // this one is in flight -- no shared/global in-flight flag.
         expect(result.current.verifyingProviders.gemini).toBe(false);
-        expect(result.current.pendingAction).toBeNull();
+        expect(result.current.pendingActions[provider]).toBeNull();
         await act(async () => { await operation; });
 
         expect(client[method]).toHaveBeenCalledWith(expect.any(AbortSignal));
@@ -680,12 +680,74 @@ describe('usePrismaCredentialAdministration', () => {
         act(() => { verifying = result.current.verifyChannelA(); });
         await waitFor(() => expect(result.current.verifyingProviders.telegram_channel_a).toBe(true));
 
-        // The global mutation lock (pendingAction, used by save/delete/apply)
-        // stays untouched by a verify, so another row's save/delete is free.
-        expect(result.current.pendingAction).toBeNull();
+        // The per-provider mutation lock (pendingActions, used by
+        // save/delete/apply) stays untouched by a verify, so another row's
+        // save/delete is free -- and, per T15/F4, so is every OTHER row's
+        // mutation lock, since save/delete are now scoped per provider too.
+        expect(result.current.pendingActions.telegram_channel_a).toBeNull();
+        expect(result.current.pendingActions.gemini).toBeNull();
         await act(async () => { await result.current.saveCredential('gemini', 'unrelated-secret'); });
 
         void verifying.catch(() => undefined);
+    });
+
+    // F4 regression (2026-09-25 live test): saveCredential/deleteCredential
+    // used one single GLOBAL operationRef/pendingAction shared by every
+    // provider (unlike verify, already scoped per provider since T15), so
+    // saving or deleting one row's credential blocked every OTHER row's
+    // save/delete/verify too. Scoped exactly like T15 scoped verify.
+    it('saving one provider never blocks another provider\'s save/delete (no shared global mutation lock)', async () => {
+        const pending = new Promise<never>(() => undefined);
+        // Provider-aware: only the channel A save hangs, so the later
+        // gemini/telegram calls below can actually resolve and prove they
+        // were never blocked by channel A's still-pending save.
+        const saveCredential = vi.fn((provider: string) => (provider === 'telegram_channel_a'
+            ? pending
+            : Promise.resolve({ provider, configured: true })));
+        const { result } = setup({ saveCredential });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let saving!: Promise<unknown>;
+        act(() => { saving = result.current.saveCredential('telegram_channel_a', 'channel-a-secret'); });
+        await waitFor(() => expect(result.current.pendingActions.telegram_channel_a).toBe('save-telegram_channel_a'));
+
+        // Every other provider's own operation slot stays completely free.
+        expect(result.current.pendingActions.gemini).toBeNull();
+        expect(result.current.pendingActions.telegram).toBeNull();
+        await act(async () => { await result.current.deleteCredential('gemini'); });
+        await act(async () => { await result.current.saveCredential('telegram', 'telegram-token'); });
+
+        void saving.catch(() => undefined);
+    });
+
+    it('deleting one provider never blocks another provider\'s save/delete', async () => {
+        const pending = new Promise<never>(() => undefined);
+        const { result } = setup({ deleteCredential: vi.fn(() => pending) });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let deleting!: Promise<unknown>;
+        act(() => { deleting = result.current.deleteCredential('telegram'); });
+        await waitFor(() => expect(result.current.pendingActions.telegram).toBe('delete-telegram'));
+
+        expect(result.current.pendingActions.gemini).toBeNull();
+        expect(result.current.pendingActions.telegram_channel_a).toBeNull();
+        await act(async () => { await result.current.saveCredential('gemini', 'gemini-secret'); });
+
+        void deleting.catch(() => undefined);
+    });
+
+    it('rejects a second concurrent save on the SAME provider while one is already pending (unchanged same-row guard)', async () => {
+        const pending = new Promise<never>(() => undefined);
+        const { result } = setup({ saveCredential: vi.fn(() => pending) });
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        let first!: Promise<unknown>;
+        act(() => { first = result.current.saveCredential('telegram', 'first-token'); });
+        await waitFor(() => expect(result.current.pendingActions.telegram).toBe('save-telegram'));
+
+        await expect(result.current.saveCredential('telegram', 'second-token'))
+            .rejects.toThrow('ADMIN_CREDENTIAL_OPERATION_PENDING');
+        void first.catch(() => undefined);
     });
 
     it.each([
