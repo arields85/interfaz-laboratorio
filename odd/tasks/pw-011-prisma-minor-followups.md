@@ -368,3 +368,23 @@ expected, low-severity behavior, or (b) reintroducing a bounded wait for the *ac
 round trip before producing the answer, which is precisely the latency T13 was written to remove —
 a real product trade-off (guaranteed visual ordering vs. the measured ~0.36s/question latency) that
 needs the user's call, not a code-level "clear cause" fix.
+
+## Integration
+
+Rebased onto `main` at `2b4c683` (`git rebase main`). The rebase replayed all 18 commits with zero
+conflicts — `main`'s Channel B work, PW-004, and the dev launcher landed in disjoint files from
+PW-011's changes. New tip: `21fcbe3`.
+
+Checks after rebase:
+- Runtime suite (`python -m unittest discover -s services/prisma-runtime -p "test_*.py"`): 1616
+  tests, 2 failures, 2 skipped. Both failures are the known environment-only cases that expect a
+  worktree-local `.venv\Scripts\python.exe` bootstrapped via `operations\bootstrap-local.ps1`
+  (`test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference` and
+  `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`), not caused by the
+  rebase.
+- hmi-app `npx vitest run`: 221 test files, 2551 tests, all passed.
+- hmi-app `npx tsc -b`: clean, no output.
+- hmi-app `npm run lint`: clean, no findings.
+
+`fix/pw-011-prisma-minor-followups` is confirmed a descendant of `main`
+(`git merge-base --is-ancestor main HEAD` succeeds).
