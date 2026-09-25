@@ -8,6 +8,7 @@ written to by this service.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import math
@@ -1165,6 +1166,23 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             if token is not None:
                 _fire_channel_a_voice_prefetch(local_http, voice_url, event["id"], token)
 
+        def channel_a_transcribe(audio_bytes, mime_type):
+            """PW-013: transcribe one already-downloaded, already-bounded
+            Channel A voice note. Runs on the Channel A poll thread, inside
+            ChannelAPairingDialogue._handle_voice_note, which already
+            catches every failure here and replies with a fixed Spanish
+            message -- this never needs its own try/except. No per-owner
+            context terms are added to the prompt (unlike Channel B): doing
+            so would require a second, unguarded read of the owner's HMI
+            context outside the query coordinator's own binding/freshness
+            discipline, so this stays with the shared static vocabulary
+            only (see the feature document)."""
+            if not voice_url or local_http is None:
+                raise VoiceTranscriptionUnavailable("VOICE_TRANSCRIPTION_UNAVAILABLE")
+            audio_base64 = base64.b64encode(bytes(audio_bytes)).decode("ascii")
+            token = voice_events.mint_voice_transcription_token(audio_base64, mime_type)
+            return _request_voice_transcription(local_http, voice_url, token)
+
         def build_channel_a_activation(token, desired, epoch, reservation):
             """Compose one real activation; the manager keeps this call lazy, so no
             credential, transport effect, thread or provider call runs here."""
@@ -1186,6 +1204,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 poll_pause=CHANNEL_A_POLL_PAUSE_SECONDS,
                 poll_retry_delay=CHANNEL_A_POLL_RETRY_DELAY_SECONDS,
                 reservation=reservation,
+                transcribe=channel_a_transcribe,
             )
 
         # The root builds Channel A before its admin boundary and injects that

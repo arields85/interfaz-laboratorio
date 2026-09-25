@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from prisma_runtime import local_presentation, voice_service
@@ -65,6 +66,24 @@ class TelegramOptInTests(unittest.TestCase):
             manager = app.config["telegram_manager"]
             bot = manager.bot_factory("some-token")
         self.assertIs(bot.session_registry, app.config["session_registry"])
+
+    def test_production_factory_wires_transcribe_for_channel_a(self) -> None:
+        """PW-013: the production ChannelAManager activation factory (built
+        by create_app) must thread a real transcribe callable into every
+        ChannelAActivation it constructs, so Channel A voice notes are
+        transcribed via the voice process instead of silently staying
+        unsupported."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"PRISMA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        self.assertTrue(callable(kwargs["transcribe"]))
 
     def test_voice_delivery_is_blocked_when_opt_in_is_disabled(self) -> None:
         job = {
