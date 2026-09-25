@@ -2,7 +2,14 @@
 
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { createPowerShellRuntime, createViteLauncher, createVitePortGuard, runDevelopment } from './dev.mjs'
+import {
+  createBrowserOpener,
+  createPowerShellRuntime,
+  createServerReadinessWaiter,
+  createViteLauncher,
+  createVitePortGuard,
+  runDevelopment,
+} from './dev.mjs'
 
 type ExitResult = { code: number | null; signal: NodeJS.Signals | null }
 
@@ -752,5 +759,230 @@ describe('native child adapters', () => {
     const options = spawn.mock.calls[0]?.[2] as { env?: Record<string, string | undefined> }
     expect(options.env?.PRISMA_STARTUP_FAILURE).toBe('{"reason":"port_in_use","port":5057}')
     expect(options.env?.PATH ?? options.env?.Path).toBe(process.env.PATH ?? process.env.Path)
+  })
+})
+
+// L2: dev.mjs opens the browser itself once Prisma has settled (already ordered before Vite
+// spawns) AND the Vite dev server actually answers, instead of the previous fixed 3 s timeout in
+// the desktop launcher. Opt-in only (PRISMA_DEV_AUTO_OPEN=1, set by the launcher), so plain
+// `npm run dev` keeps today's behavior unchanged.
+describe('createServerReadinessWaiter', () => {
+  it('resolves once the server responds ok, retrying with the configured sleep in between', async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+    const sleep = vi.fn(async () => undefined)
+    const waiter = createServerReadinessWaiter({ fetchImpl, sleep })
+
+    await expect(waiter.waitUntilReady('http://127.0.0.1:5173/')).resolves.toBe(true)
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:5173/')
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a non-ok HTTP response as not ready yet and keeps polling', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+    const waiter = createServerReadinessWaiter({ fetchImpl, sleep: vi.fn(async () => undefined) })
+
+    await expect(waiter.waitUntilReady('http://127.0.0.1:5173/')).resolves.toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('throws the last observed error once the timeout elapses, without polling forever', async () => {
+    const fetchImpl = vi.fn(async () => { throw new Error('ECONNREFUSED') })
+    let elapsed = 0
+    const waiter = createServerReadinessWaiter({
+      fetchImpl,
+      now: () => elapsed,
+      sleep: vi.fn(async () => { elapsed += 100 }),
+      timeoutMilliseconds: 300,
+      intervalMilliseconds: 100,
+    })
+
+    await expect(waiter.waitUntilReady('http://127.0.0.1:5173/')).rejects.toThrow('ECONNREFUSED')
+    expect(fetchImpl.mock.calls.length).toBeGreaterThan(1)
+  })
+})
+
+describe('createBrowserOpener', () => {
+  it('opens the browser with the same "start" semantics as the previous desktop launcher', () => {
+    const spawn = vi.fn(() => ({}))
+    const log = vi.fn()
+    const opener = createBrowserOpener({ spawn, platform: 'win32', log })
+
+    opener.open('http://127.0.0.1:5173')
+
+    expect(spawn).toHaveBeenCalledWith(
+      'cmd.exe',
+      ['/c', 'start', '""', 'chrome.exe', 'http://127.0.0.1:5173'],
+      expect.objectContaining({ shell: false }),
+    )
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:5173'))
+  })
+
+  it('uses an injected browser executable instead of the chrome.exe default', () => {
+    const spawn = vi.fn(() => ({}))
+    const opener = createBrowserOpener({ spawn, platform: 'win32', browserExecutable: 'msedge.exe' })
+
+    opener.open('http://127.0.0.1:5173')
+
+    expect(spawn).toHaveBeenCalledWith('cmd.exe', expect.arrayContaining(['msedge.exe']), expect.anything())
+  })
+
+  it('warns without spawning anything on non-Windows platforms', () => {
+    const spawn = vi.fn()
+    const warn = vi.fn()
+    const opener = createBrowserOpener({ spawn, platform: 'linux', warn })
+
+    opener.open('http://127.0.0.1:5173')
+
+    expect(spawn).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Windows'))
+  })
+
+  it('warns instead of throwing when spawning the browser fails', () => {
+    const spawn = vi.fn(() => { throw new Error('spawn EPERM') })
+    const warn = vi.fn()
+    const opener = createBrowserOpener({ spawn, platform: 'win32', warn })
+
+    expect(() => opener.open('http://127.0.0.1:5173')).not.toThrow()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('spawn EPERM'))
+  })
+})
+
+describe('runDevelopment readiness-triggered browser open (L2)', () => {
+  function createRuntimeStub() {
+    return {
+      acquire: vi.fn(async () => ({ ownerToken: 'owner', generation: 'generation' })),
+      cancelAcquire: vi.fn(),
+      release: vi.fn(async () => undefined),
+    }
+  }
+  function createNoopPortGuard() {
+    return { ensureAvailable: vi.fn(async () => ({ blocked: false as const })) }
+  }
+
+  it('never opens the browser when the opt-in is absent (plain npm run dev keeps today\'s behavior)', async () => {
+    const vite = { result: Promise.resolve<ExitResult>({ code: 0, signal: null }), terminate: vi.fn() }
+    const browserOpener = { open: vi.fn() }
+    const readinessWaiter = { waitUntilReady: vi.fn(async () => true) }
+
+    await runDevelopment({
+      platform: 'win32',
+      portGuard: createNoopPortGuard(),
+      viteArgs: ['--host', '127.0.0.1', '--port', '5173'],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn: vi.fn(),
+      env: {},
+      browserOpener,
+      readinessWaiter,
+    })
+
+    expect(readinessWaiter.waitUntilReady).not.toHaveBeenCalled()
+    expect(browserOpener.open).not.toHaveBeenCalled()
+  })
+
+  it('waits for the dev server to answer, then opens it, when PRISMA_DEV_AUTO_OPEN=1', async () => {
+    const exit = deferred<ExitResult>()
+    const vite = { result: exit.promise, terminate: vi.fn() }
+    const browserOpener = { open: vi.fn() }
+    const readinessWaiter = { waitUntilReady: vi.fn(async () => true) }
+
+    const running = runDevelopment({
+      platform: 'win32',
+      portGuard: createNoopPortGuard(),
+      viteArgs: ['--host', '127.0.0.1', '--port', '5173'],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn: vi.fn(),
+      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      browserOpener,
+      readinessWaiter,
+    })
+
+    await vi.waitFor(() => expect(browserOpener.open).toHaveBeenCalledTimes(1))
+    expect(readinessWaiter.waitUntilReady).toHaveBeenCalledWith('http://127.0.0.1:5173/')
+    expect(browserOpener.open).toHaveBeenCalledWith('http://127.0.0.1:5173/')
+
+    exit.resolve({ code: 0, signal: null })
+    await running
+  })
+
+  it('defaults the opened URL host/port from --port alone when --host is absent', async () => {
+    const vite = { result: Promise.resolve<ExitResult>({ code: 0, signal: null }), terminate: vi.fn() }
+    const browserOpener = { open: vi.fn() }
+    const readinessWaiter = { waitUntilReady: vi.fn(async () => true) }
+
+    await runDevelopment({
+      platform: 'win32',
+      portGuard: createNoopPortGuard(),
+      viteArgs: ['--port', '4321'],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn: vi.fn(),
+      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      browserOpener,
+      readinessWaiter,
+    })
+
+    await vi.waitFor(() => expect(browserOpener.open).toHaveBeenCalledWith('http://127.0.0.1:4321/'))
+  })
+
+  it('warns and never opens the browser when readiness times out', async () => {
+    const vite = { result: new Promise<ExitResult>(() => undefined), terminate: vi.fn() }
+    const browserOpener = { open: vi.fn() }
+    const readinessWaiter = { waitUntilReady: vi.fn(async () => { throw new Error('timed out') }) }
+    const warn = vi.fn()
+
+    runDevelopment({
+      platform: 'win32',
+      portGuard: createNoopPortGuard(),
+      viteArgs: ['--host', '127.0.0.1', '--port', '5173'],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn,
+      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      browserOpener,
+      readinessWaiter,
+    })
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('timed out')))
+    expect(browserOpener.open).not.toHaveBeenCalled()
+  })
+
+  it('warns and never opens the browser when Vite exits before the dev server becomes ready', async () => {
+    const exit = deferred<ExitResult>()
+    const vite = { result: exit.promise, terminate: vi.fn() }
+    const browserOpener = { open: vi.fn() }
+    const readinessDeferred = deferred<boolean>()
+    const readinessWaiter = { waitUntilReady: vi.fn(() => readinessDeferred.promise) }
+    const warn = vi.fn()
+
+    const running = runDevelopment({
+      platform: 'win32',
+      portGuard: createNoopPortGuard(),
+      viteArgs: ['--host', '127.0.0.1', '--port', '5173'],
+      runtime: createRuntimeStub(),
+      spawnVite: vi.fn(() => vite),
+      signals: createSignals(),
+      warn,
+      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      browserOpener,
+      readinessWaiter,
+    })
+
+    exit.resolve({ code: 1, signal: null })
+    await running
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('exited before')))
+    expect(browserOpener.open).not.toHaveBeenCalled()
   })
 })

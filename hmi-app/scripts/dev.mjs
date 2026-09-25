@@ -266,6 +266,94 @@ export function createVitePortGuard({
   }
 }
 
+// L2: default Vite dev host when --host is not present in viteArgs -- matches this project's
+// fixed-host development convention (the desktop launcher and DEFAULT_VITE_DEV_PORT above both
+// hardcode 127.0.0.1), used to build the URL the readiness waiter polls and the browser opens.
+const DEFAULT_VITE_DEV_HOST = '127.0.0.1'
+
+function parseViteHost(viteArguments) {
+  for (let index = 0; index < viteArguments.length; index += 1) {
+    const argument = viteArguments[index]
+    let candidate = null
+    if (argument === '--host') {
+      candidate = viteArguments[index + 1]
+    }
+    else if (argument.startsWith('--host=')) {
+      candidate = argument.slice('--host='.length)
+    }
+    if (!candidate || candidate.startsWith('-')) continue
+    return candidate
+  }
+  return DEFAULT_VITE_DEV_HOST
+}
+
+function buildDevServerUrl(viteArguments) {
+  return `http://${parseViteHost(viteArguments)}:${parseVitePort(viteArguments)}/`
+}
+
+// L2: replaces the desktop launcher's fixed `timeout /t 3` before opening the browser. Polls the
+// Vite dev server's own URL (the same one the browser will open) instead of parsing Vite's stdout
+// -- robust across Vite versions and independent of stdio being 'inherit'.
+export function createServerReadinessWaiter({
+  fetchImpl = fetch,
+  intervalMilliseconds = 200,
+  timeoutMilliseconds = 30000,
+  sleep = (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)),
+  now = () => Date.now(),
+} = {}) {
+  return {
+    async waitUntilReady(url) {
+      const deadline = now() + timeoutMilliseconds
+      let lastError = null
+      for (;;) {
+        try {
+          const response = await fetchImpl(url)
+          if (response && response.ok) return true
+          lastError = new Error(`Received HTTP ${response?.status ?? 'unknown'} from ${url}.`)
+        }
+        catch (error) {
+          lastError = error
+        }
+        if (now() >= deadline) {
+          throw lastError ?? new Error(`Timed out waiting for ${url} to become ready.`)
+        }
+        await sleep(intervalMilliseconds)
+      }
+    },
+  }
+}
+
+// L2: same "start '' chrome.exe URL" semantics as the previous desktop launcher (`cmd`'s `start`
+// builtin, detached from this process so closing the terminal never closes the browser).
+export function createBrowserOpener({
+  spawn = spawnChild,
+  platform = process.platform,
+  browserExecutable = 'chrome.exe',
+  log = (message) => console.log(message),
+  warn = (message) => console.warn(message),
+} = {}) {
+  return {
+    open(url) {
+      if (platform !== 'win32') {
+        warn(`Opening the browser automatically is only implemented for Windows; open ${url} manually.`)
+        return
+      }
+      try {
+        spawn('cmd.exe', ['/c', 'start', '""', browserExecutable, url], {
+          shell: false,
+          stdio: 'ignore',
+          windowsHide: true,
+          detached: true,
+        })
+        log(`Opened ${browserExecutable} at ${url}.`)
+      }
+      catch (error) {
+        warn(`Could not open the browser automatically: ${error instanceof Error ? error.message : String(error)}. Open ${url} manually.`)
+      }
+    },
+  }
+}
+
 export function createViteLauncher({
   spawn = spawnChild,
   nodeExecutable = process.execPath,
@@ -300,6 +388,9 @@ export async function runDevelopment({
   signals = process,
   warn = (message) => console.warn(message),
   newOwnerToken = randomUUID,
+  env = process.env,
+  readinessWaiter = createServerReadinessWaiter(),
+  browserOpener = createBrowserOpener(),
 } = {}) {
   const ownerToken = newOwnerToken()
   let receipt = null
@@ -383,6 +474,23 @@ export async function runDevelopment({
     catch (error) {
       warn(`Vite could not be started: ${error instanceof Error ? error.message : String(error)}`)
       return 1
+    }
+
+    // L2: opt-in only (PRISMA_DEV_AUTO_OPEN=1, set by the dev launcher) -- plain `npm run dev`
+    // keeps today's behavior of never opening a browser. Runs concurrently with the `await
+    // vite.result` below rather than blocking it: Vite is a long-running dev server, and this
+    // must never delay forwarding its own exit code or signal handling. Raced against Vite
+    // exiting first so a crash never opens a browser tab that would just show a connection error.
+    if (env.PRISMA_DEV_AUTO_OPEN === '1') {
+      const devServerUrl = buildDevServerUrl(viteArgs)
+      const viteExitedBeforeReady = vite.result.then(() => {
+        throw new Error(`Vite exited before the dev server at ${devServerUrl} became ready.`)
+      })
+      Promise.race([readinessWaiter.waitUntilReady(devServerUrl), viteExitedBeforeReady])
+        .then(() => browserOpener.open(devServerUrl))
+        .catch((error) => {
+          warn(`Browser was not opened automatically: ${error instanceof Error ? error.message : String(error)}`)
+        })
     }
 
     try {

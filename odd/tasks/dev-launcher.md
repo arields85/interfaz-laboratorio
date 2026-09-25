@@ -53,6 +53,8 @@ Strict TDD, per session configuration ("Strict TDD Mode: enabled").
       exiting early; opens via the same `cmd /c start "" chrome.exe <url>` semantics as today,
       with the browser command/spawn and URL injectable for tests; on timeout or Vite exiting
       first, warns instead of opening. TDD: new vitest cases first (RED), then implementation.
+      Opt-in is the `PRISMA_DEV_AUTO_OPEN=1` env var (not a CLI flag, to avoid colliding with
+      Vite's own built-in `--open`). Done, commit pending below.
 - [x] L3 — `console-progress.ps1`'s interactive animation becomes a `| / - \` spinner glyph before
       the label, orange (ANSI truecolor/256-color when VT is supported, `DarkYellow` ConsoleColor
       fallback otherwise, unchanged plain non-TTY line). `start-local.ps1`'s two wait loops tick
@@ -76,5 +78,5 @@ Strict TDD, per session configuration ("Strict TDD Mode: enabled").
 | Task | RED evidence | GREEN / checks | Commit |
 |---|---|---|---|
 | L1 | n/a (no test harness for batch scripts) | grep evidence, static review | pending |
-| L2 | vitest new cases fail before implementation | vitest/tsc/lint pass | pending |
+| L2 | 11 new vitest cases RED (import/undefined failures) | vitest 221 files/2543 tests, tsc clean, lint clean | pending |
 | L3 | python unittest new/rewritten cases fail before implementation | python unittest pass (same 2 known env failures) | pending |
