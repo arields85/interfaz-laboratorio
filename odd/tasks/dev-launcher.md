@@ -104,5 +104,22 @@ duplicated. TDD: `createBrowserOpener`'s tests were rewritten first (RED), then 
 |---|---|---|---|
 | L2 | 11 new vitest cases RED (import/undefined failures) | vitest 221 files/2543 tests, tsc clean, lint clean | `320da6e` |
 | L3 | 3 new/rewritten cases RED (old dot-based text, no ANSI) | python unittest 1533 tests, same 2 known env failures + 2 known skipped | `8fae16c` |
-| L2 (control Chrome redesign) | 3 rewritten vitest cases RED (old `cmd start`/`chrome.exe` args) | vitest 221 files/2544 tests, tsc clean, lint clean | pending |
-| L1 | n/a (no test harness for batch scripts) | grep evidence, static review | pending |
+| L2 (control Chrome redesign) | 3 rewritten vitest cases RED (old `cmd start`/`chrome.exe` args) | vitest 221 files/2544 tests, tsc clean, lint clean | `10f3c9a` |
+| test fixture cleanup | n/a | vitest 49/49 in dev.test.ts | `c696322` |
+| L1 | n/a (no test harness for batch scripts) | grep + `git check-attr` evidence (below), static review, vitest 221/2544, tsc clean, lint clean | pending |
+
+### L1 build/deployment exclusion evidence
+
+- `git check-attr export-ignore -- tools/dev-launcher/CoreAnalytics.cmd tools/dev-launcher/README.md hmi-app/scripts/dev.mjs`
+  → `tools/dev-launcher/CoreAnalytics.cmd: export-ignore: set`, `.../README.md: export-ignore: set`,
+  `hmi-app/scripts/dev.mjs: export-ignore: unspecified` — `git archive` will exclude the folder.
+- `hmi-app/vite.config.ts` has no `root:` override (defaults to `hmi-app/`) and
+  `hmi-app/tsconfig.app.json` only `"include": ["src"]` — the production build never reads
+  outside `hmi-app/src`.
+- Grep for `tools/dev-launcher` (and its Windows-path spelling) across `*.ps1/.psm1/.mjs/.js/.ts/.json/.cmd`
+  found exactly one hit outside `tools/dev-launcher/` itself: a documentation comment in
+  `hmi-app/scripts/dev.mjs` naming the standalone tool (the dependency direction is
+  `tools/dev-launcher` → `hmi-app/scripts/dev.mjs`, never the reverse) — no functional coupling.
+- `services/prisma-runtime/operations/*.ps1` bootstrap/packaging scripts: the only
+  `Get-ChildItem`/`Copy-Item`/`Compress-Archive` use is `runtime-environment.ps1`'s sweep of stale
+  `prisma_voice_config.json.*.tmp` files under Prisma's own state root — unrelated to `tools/`.

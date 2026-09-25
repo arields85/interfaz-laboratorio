@@ -1,0 +1,2 @@
+# Dev-only tooling: never included in `git archive` exports.
+tools/dev-launcher/** export-ignore
