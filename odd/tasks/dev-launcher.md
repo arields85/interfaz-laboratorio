@@ -106,7 +106,7 @@ duplicated. TDD: `createBrowserOpener`'s tests were rewritten first (RED), then 
 | L3 | 3 new/rewritten cases RED (old dot-based text, no ANSI) | python unittest 1533 tests, same 2 known env failures + 2 known skipped | `8fae16c` |
 | L2 (control Chrome redesign) | 3 rewritten vitest cases RED (old `cmd start`/`chrome.exe` args) | vitest 221 files/2544 tests, tsc clean, lint clean | `10f3c9a` |
 | test fixture cleanup | n/a | vitest 49/49 in dev.test.ts | `c696322` |
-| L1 | n/a (no test harness for batch scripts) | grep + `git check-attr` evidence (below), static review, vitest 221/2544, tsc clean, lint clean | pending |
+| L1 | n/a (no test harness for batch scripts) | grep + `git check-attr` evidence (below), static review, vitest 221/2544, tsc clean, lint clean | `09ab126` |
 
 ### L1 build/deployment exclusion evidence
 
@@ -123,3 +123,30 @@ duplicated. TDD: `createBrowserOpener`'s tests were rewritten first (RED), then 
 - `services/prisma-runtime/operations/*.ps1` bootstrap/packaging scripts: the only
   `Get-ChildItem`/`Copy-Item`/`Compress-Archive` use is `runtime-environment.ps1`'s sweep of stale
   `prisma_voice_config.json.*.tmp` files under Prisma's own state root — unrelated to `tools/`.
+
+## Closure
+
+All three tasks (L1, L2, L3) plus the mid-cycle control-Chrome decision are done, committed on
+`feat/dev-launcher`, and independently green. Final full-suite verification (after all six
+commits): `npx vitest run` → 221 files / 2544 tests passed; `npx tsc -b` → clean; `npm run lint` →
+clean; the worktree's own Python runtime suite → 1533 tests, same 2 pre-existing/environmental
+failures (both reference the worktree's missing local `.venv` interpreter, not caused by this
+task) and 2 skipped, unchanged from the recorded baseline.
+
+Six commits on `feat/dev-launcher`: `983354b` (task doc), `320da6e` (L2 readiness-triggered open),
+`8fae16c` (L3 orange spinner), `10f3c9a` (L2 control-Chrome redesign), `c696322` (test fixture
+privacy cleanup), `09ab126` (L1 in-repo launcher).
+
+Residuals / follow-ups, not hidden:
+1. `tools/dev-launcher/CoreAnalytics.cmd` and `OpenControlChrome.cmd` have no automated test
+   coverage (no harness exists in this repo for batch scripts) and were never executed for real
+   during this task, per the isolation constraint against starting the real launcher/Vite. They
+   were syntax-reviewed statically; `open-control-chrome.mjs`'s import of `dev.mjs` was confirmed
+   to resolve via a safe, side-effect-free `node --check` + dynamic-import probe.
+2. The GGA pre-commit reviewer flagged minor, non-blocking readability duplication in
+   `dev.test.ts` (`createNoopPortGuard`/`createRuntimeStub` declared both at top-level and inside
+   the L2 describe block) across two commits; left as-is since it does not affect behavior or
+   coverage, and fixing it was outside the requested scope.
+3. The parent must still replace the user's actual Desktop shortcut
+   (`C:\Users\Ariel De Simone\Desktop\CoreAnalitycs\CoreAnalitycs.bat`) — this task never touched
+   it. See the final handback report for the exact replacement target.
