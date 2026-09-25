@@ -1595,7 +1595,7 @@ class ChannelAPairingDialogue:
             return SEND_UNKNOWN
         return SEND_DELIVERED
 
-    def _typing(self, chat_id) -> None:
+    def _typing(self, chat_id) -> threading.Event | None:
         """Best-effort "typing…" chat action (T4), fire-and-forget (T13
         unit (e)).
 
