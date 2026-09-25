@@ -99,7 +99,7 @@ from .channel_a_query import (
     is_query_envelope_well_formed,
 )
 from .voice_transcription import (
-    MAX_VOICE_NOTE_DURATION_SECONDS,
+    DEFAULT_VOICE_NOTE_MIME_TYPE,
     MAX_VOICE_NOTE_FILE_SIZE_BYTES,
     VOICE_NOTE_DOWNLOAD_FAILED_REPLY,
     VOICE_NOTE_TOO_LARGE_REPLY,
@@ -1173,7 +1173,7 @@ class ChannelAPairingDialogue:
         duration = voice.get("duration")
         file_id = voice.get("file_id")
         file_size = voice.get("file_size")
-        mime_type = voice.get("mime_type") if isinstance(voice.get("mime_type"), str) else "audio/ogg"
+        mime_type = voice.get("mime_type") if isinstance(voice.get("mime_type"), str) else DEFAULT_VOICE_NOTE_MIME_TYPE
         if not isinstance(file_id, str) or not file_id:
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True)
         try:

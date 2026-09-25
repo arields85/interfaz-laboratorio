@@ -36,6 +36,11 @@ GEMINI_TRANSCRIPTION_MODEL = "gemini-3.8-flash"
 # never builds a client itself (see transcribe_voice_note's docstring).
 GEMINI_TRANSCRIPTION_TIMEOUT_MS = 20_000
 
+# Telegram voice notes are always OGG/Opus, but a caller may still receive a
+# message without a reported mime_type; both bots and transcribe_voice_note
+# itself fall back to this one named default instead of a repeated literal.
+DEFAULT_VOICE_NOTE_MIME_TYPE = "audio/ogg"
+
 DOMAIN_VOCABULARY_TERMS = (
     "lote",
     "producto",
@@ -167,7 +172,7 @@ def transcribe_voice_note(
     """
     if not isinstance(audio_bytes, (bytes, bytearray)) or not audio_bytes:
         raise VoiceTranscriptionEmpty("VOICE_NOTE_AUDIO_EMPTY")
-    resolved_mime_type = mime_type if isinstance(mime_type, str) and mime_type.strip() else "audio/ogg"
+    resolved_mime_type = mime_type if isinstance(mime_type, str) and mime_type.strip() else DEFAULT_VOICE_NOTE_MIME_TYPE
     prompt = build_transcription_prompt(extra_terms)
     try:
         import importlib
