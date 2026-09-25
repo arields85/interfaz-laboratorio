@@ -14,6 +14,7 @@ import time
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from unittest.mock import patch
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
@@ -2656,11 +2657,27 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         """T13 unit (e): fire-and-forget on a background thread -- the exact
         relative order between "send_chat_action" and "send_message" is no
         longer guaranteed (that was T4's synchronous design, which added
-        ~0.36s per question), but the indicator still fires once with the
-        right chat id/action."""
+        ~0.36s per question). PW-011 M5: the indicator now only fires when
+        its worker actually checks "already answered" before the answer was
+        marked sent -- proven deterministically here by blocking answer
+        production (via parse_hook) until the real worker has already
+        completed its send, instead of racing a real thread against
+        near-instant query handling."""
+        completed = threading.Event()
+        real_send_chat_action = self.transport.send_chat_action
+
+        def recording_send_chat_action(**payload):
+            result = real_send_chat_action(**payload)
+            completed.set()
+            return result
+
+        self.transport.send_chat_action = recording_send_chat_action
+        self.parse_hook = lambda: self.assertTrue(
+            completed.wait(2), "the typing indicator was never attempted"
+        )
+
         outcome = self.query("¿cuál es el oee?")
         self.assertEqual(outcome.kind, QUERY_ANSWER_DELIVERED)
-        self._wait_for_chat_action()
         self.assertEqual(len(self.transport.chat_actions), 1)
         action = self.transport.chat_actions[0]
         self.assertEqual(action["chat_id"], CHAT_ID)
@@ -2668,7 +2685,11 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
 
     def test_typing_indicator_never_delays_the_answer(self):
         """T13 unit (e): even a slow send_chat_action call must never block
-        query handling -- the answer is produced without waiting on it."""
+        query handling -- the answer is produced without waiting on it.
+        PW-011 M5: parse_hook blocks answer production only until the real
+        worker has cleared its "already answered" check and entered the
+        (slow) send, so this still proves a genuinely slow send never
+        blocks the answer, deterministically."""
         started = threading.Event()
         release = threading.Event()
         real_send_chat_action = self.transport.send_chat_action
@@ -2679,6 +2700,9 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
             return real_send_chat_action(**payload)
 
         self.transport.send_chat_action = slow_send_chat_action
+        self.parse_hook = lambda: self.assertTrue(
+            started.wait(2), "the typing indicator was never attempted"
+        )
 
         start = time.monotonic()
         outcome = self.query("¿cuál es el oee?")
@@ -2688,22 +2712,79 @@ class ChannelAQueryIntegrationTests(ChannelABotTestCase):
         self.assertIn("88", self.transport.sent[-1]["text"])
         self.assertLess(elapsed, 1.0, "the answer waited on the typing indicator")
         release.set()
-        self.assertTrue(started.wait(2), "the typing indicator was never attempted")
 
     def test_typing_indicator_failure_never_blocks_or_fails_the_answer(self):
         self.transport.chat_action_error = RuntimeError("transient network failure")
+        attempted = threading.Event()
+        real_send_chat_action = self.transport.send_chat_action
+
+        def recording_send_chat_action(**payload):
+            try:
+                return real_send_chat_action(**payload)
+            finally:
+                attempted.set()
+
+        self.transport.send_chat_action = recording_send_chat_action
+        self.parse_hook = lambda: self.assertTrue(
+            attempted.wait(2), "the typing indicator was never attempted"
+        )
+
         outcome = self.query("¿cuál es el oee?")
         self.assert_outcome(
             outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED
         )
-        self._wait_for_chat_action()
         self.assertEqual(len(self.transport.chat_actions), 1)
         self.assertIn("88", self.transport.sent[-1]["text"])
 
-    def _wait_for_chat_action(self, timeout=2):
-        deadline = time.monotonic() + timeout
-        while not self.transport.chat_actions and time.monotonic() < deadline:
-            time.sleep(0.01)
+    def test_send_typing_unless_answered_skips_once_already_answered(self):
+        """PW-011 M5: the dispatch decision itself, tested directly and
+        deterministically -- no thread, no timing."""
+        answered = threading.Event()
+        answered.set()
+        calls = []
+        ChannelAPairingDialogue._send_typing_unless_answered(
+            CHAT_ID, answered, lambda **payload: calls.append(payload)
+        )
+        self.assertEqual(calls, [])
+
+    def test_send_typing_unless_answered_sends_when_not_yet_answered(self):
+        answered = threading.Event()
+        calls = []
+        ChannelAPairingDialogue._send_typing_unless_answered(
+            CHAT_ID, answered, lambda **payload: calls.append(payload)
+        )
+        self.assertEqual(calls, [{"chat_id": CHAT_ID, "action": "typing"}])
+
+    def test_send_typing_unless_answered_swallows_a_send_failure(self):
+        answered = threading.Event()
+
+        def raising(**_payload):
+            raise RuntimeError("transient network failure")
+
+        ChannelAPairingDialogue._send_typing_unless_answered(CHAT_ID, answered, raising)
+
+    def test_typing_is_skipped_when_its_real_worker_runs_after_the_answer_already_went_out(self):
+        """PW-011 M5 end-to-end proof at the wiring level: capture the
+        background worker instead of racing it against a real thread, run
+        the full query to completion (marking "answered"), then run the
+        captured worker exactly as a very-late OS thread scheduling would --
+        deterministically, no sleep, no polling."""
+        captured = {}
+
+        class CapturingThread:
+            def __init__(self, *, target, args=(), name=None, daemon=None):
+                captured["target"] = target
+                captured["args"] = args
+
+            def start(self):
+                pass
+
+        with patch("prisma_runtime.channel_a_bot.threading.Thread", CapturingThread):
+            outcome = self.query("¿cuál es el oee?")
+        self.assertEqual(outcome.kind, QUERY_ANSWER_DELIVERED)
+        self.assertIn("target", captured)
+        captured["target"](*captured["args"])
+        self.assertEqual(self.transport.chat_actions, [])
 
     def test_typing_indicator_is_not_sent_for_an_unbound_query(self):
         outcome = self.handle(message_update(4, "hola", chat=CHAT_ID))

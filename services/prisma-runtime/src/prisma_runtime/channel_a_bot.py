@@ -1049,8 +1049,14 @@ class ChannelAPairingDialogue:
         )
         # T4: signal "typing…" right before producing the answer, so the
         # phone shows feedback for the dead time while a query is prepared.
-        self._typing(actor_id)
-        outcome = self.query.handle_query(binding, text)
+        answered = self._typing(actor_id)
+        try:
+            outcome = self.query.handle_query(binding, text)
+        finally:
+            # PW-011 M5: query handling is done -- typing no longer makes
+            # sense, whether or not an answer actually went out.
+            if answered is not None:
+                answered.set()
         delivery = SEND_NONE if outcome.delivery is None else outcome.delivery
         return IngressOutcome(
             update_id,
@@ -1566,18 +1572,42 @@ class ChannelAPairingDialogue:
         feedback, not a delivery contract -- there is no outcome, no retry
         and no logged failure at this layer (the transport itself already
         logs elapsed time on a genuine failure, T4/T5-style).
+
+        PW-011 M5: the indicator only makes sense while the answer for this
+        exact message is still being produced -- returns a ``threading.Event``
+        the caller sets right after its own answer send completes (whether
+        or not it actually sent anything: once query handling is done,
+        "typing…" no longer means anything). The background worker checks
+        that event immediately before calling ``send_chat_action`` and skips
+        the call entirely if it is already set, so "typing…" can never
+        visibly arrive at the phone after the answer already did. Returns
+        ``None`` (nothing to set) when the transport has no chat-action
+        method at all.
         """
         send = getattr(self.transport, "send_chat_action", None)
         if not callable(send):
+            return None
+        answered = threading.Event()
+        threading.Thread(
+            target=self._send_typing_unless_answered,
+            args=(chat_id, answered, send),
+            name="ChannelATypingIndicator",
+            daemon=True,
+        ).start()
+        return answered
+
+    @staticmethod
+    def _send_typing_unless_answered(chat_id, answered, send) -> None:
+        """The actual dispatch check (PW-011 M5), split out from ``_typing``'s
+        thread-spawning wrapper so a test can call it directly -- exercising
+        the skip/send decision deterministically, without racing a real
+        background thread against a real answer send."""
+        if answered.is_set():
             return
-
-        def worker() -> None:
-            try:
-                send(chat_id=chat_id, action="typing")
-            except Exception:
-                pass
-
-        threading.Thread(target=worker, name="ChannelATypingIndicator", daemon=True).start()
+        try:
+            send(chat_id=chat_id, action="typing")
+        except Exception:
+            pass
 
     def _set_unlink_menu(self, chat_id) -> None:
         """Best-effort, fire-and-forget Telegram menu entry for this chat (T14).
