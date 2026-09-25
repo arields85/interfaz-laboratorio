@@ -27,6 +27,10 @@ checked deterministically. Both are now implemented; see the updated M3/M5 entri
 same `{label}` the pairing flow already shows in `CONFIRMATION_PROMPT_TEMPLATE`/`WELCOME_TEMPLATE`.
 Fixed; see M6 below.
 
+**2026-09-24 third follow-up — M7, the "documento" occurrence found (not changed) during M6 is now
+approved too.** `channel_a_query.py`'s `COPY_QUERY_UNAVAILABLE` also named "el documento del HMI";
+the user approved the same `{label}` treatment for it. Fixed; see M7 below.
+
 ## TDD
 
 Strict TDD: enabled (source: session/global orchestrator config).
@@ -267,9 +271,41 @@ PW-011). hmi-app: 221 files / 2532 tests, `tsc -b` clean, `npm run lint` clean.
     pre-existing environmental failures, no new failures.
   - **Commit:** `dcabe50`.
 
+- [x] **M7 — "documento" in `channel_a_query.py`'s `COPY_QUERY_UNAVAILABLE`.** User decision
+  2026-09-24 (the occurrence M6 found and reported instead of changing). Route: inline (one small
+  seam addition across `channel_a_query.py` + its one real caller in `channel_a_bot.py`). Fixed.
+  - **String:** `"No se pudieron leer los datos de {label} en este momento. Intente de nuevo en
+    unos segundos."`
+  - **Where the label comes from.** `channel_a_query.py`'s own module docstring lists the pairing
+    registry/Telegram/label lookup as "deliberately absent from this stage," and
+    `channel_a_bot.py` already imports FROM `channel_a_query.py` (so the reverse import would be
+    circular) — so the coordinator cannot resolve or format the label itself. New required
+    constructor dependency `resolve_label` (validated `callable`, same pattern as
+    `validate`/`read_context`/`parse`/`deliver`): `ChannelAPairingDialogue.enable_queries` injects
+    `self._resolve_display_label`, a new one-line method calling the SAME `self._read_label(owner_id)`
+    (no new data source) and M6's own `_display_label()` fallback helper — identical semantics, not
+    reimplemented. `_fail_closed` calls `self._resolved_label(binding.owner_id)` (foreign code:
+    any `resolve_label` failure or unusable value fails closed to a local `_FALLBACK_LABEL = "la
+    HMI"` constant, exactly matching M6's mid-sentence fallback text, kept local to avoid the
+    circular import).
+  - **TDD.** Added `resolve_label` to `test_channel_a_query.py`'s shared `QueryHarness`/`build()`
+    (single point covering ~90 existing tests) and to its "injected callables must be callable"
+    loop test. New `ChannelAQueryUnavailableLabelTests` (4 tests: resolved label used, a raising
+    resolver falls back, an unusable resolved value falls back, the owner id never leaks). Updated
+    10 existing exact-copy assertions across `test_channel_a_query.py` plus 2 in `test_channel_a_bot.py`
+    and 3 in `test_channel_a_activation.py`. RED confirmed: the whole `test_channel_a_query.py` file
+    (95/98 tests) failed at harness construction (`TypeError: unexpected keyword argument
+    'resolve_label'`) before the source change; GREEN after.
+  - **Checks:** `tests.test_channel_a_query` — 98 OK. `tests.test_channel_a_bot` — 227 OK.
+    `tests.test_channel_a_activation` — 39 OK. Full Channel A suite (query/bot/activation/
+    delivery-authority/manager/pairing/lifecycle/transport) — 848 OK. Full prisma-runtime suite —
+    1571 tests, same 2 pre-existing environmental failures, no new failures.
+  - **Commits:** `32f61dc` (fix), `361d210` (review follow-up: `_typing`'s return type annotation,
+    stale since the M5 fix).
+
 ## Verification (final, all items)
 
-- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — 1567 tests, 2 pre-existing environmental failures (same as baseline; `test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference` and `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`, both expecting a worktree-local `.venv\Scripts\python.exe` this worktree doesn't have), no new failures.
+- `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-011\services\prisma-runtime -p "test_*.py"` — 1571 tests, 2 pre-existing environmental failures (same as baseline; `test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference` and `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`, both expecting a worktree-local `.venv\Scripts\python.exe` this worktree doesn't have), no new failures.
 - `cd hmi-app && npx vitest run` — 221 files / 2532 tests OK. `npx tsc -b` clean. `npm run lint` clean. (hmi-app untouched in this follow-up; re-verified unchanged.)
 
 ## M3 report (needs a product/scope decision)
