@@ -67,8 +67,8 @@ is the opt-in flag `hmi-app/scripts/dev.mjs` checks before opening a browser at 
    `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\tools\dev-launcher\CoreAnalytics.cmd`.
 3. Start in: leave it as the folder containing the target (the script does not depend on the
    working directory it was launched from).
-4. Icon: Properties > Change Icon… > browse to `coreanalytics.ico` in this folder (a prism in
-   the HMI's blue-to-violet chart gradient; `coreanalytics-icon.svg` is its editable source).
+4. Icon: Properties > Change Icon… > browse to `coreanalytics.ico` in this folder (the monochrome
+   Lucide pyramid the viewer topbar uses for Prisma; `coreanalytics-icon.svg` is its editable source).
 
 Or create it in one step from PowerShell (run from this folder):
 

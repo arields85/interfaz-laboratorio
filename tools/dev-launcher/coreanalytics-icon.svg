@@ -1,35 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- Dev launcher icon: a prism on the HMI's dark surface, in the blue-to-violet chart gradient. -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#161a2b"/>
-      <stop offset="1" stop-color="#0a0c14"/>
-    </linearGradient>
-    <linearGradient id="edge" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#3b82f6"/>
-      <stop offset="0.55" stop-color="#7c6cf2"/>
-      <stop offset="1" stop-color="#c084fc"/>
-    </linearGradient>
-    <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3b82f6" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#a855f7" stop-opacity="0.12"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.55" r="0.5">
-      <stop offset="0" stop-color="#6d7cff" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#6d7cff" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
-  <rect x="8.5" y="8.5" width="239" height="239" rx="55.5" fill="none" stroke="#2a3150" stroke-width="3"/>
-  <circle cx="128" cy="140" r="104" fill="url(#glow)"/>
-  <!-- Prism: two faces sharing the central ridge. -->
-  <polygon points="128,46 60,190 128,212" fill="url(#face)"/>
-  <polygon points="128,46 196,190 128,212" fill="#a855f7" fill-opacity="0.10"/>
-  <polygon points="128,46 60,190 128,212 196,190" fill="none" stroke="url(#edge)" stroke-width="10" stroke-linejoin="round"/>
-  <line x1="128" y1="46" x2="128" y2="212" stroke="url(#edge)" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
-  <!-- Light beam split by the prism. -->
-  <line x1="24" y1="132" x2="92" y2="120" stroke="#e2e8f0" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
-  <line x1="164" y1="118" x2="232" y2="96" stroke="#3b82f6" stroke-width="6" stroke-linecap="round"/>
-  <line x1="166" y1="132" x2="234" y2="126" stroke="#7c6cf2" stroke-width="6" stroke-linecap="round"/>
-  <line x1="164" y1="146" x2="230" y2="156" stroke="#c084fc" stroke-width="6" stroke-linecap="round"/>
+  <!-- Dev launcher icon: the Lucide "pyramid" glyph the viewer topbar uses to connect to Prisma,
+       monochrome on a dark tile. -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#14161d"/>
+  <rect x="9.5" y="9.5" width="237" height="237" rx="54.5" fill="none" stroke="#2c303b" stroke-width="3"/>
+  <g transform="translate(44 42) scale(7)" fill="none" stroke="#e5e7eb" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 16.88a1 1 0 0 1-.32-1.43l9-13.02a1 1 0 0 1 1.64 0l9 13.01a1 1 0 0 1-.32 1.44l-8.51 4.86a2 2 0 0 1-1.98 0Z"/>
+    <path d="M12 2v20"/>
+  </g>
 </svg>
