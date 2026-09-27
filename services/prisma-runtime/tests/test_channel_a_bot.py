@@ -3222,11 +3222,15 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assert_outcome(outcome, QUERY_ANSWER_DELIVERED, variant=VARIANT_MESSAGE, delivery=SEND_DELIVERED)
 
     def test_a_cancelled_signal_failure_never_breaks_the_rejection_reply(self):
-        """voice-ux U1: same best-effort contract on notify_cancelled."""
+        """voice-ux U1: same best-effort contract on notify_cancelled. K2: a duration/size
+        rejection no longer signals cancelled (thinking was never sent for it either, see the
+        duration/size tests below), so this must use a failure that happens AFTER thinking was
+        sent -- a download failure -- to actually exercise notify_cancelled's own error path."""
         self.enable_voice_notes()
         self.notify_cancelled_error = RuntimeError("boom")
-        outcome = self.voice(duration=MAX_VOICE_NOTE_DURATION_SECONDS + 1)
-        self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
+        self.transport.get_file_error = RuntimeError("boom")
+        outcome = self.voice()
+        self.assert_outcome(outcome, VOICE_NOTE_DOWNLOAD_FAILED, delivery=SEND_DELIVERED)
 
     # -- duration/size limits --------------------------------------------------
 
@@ -3238,19 +3242,20 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assertEqual(self.transport.download_file_calls, [])
         self.assertEqual(self.transcribe_calls, [])
         self.assertIn("30 segundos", self.transport.sent[-1]["text"])
-        # voice-ux U1: thinking fired on acceptance, then cancelled on
-        # rejection -- the orb must not stay stuck waiting for an answer
-        # that will never come.
-        self.assertEqual(self.thinking_calls, [OWNER])
-        self.assertEqual(self.cancelled_calls, [OWNER])
+        # K2 (live test 2026-09-27): the cheap duration/size checks run BEFORE thinking is
+        # signalled -- a note that was always going to be rejected must never flash the orb, and
+        # therefore never needs a cancel either.
+        self.assertEqual(self.thinking_calls, [])
+        self.assertEqual(self.cancelled_calls, [])
 
     def test_a_voice_note_with_a_missing_or_invalid_duration_is_rejected(self):
         self.enable_voice_notes()
         outcome = self.voice(duration=None)
         self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
         self.assertEqual(self.transport.get_file_calls, [])
-        self.assertEqual(self.thinking_calls, [OWNER])
-        self.assertEqual(self.cancelled_calls, [OWNER])
+        # K2: same as above -- rejected before thinking, so neither signal fires.
+        self.assertEqual(self.thinking_calls, [])
+        self.assertEqual(self.cancelled_calls, [])
 
     def test_a_voice_note_over_the_size_cap_is_rejected_before_any_download(self):
         self.enable_voice_notes()
@@ -3258,8 +3263,9 @@ class ChannelAVoiceNoteIntegrationTests(ChannelAQueryIntegrationTests):
         self.assert_outcome(outcome, VOICE_NOTE_REJECTED, delivery=SEND_DELIVERED)
         self.assertEqual(self.transport.get_file_calls, [])
         self.assertEqual(self.transport.download_file_calls, [])
-        self.assertEqual(self.thinking_calls, [OWNER])
-        self.assertEqual(self.cancelled_calls, [OWNER])
+        # K2: same as above -- rejected before thinking, so neither signal fires.
+        self.assertEqual(self.thinking_calls, [])
+        self.assertEqual(self.cancelled_calls, [])
 
     def test_a_voice_note_missing_a_file_id_is_ignored_as_malformed(self):
         self.enable_voice_notes()

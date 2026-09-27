@@ -1250,22 +1250,22 @@ class ChannelAPairingDialogue:
         mime_type = voice.get("mime_type") if isinstance(voice.get("mime_type"), str) else DEFAULT_VOICE_NOTE_MIME_TYPE
         if not isinstance(file_id, str) or not file_id:
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_MALFORMED, True)
-        # voice-ux U1: this is a well-formed voice note from an authorized/
-        # paired actor -- signal "thinking" to the HMI now, before any
-        # duration/size check or download, so the orb shows feedback for the
-        # whole download+transcribe window instead of staying invisible.
-        self._signal_thinking(record.owner_id)
+        # K2 (live test 2026-09-27): run the cheap, download-free duration/size checks BEFORE
+        # signalling "thinking" -- a note rejected by either check was always going to be
+        # rejected, so it must never flash the orb (and therefore never needs a "cancel" either).
         try:
             validate_voice_note_duration(duration)
             validate_voice_note_size(file_size)
         except VoiceNoteTooLong:
             delivery = self._send(chat_id, VOICE_NOTE_TOO_LONG_REPLY)
-            self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
         except VoiceNoteTooLarge:
             delivery = self._send(chat_id, VOICE_NOTE_TOO_LARGE_REPLY)
-            self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
+        # voice-ux U1: the note passed the cheap checks and is about to be downloaded and
+        # transcribed -- signal "thinking" to the HMI now, so the orb shows feedback for the
+        # whole download+transcribe window instead of staying invisible.
+        self._signal_thinking(record.owner_id)
         # T4-style feedback for the dead time while the note is downloaded
         # and transcribed, same as _handle_query does before parsing.
         self._typing(actor_id)

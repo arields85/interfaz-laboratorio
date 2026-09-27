@@ -244,3 +244,24 @@ being flipped to assert `thinking_calls == []` / `cancelled_calls == []`.
 
 Checks: `test_channel_a_bot.py`; full runtime suite baseline 1791/1791 modulo the 2 known
 pre-existing worktree-`.venv` environmental failures.
+
+### K2 evidence
+
+- RED: rewrote `test_a_voice_note_over_the_duration_cap_is_rejected_before_any_download`,
+  `test_a_voice_note_with_a_missing_or_invalid_duration_is_rejected`, and
+  `test_a_voice_note_over_the_size_cap_is_rejected_before_any_download` to assert
+  `thinking_calls == []` / `cancelled_calls == []`; all three failed against the pre-fix source for
+  the expected reason (`Lists differ: ['00000000-0000-4000-8000-000000000001'] != []`, i.e. thinking
+  still fired before the reject checks). Also rewrote
+  `test_a_cancelled_signal_failure_never_breaks_the_rejection_reply` (its old duration-over-cap
+  scenario no longer signals cancelled at all, so it would stop exercising `notify_cancelled`'s error
+  path) to use a download failure instead — a failure that happens AFTER thinking is sent.
+- Fix: `channel_a_bot.py`'s `_handle_voice_note` now runs the `validate_voice_note_duration`/
+  `validate_voice_note_size` try/except block BEFORE `self._signal_thinking(record.owner_id)`; the
+  `VoiceNoteTooLong`/`VoiceNoteTooLarge` except branches no longer call `self._signal_cancelled(...)`.
+  Every failure after thinking is sent (download failure, transcription empty/unavailable/unexpected)
+  is untouched.
+- GREEN: `test_channel_a_bot.py` — 280 tests (unchanged count; existing tests were rewritten, none
+  added/removed). Full runtime suite: 1791/1791 modulo the same 2 known pre-existing worktree-`.venv`
+  environmental failures, 2 skipped — unchanged from baseline.
+- Commit: `29fbcae`.
