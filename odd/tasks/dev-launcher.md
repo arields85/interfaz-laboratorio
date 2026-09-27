@@ -204,4 +204,4 @@ baseline 1791/1791 modulo the 2 known pre-existing worktree-`.venv` environmenta
   runtime suite: 1791/1791 modulo the same 2 known pre-existing worktree-`.venv` environmental
   failures, 2 skipped — unchanged from baseline (K1 adds no new test count since it rewrote existing
   tests rather than adding new ones).
-- Commit: `f637fbc`.
+- Commit: `8ddf80b`.
