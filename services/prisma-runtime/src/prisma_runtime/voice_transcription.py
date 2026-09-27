@@ -120,7 +120,9 @@ def validate_voice_note_duration(duration: object) -> None:
     """
     if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
         raise VoiceNoteTooLong("VOICE_NOTE_DURATION_INVALID")
-    if duration > MAX_VOICE_NOTE_DURATION_SECONDS:
+    # Telegram reports whole seconds, so a note reported as exactly the bound
+    # already lasts longer than it (30.0-30.9 s for a 30 s bound).
+    if duration >= MAX_VOICE_NOTE_DURATION_SECONDS:
         raise VoiceNoteTooLong("VOICE_NOTE_DURATION_EXCEEDED")
 
 

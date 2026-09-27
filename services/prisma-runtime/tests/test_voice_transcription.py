@@ -14,11 +14,17 @@ from prisma_runtime import voice_transcription as vt
 class LimitsTests(unittest.TestCase):
     def test_duration_within_bound_is_accepted(self):
         vt.validate_voice_note_duration(1)
-        vt.validate_voice_note_duration(vt.MAX_VOICE_NOTE_DURATION_SECONDS)
+        vt.validate_voice_note_duration(vt.MAX_VOICE_NOTE_DURATION_SECONDS - 1)
 
     def test_duration_over_bound_is_rejected(self):
         with self.assertRaises(vt.VoiceNoteTooLong):
             vt.validate_voice_note_duration(vt.MAX_VOICE_NOTE_DURATION_SECONDS + 1)
+
+    def test_duration_reported_as_exactly_the_bound_is_rejected(self):
+        # Telegram reports whole seconds: a note shown as 0:30 lasts 30.0-30.9 s,
+        # i.e. it already exceeds the 30 s limit the reply announces.
+        with self.assertRaises(vt.VoiceNoteTooLong):
+            vt.validate_voice_note_duration(vt.MAX_VOICE_NOTE_DURATION_SECONDS)
 
     def test_duration_missing_or_invalid_is_rejected(self):
         for bad in (None, "30", 0, -1, True, 3.5):
