@@ -4,6 +4,7 @@ import type { DragEvent } from 'react';
 import { useParams, useNavigate, useBlocker } from 'react-router-dom';
 import { Save, ArrowLeft, Loader2, AlertCircle, ChevronLeft, ChevronRight, AlertTriangle, LayoutGrid, Plus, Pencil, Trash2, Undo2, Redo2 } from 'lucide-react';
 import { useHistoryState } from '../../hooks/useHistoryState';
+import type { SetValueOptions } from '../../hooks/useHistoryState';
 import { dashboardStorage } from '../../services/DashboardStorageService';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { variableCatalogStorage } from '../../services/VariableCatalogStorageService';
@@ -197,7 +198,7 @@ export default function DashboardBuilderPage() {
     // contenteditable — o mientras hay un diálogo abierto sobre el builder.
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (isAnyDialogOpen) {
+            if (isAnyDialogOpen || isSaving) {
                 return;
             }
 
@@ -231,7 +232,7 @@ export default function DashboardBuilderPage() {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isAnyDialogOpen, undoDraft, redoDraft]);
+    }, [isAnyDialogOpen, isSaving, undoDraft, redoDraft]);
 
     // 4. Mapeo de equipos simulado (para resolver bindings de la F3)
     const equipmentMap = useMemo(() => {
@@ -754,7 +755,7 @@ export default function DashboardBuilderPage() {
         // `historyOptions` se reenvía a la historia: la edición de título/subtítulo (tipeo
         // continuo) usa el default (coalesce), mientras que las mutaciones discretas de slots
         // del header (asignar/mover/quitar widget) piden `{ coalesce: false }` explícitamente.
-        const handleUpdateHeaderConfig = (headerConfig: DashboardHeaderConfig, historyOptions?: { coalesce?: boolean }) => {
+        const handleUpdateHeaderConfig = (headerConfig: DashboardHeaderConfig, historyOptions?: SetValueOptions) => {
             setDraft(prev => {
                 if (!prev) return prev;
                 return { ...prev, headerConfig };
@@ -1634,7 +1635,7 @@ export default function DashboardBuilderPage() {
                             tooltipPosition="bottom"
                             iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
                             onClick={undoDraft}
-                            disabled={!canUndoDraft}
+                            disabled={!canUndoDraft || isSaving}
                         />
                         <AdminIconToolbarButton
                             label="Rehacer (Ctrl+Y)"
@@ -1642,7 +1643,7 @@ export default function DashboardBuilderPage() {
                             tooltipPosition="bottom"
                             iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
                             onClick={redoDraft}
-                            disabled={!canRedoDraft}
+                            disabled={!canRedoDraft || isSaving}
                         />
                     </div>
                     <AdminActionButton
