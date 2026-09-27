@@ -216,3 +216,31 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
 
 Live retest by the user — see the final report for exactly what to look for in the HMI voice timeline
 log.
+
+## K2 — a rejected voice note must never signal "thinking" (2026-09-27)
+
+Live test (2026-09-27) evidence: a >30 s voice note produced `orb-phase thinking` at
+`t=156606 ms` and `hidden` at `t=157001 ms` (a `cancel` 0.4 s later) — the orb flashed for a note that
+was always going to be rejected.
+
+Root cause: `channel_a_bot.py`'s `_handle_voice_note` called `self._signal_thinking(record.owner_id)`
+right after the authorization/malformed-file-id check, **before** the cheap, download-free
+`validate_voice_note_duration`/`validate_voice_note_size` checks. A note rejected by either check
+still got a `thinking` signal (immediately followed by `cancel`), even though nothing was ever going
+to be downloaded or transcribed.
+
+Fix: run `validate_voice_note_duration`/`validate_voice_note_size` first; call `_signal_thinking`
+only once both pass. The `VoiceNoteTooLong`/`VoiceNoteTooLarge` except branches no longer call
+`_signal_cancelled` either (there is nothing to cancel — `thinking` was never sent for these). Every
+failure that happens AFTER `_signal_thinking` (download failure, transcription empty/unavailable/
+unexpected) keeps signalling `_signal_cancelled`, unchanged.
+
+Route: direct inline (one already-understood file — `channel_a_bot.py` — plus its existing test
+class `ChannelAVoiceNoteIntegrationTests` in `test_channel_a_bot.py`).
+
+TDD: Strict, same runner as U1/U2. RED observed first on the three duration/size tests (asserted the
+pre-fix behavior of `thinking_calls == [OWNER]`) and confirmed failing for the expected reason before
+being flipped to assert `thinking_calls == []` / `cancelled_calls == []`.
+
+Checks: `test_channel_a_bot.py`; full runtime suite baseline 1791/1791 modulo the 2 known
+pre-existing worktree-`.venv` environmental failures.

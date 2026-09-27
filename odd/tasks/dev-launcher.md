@@ -150,3 +150,31 @@ Residuals / follow-ups, not hidden:
 3. The parent must still replace the user's actual Desktop shortcut
    (`C:\Users\Ariel De Simone\Desktop\CoreAnalitycs\CoreAnalitycs.bat`) — this task never touched
    it. See the final handback report for the exact replacement target.
+
+## K1 — wait indicator: default-foreground label + blinking caret (2026-09-27)
+
+Live test (2026-09-27) feedback on L3's orange `|/-\` spinner:
+
+- (a) the label must print in the SAME color as the npm lines above it (the console's own default
+  foreground), not orange — remove the ANSI truecolor path and the `DarkYellow` fallback entirely
+  (`console-progress.ps1`'s `Test-PrismaVirtualTerminalSupport` helper and its VT-state script
+  variables are unused anywhere else in the repo, confirmed by grep, so removed cleanly rather than
+  kept dead).
+- (b) replace the `|/-\` spinner with the blinking underscore caret already used elsewhere in the
+  HMI ("Cargando_" / `.widget-runtime-state-caret` in `hmi-app/src/index.css`): the label followed
+  immediately (no space) by a `_` that alternates visible/hidden at the same 0.6 s cycle / 50% duty
+  (~0.3 s each phase). `start-local.ps1`'s existing 100 ms tick (`$tick`, unchanged) means 3 ticks =
+  one phase; `Update-PrismaWaitIndicator` now derives the caret from `[Math]::Floor($FrameIndex / 3)
+  % 2` instead of the old 4-glyph spinner-frame index. The hidden phase overwrites the caret with a
+  space (never omits it), so the line length never changes and no stray `_` is ever left behind.
+  Overall ~30 s health-check budget, non-TTY (print-once, unanimated) behavior, and clear-on-ready
+  all unchanged.
+
+Route: direct inline (one already-understood file — `console-progress.ps1` — plus its Python test
+file; no cross-cutting design left after L3).
+
+TDD: Strict, same runner as L3 (`services/prisma-runtime/tests/test_runtime_safety.py`, Python
+`unittest` subprocess-harness style). RED observed before implementation.
+
+Checks: same as above (`test_runtime_safety.py`'s progress-indicator tests; full runtime suite
+baseline 1791/1791 modulo the 2 known pre-existing worktree-`.venv` environmental failures).
