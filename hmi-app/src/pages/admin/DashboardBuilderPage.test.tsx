@@ -8,7 +8,7 @@ import { createDefaultDashboardView } from '../../utils/dashboardViews';
 import { useUIStore } from '../../store/ui.store';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
 import { HEADER_WIDGET_DRAG_MIME } from '../../utils/headerWidgets';
-import type { Dashboard, HierarchyNode } from '../../domain/admin.types';
+import type { Dashboard, HierarchyNode, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import {
     DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
     DEFAULT_KPI_TRAVELING_TOP_CAP_EFFECTS,
@@ -208,6 +208,7 @@ function getBuilderCanvasSnapshot() {
 function getLatestPropertyDockProps() {
     return propertyDockMock.mock.calls.at(-1)?.[0] as {
         onDuplicate?: () => void;
+        selectedWidget?: WidgetConfig;
     } | undefined;
 }
 
@@ -300,7 +301,21 @@ vi.mock('../../components/admin/WidgetCatalogRail', () => ({
 vi.mock('../../components/admin/PropertyDock', () => ({
     default: (props: unknown) => {
         propertyDockMock(props);
-        return <div data-testid="property-dock" />;
+        const { selectedWidget, onUpdateWidget } = props as {
+            selectedWidget?: WidgetConfig;
+            onUpdateWidget?: (widget: WidgetConfig) => void;
+        };
+        return (
+            <div data-testid="property-dock">
+                {selectedWidget && onUpdateWidget && (
+                    <input
+                        aria-label="Título del widget"
+                        value={selectedWidget.title ?? ''}
+                        onChange={(event) => onUpdateWidget({ ...selectedWidget, title: event.target.value })}
+                    />
+                )}
+            </div>
+        );
     },
 }));
 
@@ -359,12 +374,14 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         layout,
         widgets,
         onWidgetSelect,
+        onLayoutCommit,
     }: {
         cols: number;
         rows: number;
-        layout: Array<{ widgetId: string; x: number; y: number; w: number; h: number }>;
+        layout: WidgetLayout[];
         widgets: Array<{ id: string; type: string; title?: string }>;
         onWidgetSelect?: (widgetId: string | undefined) => void;
+        onLayoutCommit?: (layout: WidgetLayout) => void;
     }) => (
         builderCanvasMock({ cols, rows, layout, widgets, onWidgetSelect }),
         <div
@@ -383,6 +400,14 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
                     Seleccionar {widget.title ?? widget.id}
                 </button>
             ))}
+            {onLayoutCommit && (
+                <button
+                    type="button"
+                    onClick={() => onLayoutCommit({ widgetId: 'widget-1', x: 5, y: 5, w: 6, h: 6 })}
+                >
+                    Simular arrastre de widget-1
+                </button>
+            )}
         </div>
     ),
 }));
@@ -1820,5 +1845,196 @@ describe('DashboardBuilderPage', () => {
                 rows: 24,
             });
         });
+    });
+});
+
+describe('DashboardBuilderPage undo/redo', () => {
+    beforeEach(() => {
+        resizeCallbacks.clear();
+        mockNavigate.mockReset();
+        localStorage.clear();
+        useUIStore.setState(useUIStore.getInitialState());
+        templateStorageMock.getTemplates.mockReset();
+        useDataOverviewMock.mockReset();
+        useDataOverviewMock.mockReturnValue({
+            connection: { globalStatus: 'unknown', lastSuccess: null, ageMs: null },
+            machines: [],
+            isLoading: false,
+            isError: false,
+            isEnabled: true,
+        });
+        Object.values(dashboardStorageMock).forEach((mockFn) => mockFn.mockReset());
+        Object.values(hierarchyStorageMock).forEach((mockFn) => mockFn.mockReset());
+        Object.values(variableCatalogStorageMock).forEach((mockFn) => mockFn.mockReset());
+        loadNodeTypeLabelsMock.mockReset();
+        migrateLegacyBindingsMock.mockReset();
+        propertyDockMock.mockReset();
+        dashboardHeaderMock.mockReset();
+        builderCanvasMock.mockReset();
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('renders Undo and Redo disabled when the draft has no history yet', async () => {
+        await renderBuilderPage();
+
+        expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Rehacer (Ctrl+Y)' })).toBeDisabled();
+    });
+
+    it('undo reverts an added widget and enables redo; redo brings it back', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+
+        const undoButton = screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' });
+        const redoButton = screen.getByRole('button', { name: 'Rehacer (Ctrl+Y)' });
+        expect(undoButton).toBeEnabled();
+        expect(redoButton).toBeDisabled();
+
+        await user.click(undoButton);
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-1']);
+        });
+        expect(undoButton).toBeDisabled();
+        expect(redoButton).toBeEnabled();
+
+        await user.click(redoButton);
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+        expect(redoButton).toBeDisabled();
+    });
+
+    it('undoing back to the saved state clears the dirty indicator', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        expect(screen.getByRole('button', { name: 'Guardar Draft' })).toBeDisabled();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Guardar Draft' })).toBeEnabled();
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Guardar Draft' })).toBeDisabled();
+        });
+    });
+
+    it('clears the widget selection when undo removes the currently selected widget', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(getLatestPropertyDockProps()?.selectedWidget?.id).toMatch(/kpi/);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+        await waitFor(() => {
+            expect(getLatestPropertyDockProps()?.selectedWidget).toBeUndefined();
+        });
+    });
+
+    it('Ctrl+Z undoes and Ctrl+Y redoes from the keyboard', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+
+        await user.keyboard('{Control>}z{/Control}');
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-1']);
+        });
+
+        await user.keyboard('{Control>}y{/Control}');
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+    });
+
+    it('Ctrl+Shift+Z also redoes', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-1']);
+        });
+
+        await user.keyboard('{Control>}{Shift>}z{/Shift}{/Control}');
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+    });
+
+    it('does not undo from the keyboard while a text field is focused, so native text undo keeps working', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Nueva vista' }));
+        const nameInput = screen.getByPlaceholderText('Nombre de la vista');
+        await waitFor(() => expect(nameInput).toHaveFocus());
+
+        await user.keyboard('{Control>}z{/Control}');
+
+        expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+    });
+
+    it('a full layout commit (drag or resize) is exactly one undo step', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        const originalLayout = getBuilderCanvasSnapshot().layout;
+
+        await user.click(screen.getByRole('button', { name: 'Simular arrastre de widget-1' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().layout).toEqual([{ widgetId: 'widget-1', x: 5, y: 5, w: 6, h: 6 }]);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().layout).toEqual(originalLayout);
+        });
+        expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+    });
+
+    it('rapid consecutive property edits coalesce into a single undo step', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Widget 1' }));
+        const titleInput = await screen.findByLabelText('Título del widget');
+
+        await user.clear(titleInput);
+        await user.type(titleInput, 'Nuevo Titulo');
+
+        await waitFor(() => {
+            expect(getLatestPropertyDockProps()?.selectedWidget?.title).toBe('Nuevo Titulo');
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+
+        await waitFor(() => {
+            expect(getLatestPropertyDockProps()?.selectedWidget?.title).toBe('Widget 1');
+        });
+        expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
     });
 });

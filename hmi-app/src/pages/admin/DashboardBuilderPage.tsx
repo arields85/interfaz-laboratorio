@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { DragEvent } from 'react';
 import { useParams, useNavigate, useBlocker } from 'react-router-dom';
-import { Save, ArrowLeft, Loader2, AlertCircle, ChevronLeft, ChevronRight, AlertTriangle, LayoutGrid, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Save, ArrowLeft, Loader2, AlertCircle, ChevronLeft, ChevronRight, AlertTriangle, LayoutGrid, Plus, Pencil, Trash2, Undo2, Redo2 } from 'lucide-react';
+import { useHistoryState } from '../../hooks/useHistoryState';
 import { dashboardStorage } from '../../services/DashboardStorageService';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { variableCatalogStorage } from '../../services/VariableCatalogStorageService';
@@ -105,7 +106,18 @@ export default function DashboardBuilderPage() {
 
     // 1. Estado original vs Estado draft para saber si hay cambios
     const [originalConfig, setOriginalConfig] = useState<Dashboard | null>(null);
-    const [draft, setDraft] = useState<Dashboard | null>(null);
+    // El historial de undo/redo envuelve únicamente el draft (nunca stagedVariables, fuera de
+    // alcance): `setDraft` sigue aceptando valor u updater funcional, igual que useState, para
+    // no tener que tocar cada call site existente.
+    const draftHistory = useHistoryState<Dashboard | null>(null);
+    const draft = draftHistory.value;
+    const setDraft = draftHistory.set;
+    const undoDraft = draftHistory.undo;
+    const redoDraft = draftHistory.redo;
+    const canUndoDraft = draftHistory.canUndo;
+    const canRedoDraft = draftHistory.canRedo;
+    const resetDraftHistory = draftHistory.reset;
+    const replaceDraftHistory = draftHistory.replaceCurrent;
     const [allDashboards, setAllDashboards] = useState<Dashboard[]>([]);
     const [allNodes, setAllNodes] = useState<HierarchyNode[]>([]);
     const [catalogVariables, setCatalogVariables] = useState<CatalogVariable[]>([]);
@@ -173,6 +185,54 @@ export default function DashboardBuilderPage() {
 
     const blocker = useBlocker(isDirty);
 
+    const isAnyDialogOpen = isCreateViewDialogOpen
+        || isRenameViewDialogOpen
+        || Boolean(dialogMessage)
+        || Boolean(variableDeletionState)
+        || blocker.state === 'blocked';
+
+    // Atajos de teclado del historial (T2): Ctrl+Z deshace; Ctrl+Y y Ctrl+Shift+Z rehacen
+    // (Meta en vez de Ctrl para mac). Se ignoran mientras el foco está en un campo editable —
+    // para que el undo nativo del navegador siga funcionando dentro de inputs/textarea/
+    // contenteditable — o mientras hay un diálogo abierto sobre el builder.
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (isAnyDialogOpen) {
+                return;
+            }
+
+            const target = event.target as HTMLElement | null;
+            const tagName = target?.tagName;
+            const isEditableTarget = tagName === 'INPUT'
+                || tagName === 'TEXTAREA'
+                || tagName === 'SELECT'
+                || Boolean(target?.isContentEditable);
+
+            if (isEditableTarget) {
+                return;
+            }
+
+            const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+
+            if (!isCtrlOrMeta) {
+                return;
+            }
+
+            const key = event.key.toLowerCase();
+
+            if (key === 'z' && !event.shiftKey) {
+                event.preventDefault();
+                undoDraft();
+            } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
+                event.preventDefault();
+                redoDraft();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isAnyDialogOpen, undoDraft, redoDraft]);
+
     // 4. Mapeo de equipos simulado (para resolver bindings de la F3)
     const equipmentMap = useMemo(() => {
         const list = mockEquipmentList;
@@ -235,7 +295,9 @@ export default function DashboardBuilderPage() {
                 if (nextConfig) {
                     const normalizedConfig = normalizeDashboardViews(normalizeDashboardBounds(nextConfig));
                     setOriginalConfig(normalizedConfig);
-                    setDraft(JSON.parse(JSON.stringify(normalizedConfig))); // Deep copy
+                    // Cargar un dashboard reinicia el historial (T2): no debe ser posible
+                    // deshacer hacia el draft de un dashboard distinto.
+                    resetDraftHistory(JSON.parse(JSON.stringify(normalizedConfig))); // Deep copy
                     setSelectedViewId(normalizedConfig.activeViewId);
                 }
             } catch (error) {
@@ -245,7 +307,7 @@ export default function DashboardBuilderPage() {
             }
         };
         loadConfig();
-    }, [id]);
+    }, [id, resetDraftHistory]);
 
     useEffect(() => {
         if (!draft || !selectedWidgetId) {
@@ -404,7 +466,7 @@ export default function DashboardBuilderPage() {
                 name: trimmedName,
                 iconKey: resolvePersistedViewIconKey(viewIconDraft),
             });
-        });
+        }, { coalesce: false });
 
         pendingSelectedViewIdRef.current = createdViewId;
         setSelectedViewId(createdViewId);
@@ -430,7 +492,7 @@ export default function DashboardBuilderPage() {
         setDraft((prev) => (prev ? updateDashboardViewPresentation(prev, currentActiveView.id, {
             name: trimmedName,
             iconKey: resolvePersistedViewIconKey(viewIconDraft),
-        }) : prev));
+        }) : prev), { coalesce: false });
         setViewNameDraft('');
         setViewIconDraft(AUTO_VIEW_ICON_SELECTION);
         setIsRenameViewDialogOpen(false);
@@ -441,7 +503,7 @@ export default function DashboardBuilderPage() {
             return;
         }
 
-        setDraft((prev) => (prev ? moveDashboardView(prev, currentActiveView.id, direction) : prev));
+        setDraft((prev) => (prev ? moveDashboardView(prev, currentActiveView.id, direction) : prev), { coalesce: false });
     };
 
     const handleDeleteCurrentView = () => {
@@ -454,7 +516,7 @@ export default function DashboardBuilderPage() {
             return;
         }
 
-        setDraft((prev) => (prev ? deleteDashboardView(prev, currentActiveView.id) : prev));
+        setDraft((prev) => (prev ? deleteDashboardView(prev, currentActiveView.id) : prev), { coalesce: false });
         setSelectedWidgetId(undefined);
     };
 
@@ -533,7 +595,7 @@ export default function DashboardBuilderPage() {
                         };
                     }),
                 };
-            });
+            }, { coalesce: false });
             setOriginalConfig((prev) => {
                 if (!prev) {
                     return prev;
@@ -641,7 +703,9 @@ export default function DashboardBuilderPage() {
                 const dashboards = await dashboardStorage.getDashboards();
                 if (newConfig) {
                     setOriginalConfig(newConfig);
-                    setDraft(JSON.parse(JSON.stringify(newConfig)));
+                    // Guardar sincroniza el draft con la respuesta del storage pero conserva el
+                    // historial de undo/redo (fuera de alcance perderlo al guardar).
+                    replaceDraftHistory(JSON.parse(JSON.stringify(newConfig)));
                 }
                 setAllDashboards(dashboards);
             } catch (error) {
@@ -674,7 +738,9 @@ export default function DashboardBuilderPage() {
                 const dashboards = await dashboardStorage.getDashboards();
                 if (newConfig) {
                     setOriginalConfig(newConfig);
-                    setDraft(JSON.parse(JSON.stringify(newConfig)));
+                    // Publicar también sincroniza el draft manteniendo el historial (mismo
+                    // motivo que en handleSaveDraft).
+                    replaceDraftHistory(JSON.parse(JSON.stringify(newConfig)));
                 }
                 setAllDashboards(dashboards);
             } catch (error) {
@@ -685,11 +751,14 @@ export default function DashboardBuilderPage() {
             }
         };
 
-        const handleUpdateHeaderConfig = (headerConfig: DashboardHeaderConfig) => {
+        // `historyOptions` se reenvía a la historia: la edición de título/subtítulo (tipeo
+        // continuo) usa el default (coalesce), mientras que las mutaciones discretas de slots
+        // del header (asignar/mover/quitar widget) piden `{ coalesce: false }` explícitamente.
+        const handleUpdateHeaderConfig = (headerConfig: DashboardHeaderConfig, historyOptions?: { coalesce?: boolean }) => {
             setDraft(prev => {
                 if (!prev) return prev;
                 return { ...prev, headerConfig };
-            });
+            }, historyOptions);
         };
 
         const handleHeaderTitleChange = (value: string) => {
@@ -758,7 +827,7 @@ export default function DashboardBuilderPage() {
             handleUpdateHeaderConfig({
                 ...(draft.headerConfig ?? {}),
                 widgetSlots: [...currentSlots, { widgetId, column: targetColumn }],
-            });
+            }, { coalesce: false });
 
             setSelectedWidgetId(widgetId);
         };
@@ -788,7 +857,7 @@ export default function DashboardBuilderPage() {
                         widgetSlots: (prev.headerConfig?.widgetSlots ?? []).filter(slot => slot.widgetId !== widgetId),
                     },
                 };
-            });
+            }, { coalesce: false });
         };
 
         const handleMoveHeaderWidget = (widgetId: string, targetColumn: number) => {
@@ -821,7 +890,7 @@ export default function DashboardBuilderPage() {
             handleUpdateHeaderConfig({
                 ...(draft.headerConfig ?? {}),
                 widgetSlots: newSlots,
-            });
+            }, { coalesce: false });
         };
 
         const handleHeaderDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -1090,7 +1159,7 @@ export default function DashboardBuilderPage() {
                     widgets: [...view.widgets, newWidget],
                     layout: [...view.layout, newLayout],
                 }));
-            });
+            }, { coalesce: false });
             setSelectedWidgetId(newId);
         };
 
@@ -1152,7 +1221,7 @@ export default function DashboardBuilderPage() {
                         widgetSlots: nextSlots,
                     },
                 };
-            });
+            }, { coalesce: false });
             setSelectedWidgetId(newId);
         };
 
@@ -1181,7 +1250,7 @@ export default function DashboardBuilderPage() {
                             ? { ...slot, column: slotIndex }
                             : slot
                     )),
-                });
+                }, { coalesce: false });
 
                 setSelectedWidgetId(widgetId);
                 return;
@@ -1190,7 +1259,7 @@ export default function DashboardBuilderPage() {
             handleUpdateHeaderConfig({
                 ...(draft.headerConfig ?? {}),
                 widgetSlots: [...currentSlots, { widgetId, column: slotIndex }],
-            });
+            }, { coalesce: false });
 
             setSelectedWidgetId(widgetId);
         };
@@ -1230,11 +1299,13 @@ export default function DashboardBuilderPage() {
                     widgets: [...view.widgets, duplicatedWidget],
                     layout: [...view.layout, newLayout],
                 }));
-            });
+            }, { coalesce: false });
 
             setSelectedWidgetId(newId);
         };
 
+        // Las ediciones desde PropertyDock pueden ser tipeo continuo (título, etc.) — se dejan
+        // en el coalescing por default de la historia para que se agrupen en un solo paso.
         const handleUpdateWidget = (updatedWidget: WidgetConfig) => {
             setDraft(prev => {
                 if (!prev) return prev;
@@ -1286,7 +1357,7 @@ export default function DashboardBuilderPage() {
                         }),
                     })),
                 };
-            });
+            }, { coalesce: false });
         };
 
         const handleRequestVariableDeletion = async (variableId: string) => {
@@ -1412,6 +1483,10 @@ export default function DashboardBuilderPage() {
             return nextDashboard;
         };
 
+        // Cada llamada ya representa un drag/resize completo: BuilderCanvas solo confirma
+        // (`onLayoutCommit`/`onResize`) una vez, al soltar el puntero, nunca mientras arrastra
+        // (ver `commitLayout` en BuilderCanvas.tsx). Por eso alcanza con `coalesce: false` — no
+        // hace falta la marca `transient` de la historia para este call site.
         const handleUpdateLayout = (updatedLayout: WidgetLayout) => {
             setDraft(prev => {
                 if (!prev) return prev;
@@ -1419,7 +1494,7 @@ export default function DashboardBuilderPage() {
                     ...view,
                     layout: view.layout.map((layoutItem) => layoutItem.widgetId === updatedLayout.widgetId ? updatedLayout : layoutItem),
                 }));
-            });
+            }, { coalesce: false });
         };
 
         const handleResizeLayout = (widgetId: string, w: number, h: number) => {
@@ -1429,7 +1504,7 @@ export default function DashboardBuilderPage() {
                     ...view,
                     layout: view.layout.map((layoutItem) => layoutItem.widgetId === widgetId ? { ...layoutItem, w, h } : layoutItem),
                 }));
-            });
+            }, { coalesce: false });
         };
 
         const handleDeleteWidget = (widgetId?: string) => {
@@ -1454,7 +1529,7 @@ export default function DashboardBuilderPage() {
                         widgetSlots: nextHeaderSlots,
                     },
                 };
-            });
+            }, { coalesce: false });
             setSelectedWidgetId(current => current === targetWidgetId ? undefined : current);
         };
 
@@ -1551,6 +1626,24 @@ export default function DashboardBuilderPage() {
                         />
                     </div>
                     <div data-testid="dashboard-builder-unsaved-slot" className={DASHBOARD_BUILDER_WARNING_SLOT_CLS}>
+                    </div>
+                    <div data-testid="dashboard-builder-history-actions" className="flex shrink-0 items-center gap-2">
+                        <AdminIconToolbarButton
+                            label="Deshacer (Ctrl+Z)"
+                            icon={Undo2}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            onClick={undoDraft}
+                            disabled={!canUndoDraft}
+                        />
+                        <AdminIconToolbarButton
+                            label="Rehacer (Ctrl+Y)"
+                            icon={Redo2}
+                            tooltipPosition="bottom"
+                            iconProps={DASHBOARD_BUILDER_VIEW_ACTION_ICON_PROPS}
+                            onClick={redoDraft}
+                            disabled={!canRedoDraft}
+                        />
                     </div>
                     <AdminActionButton
                         onClick={handleSaveDraft}
