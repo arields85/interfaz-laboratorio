@@ -63,9 +63,10 @@ function Wait-VoiceReady {
         $tick = 0
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
             if (Test-PrismaDevelopmentCancellation) { return $false }
-            # m1 spinner (user request): tick the indicator every 100 ms (10 ticks per 1 s
-            # attempt, a 0.4 s full `|/-\` cycle) instead of once per attempt, so the animation
-            # reads as a smooth spinner. The overall ~30 s health-check budget is unchanged.
+            # K1/m1 caret (user request): tick the indicator every 100 ms (10 ticks per 1 s
+            # attempt) instead of once per attempt, so the trailing caret blinks smoothly (0.6 s
+            # full cycle, see console-progress.ps1). The overall ~30 s health-check budget is
+            # unchanged.
             for ($subTick = 0; $subTick -lt 10; $subTick++) {
                 Update-PrismaWaitIndicator -Label $label -FrameIndex $tick
                 Start-Sleep -Milliseconds 100
@@ -93,9 +94,10 @@ function Wait-PresentationReady {
         $tick = 0
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
             if (Test-PrismaDevelopmentCancellation) { return $false }
-            # m1 spinner (user request): tick the indicator every 100 ms (10 ticks per 1 s
-            # attempt, a 0.4 s full `|/-\` cycle) instead of once per attempt, so the animation
-            # reads as a smooth spinner. The overall ~30 s health-check budget is unchanged.
+            # K1/m1 caret (user request): tick the indicator every 100 ms (10 ticks per 1 s
+            # attempt) instead of once per attempt, so the trailing caret blinks smoothly (0.6 s
+            # full cycle, see console-progress.ps1). The overall ~30 s health-check budget is
+            # unchanged.
             for ($subTick = 0; $subTick -lt 10; $subTick++) {
                 Update-PrismaWaitIndicator -Label $label -FrameIndex $tick
                 Start-Sleep -Milliseconds 100

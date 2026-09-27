@@ -178,3 +178,30 @@ TDD: Strict, same runner as L3 (`services/prisma-runtime/tests/test_runtime_safe
 
 Checks: same as above (`test_runtime_safety.py`'s progress-indicator tests; full runtime suite
 baseline 1791/1791 modulo the 2 known pre-existing worktree-`.venv` environmental failures).
+
+### K1 evidence
+
+- RED: rewrote `test_wait_indicator_cycles_the_orange_spinner_glyph_and_clears_it_when_the_console_is_interactive`
+  into `test_wait_indicator_blinks_a_trailing_caret_after_the_label_and_clears_it_when_the_console_is_interactive`
+  (asserts `"{label}_"`/`"{label} "` prefixes across FrameIndex 0-6 and a constant line length) and
+  `test_wait_indicator_uses_orange_ansi_truecolor_around_the_spinner_when_vt_is_supported` into
+  `test_wait_indicator_never_applies_any_color_matching_the_npm_output_lines_above_it` (structural:
+  no `ForegroundColor`/`DarkYellow`/`38;2;255;140;0`/`prismaSpinnerFrames`/
+  `Test-PrismaVirtualTerminalSupport` in source; behavioral: no `\x1b` anywhere). Both failed against
+  the pre-fix source for the expected reason: `'| Starting Prisma voic' != 'Starting Prisma voice_'`
+  (old spinner-glyph-before-label output) and `'ForegroundColor' unexpectedly found in <source>`.
+- Fix: `console-progress.ps1` rewritten — removed `Test-PrismaVirtualTerminalSupport`,
+  `$script:prismaSpinnerFrames`, `$script:prismaOrangeAnsiTrueColor`, `$script:prismaAnsiReset`,
+  `$script:prismaVirtualTerminalEnabled` (grep-confirmed unused elsewhere in the repo);
+  `Start-PrismaWaitIndicator`'s non-TTY line and `Update-PrismaWaitIndicator`'s interactive line
+  both drop `-ForegroundColor` entirely. `Update-PrismaWaitIndicator` now computes
+  `$phase = [Math]::Floor($FrameIndex / 3)`, caret = `'_'` when `$phase % 2 -eq 0` else `' '`, text =
+  `"$Label$caret"` padded to the same 40-char width. `start-local.ps1`'s tick loops and comments
+  updated to describe the caret instead of the retired spinner (no behavior change — same 100 ms
+  tick, same ~30 s budget).
+- GREEN: the 2 rewritten tests + `test_wait_indicator_prints_one_plain_line_when_output_is_not_a_tty`
+  + `test_start_local_wires_the_progress_indicator_around_both_health_waits`, all passing. Full
+  runtime suite: 1791/1791 modulo the same 2 known pre-existing worktree-`.venv` environmental
+  failures, 2 skipped — unchanged from baseline (K1 adds no new test count since it rewrote existing
+  tests rather than adding new ones).
+- Commit: `f637fbc`.
