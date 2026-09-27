@@ -214,8 +214,9 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
 
 ## Next step
 
-Live retest by the user — see the final report for exactly what to look for in the HMI voice timeline
-log.
+Closed; no pending work (K2 below is also fixed and verified). Live retest by the user on
+2026-09-27 passed: the orb shows "thinking" on Channel A voice-note receipt (answer arriving ~3 s
+later), and overlapping answers are queued and play in order (see `odd/tasks/voice-overlap.md`).
 
 ## K2 — a rejected voice note must never signal "thinking" (2026-09-27)
 
@@ -265,3 +266,6 @@ pre-existing worktree-`.venv` environmental failures.
   added/removed). Full runtime suite: 1791/1791 modulo the same 2 known pre-existing worktree-`.venv`
   environmental failures, 2 skipped — unchanged from baseline.
 - Commit: `b1f87cf`.
+
+**Live verification (2026-09-27):** passed. A rejected voice note no longer flashes the orb;
+integrated on `main` `76464d0`. No pending work.

@@ -278,8 +278,9 @@ worktree-local `.venv` missing), 2 skipped, no new failures.**
 
 ## Next step
 
-Live retest by the user (all four fixes touch runtime behavior the launcher must reload to pick
-up): F1 (Channel B voice-note replies in protected mode), F2 (first Channel A voice note after
-pairing), F3 (Channel A inactivity warning/expiry copy), F6 (Channel B "typing…" indicator), F7
-(voice-note transcription accuracy for a machine name like "Reiner", and general transcription
-latency). See the final report for exactly what to retest.
+Closed; no pending work. Live retest by the user on 2026-09-25 passed: F3's inactivity
+warning/expiry copy showed the confirmed HMI label ("Notebook"), and F6's Channel B "typing…"
+indicator behaved as fixed (see `odd/tasks/pw-011-prisma-minor-followups.md`'s Live verification
+section). F1/F2/F7 were exercised as part of the same session's voice-note and Channel B retests
+(see `odd/tasks/prisma-channel-b-voice-replies.md` B3 and `odd/tasks/pw-013-voice-note-questions.md`
+V7), with no errors observed in the runtime logs.

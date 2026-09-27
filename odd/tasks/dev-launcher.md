@@ -150,6 +150,7 @@ Residuals / follow-ups, not hidden:
 3. The parent must still replace the user's actual Desktop shortcut
    (`C:\Users\Ariel De Simone\Desktop\CoreAnalitycs\CoreAnalitycs.bat`) — this task never touched
    it. See the final handback report for the exact replacement target.
+   **Resolved 2026-09-27** — see Live verification below: the shortcut has been repointed.
 
 ## K1 — wait indicator: default-foreground label + blinking caret (2026-09-27)
 
@@ -205,3 +206,11 @@ baseline 1791/1791 modulo the 2 known pre-existing worktree-`.venv` environmenta
   failures, 2 skipped — unchanged from baseline (K1 adds no new test count since it rewrote existing
   tests rather than adding new ones).
 - Commit: `8ddf80b`.
+
+## Live verification (2026-09-27)
+
+Passed. The launcher opens the control Chrome once ready; the console wait label prints in the
+default foreground color with a trailing blinking caret ("_"); the taskbar/shortcut icon is now a
+monochrome Lucide pyramid, renamed to `tools/dev-launcher/prisma-pyramid.ico` (`b86f2e9`) to bust
+Windows' cached-icon behavior. The user's Desktop shortcut (residual item 3 above) has been
+repointed to the in-repo launcher. No pending work.

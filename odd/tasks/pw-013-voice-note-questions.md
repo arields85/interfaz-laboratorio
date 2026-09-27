@@ -131,13 +131,14 @@ not an oversight:
   design symmetric to B1b, plus a way to defer Channel A's envelope publish), not something to
   quietly fold into this task after the fact.
 
-- [ ] **V7 — Live verification (user).** Send a voice note under 30 s to each bot (the Channel A
+- [x] **V7 — Live verification (user).** Send a voice note under 30 s to each bot (the Channel A
   dedicated/QR bot and the Channel B personal bot) with the HMI showing a dashboard: the answer must
   arrive exactly as if the question had been typed, with no transcript echo. Then a voice note over
   30 s (rejected before download) and, if convenient, one in a noisy/unclear recording (empty-
   transcript reply). Parent checks the runtime logs for errors and confirms the model id in
   Evidence really is a valid, reachable Gemini model (`GEMINI_TRANSCRIPTION_MODEL` in
   `voice_transcription.py`) — **not verified by this task, no live provider call was made.**
+  **Done 2026-09-25 ~09:54-09:59** — see Evidence below.
 
 ## Model id decision (needs user/parent confirmation before live use)
 
@@ -316,6 +317,17 @@ it will not crash, but voice-note questions will not work until the id is correc
   implemented).
 - Commit: `574be18`.
 
+## Evidence (V7, live verification, 2026-09-25 ~09:54-09:59, follow-up 2026-09-27)
+
+Voice-note questions passed on both channels: transcription in 1-3 s; Channel B answered with text
+plus a voice note, Channel A answered with the orb plus voice. Notes over 30 s are rejected before
+download. `GEMINI_TRANSCRIPTION_MODEL` confirmed reachable in production use.
+
+2026-09-27 follow-up: a note Telegram reported as exactly 0:30 was accepted and got an unrelated
+keyword answer — fixed on `main` `c782287` (duration `>= 30` now rejected; Telegram reports whole
+seconds, so an exact-30 note was previously let through). Unrelated answers to long/rambling
+transcripts are a keyword-parser limitation, deferred to PW-003 by the user (not part of this task).
+
 ## Progress
 
 - 2026-09-24: read-only investigation complete (transports, bots, Gemini credential/TTS wiring,
@@ -326,8 +338,9 @@ it will not crash, but voice-note questions will not work until the id is correc
 
 ## Next step
 
-V7 live verification (user) — see Tasks above. The model id (`GEMINI_TRANSCRIPTION_MODEL`) also
-needs explicit confirmation before that live test can succeed; see "Model id decision" above.
+Closed for this task's scope; V7 live verification passed 2026-09-25/2026-09-27 (see Evidence
+above). The unrelated-answer keyword-parser limitation on long/rambling transcripts remains open,
+tracked under PW-003.
 
 ## Integration
 

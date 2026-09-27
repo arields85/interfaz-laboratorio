@@ -223,6 +223,14 @@ Final F5 strings (verbatim, before the blinking caret's trailing `_`):
 Commits (work units): `26e95ce` (hook, T1), `d7bbd4e` (component, T2+T3+T4),
 `b47b1b3` (component, GGA double-submit fix).
 
+## Live verification (2026-09-25, follow-up 2026-09-27)
+
+Passed. Retested live under `/admin`: the three credential rows (Proveedor de voz / Canal A /
+Canal B) are independent, each showing its own in-row "Guardando credencial_" /
+"Verificando credencial_" / "Borrando credencial_" caret while busy, with the other rows unaffected.
+The delete confirmation dialog closes immediately on confirm (F8), verified again 2026-09-27. No
+pending work.
+
 ## Second coordinator correction (2026-09-25, same day)
 
 The coordinator withdrew the "Probar" wording as a mistake: there is no

@@ -209,3 +209,10 @@ mint and the failed resolve to confirm or rule out the queueing-under-burst theo
   still starts immediately, unchanged from before.
 - Runtime suite green (2 known pre-existing worktree-`.venv` environmental failures acceptable,
   named above). hmi-app `npx vitest run` / `npx tsc -b` / `npm run lint` clean.
+
+## Live verification (2026-09-27)
+
+Passed. Overlapping Channel A answers are queued and play in order (no drop, no overlap); the
+overall orb "thinking" signal on voice-note receipt also works (answer ~3 s later). See also
+`odd/tasks/channel-a-voice-note-ux.md`'s K2 fix (rejected voice notes no longer flash the orb),
+integrated on `main` `76464d0`. No pending work.

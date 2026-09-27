@@ -388,3 +388,11 @@ Checks after rebase:
 
 `fix/pw-011-prisma-minor-followups` is confirmed a descendant of `main`
 (`git merge-base --is-ancestor main HEAD` succeeds).
+
+## Live verification (2026-09-25)
+
+Passed for the items exercised live: Channel A's inactivity warning and idle-expiry cleanup (M3)
+fired correctly, showing the confirmed HMI label ("Notebook") rather than falling back to "la HMI"
+(the label-capture fix landed as F3 in `odd/tasks/live-test-2026-09-25-runtime.md`); the "typing…"
+indicator behavior (M5, and Channel B's F6 counterpart) was confirmed live in the same session. No
+pending work for these items.

@@ -99,10 +99,11 @@ on its own — without any HMI browser open and without anything playing or show
   §1.1 status row (reactivated 2026-09-24, PW-012) and §6.3 (remote personal definition, text +
   voice note in the chat only, never on the HMI, provisional active-screen source, queue of 3,
   migration to the autonomous source with PW-003) plus a dated clarification block.
-- [ ] **B3 — Live verification (user).** With the HMI showing a dashboard, ask the Channel B bot a
+- [x] **B3 — Live verification (user).** With the HMI showing a dashboard, ask the Channel B bot a
   few questions: the text answer arrives as today, then a voice note replying to the same question
   with Prisma's voice; nothing plays or shows on the HMI; overlapping questions keep their audio
   paired. Parent checks the runtime logs for errors.
+  **Done 2026-09-25 ~09:31** — see Evidence below.
 
 ## Acceptance criteria
 
@@ -284,6 +285,12 @@ on its own — without any HMI browser open and without anything playing or show
   checks run.
 - Commit: `c8df41b` — `feat(prisma-channel-b): queue overlapping Channel B voice notes (B1b)`.
 
+## Evidence (B3, live verification, 2026-09-25 ~09:31)
+
+Typed questions to the Channel B bot got the text answer, then the voice note as a reply to the same
+question, using current active-screen data, fast; nothing played or showed on the HMI. No errors in
+the runtime logs.
+
 ## Progress
 
 - 2026-09-24: product definition clarified with the user; read-only investigation of `C:\hmi_tts`
@@ -299,6 +306,4 @@ on its own — without any HMI browser open and without anything playing or show
 
 ## Next step
 
-B3 live verification (user). The branch was rebased onto `main` (now includes the PW-008 fix
-`30f84ca`); runtime suite 1576 OK after the rebase. The runtime must be relaunched to load the
-Channel B changes.
+Closed; no pending work. B3 live verification passed 2026-09-25 ~09:31 (see Evidence above).

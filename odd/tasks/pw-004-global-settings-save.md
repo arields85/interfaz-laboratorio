@@ -118,7 +118,11 @@ outside `onDirtyChange`) needed no change and stayed green throughout.
 
 ## Visual check
 
-Pending. The dialog lives under `/admin`, which requires a real login; no dev/test auth bypass
-exists in the codebase (checked `store/auth.store.ts` and `services/adminAuth.service.ts` call
-sites). Per the isolation instructions, auth was not bypassed, so no real-browser screenshot was
-taken. All behaviour is covered by the RTL test suite above (21/21 + 9/9 green).
+Originally pending (the dialog lives under `/admin`, which requires a real login and had no
+dev/test auth bypass); resolved by a live retest, see below.
+
+## Live verification (2026-09-25)
+
+Passed. The dialog was retested live under `/admin`: the dirty dots on inactive tabs, the discard
+confirmation dialog (Cerrar/Escape/backdrop while dirty), and the footer status font size all behave
+as specified. No pending work.
