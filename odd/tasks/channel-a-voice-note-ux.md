@@ -264,4 +264,4 @@ pre-existing worktree-`.venv` environmental failures.
 - GREEN: `test_channel_a_bot.py` — 280 tests (unchanged count; existing tests were rewritten, none
   added/removed). Full runtime suite: 1791/1791 modulo the same 2 known pre-existing worktree-`.venv`
   environmental failures, 2 skipped — unchanged from baseline.
-- Commit: `29fbcae`.
+- Commit: `b1f87cf`.
