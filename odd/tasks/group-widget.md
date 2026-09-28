@@ -111,9 +111,14 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   makes the group lose ALL its members (dragging the container afterwards moves only the
   container); unlock -> demote -> lock restores it. Expected: only the promoted widget leaves the
   group.
-- [ ] **G12** — Bug (live check 3, builder header): the dashboard view tab buttons overlap the
+- [x] **G12** — Bug (live check 3, builder header): the dashboard view tab buttons overlap the
   header widget slots (screenshot: view icons stacked over the empty slot's "+" trigger). Not
   group-specific; fixed on this branch because it is found in the same builder live session.
+- [x] **G13** — (live check 4) (a) locked resize must be smooth like unlocked: px preview clamped
+  to the members' px bounding box, snap only on release; (b) group resize handles outside the
+  frame like other widgets.
+- [x] **G14** — (user) builder selection frame and resize handles of every widget take the
+  Design tab "Acento Admin" color (`--color-admin-accent`).
 - [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
@@ -289,7 +294,25 @@ after the user's live check. Slice boundaries are recorded under Progress.
   to `e89e44d`. Advisory SUGGESTION: R3-resize-clamp-corner-only-direction-mapping
   (`groupWidget.ts:321-322`, the resize clamp only maps corner handles) — folded into G11/G12.
 
+- 2026-09-28: live check 4: grid snap OK; new G13 and G14.
+- 2026-09-28: G11-G14 (route: delegated writer, one writer, items added mid-run) — G11 NOT
+  reproduced (pure functions, real `updateDashboardView` pipeline, real canvas DOM with and
+  without StrictMode all keep the other members); regression tests added (`e24790f`); resize
+  clamp direction mapping documented as exhaustive (`27e692c`). Parent read the live saved
+  dashboard via CDP: group healthy (7 members, header empty) — the user had already demoted the
+  widget, so no evidence remained. G11 stays OPEN pending a live repro with an immediate CDP
+  state capture. G12 `0218f10`: header slot canvas and actions get `shrink-0` so only the title
+  truncates (builder and viewer). G13a `88a1921`: locked resize preview clamped in px
+  (`pixelBoundsToRect`/`rectToPixelBounds`), snap on commit. G13b `d9a0468`: handles offset by
+  `calc(inset - var(--widget-spacing))` via `resolveWidgetSurfaceInset`. G14 `6044921`:
+  `GridSelectionFrame` and handle swatch use `--color-admin-accent` (solid); other
+  `--color-admin-selection-*` consumers left (`HeaderSelectionFrame.tsx`, `.text-gradient`) —
+  header selection frame now diverges from the canvas frame when the accent is customized
+  (possible follow-up). Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test` 2791/2791.
+  Parent spot check: BuilderCanvas + groupWidget 140/140.
+
 ## Next step
 
-G11 + G12 (writer), then the user's live check, then the single
+Slice review, then the user's live check (G11 repro attempt with CDP capture, G12, G13, G14),
+then the single merge., then the user's live check, then the single
 merge.
