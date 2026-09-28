@@ -183,8 +183,12 @@ live check).
   bug found, regression test added). RED: 2 genuine failures; GREEN 14/14. Writer: `npx tsc -b`
   clean, `npm run lint` clean, `npm test` 2672/2672. Parent spot check: ThemeSettingsTab 14/14.
 
+  Review assess (base 724ab41): medium, 131 lines, `under_budget` — pending in the slice.
+
 ## Next step
 
+Live check (TH5) from the main checkout after the group widget merge: rebase `feat/theme-tab`
+onto the new `main`, then the single merge to `main`.
  live check after the group widget merge (the dashboards
 live in the 5173 origin's localStorage, so the theme is tested from the main checkout once
 `feat/theme-tab` is rebased onto the new `main`).
