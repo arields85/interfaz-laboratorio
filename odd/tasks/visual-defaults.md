@@ -141,7 +141,7 @@ Only overrides are stored; keys absent or null already equal the code defaults.
 
 ## Tasks
 
-- [ ] **V1** — Update all defaults to the captured values (shader store, CSS tokens + Design tab
+- [x] **V1** — Update all defaults to the captured values (shader store, CSS tokens + Design tab
   default maps, orb defaults), adjust tests that pin old defaults, update docs that list them.
   Route: delegated writer.
 - [ ] **V2** — Live check by the user on a fresh origin (e.g. 5174 or `localhost`).
@@ -150,6 +150,17 @@ Only overrides are stored; keys absent or null already equal the code defaults.
 
 - 2026-09-28: values captured via CDP; worktree and document created.
 
+- 2026-09-28: V1 done (route: delegated writer) — `9c29d07` feat(design): shader defaults
+  changed nebIntensity 0.5->0.36, nebAlpha 1->0.89, nebSat 0.5->0.36, nebColorVar 1->0.3,
+  nebColorShift 1->0, chromHue 0->0.84, cursorNebHue 0->0.84; `--font-size-mono` 10->11px;
+  colors accent-green #26c5aa, admin-accent #dee8f7, widget-gradient-to #29dde0, widget-icon
+  #dee8f7, dynamic-normal-from #29dde0, dynamic-normal-to #229191, status-normal #29dde0 (CSS
+  `@theme` and Design tab maps kept in sync, CSS-contract sync test added); orb speed 1->1.85.
+  No store version bump needed (key-by-key sanitize; existing stored tunings untouched). Docs list
+  no literal defaults. RED 5 pinning tests against old values; GREEN 136/136. Writer: `npx tsc -b`
+  clean, `npm run lint` clean, `npm test` 2620/2620, `npx vite build` OK. Parent check: script
+  comparison — all 67 captured shader values equal the code defaults; store + orb tests 15/15.
+
 ## Next step
 
-Delegate V1.
+V2 live check on a fresh origin; merge after the group widget and theme merges (rebase).
