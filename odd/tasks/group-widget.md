@@ -212,6 +212,10 @@ after the user's live check. Slice boundaries are recorded under Progress.
   2722/2722. Parent spot check: groupWidget + BuilderCanvas + GroupWidget 99/99. Docs updated
   (stacking section in `ADMIN_CONVENTIONS.md` and `WIDGET_AUTHORING.md`).
 
+- 2026-09-28: slice review G7 (base `490e035`..`d704e87`, 550 lines, medium, user granted):
+  lineage `review-856f7947e14bf16e` APPROVED with no findings, acknowledged, authority burned;
+  boundary advances to `d704e87`.
+
 ## Next step
 
 User's live check again (from point 2), then the single merge to `main`.
