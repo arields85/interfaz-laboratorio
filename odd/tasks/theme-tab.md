@@ -62,7 +62,8 @@ masked to four corner squares whose size is the length variable; radius inherite
 
 ## Open product questions
 
-- Q1 (asked 2026-09-28): tab = preset selector only, or selector + in-app editor like the lab?
+- Q1 ANSWERED (user, 2026-09-28): preset selector only for now. The style lab stays as a separate
+  dev tool to keep improving (`tools/style-lab/`), not inside the HMI.
 - Q2 (to ask): which buttons the theme restyles (admin actions, viewer buttons, widget segmented
   controls).
 
@@ -85,8 +86,8 @@ masked to four corner squares whose size is the length variable; radius inherite
 - [ ] **TH2** — Theme model, built-in presets ("Clásico" = current, "Contorno" = user's),
   persistence and boot re-apply (mirrors `applyThemeOverrides`). Route: same writer as TH1.
 - [ ] **TH3** — Button theme engine on the primitives chosen in Q2.
-- [ ] **TH4** — "Tema" tab UI in `GlobalSettingsDialog` (scope per Q1), dirty/save/revert like the
-  other tabs.
+- [ ] **TH4** — "Tema" tab UI in `GlobalSettingsDialog`: preset selector only (Q1), with a preview
+  of each preset if an existing primitive fits; dirty/save/revert like the other tabs.
 - [ ] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
 
 ## Delivery
@@ -103,6 +104,8 @@ live check).
 ## Progress
 
 - 2026-09-28: worktree, branch and feature document created; mapping done.
+- 2026-09-28: Q1 answered (selector only). Style lab source saved to `tools/style-lab/` with a
+  README (user asked to keep it and keep improving it).
 
 ## Next step
 

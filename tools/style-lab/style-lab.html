@@ -1,0 +1,960 @@
+<title>CoreAnalytics Style Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=JetBrains+Mono:wght@400;500;600&family=Saira+Semi+Condensed:wght@400;500&display=swap">
+<style>
+  /* Every state-driven value is registered so rest <-> hover transitions animate smoothly. */
+  @property --w-radius { syntax: "<length>"; inherits: true; initial-value: 24px; }
+  @property --w-blur { syntax: "<length>"; inherits: true; initial-value: 12px; }
+  @property --w-fill { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+  @property --w-border { syntax: "<percentage>"; inherits: true; initial-value: 8%; }
+  @property --wc-alpha { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+  @property --wc-len { syntax: "<length>"; inherits: true; initial-value: 18px; }
+  @property --wc-w { syntax: "<length>"; inherits: true; initial-value: 1px; }
+  @property --wc-color { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+  @property --b-radius { syntax: "<length>"; inherits: true; initial-value: 10px; }
+  @property --b-fill { syntax: "<percentage>"; inherits: true; initial-value: 6%; }
+  @property --b-border { syntax: "<percentage>"; inherits: true; initial-value: 8%; }
+  @property --bc-alpha { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+  @property --bc-len { syntax: "<length>"; inherits: true; initial-value: 8px; }
+  @property --bc-w { syntax: "<length>"; inherits: true; initial-value: 1px; }
+  @property --bc-color { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+
+  /* Single dark look on purpose: it mirrors the HMI tokens (DesignSettingsTab defaults). */
+  :root {
+    color-scheme: dark;
+    --bg: #05070a;
+    --surface: #0e1117;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.20);
+    --text: #f1f5f9;
+    --text-soft: #c5c9d1;
+    --muted: #94a3b8;
+    --cyan: #22d3ee;
+    --blue: #3b82f6;
+    --green: #10b981;
+    --violet: #927bec;
+
+    --font-system: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    --font-title: "Saira Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  body {
+    margin: 0;
+    color: var(--text);
+    font: 13px/1.5 var(--font-system);
+    padding-inline: 16px;
+    padding-block: 20px 40px;
+  }
+
+  .shell {
+    max-width: 1280px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 330px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); } }
+
+  header.top {
+    max-width: 1280px;
+    margin: 0 auto 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
+  }
+  .brand { font: 500 18px/1 var(--font-system); letter-spacing: 0.12em; }
+  .brand b { font-weight: 500; color: var(--violet); }
+  .top p { margin: 0; color: var(--muted); max-width: 64ch; }
+
+  /* ---------- Controls ---------- */
+  .controls {
+    position: sticky;
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  @media (max-width: 900px) { .controls { position: static; max-height: none; } }
+  .ctl-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .ctl-group:first-child { padding-top: 0; border-top: 0; }
+  .ctl-head { font: 600 11px/1 var(--font-system); letter-spacing: 0.08em; color: var(--text); margin: 0; }
+  .ctl-title {
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+  .seg { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  .seg.three { grid-template-columns: repeat(3, 1fr); }
+  .seg button {
+    font: 500 11px/1.2 var(--font-system);
+    color: var(--text-soft);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 6px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .seg button:hover { border-color: var(--line-strong); color: var(--text); }
+  .seg button[aria-pressed="true"] {
+    background: rgba(34, 211, 238, 0.10);
+    border-color: rgba(34, 211, 238, 0.55);
+    color: var(--text);
+  }
+  .seg button:focus-visible, .range:focus-visible, .copy:focus-visible, .btn:focus-visible, .switch input:focus-visible + span {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
+  }
+  .range-row { display: flex; align-items: center; gap: 10px; }
+  .range-row label { flex: 0 0 9ch; color: var(--text-soft); font-size: 11px; }
+  .range { flex: 1; min-width: 0; accent-color: var(--cyan); }
+  .range-val {
+    font: 500 12px/1 var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    min-width: 5ch;
+    text-align: right;
+    color: var(--text);
+  }
+
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; color: var(--text-soft); }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .switch span {
+    position: relative;
+    width: 34px;
+    height: 18px;
+    flex: none;
+    border-radius: 9px;
+    background: #232a35;
+    border: 1px solid var(--line-strong);
+    transition: background 0.15s ease;
+  }
+  .switch span::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .switch input:checked + span { background: rgba(34, 211, 238, 0.25); border-color: rgba(34, 211, 238, 0.6); }
+  .switch input:checked + span::after { transform: translateX(16px); background: var(--cyan); }
+  .sub-controls { display: flex; flex-direction: column; gap: 10px; padding-left: 10px; border-left: 1px solid var(--line); }
+
+  /* Rest / hover editor */
+  .state-box {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.015);
+  }
+  .state-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .state-tabs button {
+    font: 600 11px/1 var(--font-system);
+    letter-spacing: 0.06em;
+    color: var(--text-soft);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 9px 6px;
+    cursor: pointer;
+  }
+  .state-tabs button[aria-selected="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
+  .state-tabs button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .copy-state {
+    align-self: flex-start;
+    font: 500 10px/1 var(--font-system);
+    color: var(--text-soft);
+    background: transparent;
+    border: 1px dashed var(--line-strong);
+    border-radius: 4px;
+    padding: 6px 9px;
+    cursor: pointer;
+  }
+  .copy-state:hover { color: var(--text); border-color: var(--text-soft); }
+
+  .summary { display: flex; flex-direction: column; gap: 8px; }
+  .summary code {
+    display: block;
+    font: 12px/1.5 var(--font-mono);
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 10px;
+    user-select: all;
+    word-break: break-word;
+  }
+  .copy {
+    align-self: flex-start;
+    font: 500 11px/1 var(--font-system);
+    color: var(--bg);
+    background: var(--text);
+    border: 0;
+    border-radius: 4px;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  .hint { margin: 0; color: var(--muted); font-size: 11px; }
+
+  /* ---------- Stage (mimics the shader background so blur is visible) ---------- */
+  .stage {
+    position: relative;
+    border-radius: 6px;
+    padding: 24px;
+    overflow: hidden;
+    background:
+      radial-gradient(40% 35% at 22% 18%, rgba(59, 130, 246, 0.16), transparent 70%),
+      radial-gradient(35% 40% at 78% 70%, rgba(146, 123, 236, 0.14), transparent 70%),
+      radial-gradient(25% 25% at 55% 35%, rgba(34, 211, 238, 0.08), transparent 70%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.07) 0 1px, transparent 1px 28px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.07) 0 1px, transparent 1px 28px),
+      var(--bg);
+    border: 1px solid var(--line);
+  }
+  .stage::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 12% 30%, rgba(255,255,255,.5), transparent 60%),
+      radial-gradient(1px 1px at 38% 12%, rgba(255,255,255,.35), transparent 60%),
+      radial-gradient(1px 1px at 67% 44%, rgba(255,255,255,.4), transparent 60%),
+      radial-gradient(1px 1px at 84% 20%, rgba(255,255,255,.3), transparent 60%),
+      radial-gradient(1px 1px at 25% 82%, rgba(255,255,255,.35), transparent 60%),
+      radial-gradient(1px 1px at 91% 88%, rgba(255,255,255,.4), transparent 60%);
+    pointer-events: none;
+  }
+  .stage > * { position: relative; }
+  .dash-title { font: 400 clamp(26px, 4vw, 38px)/1.05 var(--font-title); margin: 0; }
+  .dash-sub {
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 8px 0 20px;
+  }
+  .force-note {
+    display: inline-block;
+    margin: 0 0 14px;
+    padding: 6px 10px;
+    border: 1px solid rgba(34, 211, 238, 0.45);
+    border-radius: 4px;
+    font: 500 10px/1.3 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+  @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 440px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .span-2 { grid-column: span 2; }
+  @media (max-width: 440px) { .span-2 { grid-column: auto; } }
+
+  /* ---------- Widget frame: base per variant, everything else driven by the state ---------- */
+  .card {
+    --w-radius: var(--w-radius-rest);
+    --w-blur: var(--w-blur-rest);
+    --w-fill: var(--w-fill-rest);
+    --w-border: var(--w-border-rest);
+    --wc-alpha: var(--wc-alpha-rest);
+    --wc-len: var(--wc-len-rest);
+    --wc-w: var(--wc-w-rest);
+    --wc-color: var(--wc-color-rest);
+    position: relative;
+    isolation: isolate;
+    border-radius: var(--w-radius);
+    padding: 16px 18px;
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background:
+      linear-gradient(color-mix(in srgb, #fff var(--w-fill), transparent), color-mix(in srgb, #fff var(--w-fill), transparent)),
+      var(--w-base);
+    border: 1px solid color-mix(in srgb, #fff var(--w-border), transparent);
+    transition:
+      --w-radius 0.25s ease, --w-blur 0.25s ease, --w-fill 0.2s ease, --w-border 0.2s ease,
+      --wc-alpha 0.2s ease, --wc-len 0.25s ease, --wc-w 0.2s ease, --wc-color 0.2s ease;
+    cursor: pointer;
+  }
+  .card:hover,
+  .force-w .card {
+    --w-radius: var(--w-radius-hover);
+    --w-blur: var(--w-blur-hover);
+    --w-fill: var(--w-fill-hover);
+    --w-border: var(--w-border-hover);
+    --wc-alpha: var(--wc-alpha-hover);
+    --wc-len: var(--wc-len-hover);
+    --wc-w: var(--wc-w-hover);
+    --wc-color: var(--wc-color-hover);
+  }
+  [data-frame="glass"] .card { --w-base: linear-gradient(135deg, rgba(255,255,255,.05) 0%, rgba(255,255,255,.01) 100%); }
+  [data-frame="flat"] .card { --w-base: linear-gradient(var(--surface), var(--surface)); }
+  [data-frame="line"] .card { --w-base: linear-gradient(transparent, transparent); }
+
+  [data-frame="glass"] .card,
+  [data-frame="line"] .card {
+    backdrop-filter: blur(var(--w-blur));
+    -webkit-backdrop-filter: blur(var(--w-blur));
+  }
+
+  /* ---------- Corner accent ----------
+   * A border of the state's thickness, masked down to the four corners. It sits exactly
+   * over the element's own 1px border (inset -1px) and follows the corner radius. A state
+   * with the accent turned off simply has opacity 0, so it fades in and out. */
+  .card::after,
+  .btn::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    border-style: solid;
+    border-width: var(--cw);
+    border-color: color-mix(in srgb, var(--ccolor) var(--calpha), transparent);
+    pointer-events: none;
+    -webkit-mask:
+      linear-gradient(#000 0 0) 0 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 0 100% / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 100% / var(--clen) var(--clen) no-repeat;
+            mask:
+      linear-gradient(#000 0 0) 0 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 0 100% / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 100% / var(--clen) var(--clen) no-repeat;
+  }
+  .card::after { --clen: var(--wc-len); --calpha: var(--wc-alpha); --cw: var(--wc-w); --ccolor: var(--wc-color); }
+  .btn::after { --clen: var(--bc-len); --calpha: var(--bc-alpha); --cw: var(--bc-w); --ccolor: var(--bc-color); }
+
+  /* ---------- Widget content ---------- */
+  .w-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font: 500 10px/1.3 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+  }
+  .w-head .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-right: 8px; vertical-align: middle; }
+  .w-head svg { flex: none; color: var(--muted); }
+  .w-sub { font: 500 11px/1 var(--font-mono); color: var(--text); letter-spacing: 0.06em; }
+  .big { font: 400 46px/1 var(--font-title); font-variant-numeric: tabular-nums; margin-top: auto; }
+  .big small { font: 400 14px/1 var(--font-mono); color: var(--muted); margin-left: 4px; }
+  .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.06); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 65%; border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--violet)); }
+  .scale { display: flex; justify-content: space-between; font: 10px/1 var(--font-mono); color: var(--muted); }
+  .foot { font: 500 10px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-soft); }
+  .pill-row { margin: auto 0; display: flex; justify-content: center; }
+  .state { font: 500 11px/1 var(--font-mono); letter-spacing: 0.12em; color: var(--green); text-transform: uppercase; }
+  .state::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 8px; }
+  .gauge { display: grid; place-items: center; margin: auto 0; }
+  .gauge text { font-family: var(--font-title); }
+  .chart svg { width: 100%; height: auto; display: block; }
+  .chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+
+  /* ---------- Buttons: base per style, everything else driven by the state ---------- */
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn {
+    --b-radius: var(--b-radius-rest);
+    --b-fill: var(--b-fill-rest);
+    --b-border: var(--b-border-rest);
+    --bc-alpha: var(--bc-alpha-rest);
+    --bc-len: var(--bc-len-rest);
+    --bc-w: var(--bc-w-rest);
+    --bc-color: var(--bc-color-rest);
+    position: relative;
+    font: 500 11px/1 var(--font-system);
+    letter-spacing: 0.06em;
+    color: var(--text);
+    padding: 9px 14px;
+    border-radius: var(--b-radius);
+    background:
+      linear-gradient(color-mix(in srgb, #fff var(--b-fill), transparent), color-mix(in srgb, #fff var(--b-fill), transparent)),
+      var(--b-base);
+    border: 1px solid color-mix(in srgb, #fff var(--b-border), transparent);
+    cursor: pointer;
+    transition:
+      --b-radius 0.2s ease, --b-fill 0.15s ease, --b-border 0.15s ease, --bc-alpha 0.15s ease,
+      --bc-len 0.2s ease, --bc-w 0.15s ease, --bc-color 0.15s ease, filter 0.15s ease;
+  }
+  .btn.sm { padding: 6px 9px; font-size: 10px; }
+  .btn:hover,
+  .force-b .btn {
+    --b-radius: var(--b-radius-hover);
+    --b-fill: var(--b-fill-hover);
+    --b-border: var(--b-border-hover);
+    --bc-alpha: var(--bc-alpha-hover);
+    --bc-len: var(--bc-len-hover);
+    --bc-w: var(--bc-w-hover);
+    --bc-color: var(--bc-color-hover);
+  }
+  /* Selected segment: hover look plus a little extra fill so it reads as "on". */
+  .btn[aria-pressed="true"] {
+    --b-radius: var(--b-radius-hover);
+    --b-fill: calc(var(--b-fill-hover) + 5%);
+    --b-border: var(--b-border-hover);
+    --bc-alpha: var(--bc-alpha-hover);
+    --bc-len: var(--bc-len-hover);
+    --bc-w: var(--bc-w-hover);
+    --bc-color: var(--bc-color-hover);
+  }
+  [data-button="glass"] .btn {
+    --b-base: linear-gradient(transparent, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  [data-button="flat"] .btn { --b-base: linear-gradient(#1a2029, #1a2029); }
+  [data-button="outline"] .btn { --b-base: linear-gradient(transparent, transparent); }
+
+  /* The primary action keeps its accent; hover only brightens it. */
+  [data-button] .btn.primary {
+    background: rgba(59, 130, 246, 0.22);
+    border-color: rgba(96, 165, 250, 0.55);
+  }
+  [data-button="flat"] .btn.primary { background: var(--text); border-color: var(--text); color: var(--bg); }
+  [data-button="outline"] .btn.primary { background: transparent; border-color: var(--text); }
+  .btn.primary:hover, .force-b .btn.primary { filter: brightness(1.15); }
+
+  .panel-note {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-note .label { font: 500 10px/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card, .btn, .switch span, .switch span::after { transition: none; }
+  }
+</style>
+
+<header class="top">
+  <div class="brand">CORE<b>ANALYTICS</b> · laboratorio de estilos</div>
+  <p>Cada estado, Reposo y Hover, tiene su propia configuración completa: radio, desenfoque, fondo, borde y remate. Mientras edita Hover, la vista previa se queda en hover. Colores y fuentes son los tokens reales de la HMI (el título usa una fuente sustituta de Magistral).</p>
+</header>
+
+<div class="shell">
+  <aside class="controls" aria-label="Controles de estilo">
+    <div class="ctl-group">
+      <p class="ctl-title">Punto de partida</p>
+      <div class="seg" id="presets">
+        <button type="button" data-preset="current">Actual</button>
+        <button type="button" data-preset="glassCorners">Vidrio con remate</button>
+        <button type="button" data-preset="industrial">Industrial recto</button>
+        <button type="button" data-preset="minimal">Contorno mínimo</button>
+      </div>
+    </div>
+
+    <!-- Widgets -->
+    <div class="ctl-group">
+      <p class="ctl-head">Widgets</p>
+      <div>
+        <p class="ctl-title">Marco</p>
+        <div class="seg three" data-group="frame">
+          <button type="button" data-value="glass">Vidrio</button>
+          <button type="button" data-value="flat">Plano</button>
+          <button type="button" data-value="line">Contorno</button>
+        </div>
+      </div>
+
+      <div class="state-box" data-scope="w">
+        <div class="state-tabs" role="tablist" aria-label="Estado de widgets">
+          <button type="button" role="tab" data-state="rest">Reposo</button>
+          <button type="button" role="tab" data-state="hover">Hover</button>
+        </div>
+        <div class="range-row">
+          <label for="w-radius">Radio</label>
+          <input class="range" id="w-radius" type="range" min="0" max="28" step="1">
+          <span class="range-val" id="w-radius-val"></span>
+        </div>
+        <div class="range-row">
+          <label for="w-fill">Fondo</label>
+          <input class="range" id="w-fill" type="range" min="0" max="20" step="1">
+          <span class="range-val" id="w-fill-val"></span>
+        </div>
+        <div class="range-row">
+          <label for="w-border">Borde</label>
+          <input class="range" id="w-border" type="range" min="0" max="80" step="1">
+          <span class="range-val" id="w-border-val"></span>
+        </div>
+        <label class="switch" for="w-blurOn">Desenfoque de fondo <input id="w-blurOn" type="checkbox"><span aria-hidden="true"></span></label>
+        <div class="sub-controls" data-needs="w-blurOn">
+          <div class="range-row">
+            <label for="w-blur">Intensidad</label>
+            <input class="range" id="w-blur" type="range" min="2" max="24" step="1">
+            <span class="range-val" id="w-blur-val"></span>
+          </div>
+          <p class="hint">Se nota en Vidrio y Contorno; Plano es opaco.</p>
+        </div>
+        <label class="switch" for="w-cOn">Remate visible <input id="w-cOn" type="checkbox"><span aria-hidden="true"></span></label>
+        <p class="hint">Oculto, el remate conserva largo, grosor y color: son el punto de partida de la animación hacia el otro estado.</p>
+        <div class="sub-controls">
+          <div class="range-row">
+            <label for="w-cLen">Largo</label>
+            <input class="range" id="w-cLen" type="range" min="4" max="60" step="1">
+            <span class="range-val" id="w-cLen-val"></span>
+          </div>
+          <div class="range-row">
+            <label for="w-cW">Grosor</label>
+            <input class="range" id="w-cW" type="range" min="1" max="4" step="0.5">
+            <span class="range-val" id="w-cW-val"></span>
+          </div>
+          <div class="range-row">
+            <label for="w-cAlpha">Opacidad</label>
+            <input class="range" id="w-cAlpha" type="range" min="10" max="100" step="5">
+            <span class="range-val" id="w-cAlpha-val"></span>
+          </div>
+          <div class="seg three" data-color="w">
+            <button type="button" data-value="white">Blanco</button>
+            <button type="button" data-value="cyan">Cian</button>
+            <button type="button" data-value="violet">Violeta</button>
+          </div>
+        </div>
+        <button type="button" class="copy-state" data-copy="w">Copiar desde el otro estado</button>
+      </div>
+    </div>
+
+    <!-- Buttons -->
+    <div class="ctl-group">
+      <p class="ctl-head">Botones</p>
+      <div>
+        <p class="ctl-title">Estilo</p>
+        <div class="seg three" data-group="button">
+          <button type="button" data-value="glass">Vidrio</button>
+          <button type="button" data-value="flat">Plano</button>
+          <button type="button" data-value="outline">Contorno</button>
+        </div>
+      </div>
+
+      <div class="state-box" data-scope="b">
+        <div class="state-tabs" role="tablist" aria-label="Estado de botones">
+          <button type="button" role="tab" data-state="rest">Reposo</button>
+          <button type="button" role="tab" data-state="hover">Hover</button>
+        </div>
+        <div class="range-row">
+          <label for="b-radius">Radio</label>
+          <input class="range" id="b-radius" type="range" min="0" max="20" step="1">
+          <span class="range-val" id="b-radius-val"></span>
+        </div>
+        <div class="range-row">
+          <label for="b-fill">Fondo</label>
+          <input class="range" id="b-fill" type="range" min="0" max="30" step="1">
+          <span class="range-val" id="b-fill-val"></span>
+        </div>
+        <div class="range-row">
+          <label for="b-border">Borde</label>
+          <input class="range" id="b-border" type="range" min="0" max="80" step="1">
+          <span class="range-val" id="b-border-val"></span>
+        </div>
+        <label class="switch" for="b-cOn">Remate visible <input id="b-cOn" type="checkbox"><span aria-hidden="true"></span></label>
+        <div class="sub-controls">
+          <div class="range-row">
+            <label for="b-cLen">Largo</label>
+            <input class="range" id="b-cLen" type="range" min="2" max="20" step="1">
+            <span class="range-val" id="b-cLen-val"></span>
+          </div>
+          <div class="range-row">
+            <label for="b-cW">Grosor</label>
+            <input class="range" id="b-cW" type="range" min="1" max="3" step="0.5">
+            <span class="range-val" id="b-cW-val"></span>
+          </div>
+          <div class="range-row">
+            <label for="b-cAlpha">Opacidad</label>
+            <input class="range" id="b-cAlpha" type="range" min="10" max="100" step="5">
+            <span class="range-val" id="b-cAlpha-val"></span>
+          </div>
+          <div class="seg three" data-color="b">
+            <button type="button" data-value="white">Blanco</button>
+            <button type="button" data-value="cyan">Cian</button>
+            <button type="button" data-value="violet">Violeta</button>
+          </div>
+        </div>
+        <button type="button" class="copy-state" data-copy="b">Copiar desde el otro estado</button>
+        <p class="hint">El botón principal (Guardar) conserva su color de acento; en hover solo se aclara.</p>
+      </div>
+    </div>
+
+    <div class="ctl-group summary">
+      <p class="ctl-title">Su elección</p>
+      <code id="summary"></code>
+      <button type="button" class="copy" id="copy">Copiar elección</button>
+      <p class="hint" id="copy-hint">Pegue este texto en el chat para convertirlo en el primer tema.</p>
+    </div>
+  </aside>
+
+<main class="stage" id="lab">
+    <h1 class="dash-title">Fette 2000</h1>
+    <p class="dash-sub">Lote: BT-2407 · Paracetamol 500 mg</p>
+    <p class="force-note" id="force-note" hidden></p>
+
+    <div class="grid">
+      <section class="card" tabindex="0" aria-label="Estado de máquina">
+        <div class="w-head"><span><span class="dot"></span>Estado</span></div>
+        <div class="pill-row"><span class="state">En producción</span></div>
+        <div class="foot">Actualizado hace 4 s</div>
+      </section>
+
+      <section class="card" tabindex="0" aria-label="Progreso de lote">
+        <div class="w-head">
+          <span><span class="dot"></span>Progreso de lote</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+        </div>
+        <div class="w-sub">BT-2407</div>
+        <div class="big">65<small>%</small></div>
+        <div class="bar"><i></i></div>
+        <div class="scale"><span>0 %</span><span>100 %</span></div>
+      </section>
+
+      <section class="card" tabindex="0" aria-label="Actividad de máquina">
+        <div class="w-head">
+          <span><span class="dot"></span>Actividad</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="gauge">
+          <svg width="120" height="120" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="8"/>
+            <circle cx="60" cy="60" r="48" fill="none" stroke="#5ec8d6" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="174.9 301.6" transform="rotate(-90 60 60)"/>
+            <text x="60" y="66" text-anchor="middle" fill="#f1f5f9" font-size="30">58</text>
+            <text x="60" y="84" text-anchor="middle" fill="#94a3b8" font-size="11" font-family="IBM Plex Mono, monospace">%</text>
+          </svg>
+        </div>
+        <div class="foot">Produciendo</div>
+      </section>
+
+      <section class="card" tabindex="0" aria-label="Conexión">
+        <div class="w-head">
+          <span><span class="dot" style="color: var(--cyan)"></span>Conexión</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.86a10 10 0 0 1 14 0"/><path d="M8.5 16.43a5 5 0 0 1 7 0"/></svg>
+        </div>
+        <div class="big" style="font-size: 30px">Online</div>
+        <div class="foot">Latencia 42 ms</div>
+      </section>
+
+      <section class="card span-2 chart" tabindex="0" aria-label="Producción de los últimos 7 días">
+        <div class="chart-head">
+          <div class="w-head"><span><span class="dot"></span>Producción</span></div>
+          <div class="btn-row" role="group" aria-label="Período">
+            <button type="button" class="btn sm" aria-pressed="true">7D</button>
+            <button type="button" class="btn sm" aria-pressed="false">30D</button>
+            <button type="button" class="btn sm" aria-pressed="false">12M</button>
+          </div>
+        </div>
+        <svg viewBox="0 0 420 130" role="img" aria-label="Curva de producción entre 21/09 y 27/09, cierra en 78 %">
+          <g stroke="rgba(255,255,255,.07)" stroke-dasharray="3 4">
+            <line x1="30" y1="10" x2="410" y2="10"/><line x1="30" y1="37.5" x2="410" y2="37.5"/>
+            <line x1="30" y1="65" x2="410" y2="65"/><line x1="30" y1="92.5" x2="410" y2="92.5"/>
+            <line x1="30" y1="120" x2="410" y2="120"/>
+          </g>
+          <g fill="#94a3b8" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="end">
+            <text x="24" y="13">100</text><text x="24" y="68">50</text><text x="24" y="123">0</text>
+          </g>
+          <defs>
+            <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#22d3ee" stop-opacity=".25"/>
+              <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#3b82f6"/><stop offset="1" stop-color="#22d3ee"/>
+            </linearGradient>
+          </defs>
+          <path d="M30 112 C60 108 70 64 95 62 S130 88 150 86 S185 74 210 70 S250 60 270 64 S300 118 330 110 S375 40 400 34 L400 120 L30 120 Z" fill="url(#area)"/>
+          <path d="M30 112 C60 108 70 64 95 62 S130 88 150 86 S185 74 210 70 S250 60 270 64 S300 118 330 110 S375 40 400 34" fill="none" stroke="url(#stroke)" stroke-width="2.2"/>
+          <circle cx="400" cy="34" r="3.5" fill="#22d3ee"/>
+          <text x="398" y="24" fill="#22d3ee" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="end">78%</text>
+        </svg>
+      </section>
+
+      <section class="card span-2" tabindex="0" aria-label="Botones de administración">
+        <div class="w-head"><span><span class="dot"></span>Botones del modo admin</span></div>
+        <div class="btn-row" style="margin-top: auto">
+          <button type="button" class="btn primary">Guardar</button>
+          <button type="button" class="btn">Cancelar</button>
+          <button type="button" class="btn">Duplicar</button>
+          <button type="button" class="btn">Deshacer</button>
+        </div>
+        <div class="foot">Turno · Día · Semana · Mes</div>
+      </section>
+    </div>
+
+    <div class="panel-note">
+      <span class="label">Vista previa sobre fondo con grilla y estrellas, como el shader de la HMI</span>
+    </div>
+  </main>
+</div>
+
+<script>
+  (function () {
+    const lab = document.getElementById('lab');
+    const root = document.documentElement;
+    const $ = function (id) { return document.getElementById(id); };
+
+    const FRAME_LABELS = { glass: 'vidrio', flat: 'plano', line: 'contorno' };
+    const BUTTON_LABELS = { glass: 'vidrio', flat: 'plano', outline: 'contorno' };
+    const COLOR_VALUES = { white: '#ffffff', cyan: '#22d3ee', violet: '#927bec' };
+    const COLOR_LABELS = { white: 'blanco', cyan: 'cian', violet: 'violeta' };
+    const PHASES = ['rest', 'hover'];
+    const PHASE_LABELS = { rest: 'reposo', hover: 'hover' };
+
+    // Per-variant fill/border defaults, loaded into both states when the variant changes.
+    const FRAME_STATES = {
+      glass: { rest: { fill: 0, border: 8 },  hover: { fill: 4, border: 20 } },
+      flat:  { rest: { fill: 0, border: 8 },  hover: { fill: 3, border: 20 } },
+      line:  { rest: { fill: 0, border: 16 }, hover: { fill: 2, border: 40 } },
+    };
+    const BUTTON_STATES = {
+      glass:   { rest: { fill: 6, border: 8 },  hover: { fill: 10, border: 20 } },
+      flat:    { rest: { fill: 0, border: 0 },  hover: { fill: 5, border: 0 } },
+      outline: { rest: { fill: 0, border: 22 }, hover: { fill: 3, border: 50 } },
+    };
+
+    function clone(o) { return JSON.parse(JSON.stringify(o)); }
+    function wState(o) {
+      return Object.assign({ radius: 24, fill: 0, border: 8, blurOn: true, blur: 12,
+        cOn: false, cLen: 18, cW: 1, cAlpha: 60, cColor: 'white' }, o);
+    }
+    function bState(o) {
+      return Object.assign({ radius: 10, fill: 6, border: 8,
+        cOn: false, cLen: 8, cW: 1, cAlpha: 60, cColor: 'white' }, o);
+    }
+
+    const PRESETS = {
+      current: {
+        frame: 'glass', button: 'glass',
+        w: { rest: wState({}), hover: wState({ fill: 4, border: 20 }) },
+        b: { rest: bState({}), hover: bState({ fill: 10, border: 20 }) },
+      },
+      glassCorners: {
+        frame: 'glass', button: 'glass',
+        w: { rest: wState({ radius: 12, cOn: true, cLen: 16, cW: 1.5, cAlpha: 45 }),
+             hover: wState({ radius: 12, fill: 4, border: 20, cOn: true, cLen: 28, cW: 1.5, cAlpha: 100 }) },
+        b: { rest: bState({ radius: 6, cOn: true, cLen: 6, cAlpha: 50 }),
+             hover: bState({ radius: 6, fill: 10, border: 20, cOn: true, cLen: 10, cAlpha: 100 }) },
+      },
+      industrial: {
+        frame: 'flat', button: 'flat',
+        w: { rest: wState({ radius: 2, blurOn: false, cOn: true, cLen: 12, cW: 2, cAlpha: 40 }),
+             hover: wState({ radius: 2, fill: 3, border: 20, blurOn: false, cOn: true, cLen: 22, cW: 2, cAlpha: 90, cColor: 'cyan' }) },
+        b: { rest: bState({ radius: 2, fill: 0, border: 0 }), hover: bState({ radius: 2, fill: 5, border: 0 }) },
+      },
+      minimal: {
+        frame: 'line', button: 'outline',
+        w: { rest: wState({ radius: 0, border: 16, blurOn: false }),
+             hover: wState({ radius: 0, fill: 2, border: 40, blurOn: false }) },
+        b: { rest: bState({ radius: 0, fill: 0, border: 22 }), hover: bState({ radius: 0, fill: 3, border: 50 }) },
+      },
+    };
+
+    let state = clone(PRESETS.current);
+    const editing = { w: 'rest', b: 'rest' };
+
+    // State controls: suffix -> [unit or null for checkbox]
+    const W_FIELDS = { radius: ' px', fill: ' %', border: ' %', blur: ' px', cLen: ' px', cW: ' px', cAlpha: ' %', blurOn: null, cOn: null };
+    const B_FIELDS = { radius: ' px', fill: ' %', border: ' %', cLen: ' px', cW: ' px', cAlpha: ' %', cOn: null };
+    const FIELDS = { w: W_FIELDS, b: B_FIELDS };
+
+    function setVar(name, value) { root.style.setProperty(name, value); }
+
+    function writeVars() {
+      PHASES.forEach(function (p) {
+        const w = state.w[p];
+        setVar('--w-radius-' + p, w.radius + 'px');
+        setVar('--w-blur-' + p, (w.blurOn ? w.blur : 0) + 'px');
+        setVar('--w-fill-' + p, w.fill + '%');
+        setVar('--w-border-' + p, w.border + '%');
+        setVar('--wc-alpha-' + p, (w.cOn ? w.cAlpha : 0) + '%');
+        setVar('--wc-len-' + p, w.cLen + 'px');
+        setVar('--wc-w-' + p, w.cW + 'px');
+        setVar('--wc-color-' + p, COLOR_VALUES[w.cColor]);
+        const b = state.b[p];
+        setVar('--b-radius-' + p, b.radius + 'px');
+        setVar('--b-fill-' + p, b.fill + '%');
+        setVar('--b-border-' + p, b.border + '%');
+        setVar('--bc-alpha-' + p, (b.cOn ? b.cAlpha : 0) + '%');
+        setVar('--bc-len-' + p, b.cLen + 'px');
+        setVar('--bc-w-' + p, b.cW + 'px');
+        setVar('--bc-color-' + p, COLOR_VALUES[b.cColor]);
+      });
+    }
+
+    function describe(s, isWidget) {
+      let t = 'radio ' + s.radius + ' px, fondo ' + s.fill + ' %, borde ' + s.border + ' %';
+      if (isWidget) t += ', desenfoque ' + (s.blurOn ? s.blur + ' px' : 'no');
+      // A hidden accent still defines where the rest <-> hover animation starts or ends.
+      const accent = s.cLen + ' px x ' + s.cW + ' px ' + COLOR_LABELS[s.cColor];
+      t += s.cOn
+        ? ', remate ' + accent + ' al ' + s.cAlpha + ' %'
+        : ', remate oculto (origen de la animación: ' + accent + ')';
+      return t;
+    }
+
+    function render() {
+      lab.dataset.frame = state.frame;
+      lab.dataset.button = state.button;
+      lab.classList.toggle('force-w', editing.w === 'hover');
+      lab.classList.toggle('force-b', editing.b === 'hover');
+      writeVars();
+
+      ['w', 'b'].forEach(function (scope) {
+        const s = state[scope][editing[scope]];
+        Object.keys(FIELDS[scope]).forEach(function (key) {
+          const el = $(scope + '-' + key);
+          const unit = FIELDS[scope][key];
+          if (unit === null) {
+            el.checked = s[key];
+          } else {
+            el.value = s[key];
+            $(scope + '-' + key + '-val').textContent = s[key] + unit;
+          }
+        });
+        document.querySelectorAll('[data-color="' + scope + '"] button').forEach(function (b) {
+          b.setAttribute('aria-pressed', String(b.dataset.value === s.cColor));
+        });
+        document.querySelectorAll('.state-box[data-scope="' + scope + '"] .state-tabs button').forEach(function (b) {
+          b.setAttribute('aria-selected', String(b.dataset.state === editing[scope]));
+        });
+        const other = editing[scope] === 'rest' ? 'hover' : 'rest';
+        document.querySelector('[data-copy="' + scope + '"]').textContent = 'Copiar desde ' + PHASE_LABELS[other];
+      });
+      document.querySelectorAll('[data-needs]').forEach(function (block) {
+        const parts = block.dataset.needs.split('-');
+        block.hidden = !state[parts[0]][editing[parts[0]]][parts[1]];
+      });
+      document.querySelectorAll('[data-group]').forEach(function (group) {
+        const key = group.dataset.group;
+        group.querySelectorAll('button').forEach(function (b) {
+          b.setAttribute('aria-pressed', String(b.dataset.value === state[key]));
+        });
+      });
+      document.querySelectorAll('#presets button').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(JSON.stringify(PRESETS[b.dataset.preset]) === JSON.stringify(state)));
+      });
+
+      const forced = [];
+      if (editing.w === 'hover') forced.push('widgets');
+      if (editing.b === 'hover') forced.push('botones');
+      $('force-note').hidden = forced.length === 0;
+      $('force-note').textContent = 'Mostrando hover de ' + forced.join(' y ') + ' (vuelva a Reposo para verlos en reposo)';
+
+      $('summary').textContent =
+        'Widgets (' + FRAME_LABELS[state.frame] + ') | reposo: ' + describe(state.w.rest, true) +
+        ' | hover: ' + describe(state.w.hover, true) +
+        ' · Botones (' + BUTTON_LABELS[state.button] + ') | reposo: ' + describe(state.b.rest, false) +
+        ' | hover: ' + describe(state.b.hover, false);
+    }
+
+    // Variant changes load that variant's fill/border for both states; everything else stays.
+    document.querySelectorAll('[data-group]').forEach(function (group) {
+      group.addEventListener('click', function (e) {
+        const b = e.target.closest('button');
+        if (!b) return;
+        const key = group.dataset.group;
+        state[key] = b.dataset.value;
+        const table = key === 'frame' ? FRAME_STATES : BUTTON_STATES;
+        const scope = key === 'frame' ? 'w' : 'b';
+        PHASES.forEach(function (p) { Object.assign(state[scope][p], table[b.dataset.value][p]); });
+        render();
+      });
+    });
+    $('presets').addEventListener('click', function (e) {
+      const b = e.target.closest('button');
+      if (!b) return;
+      state = clone(PRESETS[b.dataset.preset]);
+      render();
+    });
+    document.querySelectorAll('.state-box').forEach(function (box) {
+      const scope = box.dataset.scope;
+      box.querySelector('.state-tabs').addEventListener('click', function (e) {
+        const b = e.target.closest('button');
+        if (!b) return;
+        editing[scope] = b.dataset.state;
+        render();
+      });
+      box.querySelector('[data-copy]').addEventListener('click', function () {
+        const other = editing[scope] === 'rest' ? 'hover' : 'rest';
+        state[scope][editing[scope]] = clone(state[scope][other]);
+        render();
+      });
+      box.querySelector('[data-color]').addEventListener('click', function (e) {
+        const b = e.target.closest('button');
+        if (!b) return;
+        state[scope][editing[scope]].cColor = b.dataset.value;
+        render();
+      });
+      Object.keys(FIELDS[scope]).forEach(function (key) {
+        const el = $(scope + '-' + key);
+        const isCheck = FIELDS[scope][key] === null;
+        el.addEventListener(isCheck ? 'change' : 'input', function () {
+          state[scope][editing[scope]][key] = isCheck ? el.checked : Number(el.value);
+          render();
+        });
+      });
+    });
+
+    // Period toggles inside the chart behave like the HMI segmented control.
+    document.querySelectorAll('.chart .btn').forEach(function (b, _, all) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        all.forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+      });
+    });
+
+    const hint = $('copy-hint');
+    $('copy').addEventListener('click', function () {
+      const summary = $('summary');
+      function selectFallback() {
+        const range = document.createRange();
+        range.selectNodeContents(summary);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        hint.textContent = 'Texto seleccionado: cópielo con Ctrl+C.';
+      }
+      try {
+        navigator.clipboard.writeText(summary.textContent).then(function () {
+          hint.textContent = 'Copiado. Péguelo en el chat.';
+        }, selectFallback);
+      } catch (err) {
+        selectFallback();
+      }
+    });
+
+    render();
+  })();
+</script>
