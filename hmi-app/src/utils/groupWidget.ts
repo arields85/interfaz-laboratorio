@@ -225,16 +225,19 @@ export function collectWidgetIdsInOtherLockedGroups(
 
 /**
  * G5b (R3-group-double-membership): resolves cross-group duplicate membership already present in
- * `widgets` — a widget belongs to at most one locked group. When the same id is listed by more
- * than one group, it is kept only in the first group encountered in `widgets` order
- * (deterministic); every later group drops it. Used on read (normalize/load/import), where
- * malformed or hand-edited data could otherwise list the same member under two groups.
+ * `widgets` — a widget belongs to at most one LOCKED group. When the same id is listed by more
+ * than one currently locked group, it is kept only in the first one encountered in `widgets`
+ * order (deterministic); every later locked group drops it. Used on read (normalize/load/import),
+ * where malformed or hand-edited data could otherwise list the same member under two groups. An
+ * unlocked group's `memberWidgetIds` is left untouched and never claims a member: D1 already
+ * empties it on unlock, so a stale/malformed one here is not an authoritative owner and must
+ * never block a locked group from a member it legitimately has.
  */
 export function sanitizeGroupMembershipAcrossWidgets(widgets: readonly WidgetConfig[]): WidgetConfig[] {
     const claimedWidgetIds = new Set<string>();
 
     return widgets.map((widget) => {
-        if (!isGroupWidget(widget)) {
+        if (!isGroupWidget(widget) || widget.locked !== true) {
             return widget;
         }
 

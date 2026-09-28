@@ -318,6 +318,19 @@ describe('sanitizeGroupMembershipAcrossWidgets', () => {
 
         expect(sanitizeGroupMembershipAcrossWidgets(widgets)).toEqual(widgets);
     });
+
+    it('only LOCKED groups can claim a member: a stale unlocked group never blocks a later locked one', () => {
+        const widgets = [
+            makeGroup({ id: 'group-unlocked', locked: false, memberWidgetIds: ['widget-1'] }),
+            makeGroup({ id: 'group-locked', locked: true, memberWidgetIds: ['widget-1'] }),
+            makeWidget({ id: 'widget-1' }),
+        ];
+
+        const result = sanitizeGroupMembershipAcrossWidgets(widgets);
+        const lockedGroup = result.find((widget) => widget.id === 'group-locked') as GroupWidgetConfig;
+
+        expect(lockedGroup.memberWidgetIds).toEqual(['widget-1']);
+    });
 });
 
 describe('resolveEffectiveNavigationTarget', () => {
