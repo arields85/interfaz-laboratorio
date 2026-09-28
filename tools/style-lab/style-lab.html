@@ -19,6 +19,13 @@
   @property --bc-len { syntax: "<length>"; inherits: true; initial-value: 8px; }
   @property --bc-w { syntax: "<length>"; inherits: true; initial-value: 1px; }
   @property --bc-color { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+  @property --i-radius { syntax: "<length>"; inherits: true; initial-value: 6px; }
+  @property --i-fill { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+  @property --i-border { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+  @property --ic-alpha { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+  @property --ic-len { syntax: "<length>"; inherits: true; initial-value: 6px; }
+  @property --ic-w { syntax: "<length>"; inherits: true; initial-value: 1px; }
+  @property --ic-color { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
 
   /* Single dark look on purpose: it mirrors the HMI tokens (DesignSettingsTab defaults). */
   :root {
@@ -335,7 +342,8 @@
    * over the element's own 1px border (inset -1px) and follows the corner radius. A state
    * with the accent turned off simply has opacity 0, so it fades in and out. */
   .card::after,
-  .btn::after {
+  .btn::after,
+  .ibtn::after {
     content: "";
     position: absolute;
     inset: -1px;
@@ -357,6 +365,7 @@
   }
   .card::after { --clen: var(--wc-len); --calpha: var(--wc-alpha); --cw: var(--wc-w); --ccolor: var(--wc-color); }
   .btn::after { --clen: var(--bc-len); --calpha: var(--bc-alpha); --cw: var(--bc-w); --ccolor: var(--bc-color); }
+  .ibtn::after { --clen: var(--ic-len); --calpha: var(--ic-alpha); --cw: var(--ic-w); --ccolor: var(--ic-color); }
 
   /* ---------- Widget content ---------- */
   .w-head {
@@ -449,6 +458,67 @@
   [data-button="outline"] .btn.primary { background: transparent; border-color: var(--text); }
   .btn.primary:hover, .force-b .btn.primary { filter: brightness(1.15); }
 
+  /* ---------- Icon-only buttons (catalog rail, builder toolbars) ---------- */
+  .ibtn-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ibtn-rail { display: flex; flex-direction: column; gap: 6px; }
+  .ibtn {
+    --i-radius: var(--i-radius-rest);
+    --i-fill: var(--i-fill-rest);
+    --i-border: var(--i-border-rest);
+    --ic-alpha: var(--ic-alpha-rest);
+    --ic-len: var(--ic-len-rest);
+    --ic-w: var(--ic-w-rest);
+    --ic-color: var(--ic-color-rest);
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    color: var(--muted);
+    border-radius: var(--i-radius);
+    background: linear-gradient(color-mix(in srgb, #fff var(--i-fill), transparent), color-mix(in srgb, #fff var(--i-fill), transparent));
+    border: 1px solid color-mix(in srgb, #fff var(--i-border), transparent);
+    cursor: pointer;
+    transition:
+      --i-radius 0.2s ease, --i-fill 0.15s ease, --i-border 0.15s ease, --ic-alpha 0.15s ease,
+      --ic-len 0.2s ease, --ic-w 0.15s ease, --ic-color 0.15s ease, color 0.15s ease;
+  }
+  .ibtn svg { width: 18px; height: 18px; }
+  .ibtn:hover:not(:disabled),
+  .force-i .ibtn:not(:disabled) {
+    --i-radius: var(--i-radius-hover);
+    --i-fill: var(--i-fill-hover);
+    --i-border: var(--i-border-hover);
+    --ic-alpha: var(--ic-alpha-hover);
+    --ic-len: var(--ic-len-hover);
+    --ic-w: var(--ic-w-hover);
+    --ic-color: var(--ic-color-hover);
+    color: var(--text);
+  }
+  .ibtn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .ibtn:disabled { opacity: 0.35; cursor: default; }
+
+  /* ---------- Tags (AdminTag): static labels, no hover ---------- */
+  .tag-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .tag {
+    --tc: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    font: 500 11px/1.3 var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--tc);
+    border-radius: var(--t-radius);
+    border: 1px solid color-mix(in srgb, var(--tc) var(--t-border), transparent);
+    background:
+      linear-gradient(color-mix(in srgb, var(--tc) var(--t-tint), transparent), color-mix(in srgb, var(--tc) var(--t-tint), transparent)),
+      linear-gradient(color-mix(in srgb, #fff var(--t-fill), transparent), color-mix(in srgb, #fff var(--t-fill), transparent));
+  }
+  .tag.cyan { --tc: var(--cyan); }
+  .tag.green { --tc: var(--green); }
+  .tag.muted { --tc: var(--muted); }
+
   .panel-note {
     margin-top: 20px;
     display: flex;
@@ -477,7 +547,7 @@
         <button type="button" data-preset="current">Actual</button>
         <button type="button" data-preset="glassCorners">Vidrio con remate</button>
         <button type="button" data-preset="industrial">Industrial recto</button>
-        <button type="button" data-preset="minimal">Contorno mínimo</button>
+        <button type="button" data-preset="minimal">Contorno (HMI)</button>
       </div>
     </div>
 
@@ -610,6 +680,84 @@
       </div>
     </div>
 
+    <!-- Icon-only buttons -->
+    <div class="ctl-group">
+      <p class="ctl-head">Botones de ícono</p>
+      <p class="hint">Botones sin texto: catálogo de widgets, barras del builder, deshacer y rehacer.</p>
+      <div class="state-box" data-scope="i">
+        <div class="state-tabs" role="tablist" aria-label="Estado de botones de ícono">
+          <button type="button" role="tab" data-state="rest">Reposo</button>
+          <button type="button" role="tab" data-state="hover">Hover</button>
+        </div>
+        <div class="range-row">
+          <label for="i-radius">Radio</label>
+          <input class="range" id="i-radius" type="range" min="0" max="18" step="1">
+          <span class="range-val" id="i-radius-val"></span>
+        </div>
+        <div class="range-row">
+          <label for="i-fill">Fondo</label>
+          <input class="range" id="i-fill" type="range" min="0" max="30" step="1">
+          <span class="range-val" id="i-fill-val"></span>
+        </div>
+        <div class="range-row">
+          <label for="i-border">Borde</label>
+          <input class="range" id="i-border" type="range" min="0" max="80" step="1">
+          <span class="range-val" id="i-border-val"></span>
+        </div>
+        <label class="switch" for="i-cOn">Remate visible <input id="i-cOn" type="checkbox"><span aria-hidden="true"></span></label>
+        <div class="sub-controls">
+          <div class="range-row">
+            <label for="i-cLen">Largo</label>
+            <input class="range" id="i-cLen" type="range" min="2" max="18" step="1">
+            <span class="range-val" id="i-cLen-val"></span>
+          </div>
+          <div class="range-row">
+            <label for="i-cW">Grosor</label>
+            <input class="range" id="i-cW" type="range" min="1" max="3" step="0.5">
+            <span class="range-val" id="i-cW-val"></span>
+          </div>
+          <div class="range-row">
+            <label for="i-cAlpha">Opacidad</label>
+            <input class="range" id="i-cAlpha" type="range" min="10" max="100" step="5">
+            <span class="range-val" id="i-cAlpha-val"></span>
+          </div>
+          <div class="seg three" data-color="i">
+            <button type="button" data-value="white">Blanco</button>
+            <button type="button" data-value="cyan">Cian</button>
+            <button type="button" data-value="violet">Violeta</button>
+          </div>
+        </div>
+        <button type="button" class="copy-state" data-copy="i">Copiar desde el otro estado</button>
+      </div>
+    </div>
+
+    <!-- Tags -->
+    <div class="ctl-group">
+      <p class="ctl-head">Tags</p>
+      <p class="hint">Etiquetas de estado (ASIGNADO, PLANTA, PUBLISHED...). No tienen hover.</p>
+      <div class="range-row">
+        <label for="t-radius">Radio</label>
+        <input class="range" id="t-radius" type="range" min="0" max="12" step="1">
+        <span class="range-val" id="t-radius-val"></span>
+      </div>
+      <div class="range-row">
+        <label for="t-fill">Fondo</label>
+        <input class="range" id="t-fill" type="range" min="0" max="20" step="1">
+        <span class="range-val" id="t-fill-val"></span>
+      </div>
+      <div class="range-row">
+        <label for="t-border">Borde</label>
+        <input class="range" id="t-border" type="range" min="0" max="100" step="5">
+        <span class="range-val" id="t-border-val"></span>
+      </div>
+      <div class="range-row">
+        <label for="t-tint">Color</label>
+        <input class="range" id="t-tint" type="range" min="0" max="40" step="1">
+        <span class="range-val" id="t-tint-val"></span>
+      </div>
+      <p class="hint">Borde y Color usan el color propio de cada tag (cian, verde, gris).</p>
+    </div>
+
     <div class="ctl-group summary">
       <p class="ctl-title">Su elección</p>
       <code id="summary"></code>
@@ -711,6 +859,35 @@
         </div>
         <div class="foot">Turno · Día · Semana · Mes</div>
       </section>
+      <section class="card span-2" tabindex="0" aria-label="Botones de ícono y tags">
+        <div class="w-head"><span><span class="dot"></span>Barra del builder y tags</span></div>
+        <div style="display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap;">
+          <div class="ibtn-rail" aria-label="Catálogo de widgets">
+            <button type="button" class="ibtn" aria-label="KPI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg></button>
+            <button type="button" class="ibtn" aria-label="Métrica"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg></button>
+            <button type="button" class="ibtn" aria-label="Tendencia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></svg></button>
+            <button type="button" class="ibtn" aria-label="Conexión"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.86a10 10 0 0 1 14 0"/><path d="M8.5 16.43a5 5 0 0 1 7 0"/></svg></button>
+            <button type="button" class="ibtn" aria-label="Título"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg></button>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="ibtn-row" aria-label="Barra de vistas">
+              <button type="button" class="ibtn" aria-label="Nueva vista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+              <button type="button" class="ibtn" aria-label="Renombrar vista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+              <button type="button" class="ibtn" aria-label="Mover a la izquierda" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+              <button type="button" class="ibtn" aria-label="Mover a la derecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+              <button type="button" class="ibtn" aria-label="Eliminar vista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+              <button type="button" class="ibtn" aria-label="Vistas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
+            </div>
+            <div class="tag-row">
+              <span class="tag cyan">Asignado</span>
+              <span class="tag muted">Planta</span>
+              <span class="tag muted">Equipo</span>
+              <span class="tag green">Published</span>
+              <span class="tag muted">Draft</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="panel-note">
@@ -749,6 +926,13 @@
       return Object.assign({ radius: 24, fill: 0, border: 8, blurOn: true, blur: 12,
         cOn: false, cLen: 18, cW: 1, cAlpha: 60, cColor: 'white' }, o);
     }
+    function iState(o) {
+      return Object.assign({ radius: 6, fill: 0, border: 0,
+        cOn: false, cLen: 6, cW: 1, cAlpha: 60, cColor: 'white' }, o);
+    }
+    function tState(o) {
+      return Object.assign({ radius: 4, fill: 5, border: 40, tint: 0 }, o);
+    }
     function bState(o) {
       return Object.assign({ radius: 10, fill: 6, border: 8,
         cOn: false, cLen: 8, cW: 1, cAlpha: 60, cColor: 'white' }, o);
@@ -759,6 +943,8 @@
         frame: 'glass', button: 'glass',
         w: { rest: wState({}), hover: wState({ fill: 4, border: 20 }) },
         b: { rest: bState({}), hover: bState({ fill: 10, border: 20 }) },
+        i: { rest: iState({}), hover: iState({ fill: 5 }) },
+        t: tState({}),
       },
       glassCorners: {
         frame: 'glass', button: 'glass',
@@ -766,28 +952,36 @@
              hover: wState({ radius: 12, fill: 4, border: 20, cOn: true, cLen: 28, cW: 1.5, cAlpha: 100 }) },
         b: { rest: bState({ radius: 6, cOn: true, cLen: 6, cAlpha: 50 }),
              hover: bState({ radius: 6, fill: 10, border: 20, cOn: true, cLen: 10, cAlpha: 100 }) },
+        i: { rest: iState({ radius: 6 }), hover: iState({ radius: 6, fill: 6, cOn: true, cLen: 6, cAlpha: 90 }) },
+        t: tState({ radius: 4 }),
       },
       industrial: {
         frame: 'flat', button: 'flat',
         w: { rest: wState({ radius: 2, blurOn: false, cOn: true, cLen: 12, cW: 2, cAlpha: 40 }),
              hover: wState({ radius: 2, fill: 3, border: 20, blurOn: false, cOn: true, cLen: 22, cW: 2, cAlpha: 90, cColor: 'cyan' }) },
         b: { rest: bState({ radius: 2, fill: 0, border: 0 }), hover: bState({ radius: 2, fill: 5, border: 0 }) },
+        i: { rest: iState({ radius: 2 }), hover: iState({ radius: 2, fill: 5 }) },
+        t: tState({ radius: 2 }),
       },
       minimal: {
         frame: 'line', button: 'outline',
-        w: { rest: wState({ radius: 0, border: 16, blurOn: false }),
-             hover: wState({ radius: 0, fill: 2, border: 40, blurOn: false }) },
+        w: { rest: wState({ radius: 0, border: 15, blurOn: true, blur: 2, cOn: false, cLen: 18, cW: 1 }),
+             hover: wState({ radius: 0, fill: 4, border: 25, blurOn: true, blur: 2, cOn: true, cLen: 8, cW: 1, cAlpha: 40 }) },
         b: { rest: bState({ radius: 0, fill: 0, border: 22 }), hover: bState({ radius: 0, fill: 3, border: 50 }) },
+        i: { rest: iState({ radius: 0 }), hover: iState({ radius: 0, fill: 5 }) },
+        t: tState({}),
       },
     };
 
     let state = clone(PRESETS.current);
-    const editing = { w: 'rest', b: 'rest' };
+    const editing = { w: 'rest', b: 'rest', i: 'rest' };
 
     // State controls: suffix -> [unit or null for checkbox]
     const W_FIELDS = { radius: ' px', fill: ' %', border: ' %', blur: ' px', cLen: ' px', cW: ' px', cAlpha: ' %', blurOn: null, cOn: null };
     const B_FIELDS = { radius: ' px', fill: ' %', border: ' %', cLen: ' px', cW: ' px', cAlpha: ' %', cOn: null };
-    const FIELDS = { w: W_FIELDS, b: B_FIELDS };
+    const FIELDS = { w: W_FIELDS, b: B_FIELDS, i: B_FIELDS };
+    const T_FIELDS = { radius: ' px', fill: ' %', border: ' %', tint: ' %' };
+    const STATE_SCOPES = ['w', 'b', 'i'];
 
     function setVar(name, value) { root.style.setProperty(name, value); }
 
@@ -810,7 +1004,19 @@
         setVar('--bc-len-' + p, b.cLen + 'px');
         setVar('--bc-w-' + p, b.cW + 'px');
         setVar('--bc-color-' + p, COLOR_VALUES[b.cColor]);
+        const ic = state.i[p];
+        setVar('--i-radius-' + p, ic.radius + 'px');
+        setVar('--i-fill-' + p, ic.fill + '%');
+        setVar('--i-border-' + p, ic.border + '%');
+        setVar('--ic-alpha-' + p, (ic.cOn ? ic.cAlpha : 0) + '%');
+        setVar('--ic-len-' + p, ic.cLen + 'px');
+        setVar('--ic-w-' + p, ic.cW + 'px');
+        setVar('--ic-color-' + p, COLOR_VALUES[ic.cColor]);
       });
+      setVar('--t-radius', state.t.radius + 'px');
+      setVar('--t-fill', state.t.fill + '%');
+      setVar('--t-border', state.t.border + '%');
+      setVar('--t-tint', state.t.tint + '%');
     }
 
     function describe(s, isWidget) {
@@ -829,9 +1035,14 @@
       lab.dataset.button = state.button;
       lab.classList.toggle('force-w', editing.w === 'hover');
       lab.classList.toggle('force-b', editing.b === 'hover');
+      lab.classList.toggle('force-i', editing.i === 'hover');
       writeVars();
 
-      ['w', 'b'].forEach(function (scope) {
+      Object.keys(T_FIELDS).forEach(function (key) {
+        $('t-' + key).value = state.t[key];
+        $('t-' + key + '-val').textContent = state.t[key] + T_FIELDS[key];
+      });
+      STATE_SCOPES.forEach(function (scope) {
         const s = state[scope][editing[scope]];
         Object.keys(FIELDS[scope]).forEach(function (key) {
           const el = $(scope + '-' + key);
@@ -869,6 +1080,7 @@
       const forced = [];
       if (editing.w === 'hover') forced.push('widgets');
       if (editing.b === 'hover') forced.push('botones');
+      if (editing.i === 'hover') forced.push('botones de ícono');
       $('force-note').hidden = forced.length === 0;
       $('force-note').textContent = 'Mostrando hover de ' + forced.join(' y ') + ' (vuelva a Reposo para verlos en reposo)';
 
@@ -876,7 +1088,11 @@
         'Widgets (' + FRAME_LABELS[state.frame] + ') | reposo: ' + describe(state.w.rest, true) +
         ' | hover: ' + describe(state.w.hover, true) +
         ' · Botones (' + BUTTON_LABELS[state.button] + ') | reposo: ' + describe(state.b.rest, false) +
-        ' | hover: ' + describe(state.b.hover, false);
+        ' | hover: ' + describe(state.b.hover, false) +
+        ' · Botones de ícono | reposo: ' + describe(state.i.rest, false) +
+        ' | hover: ' + describe(state.i.hover, false) +
+        ' · Tags | radio ' + state.t.radius + ' px, fondo ' + state.t.fill + ' %, borde ' + state.t.border +
+        ' %, color ' + state.t.tint + ' %';
     }
 
     // Variant changes load that variant's fill/border for both states; everything else stays.
@@ -924,6 +1140,13 @@
           state[scope][editing[scope]][key] = isCheck ? el.checked : Number(el.value);
           render();
         });
+      });
+    });
+
+    Object.keys(T_FIELDS).forEach(function (key) {
+      $('t-' + key).addEventListener('input', function () {
+        state.t[key] = Number($('t-' + key).value);
+        render();
       });
     });
 
