@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     clampGroupMoveDelta,
     clampGroupResizeToMembers,
+    clampRectInsideContainer,
     collectWidgetIdsInOtherLockedGroups,
     computeGroupMembers,
     computeMembersBoundingBox,
@@ -9,6 +10,7 @@ import {
     isRectFullyInside,
     orderRenderItemsWithGroupsFirst,
     removeMemberFromGroups,
+    resolveEffectiveInteractionTarget,
     resolveEffectiveNavigationTarget,
     resolveHoveredGroupId,
     sanitizeGroupMemberIds,
@@ -473,6 +475,87 @@ describe('resolveHoveredGroupId', () => {
         const widgets = [makeWidget({ id: 'widget-1' })];
 
         expect(resolveHoveredGroupId('widget-1', widgets)).toBeUndefined();
+    });
+});
+
+describe('resolveEffectiveInteractionTarget (D6, G8)', () => {
+    it('redirects a member of a locked, non-editing group to its container', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+            makeWidget({ id: 'member-1' }),
+        ];
+
+        expect(resolveEffectiveInteractionTarget('member-1', widgets, undefined)).toBe('group-1');
+    });
+
+    it('does not redirect a member of the group currently in edit mode', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+            makeWidget({ id: 'member-1' }),
+        ];
+
+        expect(resolveEffectiveInteractionTarget('member-1', widgets, 'group-1')).toBe('member-1');
+    });
+
+    it('does not redirect a member while a DIFFERENT group is being edited', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+            makeGroup({ id: 'group-2', locked: true, memberWidgetIds: [] }),
+            makeWidget({ id: 'member-1' }),
+        ];
+
+        expect(resolveEffectiveInteractionTarget('member-1', widgets, 'group-2')).toBe('group-1');
+    });
+
+    it('never redirects a group container itself', () => {
+        const widgets = [makeGroup({ id: 'group-1', locked: true, memberWidgetIds: [] })];
+
+        expect(resolveEffectiveInteractionTarget('group-1', widgets, undefined)).toBe('group-1');
+    });
+
+    it('does not redirect a plain widget outside any locked group', () => {
+        const widgets = [makeWidget({ id: 'widget-1' })];
+
+        expect(resolveEffectiveInteractionTarget('widget-1', widgets, undefined)).toBe('widget-1');
+    });
+
+    it('does not redirect a member of an UNLOCKED group', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: false, memberWidgetIds: [] }),
+            makeWidget({ id: 'member-1' }),
+        ];
+
+        expect(resolveEffectiveInteractionTarget('member-1', widgets, undefined)).toBe('member-1');
+    });
+});
+
+describe('clampRectInsideContainer (D6, G8)', () => {
+    it('leaves a rect already fully inside the container untouched', () => {
+        const container = { x: 0, y: 0, w: 10, h: 10 };
+        const rect = { x: 2, y: 2, w: 2, h: 2 };
+
+        expect(clampRectInsideContainer(rect, container)).toEqual(rect);
+    });
+
+    it('pulls a rect back inside when it moved past the right/bottom edge', () => {
+        const container = { x: 0, y: 0, w: 10, h: 10 };
+        const rect = { x: 9, y: 9, w: 3, h: 3 };
+
+        expect(clampRectInsideContainer(rect, container)).toEqual({ x: 7, y: 7, w: 3, h: 3 });
+    });
+
+    it('pulls a rect back inside when it moved past the left/top edge', () => {
+        const container = { x: 5, y: 5, w: 10, h: 10 };
+        const rect = { x: 1, y: 1, w: 2, h: 2 };
+
+        expect(clampRectInsideContainer(rect, container)).toEqual({ x: 5, y: 5, w: 2, h: 2 });
+    });
+
+    it('shrinks a rect resized larger than the container itself', () => {
+        const container = { x: 0, y: 0, w: 10, h: 10 };
+        const rect = { x: 0, y: 0, w: 14, h: 14 };
+
+        expect(clampRectInsideContainer(rect, container)).toEqual({ x: 0, y: 0, w: 10, h: 10 });
     });
 });
 

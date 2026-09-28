@@ -250,6 +250,43 @@ export function sanitizeGroupMembershipAcrossWidgets(widgets: readonly WidgetCon
     });
 }
 
+/**
+ * D6: while a locked group is NOT in edit mode, it acts as ONE widget — a pointer interaction
+ * (select or drag) that starts on any of its members must actually target the CONTAINER instead.
+ * Resolves the id BuilderCanvas should treat as the interaction target for `widgetId`: the id of
+ * the locked group that owns it as a member, UNLESS that group is the one currently in edit mode
+ * (`editingGroupId`), in which case the member is interacted with individually — or `widgetId`
+ * itself for anything else (a plain widget, or a group container, which is always its own target).
+ */
+export function resolveEffectiveInteractionTarget(
+    widgetId: string,
+    widgets: readonly WidgetConfig[],
+    editingGroupId: string | undefined,
+): string {
+    const owningGroup = findOwningLockedGroup(widgetId, widgets);
+
+    if (!owningGroup || owningGroup.id === editingGroupId) {
+        return widgetId;
+    }
+
+    return owningGroup.id;
+}
+
+/**
+ * D6 pencil edit mode: clamps `rect` so it stays fully inside `container` — shrinking it first if
+ * it is wider/taller than the container, then repositioning it so neither edge crosses the
+ * container's bounds. Used to keep an individually moved/resized group member inside its locked
+ * container while the group is being edited.
+ */
+export function clampRectInsideContainer(rect: LayoutRect, container: LayoutRect): LayoutRect {
+    const w = Math.min(rect.w, container.w);
+    const h = Math.min(rect.h, container.h);
+    const x = Math.min(Math.max(rect.x, container.x), container.x + container.w - w);
+    const y = Math.min(Math.max(rect.y, container.y), container.y + container.h - h);
+
+    return { x, y, w, h };
+}
+
 /** The locked group that currently lists `widgetId` as a sanitized member, or undefined. */
 export function findOwningLockedGroup(
     widgetId: string,

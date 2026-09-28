@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Trash2, ArrowUp, LayoutDashboard, Lock, LockOpen } from 'lucide-react';
+import { Copy, Trash2, ArrowUp, LayoutDashboard, Lock, LockOpen, Pencil } from 'lucide-react';
 import { isGroupWidget, type GroupWidgetConfig, type WidgetConfig, type WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
@@ -30,8 +30,11 @@ import {
 import {
     clampGroupMoveDelta,
     clampGroupResizeToMembers,
+    clampRectInsideContainer,
     computeMembersBoundingBox,
+    findOwningLockedGroup,
     orderRenderItemsWithGroupsFirst,
+    resolveEffectiveInteractionTarget,
     sanitizeGroupMemberIds,
     type LayoutRect,
 } from '../../utils/groupWidget';
@@ -58,6 +61,12 @@ interface BuilderCanvasProps {
     headerWidgetIds?: Set<string>;
     headerOccupiedSlotCount?: number;
     onPromoteToHeader?: (widgetId: string) => void;
+    /** D6: the id of the locked group currently in pencil edit mode, if any. */
+    editingGroupId?: string;
+    /** D6: toggles pencil edit mode for a locked group container. */
+    onToggleGroupEditMode?: (widgetId: string) => void;
+    /** D6: exits pencil edit mode (click outside the group, Escape, unlock/delete). */
+    onExitGroupEditMode?: () => void;
     cols?: number;
     rows?: number;
 }
@@ -77,8 +86,6 @@ interface InteractionState {
     startBounds: WidgetPixelBounds;
     tentativeBounds: WidgetPixelBounds;
     hasExceededThreshold: boolean;
-    /** True when `widgetId` is a member of a currently locked group: selectable, never draggable/resizable (G2). */
-    isLockedMember: boolean;
     /** Sanitized member ids of the group being dragged, when `widgetId` is a locked group container (G3). Empty otherwise. */
     groupMemberIds: string[];
     /** Members' pre-drag layout, aligned by index with `groupMemberIds`. */
@@ -213,6 +220,9 @@ export default function BuilderCanvas({
     headerWidgetIds,
     headerOccupiedSlotCount = 0,
     onPromoteToHeader,
+    editingGroupId,
+    onToggleGroupEditMode,
+    onExitGroupEditMode,
     cols = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
 }: BuilderCanvasProps) {
@@ -224,8 +234,9 @@ export default function BuilderCanvas({
     const resolveVisibleGroupMemberIds = useCallback((group: GroupWidgetConfig) => (
         sanitizeGroupMemberIds(group.memberWidgetIds, group.id, widgets).filter((memberId) => !headerWidgetIds?.has(memberId))
     ), [widgets, headerWidgetIds]);
-    // Ids of widgets that are members of a currently locked group (D1/G2): selectable, but
-    // never draggable or resizable individually while their container stays locked.
+    // Ids of widgets that are members of a currently locked group (D1/G2). Outside edit mode
+    // (D6) these act as part of ONE widget — the container: selection and drag redirect to it,
+    // and no individual resize handles render for them.
     const lockedMemberIds = useMemo(() => {
         const ids = new Set<string>();
         widgets.filter(isGroupWidget).filter((widget) => widget.locked).forEach((widget) => {
@@ -233,6 +244,19 @@ export default function BuilderCanvas({
         });
         return ids;
     }, [widgets, resolveVisibleGroupMemberIds]);
+    // D6 pencil edit mode: members of the group CURRENTLY being edited are excluded from the
+    // "acts as one widget" redirect above — they become individually selectable/draggable/
+    // resizable again (clamped to the container's bounds).
+    const editingGroupMemberIds = useMemo(() => {
+        if (!editingGroupId) {
+            return new Set<string>();
+        }
+        const editingGroup = widgets.find((widget) => widget.id === editingGroupId);
+        if (!editingGroup || !isGroupWidget(editingGroup) || editingGroup.locked !== true) {
+            return new Set<string>();
+        }
+        return new Set(resolveVisibleGroupMemberIds(editingGroup));
+    }, [widgets, editingGroupId, resolveVisibleGroupMemberIds]);
     const rightEdgeUsesMajorLine = cols % GRID_MAJOR_INTERVAL_CELLS === 0;
     const bottomEdgeUsesMajorLine = rows % GRID_MAJOR_INTERVAL_CELLS === 0;
     const isGridVisible = useUIStore((state) => state.isGridVisible);
@@ -289,23 +313,27 @@ export default function BuilderCanvas({
     };
 
     // Resize of a locked group container (G3) must never shrink below its members' bounding box
-    // and must keep containing it; every other interaction resolves exactly as before.
+    // and must keep containing it. Move/resize of a member of the group CURRENTLY in edit mode
+    // (D6) must never leave the container's bounds. Every other interaction resolves as before.
     const resolveCommittedLayoutForCommit = (currentInteraction: InteractionState): Pick<WidgetLayout, 'x' | 'y' | 'w' | 'h'> => {
         const baseLayout = resolveCommittedLayout({ interaction: currentInteraction, metrics, cols, rows });
-
-        if (!isResizeInteraction(currentInteraction.type)) {
-            return baseLayout;
-        }
-
         const widget = widgetMap.get(currentInteraction.widgetId);
-        if (!widget || !isGroupWidget(widget) || !widget.locked) {
-            return baseLayout;
+
+        if (isResizeInteraction(currentInteraction.type) && widget && isGroupWidget(widget) && widget.locked) {
+            const memberIds = resolveVisibleGroupMemberIds(widget);
+            const membersBoundingBox = computeMembersBoundingBox(memberIds, layout);
+
+            return clampGroupResizeToMembers(baseLayout, membersBoundingBox);
         }
 
-        const memberIds = resolveVisibleGroupMemberIds(widget);
-        const membersBoundingBox = computeMembersBoundingBox(memberIds, layout);
+        if (widget && editingGroupMemberIds.has(widget.id)) {
+            const containerLayout = layout.find((item) => item.widgetId === editingGroupId);
+            if (containerLayout) {
+                return clampRectInsideContainer(baseLayout, containerLayout);
+            }
+        }
 
-        return clampGroupResizeToMembers(baseLayout, membersBoundingBox);
+        return baseLayout;
     };
 
     // Group move (G3): resolve one shared, clamped grid delta from the container's tentative
@@ -346,7 +374,7 @@ export default function BuilderCanvas({
 
     const beginInteraction = (
         event: React.PointerEvent<HTMLDivElement>,
-        item: WidgetLayout,
+        clickedItem: WidgetLayout,
         type: WidgetInteractionType,
     ) => {
         if (event.button !== 0) {
@@ -358,8 +386,28 @@ export default function BuilderCanvas({
             event.stopPropagation();
         }
 
+        // D6: exit pencil edit mode on any pointer down that lands outside the group being
+        // edited — its container, or one of ITS members. A click on a different widget (plain,
+        // or belonging to another locked group) always exits first, before that click is
+        // otherwise handled below.
+        if (editingGroupId) {
+            const clickedWidget = widgetMap.get(clickedItem.widgetId);
+            const clickedGroupScope = clickedWidget && isGroupWidget(clickedWidget)
+                ? clickedWidget.id
+                : findOwningLockedGroup(clickedItem.widgetId, widgets)?.id;
+            if (clickedGroupScope !== editingGroupId) {
+                onExitGroupEditMode?.();
+            }
+        }
+
+        // D6: outside edit mode, a locked group acts as ONE widget — a pointer interaction that
+        // starts on a member actually targets the container (selection, and a 'move' drag).
+        const effectiveWidgetId = resolveEffectiveInteractionTarget(clickedItem.widgetId, widgets, editingGroupId);
+        const item = type === 'move' && effectiveWidgetId !== clickedItem.widgetId
+            ? (layout.find((entry) => entry.widgetId === effectiveWidgetId) ?? clickedItem)
+            : clickedItem;
+
         const draggedWidget = widgetMap.get(item.widgetId);
-        const isLockedMember = lockedMemberIds.has(item.widgetId);
         // Narrowed once into a typed variable (rather than a boolean flag) so the group-member
         // resolution below keeps `GroupWidgetConfig` typing instead of the wider `WidgetConfig`.
         const draggedLockedGroup: GroupWidgetConfig | undefined = type === 'move'
@@ -395,7 +443,6 @@ export default function BuilderCanvas({
             startBounds,
             tentativeBounds: startBounds,
             hasExceededThreshold: false,
-            isLockedMember,
             groupMemberIds,
             groupMemberStartLayouts,
             groupMemberBounds: {},
@@ -403,25 +450,13 @@ export default function BuilderCanvas({
 
         interactionRef.current = initialInteraction;
         setInteraction(initialInteraction);
-        setBodyCursor(isLockedMember ? null : resizeCursor(type));
+        setBodyCursor(resizeCursor(type));
         onWidgetDragChange?.(null);
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
             const currentInteraction = interactionRef.current;
 
             if (!currentInteraction) {
-                return;
-            }
-
-            // Locked members are selectable but never draggable/resizable individually (D1/G2):
-            // pointer movement never starts a visual drag, so release always resolves as a select.
-            if (currentInteraction.isLockedMember) {
-                const nextInteraction: InteractionState = {
-                    ...currentInteraction,
-                    currentPointer: { x: moveEvent.clientX, y: moveEvent.clientY },
-                };
-                interactionRef.current = nextInteraction;
-                setInteraction(nextInteraction);
                 return;
             }
 
@@ -539,6 +574,8 @@ export default function BuilderCanvas({
                 if (event.button === 0 && !(event.target as Element).closest('[data-testid^="builder-canvas-item-"]')) {
                     event.currentTarget.focus();
                     onWidgetSelect?.(undefined);
+                    // D6: a click on empty canvas space is a click outside every group.
+                    onExitGroupEditMode?.();
                 }
             }}
             className="flex h-full min-h-0 min-w-0 w-full items-start justify-start overflow-visible"
@@ -686,20 +723,24 @@ export default function BuilderCanvas({
                         }
 
                         const isSelected = selectedWidgetId === widget.id;
-                        const isLockedMemberWidget = lockedMemberIds.has(widget.id);
-                        // A locked member's own interaction never previews a visual drag (D1/G2):
-                        // it only tracks pointer position toward a plain click-to-select release.
-                        const activeInteraction = interaction?.widgetId === widget.id && !interaction.isLockedMember
-                            ? interaction
-                            : null;
-                        // Group move (G3): while a locked container is being dragged, its members
-                        // preview at the same live delta instead of jumping only on commit.
+                        // D6: a member of a locked group NOT currently in edit mode acts as part
+                        // of the container — no individual resize handles.
+                        const isLockedMemberWidget = lockedMemberIds.has(widget.id) && !editingGroupMemberIds.has(widget.id);
+                        const activeInteraction = interaction?.widgetId === widget.id ? interaction : null;
+                        // Group move (G3/D6): while a locked container (or a member redirected to
+                        // it) is being dragged, every member previews at the same live delta
+                        // instead of jumping only on commit.
                         const groupPreviewBounds = interaction?.groupMemberBounds[widget.id];
                         // G5b (R3-resize-preview-commit-mismatch): resizing a locked group
                         // container clamps the LIVE preview with the same members-bounding-box
                         // clamp the commit uses, so the rect never renders smaller than what gets
-                        // saved and then snaps back on release.
-                        const resizePreviewBounds = activeInteraction && isResizeInteraction(activeInteraction.type) && isGroupWidget(widget) && widget.locked
+                        // saved and then snaps back on release. D6: an editable member's own
+                        // move/resize preview is likewise clamped to the container bounds live,
+                        // matching what will actually be committed.
+                        const resizePreviewBounds = activeInteraction && (
+                            (isResizeInteraction(activeInteraction.type) && isGroupWidget(widget) && widget.locked)
+                            || editingGroupMemberIds.has(widget.id)
+                        )
                             ? layoutToPixelBounds(resolveCommittedLayoutForCommit(activeInteraction), metrics)
                             : null;
                         const itemStyle = activeInteraction
@@ -732,12 +773,11 @@ export default function BuilderCanvas({
                                 isTransientResizeActive: true,
                             }
                             : undefined;
-
                         return (
                             <div
                                 key={widget.id}
                                 data-testid={`builder-canvas-item-${widget.id}`}
-                                className={`relative group ${isLockedMemberWidget ? 'cursor-default' : 'cursor-grab'} transition-opacity duration-200 ${widget.type === 'text-title' ? 'rounded-none' : 'rounded-xl'}`}
+                                className={`relative group cursor-grab transition-opacity duration-200 ${widget.type === 'text-title' ? 'rounded-none' : 'rounded-xl'}`}
                                 style={itemStyle}
                                 onPointerDown={(event) => beginInteraction(event, item, 'move')}
                             >
@@ -748,7 +788,11 @@ export default function BuilderCanvas({
                                 />
 
                                 <WidgetHoverActions
-                                    actions={[
+                                    // D6: a member of a locked group NOT in edit mode acts as
+                                    // part of the container — it gets no hover actions of its
+                                    // own; the container's own actions (copy/delete/lock/pencil,
+                                    // rendered on the container's own item) are the group's.
+                                    actions={isLockedMemberWidget ? [] : [
                                         ...(isHeaderCompatibleWidget(widget) && headerOccupiedSlotCount < HEADER_WIDGET_SLOT_COUNT
                                             ? [{
                                                 label: 'Subir al header',
@@ -764,6 +808,15 @@ export default function BuilderCanvas({
                                                 label: widget.locked ? 'Desagrupar widgets' : 'Agrupar widgets',
                                                 icon: widget.locked ? Lock : LockOpen,
                                                 onClick: () => onToggleGroupLock?.(widget.id),
+                                              }]
+                                            : []),
+                                        // D6 pencil edit mode: only offered on a LOCKED container.
+                                        ...(isGroupWidget(widget) && widget.locked
+                                            ? [{
+                                                label: 'Editar contenido',
+                                                icon: Pencil,
+                                                onClick: () => onToggleGroupEditMode?.(widget.id),
+                                                isActive: editingGroupId === widget.id,
                                               }]
                                             : []),
                                         {

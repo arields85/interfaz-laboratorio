@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { useState } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode, useState } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import BuilderCanvas from './BuilderCanvas';
@@ -10,7 +10,9 @@ import DashboardViewer from '../viewer/DashboardViewer';
 import { makeDashboard, makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { useUIStore } from '../../store/ui.store';
 import { isGroupWidget, type WidgetConfig, type WidgetLayout } from '../../domain/admin.types';
-import { collectWidgetIdsInOtherLockedGroups, computeGroupMembers } from '../../utils/groupWidget';
+import { collectWidgetIdsInOtherLockedGroups, computeGroupMembers, duplicateLockedGroup } from '../../utils/groupWidget';
+import { useHistoryState } from '../../hooks/useHistoryState';
+import { generateWidgetId } from '../../utils/idGenerator';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -116,6 +118,9 @@ async function renderInteractiveCanvas(overrides?: {
     headerWidgetIds?: Set<string>;
     resizeWidth?: number;
     resizeHeight?: number;
+    editingGroupId?: string;
+    onToggleGroupEditMode?: (widgetId: string) => void;
+    onExitGroupEditMode?: () => void;
 }) {
     const widgets = overrides?.widgets ?? [makeWidget({ id: 'widget-1', title: 'Widget 1' })];
     const dashboard = makeDashboard({
@@ -139,6 +144,9 @@ async function renderInteractiveCanvas(overrides?: {
                 onToggleGroupLock={overrides?.onToggleGroupLock}
                 onGroupLayoutCommit={overrides?.onGroupLayoutCommit}
                 headerWidgetIds={overrides?.headerWidgetIds}
+                editingGroupId={overrides?.editingGroupId}
+                onToggleGroupEditMode={overrides?.onToggleGroupEditMode}
+                onExitGroupEditMode={overrides?.onExitGroupEditMode}
             />
         </div>,
     );
@@ -1111,7 +1119,9 @@ describe('BuilderCanvas', () => {
             expect(screen.queryByTestId('builder-canvas-resize-handle-se-member-1')).not.toBeInTheDocument();
         });
 
-        it('does not move a locked member on drag, but still selects it on release', async () => {
+        // D6 (supersedes the D4 "select-only" behavior): outside edit mode, a locked group acts
+        // as ONE widget — a plain click on a member selects the CONTAINER, not the member.
+        it('selects the CONTAINER, not the member, on a plain click on a locked member', async () => {
             const user = userEvent.setup();
             const onLayoutCommit = vi.fn();
             const onWidgetSelect = vi.fn();
@@ -1121,15 +1131,39 @@ describe('BuilderCanvas', () => {
             const memberItem = screen.getByTestId('builder-canvas-item-member-1');
 
             await pressPointer(user, memberItem, { clientX: 100, clientY: 100 });
-            await movePointer(user, document.body, { clientX: 400, clientY: 400 });
-
-            // No visual drag: the item never switches to absolute tentative-bounds styling.
-            expect(memberItem.style.position).not.toBe('absolute');
-
-            await releasePointer(user, document.body, { clientX: 400, clientY: 400 });
+            await releasePointer(user, memberItem, { clientX: 100, clientY: 100 });
 
             expect(onLayoutCommit).not.toHaveBeenCalled();
-            expect(onWidgetSelect).toHaveBeenCalledWith('member-1');
+            expect(onWidgetSelect).toHaveBeenCalledWith('group-1');
+        });
+
+        // D6: a drag started on a member moves the WHOLE group, exactly like dragging the
+        // container (the member's own layout never moves independently).
+        it('moves the whole group when a drag starts on a locked member', async () => {
+            const user = userEvent.setup();
+            const onGroupLayoutCommit = vi.fn();
+
+            await renderLockedGroupCanvas({ onGroupLayoutCommit });
+
+            const memberItem = screen.getByTestId('builder-canvas-item-member-1');
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            // cellWidth = 1200/16 = 75px; a 150px rightward drag is exactly 2 cells.
+            await pressPointer(user, memberItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 250, clientY: 100 });
+
+            // The CONTAINER previews the drag (its own tentative bounds go absolute)...
+            expect(containerItem.style.position).toBe('absolute');
+            // ...and the member follows live via the group-move preview.
+            expect(memberItem.style.position).toBe('absolute');
+
+            await releasePointer(user, document.body, { clientX: 250, clientY: 100 });
+
+            expect(onGroupLayoutCommit).toHaveBeenCalledTimes(1);
+            expect(onGroupLayoutCommit).toHaveBeenCalledWith([
+                { widgetId: 'group-1', x: 2, y: 0, w: 10, h: 10 },
+                { widgetId: 'member-1', x: 3, y: 1, w: 2, h: 2 },
+            ]);
         });
     });
 
@@ -1534,6 +1568,360 @@ describe('BuilderCanvas', () => {
             // The container and the other member did NOT ride along this time.
             expect(screen.getByTestId('builder-canvas-item-group-1').style.gridColumnStart).toBe('4');
             expect(screen.getByTestId('builder-canvas-item-member-2').style.gridColumnStart).toBe('9');
+        });
+    });
+
+    // G8: DashboardBuilderPage wires the canvas's "Duplicar widget" action through
+    // `useHistoryState` + `duplicateLockedGroup` (the SAME production helpers, not a bare
+    // `useState`), and the dev server the user tests against runs `StrictMode`. This harness
+    // reproduces that exact wiring under `StrictMode` to prove/fix the live-check-2 bug:
+    // copying a locked group duplicated its inner widgets several times.
+    describe('real group workflow: duplicate a locked group under StrictMode (G8)', () => {
+        interface DuplicateWorkflowDraft {
+            widgets: WidgetConfig[];
+            layout: WidgetLayout[];
+        }
+
+        function DuplicateWorkflowHarness({
+            initialWidgets,
+            initialLayout,
+            cols,
+            rows,
+        }: {
+            initialWidgets: WidgetConfig[];
+            initialLayout: WidgetLayout[];
+            cols: number;
+            rows: number;
+        }) {
+            const draftHistory = useHistoryState<DuplicateWorkflowDraft>({
+                widgets: initialWidgets,
+                layout: initialLayout,
+            });
+            const draft = draftHistory.value;
+            const setDraft = draftHistory.set;
+
+            // Mirrors `DashboardBuilderPage.handleDuplicateWidget`'s locked-group branch exactly:
+            // `duplicateLockedGroup` (id generation included) runs once, OUTSIDE the `setDraft`
+            // updater, and the updater only assigns the already-computed result.
+            const handleDuplicateWidget = (widgetId: string) => {
+                const selectedWidget = draft.widgets.find((widget) => widget.id === widgetId);
+                if (!selectedWidget || !isGroupWidget(selectedWidget) || selectedWidget.locked !== true) {
+                    return;
+                }
+
+                const groupDuplication = duplicateLockedGroup(
+                    widgetId,
+                    draft.widgets,
+                    draft.layout,
+                    cols,
+                    rows,
+                    generateWidgetId,
+                );
+
+                if (!groupDuplication) {
+                    return;
+                }
+
+                setDraft((prev) => ({
+                    ...prev,
+                    widgets: groupDuplication.widgets,
+                    layout: groupDuplication.layout,
+                }), { coalesce: false });
+            };
+
+            const handleToggleGroupLock = (widgetId: string) => {
+                setDraft((prev) => {
+                    const widget = prev.widgets.find((item) => item.id === widgetId);
+                    if (!widget || !isGroupWidget(widget)) {
+                        return prev;
+                    }
+
+                    if (widget.locked) {
+                        return {
+                            ...prev,
+                            widgets: prev.widgets.map((item) => (
+                                item.id === widgetId ? { ...item, locked: false, memberWidgetIds: [] } : item
+                            )),
+                        };
+                    }
+
+                    const containerLayout = prev.layout.find((item) => item.widgetId === widgetId);
+                    if (!containerLayout) {
+                        return prev;
+                    }
+
+                    const otherLockedGroupMemberIds = collectWidgetIdsInOtherLockedGroups(prev.widgets, widgetId);
+                    const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, prev.widgets, prev.layout, otherLockedGroupMemberIds);
+
+                    return {
+                        ...prev,
+                        widgets: prev.widgets.map((item) => (
+                            item.id === widgetId ? { ...item, locked: true, memberWidgetIds } : item
+                        )),
+                    };
+                }, { coalesce: false });
+            };
+
+            const handleLayoutCommit = (updated: WidgetLayout) => {
+                setDraft((prev) => ({
+                    ...prev,
+                    layout: prev.layout.map((item) => (item.widgetId === updated.widgetId ? updated : item)),
+                }));
+            };
+
+            return (
+                <div style={{ width: '1200px', height: '900px' }}>
+                    <BuilderCanvas
+                        widgets={draft.widgets}
+                        layout={draft.layout}
+                        equipmentMap={new Map()}
+                        cols={cols}
+                        rows={rows}
+                        onLayoutCommit={handleLayoutCommit}
+                        onToggleGroupLock={handleToggleGroupLock}
+                        onDuplicate={handleDuplicateWidget}
+                    />
+                </div>
+            );
+        }
+
+        it('duplicates a locked group and each of its members exactly once from a single click', async () => {
+            const user = userEvent.setup();
+            const widgets: WidgetConfig[] = [
+                makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1', 'member-2'] }),
+                makeWidget({ id: 'member-1', title: 'Member 1' }),
+                makeWidget({ id: 'member-2', title: 'Member 2' }),
+            ];
+            const layout: WidgetLayout[] = [
+                makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                makeLayout({ widgetId: 'member-2', x: 5, y: 5, w: 2, h: 2 }),
+            ];
+
+            const view = render(
+                <StrictMode>
+                    <DuplicateWorkflowHarness initialWidgets={widgets} initialLayout={layout} cols={40} rows={24} />
+                </StrictMode>,
+            );
+
+            const builderRoot = view.container.querySelector('[data-testid="builder-canvas-root"]');
+            if (!builderRoot) {
+                throw new Error('Builder root was not rendered.');
+            }
+            await syncCanvasMetrics(builderRoot, 1200, 900);
+
+            const groupItem = screen.getByTestId('builder-canvas-item-group-1');
+            const duplicateButton = within(groupItem).getByRole('button', { name: 'Duplicar widget' });
+            await user.click(duplicateButton);
+
+            await waitFor(() => {
+                expect(screen.getAllByTestId(/^builder-canvas-item-(?!surface-)/)).toHaveLength(6);
+            });
+
+            // One original + one copy of each member — matched by prefix since the copy's title
+            // carries the "(Copia)" suffix.
+            const memberOneCopies = screen.getAllByText(/^Member 1/);
+            const memberTwoCopies = screen.getAllByText(/^Member 2/);
+
+            expect(memberOneCopies).toHaveLength(2);
+            expect(memberTwoCopies).toHaveLength(2);
+        });
+
+        // G8 (copy bug, live check 2): a group whose `memberWidgetIds` already lists the same
+        // member id twice — the shape a malformed/imported dashboard, or one propagated through
+        // view duplication, could carry — must still yield exactly one copy of that member from a
+        // single click on the REAL canvas, never "several times".
+        it('duplicates a member exactly once even when the group already lists its id twice', async () => {
+            const user = userEvent.setup();
+            const widgets: WidgetConfig[] = [
+                makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1', 'member-1', 'member-2'] }),
+                makeWidget({ id: 'member-1', title: 'Member 1' }),
+                makeWidget({ id: 'member-2', title: 'Member 2' }),
+            ];
+            const layout: WidgetLayout[] = [
+                makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                makeLayout({ widgetId: 'member-2', x: 5, y: 5, w: 2, h: 2 }),
+            ];
+
+            const view = render(
+                <StrictMode>
+                    <DuplicateWorkflowHarness initialWidgets={widgets} initialLayout={layout} cols={40} rows={24} />
+                </StrictMode>,
+            );
+
+            const builderRoot = view.container.querySelector('[data-testid="builder-canvas-root"]');
+            if (!builderRoot) {
+                throw new Error('Builder root was not rendered.');
+            }
+            await syncCanvasMetrics(builderRoot, 1200, 900);
+
+            const groupItem = screen.getByTestId('builder-canvas-item-group-1');
+            const duplicateButton = within(groupItem).getByRole('button', { name: 'Duplicar widget' });
+            await user.click(duplicateButton);
+
+            await waitFor(() => {
+                expect(screen.getAllByTestId(/^builder-canvas-item-(?!surface-)/)).toHaveLength(6);
+            });
+
+            expect(screen.getAllByText(/^Member 1/)).toHaveLength(2);
+            expect(screen.getAllByText(/^Member 2/)).toHaveLength(2);
+        });
+    });
+
+    describe('pencil edit mode (D6, G8)', () => {
+        function renderLockedGroupWithMembers(overrides?: {
+            editingGroupId?: string;
+            onToggleGroupEditMode?: (widgetId: string) => void;
+            onExitGroupEditMode?: () => void;
+            onLayoutCommit?: (layout: WidgetLayout) => void;
+            selectedWidgetId?: string;
+            onWidgetSelect?: (widgetId: string) => void;
+        }) {
+            return renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                    makeWidget({ id: 'widget-2', title: 'Widget 2' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'widget-2', x: 12, y: 0, w: 2, h: 2 }),
+                ],
+                cols: 16,
+                rows: 12,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+                ...overrides,
+            });
+        }
+
+        it('offers the pencil action only on a LOCKED container, not on an unlocked one', async () => {
+            await renderInteractiveCanvas({
+                widgets: [makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+            });
+
+            expect(screen.queryByRole('button', { name: 'Editar contenido' })).not.toBeInTheDocument();
+        });
+
+        it('toggles edit mode via the pencil action and shows it pressed while active', async () => {
+            const user = userEvent.setup();
+            const onToggleGroupEditMode = vi.fn();
+
+            await renderLockedGroupWithMembers({ onToggleGroupEditMode });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+            const pencilButton = within(containerItem).getByRole('button', { name: 'Editar contenido' });
+            expect(pencilButton).toHaveAttribute('aria-pressed', 'false');
+
+            await user.click(pencilButton);
+            expect(onToggleGroupEditMode).toHaveBeenCalledWith('group-1');
+        });
+
+        it('shows the pencil action as pressed when this group is the one being edited', async () => {
+            await renderLockedGroupWithMembers({ editingGroupId: 'group-1' });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+            const pencilButton = within(containerItem).getByRole('button', { name: 'Editar contenido' });
+            expect(pencilButton).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        it('lets a member show its own hover actions and be selected individually while its group is being edited', async () => {
+            const user = userEvent.setup();
+            const onWidgetSelect = vi.fn();
+
+            await renderLockedGroupWithMembers({ editingGroupId: 'group-1', onWidgetSelect });
+
+            const memberItem = screen.getByTestId('builder-canvas-item-member-1');
+            expect(within(memberItem).getByRole('button', { name: 'Eliminar widget' })).toBeInTheDocument();
+
+            await pressPointer(user, memberItem, { clientX: 100, clientY: 100 });
+            await releasePointer(user, memberItem, { clientX: 100, clientY: 100 });
+
+            expect(onWidgetSelect).toHaveBeenCalledWith('member-1');
+        });
+
+        it('renders resize handles for a member selected while its group is being edited', async () => {
+            await renderLockedGroupWithMembers({ editingGroupId: 'group-1', selectedWidgetId: 'member-1' });
+
+            expect(screen.getByTestId('builder-canvas-resize-handle-se-member-1')).toBeInTheDocument();
+        });
+
+        it('clamps a member move so it never leaves the container while editing', async () => {
+            const user = userEvent.setup();
+            const onLayoutCommit = vi.fn();
+
+            await renderLockedGroupWithMembers({ editingGroupId: 'group-1', onLayoutCommit });
+
+            const memberItem = screen.getByTestId('builder-canvas-item-member-1');
+
+            // cellWidth = 1200/16 = 75px; a huge rightward drag would push member-1 (w=2) far
+            // past the container's right edge (x=0..10) if it were not clamped.
+            await pressPointer(user, memberItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 2000, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 2000, clientY: 100 });
+
+            expect(onLayoutCommit).toHaveBeenCalledTimes(1);
+            const committed = onLayoutCommit.mock.calls[0][0] as WidgetLayout;
+            expect(committed.x + committed.w).toBeLessThanOrEqual(10);
+        });
+
+        it('still moves the whole group when the container itself is dragged while editing', async () => {
+            const user = userEvent.setup();
+            const onGroupLayoutCommit = vi.fn();
+
+            await renderLockedGroupWithMembers({ editingGroupId: 'group-1', onGroupLayoutCommit });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 250, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 250, clientY: 100 });
+
+            expect(onGroupLayoutCommit).toHaveBeenCalledTimes(1);
+        });
+
+        it('exits edit mode when clicking a widget outside the group', async () => {
+            const user = userEvent.setup();
+            const onExitGroupEditMode = vi.fn();
+
+            await renderLockedGroupWithMembers({ editingGroupId: 'group-1', onExitGroupEditMode });
+
+            const outsideWidget = screen.getByTestId('builder-canvas-item-widget-2');
+            await pressPointer(user, outsideWidget, { clientX: 500, clientY: 500 });
+            await releasePointer(user, outsideWidget, { clientX: 500, clientY: 500 });
+
+            expect(onExitGroupEditMode).toHaveBeenCalledTimes(1);
+        });
+
+        it('exits edit mode when clicking empty canvas space', async () => {
+            const user = userEvent.setup();
+            const onExitGroupEditMode = vi.fn();
+
+            const { builderRoot } = await renderLockedGroupWithMembers({ editingGroupId: 'group-1', onExitGroupEditMode });
+
+            await user.click(builderRoot);
+
+            expect(onExitGroupEditMode).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not exit edit mode when clicking the container or a member of the group being edited', async () => {
+            const user = userEvent.setup();
+            const onExitGroupEditMode = vi.fn();
+
+            await renderLockedGroupWithMembers({ editingGroupId: 'group-1', onExitGroupEditMode });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await releasePointer(user, containerItem, { clientX: 100, clientY: 100 });
+
+            const memberItem = screen.getByTestId('builder-canvas-item-member-1');
+            await pressPointer(user, memberItem, { clientX: 100, clientY: 100 });
+            await releasePointer(user, memberItem, { clientX: 100, clientY: 100 });
+
+            expect(onExitGroupEditMode).not.toHaveBeenCalled();
         });
     });
 });
