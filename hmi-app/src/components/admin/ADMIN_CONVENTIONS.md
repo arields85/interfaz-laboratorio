@@ -43,6 +43,19 @@ Toda página nueva bajo `/admin` DEBE usar `AdminWorkspaceLayout` (`hmi-app/src/
 
 ---
 
+## 2.0. Historial del builder (deshacer / rehacer)
+
+- `DashboardBuilderPage` mantiene el draft en `useHistoryState` (`hmi-app/src/hooks/useHistoryState.ts`), no en un `useState` plano. Los botones **Deshacer** / **Rehacer** están en la context bar, junto a **Guardar**; los atajos son Ctrl+Z, Ctrl+Y y Ctrl+Shift+Z.
+- Toda mutación nueva del draft debe pasar por el setter de la historia. No crear un estado paralelo del dashboard.
+- Acciones discretas (agregar, borrar, duplicar, operar vistas, confirmar un drag o resize) usan `{ coalesce: false }` para ser un paso propio. Las ediciones de texto continuas (PropertyDock, título y subtítulo del header) usan el coalescing por defecto (500 ms), para que un tipeo sea un solo paso.
+- Una operación que mueve o modifica varios widgets a la vez (por ejemplo, mover un grupo) debe entrar como un único `set`, para que se deshaga en un solo paso.
+- Resincronizar el draft con lo persistido (Guardar / Publicar) usa `replaceCurrent`: no crea un paso ni borra la historia.
+- Un efecto persistido e irreversible fuera del draft (por ejemplo, eliminar una variable del catálogo) no es deshacible: se aplica a todas las entradas con `mapAll`, para que ningún paso de deshacer restaure una referencia ya eliminada.
+- Los atajos no actúan si el foco está en un campo editable o hay un diálogo abierto, para no pisar el deshacer nativo del texto.
+- La historia vive mientras dura la sesión del builder: se reinicia al cargar un dashboard y se pierde al salir de la página.
+
+---
+
 ## 2.1. Badges de template
 
 - El badge `Template` del modo admin debe usar `<AdminTag label="TEMPLATE" variant="cyan" />` directamente.
