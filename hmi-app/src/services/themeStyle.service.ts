@@ -3,6 +3,7 @@ import type {
     ThemeFrameStyle,
     ThemeStyle,
     ThemeSurfaceStateStyle,
+    ThemeTagStyle,
 } from '../domain/themeStyle.types';
 
 export const THEME_STYLE_STORAGE_KEY = 'hmi-theme-style';
@@ -11,6 +12,22 @@ export const CLASSIC_THEME_STYLE_ID = 'classic';
 export const OUTLINE_THEME_STYLE_ID = 'outline';
 
 const WHITE = '#ffffff';
+
+/**
+ * "Clasico" reproduces today's `AdminTag` look exactly: 0.25rem (4px)
+ * radius, `bg-white/5` (5% white fill, no tint from the tag's own color),
+ * and each variant's own color mixed into the border at 40% -- see
+ * `AdminTag.tsx`'s `BASE_CLS`/`VARIANT_CLS`. Exported so a theme without its
+ * own `tag` block can fall back to it explicitly (mirrors
+ * `ThemeButtonStyle.icon`'s fallback pattern).
+ */
+export const CLASSIC_TAG_STYLE: ThemeTagStyle = {
+    style: 'glass',
+    radiusPx: 4,
+    fillPercent: 5,
+    borderPercent: 40,
+    tintPercent: 0,
+};
 
 /**
  * "Clasico" reproduces today's `.glass-panel` look exactly: 1.5rem (24px)
@@ -64,6 +81,7 @@ export const CLASSIC_THEME_STYLE: ThemeStyle = {
             baseStrengthPercent: 100,
         },
     },
+    tag: CLASSIC_TAG_STYLE,
 };
 
 /**
@@ -117,6 +135,10 @@ export const OUTLINE_THEME_STYLE: ThemeStyle = {
             baseStrengthPercent: 100,
         },
     },
+    // Tags are untouched by P1-P3's Contorno corrections (user decision,
+    // 2026-09-28): same recipe as Clasico until the user asks for a themed
+    // look (see P5/P6 in odd/tasks/theme-polish.md).
+    tag: CLASSIC_TAG_STYLE,
 };
 
 export const THEME_STYLE_PRESETS: readonly ThemeStyle[] = [CLASSIC_THEME_STYLE, OUTLINE_THEME_STYLE];
@@ -181,11 +203,41 @@ function buttonStyleToCssProperties(button: ThemeButtonStyle): Record<string, st
     };
 }
 
+// Base surface behind the tag fill/tint overlays, per `ThemeTagStyle.style`
+// (see `.theme-tag` in index.css): "glass" and "outline" are transparent
+// (only the fill/tint mix shows), "flat" is an opaque dark surface -- the
+// closest existing design token to the style lab's raw `#1a2029` (AGENTS.md:
+// no hardcoded colors when a token exists).
+const TAG_STYLE_BASE_BACKGROUND: Record<ThemeTagStyle['style'], string> = {
+    glass: 'transparent',
+    flat: 'var(--color-industrial-hover)',
+    outline: 'transparent',
+};
+
+// Only "glass" gets the small backdrop blur described in P5.
+const TAG_STYLE_BLUR_PX: Record<ThemeTagStyle['style'], number> = {
+    glass: 6,
+    flat: 0,
+    outline: 0,
+};
+
+function tagStyleToCssProperties(tag: ThemeTagStyle): Record<string, string> {
+    return {
+        '--tag-radius': pxToken(tag.radiusPx),
+        '--tag-fill': percentToken(tag.fillPercent),
+        '--tag-border': percentToken(tag.borderPercent),
+        '--tag-tint': percentToken(tag.tintPercent),
+        '--tag-base-background': TAG_STYLE_BASE_BACKGROUND[tag.style],
+        '--tag-blur': pxToken(TAG_STYLE_BLUR_PX[tag.style]),
+    };
+}
+
 /** Maps a full theme to the CSS custom properties the theme engine reads (see `index.css`). */
 export function themeStyleToCssProperties(style: ThemeStyle): Record<string, string> {
     return {
         ...frameStyleToCssProperties(style.frame),
         ...buttonStyleToCssProperties(style.button),
+        ...tagStyleToCssProperties(style.tag ?? CLASSIC_TAG_STYLE),
     };
 }
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     applyThemeStyleOverrides,
     applyThemeStyleToDocument,
+    CLASSIC_TAG_STYLE,
     CLASSIC_THEME_STYLE,
     CLASSIC_THEME_STYLE_ID,
     getThemeStylePreset,
@@ -10,6 +11,7 @@ import {
     readStoredThemeStylePresetId,
     resetThemeStyleOnDocument,
     setActiveThemeStyle,
+    THEME_STYLE_PRESETS,
     THEME_STYLE_STORAGE_KEY,
     themeStyleToCssProperties,
     writeStoredThemeStylePresetId,
@@ -131,6 +133,26 @@ describe('themeStyle.service presets', () => {
     });
 });
 
+describe('themeStyle.service tags (P5, 2026-09-28)', () => {
+    it('reproduces today\'s AdminTag look exactly for Clasico (radius 4px, fill 5%, border 40%, no tint)', () => {
+        expect(CLASSIC_THEME_STYLE.tag).toEqual({
+            style: 'glass',
+            radiusPx: 4,
+            fillPercent: 5,
+            borderPercent: 40,
+            tintPercent: 0,
+        });
+    });
+
+    it('keeps Contorno\'s tags pixel-identical to Clasico\'s (user decision 2026-09-28: tags unchanged by P1-P3)', () => {
+        expect(OUTLINE_THEME_STYLE.tag).toEqual(CLASSIC_THEME_STYLE.tag);
+    });
+
+    it('exposes the Clasico tag recipe as the documented fallback for a theme without its own tag block', () => {
+        expect(CLASSIC_TAG_STYLE).toEqual(CLASSIC_THEME_STYLE.tag);
+    });
+});
+
 describe('themeStyleToCssProperties', () => {
     it('maps a theme to frame and button custom properties', () => {
         const properties = themeStyleToCssProperties(OUTLINE_THEME_STYLE);
@@ -177,11 +199,51 @@ describe('themeStyleToCssProperties', () => {
         expect(Object.keys(properties).sort()).toEqual(Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort());
     });
 
-    it('produces the same set of keys for every preset', () => {
-        const classicKeys = Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort();
-        const outlineKeys = Object.keys(themeStyleToCssProperties(OUTLINE_THEME_STYLE)).sort();
+    it('maps the tag recipe to --tag-* custom properties', () => {
+        const properties = themeStyleToCssProperties(CLASSIC_THEME_STYLE);
 
-        expect(outlineKeys).toEqual(classicKeys);
+        expect(properties['--tag-radius']).toBe('4px');
+        expect(properties['--tag-fill']).toBe('5%');
+        expect(properties['--tag-border']).toBe('40%');
+        expect(properties['--tag-tint']).toBe('0%');
+        expect(properties['--tag-base-background']).toBe('transparent');
+        expect(properties['--tag-blur']).toBe('6px');
+    });
+
+    it('maps a flat tag style to an opaque base background and no blur', () => {
+        const flatTagTheme = {
+            ...CLASSIC_THEME_STYLE,
+            tag: { style: 'flat' as const, radiusPx: 3, fillPercent: 0, borderPercent: 0, tintPercent: 14 },
+        };
+
+        const properties = themeStyleToCssProperties(flatTagTheme);
+
+        expect(properties['--tag-radius']).toBe('3px');
+        expect(properties['--tag-fill']).toBe('0%');
+        expect(properties['--tag-border']).toBe('0%');
+        expect(properties['--tag-tint']).toBe('14%');
+        expect(properties['--tag-base-background']).toBe('var(--color-industrial-hover)');
+        expect(properties['--tag-blur']).toBe('0px');
+    });
+
+    it('falls back to the Clasico tag recipe when a theme has no tag block', () => {
+        const themeWithoutTag = { ...OUTLINE_THEME_STYLE, tag: undefined };
+
+        const properties = themeStyleToCssProperties(themeWithoutTag);
+
+        expect(properties['--tag-radius']).toBe('4px');
+        expect(properties['--tag-fill']).toBe('5%');
+        expect(properties['--tag-border']).toBe('40%');
+        expect(properties['--tag-tint']).toBe('0%');
+        expect(Object.keys(properties).sort()).toEqual(Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort());
+    });
+
+    it('produces the same set of keys for every built-in preset', () => {
+        const classicKeys = Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort();
+
+        for (const preset of THEME_STYLE_PRESETS) {
+            expect(Object.keys(themeStyleToCssProperties(preset)).sort()).toEqual(classicKeys);
+        }
     });
 });
 
@@ -196,6 +258,8 @@ describe('applyThemeStyleToDocument / resetThemeStyleOnDocument', () => {
         expect(target.style.getPropertyValue('--button-border-hover')).toBe('50%');
         expect(target.style.getPropertyValue('--button-icon-border-hover')).toBe('0%');
         expect(target.style.getPropertyValue('--button-icon-base-strength')).toBe('100%');
+        expect(target.style.getPropertyValue('--tag-radius')).toBe('4px');
+        expect(target.style.getPropertyValue('--tag-border')).toBe('40%');
     });
 
     it('removes every theme custom property, restoring the CSS defaults', () => {
@@ -208,6 +272,8 @@ describe('applyThemeStyleToDocument / resetThemeStyleOnDocument', () => {
         expect(target.style.getPropertyValue('--frame-accent-opacity-hover')).toBe('');
         expect(target.style.getPropertyValue('--button-icon-border-hover')).toBe('');
         expect(target.style.getPropertyValue('--button-icon-base-strength')).toBe('');
+        expect(target.style.getPropertyValue('--tag-radius')).toBe('');
+        expect(target.style.getPropertyValue('--tag-tint')).toBe('');
     });
 });
 

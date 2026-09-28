@@ -547,6 +547,31 @@ h1, h2, h3, h4, h5, h6 {
   --button-icon-base-strength: 100%;
 }
 
+/* ── Motor de tema: tags (AdminTag) ────────────────────────────────────────
+ * Los tags son etiquetas estaticas sin hover (P5, 2026-09-28): un solo
+ * juego de tokens, sin par rest/hover y sin @property/transicion Houdini.
+ * `.theme-tag` compone el fondo en capas (de arriba a abajo): tinte (el
+ * color propio del tag, `--tc`, mezclado via --tag-tint), relleno (blanco
+ * via --tag-fill) y el fondo base segun el estilo (--tag-base-background:
+ * transparente para glass/outline, superficie oscura para flat). El borde
+ * mezcla `--tc` al --tag-border. Cada variante define su propio `--tc`
+ * (ver AdminTag.tsx); el color de texto lo pone cada variante directamente,
+ * sin verse afectado por --tag-tint (igual que hoy).
+ * Los valores por defecto reproducen el look actual de AdminTag exactamente
+ * para las variantes cyan/green/amber/red/pink/purple. "muted" y "admin" no
+ * encajan en el eje compartido (usan un color u porcentaje propio distinto)
+ * y se resuelven con una anulacion local en `.theme-tag-muted`/
+ * `.theme-tag-admin` -- mismo patron que el 20%/30% fijo de
+ * `.admin-accent-ghost` entre las variantes de boton. */
+:root {
+  --tag-radius: 0.25rem;
+  --tag-fill: 5%;
+  --tag-border: 40%;
+  --tag-tint: 0%;
+  --tag-base-background: transparent;
+  --tag-blur: 0px;
+}
+
 /* ── Scrollbar delgado y discreto para paneles scrolleables ───────────────
  * Usa únicamente CSS Scrollbar Styling Level 1 para evitar conflictos con
  * pseudo-elementos webkit en Chromium moderno.
@@ -932,6 +957,43 @@ h1, h2, h3, h4, h5, h6 {
     --button-accent-opacity: var(--button-icon-accent-opacity-hover);
     background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, rgba(255, 255, 255, 0.05) var(--button-icon-base-strength), transparent));
     border-color: color-mix(in srgb, #fff var(--button-border), transparent);
+  }
+
+  /* Motor de tema de tags: forma + fondo compartidos, sin hover (ver
+   * comentario del bloque `:root --tag-*` arriba). Cada variante define
+   * `--tc` (color propio) via una propiedad arbitraria de Tailwind en
+   * AdminTag.tsx; el texto lo colorea la propia variante por separado. */
+  .theme-tag {
+    border-radius: var(--tag-radius);
+    background:
+      linear-gradient(
+        color-mix(in srgb, var(--tc, transparent) var(--tag-tint), transparent),
+        color-mix(in srgb, var(--tc, transparent) var(--tag-tint), transparent)
+      ),
+      linear-gradient(
+        color-mix(in srgb, #fff var(--tag-fill), transparent),
+        color-mix(in srgb, #fff var(--tag-fill), transparent)
+      ),
+      var(--tag-base-background);
+    border: 1px solid color-mix(in srgb, var(--tc, transparent) var(--tag-border), transparent);
+    backdrop-filter: blur(var(--tag-blur));
+    -webkit-backdrop-filter: blur(var(--tag-blur));
+  }
+
+  /* "muted" no sigue el eje --tag-border compartido: hoy es un borde blanco
+   * neutro al 10%, no su propio color al 40% -- anulacion local fija, no
+   * theme-driven (ver comentario del bloque `:root --tag-*` arriba). */
+  .theme-tag-muted {
+    border-color: color-mix(in srgb, #fff 10%, transparent);
+  }
+
+  /* "admin" tampoco sigue --tag-fill/--tag-tint/--tag-border: conserva su
+   * propio 20%/30% mezclado con su propio color -- misma logica que el
+   * 20%/30% fijo de `.admin-accent-ghost` entre los botones, anulacion
+   * local fija, no theme-driven. */
+  .theme-tag-admin {
+    background: color-mix(in srgb, var(--color-admin-accent) 20%, transparent);
+    border-color: color-mix(in srgb, var(--color-admin-accent) 30%, transparent);
   }
 
   /* Variante hmi-secondary (HmiButton "secondary"): hoy border-industrial-

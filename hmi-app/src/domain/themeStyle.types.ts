@@ -102,9 +102,37 @@ export interface ThemeButtonIconStyle {
     readonly baseStrengthPercent: number;
 }
 
-/** A complete theme: widget frame + button visual style. */
+/**
+ * Tag visual recipe (`AdminTag`). Unlike frame/button, tags are static
+ * labels with no hover state (P5, 2026-09-28): a single set of values, no
+ * rest/hover pair.
+ */
+export interface ThemeTagStyle {
+    /**
+     * Base surface behind the fill/tint overlays below. "glass" and
+     * "outline" are transparent (only the fill/tint mix shows); "flat" is a
+     * dark opaque surface. "glass" additionally gets a small backdrop blur.
+     */
+    readonly style: 'glass' | 'flat' | 'outline';
+    /** Corner radius, in pixels. */
+    readonly radiusPx: number;
+    /** White overlay mixed into the tag surface, 0-100. */
+    readonly fillPercent: number;
+    /** Each tag's own color (`--tc`) mixed into its border, 0-100. */
+    readonly borderPercent: number;
+    /** Each tag's own color (`--tc`) mixed into the surface as a tint, 0-100. */
+    readonly tintPercent: number;
+}
+
+/**
+ * A complete theme: widget frame + button + tag visual style. `tag` is
+ * optional -- like `ThemeButtonStyle.icon`, a theme without it falls back to
+ * the "Clasico" tag recipe (see `themeStyle.service.ts`) instead of
+ * throwing, so a theme object written before P5 keeps working.
+ */
 export interface ThemeStyle {
     readonly id: string;
     readonly frame: ThemeFrameStyle;
     readonly button: ThemeButtonStyle;
+    readonly tag?: ThemeTagStyle;
 }

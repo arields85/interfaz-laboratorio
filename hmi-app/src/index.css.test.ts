@@ -361,3 +361,52 @@ describe('index.css icon-only button engine (P1, user decision 2026-09-28)', () 
         expect(ghostRestRule?.[1] ?? '').not.toMatch(/--button-icon-/);
     });
 });
+
+describe('index.css tag theme engine (P5, 2026-09-28)', () => {
+    it('defaults --tag-* to today\'s AdminTag look exactly: 0.25rem radius, 5% fill, 40% border, no tint', () => {
+        const rootBlock = indexCss.match(/:root\s*{([^}]*--tag-radius[^}]*)}/s);
+        expect(rootBlock).not.toBeNull();
+        const root = rootBlock?.[1] ?? '';
+
+        expect(root).toContain('--tag-radius: 0.25rem;');
+        expect(root).toContain('--tag-fill: 5%;');
+        expect(root).toContain('--tag-border: 40%;');
+        expect(root).toContain('--tag-tint: 0%;');
+        expect(root).toContain('--tag-base-background: transparent;');
+        expect(root).toContain('--tag-blur: 0px;');
+    });
+
+    it('drives .theme-tag radius/background/border/blur from the live theme tokens', () => {
+        const rule = indexCss.match(/(?<!-)\.theme-tag\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('border-radius: var(--tag-radius);');
+        expect(body).toMatch(/border:\s*1px solid color-mix\(in srgb, var\(--tc[^)]*\) var\(--tag-border\), transparent\);/);
+        expect(body).toMatch(/color-mix\(in srgb, var\(--tc[^)]*\) var\(--tag-tint\), transparent\)/);
+        expect(body).toMatch(/color-mix\(in srgb, #fff var\(--tag-fill\), transparent\)/);
+        expect(body).toContain('var(--tag-base-background)');
+        expect(body).toContain('backdrop-filter: blur(var(--tag-blur));');
+    });
+
+    it('has no hover rule for tags (static labels, P5 decision)', () => {
+        expect(indexCss).not.toMatch(/\.theme-tag[^{]*:hover/);
+    });
+
+    it('keeps the "muted" tag border a neutral white/10, independent of the shared --tag-border axis', () => {
+        const rule = indexCss.match(/\.theme-tag-muted\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('color-mix(in srgb, #fff 10%, transparent)');
+    });
+
+    it('keeps the "admin" tag its own accent-color fill (20%) and border (30%), independent of the shared --tag-* axis', () => {
+        const rule = indexCss.match(/\.theme-tag-admin\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('color-mix(in srgb, var(--color-admin-accent) 20%, transparent)');
+        expect(body).toContain('color-mix(in srgb, var(--color-admin-accent) 30%, transparent)');
+    });
+});
