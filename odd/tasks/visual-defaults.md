@@ -161,6 +161,11 @@ Only overrides are stored; keys absent or null already equal the code defaults.
   clean, `npm run lint` clean, `npm test` 2620/2620, `npx vite build` OK. Parent check: script
   comparison — all 67 captured shader values equal the code defaults; store + orb tests 15/15.
 
+- 2026-09-28: review (base `3790cbd`..`0cfd04f`, 407 lines, medium, user granted): lineage
+  `review-de9cc5293f91865d` APPROVED, acknowledged, authority burned. Advisory SUGGESTIONs only
+  (optional later): R3-css-token-regex-comment-shadowing, R3-reset-test-no-persistence-assertion
+  (`DesignSettingsTab.test.tsx`).
+
 ## Next step
 
 V2 live check on a fresh origin; merge after the group widget and theme merges (rebase).
