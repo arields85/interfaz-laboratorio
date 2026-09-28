@@ -1,4 +1,4 @@
-import { isGroupWidget, type WidgetConfig, type WidgetLayout } from '../domain/admin.types';
+import { isGroupWidget, type GroupWidgetConfig, type WidgetConfig, type WidgetLayout } from '../domain/admin.types';
 
 // =============================================================================
 // groupWidget — pure logic for the `group` container widget (builder-only).
@@ -51,18 +51,25 @@ export function isRectFullyInside(inner: LayoutRect, outer: LayoutRect): boolean
  * D1 membership: widgets of the same view whose layout rect is completely
  * inside the container's rect at close time. Partially overlapping widgets
  * stay out; the container never includes itself or another group widget.
+ * `excludedWidgetIds` (G4) drops header-promoted widgets from candidacy: they
+ * do not live on the canvas, so they can never become — or stay — members.
  */
 export function computeGroupMembers(
     containerWidgetId: string,
     containerRect: LayoutRect,
     widgets: readonly WidgetConfig[],
     layout: readonly WidgetLayout[],
+    excludedWidgetIds: ReadonlySet<string> = new Set(),
 ): string[] {
     const layoutByWidgetId = new Map(layout.map((item) => [item.widgetId, item]));
     const groupWidgetIds = new Set(widgets.filter(isGroupWidget).map((widget) => widget.id));
 
     return widgets
-        .filter((widget) => widget.id !== containerWidgetId && !groupWidgetIds.has(widget.id))
+        .filter((widget) => (
+            widget.id !== containerWidgetId
+            && !groupWidgetIds.has(widget.id)
+            && !excludedWidgetIds.has(widget.id)
+        ))
         .filter((widget) => {
             const rect = layoutByWidgetId.get(widget.id);
             return rect !== undefined && isRectFullyInside(rect, containerRect);
@@ -174,4 +181,160 @@ export function clampGroupResizeToMembers(tentative: LayoutRect, membersBounding
     const bottom = Math.max(tentative.y + tentative.h, membersBoundingBox.y + membersBoundingBox.h);
 
     return { x: left, y: top, w: right - left, h: bottom - top };
+}
+
+/**
+ * D5 delete: drops `removedWidgetId` from every locked group's `memberWidgetIds` that lists it
+ * (the group stays locked with the rest of its members). Non-group widgets and groups that don't
+ * list the id pass through unchanged.
+ */
+export function removeMemberFromGroups(widgets: readonly WidgetConfig[], removedWidgetId: string): WidgetConfig[] {
+    return widgets.map((widget) => {
+        if (!isGroupWidget(widget) || !widget.memberWidgetIds?.includes(removedWidgetId)) {
+            return widget;
+        }
+
+        return {
+            ...widget,
+            memberWidgetIds: widget.memberWidgetIds.filter((id) => id !== removedWidgetId),
+        };
+    });
+}
+
+/** The locked group that currently lists `widgetId` as a sanitized member, or undefined. */
+export function findOwningLockedGroup(
+    widgetId: string,
+    widgets: readonly WidgetConfig[],
+): GroupWidgetConfig | undefined {
+    return widgets
+        .filter(isGroupWidget)
+        .find((group) => group.locked === true && sanitizeGroupMemberIds(group.memberWidgetIds, group.id, widgets).includes(widgetId));
+}
+
+/**
+ * D3 click priority (viewer): the navigation target a widget should actually navigate to — its
+ * own `navigationTargetDashboardId` when set, otherwise (for a member of a currently locked
+ * group) the group's target. Returns `undefined` when neither resolves to a non-empty target.
+ */
+export function resolveEffectiveNavigationTarget(
+    widget: WidgetConfig,
+    widgets: readonly WidgetConfig[],
+): string | undefined {
+    const own = widget.navigationTargetDashboardId?.trim();
+    if (own) {
+        return own;
+    }
+
+    const owningGroup = findOwningLockedGroup(widget.id, widgets);
+    const inherited = owningGroup?.navigationTargetDashboardId?.trim();
+
+    return inherited || undefined;
+}
+
+/**
+ * G5 group hover: the id of the locked group that should show its hover look while the pointer
+ * is over `widgetId` — the group's own id when `widgetId` is itself a locked container, or the
+ * id of the locked group that owns it as a member. `undefined` when `widgetId` is not part of any
+ * locked group (members and unrelated widgets keep only their own native hover).
+ */
+export function resolveHoveredGroupId(widgetId: string, widgets: readonly WidgetConfig[]): string | undefined {
+    const widget = widgets.find((item) => item.id === widgetId);
+
+    if (widget && isGroupWidget(widget) && widget.locked === true) {
+        return widget.id;
+    }
+
+    return findOwningLockedGroup(widgetId, widgets)?.id;
+}
+
+/** One duplicated group: the appended widgets/layout (already merged with the originals) and the new container id to select. */
+export interface GroupDuplicationResult {
+    widgets: WidgetConfig[];
+    layout: WidgetLayout[];
+    newSelectedWidgetId: string;
+}
+
+/**
+ * D5 copy: duplicating a LOCKED group duplicates the container and every one of its members as
+ * one new, already-grouped copy — new ids throughout, `memberWidgetIds` remapped to the new
+ * member ids, `locked: true`, stacking (container before members) preserved. The whole group
+ * offsets the same way a single-widget duplicate does (`y += own height`), applied as one rigid
+ * body and clamped to the grid like a group move (G3). `excludedWidgetIds` (defensive, mirrors
+ * G4's membership exclusion) keeps a header-promoted id out of the copy even if it were still
+ * listed. Returns `null` when `groupWidgetId` is not a currently locked group with a resolvable
+ * container layout — callers duplicate an unlocked container or a plain member widget (including
+ * one that happens to be a group member) through the regular single-widget duplicate path
+ * instead, since D5 only special-cases a locked group's own copy.
+ */
+export function duplicateLockedGroup(
+    groupWidgetId: string,
+    widgets: readonly WidgetConfig[],
+    layout: readonly WidgetLayout[],
+    cols: number,
+    rows: number,
+    generateId: (type: string) => string,
+    excludedWidgetIds: ReadonlySet<string> = new Set(),
+): GroupDuplicationResult | null {
+    const group = widgets.find((widget) => widget.id === groupWidgetId);
+    if (!group || !isGroupWidget(group) || group.locked !== true) {
+        return null;
+    }
+
+    const containerLayout = layout.find((item) => item.widgetId === groupWidgetId);
+    if (!containerLayout) {
+        return null;
+    }
+
+    const memberIds = sanitizeGroupMemberIds(group.memberWidgetIds, group.id, widgets)
+        .filter((memberId) => !excludedWidgetIds.has(memberId));
+    const members = memberIds
+        .map((id) => {
+            const widget = widgets.find((item) => item.id === id);
+            const memberLayout = layout.find((item) => item.widgetId === id);
+            return widget && memberLayout ? { widget, layout: memberLayout } : null;
+        })
+        .filter((entry): entry is { widget: WidgetConfig; layout: WidgetLayout } => entry !== null);
+
+    const groupRects: LayoutRect[] = [containerLayout, ...members.map((member) => member.layout)];
+    // Same offset a single-widget duplicate uses (y += own height), clamped as one rigid body.
+    const { dx, dy } = clampGroupMoveDelta(groupRects, 0, containerLayout.h, cols, rows);
+
+    const newContainerId = generateId(group.type);
+    const idByOldMemberId = new Map(members.map((member) => [member.widget.id, generateId(member.widget.type)]));
+
+    const newContainer: GroupWidgetConfig = {
+        ...(JSON.parse(JSON.stringify(group)) as GroupWidgetConfig),
+        id: newContainerId,
+        title: group.title ? `${group.title} (Copia)` : undefined,
+        locked: true,
+        memberWidgetIds: members.map((member) => idByOldMemberId.get(member.widget.id) as string),
+    };
+    const newContainerLayout: WidgetLayout = {
+        ...containerLayout,
+        widgetId: newContainerId,
+        x: containerLayout.x + dx,
+        y: containerLayout.y + dy,
+    };
+
+    const newMembers: WidgetConfig[] = members.map((member) => ({
+        ...(JSON.parse(JSON.stringify(member.widget)) as WidgetConfig),
+        id: idByOldMemberId.get(member.widget.id) as string,
+        title: member.widget.title ? `${member.widget.title} (Copia)` : undefined,
+    }));
+    const newMemberLayouts: WidgetLayout[] = members.map((member) => ({
+        ...member.layout,
+        widgetId: idByOldMemberId.get(member.widget.id) as string,
+        x: member.layout.x + dx,
+        y: member.layout.y + dy,
+    }));
+
+    return {
+        widgets: reorderWidgetsWithGroupBeforeMembers(
+            [...widgets, newContainer, ...newMembers],
+            newContainerId,
+            newContainer.memberWidgetIds ?? [],
+        ),
+        layout: [...layout, newContainerLayout, ...newMemberLayouts],
+        newSelectedWidgetId: newContainerId,
+    };
 }
