@@ -1217,7 +1217,11 @@ export default function DashboardBuilderPage() {
                                 ? {
                                     id: newId,
                                     type,
-                                    title: 'Contenedor',
+                                    // G9 (user request, 2026-09-28): a new container starts with
+                                    // no title and no icon (defaultIcon is null for 'group' —
+                                    // widgetCapabilities.ts), so its header row renders empty; the
+                                    // catalog entry itself keeps showing "Contenedor".
+                                    title: '',
                                     position: { x: 0, y: 0 },
                                     size: { w: defaultWidth, h: defaultHeight },
                                     memberWidgetIds: [],

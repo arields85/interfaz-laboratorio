@@ -104,12 +104,14 @@ describe('widgetCapabilities', () => {
     it('marks group as a static container without catalog, hierarchy or nested navigation', () => {
         const widgetType: WidgetType = 'group';
 
+        // G9 (user request, 2026-09-28): no default icon — a new container starts with neither
+        // title nor icon, so its header row renders empty (GroupWidget.tsx).
         expect(getWidgetCapabilities(widgetType)).toEqual({
             catalogVariable: false,
             hierarchy: false,
             nestedInteractiveNavigation: false,
             defaultSize: { w: 10, h: 10 },
-            defaultIcon: 'Group',
+            defaultIcon: null,
         });
         expect(hasNestedInteractiveNavigation(widgetType)).toBe(false);
         expect(supportsCatalogVariable(widgetType)).toBe(false);

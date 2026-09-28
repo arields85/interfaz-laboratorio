@@ -34,7 +34,11 @@ const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
     'alert-history': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 8, h: 8 }, defaultIcon: 'Siren' },
     'text-title': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 5, h: 2 }, defaultIcon: null },
     'info-card': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 5 }, defaultIcon: 'Info' },
-    'group': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 10, h: 10 }, defaultIcon: 'Group' },
+    // G9 (user request, 2026-09-28): a new container starts with no icon (and no title, set in
+    // DashboardBuilderPage's handleAddWidget), so its header row renders empty. The catalog rail
+    // still shows its own "Contenedor" label and Group icon (WidgetCatalogRail.tsx), independent
+    // of this default.
+    'group': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 10, h: 10 }, defaultIcon: null },
 };
 
 const WIDGET_PRESENTATION_CAPABILITIES: Record<WidgetType, PresentationCapability | undefined> = {

@@ -271,7 +271,7 @@ vi.mock('../../components/admin/AdminWorkspaceLayout', () => ({
 }));
 
 vi.mock('../../components/admin/WidgetCatalogRail', () => ({
-    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart' | 'trend-chart-v2' | 'activity-analytics' | 'prod-trend' | 'info-card') => void }) => (
+    default: ({ onAddWidget }: { onAddWidget: (type: 'kpi' | 'metric-card' | 'machine-activity' | 'trend-chart' | 'trend-chart-v2' | 'activity-analytics' | 'prod-trend' | 'info-card' | 'group') => void }) => (
         <div data-testid="widget-catalog-rail">
             <button type="button" onClick={() => onAddWidget('kpi')}>
                 Agregar KPI
@@ -296,6 +296,9 @@ vi.mock('../../components/admin/WidgetCatalogRail', () => ({
             </button>
             <button type="button" onClick={() => onAddWidget('info-card')}>
                 Agregar INFO-CARD
+            </button>
+            <button type="button" onClick={() => onAddWidget('group')}>
+                Agregar Contenedor
             </button>
         </div>
     ),
@@ -805,6 +808,35 @@ describe('DashboardBuilderPage', () => {
                 },
             });
             expect(propertyDockMock.mock.calls.at(-1)?.[0].selectedWidget.binding).not.toHaveProperty('catalogVariableId');
+        });
+    });
+
+    // G9 (user request, 2026-09-28): a new group container must start with no title and no icon
+    // (the catalog entry label stays "Contenedor" — only the created widget's own content is
+    // empty), so its header row renders empty (GroupWidget.test.tsx already proves that shape
+    // renders with no header row).
+    it('adds group containers with an empty title and no icon by default', async () => {
+        const user = userEvent.setup();
+
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [],
+            layout: [],
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Agregar Contenedor' }));
+
+        await waitFor(() => {
+            expect(propertyDockMock).toHaveBeenCalled();
+            expect(propertyDockMock.mock.calls.at(-1)?.[0]).toMatchObject({
+                selectedWidget: {
+                    type: 'group',
+                    title: '',
+                    displayOptions: { icon: null },
+                },
+            });
         });
     });
 
