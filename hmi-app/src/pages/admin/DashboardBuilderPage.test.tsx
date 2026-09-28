@@ -208,7 +208,9 @@ function getBuilderCanvasSnapshot() {
 function getLatestPropertyDockProps() {
     return propertyDockMock.mock.calls.at(-1)?.[0] as {
         onDuplicate?: () => void;
+        onDeleteVariable?: (variableId: string) => void;
         selectedWidget?: WidgetConfig;
+        usedCatalogVariableIds?: string[];
     } | undefined;
 }
 
@@ -1980,7 +1982,7 @@ describe('DashboardBuilderPage undo/redo', () => {
         });
     });
 
-    it('does not undo from the keyboard while a text field is focused, so native text undo keeps working', async () => {
+    it('does not undo from the keyboard while a text field is focused inside an open dialog', async () => {
         const user = userEvent.setup();
         await renderBuilderPage();
 
@@ -1996,6 +1998,95 @@ describe('DashboardBuilderPage undo/redo', () => {
         await user.keyboard('{Control>}z{/Control}');
 
         expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+    });
+
+    it('does not undo from the keyboard while a text field is focused, with no dialog open', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage();
+
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Widget 1' }));
+        const titleInput = await screen.findByLabelText('Título del widget');
+        await user.click(titleInput);
+        await waitFor(() => expect(titleInput).toHaveFocus());
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+        await user.keyboard('{Control>}z{/Control}');
+
+        expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+    });
+
+    it('deleting a catalog variable is not itself an undoable step, and clears the bound widget from every existing undo/redo entry', async () => {
+        const user = userEvent.setup();
+        const boundWidget = makeWidget({
+            id: 'widget-1',
+            title: 'Widget 1',
+            binding: { mode: 'real_variable', catalogVariableId: 'cv-temp', unit: '°C' },
+        });
+        const dashboardState = makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [boundWidget],
+            layout: [makeLayout({ widgetId: 'widget-1', x: 0, y: 0, w: 4, h: 3 })],
+        });
+
+        variableCatalogStorageMock.getAll.mockResolvedValueOnce([
+            { id: 'cv-temp', name: 'Temperatura', unit: '°C' },
+        ]);
+
+        await renderBuilderPage(dashboardState, { statefulDashboard: dashboardState });
+
+        // Step 1: add a KPI (past = [state0], current = state1 with 2 widgets).
+        await user.click(screen.getByRole('button', { name: 'Agregar KPI' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+
+        // Step 2: undo it (past = [], current = state0, future = [state1]). Both state0 (current)
+        // and state1 (future) still bind widget-1 to cv-temp at this point.
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-1']);
+        });
+        expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Rehacer (Ctrl+Y)' })).toBeEnabled();
+
+        // Delete the catalog variable: getAffectedDashboards resolves empty by default, so
+        // deletion runs immediately with no confirmation dialog.
+        await act(async () => {
+            await getLatestPropertyDockProps()?.onDeleteVariable?.('cv-temp');
+        });
+
+        await waitFor(() => {
+            expect(getLatestPropertyDockProps()?.usedCatalogVariableIds ?? []).not.toContain('cv-temp');
+        });
+
+        // The deletion must not have created a new undo step: past was empty before it and
+        // must still be empty, and the redo entry must still be there.
+        expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Rehacer (Ctrl+Y)' })).toBeEnabled();
+
+        // The current entry (former state0) must no longer bind widget-1 to the deleted variable.
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Widget 1' }));
+        await waitFor(() => {
+            expect(getLatestPropertyDockProps()?.selectedWidget?.binding?.catalogVariableId).toBeUndefined();
+        });
+
+        // Redo into the future entry (former state1): it must be scrubbed too, not just current.
+        await user.click(screen.getByRole('button', { name: 'Rehacer (Ctrl+Y)' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+        });
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Widget 1' }));
+        await waitFor(() => {
+            expect(getLatestPropertyDockProps()?.selectedWidget?.binding?.catalogVariableId).toBeUndefined();
+        });
     });
 
     it('a full layout commit (drag or resize) is exactly one undo step', async () => {
