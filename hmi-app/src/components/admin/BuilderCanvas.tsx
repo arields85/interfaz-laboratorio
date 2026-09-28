@@ -1214,8 +1214,9 @@ export default function BuilderCanvas({
                         );
                     })()}
 
-                    {/* P8: visible copy of the aria-live hint above, purely decorative (the
-                        sr-only region already owns the accessible announcement). */}
+                    {/* P8: visible copy of the aria-live hint rendered below (last child of the
+                        root), purely decorative — the sr-only region already owns the accessible
+                        announcement. */}
                     {placementSourceWidgetId && placementPointer && (
                         <CursorTooltip
                             data-testid="builder-canvas-placement-cursor-hint"
