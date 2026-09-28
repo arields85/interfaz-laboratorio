@@ -101,8 +101,11 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   the container without header text (no 'Contenedor' fallback in `GroupWidget.tsx:81`);
   (d) integration tests with the REAL `BuilderCanvas` (the page tests mock it, which hid all of
   this): add container, lock, drag -> members move, render order.
-- [ ] **G8** — D6 (locked group = one widget, pencil edit mode, delete confirmation) + bug from
+- [x] **G8** — D6 (locked group = one widget, pencil edit mode, delete confirmation) + bug from
   live check 2: copying a locked group duplicated the inner widgets several times.
+- [ ] **G9** — Container snaps exactly to the grid lines (user, live check 2): its frame must not
+  use the widget inset/gutter, so members keep a breathing margin inside it and the frames never
+  overlap; builder and viewer. (Engram `odd/group-widget/g9-grid-snap`.)
 - [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
@@ -233,6 +236,22 @@ after the user's live check. Slice boundaries are recorded under Progress.
 - 2026-09-28: live check 2: points 2 (lock) and 3 (move/resize) OK. Point 4 FAILED: copying a
   locked group duplicates the inner widgets several times. New user decisions D6.
 
+- 2026-09-28: G8 done (route: delegated writer) — `a2692c7` fix: copy bug root cause =
+  `sanitizeGroupMemberIds` did not dedupe, so a repeated member id produced several copies in
+  `duplicateLockedGroup` (reproduced under StrictMode with the real canvas; StrictMode updater
+  double-invocation ruled out); `35f6762` feat: locked group = one widget
+  (`resolveEffectiveInteractionTarget` redirects member pointer interactions to the container
+  unless editing; members of a locked, non-editing group show no hover actions of their own) +
+  pencil "Editar contenido" edit mode (`editingGroupId` UI state in the page; exits: pencil,
+  outside click, Escape, unlock/delete; `clampRectInsideContainer` live and on commit);
+  `5860bcf` feat: locked delete confirmation with `AdminDestructiveDialog` (container + N
+  widgets, one step; unlocked delete unchanged); `471a88a`/`c353adb` message grammar fixes;
+  `d5983c8` docs. Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test` 2751/2751.
+  TDD note: the copy bug was RED-first; the D6 helpers/behaviors were written together with
+  their tests, not strictly RED-first (writer disclosed the deviation). Parent spot check:
+  groupWidget + BuilderCanvas 115/115.
+  New user request queued as G9 (grid snap).
+
 ## Next step
 
-G8 (writer), then the user's live check from point 4, then the single merge to `main`.
+Slice review G8, then G9 (writer) while the user retests from point 4; then the single merge.
