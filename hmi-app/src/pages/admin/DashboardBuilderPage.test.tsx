@@ -2549,6 +2549,38 @@ describe('DashboardBuilderPage undo/redo', () => {
                 expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1', 'widget-2']);
             });
 
+            // G9 review fix (R3-delete-count-includes-dangling-ids): a stale member id that no
+            // longer resolves to a widget (removed elsewhere without going through
+            // `removeMemberFromGroups`, or malformed/imported data) must never inflate the count.
+            it('counts only members that actually still exist, excluding a dangling member id', async () => {
+                const user = userEvent.setup();
+                await renderBuilderPage(makeDashboard({
+                    id: 'dashboard-1',
+                    cols: 20,
+                    rows: 12,
+                    widgets: [
+                        makeGroupWidget({
+                            id: 'group-1',
+                            locked: true,
+                            memberWidgetIds: ['widget-1', 'ghost-id'],
+                            title: 'Contenedor',
+                        }),
+                        makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                    ],
+                    layout: [
+                        makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                        makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                    ],
+                }));
+
+                await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
+
+                const dialog = await screen.findByRole('dialog');
+                expect(within(dialog).getByText(/su widget agrupado/)).toBeInTheDocument();
+                expect(within(dialog).queryByText(/sus 2 widgets agrupados/)).not.toBeInTheDocument();
+                expect(within(dialog).queryByText('ghost-id')).not.toBeInTheDocument();
+            });
+
             it('reads correctly for an untitled container and for one with no members', async () => {
                 const user = userEvent.setup();
                 await renderBuilderPage(makeDashboard({

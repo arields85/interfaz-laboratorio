@@ -73,7 +73,7 @@ import {
     computeGroupMembers,
     duplicateLockedGroup,
     removeMemberFromGroups,
-    sanitizeGroupMemberIds,
+    resolveExistingGroupMemberIds,
 } from '../../utils/groupWidget';
 import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
 import {
@@ -1725,8 +1725,10 @@ export default function DashboardBuilderPage() {
         // user via `groupDeleteConfirmation` first).
         const performDeleteLockedGroupWithMembers = (groupWidgetId: string) => {
             const group = activeView.widgets.find((widget) => widget.id === groupWidgetId);
+            // G9 review fix (R3-delete-count-includes-dangling-ids): only remove members that
+            // still exist, so this set matches exactly what the confirmation dialog showed.
             const memberIds = group && isGroupWidget(group)
-                ? sanitizeGroupMemberIds(group.memberWidgetIds, group.id, activeView.widgets)
+                ? resolveExistingGroupMemberIds(group, activeView.widgets)
                 : [];
             const idsToRemove = new Set([groupWidgetId, ...memberIds]);
 
@@ -1765,7 +1767,10 @@ export default function DashboardBuilderPage() {
             const targetWidget = activeView.widgets.find((widget) => widget.id === targetWidgetId);
 
             if (targetWidget && isGroupWidget(targetWidget) && targetWidget.locked === true) {
-                const memberIds = sanitizeGroupMemberIds(targetWidget.memberWidgetIds, targetWidget.id, activeView.widgets);
+                // G9 review fix (R3-delete-count-includes-dangling-ids): a dangling member id
+                // (removed elsewhere without going through `removeMemberFromGroups`, or
+                // malformed/imported data) must never inflate "container + N widgets".
+                const memberIds = resolveExistingGroupMemberIds(targetWidget, activeView.widgets);
                 setGroupDeleteConfirmation({
                     groupWidgetId: targetWidgetId,
                     groupTitle: targetWidget.title?.trim() ?? '',

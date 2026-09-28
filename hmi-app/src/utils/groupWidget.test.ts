@@ -13,6 +13,7 @@ import {
     removeMemberFromGroups,
     resolveEffectiveInteractionTarget,
     resolveEffectiveNavigationTarget,
+    resolveExistingGroupMemberIds,
     resolveHoveredGroupId,
     resolveWidgetSurfaceInset,
     sanitizeGroupMemberIds,
@@ -78,6 +79,39 @@ describe('sanitizeGroupMemberIds', () => {
     it('deduplicates a repeated member id, keeping only its first occurrence', () => {
         const widgets = [makeGroup({ id: 'group-1' }), makeWidget({ id: 'widget-1' }), makeWidget({ id: 'widget-2' })];
         expect(sanitizeGroupMemberIds(['widget-1', 'widget-2', 'widget-1'], 'group-1', widgets)).toEqual(['widget-1', 'widget-2']);
+    });
+});
+
+describe('resolveExistingGroupMemberIds (G9 review fix: R3-delete-count-includes-dangling-ids)', () => {
+    it('drops a dangling member id that no longer resolves to a widget', () => {
+        const group = makeGroup({ id: 'group-1', memberWidgetIds: ['widget-1', 'ghost-id'] });
+        const widgets = [group, makeWidget({ id: 'widget-1' })];
+
+        expect(resolveExistingGroupMemberIds(group, widgets)).toEqual(['widget-1']);
+    });
+
+    it('returns every member id when all of them resolve to an existing widget', () => {
+        const group = makeGroup({ id: 'group-1', memberWidgetIds: ['widget-1', 'widget-2'] });
+        const widgets = [group, makeWidget({ id: 'widget-1' }), makeWidget({ id: 'widget-2' })];
+
+        expect(resolveExistingGroupMemberIds(group, widgets)).toEqual(['widget-1', 'widget-2']);
+    });
+
+    it('still applies the usual sanitation (non-array, self-id, other-group-id, dedupe)', () => {
+        const otherGroup = makeGroup({ id: 'group-2' });
+        const group = makeGroup({
+            id: 'group-1',
+            memberWidgetIds: ['group-1', 'group-2', 'widget-1', 'widget-1'] as unknown as string[],
+        });
+        const widgets = [group, otherGroup, makeWidget({ id: 'widget-1' })];
+
+        expect(resolveExistingGroupMemberIds(group, widgets)).toEqual(['widget-1']);
+    });
+
+    it('returns an empty list for a non-array memberWidgetIds', () => {
+        const group = makeGroup({ id: 'group-1', memberWidgetIds: undefined });
+
+        expect(resolveExistingGroupMemberIds(group, [group])).toEqual([]);
     });
 });
 

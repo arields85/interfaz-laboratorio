@@ -54,6 +54,21 @@ export function sanitizeGroupMemberIds(
     });
 }
 
+/**
+ * G9 review fix (R3-delete-count-includes-dangling-ids): sanitized member ids that also resolve to
+ * a widget still present in `widgets`. Used by the locked-group delete confirmation so a stale or
+ * dangling id (a member removed elsewhere without going through `removeMemberFromGroups`, or
+ * malformed/imported data) never inflates "container + N widgets" with a phantom entry, and so the
+ * ids actually removed on confirm match the ids shown in the dialog.
+ */
+export function resolveExistingGroupMemberIds(
+    group: Pick<GroupWidgetConfig, 'id' | 'memberWidgetIds'>,
+    widgets: readonly WidgetConfig[],
+): string[] {
+    const widgetIds = new Set(widgets.map((widget) => widget.id));
+    return sanitizeGroupMemberIds(group.memberWidgetIds, group.id, widgets).filter((id) => widgetIds.has(id));
+}
+
 /** True when `inner` is completely contained within `outer` (D1 membership rule). */
 export function isRectFullyInside(inner: LayoutRect, outer: LayoutRect): boolean {
     return inner.x >= outer.x
