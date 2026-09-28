@@ -500,6 +500,46 @@ describe('DashboardViewer', () => {
         });
     });
 
+    describe('G9: group container frame sits exactly on the grid lines', () => {
+        it('renders the group container surface with no inset, while a member keeps the standard breathing gutter', async () => {
+            const dashboard = makeDashboard({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            });
+
+            const { container } = render(
+                <div style={{ width: '1200px', height: '800px' }}>
+                    <DashboardViewer
+                        widgets={dashboard.widgets}
+                        layout={dashboard.layout}
+                        equipmentMap={new Map()}
+                        cols={dashboard.cols}
+                        rows={dashboard.rows}
+                    />
+                </div>,
+            );
+
+            const observedContainer = container.querySelector('[data-testid="dashboard-viewer-root"]');
+            emitResize(observedContainer as Element, 1200, 800);
+
+            await waitFor(() => {
+                expect(screen.getByTestId('dashboard-viewer-item-surface-group-1')).toBeInTheDocument();
+            });
+
+            const groupSurface = screen.getByTestId('dashboard-viewer-item-surface-group-1');
+            const memberSurface = screen.getByTestId('dashboard-viewer-item-surface-member-1');
+
+            expect(groupSurface.getAttribute('style')).toContain('padding: 0px;');
+            expect(memberSurface.getAttribute('style')).toContain('padding: var(--widget-spacing);');
+        });
+    });
+
     describe('G7b group container stacking', () => {
         it('always renders the group container before every other widget, regardless of the layout array order', async () => {
             const dashboard = makeDashboard({

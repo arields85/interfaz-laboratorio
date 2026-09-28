@@ -423,3 +423,17 @@ export function duplicateLockedGroup(
         newSelectedWidgetId: newContainerId,
     };
 }
+
+/**
+ * G9 grid snap: CSS padding for a widget's grid-cell "surface" wrapper — the div both
+ * `BuilderCanvas` and `DashboardViewer` wrap every grid item in. Every other widget keeps
+ * `--widget-spacing` there as the breathing gutter between its own card and the grid lines (the
+ * raw grid-cell boundary, which is also where the builder's dashed guides sit — the CSS grid
+ * itself has no gap of its own). A group container renders with none of it, so its frame sits
+ * exactly on the grid lines instead of stopping short like a normal widget. A member placed inside
+ * the container still keeps its own `--widget-spacing` inset, so its frame never coincides with or
+ * overlaps the container's — the container simply reaches all the way out to the shared grid line.
+ */
+export function resolveWidgetSurfaceInset(widget: WidgetConfig): string {
+    return isGroupWidget(widget) ? '0px' : 'var(--widget-spacing)';
+}

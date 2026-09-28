@@ -5,7 +5,12 @@ import type { ContractMachine, ConnectionHealth } from '../../domain/dataContrac
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import { useCanvasReference } from '../../utils/useCanvasReference';
 import { DEFAULT_COLS, DEFAULT_ROWS, getGridTemplateStyle } from '../../utils/gridConfig';
-import { orderRenderItemsWithGroupsFirst, resolveEffectiveNavigationTarget, resolveHoveredGroupId } from '../../utils/groupWidget';
+import {
+    orderRenderItemsWithGroupsFirst,
+    resolveEffectiveNavigationTarget,
+    resolveHoveredGroupId,
+    resolveWidgetSurfaceInset,
+} from '../../utils/groupWidget';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 interface DashboardViewerProps {
@@ -140,7 +145,7 @@ export default function DashboardViewer({
                                 <div
                                     data-testid={`dashboard-viewer-item-surface-${widget.id}`}
                                     className="relative z-0 h-full w-full box-border"
-                                    style={{ padding: 'var(--widget-spacing)' }}
+                                    style={{ padding: resolveWidgetSurfaceInset(widget) }}
                                 >
                                     <WidgetPresentationBoundary
                                         widget={effectiveWidget}

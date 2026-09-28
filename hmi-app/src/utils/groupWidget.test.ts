@@ -13,6 +13,7 @@ import {
     resolveEffectiveInteractionTarget,
     resolveEffectiveNavigationTarget,
     resolveHoveredGroupId,
+    resolveWidgetSurfaceInset,
     sanitizeGroupMemberIds,
     sanitizeGroupMembershipAcrossWidgets,
 } from './groupWidget';
@@ -682,5 +683,15 @@ describe('duplicateLockedGroup', () => {
 
         const newMemberOneLayouts = result!.layout.filter((item) => item.widgetId === newMemberOneCopies[0].id);
         expect(newMemberOneLayouts).toHaveLength(1);
+    });
+});
+
+describe('resolveWidgetSurfaceInset (G9)', () => {
+    it('returns no inset for a group container, so its frame sits exactly on the grid lines', () => {
+        expect(resolveWidgetSurfaceInset(makeGroup({ id: 'group-1' }))).toBe('0px');
+    });
+
+    it('returns the standard widget-spacing token for every non-group widget', () => {
+        expect(resolveWidgetSurfaceInset(makeWidget({ id: 'widget-1' }))).toBe('var(--widget-spacing)');
     });
 });

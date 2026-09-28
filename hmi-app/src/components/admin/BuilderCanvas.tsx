@@ -35,6 +35,7 @@ import {
     findOwningLockedGroup,
     orderRenderItemsWithGroupsFirst,
     resolveEffectiveInteractionTarget,
+    resolveWidgetSurfaceInset,
     sanitizeGroupMemberIds,
     type LayoutRect,
 } from '../../utils/groupWidget';
@@ -785,6 +786,7 @@ export default function BuilderCanvas({
                                     isSelected={isSelected}
                                     isHighlighted={false}
                                     radius={getWidgetCornerRadius(widget.type)}
+                                    inset={resolveWidgetSurfaceInset(widget)}
                                 />
 
                                 <WidgetHoverActions
@@ -846,7 +848,7 @@ export default function BuilderCanvas({
                                 <div
                                     data-testid={`builder-canvas-item-surface-${widget.id}`}
                                     className="pointer-events-none relative z-0 h-full w-full box-border"
-                                    style={{ padding: 'var(--widget-spacing)' }}
+                                    style={{ padding: resolveWidgetSurfaceInset(widget) }}
                                 >
                                     <WidgetPresentationBoundary
                                         widget={widget}

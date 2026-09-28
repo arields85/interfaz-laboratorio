@@ -524,6 +524,86 @@ describe('BuilderCanvas', () => {
         expect(indexCss).toContain('--widget-spacing: 0.5rem;');
     });
 
+    describe('G9: group container frame sits exactly on the grid lines', () => {
+        function renderGroupAndPlainWidget(overrides?: { editingGroupId?: string; onLayoutCommit?: (layout: WidgetLayout) => void }) {
+            return renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-1', x: 6, y: 0, w: 2, h: 2 }),
+                ],
+                cols: 16,
+                rows: 12,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+                ...overrides,
+            });
+        }
+
+        it('renders the group container surface with no inset, while a plain widget keeps the standard breathing gutter', async () => {
+            await renderGroupAndPlainWidget();
+
+            const groupSurface = screen.getByTestId('builder-canvas-item-surface-group-1');
+            const widgetSurface = screen.getByTestId('builder-canvas-item-surface-widget-1');
+
+            expect(groupSurface.getAttribute('style')).toContain('padding: 0px;');
+            expect(widgetSurface.getAttribute('style')).toContain('padding: var(--widget-spacing);');
+        });
+
+        it('aligns the selection frame with the container frame (no inset) when the group is selected, unlike a plain widget', async () => {
+            await renderGroupAndPlainWidget();
+
+            const groupItem = screen.getByTestId('builder-canvas-item-group-1');
+            const widgetItem = screen.getByTestId('builder-canvas-item-widget-1');
+
+            const groupSelectionFrame = within(groupItem).getByTestId('grid-selection-frame');
+            const widgetSelectionFrame = within(widgetItem).getByTestId('grid-selection-frame');
+
+            expect(groupSelectionFrame.getAttribute('style')).toContain('inset: 0px;');
+            expect(widgetSelectionFrame.getAttribute('style')).toContain('inset: var(--widget-spacing);');
+        });
+
+        it('keeps the container surface inset at zero while it is being dragged (absolute-positioned preview)', async () => {
+            const user = userEvent.setup();
+            await renderGroupAndPlainWidget();
+
+            const groupItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            await pressPointer(user, groupItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 160, clientY: 100 });
+
+            // Still mid-drag: the item switched to absolute positioning, but the inner surface
+            // wrapper (and its padding) is unrelated to the positioning mode.
+            expect(screen.getByTestId('builder-canvas-item-group-1').style.position).toBe('absolute');
+            const groupSurface = screen.getByTestId('builder-canvas-item-surface-group-1');
+            expect(groupSurface.getAttribute('style')).toContain('padding: 0px;');
+
+            await releasePointer(user, document.body, { clientX: 160, clientY: 100 });
+        });
+
+        it('keeps a locked group member inset with the standard gutter even while the group is being edited (D6)', async () => {
+            await renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 6, h: 6 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                ],
+                cols: 16,
+                rows: 12,
+                editingGroupId: 'group-1',
+            });
+
+            const memberSurface = screen.getByTestId('builder-canvas-item-surface-member-1');
+            expect(memberSurface.getAttribute('style')).toContain('padding: var(--widget-spacing);');
+        });
+    });
+
     it('fills the measured builder pane even when the local builder pane is narrower', async () => {
         const dashboard = makeDashboard({
             cols: 20,

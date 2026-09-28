@@ -6,6 +6,13 @@ interface GridSelectionFrameProps {
     /** Border-radius del widget subyacente. Debe coincidir con .glass-panel en index.css. */
     radius?: string;
     className?: string;
+    /**
+     * Separación entre el frame de selección y el borde del grid item. Por defecto coincide con el
+     * inset visual estándar de cualquier widget (`--widget-spacing`); un contenedor de grupo (G9)
+     * pasa `0px` para que el anillo de selección coincida con su propio frame, que ya no usa ese
+     * inset.
+     */
+    inset?: string;
 }
 
 const GRID_RADIUS_DELTA_PX = 0;
@@ -26,6 +33,7 @@ export default function GridSelectionFrame({
     isHighlighted = false,
     radius = '1.5rem',
     className = '',
+    inset = 'var(--widget-spacing)',
 }: GridSelectionFrameProps) {
     // useId garantiza un ID de gradiente único por instancia — evita colisiones de <defs> SVG en el DOM.
     const gradientId = useId();
@@ -47,9 +55,10 @@ export default function GridSelectionFrame({
     // ───────────────────────────────────────────────────────────────────────────
     return (
         <div
+            data-testid="grid-selection-frame"
             className={`pointer-events-none absolute z-10 ${className}`}
             style={{
-                inset: 'var(--widget-spacing)',
+                inset,
                 borderRadius: `${outerRadiusPx}px`,
                 // Limitar transiciones a las propiedades reales que cambian.
                 // transition-all anima 'display' y otras propiedades no interpolables,
