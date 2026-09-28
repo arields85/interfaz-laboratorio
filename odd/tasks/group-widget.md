@@ -67,11 +67,11 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   `memberWidgetIds`, `locked`), renderer on the shared frame with `WidgetHeader`, catalog entry,
   PropertyDock section per the skill, inherited navigation; member ids remapped on view
   duplication and portable export/import.
-- [ ] **G2** — Builder lock: lock/unlock action next to copy/delete; D1 membership (fully inside,
+- [x] **G2** — Builder lock: lock/unlock action next to copy/delete; D1 membership (fully inside,
   never other groups); container moved below its members in stacking order; locked members not
   draggable/resizable; one history step. Plus membership sanitation (review follow-ups): non-array
   `memberWidgetIds` treated as empty, no self-membership, no group as member.
-- [ ] **G3** — Group move and resize: dragging a locked container moves all members in one commit;
+- [x] **G3** — Group move and resize: dragging a locked container moves all members in one commit;
   resize clamped to the members' bounding box.
 - [ ] **G4** — Copy/delete semantics (D5) and no nesting.
 - [ ] **G5** — Viewer: D3 click priority for members without their own link; group hover (the
@@ -121,6 +121,26 @@ after the user's live check. Slice boundaries are recorded under Progress.
   imported `memberWidgetIds` that is not an array would throw), R3-group-self-membership
   (SUGGESTION — a group listing itself). Both folded into G2 as membership sanitation.
 
+- 2026-09-28: G2+G3 done (route: delegated writer, trigger 2+ non-trivial files) — `06b809e`
+  feat(widgets): add group membership, sanitation and rigid-move helpers (pure
+  `utils/groupWidget.ts`: sanitize, fully-inside membership, reorder container before earliest
+  member, bounding box, rigid move-delta clamp, resize clamp to members; `normalizeWidget` and
+  the view-clone remap now sanitize members — closes the G1 review warnings); `acd1e2f`
+  feat(builder): lock, move and resize a group container as one unit (Lock/LockOpen hover action
+  "Agrupar widgets"/"Desagrupar widgets"; locked members select but never drag, no resize
+  handles; members follow the container live while dragging; one `setDraft({coalesce:false})`
+  per lock toggle and per group commit). Commits split by layer (pure logic vs canvas wiring)
+  because G2 and G3 share one interaction state machine.
+  RED/GREEN: groupWidget 22/22, dashboardViews 17/17 (incl. the `.map is not a function` crash),
+  BuilderCanvas 32/32 (7/8 new failing first), page tests verified RED by unwiring then GREEN.
+  Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test` 2670/2670. Parent spot check:
+  groupWidget + BuilderCanvas 54/54.
+  Items handed to G4: duplicating a locked group today deep-copies `locked`/`memberWidgetIds`
+  (copy would share members) — D5 must remap; drag-preview placeholder rect `{w:0,h:0}` for a
+  member without layout (harmless, tighten); header-promoted widgets: parent decision — they are
+  never group members (excluded from D1 membership and from group moves), since they do not live
+  on the canvas.
+
 ## Next step
 
-Delegate G2+G3 (builder lock, group move/resize) to one writer.
+Slice review for G2+G3 (consent pending), and in parallel G4+G5 writer.
