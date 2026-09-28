@@ -134,11 +134,12 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   `npm test` 2943/2943. Parent spot check: groupWidget tests green.
 - 2026-09-28: user approved the branch (P1-P7, viewer frame) in the live check (P4); P8 was
   finished at session close and still needs its live check (next session).
+- 2026-09-28: user approved the copy placement mode (P8) in the live check.
 
 ## Next step
 
-Merged to main at session close. Pending for the next session: live check of the copy
-placement mode (P8) and the last review's advisories.
+Merged to main at session close. P8 live check approved (2026-09-28). Pending: the last
+review's advisories.
 
 - 2026-09-28: final slice review (base `dacde8c`..`2159aa6`, 1167 lines, medium, user granted):
   lineage `review-2cb306d00888f75a` APPROVED, acknowledged, authority burned. Advisory, pending
