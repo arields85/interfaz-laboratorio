@@ -1562,6 +1562,46 @@ describe('BuilderCanvas', () => {
 
             expect(onLayoutCommit).toHaveBeenCalledWith({ widgetId: 'group-1', x: 0, y: 0, w: 1, h: 1 });
         });
+
+        // G13(a) (live check 4): resizing a LOCKED container was jumpy (cell by cell) because its
+        // live preview round-tripped through the grid (resolveCommittedLayoutForCommit ->
+        // layoutToPixelBounds), unlike every other resize (including an UNLOCKED container's),
+        // which previews smoothly in raw pixels and only snaps to the grid on commit. The members
+        // bounding-box floor must still hold, but applied in PIXELS during the preview instead of
+        // forcing a grid round-trip.
+        it('previews a growing resize smoothly in pixels, sub-cell, like an unlocked container (G13a)', async () => {
+            const user = userEvent.setup();
+
+            await renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 6, y: 6, w: 3, h: 3 }),
+                ],
+                selectedWidgetId: 'group-1',
+                cols: 40,
+                rows: 24,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+            });
+
+            const handle = screen.getByTestId('builder-canvas-resize-handle-se-group-1');
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            // cellWidth = 1200/40 = 30px, rowHeight = 900/24 = 37.5px. A 7px move is well under
+            // one cell in either axis: a grid-snapped preview would round back to the start size
+            // (300x375) and not move at all; a smooth pixel preview follows it exactly.
+            await pressPointer(user, handle, { clientX: 300, clientY: 375 });
+            await movePointer(user, document.body, { clientX: 307, clientY: 382 });
+
+            expect(Number.parseFloat(containerItem.style.width)).toBeCloseTo(307, 5);
+            expect(Number.parseFloat(containerItem.style.height)).toBeCloseTo(382, 5);
+
+            await releasePointer(user, document.body, { clientX: 307, clientY: 382 });
+        });
     });
 
     // G7(d): the page tests mock BuilderCanvas entirely, which hid the lock-icon inversion, the

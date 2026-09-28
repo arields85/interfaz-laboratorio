@@ -21,6 +21,8 @@ import {
     isResizeInteraction,
     layoutToPixelBounds,
     pixelBoundsToGridBounds,
+    pixelBoundsToRect,
+    rectToPixelBounds,
     resizeCursor,
     type ResizeDirection,
     type WidgetInteractionMetrics,
@@ -742,18 +744,42 @@ export default function BuilderCanvas({
                         // it) is being dragged, every member previews at the same live delta
                         // instead of jumping only on commit.
                         const groupPreviewBounds = interaction?.groupMemberBounds[widget.id];
-                        // G5b (R3-resize-preview-commit-mismatch): resizing a locked group
-                        // container clamps the LIVE preview with the same members-bounding-box
-                        // clamp the commit uses, so the rect never renders smaller than what gets
-                        // saved and then snaps back on release. D6: an editable member's own
-                        // move/resize preview is likewise clamped to the container bounds live,
-                        // matching what will actually be committed.
-                        const resizePreviewBounds = activeInteraction && (
-                            (isResizeInteraction(activeInteraction.type) && isGroupWidget(widget) && widget.locked)
-                            || editingGroupMemberIds.has(widget.id)
-                        )
-                            ? layoutToPixelBounds(resolveCommittedLayoutForCommit(activeInteraction), metrics)
-                            : null;
+                        // G13(a) (live check 4): a locked container's live resize preview must
+                        // follow the pointer SMOOTHLY in raw pixels, exactly like every other
+                        // resize (including an unlocked container's) — only the commit snaps to
+                        // the grid. The members-bounding-box floor from G5b
+                        // (R3-resize-preview-commit-mismatch) still applies, but now clamped in
+                        // PIXELS directly against `tentativeBounds`, instead of round-tripping the
+                        // preview through the grid (`resolveCommittedLayoutForCommit`), which is
+                        // what made it jump cell-by-cell instead of tracking the pointer. D6: an
+                        // editable member's own move/resize preview is still clamped to the
+                        // container bounds via the grid-space commit resolver, matching what will
+                        // actually be committed.
+                        const resizePreviewBounds = (() => {
+                            if (!activeInteraction) {
+                                return null;
+                            }
+
+                            if (isResizeInteraction(activeInteraction.type) && isGroupWidget(widget) && widget.locked) {
+                                const memberIds = resolveVisibleGroupMemberIds(widget);
+                                const membersBoundingBox = computeMembersBoundingBox(memberIds, layout);
+                                if (!membersBoundingBox) {
+                                    return activeInteraction.tentativeBounds;
+                                }
+                                const membersBoundingBoxPx = layoutToPixelBounds(membersBoundingBox, metrics);
+                                const clampedRect = clampGroupResizeToMembers(
+                                    pixelBoundsToRect(activeInteraction.tentativeBounds),
+                                    pixelBoundsToRect(membersBoundingBoxPx),
+                                );
+                                return rectToPixelBounds(clampedRect);
+                            }
+
+                            if (editingGroupMemberIds.has(widget.id)) {
+                                return layoutToPixelBounds(resolveCommittedLayoutForCommit(activeInteraction), metrics);
+                            }
+
+                            return null;
+                        })();
                         const itemStyle = activeInteraction
                             ? {
                                 position: 'absolute' as const,

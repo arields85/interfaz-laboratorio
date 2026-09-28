@@ -4,6 +4,8 @@ import {
     isResizeInteraction,
     layoutToPixelBounds,
     pixelBoundsToGridBounds,
+    pixelBoundsToRect,
+    rectToPixelBounds,
     resizeCursor,
 } from './widgetInteraction';
 
@@ -24,6 +26,15 @@ describe('widgetInteraction', () => {
                 { cellWidth: 60, rowHeight: 75 },
             ),
         ).toEqual({ x: 3, y: 3, w: 4, h: 4 });
+    });
+
+    // G13(a): pure field-rename (no unit math) so a pixel-space rect can reuse the unit-agnostic
+    // grid-space clamp helpers (e.g. groupWidget's clampGroupResizeToMembers) directly.
+    it('renames pixel bounds fields into the generic x/y/w/h rect shape and back, without altering values', () => {
+        const bounds = { left: 12.5, top: 40, width: 307, height: 382 };
+
+        expect(pixelBoundsToRect(bounds)).toEqual({ x: 12.5, y: 40, w: 307, h: 382 });
+        expect(rectToPixelBounds(pixelBoundsToRect(bounds))).toEqual(bounds);
     });
 
     it('identifies resize interaction types', () => {
