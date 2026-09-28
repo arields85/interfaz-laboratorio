@@ -318,9 +318,10 @@ export function clampRectInsideContainer(rect: LayoutRect, container: LayoutRect
  * — BuilderCanvas renders exactly those four handles and no edge-only (n/s/e/w) handle exists
  * anywhere in the canvas. The two booleans below are an exhaustive 2x2 mapping over that same
  * closed union (`fixesLeftEdge`/`fixesTopEdge`, one per axis), so every possible `ResizeDirection`
- * is already covered; `clampResizeRectInsideContainer (G9 review fix...)` below asserts this for
- * all four values. If an edge-only handle is ever added to the canvas, `ResizeDirection` must grow
- * a new member first, which would make this mapping incomplete and worth revisiting then.
+ * is already covered; the `clampResizeRectInsideContainer (G9 review fix...)` describe block in
+ * `groupWidget.test.ts` asserts this for all four values. If an edge-only handle is ever added to
+ * the canvas, `ResizeDirection` must grow a new member first, which would make this mapping
+ * incomplete and worth revisiting then.
  */
 export function clampResizeRectInsideContainer(
     rect: LayoutRect,
