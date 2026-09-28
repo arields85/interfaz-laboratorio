@@ -147,6 +147,12 @@ live check).
   RED/GREEN per file. Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test` 2655/2655,
   `npx vite build` OK. Parent spot check: service + CSS contract 36/36.
 
+- 2026-09-28: slice review TH3 (base `cf1c892`..`c1807af`, 705 lines, medium, user granted):
+  lineage `review-4d8dc52f070c5575` APPROVED, acknowledged, authority burned; boundary advances to
+  `c1807af`. Advisory: R3-button-transition-cascade-collision (WARNING, `index.css:801-804` — a
+  later `transition` declaration on a button class/utility can override the theme token
+  transitions); folded into TH4.
+
 ## Next step
 
-Slice review TH3 (base cf1c892), then TH4 tab UI (writer).
+TH4 tab UI + the transition-collision fix (writer).
