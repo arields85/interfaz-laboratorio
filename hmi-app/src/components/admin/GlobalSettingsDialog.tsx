@@ -1,17 +1,19 @@
 import { Fragment, useCallback, useRef, useState } from 'react';
-import { Clock3, Palette, Pyramid, SlidersHorizontal, Wifi } from 'lucide-react';
+import { Clock3, Palette, Pyramid, SlidersHorizontal, SwatchBook, Wifi } from 'lucide-react';
 import AdminDialog from './AdminDialog';
 import AdminActionButton from './AdminActionButton';
 import ConnectionSettingsTab from './ConnectionSettingsTab';
 import DesignSettingsTab from './DesignSettingsTab';
 import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
 import TemporalSettingsTab from './TemporalSettingsTab';
+import ThemeSettingsTab from './ThemeSettingsTab';
 import VoiceSettingsTab from './VoiceSettingsTab';
 import { SAVE_STATUS_UI, type SaveStatus } from './saveStatus';
 
 const TABS = [
     { id: 'connection', label: 'Conexion', icon: Wifi },
     { id: 'design', label: 'Diseno', icon: Palette },
+    { id: 'theme', label: 'Tema', icon: SwatchBook },
     { id: 'options', label: 'Opciones', icon: SlidersHorizontal },
     { id: 'temporal', label: 'Ajustes', icon: Clock3 },
     { id: 'voice', label: 'Prisma', icon: Pyramid },
@@ -32,12 +34,14 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
 
     const [connectionDirty, setConnectionDirty] = useState(false);
     const [designDirty, setDesignDirty] = useState(false);
+    const [themeDirty, setThemeDirty] = useState(false);
     const [optionsDirty, setOptionsDirty] = useState(false);
     const [temporalDirty, setTemporalDirty] = useState(false);
     const [voiceDirty, setVoiceDirty] = useState(false);
     const [saveStatusByTab, setSaveStatusByTab] = useState<Record<TabId, SaveStatus>>(() => ({
         connection: null,
         design: null,
+        theme: null,
         options: null,
         temporal: null,
         voice: null,
@@ -49,6 +53,7 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     const dirtyByTab: Record<TabId, boolean> = {
         connection: connectionDirty,
         design: designDirty,
+        theme: themeDirty,
         options: optionsDirty,
         temporal: temporalDirty,
         voice: voiceDirty,
@@ -74,6 +79,10 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         (status: SaveStatus) => updateTabSaveStatus('design', status),
         [updateTabSaveStatus],
     );
+    const setThemeSaveStatus = useCallback(
+        (status: SaveStatus) => updateTabSaveStatus('theme', status),
+        [updateTabSaveStatus],
+    );
     const setOptionsSaveStatus = useCallback(
         (status: SaveStatus) => updateTabSaveStatus('options', status),
         [updateTabSaveStatus],
@@ -92,6 +101,8 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     const connectionSaveRef = useRef<(() => void) | null>(null);
     const designSaveRef = useRef<(() => void) | null>(null);
     const designRevertRef = useRef<(() => void) | null>(null);
+    const themeSaveRef = useRef<(() => void) | null>(null);
+    const themeRevertRef = useRef<(() => void) | null>(null);
     const optionsSaveRef = useRef<(() => void) | null>(null);
     const temporalSaveRef = useRef<(() => void) | null>(null);
     const voiceSaveRef = useRef<(() => void | Promise<void>) | null>(null);
@@ -104,6 +115,11 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
 
         if (activeTab === 'design') {
             designSaveRef.current?.();
+            return;
+        }
+
+        if (activeTab === 'theme') {
+            themeSaveRef.current?.();
             return;
         }
 
@@ -120,21 +136,26 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
         optionsSaveRef.current?.();
     };
 
-    // Discards every tab's draft (reverting Diseño's live preview) and closes.
-    // This is the confirmed path: either the user accepted the discard prompt,
-    // or there was nothing to discard in the first place.
+    // Discards every tab's draft (reverting Diseño's and Tema's live preview)
+    // and closes. This is the confirmed path: either the user accepted the
+    // discard prompt, or there was nothing to discard in the first place.
     const discardAndClose = () => {
         if (designDirty) {
             designRevertRef.current?.();
         }
+        if (themeDirty) {
+            themeRevertRef.current?.();
+        }
         setConnectionDirty(false);
         setDesignDirty(false);
+        setThemeDirty(false);
         setOptionsDirty(false);
         setTemporalDirty(false);
         setVoiceDirty(false);
         setSaveStatusByTab({
             connection: null,
             design: null,
+            theme: null,
             options: null,
             temporal: null,
             voice: null,
@@ -264,6 +285,15 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
                             onSaveStatusChange={setDesignSaveStatus}
                             saveRef={designSaveRef}
                             revertRef={designRevertRef}
+                        />
+                    </div>
+
+                    <div hidden={activeTab !== 'theme'}>
+                        <ThemeSettingsTab
+                            onDirtyChange={setThemeDirty}
+                            onSaveStatusChange={setThemeSaveStatus}
+                            saveRef={themeSaveRef}
+                            revertRef={themeRevertRef}
                         />
                     </div>
 

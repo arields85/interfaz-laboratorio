@@ -185,15 +185,25 @@ export function writeStoredThemeStylePresetId(id: string): void {
     } catch { /* ignore unavailable storage */ }
 }
 
-/** Applies and persists the given preset. Route this from the future Tema tab (TH4). */
-export function setActiveThemeStyle(id: string, target: HTMLElement = document.documentElement): void {
+/**
+ * Applies the given preset on `target` without persisting it -- Clasico
+ * resets to the CSS `:root` defaults instead of writing its (identical)
+ * values explicitly, matching `setActiveThemeStyle`'s own rule. Route this
+ * from the Tema tab's live preview and its revert.
+ */
+export function previewThemeStyleOnDocument(id: string, target: HTMLElement = document.documentElement): void {
     const preset = getThemeStylePreset(id);
     if (preset.id === CLASSIC_THEME_STYLE_ID) {
         resetThemeStyleOnDocument(target);
     } else {
         applyThemeStyleToDocument(preset, target);
     }
-    writeStoredThemeStylePresetId(preset.id);
+}
+
+/** Applies and persists the given preset. Routed from the Tema tab (TH4). */
+export function setActiveThemeStyle(id: string, target: HTMLElement = document.documentElement): void {
+    previewThemeStyleOnDocument(id, target);
+    writeStoredThemeStylePresetId(getThemeStylePreset(id).id);
 }
 
 /**

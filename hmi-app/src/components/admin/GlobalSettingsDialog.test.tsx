@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const CONNECTION_STORAGE_KEY = 'test:global-settings:connection';
 const DESIGN_STORAGE_KEY = 'test:global-settings:design';
+const THEME_STORAGE_KEY = 'test:global-settings:theme';
 const LOADER_STORAGE_KEY = 'test:global-settings:loader';
 const TEMPORAL_STORAGE_KEY = 'test:global-settings:temporal';
 const VOICE_STORAGE_KEY = 'test:global-settings:voice';
@@ -82,6 +83,49 @@ vi.mock('./DesignSettingsTab', async () => {
                         onChange={(event) => {
                             setValue(event.target.value);
                             document.documentElement.dataset.designPreview = event.target.value;
+                            onDirtyChange?.(true);
+                            onSaveStatusChange?.('dirty');
+                        }}
+                    />
+                </div>
+            );
+        },
+    };
+});
+
+vi.mock('./ThemeSettingsTab', async () => {
+    const React = await vi.importActual<typeof import('react')>('react');
+
+    return {
+        default: function MockThemeSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef, revertRef }: { onDirtyChange?: (dirty: boolean) => void; onSaveStatusChange?: (status: 'dirty' | 'saving' | 'saved' | 'error' | null) => void; saveRef?: { current: (() => void) | null }; revertRef?: { current: (() => void) | null } }) {
+            const persisted = () => localStorage.getItem(THEME_STORAGE_KEY) ?? 'Persisted theme';
+            const [value, setValue] = React.useState(persisted);
+
+            if (saveRef) {
+                saveRef.current = () => {
+                    localStorage.setItem(THEME_STORAGE_KEY, value);
+                    onDirtyChange?.(false);
+                    onSaveStatusChange?.('saved');
+                };
+            }
+
+            if (revertRef) {
+                revertRef.current = () => {
+                    const nextValue = persisted();
+                    setValue(nextValue);
+                    onDirtyChange?.(false);
+                    onSaveStatusChange?.(null);
+                };
+            }
+
+            return (
+                <div>
+                    <label htmlFor="theme-draft">Theme draft</label>
+                    <input
+                        id="theme-draft"
+                        value={value}
+                        onChange={(event) => {
+                            setValue(event.target.value);
                             onDirtyChange?.(true);
                             onSaveStatusChange?.('dirty');
                         }}
@@ -250,13 +294,13 @@ describe('GlobalSettingsDialog', () => {
         voiceSaveShouldFail = false;
     });
 
-    it('renders VOZ as the final peer tab in the required order', () => {
+    it('renders VOZ as the final peer tab in the required order, with Tema next to Diseno', () => {
         render(<Harness />);
 
         const dialog = screen.getByRole('dialog', { name: 'CONFIGURACION GENERAL' });
-        const tabNames = Array.from(dialog.querySelectorAll('button')).slice(0, 5).map((button) => button.textContent);
+        const tabNames = Array.from(dialog.querySelectorAll('button')).slice(0, 6).map((button) => button.textContent);
 
-        expect(tabNames).toEqual(['Conexion', 'Diseno', 'Opciones', 'Ajustes', 'Prisma']);
+        expect(tabNames).toEqual(['Conexion', 'Diseno', 'Tema', 'Opciones', 'Ajustes', 'Prisma']);
     });
 
     it('keeps every tab draft alive while switching tabs in the open dialog', async () => {
@@ -270,6 +314,10 @@ describe('GlobalSettingsDialog', () => {
         await user.click(screen.getByRole('button', { name: 'Diseno' }));
         await user.clear(screen.getByLabelText('Design draft'));
         await user.type(screen.getByLabelText('Design draft'), 'Design unsaved');
+
+        await user.click(screen.getByRole('button', { name: 'Tema' }));
+        await user.clear(screen.getByLabelText('Theme draft'));
+        await user.type(screen.getByLabelText('Theme draft'), 'Theme unsaved');
 
         await user.click(screen.getByRole('button', { name: 'Opciones' }));
         await user.clear(screen.getByLabelText('Loader draft'));
@@ -288,6 +336,9 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Diseno' }));
         expect(screen.getByLabelText('Design draft')).toHaveValue('Design unsaved');
+
+        await user.click(screen.getByRole('button', { name: 'Tema' }));
+        expect(screen.getByLabelText('Theme draft')).toHaveValue('Theme unsaved');
 
         await user.click(screen.getByRole('button', { name: 'Opciones' }));
         expect(screen.getByLabelText('Loader draft')).toHaveValue('Loader unsaved');
@@ -428,6 +479,36 @@ describe('GlobalSettingsDialog', () => {
         });
     });
 
+    it('projects the Tema save status in the footer before Guardar, per tab, and clears it on close', async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+
+        await user.click(screen.getByRole('button', { name: 'Tema' }));
+        await user.type(screen.getByLabelText('Theme draft'), 'X');
+
+        const actions = screen.getByRole('group', { name: 'Acciones de configuración general' });
+        const content = screen.getByRole('region', { name: 'Contenido de configuración general' });
+        const status = within(actions).getByText('Cambios sin guardar');
+        expect(status).toHaveClass('text-status-warning');
+        expect(status).toHaveAttribute('aria-live', 'polite');
+        expect(status).toHaveAttribute('aria-atomic', 'true');
+        expect(getSaveButton().previousElementSibling).toBe(status);
+        expect(within(content).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Conexion' }));
+        expect(within(actions).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Tema' }));
+        expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
+
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
+        await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
+
+        await waitFor(() => {
+            expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+        });
+    });
+
     it('projects the Opciones save status in the footer before Guardar, per tab, and clears it on close', async () => {
         const user = userEvent.setup();
         render(<Harness />);
@@ -545,6 +626,7 @@ describe('GlobalSettingsDialog', () => {
 
         localStorage.setItem(CONNECTION_STORAGE_KEY, 'Persisted connection');
         localStorage.setItem(DESIGN_STORAGE_KEY, 'Persisted design');
+        localStorage.setItem(THEME_STORAGE_KEY, 'Persisted theme');
         localStorage.setItem(LOADER_STORAGE_KEY, 'Persisted loader');
         localStorage.setItem(TEMPORAL_STORAGE_KEY, 'Persisted timezone');
         localStorage.setItem(VOICE_STORAGE_KEY, 'Persisted voice');
@@ -558,6 +640,10 @@ describe('GlobalSettingsDialog', () => {
         await user.click(screen.getByRole('button', { name: 'Diseno' }));
         await user.clear(screen.getByLabelText('Design draft'));
         await user.type(screen.getByLabelText('Design draft'), 'Design unsaved');
+
+        await user.click(screen.getByRole('button', { name: 'Tema' }));
+        await user.clear(screen.getByLabelText('Theme draft'));
+        await user.type(screen.getByLabelText('Theme draft'), 'Theme unsaved');
 
         await user.click(screen.getByRole('button', { name: 'Opciones' }));
         await user.clear(screen.getByLabelText('Loader draft'));
@@ -578,6 +664,7 @@ describe('GlobalSettingsDialog', () => {
         expect(document.documentElement.dataset.designPreview).toBe('Persisted design');
         expect(localStorage.getItem(CONNECTION_STORAGE_KEY)).toBe('Persisted connection');
         expect(localStorage.getItem(DESIGN_STORAGE_KEY)).toBe('Persisted design');
+        expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('Persisted theme');
         expect(localStorage.getItem(LOADER_STORAGE_KEY)).toBe('Persisted loader');
         expect(localStorage.getItem(TEMPORAL_STORAGE_KEY)).toBe('Persisted timezone');
         expect(localStorage.getItem(VOICE_STORAGE_KEY)).toBe('Persisted voice');
@@ -589,6 +676,9 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Diseno' }));
         expect(screen.getByLabelText('Design draft')).toHaveValue('Persisted design');
+
+        await user.click(screen.getByRole('button', { name: 'Tema' }));
+        expect(screen.getByLabelText('Theme draft')).toHaveValue('Persisted theme');
 
         await user.click(screen.getByRole('button', { name: 'Opciones' }));
         expect(screen.getByLabelText('Loader draft')).toHaveValue('Persisted loader');
@@ -698,6 +788,27 @@ describe('GlobalSettingsDialog', () => {
 
         expect(localStorage.getItem(DESIGN_STORAGE_KEY)).toBe('Design saved');
         expect(document.documentElement.dataset.designPreview).toBe('Design saved');
+        expect(getSaveButton()).toBeDisabled();
+    });
+
+    it('saves the active Tema draft through the theme save branch only', async () => {
+        const user = userEvent.setup();
+
+        localStorage.setItem(DESIGN_STORAGE_KEY, 'Persisted design');
+        localStorage.setItem(THEME_STORAGE_KEY, 'Persisted theme');
+
+        render(<Harness />);
+
+        await user.click(screen.getByRole('button', { name: 'Tema' }));
+        await user.clear(screen.getByLabelText('Theme draft'));
+        await user.type(screen.getByLabelText('Theme draft'), 'Theme saved');
+
+        expect(getSaveButton()).toBeEnabled();
+
+        await user.click(getSaveButton());
+
+        expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('Theme saved');
+        expect(localStorage.getItem(DESIGN_STORAGE_KEY)).toBe('Persisted design');
         expect(getSaveButton()).toBeDisabled();
     });
 
