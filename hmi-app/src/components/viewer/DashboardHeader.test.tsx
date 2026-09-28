@@ -227,6 +227,36 @@ describe('DashboardHeader', () => {
         expect(viewControls.compareDocumentPosition(widgetCanvas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    // G12: the header actions block (internal-view tabs + header widget slots) sits in a `flex`
+    // row alongside the title. Without `shrink-0`, flexbox lets this block compress under space
+    // pressure while `HeaderWidgetCanvas` keeps a fixed, right-justified content width — the
+    // shrunk box then overflows LEFT, visually stacking the header widget "+" slot trigger on top
+    // of the view-tab buttons (live check 3 screenshot). `shrink-0` here is the structural
+    // guarantee jsdom (no real layout engine) CAN assert: it forces the title block — which
+    // already truncates — to be the only element flexbox ever compresses.
+    it('never lets the header actions block (view tabs + widget slots) shrink into overlap with the title', () => {
+        renderViewerHeader({
+            headerConfig: {
+                widgetSlots: [{ widgetId: 'header-widget-1', column: 0 }],
+            },
+            views: [
+                {
+                    ...makeView('view-production', 'Production'),
+                    widgets: [{
+                        id: 'header-widget-1',
+                        type: 'status',
+                        title: 'Header status',
+                        position: { x: 0, y: 0 },
+                        size: { w: 2, h: 1 },
+                    }],
+                },
+                makeView('view-technical', 'Technical'),
+            ],
+        });
+
+        expect(screen.getByTestId('dashboard-header-actions')).toHaveClass('shrink-0');
+    });
+
     it('renders header widget slots from the active internal view only, even when global slots share a column', () => {
         const productionHeaderWidget = makeWidget({ id: 'header-production', type: 'status', title: 'Production header status' });
         const technicalHeaderWidget = makeWidget({ id: 'header-technical', type: 'status', title: 'Technical header status' });

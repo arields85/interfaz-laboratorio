@@ -369,7 +369,10 @@ export default function DashboardHeader({
 
             </div>
 
-            <div data-testid="dashboard-header-actions" className="flex min-w-0 items-center gap-3 self-center">
+            {/* G12: `shrink-0` keeps this block (view tabs + header widget slots) at its natural
+                width — the title block already absorbs space pressure via `flex-1`/`truncate`, so
+                the actions block never gets compressed into overlapping its own children. */}
+            <div data-testid="dashboard-header-actions" className="flex min-w-0 shrink-0 items-center gap-3 self-center">
                 {hasInternalViewNavigation && dashboard.views && resolvedActiveViewId && (
                     <DashboardViewNavigation
                         views={dashboard.views}

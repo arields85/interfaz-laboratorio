@@ -80,6 +80,26 @@ describe('HeaderWidgetCanvas', () => {
         expect((surface as HTMLElement).style.background).toBe('');
     });
 
+    // G12: the canvas root claims a fixed `w-72`/`w-0` width and right-justifies its slot content
+    // (`justify-end`). As a plain flex child of the header actions row it would otherwise shrink
+    // under space pressure while its content keeps its full width, overflowing LEFT onto the
+    // view-tab buttons rendered to its left (live check 3 screenshot: the tabs stacked over an
+    // empty slot's "+" trigger). `shrink-0` is the structural, jsdom-assertable guarantee that
+    // this box always renders at its declared width and never overflows into a sibling.
+    it('never shrinks below its fixed width, so its right-justified slots cannot overflow into a sibling (G12)', () => {
+        const { container: previewContainer } = renderPreviewCanvas();
+        expect(previewContainer.querySelector('[data-header-widget-canvas="true"]')).toHaveClass('shrink-0');
+
+        const { container: viewerContainer } = render(
+            <HeaderWidgetCanvas
+                widgets={[makeWidget({ id: 'header-status', type: 'status', title: 'Status widget' })]}
+                equipmentMap={new Map()}
+                mode="viewer"
+            />,
+        );
+        expect(viewerContainer.querySelector('[data-header-widget-canvas="true"]')).toHaveClass('shrink-0');
+    });
+
     it('animates viewer widgets in logical left-to-right slot order without transitioning canvas width', () => {
         const leftWidget = makeWidget({ id: 'header-left', type: 'status', title: 'Left status' });
         const rightWidget = makeWidget({ id: 'header-right', type: 'status', title: 'Right status' });

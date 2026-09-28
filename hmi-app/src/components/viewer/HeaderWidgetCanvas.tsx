@@ -429,7 +429,12 @@ export default function HeaderWidgetCanvas({
     return (
         <div
             data-header-widget-canvas="true"
-            className={`min-w-0 max-w-full rounded-2xl ${isPreview || widgets.length > 0 ? 'w-72' : 'w-0'} ${isPreview && isHeaderDropActive ? 'border border-dashed' : ''}`}
+            // G12: `shrink-0` — this box claims a fixed width (`w-72`/`w-0`) and right-justifies
+            // its slot content (`justify-end` below). As an ordinary flex child it would otherwise
+            // shrink under space pressure while its content kept its full width, overflowing LEFT
+            // onto the header's other actions (e.g. the internal-view tab buttons) instead of
+            // clipping inside its own box.
+            className={`min-w-0 max-w-full shrink-0 rounded-2xl ${isPreview || widgets.length > 0 ? 'w-72' : 'w-0'} ${isPreview && isHeaderDropActive ? 'border border-dashed' : ''}`}
             style={{
                 height: HEADER_WIDGET_SLOT_HEIGHT_PX,
                 minHeight: HEADER_WIDGET_SLOT_HEIGHT_PX,
