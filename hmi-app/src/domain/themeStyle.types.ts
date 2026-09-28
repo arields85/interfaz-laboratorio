@@ -4,9 +4,10 @@
  * `index.css`) can drive `@property`-based hover transitions.
  *
  * Buttons are modeled here so a full theme (including "Contorno") can be
- * represented end to end, but the CSS that consumes `ThemeButtonStyle` is
- * wired in a later task; until then the values are only mapped to unused
- * CSS custom properties.
+ * represented end to end; the CSS that consumes `ThemeButtonStyle` lives in
+ * `index.css`'s `.theme-button`/`.theme-button-*`/`.admin-accent-ghost`
+ * rules, applied by AdminActionButton, AdminIconToolbarButton, HmiButton
+ * and the WidgetHeaderTemporalControls pill segments.
  */
 
 /** Corner-accent geometry and color for one interaction state (rest or hover). */
