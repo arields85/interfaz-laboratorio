@@ -59,10 +59,28 @@ describe('GroupWidget', () => {
         expect(icon).toHaveStyle({ color: 'var(--color-industrial-muted)' });
     });
 
-    it('falls back to a default title when the widget has no title configured', () => {
+    it('renders no title text when the widget has no title configured (no fallback text)', () => {
         render(<GroupWidget widget={makeWidget({ title: undefined })} />);
 
-        expect(screen.getByText('Contenedor')).toBeInTheDocument();
+        expect(screen.queryByText('Contenedor')).not.toBeInTheDocument();
+        // The icon is still configured, so the header row itself still renders.
+        expect(screen.getByTestId('group-header-icon')).toBeInTheDocument();
+    });
+
+    it('renders no title text when the title is only whitespace', () => {
+        render(<GroupWidget widget={makeWidget({ title: '   ' })} />);
+
+        expect(screen.queryByText('Contenedor')).not.toBeInTheDocument();
+        expect(screen.getByTestId('group-header-icon')).toBeInTheDocument();
+    });
+
+    it('renders no header row at all when both the title and the icon are empty', () => {
+        const { container } = render(
+            <GroupWidget widget={makeWidget({ title: undefined, displayOptions: { icon: null } })} />,
+        );
+
+        expect(screen.queryByTestId('group-header-icon')).not.toBeInTheDocument();
+        expect(container.querySelector('.glass-panel')?.children).toHaveLength(0);
     });
 
     it('renders at any given grid size without overflowing its own frame', () => {

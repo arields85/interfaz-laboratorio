@@ -75,15 +75,23 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
         ? 'var(--color-industrial-muted)'
         : 'var(--color-widget-icon)';
 
+    // G7(c): no 'Contenedor' fallback — an empty title stays empty. When there is also no icon
+    // ("Sin ícono"), the header row itself is skipped instead of rendering an empty, oddly
+    // spaced row.
+    const trimmedTitle = widget.title?.trim() ?? '';
+    const hasHeaderContent = trimmedTitle.length > 0 || Icon !== undefined;
+
     return (
         <div className={[className, 'glass-panel group flex h-full w-full flex-col p-4'].filter(Boolean).join(' ')}>
-            <WidgetHeader
-                title={widget.title?.trim() || 'Contenedor'}
-                icon={Icon}
-                iconColor={iconColor}
-                iconPosition="right"
-                iconTestId="group-header-icon"
-            />
+            {hasHeaderContent && (
+                <WidgetHeader
+                    title={trimmedTitle}
+                    icon={Icon}
+                    iconColor={iconColor}
+                    iconPosition="right"
+                    iconTestId="group-header-icon"
+                />
+            )}
         </div>
     );
 }
