@@ -222,6 +222,16 @@ en vez de depender de un widget de título individual.
   hereda el del contenedor bloqueado que lo agrupa; si el miembro define su propio target, ese
   gana siempre. Resuelto por la función pura `resolveEffectiveNavigationTarget` en
   `utils/groupWidget.ts`, consumida por el viewer — no reimplementar esta lógica en el renderer.
+- **En el builder, bloqueado actúa como un solo widget (D6)**: sin modo edición activo, un click
+  o arrastre que empieza en cualquier miembro se redirige al contenedor
+  (`resolveEffectiveInteractionTarget` en `utils/groupWidget.ts`) — selecciona o mueve el grupo
+  completo, nunca el miembro individual. El modo edición ("Editar contenido", ícono Lucide
+  `Pencil` en `WidgetHoverActions`, solo visible en un contenedor bloqueado) suspende esa
+  redirección para ESE grupo: sus miembros vuelven a ser seleccionables/arrastrables/
+  redimensionables por separado, siempre clamp-eados dentro del contenedor
+  (`clampRectInsideContainer`). Es estado de UI (`editingGroupId`), nunca persistido ni parte del
+  historial de undo/redo. Ver el detalle completo (redirección, modo edición, salidas, diálogo de
+  borrado) en `ADMIN_CONVENTIONS.md`.
 
 ## Menús flotantes / overlays contextuales
 

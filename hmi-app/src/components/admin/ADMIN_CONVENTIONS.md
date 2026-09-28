@@ -86,11 +86,19 @@ junto a copiar/eliminar en `WidgetHoverActions`) alterna entre cerrado (`locked:
   widget que ya era miembro de un grupo bloqueado, la promoción lo libera del grupo en el mismo
   paso de historial.
 
-### Edición con el candado cerrado (D4)
+### Edición con el candado cerrado: el grupo actúa como un solo widget (D6)
 
-- Arrastrar el contenedor mueve todos sus miembros junto con él, como un único cuerpo rígido.
-- Los miembros siguen siendo seleccionables para ver/editar sus propiedades, pero no se pueden
-  arrastrar ni redimensionar individualmente mientras el grupo esté bloqueado.
+D6 reemplaza la parte de D4 que dejaba a los miembros seleccionables/arrastrables por separado
+mientras el grupo estaba bloqueado. Con el candado cerrado y sin modo edición activo (ver más
+abajo), el grupo se comporta como un único widget:
+
+- Un click en cualquier parte del grupo — el contenedor o cualquiera de sus miembros — selecciona
+  el **contenedor**: el panel de propiedades muestra el contenedor, nunca el miembro clickeado.
+- Un arrastre iniciado sobre cualquier miembro mueve **todo el grupo**, exactamente igual que
+  arrastrar el contenedor directamente.
+- Un miembro no muestra sus propias acciones al pasar el mouse (copiar/eliminar individuales);
+  solo el contenedor las ofrece, y esas acciones (copiar, eliminar, candado, lápiz) operan sobre
+  el grupo.
 - El contenedor se puede redimensionar, pero nunca por debajo del cuadro delimitador (bounding
   box) de sus miembros; la vista previa en vivo del resize respeta el mismo límite que el commit
   final, para que no haya un salto visual al soltar.
@@ -98,14 +106,40 @@ junto a copiar/eliminar en `WidgetHoverActions`) alterna entre cerrado (`locked:
   builder y en el viewer: el orden de render lo resuelve `orderRenderItemsWithGroupsFirst`
   (`utils/groupWidget.ts`), sin depender del orden en que se crearon.
 
-### Copiar y eliminar (D5)
+### Modo edición de contenido (lápiz, D6)
+
+Cada contenedor **bloqueado** ofrece una acción adicional "Editar contenido" (Lucide `Pencil`) en
+`WidgetHoverActions`, junto a candado/copiar/eliminar. Alterna el modo edición de ESE grupo:
+
+- Es estado de UI puro (`editingGroupId` en `DashboardBuilderPage`) — nunca se persiste ni entra
+  al historial de undo/redo.
+- Mientras un grupo está en modo edición, sus miembros vuelven a ser individualmente
+  seleccionables, arrastrables y redimensionables — pero su rect queda siempre clamp-eado (ver
+  `clampRectInsideContainer` en `utils/groupWidget.ts`) para que nunca salga del área del
+  contenedor. Cada movimiento/resize de un miembro es un paso de historial propio.
+- El contenedor sigue siendo arrastrable en todo momento (mueve el grupo completo), incluso con
+  el modo edición activo.
+- Solo un grupo puede estar en modo edición a la vez.
+- Se sale del modo edición al volver a tocar el lápiz, al hacer click fuera del grupo (en otro
+  widget o en el canvas vacío), con Escape, o automáticamente si el grupo se desbloquea o se
+  elimina. Un candado reabierto y vuelto a cerrar NO reactiva el modo edición por sí solo.
+
+### Copiar y eliminar (D5, con la excepción D6 para eliminar bloqueado)
 
 - Copiar un contenedor **cerrado** duplica el grupo completo (contenedor + miembros, ya
-  agrupados, con ids nuevos).
+  agrupados, con ids nuevos); `sanitizeGroupMemberIds` deduplica la lista de miembros antes de
+  copiar, para que un `memberWidgetIds` corrupto (con un id repetido) nunca duplique ese miembro
+  varias veces.
 - Copiar un contenedor **abierto** duplica solo el contenedor vacío.
-- Eliminar el contenedor elimina únicamente el contenedor; los miembros permanecen en su lugar y
-  quedan liberados.
-- Eliminar un miembro lo quita también de la lista de miembros de su grupo.
+- Eliminar un contenedor **abierto** elimina únicamente el contenedor, sin diálogo de
+  confirmación; los miembros permanecen en su lugar y quedan liberados (comportamiento D5 sin
+  cambios).
+- Eliminar un contenedor **cerrado** (D6) pide confirmación primero — el diálogo reutiliza
+  `AdminDestructiveDialog` y nombra el contenedor y la cantidad de widgets agrupados que se van a
+  eliminar. Al confirmar, se elimina el contenedor y TODOS sus miembros en un único paso de
+  historial; al cancelar no cambia nada.
+- Eliminar un miembro individual (en modo edición) lo quita también de la lista de miembros de su
+  grupo, sin diálogo — comportamiento existente sin cambios.
 
 ### Historial
 
