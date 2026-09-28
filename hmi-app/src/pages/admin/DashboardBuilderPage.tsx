@@ -102,15 +102,21 @@ const AUTO_VIEW_ICON_SELECTION = '__auto__';
 
 type DashboardViewIconSelection = DashboardViewIconKey | typeof AUTO_VIEW_ICON_SELECTION;
 
-/** D6: grammatically correct member count for the locked-group delete confirmation. */
-function describeGroupDeleteMemberCount(memberCount: number): string {
+/**
+ * D6: builds the locked-group delete confirmation's warning sentence, handling an untitled
+ * container (no "el contenedor \"el contenedor\"" double-fallback) and the 0/1/N member count
+ * grammatically (an empty group reads as a plain statement, not "y ningún widget agrupado").
+ */
+function buildGroupDeleteWarningMessage(groupTitle: string, memberCount: number): string {
+    const containerLabel = groupTitle.trim() ? `el contenedor "${groupTitle.trim()}"` : 'este contenedor';
+
     if (memberCount === 0) {
-        return 'ningún widget agrupado';
+        return `Se va a eliminar ${containerLabel}, que no tiene widgets agrupados.`;
     }
     if (memberCount === 1) {
-        return 'su widget agrupado';
+        return `Se van a eliminar ${containerLabel} y su widget agrupado.`;
     }
-    return `sus ${memberCount} widgets agrupados`;
+    return `Se van a eliminar ${containerLabel} y sus ${memberCount} widgets agrupados.`;
 }
 
 // =============================================================================
@@ -1762,7 +1768,7 @@ export default function DashboardBuilderPage() {
                 const memberIds = sanitizeGroupMemberIds(targetWidget.memberWidgetIds, targetWidget.id, activeView.widgets);
                 setGroupDeleteConfirmation({
                     groupWidgetId: targetWidgetId,
-                    groupTitle: targetWidget.title?.trim() || 'el contenedor',
+                    groupTitle: targetWidget.title?.trim() ?? '',
                     affectedMembers: memberIds.map((id) => {
                         const member = activeView.widgets.find((widget) => widget.id === id);
                         return { id, name: member?.title?.trim() || id };
@@ -1785,7 +1791,7 @@ export default function DashboardBuilderPage() {
                     setGroupDeleteConfirmation(null);
                 }}
                 warningMessage={groupDeleteConfirmation
-                    ? `Se van a eliminar el contenedor "${groupDeleteConfirmation.groupTitle}" y ${describeGroupDeleteMemberCount(groupDeleteConfirmation.affectedMembers.length)}.`
+                    ? buildGroupDeleteWarningMessage(groupDeleteConfirmation.groupTitle, groupDeleteConfirmation.affectedMembers.length)
                     : ''}
                 affectedLabel="Widgets agrupados"
                 affectedItems={groupDeleteConfirmation?.affectedMembers ?? []}

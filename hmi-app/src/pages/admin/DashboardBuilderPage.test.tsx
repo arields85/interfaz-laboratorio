@@ -2544,9 +2544,25 @@ describe('DashboardBuilderPage undo/redo', () => {
                 await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
 
                 const dialog = await screen.findByRole('dialog');
-                expect(within(dialog).getByText(/sus 2 widgets/)).toBeInTheDocument();
+                expect(within(dialog).getByText(/sus 2 widgets agrupados/)).toBeInTheDocument();
                 // Nothing was deleted yet.
                 expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1', 'widget-2']);
+            });
+
+            it('reads correctly for an untitled container and for one with no members', async () => {
+                const user = userEvent.setup();
+                await renderBuilderPage(makeDashboard({
+                    id: 'dashboard-1',
+                    cols: 20,
+                    rows: 12,
+                    widgets: [makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: [], title: '' })],
+                    layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 })],
+                }));
+
+                await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
+
+                const dialog = await screen.findByRole('dialog');
+                expect(within(dialog).getByText('Se va a eliminar este contenedor, que no tiene widgets agrupados.')).toBeInTheDocument();
             });
 
             it('cancel does nothing', async () => {
