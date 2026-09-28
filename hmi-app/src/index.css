@@ -436,6 +436,32 @@ h1, h2, h3, h4, h5, h6 {
   --frame-accent-opacity-hover: 0%;
 }
 
+/* ── Motor de tema: fondo propio del contenedor de grupo (GroupWidget) ────
+ * El contenedor de grupo reusa el marco de cualquier widget (radio, borde,
+ * blur, acento de esquina, todos --frame-*) pero pinta su PROPIO fondo (P7,
+ * 2026-09-28): una opacidad reducida del fondo base del marco propio
+ * (--frame-base-background) más una superposición blanca, cada una con su
+ * par reposo/hover. Sin colores de estado: el contenedor no tiene ninguno.
+ * Mismo patrón Houdini que el marco de arriba. ─────────────────────────── */
+@property --group-base {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 20%;
+}
+
+@property --group-fill {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+:root {
+  --group-base-rest: 20%;
+  --group-base-hover: 40%;
+  --group-fill-rest: 0%;
+  --group-fill-hover: 0%;
+}
+
 /* ── Motor de tema: botones (AdminActionButton, AdminIconToolbarButton,
  * HmiButton, .admin-accent-ghost, WidgetHeaderTemporalControls pill) ─────
  * Mismo patron Houdini que el marco de arriba. La diferencia: un boton no
@@ -1126,6 +1152,7 @@ h1, h2, h3, h4, h5, h6 {
       --frame-radius 0.2s ease, --frame-fill 0.2s ease, --frame-border 0.2s ease,
       --frame-blur 0.2s ease, --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
       --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease,
+      --group-base 0.2s ease, --group-fill 0.2s ease,
       border-color 0.2s ease, background 0.2s ease;
   }
 
@@ -1148,6 +1175,44 @@ h1, h2, h3, h4, h5, h6 {
     --frame-accent-thickness: var(--frame-accent-thickness-hover);
     --frame-accent-color: var(--frame-accent-color-hover);
     --frame-accent-opacity: var(--frame-accent-opacity-hover);
+  }
+
+  /* Fondo propio del contenedor de grupo (P7, 2026-09-28): se combina con
+   * `.glass-panel` en el mismo elemento (ver `GroupWidget.tsx`), que sigue
+   * aportando radio/borde/blur/acento sin cambios. Esta clase reemplaza
+   * `background` para que solo se vea la superposición blanca (--group-fill,
+   * sin mezclar el fondo base del marco); el fondo base propio se pinta por
+   * separado, atenuado a --group-base, en el ::before de abajo -- .glass-panel
+   * no usa ::before, así que no hay colisión. Las transiciones de
+   * --group-base/--group-fill viven en la regla `.glass-panel` de arriba
+   * (misma caja, una sola propiedad `transition`), para que combinar ambas
+   * clases no pueda perder las transiciones propias del marco. */
+  .glass-panel-group {
+    --group-base: var(--group-base-rest);
+    --group-fill: var(--group-fill-rest);
+    background:
+      linear-gradient(
+        color-mix(in srgb, #fff var(--group-fill), transparent),
+        color-mix(in srgb, #fff var(--group-fill), transparent)
+      );
+  }
+
+  .glass-panel-group::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--frame-base-background);
+    opacity: var(--group-base);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .glass-panel-group:hover,
+  .group:hover .glass-panel-group,
+  [data-group-hover-target="true"] .glass-panel-group {
+    --group-base: var(--group-base-hover);
+    --group-fill: var(--group-fill-hover);
   }
 
   /* Acento de esquina: overlay ::after enmascarado a los 4 corners, controlado

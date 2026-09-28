@@ -153,6 +153,68 @@ describe('index.css widget frame theme engine', () => {
     });
 });
 
+describe('index.css group container theme engine (P7, 2026-09-28)', () => {
+    it('registers --group-base and --group-fill as animatable percentage custom properties', () => {
+        expect(indexCss).toMatch(/@property --group-base\s*{\s*syntax:\s*'<percentage>';/);
+        expect(indexCss).toMatch(/@property --group-fill\s*{\s*syntax:\s*'<percentage>';/);
+    });
+
+    it('defaults --group-* to the user\'s tuned values: rest base 20%/fill 0%, hover base 40%/fill 0%', () => {
+        const rootBlock = indexCss.match(/:root\s*{([^}]*--group-base-rest[^}]*)}/s);
+        expect(rootBlock).not.toBeNull();
+        const root = rootBlock?.[1] ?? '';
+
+        expect(root).toContain('--group-base-rest: 20%;');
+        expect(root).toContain('--group-fill-rest: 0%;');
+        expect(root).toContain('--group-base-hover: 40%;');
+        expect(root).toContain('--group-fill-hover: 0%;');
+    });
+
+    it('draws the group container\'s own background on .glass-panel-group: a white fill overlay only, no frame base mixed in', () => {
+        const rule = indexCss.match(/(?<!-)\.glass-panel-group\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('--group-base: var(--group-base-rest);');
+        expect(body).toContain('--group-fill: var(--group-fill-rest);');
+        expect(body).toMatch(/background:\s*linear-gradient\(\s*color-mix\(in srgb, #fff var\(--group-fill\), transparent\),\s*color-mix\(in srgb, #fff var\(--group-fill\), transparent\)\s*\);/);
+        expect(body).not.toContain('--frame-base-background');
+    });
+
+    it('paints the scaled-down frame base on a ::before behind the fill overlay, since .glass-panel has no ::before of its own', () => {
+        const panelRule = indexCss.match(/(?<!-)\.glass-panel\s*{([\s\S]*?)\n {2}}/);
+        expect(panelRule).not.toBeNull();
+        expect(panelRule?.[1] ?? '').not.toContain('::before');
+
+        const rule = indexCss.match(/\.glass-panel-group::before\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('background: var(--frame-base-background);');
+        expect(body).toContain('opacity: var(--group-base);');
+        expect(body).toContain('inset: 0;');
+        expect(body).toContain('border-radius: inherit;');
+        expect(body).toContain('pointer-events: none;');
+    });
+
+    it('swaps --group-base/--group-fill to their hover values under the same hover selectors the frame uses', () => {
+        const rule = indexCss.match(/\.glass-panel-group:hover,\s*\n\s*\.group:hover \.glass-panel-group,\s*\n\s*\[data-group-hover-target="true"\] \.glass-panel-group\s*{([\s\S]*?)}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('--group-base: var(--group-base-hover);');
+        expect(body).toContain('--group-fill: var(--group-fill-hover);');
+    });
+
+    it('transitions --group-base/--group-fill on the shared .glass-panel rule, so combining it with .glass-panel-group cannot drop the frame\'s own transitions', () => {
+        const rule = indexCss.match(/(?<!-)\.glass-panel\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toMatch(/transition:[\s\S]*--group-base[\s\S]*--group-fill[\s\S]*;/);
+    });
+});
+
 describe('index.css button theme engine', () => {
     it('registers the animatable button custom properties with @property, including --button-base-strength', () => {
         expect(indexCss).toMatch(/@property --button-radius\s*{\s*syntax:\s*'<length>';/);

@@ -5,6 +5,7 @@ import {
     CLASSIC_TAG_STYLE,
     CLASSIC_THEME_STYLE,
     CLASSIC_THEME_STYLE_ID,
+    DEFAULT_GROUP_STYLE,
     getThemeStylePreset,
     INSTRUMENT_THEME_STYLE,
     INSTRUMENT_THEME_STYLE_ID,
@@ -262,6 +263,42 @@ describe('themeStyleToCssProperties', () => {
     });
 });
 
+describe('themeStyle.service group container background (P7, 2026-09-28)', () => {
+    it('exposes the user\'s tuned values as the documented default/fallback recipe', () => {
+        expect(DEFAULT_GROUP_STYLE).toEqual({
+            rest: { baseOpacityPercent: 20, fillPercent: 0 },
+            hover: { baseOpacityPercent: 40, fillPercent: 0 },
+        });
+    });
+
+    it('applies the same group recipe to all three built-in presets (the group widget has no legacy look to preserve)', () => {
+        expect(CLASSIC_THEME_STYLE.group).toEqual(DEFAULT_GROUP_STYLE);
+        expect(OUTLINE_THEME_STYLE.group).toEqual(DEFAULT_GROUP_STYLE);
+        expect(INSTRUMENT_THEME_STYLE.group).toEqual(DEFAULT_GROUP_STYLE);
+    });
+
+    it('maps the group recipe to --group-* custom properties', () => {
+        const properties = themeStyleToCssProperties(CLASSIC_THEME_STYLE);
+
+        expect(properties['--group-base-rest']).toBe('20%');
+        expect(properties['--group-fill-rest']).toBe('0%');
+        expect(properties['--group-base-hover']).toBe('40%');
+        expect(properties['--group-fill-hover']).toBe('0%');
+    });
+
+    it('falls back to the default group recipe when a theme has no group block', () => {
+        const themeWithoutGroup = { ...OUTLINE_THEME_STYLE, group: undefined };
+
+        const properties = themeStyleToCssProperties(themeWithoutGroup);
+
+        expect(properties['--group-base-rest']).toBe('20%');
+        expect(properties['--group-fill-rest']).toBe('0%');
+        expect(properties['--group-base-hover']).toBe('40%');
+        expect(properties['--group-fill-hover']).toBe('0%');
+        expect(Object.keys(properties).sort()).toEqual(Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort());
+    });
+});
+
 describe('themeStyle.service "Instrumento" preset (P6, user decision 2026-09-28)', () => {
     it('matches the user\'s "Instrumento" values from the theme-polish task', () => {
         expect(INSTRUMENT_THEME_STYLE.id).toBe(INSTRUMENT_THEME_STYLE_ID);
@@ -326,6 +363,8 @@ describe('applyThemeStyleToDocument / resetThemeStyleOnDocument', () => {
         expect(target.style.getPropertyValue('--button-icon-base-strength')).toBe('100%');
         expect(target.style.getPropertyValue('--tag-radius')).toBe('4px');
         expect(target.style.getPropertyValue('--tag-border')).toBe('40%');
+        expect(target.style.getPropertyValue('--group-base-rest')).toBe('20%');
+        expect(target.style.getPropertyValue('--group-base-hover')).toBe('40%');
     });
 
     it('removes every theme custom property, restoring the CSS defaults', () => {
@@ -340,6 +379,8 @@ describe('applyThemeStyleToDocument / resetThemeStyleOnDocument', () => {
         expect(target.style.getPropertyValue('--button-icon-base-strength')).toBe('');
         expect(target.style.getPropertyValue('--tag-radius')).toBe('');
         expect(target.style.getPropertyValue('--tag-tint')).toBe('');
+        expect(target.style.getPropertyValue('--group-base-rest')).toBe('');
+        expect(target.style.getPropertyValue('--group-fill-hover')).toBe('');
     });
 });
 

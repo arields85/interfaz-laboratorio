@@ -82,7 +82,7 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
     const hasHeaderContent = trimmedTitle.length > 0 || Icon !== undefined;
 
     return (
-        <div className={[className, 'glass-panel group flex h-full w-full flex-col p-4'].filter(Boolean).join(' ')}>
+        <div className={[className, 'glass-panel glass-panel-group group flex h-full w-full flex-col p-4'].filter(Boolean).join(' ')}>
             {hasHeaderContent && (
                 <WidgetHeader
                     title={trimmedTitle}

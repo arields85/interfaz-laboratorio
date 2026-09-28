@@ -125,14 +125,46 @@ export interface ThemeTagStyle {
 }
 
 /**
- * A complete theme: widget frame + button + tag visual style. `tag` is
- * optional -- like `ThemeButtonStyle.icon`, a theme without it falls back to
- * the "Clasico" tag recipe (see `themeStyle.service.ts`) instead of
- * throwing, so a theme object written before P5 keeps working.
+ * Group container background for one interaction state (rest or hover) --
+ * see `ThemeGroupStyle`.
+ */
+export interface ThemeGroupStateStyle {
+    /**
+     * Opacity of the frame's own base background (`ThemeFrameStyle.
+     * baseBackground`), 0-100 -- NOT the frame's own fill/border/blur, which
+     * the group container keeps at full strength from the frame tokens like
+     * every other widget. This is what gives the container its own, more
+     * subtle background instead of reusing the frame's full-strength base.
+     */
+    readonly baseOpacityPercent: number;
+    /** White overlay mixed over that base, 0-100 -- same idea as `ThemeSurfaceStateStyle.fillPercent`. */
+    readonly fillPercent: number;
+}
+
+/**
+ * Group container (`GroupWidget`) background recipe (P7, 2026-09-28). The
+ * group frame reuses every other frame token (radius, border, blur, corner
+ * accent, from `ThemeFrameStyle`) but draws its OWN background: a scaled-down
+ * opacity of the frame's own base background plus a white fill overlay, each
+ * with its own rest/hover pair. Status colors are not involved (the container
+ * has none).
+ */
+export interface ThemeGroupStyle {
+    readonly rest: ThemeGroupStateStyle;
+    readonly hover: ThemeGroupStateStyle;
+}
+
+/**
+ * A complete theme: widget frame + button + tag + group visual style. `tag`
+ * and `group` are optional -- like `ThemeButtonStyle.icon`, a theme without
+ * either falls back to a documented default recipe (see
+ * `themeStyle.service.ts`) instead of throwing, so a theme object written
+ * before P5/P7 keeps working.
  */
 export interface ThemeStyle {
     readonly id: string;
     readonly frame: ThemeFrameStyle;
     readonly button: ThemeButtonStyle;
     readonly tag?: ThemeTagStyle;
+    readonly group?: ThemeGroupStyle;
 }

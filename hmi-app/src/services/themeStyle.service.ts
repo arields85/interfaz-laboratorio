@@ -1,6 +1,8 @@
 import type {
     ThemeButtonStyle,
     ThemeFrameStyle,
+    ThemeGroupStateStyle,
+    ThemeGroupStyle,
     ThemeStyle,
     ThemeSurfaceStateStyle,
     ThemeTagStyle,
@@ -33,6 +35,18 @@ export const CLASSIC_TAG_STYLE: ThemeTagStyle = {
     fillPercent: 5,
     borderPercent: 40,
     tintPercent: 0,
+};
+
+/**
+ * Group container (`GroupWidget`) background recipe (P7, 2026-09-28): the
+ * user's tuned values from the style lab, applied identically to all three
+ * built-in presets (the group widget has no legacy look to preserve in
+ * Clasico/Contorno). Exported as the fallback for a theme without its own
+ * `group` block (mirrors `CLASSIC_TAG_STYLE`).
+ */
+export const DEFAULT_GROUP_STYLE: ThemeGroupStyle = {
+    rest: { baseOpacityPercent: 20, fillPercent: 0 },
+    hover: { baseOpacityPercent: 40, fillPercent: 0 },
 };
 
 /**
@@ -88,6 +102,7 @@ export const CLASSIC_THEME_STYLE: ThemeStyle = {
         },
     },
     tag: CLASSIC_TAG_STYLE,
+    group: DEFAULT_GROUP_STYLE,
 };
 
 /**
@@ -145,6 +160,9 @@ export const OUTLINE_THEME_STYLE: ThemeStyle = {
     // 2026-09-28): same recipe as Clasico until the user asks for a themed
     // look (see P5/P6 in odd/tasks/theme-polish.md).
     tag: CLASSIC_TAG_STYLE,
+    // Group container background (P7, 2026-09-28): same tuned recipe as the
+    // other two presets -- the group widget has no legacy look to preserve.
+    group: DEFAULT_GROUP_STYLE,
 };
 
 /**
@@ -205,6 +223,7 @@ export const INSTRUMENT_THEME_STYLE: ThemeStyle = {
         borderPercent: 0,
         tintPercent: 14,
     },
+    group: DEFAULT_GROUP_STYLE,
 };
 
 export const THEME_STYLE_PRESETS: readonly ThemeStyle[] = [CLASSIC_THEME_STYLE, OUTLINE_THEME_STYLE, INSTRUMENT_THEME_STYLE];
@@ -298,12 +317,31 @@ function tagStyleToCssProperties(tag: ThemeTagStyle): Record<string, string> {
     };
 }
 
+// Group container background (P7, 2026-09-28): its own rest/hover pair of
+// "base opacity" (of the frame's own base background) and "fill" (white
+// overlay), independent from the frame's own fill/border/blur/accent, which
+// the group container keeps unchanged from `--frame-*` like every widget.
+function groupStateToCssProperties(suffix: 'rest' | 'hover', state: ThemeGroupStateStyle): Record<string, string> {
+    return {
+        [`--group-base-${suffix}`]: percentToken(state.baseOpacityPercent),
+        [`--group-fill-${suffix}`]: percentToken(state.fillPercent),
+    };
+}
+
+function groupStyleToCssProperties(group: ThemeGroupStyle): Record<string, string> {
+    return {
+        ...groupStateToCssProperties('rest', group.rest),
+        ...groupStateToCssProperties('hover', group.hover),
+    };
+}
+
 /** Maps a full theme to the CSS custom properties the theme engine reads (see `index.css`). */
 export function themeStyleToCssProperties(style: ThemeStyle): Record<string, string> {
     return {
         ...frameStyleToCssProperties(style.frame),
         ...buttonStyleToCssProperties(style.button),
         ...tagStyleToCssProperties(style.tag ?? CLASSIC_TAG_STYLE),
+        ...groupStyleToCssProperties(style.group ?? DEFAULT_GROUP_STYLE),
     };
 }
 

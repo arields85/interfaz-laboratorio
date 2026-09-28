@@ -29,6 +29,13 @@ describe('GroupWidget', () => {
         expect(container.firstElementChild).toHaveClass('custom-group');
     });
 
+    it('carries the group-specific background class alongside the shared glass-panel shell (P7)', () => {
+        const { container } = render(<GroupWidget widget={makeWidget()} />);
+
+        expect(container.firstElementChild).toHaveClass('glass-panel');
+        expect(container.firstElementChild).toHaveClass('glass-panel-group');
+    });
+
     it('renders an empty body so members placed over the container stay visible', () => {
         render(<GroupWidget widget={makeWidget()} />);
 
