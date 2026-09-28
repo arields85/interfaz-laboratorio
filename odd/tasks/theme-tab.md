@@ -91,7 +91,7 @@ masked to four corner squares whose size is the length variable; radius inherite
   defaults = today's look; primary/accent semantics preserved.
 - [x] **TH4** — "Tema" tab UI in `GlobalSettingsDialog`: preset selector only (Q1), with a preview
   of each preset if an existing primitive fits; dirty/save/revert like the other tabs.
-- [ ] **TH4b** — Review follow-ups on the Tema tab: dirty must clear when the selection returns
+- [x] **TH4b** — Review follow-ups on the Tema tab: dirty must clear when the selection returns
   to the saved theme; an unsaved preview must not leak when the tab unmounts; the mini-preview
   span must not reintroduce the transition collision.
 - [ ] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
@@ -177,8 +177,14 @@ live check).
   `ThemeSettingsTab.tsx:69-78`), R3-theme-preview-leaks-on-unmount (WARNING, `:73`),
   R3-preview-span-reintroduces-transition-collision (SUGGESTION, `:162`) -> TH4b.
 
+- 2026-09-28: TH4b done (route: delegated writer) — `f96e13c` fix(theme): dirty = selection differs
+  from the saved id; unmount restores the saved theme only when a preview was left dirty (no
+  double apply after save/revert); preview span guarded against transition utilities (no live
+  bug found, regression test added). RED: 2 genuine failures; GREEN 14/14. Writer: `npx tsc -b`
+  clean, `npm run lint` clean, `npm test` 2672/2672. Parent spot check: ThemeSettingsTab 14/14.
+
 ## Next step
 
-TH4b (writer); live check after the group widget merge (the dashboards
+ live check after the group widget merge (the dashboards
 live in the 5173 origin's localStorage, so the theme is tested from the main checkout once
 `feat/theme-tab` is rebased onto the new `main`).
