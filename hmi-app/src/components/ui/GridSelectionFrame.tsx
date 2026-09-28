@@ -1,5 +1,3 @@
-import { useId } from 'react';
-
 interface GridSelectionFrameProps {
     isSelected: boolean;
     isHighlighted?: boolean;
@@ -35,9 +33,6 @@ export default function GridSelectionFrame({
     className = '',
     inset = 'var(--widget-spacing)',
 }: GridSelectionFrameProps) {
-    // useId garantiza un ID de gradiente único por instancia — evita colisiones de <defs> SVG en el DOM.
-    const gradientId = useId();
-
     const radiusPx = radiusToPx(radius);
     // Radio del outer edge del frame: widget_radius + delta de concentricidad
     const outerRadiusPx = radiusPx + GRID_RADIUS_DELTA_PX;
@@ -76,14 +71,6 @@ export default function GridSelectionFrame({
                     overflow: 'visible',
                 }}
             >
-                <defs>
-                    {/* stopColor vía style para respetar los tokens CSS del sistema de diseño */}
-                    <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%"   style={{ stopColor: 'var(--color-admin-selection-from)' }} />
-                        <stop offset="100%" style={{ stopColor: 'var(--color-admin-selection-to)' }} />
-                    </linearGradient>
-                </defs>
-
                 {/* hover-rect: borde sutil visible durante drag-over (isHighlighted).
                     Stroke blanco semitransparente, solo el grosor de 1px. */}
                 <rect
@@ -93,14 +80,18 @@ export default function GridSelectionFrame({
                     height="calc(100% - 1px)"
                     rx={outerRadiusPx - 0.5}
                     ry={outerRadiusPx - 0.5}
-                    fill={isHighlighted ? 'color-mix(in srgb, var(--color-admin-selection-from) 10%, transparent)' : 'none'}
+                    fill={isHighlighted ? 'color-mix(in srgb, var(--color-admin-accent) 10%, transparent)' : 'none'}
                     stroke="white"
                     strokeWidth={1}
                     strokeOpacity={isHighlighted ? 0.18 : 0}
                     style={{ transition: 'stroke-opacity 120ms ease, fill-opacity 120ms ease' }}
                 />
 
-                {/* focus-rect: anillo de gradiente al seleccionar.
+                {/* focus-rect: anillo al seleccionar, en el color de acento admin editable desde
+                    la pestaña Diseño (--color-admin-accent) — el mismo token que colorea los
+                    botones primarios (.admin-accent-ghost). Antes usaba
+                    --color-admin-selection-from/-to, que no es editable ahí. Color sólido: un
+                    degradado de dos paradas del MISMO token no aportaría variación visual.
                     stroke centrado sobre el borde del rect; x/y = BORDER/2 para no recortar. */}
                 <rect
                     x={GRID_BORDER_WIDTH_PX / 2}
@@ -110,15 +101,15 @@ export default function GridSelectionFrame({
                     rx={rectRxPx}
                     ry={rectRxPx}
                     fill="none"
-                    stroke={`url(#${gradientId})`}
+                    stroke="var(--color-admin-accent)"
                     strokeWidth={GRID_BORDER_WIDTH_PX}
                     strokeOpacity={isSelected ? 1 : 0}
                     style={{
                         transition: 'stroke-opacity 150ms ease, filter 150ms ease',
                         filter: isSelected
                             ? [
-                                'drop-shadow(0 0 8px color-mix(in srgb, var(--color-admin-selection-to) 40%, transparent))',
-                                'drop-shadow(0 0 3px color-mix(in srgb, var(--color-admin-selection-from) 30%, transparent))',
+                                'drop-shadow(0 0 8px color-mix(in srgb, var(--color-admin-accent) 40%, transparent))',
+                                'drop-shadow(0 0 3px color-mix(in srgb, var(--color-admin-accent) 30%, transparent))',
                               ].join(' ')
                             : 'none',
                     }}

@@ -221,7 +221,9 @@ function ResizeHandle({
             className={`absolute z-20 flex h-6 w-6 p-1.5 opacity-0 transition-opacity drop-shadow-md group-hover:opacity-100 ${config.align}`}
             style={{ cursor: config.cursor, ...resolveResizeHandlePosition(direction, widgetInset) }}
         >
-            <div className="h-2.5 w-2.5 rounded-sm" style={{ background: 'var(--color-admin-selection-to)', clipPath: config.clipPath }} />
+            {/* G14: the handle color follows the Design tab's "Acento Admin" token
+                (--color-admin-accent) — the old --color-admin-selection-to was not editable there. */}
+            <div className="h-2.5 w-2.5 rounded-sm" style={{ background: 'var(--color-admin-accent)', clipPath: config.clipPath }} />
         </div>
     );
 }

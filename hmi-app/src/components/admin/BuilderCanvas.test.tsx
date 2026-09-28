@@ -992,6 +992,21 @@ describe('BuilderCanvas', () => {
         });
     });
 
+    // G14 (2026-09-28): every widget's resize handle must take its color from the Design tab's
+    // "Acento Admin" token (--color-admin-accent), not the old fixed --color-admin-selection-to.
+    it('colors every resize handle with the admin accent token (G14)', async () => {
+        await renderInteractiveCanvas({
+            selectedWidgetId: 'widget-1',
+            layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+        });
+
+        const handle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
+        const swatch = handle.querySelector('div');
+
+        expect((swatch as HTMLElement).style.background).toBe('var(--color-admin-accent)');
+        expect((swatch as HTMLElement).style.background).not.toContain('--color-admin-selection');
+    });
+
     it('converts pointer coordinates to layout px under CSS zoom so drag/resize tracks the pointer (PW-007 T3b)', async () => {
         document.documentElement.style.setProperty('--viewport-zoom', '2');
 
