@@ -100,7 +100,18 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   lineage `review-1cac84b786bdde95` APPROVED, acknowledged, authority burned. Advisory
   SUGGESTIONs only (R3-001 style lab line 990, R3-002 `index.css:993-994`).
 
+- 2026-09-28: `b75c19d` fix(viewer): removed the thin frame around the dashboard canvas
+  (`pages/Dashboard.tsx` wrapper had `rounded-xl border border-white/5`; parent found it via CDP
+  measurement; test first, RED then GREEN 23/23).
+- 2026-09-28: style lab: group container section (rest/hover "Base" opacity of the frame's own
+  background and "Fondo" overlay) with a container holding two overlapping mini widgets
+  (`ef34f87`, artifact v10). Next: the user tunes it; then the group background becomes theme tokens
+  (P7).
+- [ ] **P7** (pending the user's lab values) — group container background opacity as theme
+  tokens (rest/hover), so the container stays subtle under its member widgets.
+
 ## Next step
 
-User's live check (P4, including the Instrumento theme), then merge to main. Tags in the theme engine only if the user asks after
+User tunes the container in the lab; user's live check (P4, including the Instrumento theme);
+then merge to main. Tags in the theme engine only if the user asks after
 exploring them in the lab.
