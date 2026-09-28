@@ -196,6 +196,31 @@ Estas reglas deben cristalizarse en primitives reutilizables siempre que el patr
 - `hmi-app/src/components/ui/ChartHoverLayer.tsx` — capa SVG de interacción hover para charts (hit areas + línea vertical + highlight dots).
 - `hmi-app/src/utils/chartHelpers.ts` — funciones matemáticas compartidas para SVG charts (`smoothPath`, `buildAreaPath`, `formatTick`, `clamp`, `round2`).
 
+## Widget contenedor de grupo (`group`)
+
+El widget de tipo `group` (`widgets/renderers/GroupWidget.tsx`) es un contenedor visual: agrupa
+otros widgets del grid bajo el mismo marco/hover y el mismo `WidgetHeader` (texto + ícono) que
+cualquier widget, sin renderizar contenido propio en el cuerpo. Se usa para que un click en
+cualquier parte de la tarjeta (por ejemplo, la tarjeta de una máquina) navegue a un solo destino,
+en vez de depender de un widget de título individual.
+
+- **Campos de configuración**: `title` (texto del header), `displayOptions.icon` (ícono Lucide del
+  header), y hereda `navigationTargetDashboardId` de `WidgetConfigBase` como cualquier widget — no
+  redeclararlo.
+- **`locked` y `memberWidgetIds`** son estado de edición del builder, no datos de negocio: se
+  gestionan enteramente desde el candado de agrupar/desagrupar (`ADMIN_CONVENTIONS.md`), nunca
+  se editan a mano en el renderer ni en el property panel.
+- **Enmarca los widgets colocados encima**: al cerrar el candado, los widgets cuyo layout queda
+  completamente contenido en el área del contenedor pasan a ser sus miembros (`memberWidgetIds`);
+  el contenedor nunca se agrupa a sí mismo ni a otro contenedor `group` (no hay anidamiento), y un
+  widget pertenece como máximo a un grupo bloqueado a la vez.
+- **Apilamiento = orden del array**: no existe z-index; el contenedor siempre precede a sus
+  miembros en `view.widgets` para quedar debajo de ellos visualmente.
+- **Navegación efectiva de los miembros**: un miembro sin `navigationTargetDashboardId` propio
+  hereda el del contenedor bloqueado que lo agrupa; si el miembro define su propio target, ese
+  gana siempre. Resuelto por la función pura `resolveEffectiveNavigationTarget` en
+  `utils/groupWidget.ts`, consumida por el viewer — no reimplementar esta lógica en el renderer.
+
 ## Menús flotantes / overlays contextuales
 
 **Regla**: Todo menú desplegable, dropdown o popover anclado a un elemento debe usar `AnchoredOverlay`.

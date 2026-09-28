@@ -64,6 +64,64 @@ Toda página nueva bajo `/admin` DEBE usar `AdminWorkspaceLayout` (`hmi-app/src/
 
 ---
 
+## 2.2. Agrupar widgets en el builder (contenedor `group`)
+
+El widget contenedor (`group`, `hmi-app/src/widgets/renderers/GroupWidget.tsx`) agrupa otros
+widgets del grid bajo una sola tarjeta clickeable. La acción de candado (Lucide `Lock`/`LockOpen`,
+junto a copiar/eliminar en `WidgetHoverActions`) alterna entre cerrado (`locked: true`) y abierto
+(`locked: false`).
+
+### Reglas de cierre (candado)
+
+- **Membresía (D1)**: al cerrar el candado, se agrupan los widgets cuyo layout queda
+  **completamente** contenido en el área del contenedor en ese momento; un widget que solo se
+  superpone parcialmente queda afuera. Al abrir el candado se liberan todos los miembros. Para
+  agregar o quitar un miembro: abrir, reacomodar, volver a cerrar.
+- **Un widget, un grupo**: un widget pertenece como máximo a un grupo bloqueado a la vez. Al
+  cerrar un contenedor, un widget ya miembro de OTRO grupo bloqueado queda excluido de la
+  candidatura aunque ahora quede geométricamente dentro del nuevo contenedor.
+- **Sin anidamiento**: un contenedor nunca se agrupa a sí mismo ni a otro widget `group`.
+- **Widgets del header excluidos**: un widget promovido al header del dashboard nunca vive en el
+  grid, así que nunca puede ser ni quedar como miembro de un grupo. Si se promueve al header un
+  widget que ya era miembro de un grupo bloqueado, la promoción lo libera del grupo en el mismo
+  paso de historial.
+
+### Edición con el candado cerrado (D4)
+
+- Arrastrar el contenedor mueve todos sus miembros junto con él, como un único cuerpo rígido.
+- Los miembros siguen siendo seleccionables para ver/editar sus propiedades, pero no se pueden
+  arrastrar ni redimensionar individualmente mientras el grupo esté bloqueado.
+- El contenedor se puede redimensionar, pero nunca por debajo del cuadro delimitador (bounding
+  box) de sus miembros; la vista previa en vivo del resize respeta el mismo límite que el commit
+  final, para que no haya un salto visual al soltar.
+- El contenedor siempre precede a sus miembros en el orden del array (apilamiento = orden de
+  `view.widgets`), sin importar el orden en que se crearon.
+
+### Copiar y eliminar (D5)
+
+- Copiar un contenedor **cerrado** duplica el grupo completo (contenedor + miembros, ya
+  agrupados, con ids nuevos).
+- Copiar un contenedor **abierto** duplica solo el contenedor vacío.
+- Eliminar el contenedor elimina únicamente el contenedor; los miembros permanecen en su lugar y
+  quedan liberados.
+- Eliminar un miembro lo quita también de la lista de miembros de su grupo.
+
+### Historial
+
+- Toda operación de grupo (cerrar/abrir candado, mover, redimensionar, copiar, eliminar) entra
+  como un único paso de deshacer (ver sección 2.0): un solo `set` de `useHistoryState`.
+
+### Viewer: prioridad de click y hover de grupo (D3)
+
+- Un click en cualquier parte del grupo —incluso sobre un miembro— navega al destino del
+  contenedor, salvo que ese miembro tenga su propio `navigationTargetDashboardId`, en cuyo caso
+  gana el del miembro. Los controles interactivos internos de un miembro siguen funcionando
+  (`NAVIGATION_INTERACTIVE_SELECTOR`).
+- El contenedor muestra su estado hover mientras el puntero está en cualquier parte del grupo
+  (contenedor o miembros); cada miembro conserva además su propio hover individual.
+
+---
+
 ## 3. Paneles laterales (sidePanel)
 
 - El `PropertyDock` es la referencia visual canónica para paneles laterales de propiedades/inspección del modo admin.
