@@ -165,8 +165,11 @@ live check).
   change and passing in isolation. Parent spot check: ThemeSettingsTab + CSS contract + Topbar
   isolated 44/44.
 
+- 2026-09-28: TH5 docs — section "Temas visuales" in `docs/DESIGN_SYSTEM.md` (model, service,
+  frame and button tokens, accent semantics, rules, style lab). Live check still pending.
+
 ## Next step
 
-Slice review TH4 (base c1807af); TH5 docs; live check after the group widget merge (the dashboards
+Slice review TH4+TH5 docs (base c1807af); live check after the group widget merge (the dashboards
 live in the 5173 origin's localStorage, so the theme is tested from the main checkout once
 `feat/theme-tab` is rebased onto the new `main`).
