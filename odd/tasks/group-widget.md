@@ -73,9 +73,11 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   `memberWidgetIds` treated as empty, no self-membership, no group as member.
 - [x] **G3** — Group move and resize: dragging a locked container moves all members in one commit;
   resize clamped to the members' bounding box.
-- [ ] **G4** — Copy/delete semantics (D5) and no nesting.
-- [ ] **G5** — Viewer: D3 click priority for members without their own link; group hover (the
+- [x] **G4** — Copy/delete semantics (D5) and no nesting.
+- [x] **G5** — Viewer: D3 click priority for members without their own link; group hover (the
   container shows its hover while the pointer is anywhere over the group; members keep their own).
+- [ ] **G5b** — Promoting a member of a locked group to the header releases it from the group
+  (today it is only filtered at read time). One history step.
 - [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
@@ -141,6 +143,27 @@ after the user's live check. Slice boundaries are recorded under Progress.
   never group members (excluded from D1 membership and from group moves), since they do not live
   on the canvas.
 
+- 2026-09-28: G2+G3 slice review: user granted, but START was refused with
+  `stale_target_identity` because the G4/G5 writer committed on the same branch in between.
+  Lesson: never let a writer commit on a branch between the review preflight and START. The
+  slice is re-derived as G2–G5 (base `7fc7893`).
+- 2026-09-28: G4+G5 done (route: delegated writer) — `83ce076` refactor(widgets): extend group
+  helpers for copy, delete and navigation; `8702109` feat(builder): copy and delete group
+  containers as whole units (locked copy = whole group with new ids, offset below, rigid clamp,
+  one step; unlocked copy = empty container; member copy is never a member; member delete
+  strips its id in the same step; container delete releases members; header-promoted widgets
+  excluded from membership, lock, move, resize and duplicate; `{w:0,h:0}` placeholder removed);
+  `bb0d86e` feat(viewer): open the group target from anywhere in the group (pure
+  `resolveEffectiveNavigationTarget` — own target wins, else the locked group's; DashboardViewer
+  passes an effective widget so WidgetRenderer's click/keyboard/interactive-selector logic is
+  unchanged; group hover via `{groupId, sourceWidgetId}` state and
+  `[data-group-hover-target="true"] .glass-panel` added to the existing hover rule).
+  RED/GREEN: groupWidget 39/39, BuilderCanvas 34/34, DashboardBuilderPage 52/52, DashboardViewer
+  15/15 (new tests failing first). Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test`
+  2698/2698. Parent spot check: groupWidget + DashboardViewer 54/54.
+  Follow-up G5b (gap reported by the writer): promoting a locked member to the header after
+  locking leaves it in `memberWidgetIds`; parent decision: promotion releases membership.
+
 ## Next step
 
-Slice review for G2+G3 (consent pending), and in parallel G4+G5 writer.
+Slice review G2–G5 (base 7fc7893, consent), then G5b + G6.
