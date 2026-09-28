@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardViewer from './DashboardViewer';
 import HeaderWidgetCanvas from './HeaderWidgetCanvas';
-import { makeDashboard, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
+import { makeDashboard, makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import type { ContractMachine } from '../../domain/dataContract.types';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
@@ -367,6 +367,137 @@ describe('DashboardViewer', () => {
                 onNavigateDashboard,
             }),
         );
+    });
+
+    describe('D3 click priority (group navigation inheritance)', () => {
+        it("a locked group member without its own target inherits the container's navigation target", async () => {
+            const dashboard = makeDashboard({
+                widgets: [
+                    makeGroupWidget({
+                        id: 'group-1',
+                        locked: true,
+                        memberWidgetIds: ['member-1'],
+                        navigationTargetDashboardId: 'dash-x',
+                    }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            });
+
+            const { container } = render(
+                <div style={{ width: '1200px', height: '800px' }}>
+                    <DashboardViewer
+                        widgets={dashboard.widgets}
+                        layout={dashboard.layout}
+                        equipmentMap={new Map()}
+                        cols={dashboard.cols}
+                        rows={dashboard.rows}
+                    />
+                </div>,
+            );
+
+            const observedContainer = container.querySelector('[data-testid="dashboard-viewer-root"]');
+            emitResize(observedContainer as Element, 1200, 800);
+
+            await waitFor(() => {
+                expect(screen.getByTestId('widget-renderer-member-1')).toBeInTheDocument();
+            });
+
+            const memberCall = widgetRendererMock.mock.calls.find(
+                (call) => (call[0] as { widget: { id: string } }).widget.id === 'member-1',
+            );
+            expect((memberCall?.[0] as { widget: { navigationTargetDashboardId?: string } }).widget.navigationTargetDashboardId).toBe('dash-x');
+        });
+
+        it("a member's own navigation target wins over the locked group's target", async () => {
+            const dashboard = makeDashboard({
+                widgets: [
+                    makeGroupWidget({
+                        id: 'group-1',
+                        locked: true,
+                        memberWidgetIds: ['member-1'],
+                        navigationTargetDashboardId: 'dash-x',
+                    }),
+                    makeWidget({ id: 'member-1', title: 'Member 1', navigationTargetDashboardId: 'dash-own' } as never),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            });
+
+            const { container } = render(
+                <div style={{ width: '1200px', height: '800px' }}>
+                    <DashboardViewer
+                        widgets={dashboard.widgets}
+                        layout={dashboard.layout}
+                        equipmentMap={new Map()}
+                        cols={dashboard.cols}
+                        rows={dashboard.rows}
+                    />
+                </div>,
+            );
+
+            const observedContainer = container.querySelector('[data-testid="dashboard-viewer-root"]');
+            emitResize(observedContainer as Element, 1200, 800);
+
+            await waitFor(() => {
+                expect(screen.getByTestId('widget-renderer-member-1')).toBeInTheDocument();
+            });
+
+            const memberCall = widgetRendererMock.mock.calls.find(
+                (call) => (call[0] as { widget: { id: string } }).widget.id === 'member-1',
+            );
+            expect((memberCall?.[0] as { widget: { navigationTargetDashboardId?: string } }).widget.navigationTargetDashboardId).toBe('dash-own');
+        });
+    });
+
+    describe('G5 group hover', () => {
+        it('marks the container as group-hovered while the pointer is over a member, and clears it on leave', async () => {
+            const dashboard = makeDashboard({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            });
+
+            const { container } = render(
+                <div style={{ width: '1200px', height: '800px' }}>
+                    <DashboardViewer
+                        widgets={dashboard.widgets}
+                        layout={dashboard.layout}
+                        equipmentMap={new Map()}
+                        cols={dashboard.cols}
+                        rows={dashboard.rows}
+                    />
+                </div>,
+            );
+
+            const observedContainer = container.querySelector('[data-testid="dashboard-viewer-root"]');
+            emitResize(observedContainer as Element, 1200, 800);
+
+            await waitFor(() => {
+                expect(screen.getByTestId('dashboard-viewer-item-member-1')).toBeInTheDocument();
+            });
+
+            const memberItem = screen.getByTestId('dashboard-viewer-item-member-1');
+            const containerItem = screen.getByTestId('dashboard-viewer-item-group-1');
+
+            expect(containerItem).not.toHaveAttribute('data-group-hover-target', 'true');
+
+            fireEvent.mouseEnter(memberItem);
+            expect(containerItem).toHaveAttribute('data-group-hover-target', 'true');
+
+            fireEvent.mouseLeave(memberItem);
+            expect(containerItem).not.toHaveAttribute('data-group-hover-target', 'true');
+        });
     });
 
     it('keeps the viewer root as a neutral shell until the first valid canvas measurement arrives', () => {

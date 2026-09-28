@@ -605,9 +605,15 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   /* Hover sutil sobre glass-panel: mismo lenguaje visual que CatalogSidebar.
-   * Aclara el borde (white/20) y el fondo (white/[0.04]) sin cambiar semántica. */
+   * Aclara el borde (white/20) y el fondo (white/[0.04]) sin cambiar semántica.
+   * `[data-group-hover-target="true"]` (G5, viewer): un grupo bloqueado y sus
+   * miembros son grid items hermanos, no padre/hijo en el DOM, así que el
+   * contenedor no puede alcanzarse con `.group:hover`; DashboardViewer marca
+   * ese atributo en el item del contenedor mientras el puntero está sobre
+   * cualquier parte del grupo (ver `resolveHoveredGroupId`). */
   .glass-panel:hover,
-  .group:hover .glass-panel {
+  .group:hover .glass-panel,
+  [data-group-hover-target="true"] .glass-panel {
     background:
       linear-gradient(0deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.04)),
       linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);

@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import { useCanvasReference } from '../../utils/useCanvasReference';
 import { DEFAULT_COLS, DEFAULT_ROWS, getGridTemplateStyle } from '../../utils/gridConfig';
+import { resolveEffectiveNavigationTarget, resolveHoveredGroupId } from '../../utils/groupWidget';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 interface DashboardViewerProps {
@@ -65,6 +67,13 @@ export default function DashboardViewer({
 
     const widgetMap = new Map(widgets.map(w => [w.id, w]));
 
+    // G5 group hover: shared state so a locked group's container can show its hover look while
+    // the pointer is anywhere over the group (container or any member) — they are sibling grid
+    // items, not DOM parent/child, so plain CSS `:hover` can't reach across them on its own.
+    // `sourceWidgetId` guards mouseleave: only the item that last set the hover clears it, so a
+    // fresh mouseenter on another item is never clobbered by a stale mouseleave.
+    const [hoveredGroup, setHoveredGroup] = useState<{ groupId: string; sourceWidgetId: string } | null>(null);
+
     return (
         <div
             ref={containerRef}
@@ -89,16 +98,39 @@ export default function DashboardViewer({
                         const widget = widgetMap.get(item.widgetId);
                         if (!widget) return null;
 
+                        // D3 click priority: a member without its own navigation target
+                        // inherits its locked group's target (the member's own target still
+                        // wins); resolved once here so the existing generic navigation wrapper
+                        // in WidgetRenderer needs no changes at all.
+                        const effectiveWidget: WidgetConfig = {
+                            ...widget,
+                            navigationTargetDashboardId: resolveEffectiveNavigationTarget(widget, widgets),
+                        };
+
+                        // G5 group hover: which locked group (if any) hovering THIS item should
+                        // mark as hovered — its own id for the container, or its owning group's
+                        // id for a member.
+                        const hoverGroupIdForThisItem = resolveHoveredGroupId(widget.id, widgets);
+
                         return (
                             <div
                                 key={widget.id}
                                 data-testid={`dashboard-viewer-item-${widget.id}`}
+                                data-group-hover-target={hoveredGroup?.groupId === widget.id ? 'true' : undefined}
                                 className="h-full relative"
                                 style={{
                                     gridColumnStart: item.x + 1,
                                     gridColumnEnd: `span ${item.w}`,
                                     gridRowStart: item.y + 1,
                                     gridRowEnd: `span ${item.h}`,
+                                }}
+                                onMouseEnter={() => {
+                                    if (hoverGroupIdForThisItem) {
+                                        setHoveredGroup({ groupId: hoverGroupIdForThisItem, sourceWidgetId: widget.id });
+                                    }
+                                }}
+                                onMouseLeave={() => {
+                                    setHoveredGroup((prev) => (prev?.sourceWidgetId === widget.id ? null : prev));
                                 }}
                             >
                                 <div
@@ -107,7 +139,7 @@ export default function DashboardViewer({
                                     style={{ padding: 'var(--widget-spacing)' }}
                                 >
                                     <WidgetPresentationBoundary
-                                        widget={widget}
+                                        widget={effectiveWidget}
                                         equipmentMap={equipmentMap}
                                         machines={machines}
                                         connection={connection}
