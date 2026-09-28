@@ -13,9 +13,11 @@ import type { SaveStatus } from './saveStatus';
 
 // Presentational copy for the built-in presets (`themeStyle.service`'s
 // `THEME_STYLE_PRESETS` only carries visual tokens, no UI text). Spanish,
-// usted register, one line each. Keyed by the service's own id constants so
-// a renamed/added preset id can never silently fall through to a blank
-// description.
+// usted register, one line each. Keyed by the service's own id constants
+// (not literal strings) so a rename shows up as a stale/missing key here
+// instead of silently drifting; a genuinely new preset without a matching
+// entry still falls back to `getPresetCopy`'s raw-id/blank-description
+// default below.
 const THEME_PRESET_COPY: Record<string, { name: string; description: string }> = {
     [CLASSIC_THEME_STYLE_ID]: {
         name: 'Clásico',
