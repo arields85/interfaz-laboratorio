@@ -3,7 +3,6 @@ import { variableCatalogStorage } from './VariableCatalogStorageService';
 import { DASHBOARDS_STORAGE_KEY, VARIABLE_CATALOG_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 import { makeDashboard, makeWidget } from '../test/fixtures/dashboard.fixture';
 import type { CatalogVariable } from '../domain';
-import { mockVariableCatalog } from '../mocks/variableCatalog.mock';
 
 type StoredCatalogVariable = CatalogVariable & { dataType?: string };
 
@@ -29,14 +28,14 @@ describe('VariableCatalogStorageService', () => {
         vi.useRealTimers();
     });
 
-    it('seeds mock catalog when storage is empty', async () => {
+    it('starts with no catalog variables on a fresh install', async () => {
         const variablesPromise = variableCatalogStorage.getAll();
 
         await vi.advanceTimersByTimeAsync(200);
         const variables = await variablesPromise;
 
-        expect(variables).toEqual(mockVariableCatalog);
-        expect(JSON.parse(localStorage.getItem(VARIABLE_CATALOG_STORAGE_KEY) ?? '[]')).toEqual(mockVariableCatalog);
+        expect(variables).toEqual([]);
+        expect(JSON.parse(localStorage.getItem(VARIABLE_CATALOG_STORAGE_KEY) ?? 'null')).toEqual([]);
     });
 
     it('reads variables from VARIABLE_CATALOG_STORAGE_KEY', async () => {

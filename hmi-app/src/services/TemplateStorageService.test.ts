@@ -17,13 +17,13 @@ describe('TemplateStorageService', () => {
         vi.useRealTimers();
     });
 
-    it('seeds and reads templates from TEMPLATES_STORAGE_KEY', async () => {
+    it('starts with no templates on a fresh install', async () => {
         const templatesPromise = templateStorage.getTemplates();
 
         await vi.advanceTimersByTimeAsync(200);
         const templates = await templatesPromise;
 
-        expect(templates.length).toBeGreaterThan(0);
+        expect(templates).toEqual([]);
         expect(localStorage.getItem(TEMPLATES_STORAGE_KEY)).not.toBeNull();
     });
 

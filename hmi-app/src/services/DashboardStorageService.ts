@@ -1,6 +1,5 @@
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, Dashboard, Template, ViewerPersistedWidgetDisplayPatch, WidgetConfig, WidgetLayout } from '../domain/admin.types';
-import { mockDashboards } from '../mocks/admin.mock';
-import { clampWidgetBounds, DEFAULT_COLS, isTemplateApplicable } from '../utils/gridConfig';
+import { clampWidgetBounds, DEFAULT_COLS, DEFAULT_ROWS, isTemplateApplicable } from '../utils/gridConfig';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 import { TemplateAspectMismatchError } from '../utils/templateAspectMismatch';
 import {
@@ -11,12 +10,13 @@ import {
 } from '../utils/dashboardViews';
 
 const DEFAULT_DASHBOARD_ASPECT = '16:9' as const;
-const DEFAULT_DASHBOARD_ROWS = 24;
+const DEFAULT_DASHBOARD_ROWS = DEFAULT_ROWS;
 
 // =============================================================================
 // DashboardStorageService
 // Servicio de persistencia para el Modo Administrador. Simula una BD asíncrona
-// usando localStorage. Auto-puebla (seed) con datos estáticos si está vacío.
+// usando localStorage. Auto-inicializa con una colección vacía si está vacío
+// (instalación nueva sin datos de ejemplo).
 // =============================================================================
 
 class DashboardStorageService {
@@ -40,13 +40,13 @@ class DashboardStorageService {
         return normalizedDashboard;
     }
 
-    // Inicializa el Storage copiando los Mocks si es la primera vez.
-    // Si ya existen datos, corrige dashboards publicados sin snapshot o sin
-    // aspect/rows persistidos para mantener compatibilidad interna.
+    // Inicializa el Storage con una colección vacía si es la primera vez (instalación
+    // nueva sin datos de ejemplo). Si ya existen datos, corrige dashboards publicados
+    // sin snapshot o sin aspect/rows persistidos para mantener compatibilidad interna.
     private async initStorage(): Promise<void> {
         const stored = localStorage.getItem(DASHBOARDS_STORAGE_KEY);
         if (!stored) {
-            localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(mockDashboards));
+            localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify([]));
             return;
         }
 

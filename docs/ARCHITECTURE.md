@@ -89,10 +89,8 @@ hmi-app/src/
 │   ├── equipment.mock.ts
 │   ├── alerts.mock.ts
 │   ├── telemetry.mock.ts
-│   ├── admin.mock.ts
-│   ├── hierarchy.mock.ts
-│   ├── template.mock.ts
-│   └── variableCatalog.mock.ts
+│   ├── admin.mock.ts       # fixture de tests únicamente (no se siembra en fresh install)
+│   └── template.mock.ts    # usado en migración interna de TemplateStorageService + fixture de tests
 ├── pages/                  # Composiciones de página (viewer + admin)
 │   ├── Dashboard.tsx
 │   ├── EquipmentDetail.tsx

@@ -1,5 +1,4 @@
 import type { CatalogVariable, Dashboard } from '../domain';
-import { mockVariableCatalog } from '../mocks/variableCatalog.mock';
 import { DASHBOARDS_STORAGE_KEY, VARIABLE_CATALOG_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 
 const STORAGE_KEY = VARIABLE_CATALOG_STORAGE_KEY;
@@ -14,7 +13,7 @@ class VariableCatalogStorageService {
     private async initStorage(): Promise<void> {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (!stored) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(mockVariableCatalog));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
         }
     }
 

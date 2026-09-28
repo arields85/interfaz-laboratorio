@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hierarchyStorage } from './HierarchyStorageService';
 import { HIERARCHY_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 import type { HierarchyNode } from '../domain/admin.types';
-import { mockHierarchyNodes } from '../mocks/hierarchy.mock';
 
 const seedNodes = (nodes: HierarchyNode[]) => {
     localStorage.setItem(HIERARCHY_STORAGE_KEY, JSON.stringify(nodes));
@@ -69,9 +68,9 @@ describe('HierarchyStorageService', () => {
         await expect(hierarchyStorage.getNodes()).resolves.toEqual(nodes);
     });
 
-    it('seeds storage with mock hierarchy when it starts empty', async () => {
-        await expect(hierarchyStorage.getNodes()).resolves.toEqual(mockHierarchyNodes);
-        expect(readStoredNodes()).toEqual(mockHierarchyNodes);
+    it('starts with no hierarchy nodes on a fresh install', async () => {
+        await expect(hierarchyStorage.getNodes()).resolves.toEqual([]);
+        expect(readStoredNodes()).toEqual([]);
     });
 
     it('returns an empty list if storage is unavailable after initialization', async () => {

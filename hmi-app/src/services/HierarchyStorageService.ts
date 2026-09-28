@@ -1,5 +1,4 @@
 import type { HierarchyNode } from '../domain/admin.types';
-import { mockHierarchyNodes } from '../mocks/hierarchy.mock';
 import { HIERARCHY_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 
 const STORAGE_KEY = HIERARCHY_STORAGE_KEY;
@@ -7,7 +6,8 @@ const STORAGE_KEY = HIERARCHY_STORAGE_KEY;
 // =============================================================================
 // HierarchyStorageService
 // Persistencia asíncrona de la jerarquía de planta usando localStorage.
-// Auto-inicializa con datos mock si el storage está vacío.
+// Auto-inicializa con una colección vacía si el storage está vacío (instalación
+// nueva sin datos de ejemplo).
 //
 // Patrón análogo a DashboardStorageService (Fase 6).
 // =============================================================================
@@ -17,7 +17,7 @@ class HierarchyStorageService {
     private async initStorage(): Promise<void> {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (!stored) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(mockHierarchyNodes));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
         }
     }
 

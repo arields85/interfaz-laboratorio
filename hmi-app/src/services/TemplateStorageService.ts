@@ -6,7 +6,10 @@ import { dashboardStorage } from './DashboardStorageService';
 // =============================================================================
 // TemplateStorageService
 // Persistencia asíncrona de templates usando localStorage.
-// Auto-inicializa con datos mock si el storage está vacío.
+// Auto-inicializa con una colección vacía si el storage está vacío (instalación
+// nueva sin datos de ejemplo). mockTemplates se conserva solo para inferir el
+// dashboardType de templates guardados por instalaciones existentes que aún no
+// lo tengan persistido.
 //
 // Patrón análogo a DashboardStorageService / HierarchyStorageService.
 // Especificación Funcional Modo Admin §13
@@ -59,7 +62,7 @@ class TemplateStorageService {
     private async initStorage(): Promise<void> {
         const stored = localStorage.getItem(TEMPLATES_STORAGE_KEY);
         if (!stored) {
-            localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(mockTemplates));
+            localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify([]));
         }
     }
 

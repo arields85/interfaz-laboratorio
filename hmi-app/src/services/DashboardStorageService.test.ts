@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dashboard } from '../domain/admin.types';
 import { dashboardStorage } from './DashboardStorageService';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
+import { mockDashboards } from '../mocks/admin.mock';
 import { makeDashboard, makeLayout, makeTemplate, makeWidget } from '../test/fixtures/dashboard.fixture';
 import { TemplateAspectMismatchError, buildTemplateAspectMismatchMessage } from '../utils/templateAspectMismatch';
 import { createDefaultDashboardView } from '../utils/dashboardViews';
@@ -54,17 +55,19 @@ describe('DashboardStorageService', () => {
         expect(byId.get(legacyWidget.id)?.displayOptions).toMatchObject({ dataMode: 'real' });
     });
 
-    it('seeds and reads dashboards from DASHBOARDS_STORAGE_KEY', async () => {
+    it('starts with no dashboards on a fresh install', async () => {
         const dashboardsPromise = dashboardStorage.getDashboards();
 
         await vi.advanceTimersByTimeAsync(300);
         const dashboards = await dashboardsPromise;
 
-        expect(dashboards.length).toBeGreaterThan(0);
+        expect(dashboards).toEqual([]);
         expect(localStorage.getItem(DASHBOARDS_STORAGE_KEY)).not.toBeNull();
     });
 
-    it('seeds header connection widgets using connection-status type', async () => {
+    it('reads header connection widgets using connection-status type from seeded fixture data', async () => {
+        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(mockDashboards));
+
         const dashboardsPromise = dashboardStorage.getDashboards();
 
         await vi.advanceTimersByTimeAsync(300);
