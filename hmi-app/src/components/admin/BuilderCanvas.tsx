@@ -689,13 +689,20 @@ export default function BuilderCanvas({
                         // Group move (G3): while a locked container is being dragged, its members
                         // preview at the same live delta instead of jumping only on commit.
                         const groupPreviewBounds = interaction?.groupMemberBounds[widget.id];
+                        // G5b (R3-resize-preview-commit-mismatch): resizing a locked group
+                        // container clamps the LIVE preview with the same members-bounding-box
+                        // clamp the commit uses, so the rect never renders smaller than what gets
+                        // saved and then snaps back on release.
+                        const resizePreviewBounds = activeInteraction && isResizeInteraction(activeInteraction.type) && isGroupWidget(widget) && widget.locked
+                            ? layoutToPixelBounds(resolveCommittedLayoutForCommit(activeInteraction), metrics)
+                            : null;
                         const itemStyle = activeInteraction
                             ? {
                                 position: 'absolute' as const,
-                                left: `${activeInteraction.tentativeBounds.left}px`,
-                                top: `${activeInteraction.tentativeBounds.top}px`,
-                                width: `${activeInteraction.tentativeBounds.width}px`,
-                                height: `${activeInteraction.tentativeBounds.height}px`,
+                                left: `${(resizePreviewBounds ?? activeInteraction.tentativeBounds).left}px`,
+                                top: `${(resizePreviewBounds ?? activeInteraction.tentativeBounds).top}px`,
+                                width: `${(resizePreviewBounds ?? activeInteraction.tentativeBounds).width}px`,
+                                height: `${(resizePreviewBounds ?? activeInteraction.tentativeBounds).height}px`,
                                 zIndex: 20,
                               }
                             : groupPreviewBounds

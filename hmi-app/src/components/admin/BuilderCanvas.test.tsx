@@ -115,10 +115,11 @@ async function renderInteractiveCanvas(overrides?: {
     resizeWidth?: number;
     resizeHeight?: number;
 }) {
+    const widgets = overrides?.widgets ?? [makeWidget({ id: 'widget-1', title: 'Widget 1' })];
     const dashboard = makeDashboard({
         cols: overrides?.cols ?? 20,
         rows: overrides?.rows ?? 12,
-        widgets: overrides?.widgets ?? [makeWidget({ id: 'widget-1', title: 'Widget 1' })],
+        widgets,
         layout: overrides?.layout ?? [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
     });
 
@@ -148,10 +149,18 @@ async function renderInteractiveCanvas(overrides?: {
 
     await syncCanvasMetrics(builderRoot, overrides?.resizeWidth ?? 1200, overrides?.resizeHeight ?? 675);
 
+    // Only assert the item exists (fail fast with a clear error) when the rendered widgets
+    // actually include 'widget-1' — the default and most callers' case. A caller that overrides
+    // `widgets` without 'widget-1' (e.g. the group-widget suites) still gets `null` instead of a
+    // thrown error, since it never reads `item`.
+    const hasWidgetOne = widgets.some((widget) => widget.id === 'widget-1');
+
     return {
         ...view,
         builderRoot,
-        item: screen.queryByTestId('builder-canvas-item-widget-1') as HTMLElement,
+        item: (hasWidgetOne
+            ? screen.getByTestId('builder-canvas-item-widget-1')
+            : screen.queryByTestId('builder-canvas-item-widget-1')) as HTMLElement,
     };
 }
 
@@ -1216,6 +1225,49 @@ describe('BuilderCanvas', () => {
             expect(committed.y).toBeLessThanOrEqual(6);
             expect(committed.x + committed.w).toBeGreaterThanOrEqual(9);
             expect(committed.y + committed.h).toBeGreaterThanOrEqual(9);
+        });
+
+        it('previews a shrink resize with the same members-bounding-box clamp as the commit (R3-resize-preview-commit-mismatch)', async () => {
+            const user = userEvent.setup();
+
+            await renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 6, y: 6, w: 3, h: 3 }),
+                ],
+                selectedWidgetId: 'group-1',
+                cols: 40,
+                rows: 24,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+            });
+
+            const handle = screen.getByTestId('builder-canvas-resize-handle-se-group-1');
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            // cellWidth = 1200/40 = 30px, rowHeight = 900/24 = 37.5px. member-1's bounding box
+            // (x6..9, y6..9) is left>=180px/top>=225px, right<=270px/bottom<=337.5px in grid px.
+            await pressPointer(user, handle, { clientX: 300, clientY: 375 });
+            await movePointer(user, document.body, { clientX: 0, clientY: 0 });
+
+            const previewLeft = Number.parseFloat(containerItem.style.left);
+            const previewTop = Number.parseFloat(containerItem.style.top);
+            const previewRight = previewLeft + Number.parseFloat(containerItem.style.width);
+            const previewBottom = previewTop + Number.parseFloat(containerItem.style.height);
+
+            // The LIVE preview (before release) must already respect the members clamp, exactly
+            // like the eventual commit — it must never render smaller than the members bounding
+            // box and then snap back on release.
+            expect(previewLeft).toBeLessThanOrEqual(180);
+            expect(previewTop).toBeLessThanOrEqual(225);
+            expect(previewRight).toBeGreaterThanOrEqual(270);
+            expect(previewBottom).toBeGreaterThanOrEqual(337.5);
+
+            await releasePointer(user, document.body, { clientX: 0, clientY: 0 });
         });
 
         it('resizes an unlocked group container like any normal widget, without a members clamp', async () => {
