@@ -150,7 +150,7 @@ Only overrides are stored; keys absent or null already equal the code defaults.
   invented catalog variables `mockVariableCatalog` (VariableCatalogStorageService) and
   `mockTemplates` (TemplateStorageService). KEEP the 9 default node types (NodeTypeStorageService
   `DEFAULT_NODE_TYPES`). Existing installs keep their data untouched. Route: delegated writer.
-- [ ] **V2** — Live check by the user on a fresh origin (e.g. 5174 or `localhost`).
+- [x] **V2** — Live check by the user on a fresh origin (e.g. 5174 or `localhost`).
 
 ## Progress
 
@@ -181,6 +181,12 @@ Only overrides are stored; keys absent or null already equal the code defaults.
   selector, topbar): all already had empty states. RED 4 / GREEN 72 focused. Writer: `npx tsc -b`
   clean, `npm run lint` clean, `npm test` 2619/2620 (Topbar flake, 16/16 isolated), build OK.
 
+- 2026-09-28: V2 live check PASSED (user) on `127.0.0.1:5175` after clearing that origin's
+  storage from the control Chrome: empty dashboards/hierarchy/catalog/templates, node types
+  present, background/colors/typography/orb with the tuned values. Note: admin LOGIN is accepted
+  only from origins on port 5173 (`admin_http.py` LOCAL_ORIGINS); an existing session cookie is
+  shared by same-host ports, so test other ports on host `127.0.0.1`.
+
 ## Next step
 
-V2 live check on a fresh origin; merge after the group widget and theme merges (rebase).
+Merge after the group widget and theme merges (rebase onto the new main); previous: V2 live check on a fresh origin; merge after the group widget and theme merges (rebase).
