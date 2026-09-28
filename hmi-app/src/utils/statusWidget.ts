@@ -21,7 +21,16 @@ export const DEFAULT_STATUS_LABELS: Record<EquipmentStatus, string> = {
     unknown: 'Desconocido',
 };
 
-export const STATUS_TEXT_OPTION_KEY: Record<EquipmentStatus, keyof StatusDisplayOptions> = {
+/**
+ * Only the string-valued `StatusDisplayOptions` keys used for per-status
+ * custom labels. Narrower than `keyof StatusDisplayOptions` on purpose --
+ * that interface also carries non-string options (e.g. `showFrame: boolean`,
+ * P2 2026-09-28), and widening this map to the full `keyof` would make every
+ * `options?.[optionKey]` read below resolve to `string | boolean`.
+ */
+type StatusTextOptionKey = 'runningText' | 'idleText' | 'warningText' | 'criticalText' | 'offlineText' | 'maintenanceText' | 'unknownText';
+
+export const STATUS_TEXT_OPTION_KEY: Record<EquipmentStatus, StatusTextOptionKey> = {
     running: 'runningText',
     idle: 'idleText',
     warning: 'warningText',

@@ -468,6 +468,72 @@ describe('PropertyDock Node-RED binding', () => {
     });
 });
 
+describe('PropertyDock frame/background toggle (P2)', () => {
+    it('offers "Mostrar fondo y marco" for a status widget, on by default when unset', () => {
+        renderPropertyDock({ type: 'status', title: 'Estado' });
+
+        const toggle = screen.getByLabelText('Mostrar fondo y marco');
+        expect(toggle).toBeChecked();
+    });
+
+    it('offers "Mostrar fondo y marco" for a connection-status widget, on by default when unset', () => {
+        renderPropertyDock({
+            type: 'connection-status',
+            title: 'Conexión',
+            displayOptions: { scope: 'global' },
+        });
+
+        const toggle = screen.getByLabelText('Mostrar fondo y marco');
+        expect(toggle).toBeChecked();
+    });
+
+    it('does not offer the frame toggle for a widget type that cannot go in the header', () => {
+        renderPropertyDock({ type: 'kpi', title: 'KPI' });
+
+        expect(screen.queryByLabelText('Mostrar fondo y marco')).not.toBeInTheDocument();
+    });
+
+    it('persists showFrame: false on the status widget when toggled off', async () => {
+        const { user, updates } = renderPropertyDock({ type: 'status', title: 'Estado' });
+
+        const toggle = screen.getByLabelText('Mostrar fondo y marco');
+        await user.click(toggle);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ showFrame: false });
+
+        await user.click(toggle);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ showFrame: true });
+    });
+
+    it('persists showFrame: false on the connection-status widget when toggled off', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'connection-status',
+            title: 'Conexión',
+            displayOptions: { scope: 'global', showLastUpdate: true },
+        });
+
+        const toggle = screen.getByLabelText('Mostrar fondo y marco');
+        await user.click(toggle);
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({
+            scope: 'global',
+            showLastUpdate: true,
+            showFrame: false,
+        });
+    });
+
+    it('reflects an already-false showFrame as unchecked', () => {
+        renderPropertyDock({
+            type: 'status',
+            title: 'Estado',
+            displayOptions: { showFrame: false },
+        });
+
+        expect(screen.getByLabelText('Mostrar fondo y marco')).not.toBeChecked();
+    });
+});
+
 describe('PropertyDock text-title', () => {
     it('shows a dedicated font size control in General and keeps the widget out of Datos', async () => {
         const { user, updates } = renderPropertyDock({

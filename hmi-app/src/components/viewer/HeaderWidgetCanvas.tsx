@@ -12,8 +12,10 @@ import {
     HEADER_WIDGET_DRAG_MIME,
     HEADER_WIDGET_SLOT_COUNT,
     HEADER_WIDGET_SLOT_HEIGHT_PX,
+    getWidgetFrameOption,
     parseHeaderWidgetDragPayload,
 } from '../../utils/headerWidgets';
+import { resolveWidgetFrameVisible } from '../../utils/widgetFrameVisibility';
 import HeaderWidgetRenderer from './HeaderWidgetRenderer';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
@@ -319,6 +321,10 @@ export default function HeaderWidgetCanvas({
         const isNavigable = !isPreview && navigationTargetDashboardId !== '' && Boolean(onNavigateDashboard);
         const isSelectable = isPreview && Boolean(onWidgetSelect);
         const isInteractive = isNavigable || isSelectable;
+        // P2 (2026-09-28): header-capable widgets can opt in to the same
+        // glass-panel frame/background the grid shows by default -- unset
+        // stays frameless (today's look), matching resolveWidgetFrameVisible.
+        const showFrame = resolveWidgetFrameVisible(getWidgetFrameOption(widget), 'header');
 
         return (
             <div
@@ -338,7 +344,7 @@ export default function HeaderWidgetCanvas({
                     }
                 }}
                 onKeyDown={(event) => handleSelectByKeyboard(event, widget)}
-                className="relative flex h-full w-full flex-col justify-center px-3 py-2 text-left transition-all focus:outline-none md:w-auto"
+                className={`relative flex h-full w-full flex-col justify-center px-3 py-2 text-left transition-all focus:outline-none md:w-auto ${showFrame ? 'glass-panel' : ''}`}
                 style={{
                     minHeight: HEADER_WIDGET_SLOT_HEIGHT_PX,
                     borderRadius: widgetCornerRadius,

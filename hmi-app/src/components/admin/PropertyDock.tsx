@@ -28,12 +28,14 @@ import DockInfoDropdown from './DockInfoDropdown';
 import DockInfoBox from './DockInfoBox';
 import DockInlineControlRow from './DockInlineControlRow';
 import DockSliderField from './DockSliderField';
+import DockToggleField from './DockToggleField';
 import {
     DEFAULT_STATUS_LABELS,
     EQUIPMENT_STATUS_VALUES,
     normalizeSimulatedEquipmentStatus,
 } from '../../utils/statusWidget';
 import { DEFAULT_CONTRACT_STATUS_LABELS } from '../../utils/connectionWidget';
+import { isHeaderCompatibleWidgetType } from '../../utils/headerWidgets';
 import {
     ADMIN_SIDEBAR_INPUT_CLS,
     ADMIN_SIDEBAR_HINT_CLS,
@@ -327,7 +329,13 @@ const parseActivityAnalyticsHexCode = (value: string): string | null => {
     return `#${normalizedValue}`;
 };
 
-const STATUS_TEXT_FIELDS: Array<{ key: keyof StatusDisplayOptions; label: string; placeholder: string }> = [
+// Only the string-valued StatusDisplayOptions keys -- narrower than
+// `keyof StatusDisplayOptions` on purpose, since that interface also
+// carries `showFrame: boolean` (P2, 2026-09-28); widening this would make
+// the `value={...displayOptions?.[key]}` read below resolve to `string | boolean`.
+type StatusTextFieldKey = 'runningText' | 'idleText' | 'warningText' | 'criticalText' | 'offlineText' | 'maintenanceText' | 'unknownText';
+
+const STATUS_TEXT_FIELDS: Array<{ key: StatusTextFieldKey; label: string; placeholder: string }> = [
     { key: 'runningText', label: 'Running', placeholder: DEFAULT_STATUS_LABELS.running },
     { key: 'idleText', label: 'Idle', placeholder: DEFAULT_STATUS_LABELS.idle },
     { key: 'warningText', label: 'Warning', placeholder: DEFAULT_STATUS_LABELS.warning },
@@ -415,6 +423,25 @@ export default function PropertyDock(props: PropertyDockProps) {
     const handleNumericDisplayOptionChange = (key: string, value: string) => {
         handleDisplayOptionChange(key, value === '' ? '' : Number(value));
     };
+
+    // P2 (2026-09-28): frame/background toggle shared by every header-compatible
+    // widget type (isHeaderCompatibleWidgetType) -- see StatusWidget/
+    // ConnectionStatusWidget renderers and HeaderWidgetCanvas for how the value
+    // is consumed. Rendered once via this helper from each type's own section
+    // below, instead of duplicating the control's markup per type.
+    const currentShowFrame = selectedWidget && isHeaderCompatibleWidgetType(selectedWidget.type)
+        ? (selectedWidget.displayOptions as { showFrame?: boolean } | undefined)?.showFrame
+        : undefined;
+
+    const renderFrameToggle = () => (
+        <DockToggleField
+            label="Mostrar fondo y marco"
+            ariaLabel="Mostrar fondo y marco"
+            checked={currentShowFrame !== false}
+            onChange={(checked) => handleDisplayOptionChange('showFrame', checked)}
+            labelClassName="w-auto"
+        />
+    );
 
     const handleKpiFixedTopCapEffectChange = (key: keyof KpiFixedTopCapEffects, value: number) => {
         if (!selectedWidget || (selectedWidget.type !== 'kpi' && selectedWidget.type !== 'machine-activity')) {
@@ -1997,6 +2024,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                             />
                                         </DockFieldRow>
                                     ))}
+                                    {renderFrameToggle()}
                                 </>
                             )}
                             {isDashboardTitle && (() => {
@@ -2608,6 +2636,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 </span>
                                             </label>
                                         )}
+                                        {isConnectionWidget && renderFrameToggle()}
                                         </>
                                     </>
                                 )}

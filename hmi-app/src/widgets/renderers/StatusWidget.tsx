@@ -5,6 +5,7 @@ import StatusBadge from '../../components/ui/StatusBadge';
 import { WidgetHeaderDataMode } from '../../components/ui/WidgetHeader';
 import { normalizeSimulatedEquipmentStatus, resolveStatusLabel } from '../../utils/statusWidget';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
+import { resolveWidgetFrameVisible } from '../../utils/widgetFrameVisibility';
 
 // =============================================================================
 // StatusWidget
@@ -48,9 +49,17 @@ export default function StatusWidget({
 
     const label = resolveStatusLabel(status, options);
     const dataMode = resolveWidgetDataMode(widget);
+    // P2 (2026-09-28): header-capable widgets can opt out of the glass-panel
+    // frame/background so they can also show without one when placed in the
+    // header slot (see HeaderWidgetCanvas). Content layout is unaffected --
+    // only the frame class toggles.
+    const showFrame = resolveWidgetFrameVisible(options?.showFrame, 'grid');
 
     return (
-        <div className={`relative w-full h-full flex items-center justify-center gap-2 glass-panel group ${className ?? ''}`}>
+        <div
+            data-testid="status-widget-surface"
+            className={`relative w-full h-full flex items-center justify-center gap-2 group ${showFrame ? 'glass-panel' : ''} ${className ?? ''}`}
+        >
             <StatusBadge status={status} label={label} compact={compact} />
             <WidgetHeaderDataMode
                 dataMode={dataMode}

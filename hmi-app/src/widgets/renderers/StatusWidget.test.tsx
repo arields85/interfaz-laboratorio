@@ -144,4 +144,34 @@ describe('StatusWidget', () => {
 
         expect(screen.queryByTestId('status-widget-data-mode')).not.toBeInTheDocument();
     });
+
+    it('shows the glass-panel frame by default in the grid (P2, showFrame unset)', () => {
+        render(<StatusWidget widget={makeWidget()} equipmentMap={new Map()} />);
+
+        expect(screen.getByTestId('status-widget-surface')).toHaveClass('glass-panel');
+    });
+
+    it('hides the glass-panel frame in the grid when showFrame is explicitly false, without changing the content layout', () => {
+        render(
+            <StatusWidget
+                widget={makeWidget({ displayOptions: { showFrame: false } })}
+                equipmentMap={new Map()}
+            />,
+        );
+
+        const surface = screen.getByTestId('status-widget-surface');
+        expect(surface).not.toHaveClass('glass-panel');
+        expect(surface).toHaveClass('relative', 'w-full', 'h-full', 'flex', 'items-center', 'justify-center', 'gap-2', 'group');
+    });
+
+    it('shows the glass-panel frame in the grid when showFrame is explicitly true', () => {
+        render(
+            <StatusWidget
+                widget={makeWidget({ displayOptions: { showFrame: true } })}
+                equipmentMap={new Map()}
+            />,
+        );
+
+        expect(screen.getByTestId('status-widget-surface')).toHaveClass('glass-panel');
+    });
 });

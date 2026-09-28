@@ -176,6 +176,14 @@ export interface ConnectionStatusDisplayOptions {
     connectedText?: string;
     /** @deprecated Legacy — usar onlineText/offlineText */
     disconnectedText?: string;
+    /**
+     * Muestra el fondo y marco (`glass-panel`) del widget. Solo aplica a
+     * tipos de widget compatibles con el header (`isHeaderCompatibleWidgetType`).
+     * `undefined` (sin definir): el aspecto de hoy según la ubicación —
+     * grid: marco visible; header: sin marco. `true`/`false`: elección
+     * explícita, aplicada igual en el grid y en el header.
+     */
+    showFrame?: boolean;
 }
 
 
@@ -429,6 +437,14 @@ export interface StatusDisplayOptions {
     offlineText?: string;
     maintenanceText?: string;
     unknownText?: string;
+    /**
+     * Muestra el fondo y marco (`glass-panel`) del widget. Solo aplica a
+     * tipos de widget compatibles con el header (`isHeaderCompatibleWidgetType`).
+     * `undefined` (sin definir): el aspecto de hoy según la ubicación —
+     * grid: marco visible; header: sin marco. `true`/`false`: elección
+     * explícita, aplicada igual en el grid y en el header.
+     */
+    showFrame?: boolean;
 }
 
 export type ProductiveState = 'stopped' | 'calibrating' | 'producing';

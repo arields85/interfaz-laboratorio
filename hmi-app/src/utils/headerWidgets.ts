@@ -20,6 +20,23 @@ export function isHeaderCompatibleWidget(widget: WidgetConfig): boolean {
     return isHeaderCompatibleWidgetType(widget.type);
 }
 
+/**
+ * Reads the `showFrame` display option (P2, 2026-09-28) from any
+ * header-compatible widget, without importing every compatible type's own
+ * `DisplayOptions` interface here. Every header-compatible widget type's
+ * `DisplayOptions` declares an optional `showFrame: boolean` -- see
+ * `StatusDisplayOptions`/`ConnectionStatusDisplayOptions` in
+ * `domain/admin.types.ts`. Returns `undefined` for a non-header-compatible
+ * widget, matching the "today's look per location" default.
+ */
+export function getWidgetFrameOption(widget: WidgetConfig): boolean | undefined {
+    if (!isHeaderCompatibleWidgetType(widget.type)) {
+        return undefined;
+    }
+
+    return (widget.displayOptions as { showFrame?: boolean } | undefined)?.showFrame;
+}
+
 export function serializeHeaderWidgetDragPayload(payload: HeaderWidgetDragPayload): string {
     return JSON.stringify(payload);
 }

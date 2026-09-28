@@ -65,3 +65,37 @@ describe('ConnectionStatusWidget data mode', () => {
         expect(screen.queryByTestId('connection-status-widget-data-mode')).not.toBeInTheDocument();
     });
 });
+
+describe('ConnectionStatusWidget frame toggle (P2)', () => {
+    it('shows the glass-panel frame by default in the grid (showFrame unset)', () => {
+        render(
+            <ConnectionStatusWidget widget={makeWidget()} equipmentMap={new Map()} />,
+        );
+
+        expect(screen.getByTestId('connection-status-widget-surface')).toHaveClass('glass-panel');
+    });
+
+    it('hides the glass-panel frame in the grid when showFrame is explicitly false, without changing the content layout', () => {
+        render(
+            <ConnectionStatusWidget
+                widget={makeWidget({ displayOptions: { showLastUpdate: false, showFrame: false } })}
+                equipmentMap={new Map()}
+            />,
+        );
+
+        const surface = screen.getByTestId('connection-status-widget-surface');
+        expect(surface).not.toHaveClass('glass-panel');
+        expect(surface).toHaveClass('group', 'flex', 'h-full', 'w-full', 'flex-col', 'p-5');
+    });
+
+    it('shows the glass-panel frame in the grid when showFrame is explicitly true', () => {
+        render(
+            <ConnectionStatusWidget
+                widget={makeWidget({ displayOptions: { showLastUpdate: false, showFrame: true } })}
+                equipmentMap={new Map()}
+            />,
+        );
+
+        expect(screen.getByTestId('connection-status-widget-surface')).toHaveClass('glass-panel');
+    });
+});

@@ -80,6 +80,42 @@ describe('HeaderWidgetCanvas', () => {
         expect((surface as HTMLElement).style.background).toBe('');
     });
 
+    it('shows the glass-panel frame in the header when showFrame is explicitly true (P2)', () => {
+        const { container } = render(
+            <HeaderWidgetCanvas
+                widgets={[makeWidget({
+                    id: 'header-status',
+                    type: 'status',
+                    title: 'Status widget',
+                    displayOptions: { showFrame: true },
+                } as never)]}
+                equipmentMap={new Map()}
+                mode="viewer"
+            />,
+        );
+
+        const surface = container.querySelector('[data-header-widget-surface="true"]');
+        expect(surface).toHaveClass('glass-panel');
+    });
+
+    it('stays frameless in the header when showFrame is explicitly false (P2, same as the unset default)', () => {
+        const { container } = render(
+            <HeaderWidgetCanvas
+                widgets={[makeWidget({
+                    id: 'header-status',
+                    type: 'status',
+                    title: 'Status widget',
+                    displayOptions: { showFrame: false },
+                } as never)]}
+                equipmentMap={new Map()}
+                mode="viewer"
+            />,
+        );
+
+        const surface = container.querySelector('[data-header-widget-surface="true"]');
+        expect(surface).not.toHaveClass('glass-panel');
+    });
+
     // G12b: the G12 fix (`shrink-0` + a fixed `w-72`/`w-0` width) did NOT fix the live bug — a
     // fixed 288px width capped by `max-w-full` could still resolve narrower than the slots'
     // actual combined content (e.g. two occupied slots + one empty one measured ~312px of real

@@ -10,6 +10,7 @@ import {
     resolveContractStatusLabel,
 } from '../../utils/connectionWidget';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
+import { resolveWidgetFrameVisible } from '../../utils/widgetFrameVisibility';
 
 // =============================================================================
 // ConnectionStatusWidget
@@ -121,9 +122,17 @@ export default function ConnectionStatusWidget({
     const title = widget.title?.trim() ?? '';
     const hasTitle = title.trim().length > 0;
     const dataMode = resolveWidgetDataMode(widget);
+    // P2 (2026-09-28): header-capable widgets can opt out of the glass-panel
+    // frame/background so they can also show without one when placed in the
+    // header slot (see HeaderWidgetCanvas). Content layout is unaffected --
+    // only the frame class toggles.
+    const showFrame = resolveWidgetFrameVisible(options?.showFrame, 'grid');
 
     return (
-        <div className={`glass-panel group flex h-full w-full flex-col p-5 ${className ?? ''}`}>
+        <div
+            data-testid="connection-status-widget-surface"
+            className={`group flex h-full w-full flex-col p-5 ${showFrame ? 'glass-panel' : ''} ${className ?? ''}`}
+        >
             {hasTitle ? (
                 <WidgetHeader
                     title={title}
