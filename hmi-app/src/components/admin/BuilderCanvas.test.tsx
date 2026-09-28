@@ -525,7 +525,7 @@ describe('BuilderCanvas', () => {
     });
 
     describe('G9: group container frame sits exactly on the grid lines', () => {
-        function renderGroupAndPlainWidget(overrides?: { editingGroupId?: string; onLayoutCommit?: (layout: WidgetLayout) => void }) {
+        function renderGroupAndPlainWidget() {
             return renderInteractiveCanvas({
                 widgets: [
                     makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
@@ -539,7 +539,6 @@ describe('BuilderCanvas', () => {
                 rows: 12,
                 resizeWidth: 1200,
                 resizeHeight: 900,
-                ...overrides,
             });
         }
 
@@ -553,7 +552,7 @@ describe('BuilderCanvas', () => {
             expect(widgetSurface.getAttribute('style')).toContain('padding: var(--widget-spacing);');
         });
 
-        it('aligns the selection frame with the container frame (no inset) when the group is selected, unlike a plain widget', async () => {
+        it('aligns the selection frame with the container frame (no inset), unlike a plain widget', async () => {
             await renderGroupAndPlainWidget();
 
             const groupItem = screen.getByTestId('builder-canvas-item-group-1');
@@ -564,6 +563,19 @@ describe('BuilderCanvas', () => {
 
             expect(groupSelectionFrame.getAttribute('style')).toContain('inset: 0px;');
             expect(widgetSelectionFrame.getAttribute('style')).toContain('inset: var(--widget-spacing);');
+        });
+
+        it('centers the hover actions on the container border (no offset), unlike a plain widget', async () => {
+            await renderGroupAndPlainWidget();
+
+            const groupItem = screen.getByTestId('builder-canvas-item-group-1');
+            const widgetItem = screen.getByTestId('builder-canvas-item-widget-1');
+
+            const groupHoverActions = within(groupItem).getByTestId('widget-hover-actions');
+            const widgetHoverActions = within(widgetItem).getByTestId('widget-hover-actions');
+
+            expect(groupHoverActions.getAttribute('style')).toContain('top: 0px;');
+            expect(widgetHoverActions.getAttribute('style')).toContain('top: var(--widget-spacing);');
         });
 
         it('keeps the container surface inset at zero while it is being dragged (absolute-positioned preview)', async () => {

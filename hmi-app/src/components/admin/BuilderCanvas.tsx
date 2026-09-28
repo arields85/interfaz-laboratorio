@@ -790,6 +790,11 @@ export default function BuilderCanvas({
                                 />
 
                                 <WidgetHoverActions
+                                    // G9: keep the hover actions centered on the widget's own
+                                    // visible top border — a group container's border now sits
+                                    // at the grid line (no inset), so its actions must not use
+                                    // the standard --widget-spacing offset either.
+                                    top={resolveWidgetSurfaceInset(widget)}
                                     // D6: a member of a locked group NOT in edit mode acts as
                                     // part of the container — it gets no hover actions of its
                                     // own; the container's own actions (copy/delete/lock/pencil,
