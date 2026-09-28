@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Trash2, ArrowUp, LayoutDashboard } from 'lucide-react';
-import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Copy, Trash2, ArrowUp, LayoutDashboard, Lock, LockOpen } from 'lucide-react';
+import { isGroupWidget, type WidgetConfig, type WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
@@ -27,6 +27,13 @@ import {
     type WidgetInteractionType,
     type WidgetPixelBounds,
 } from '../../utils/widgetInteraction';
+import {
+    clampGroupMoveDelta,
+    clampGroupResizeToMembers,
+    computeMembersBoundingBox,
+    sanitizeGroupMemberIds,
+    type LayoutRect,
+} from '../../utils/groupWidget';
 import type { TrendChartV2RenderContext } from '../../widgets/renderers/trendChartV2RenderContext';
 import WidgetPresentationBoundary from '../viewer/WidgetPresentationBoundary';
 import { getEffectiveZoom, visualToLayoutPx } from '../../utils/zoomCoordinates';
@@ -44,6 +51,8 @@ interface BuilderCanvasProps {
     onLayoutCommit?: (layout: WidgetLayout) => void;
     onDelete?: (widgetId: string) => void;
     onDuplicate?: (widgetId: string) => void;
+    onToggleGroupLock?: (widgetId: string) => void;
+    onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void;
     onWidgetDragChange?: (payload: HeaderWidgetDragPayload | null) => void;
     headerWidgetIds?: Set<string>;
     headerOccupiedSlotCount?: number;
@@ -67,6 +76,38 @@ interface InteractionState {
     startBounds: WidgetPixelBounds;
     tentativeBounds: WidgetPixelBounds;
     hasExceededThreshold: boolean;
+    /** True when `widgetId` is a member of a currently locked group: selectable, never draggable/resizable (G2). */
+    isLockedMember: boolean;
+    /** Sanitized member ids of the group being dragged, when `widgetId` is a locked group container (G3). Empty otherwise. */
+    groupMemberIds: string[];
+    /** Members' pre-drag layout, aligned by index with `groupMemberIds`. */
+    groupMemberStartLayouts: Pick<WidgetLayout, 'x' | 'y' | 'w' | 'h'>[];
+    /** Live preview pixel bounds per member id while dragging a locked group container. */
+    groupMemberBounds: Record<string, WidgetPixelBounds>;
+}
+
+/** Live drag preview: shifts every member's start bounds by the container's tentative delta (G3). */
+function buildGroupMemberPixelBounds(
+    interaction: InteractionState,
+    tentativeBounds: WidgetPixelBounds,
+    metrics: WidgetInteractionMetrics,
+): Record<string, WidgetPixelBounds> {
+    const deltaLeft = tentativeBounds.left - interaction.startBounds.left;
+    const deltaTop = tentativeBounds.top - interaction.startBounds.top;
+
+    return interaction.groupMemberIds.reduce<Record<string, WidgetPixelBounds>>((acc, memberId, index) => {
+        const memberStartLayout = interaction.groupMemberStartLayouts[index];
+        const memberStartBounds = layoutToPixelBounds(memberStartLayout, metrics);
+
+        acc[memberId] = {
+            left: memberStartBounds.left + deltaLeft,
+            top: memberStartBounds.top + deltaTop,
+            width: memberStartBounds.width,
+            height: memberStartBounds.height,
+        };
+
+        return acc;
+    }, {});
 }
 
 function isFiniteLayout(layout: Pick<WidgetLayout, 'x' | 'y' | 'w' | 'h'>): boolean {
@@ -165,6 +206,8 @@ export default function BuilderCanvas({
     onLayoutCommit,
     onDelete,
     onDuplicate,
+    onToggleGroupLock,
+    onGroupLayoutCommit,
     onWidgetDragChange,
     headerWidgetIds,
     headerOccupiedSlotCount = 0,
@@ -174,6 +217,15 @@ export default function BuilderCanvas({
 }: BuilderCanvasProps) {
     const getWidgetCornerRadius = (type: WidgetConfig['type']) => (type === 'text-title' ? '0px' : '1.5rem');
     const widgetMap = new Map(widgets.map((widget) => [widget.id, widget]));
+    // Ids of widgets that are members of a currently locked group (D1/G2): selectable, but
+    // never draggable or resizable individually while their container stays locked.
+    const lockedMemberIds = useMemo(() => {
+        const ids = new Set<string>();
+        widgets.filter(isGroupWidget).filter((widget) => widget.locked).forEach((widget) => {
+            sanitizeGroupMemberIds(widget.memberWidgetIds, widget.id, widgets).forEach((memberId) => ids.add(memberId));
+        });
+        return ids;
+    }, [widgets]);
     const rightEdgeUsesMajorLine = cols % GRID_MAJOR_INTERVAL_CELLS === 0;
     const bottomEdgeUsesMajorLine = rows % GRID_MAJOR_INTERVAL_CELLS === 0;
     const isGridVisible = useUIStore((state) => state.isGridVisible);
@@ -229,6 +281,62 @@ export default function BuilderCanvas({
         }
     };
 
+    // Resize of a locked group container (G3) must never shrink below its members' bounding box
+    // and must keep containing it; every other interaction resolves exactly as before.
+    const resolveCommittedLayoutForCommit = (currentInteraction: InteractionState): Pick<WidgetLayout, 'x' | 'y' | 'w' | 'h'> => {
+        const baseLayout = resolveCommittedLayout({ interaction: currentInteraction, metrics, cols, rows });
+
+        if (!isResizeInteraction(currentInteraction.type)) {
+            return baseLayout;
+        }
+
+        const widget = widgetMap.get(currentInteraction.widgetId);
+        if (!widget || !isGroupWidget(widget) || !widget.locked) {
+            return baseLayout;
+        }
+
+        const memberIds = sanitizeGroupMemberIds(widget.memberWidgetIds, widget.id, widgets);
+        const membersBoundingBox = computeMembersBoundingBox(memberIds, layout);
+
+        return clampGroupResizeToMembers(baseLayout, membersBoundingBox);
+    };
+
+    // Group move (G3): resolve one shared, clamped grid delta from the container's tentative
+    // bounds, then commit the container and every member in a single array (one history step).
+    const commitGroupMove = (currentInteraction: InteractionState) => {
+        const rawDeltaXCells = metrics.cellWidth > 0
+            ? Math.round((currentInteraction.tentativeBounds.left - currentInteraction.startBounds.left) / metrics.cellWidth)
+            : 0;
+        const rawDeltaYCells = metrics.rowHeight > 0
+            ? Math.round((currentInteraction.tentativeBounds.top - currentInteraction.startBounds.top) / metrics.rowHeight)
+            : 0;
+
+        const groupRects: LayoutRect[] = [currentInteraction.startLayout, ...currentInteraction.groupMemberStartLayouts];
+        const { dx, dy } = clampGroupMoveDelta(groupRects, rawDeltaXCells, rawDeltaYCells, cols, rows);
+
+        const nextLayouts: WidgetLayout[] = [
+            {
+                widgetId: currentInteraction.widgetId,
+                x: currentInteraction.startLayout.x + dx,
+                y: currentInteraction.startLayout.y + dy,
+                w: currentInteraction.startLayout.w,
+                h: currentInteraction.startLayout.h,
+            },
+            ...currentInteraction.groupMemberIds.map((memberId, index) => {
+                const memberStartLayout = currentInteraction.groupMemberStartLayouts[index];
+                return {
+                    widgetId: memberId,
+                    x: memberStartLayout.x + dx,
+                    y: memberStartLayout.y + dy,
+                    w: memberStartLayout.w,
+                    h: memberStartLayout.h,
+                };
+            }),
+        ];
+
+        onGroupLayoutCommit?.(nextLayouts);
+    };
+
     const beginInteraction = (
         event: React.PointerEvent<HTMLDivElement>,
         item: WidgetLayout,
@@ -243,6 +351,22 @@ export default function BuilderCanvas({
             event.stopPropagation();
         }
 
+        const draggedWidget = widgetMap.get(item.widgetId);
+        const isLockedMember = lockedMemberIds.has(item.widgetId);
+        const isLockedGroupContainer = type === 'move'
+            && draggedWidget !== undefined
+            && isGroupWidget(draggedWidget)
+            && draggedWidget.locked === true;
+        const groupMemberIds = isLockedGroupContainer
+            ? sanitizeGroupMemberIds(draggedWidget.memberWidgetIds, draggedWidget.id, widgets)
+            : [];
+        const groupMemberStartLayouts = groupMemberIds.map((memberId) => {
+            const memberLayout = layout.find((entry) => entry.widgetId === memberId);
+            return memberLayout
+                ? { x: memberLayout.x, y: memberLayout.y, w: memberLayout.w, h: memberLayout.h }
+                : { x: item.x, y: item.y, w: 0, h: 0 };
+        });
+
         const startLayout = { x: item.x, y: item.y, w: item.w, h: item.h };
         const startBounds = layoutToPixelBounds(startLayout, metrics);
         const initialInteraction: InteractionState = {
@@ -254,17 +378,33 @@ export default function BuilderCanvas({
             startBounds,
             tentativeBounds: startBounds,
             hasExceededThreshold: false,
+            isLockedMember,
+            groupMemberIds,
+            groupMemberStartLayouts,
+            groupMemberBounds: {},
         };
 
         interactionRef.current = initialInteraction;
         setInteraction(initialInteraction);
-        setBodyCursor(resizeCursor(type));
+        setBodyCursor(isLockedMember ? null : resizeCursor(type));
         onWidgetDragChange?.(null);
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
             const currentInteraction = interactionRef.current;
 
             if (!currentInteraction) {
+                return;
+            }
+
+            // Locked members are selectable but never draggable/resizable individually (D1/G2):
+            // pointer movement never starts a visual drag, so release always resolves as a select.
+            if (currentInteraction.isLockedMember) {
+                const nextInteraction: InteractionState = {
+                    ...currentInteraction,
+                    currentPointer: { x: moveEvent.clientX, y: moveEvent.clientY },
+                };
+                interactionRef.current = nextInteraction;
+                setInteraction(nextInteraction);
                 return;
             }
 
@@ -297,11 +437,18 @@ export default function BuilderCanvas({
                     layoutDeltaY,
                 );
 
+            // Group move (G3): while dragging a locked container, shift every member's preview
+            // bounds by the same live delta so they visibly follow instead of jumping on commit.
+            const groupMemberBounds = currentInteraction.groupMemberIds.length > 0 && hasExceededThreshold
+                ? buildGroupMemberPixelBounds(currentInteraction, tentativeBounds, metrics)
+                : currentInteraction.groupMemberBounds;
+
             const nextInteraction: InteractionState = {
                 ...currentInteraction,
                 currentPointer: { x: moveEvent.clientX, y: moveEvent.clientY },
                 tentativeBounds,
                 hasExceededThreshold,
+                groupMemberBounds,
             };
 
             interactionRef.current = nextInteraction;
@@ -322,14 +469,17 @@ export default function BuilderCanvas({
                 return;
             }
 
+            // Group move (G3): one commit moves the container and every member together, clamped
+            // as a rigid body so none of them crosses the grid edge.
+            if (currentInteraction.type === 'move' && currentInteraction.groupMemberIds.length > 0) {
+                commitGroupMove(currentInteraction);
+                clearInteraction();
+                return;
+            }
+
             commitLayout(
                 currentInteraction.widgetId,
-                resolveCommittedLayout({
-                    interaction: currentInteraction,
-                    metrics,
-                    cols,
-                    rows,
-                }),
+                resolveCommittedLayoutForCommit(currentInteraction),
             );
 
             clearInteraction();
@@ -350,7 +500,7 @@ export default function BuilderCanvas({
     };
 
     const resizeTooltipLayout = interaction && isResizeInteraction(interaction.type) && interaction.hasExceededThreshold
-        ? resolveCommittedLayout({ interaction, metrics, cols, rows })
+        ? resolveCommittedLayoutForCommit(interaction)
         : null;
     const activeResizeWidgetId = interaction && isResizeInteraction(interaction.type)
         ? interaction.widgetId
@@ -514,7 +664,15 @@ export default function BuilderCanvas({
                         }
 
                         const isSelected = selectedWidgetId === widget.id;
-                        const activeInteraction = interaction?.widgetId === widget.id ? interaction : null;
+                        const isLockedMemberWidget = lockedMemberIds.has(widget.id);
+                        // A locked member's own interaction never previews a visual drag (D1/G2):
+                        // it only tracks pointer position toward a plain click-to-select release.
+                        const activeInteraction = interaction?.widgetId === widget.id && !interaction.isLockedMember
+                            ? interaction
+                            : null;
+                        // Group move (G3): while a locked container is being dragged, its members
+                        // preview at the same live delta instead of jumping only on commit.
+                        const groupPreviewBounds = interaction?.groupMemberBounds[widget.id];
                         const itemStyle = activeInteraction
                             ? {
                                 position: 'absolute' as const,
@@ -524,12 +682,21 @@ export default function BuilderCanvas({
                                 height: `${activeInteraction.tentativeBounds.height}px`,
                                 zIndex: 20,
                               }
-                            : {
-                                gridColumnStart: item.x + 1,
-                                gridColumnEnd: `span ${item.w}`,
-                                gridRowStart: item.y + 1,
-                                gridRowEnd: `span ${item.h}`,
-                              };
+                            : groupPreviewBounds
+                                ? {
+                                    position: 'absolute' as const,
+                                    left: `${groupPreviewBounds.left}px`,
+                                    top: `${groupPreviewBounds.top}px`,
+                                    width: `${groupPreviewBounds.width}px`,
+                                    height: `${groupPreviewBounds.height}px`,
+                                    zIndex: 20,
+                                  }
+                                : {
+                                    gridColumnStart: item.x + 1,
+                                    gridColumnEnd: `span ${item.w}`,
+                                    gridRowStart: item.y + 1,
+                                    gridRowEnd: `span ${item.h}`,
+                                  };
                         const renderContext: TrendChartV2RenderContext | undefined = widget.type === 'trend-chart-v2' && activeResizeWidgetId === widget.id
                             ? {
                                 surface: 'builder',
@@ -541,7 +708,7 @@ export default function BuilderCanvas({
                             <div
                                 key={widget.id}
                                 data-testid={`builder-canvas-item-${widget.id}`}
-                                className={`relative group cursor-grab transition-opacity duration-200 ${widget.type === 'text-title' ? 'rounded-none' : 'rounded-xl'}`}
+                                className={`relative group ${isLockedMemberWidget ? 'cursor-default' : 'cursor-grab'} transition-opacity duration-200 ${widget.type === 'text-title' ? 'rounded-none' : 'rounded-xl'}`}
                                 style={itemStyle}
                                 onPointerDown={(event) => beginInteraction(event, item, 'move')}
                             >
@@ -560,6 +727,13 @@ export default function BuilderCanvas({
                                                 onClick: () => onPromoteToHeader?.(widget.id),
                                               }]
                                             : []),
+                                        ...(isGroupWidget(widget)
+                                            ? [{
+                                                label: widget.locked ? 'Desagrupar widgets' : 'Agrupar widgets',
+                                                icon: widget.locked ? LockOpen : Lock,
+                                                onClick: () => onToggleGroupLock?.(widget.id),
+                                              }]
+                                            : []),
                                         {
                                             label: 'Duplicar widget',
                                             icon: Copy,
@@ -573,7 +747,7 @@ export default function BuilderCanvas({
                                     ]}
                                 />
 
-                                {isSelected && (
+                                {isSelected && !isLockedMemberWidget && (
                                     (['se', 'ne', 'nw', 'sw'] as const).map((dir) => (
                                         <ResizeHandle
                                             key={dir}

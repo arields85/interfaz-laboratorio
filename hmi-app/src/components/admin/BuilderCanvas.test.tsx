@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import BuilderCanvas from './BuilderCanvas';
 import DashboardViewer from '../viewer/DashboardViewer';
-import { makeDashboard, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
+import { makeDashboard, makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { useUIStore } from '../../store/ui.store';
-import type { WidgetConfig } from '../../domain/admin.types';
+import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -109,6 +109,8 @@ async function renderInteractiveCanvas(overrides?: {
     selectedWidgetId?: string;
     onWidgetSelect?: (widgetId: string) => void;
     onLayoutCommit?: (layout: { widgetId: string; x: number; y: number; w: number; h: number }) => void;
+    onToggleGroupLock?: (widgetId: string) => void;
+    onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void;
     resizeWidth?: number;
     resizeHeight?: number;
 }) {
@@ -130,6 +132,8 @@ async function renderInteractiveCanvas(overrides?: {
                     selectedWidgetId={overrides?.selectedWidgetId}
                     onWidgetSelect={overrides?.onWidgetSelect}
                 onLayoutCommit={overrides?.onLayoutCommit}
+                onToggleGroupLock={overrides?.onToggleGroupLock}
+                onGroupLayoutCommit={overrides?.onGroupLayoutCommit}
             />
         </div>,
     );
@@ -145,7 +149,7 @@ async function renderInteractiveCanvas(overrides?: {
     return {
         ...view,
         builderRoot,
-        item: screen.getByTestId('builder-canvas-item-widget-1'),
+        item: screen.queryByTestId('builder-canvas-item-widget-1') as HTMLElement,
     };
 }
 
@@ -958,5 +962,218 @@ describe('BuilderCanvas', () => {
         expect(metricCardItem).toHaveClass('rounded-xl');
         expect(dashboardTitleFrame?.style.borderRadius).toBe('0px');
         expect(metricCardFrame?.style.borderRadius).toBe('24px');
+    });
+
+    describe('group widget lock', () => {
+        it('shows a lock action for an unlocked group widget and calls onToggleGroupLock on click', async () => {
+            const onToggleGroupLock = vi.fn();
+
+            await renderInteractiveCanvas({
+                widgets: [makeGroupWidget({ id: 'group-1', locked: false })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+                cols: 16,
+                onToggleGroupLock,
+            });
+
+            const lockButton = screen.getByRole('button', { name: 'Agrupar widgets' });
+            await userEvent.setup().click(lockButton);
+
+            expect(onToggleGroupLock).toHaveBeenCalledWith('group-1');
+        });
+
+        it('shows an unlock action for a locked group widget', async () => {
+            await renderInteractiveCanvas({
+                widgets: [makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: [] })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+                cols: 16,
+            });
+
+            expect(screen.getByRole('button', { name: 'Desagrupar widgets' })).toBeInTheDocument();
+        });
+
+        it('does not show a lock action for a non-group widget', async () => {
+            await renderInteractiveCanvas({
+                layout: [makeLayout({ widgetId: 'widget-1', x: 0, y: 0, w: 4, h: 3 })],
+            });
+
+            expect(screen.queryByRole('button', { name: 'Agrupar widgets' })).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Desagrupar widgets' })).not.toBeInTheDocument();
+        });
+    });
+
+    describe('locked group members', () => {
+        function renderLockedGroupCanvas(overrides?: { onLayoutCommit?: (layout: WidgetLayout) => void; onWidgetSelect?: (id: string) => void }) {
+            return renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                ],
+                selectedWidgetId: 'member-1',
+                cols: 16,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+                ...overrides,
+            });
+        }
+
+        it('does not render resize handles for a locked member even while selected', async () => {
+            await renderLockedGroupCanvas();
+
+            expect(screen.queryByTestId('builder-canvas-resize-handle-se-member-1')).not.toBeInTheDocument();
+        });
+
+        it('does not move a locked member on drag, but still selects it on release', async () => {
+            const user = userEvent.setup();
+            const onLayoutCommit = vi.fn();
+            const onWidgetSelect = vi.fn();
+
+            await renderLockedGroupCanvas({ onLayoutCommit, onWidgetSelect });
+
+            const memberItem = screen.getByTestId('builder-canvas-item-member-1');
+
+            await pressPointer(user, memberItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 400, clientY: 400 });
+
+            // No visual drag: the item never switches to absolute tentative-bounds styling.
+            expect(memberItem.style.position).not.toBe('absolute');
+
+            await releasePointer(user, document.body, { clientX: 400, clientY: 400 });
+
+            expect(onLayoutCommit).not.toHaveBeenCalled();
+            expect(onWidgetSelect).toHaveBeenCalledWith('member-1');
+        });
+    });
+
+    describe('locked group container move (G3)', () => {
+        function renderGroupMoveCanvas(overrides?: { onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void }) {
+            return renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 2, y: 2, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 3, y: 3, w: 2, h: 2 }),
+                ],
+                cols: 40,
+                rows: 24,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+                ...overrides,
+            });
+        }
+
+        it('moves the member with the container live during drag, and commits both in one array', async () => {
+            const user = userEvent.setup();
+            const onGroupLayoutCommit = vi.fn();
+
+            await renderGroupMoveCanvas({ onGroupLayoutCommit });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+            const memberItem = screen.getByTestId('builder-canvas-item-member-1');
+            const memberLeftBefore = memberItem.style.left;
+
+            // cellWidth = 1200/40 = 30px, rowHeight = 900/24 = 37.5px.
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 160, clientY: 100 });
+
+            expect(memberItem.style.position).toBe('absolute');
+            expect(memberItem.style.left).not.toBe(memberLeftBefore);
+
+            await releasePointer(user, document.body, { clientX: 160, clientY: 100 });
+
+            expect(onGroupLayoutCommit).toHaveBeenCalledTimes(1);
+            expect(onGroupLayoutCommit).toHaveBeenCalledWith([
+                { widgetId: 'group-1', x: 4, y: 2, w: 10, h: 10 },
+                { widgetId: 'member-1', x: 5, y: 3, w: 2, h: 2 },
+            ]);
+        });
+
+        it('clamps the whole-group move delta so no member crosses the grid edge', async () => {
+            const user = userEvent.setup();
+            const onGroupLayoutCommit = vi.fn();
+
+            await renderGroupMoveCanvas({ onGroupLayoutCommit });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            // A huge rightward drag: container right edge (x=2,w=10) would overshoot cols=40.
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 3100, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 3100, clientY: 100 });
+
+            expect(onGroupLayoutCommit).toHaveBeenCalledWith([
+                { widgetId: 'group-1', x: 30, y: 2, w: 10, h: 10 },
+                { widgetId: 'member-1', x: 31, y: 3, w: 2, h: 2 },
+            ]);
+        });
+    });
+
+    describe('locked group container resize (G3)', () => {
+        it('clamps a shrink resize so the container stays a superset of its members bounding box', async () => {
+            const user = userEvent.setup();
+            const onLayoutCommit = vi.fn();
+
+            await renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 6, y: 6, w: 3, h: 3 }),
+                ],
+                selectedWidgetId: 'group-1',
+                onLayoutCommit,
+                cols: 40,
+                rows: 24,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+            });
+
+            const handle = screen.getByTestId('builder-canvas-resize-handle-se-group-1');
+
+            // Shrink drastically toward the origin; member-1's bounding box (x6..9, y6..9)
+            // must still be fully contained in the committed container rect.
+            await pressPointer(user, handle, { clientX: 300, clientY: 375 });
+            await movePointer(user, document.body, { clientX: 0, clientY: 0 });
+            await releasePointer(user, document.body, { clientX: 0, clientY: 0 });
+
+            expect(onLayoutCommit).toHaveBeenCalledTimes(1);
+            const [committed] = onLayoutCommit.mock.calls[0] as [WidgetLayout];
+            expect(committed.widgetId).toBe('group-1');
+            expect(committed.x).toBeLessThanOrEqual(6);
+            expect(committed.y).toBeLessThanOrEqual(6);
+            expect(committed.x + committed.w).toBeGreaterThanOrEqual(9);
+            expect(committed.y + committed.h).toBeGreaterThanOrEqual(9);
+        });
+
+        it('resizes an unlocked group container like any normal widget, without a members clamp', async () => {
+            const user = userEvent.setup();
+            const onLayoutCommit = vi.fn();
+
+            await renderInteractiveCanvas({
+                widgets: [makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+                selectedWidgetId: 'group-1',
+                onLayoutCommit,
+                cols: 40,
+                rows: 24,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+            });
+
+            const handle = screen.getByTestId('builder-canvas-resize-handle-se-group-1');
+
+            await pressPointer(user, handle, { clientX: 300, clientY: 375 });
+            await movePointer(user, document.body, { clientX: 0, clientY: 0 });
+            await releasePointer(user, document.body, { clientX: 0, clientY: 0 });
+
+            expect(onLayoutCommit).toHaveBeenCalledWith({ widgetId: 'group-1', x: 0, y: 0, w: 1, h: 1 });
+        });
     });
 });

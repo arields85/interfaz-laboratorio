@@ -11,7 +11,7 @@ import { variableCatalogStorage } from '../../services/VariableCatalogStorageSer
 import { mockEquipmentList } from '../../mocks/equipment.mock';
 import type { CatalogVariable } from '../../domain';
 import type { Dashboard, DashboardHeaderConfig, DashboardViewIconKey, DashboardVisualStatus, HierarchyNode, WidgetType, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
-import { getDashboardVisualStatus } from '../../domain/admin.types';
+import { getDashboardVisualStatus, isGroupWidget } from '../../domain/admin.types';
 import type { EquipmentSummary, MetricValue } from '../../domain/equipment.types';
 import { buildHierarchyAggregationTrace, type HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import AdminWorkspaceLayout from '../../components/admin/AdminWorkspaceLayout';
@@ -68,6 +68,7 @@ import {
     updateDashboardViewPresentation,
     normalizeDashboardViews,
 } from '../../utils/dashboardViews';
+import { computeGroupMembers, reorderWidgetsWithGroupBeforeMembers } from '../../utils/groupWidget';
 import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
 import {
     DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
@@ -1526,6 +1527,62 @@ export default function DashboardBuilderPage() {
             }, { coalesce: false });
         };
 
+        // G2: lock/unlock is exactly one history step. Closing the lock computes D1 membership
+        // (widgets fully inside the container's current rect, never another group) and reorders
+        // the container to precede its members so stacking (array order) puts it below them.
+        // Opening the lock releases all members without touching the rest of the layout.
+        const handleToggleGroupLock = (widgetId: string) => {
+            setDraft(prev => {
+                if (!prev) return prev;
+                return updateSelectedView(prev, (view) => {
+                    const widget = view.widgets.find((item) => item.id === widgetId);
+
+                    if (!widget || !isGroupWidget(widget)) {
+                        return view;
+                    }
+
+                    if (widget.locked) {
+                        return {
+                            ...view,
+                            widgets: view.widgets.map((item) => (
+                                item.id === widgetId ? { ...item, locked: false, memberWidgetIds: [] } : item
+                            )),
+                        };
+                    }
+
+                    const containerLayout = view.layout.find((item) => item.widgetId === widgetId);
+                    if (!containerLayout) {
+                        return view;
+                    }
+
+                    const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, view.widgets, view.layout);
+                    const lockedWidgets = view.widgets.map((item) => (
+                        item.id === widgetId ? { ...item, locked: true, memberWidgetIds } : item
+                    ));
+
+                    return {
+                        ...view,
+                        widgets: reorderWidgetsWithGroupBeforeMembers(lockedWidgets, widgetId, memberWidgetIds),
+                    };
+                });
+            }, { coalesce: false });
+        };
+
+        // G3: dragging a locked container moves it and every member together; BuilderCanvas
+        // already resolves and clamps the shared grid delta, so this only applies the result —
+        // one `set` covering every affected layout entry, i.e. one undo step.
+        const handleGroupLayoutCommit = (layouts: WidgetLayout[]) => {
+            setDraft(prev => {
+                if (!prev) return prev;
+                return updateSelectedView(prev, (view) => ({
+                    ...view,
+                    layout: view.layout.map((item) => (
+                        layouts.find((updated) => updated.widgetId === item.widgetId) ?? item
+                    )),
+                }));
+            }, { coalesce: false });
+        };
+
         const handleDeleteWidget = (widgetId?: string) => {
             const targetWidgetId = widgetId ?? selectedWidgetId;
 
@@ -1770,6 +1827,8 @@ export default function DashboardBuilderPage() {
                             onLayoutCommit={handleUpdateLayout}
                             onDelete={handleDeleteWidget}
                             onDuplicate={handleDuplicateWidget}
+                            onToggleGroupLock={handleToggleGroupLock}
+                            onGroupLayoutCommit={handleGroupLayoutCommit}
                             onWidgetDragChange={(payload) => {
                                 setDraggedWidget(payload);
 

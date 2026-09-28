@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardBuilderPage from './DashboardBuilderPage';
-import { makeDashboard, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
+import { makeDashboard, makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { createDefaultDashboardView } from '../../utils/dashboardViews';
 import { useUIStore } from '../../store/ui.store';
 import type { ConnectionHealth, ContractMachine } from '../../domain/dataContract.types';
@@ -377,6 +377,8 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         widgets,
         onWidgetSelect,
         onLayoutCommit,
+        onToggleGroupLock,
+        onGroupLayoutCommit,
     }: {
         cols: number;
         rows: number;
@@ -384,6 +386,8 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         widgets: Array<{ id: string; type: string; title?: string }>;
         onWidgetSelect?: (widgetId: string | undefined) => void;
         onLayoutCommit?: (layout: WidgetLayout) => void;
+        onToggleGroupLock?: (widgetId: string) => void;
+        onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void;
     }) => (
         builderCanvasMock({ cols, rows, layout, widgets, onWidgetSelect }),
         <div
@@ -408,6 +412,26 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
                     onClick={() => onLayoutCommit({ widgetId: 'widget-1', x: 5, y: 5, w: 6, h: 6 })}
                 >
                     Simular arrastre de widget-1
+                </button>
+            )}
+            {onToggleGroupLock && widgets.filter((widget) => widget.type === 'group').map((widget) => (
+                <button
+                    key={`lock-${widget.id}`}
+                    type="button"
+                    onClick={() => onToggleGroupLock(widget.id)}
+                >
+                    Alternar candado {widget.id}
+                </button>
+            ))}
+            {onGroupLayoutCommit && (
+                <button
+                    type="button"
+                    onClick={() => onGroupLayoutCommit([
+                        { widgetId: 'group-1', x: 5, y: 5, w: 4, h: 4 },
+                        { widgetId: 'widget-1', x: 6, y: 6, w: 1, h: 1 },
+                    ])}
+                >
+                    Simular mover grupo
                 </button>
             )}
         </div>
@@ -2101,6 +2125,82 @@ describe('DashboardBuilderPage undo/redo', () => {
         });
 
         await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().layout).toEqual(originalLayout);
+        });
+        expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+    });
+
+    it('closing a group lock computes D1 membership and reorders the group before its member, as one undo step', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [
+                makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
+            ],
+            layout: [
+                makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+            ],
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Alternar candado group-1' }));
+
+        await waitFor(() => {
+            // The container was authored after its future member; locking must reorder it to
+            // precede the member so stacking (array order) puts the container below it.
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1']);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Seleccionar Contenedor' }));
+        await waitFor(() => {
+            const selected = getLatestPropertyDockProps()?.selectedWidget;
+            expect(selected?.type === 'group' ? selected.locked : undefined).toBe(true);
+            expect(selected?.type === 'group' ? selected.memberWidgetIds : undefined).toEqual(['widget-1']);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+
+        await waitFor(() => {
+            const selected = getLatestPropertyDockProps()?.selectedWidget;
+            expect(selected?.type === 'group' ? selected.locked : undefined).toBe(false);
+            expect(selected?.type === 'group' ? selected.memberWidgetIds : undefined).toEqual([]);
+        });
+        expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+    });
+
+    it('a group move commits the container and its member together as one undo step', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [
+                makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+                makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+            ],
+            layout: [
+                makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+            ],
+        }));
+
+        const originalLayout = getBuilderCanvasSnapshot().layout;
+
+        await user.click(screen.getByRole('button', { name: 'Simular mover grupo' }));
+
+        await waitFor(() => {
+            expect(getBuilderCanvasSnapshot().layout).toEqual([
+                { widgetId: 'group-1', x: 5, y: 5, w: 4, h: 4 },
+                { widgetId: 'widget-1', x: 6, y: 6, w: 1, h: 1 },
+            ]);
+        });
+
+        await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+
         await waitFor(() => {
             expect(getBuilderCanvasSnapshot().layout).toEqual(originalLayout);
         });
