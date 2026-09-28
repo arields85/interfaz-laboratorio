@@ -947,6 +947,51 @@ describe('BuilderCanvas', () => {
         expect(onLayoutCommit).toHaveBeenCalledWith({ widgetId: 'widget-1', x: 2, y: 1, w: 5, h: 3 });
     });
 
+    // G13(b) (live check 4): a group container's frame has no inset since G9 (it reaches the
+    // grid line), but its resize handles kept the old fixed `0` offset, landing them ON the
+    // frame instead of outside it like every other widget's handles. The handle must sit at the
+    // SAME visual offset from its own visible frame regardless of widget type — for a normal
+    // widget that offset is 0 (already outside, unchanged); for a group it must be pushed out by
+    // a full `--widget-spacing`, past the grid line.
+    describe('resize handle offset (G13b)', () => {
+        it('offsets a group container handle outward past the grid line, unlike a normal widget', async () => {
+            await renderInteractiveCanvas({
+                selectedWidgetId: 'widget-1',
+                widgets: [makeWidget({ id: 'widget-1' })],
+                layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+            });
+
+            const normalHandle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
+            expect(normalHandle.style.bottom).toBe('calc(var(--widget-spacing) - var(--widget-spacing))');
+            expect(normalHandle.style.right).toBe('calc(var(--widget-spacing) - var(--widget-spacing))');
+
+            await renderInteractiveCanvas({
+                selectedWidgetId: 'group-1',
+                widgets: [makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+            });
+
+            const groupHandle = screen.getByTestId('builder-canvas-resize-handle-se-group-1');
+            expect(groupHandle.style.bottom).toBe('calc(0px - var(--widget-spacing))');
+            expect(groupHandle.style.right).toBe('calc(0px - var(--widget-spacing))');
+        });
+
+        it('offsets every corner handle of a locked group container the same way as its unlocked handles', async () => {
+            await renderInteractiveCanvas({
+                selectedWidgetId: 'group-1',
+                widgets: [makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: [] })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+            });
+
+            expect(screen.getByTestId('builder-canvas-resize-handle-nw-group-1').style.top).toBe('calc(0px - var(--widget-spacing))');
+            expect(screen.getByTestId('builder-canvas-resize-handle-nw-group-1').style.left).toBe('calc(0px - var(--widget-spacing))');
+            expect(screen.getByTestId('builder-canvas-resize-handle-ne-group-1').style.top).toBe('calc(0px - var(--widget-spacing))');
+            expect(screen.getByTestId('builder-canvas-resize-handle-ne-group-1').style.right).toBe('calc(0px - var(--widget-spacing))');
+            expect(screen.getByTestId('builder-canvas-resize-handle-sw-group-1').style.bottom).toBe('calc(0px - var(--widget-spacing))');
+            expect(screen.getByTestId('builder-canvas-resize-handle-sw-group-1').style.left).toBe('calc(0px - var(--widget-spacing))');
+        });
+    });
+
     it('converts pointer coordinates to layout px under CSS zoom so drag/resize tracks the pointer (PW-007 T3b)', async () => {
         document.documentElement.style.setProperty('--viewport-zoom', '2');
 

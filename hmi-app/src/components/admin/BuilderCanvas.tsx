@@ -173,23 +173,44 @@ function resolveCommittedLayout(args: {
 
 const RESIZE_HANDLE_CONFIGS: Record<ResizeDirection, {
     cursor: string;
-    position: React.CSSProperties;
+    verticalEdge: 'top' | 'bottom';
+    horizontalEdge: 'left' | 'right';
     align: string;
     clipPath: string;
 }> = {
-    se: { cursor: 'se-resize', position: { bottom: 0, right: 0 }, align: 'items-end justify-end', clipPath: 'polygon(100% 0, 0% 100%, 100% 100%)' },
-    ne: { cursor: 'ne-resize', position: { top: 0, right: 0 }, align: 'items-start justify-end', clipPath: 'polygon(0% 0%, 100% 0%, 100% 100%)' },
-    nw: { cursor: 'nw-resize', position: { top: 0, left: 0 }, align: 'items-start justify-start', clipPath: 'polygon(0% 0%, 100% 0%, 0% 100%)' },
-    sw: { cursor: 'sw-resize', position: { bottom: 0, left: 0 }, align: 'items-end justify-start', clipPath: 'polygon(0% 0%, 0% 100%, 100% 100%)' },
+    se: { cursor: 'se-resize', verticalEdge: 'bottom', horizontalEdge: 'right', align: 'items-end justify-end', clipPath: 'polygon(100% 0, 0% 100%, 100% 100%)' },
+    ne: { cursor: 'ne-resize', verticalEdge: 'top', horizontalEdge: 'right', align: 'items-start justify-end', clipPath: 'polygon(0% 0%, 100% 0%, 100% 100%)' },
+    nw: { cursor: 'nw-resize', verticalEdge: 'top', horizontalEdge: 'left', align: 'items-start justify-start', clipPath: 'polygon(0% 0%, 100% 0%, 0% 100%)' },
+    sw: { cursor: 'sw-resize', verticalEdge: 'bottom', horizontalEdge: 'left', align: 'items-end justify-start', clipPath: 'polygon(0% 0%, 0% 100%, 100% 100%)' },
 };
+
+/**
+ * G13(b) (live check 4): a resize handle must sit OUTSIDE the widget's own visible frame, at the
+ * same visual offset for every widget type — the gap between the outer grid-cell box (where the
+ * handle is positioned, `top/left/bottom/right: 0`) and the frame drawn inset from it by
+ * `resolveWidgetSurfaceInset`. A normal widget's frame is inset by `--widget-spacing`, so its
+ * handle (at the outer edge) already sits exactly that far outside the frame. A group container's
+ * frame has NO inset (G9: it reaches the grid line), so positioning its handle at the same outer
+ * edge lands it ON the frame instead of outside it. Pushing the handle out by
+ * `--widget-spacing - inset` restores the same visual relationship for every widget: 0 for a
+ * normal widget (unchanged), and a full `--widget-spacing` PAST the grid line for a group.
+ */
+function resolveResizeHandlePosition(direction: ResizeDirection, widgetInset: string): React.CSSProperties {
+    const { verticalEdge, horizontalEdge } = RESIZE_HANDLE_CONFIGS[direction];
+    const offset = `calc(${widgetInset} - var(--widget-spacing))`;
+
+    return { [verticalEdge]: offset, [horizontalEdge]: offset };
+}
 
 function ResizeHandle({
     widgetId,
     direction,
+    widgetInset,
     onPointerDown,
 }: {
     widgetId: string;
     direction: ResizeDirection;
+    widgetInset: string;
     onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
 }) {
     const config = RESIZE_HANDLE_CONFIGS[direction];
@@ -198,7 +219,7 @@ function ResizeHandle({
             data-testid={`builder-canvas-resize-handle-${direction}-${widgetId}`}
             onPointerDown={onPointerDown}
             className={`absolute z-20 flex h-6 w-6 p-1.5 opacity-0 transition-opacity drop-shadow-md group-hover:opacity-100 ${config.align}`}
-            style={{ cursor: config.cursor, ...config.position }}
+            style={{ cursor: config.cursor, ...resolveResizeHandlePosition(direction, widgetInset) }}
         >
             <div className="h-2.5 w-2.5 rounded-sm" style={{ background: 'var(--color-admin-selection-to)', clipPath: config.clipPath }} />
         </div>
@@ -881,6 +902,7 @@ export default function BuilderCanvas({
                                             key={dir}
                                             widgetId={widget.id}
                                             direction={dir}
+                                            widgetInset={resolveWidgetSurfaceInset(widget)}
                                             onPointerDown={(event) => beginInteraction(event, item, `resize-${dir}`)}
                                         />
                                     ))
