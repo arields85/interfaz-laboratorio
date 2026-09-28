@@ -28,10 +28,10 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 - [x] **P1** — Contorno button preset = Clásico look (no border, hover fill) with the theme radius.
 - [x] **P2** — Frame/background toggle for header-capable widgets (panel + renderers + header).
 - [x] **P3** — Resize handle offset independent of the theme radius.
-- [ ] **P5** — Tags in the theme engine: `AdminTag` driven by theme tokens (style base glass/flat/
+- [x] **P5** — Tags in the theme engine: `AdminTag` driven by theme tokens (style base glass/flat/
   outline, radius, fill, border and color tint using each tag's own color); Clásico and Contorno
   keep today's tag look exactly. Needed for the user's third style (below).
-- [ ] **P6** — The user's new style from the lab (2026-09-28) as a theme preset (name/placement
+- [x] **P6** — The user's new style from the lab (2026-09-28) as a theme preset (name/placement
   pending the user's answer):
   - Widgets (glass): rest radius 3, fill 0 %, border 8 %, blur 3 px, accent hidden (origin 20 px
     x 1.5 px white); hover radius 3, fill 4 %, border 20 %, blur 12 px, accent 8 px x 1 px white at
@@ -83,7 +83,20 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   (radius, fill, border, color tint) with ASIGNADO/PLANTA/EQUIPO/PUBLISHED/DRAFT; preset
   "Contorno (HMI)" = the current Contorno theme. `fba6610`; artifact republished (v8).
 
+- 2026-09-28: P5 + P6 + muted-tag fix (route: delegated writer) — `4ac0729` feat(theme): tags
+  from theme tokens (`ThemeTagStyle`, optional with Clásico fallback; `AdminTag` renders
+  `.theme-tag` + per-variant `--tc`); `47351ae` feat(theme): Instrumento preset (id
+  `instrument`, third card in the Tema tab, values as recorded above); `2dc7447` fix(theme): the
+  user found PLANTA/EQUIPO still bordered under Instrumento — parent confirmed via CDP
+  (`theme-tag-muted` had a literal white/10 border and no tint); every variant now scales the
+  shared tokens (`--tag-border-scale`/`--tag-fill-scale`: muted 0.25 border, admin 4x fill and
+  0.75 border) so Clásico/Contorno stay identical; Clásico/Contorno tag style set to `outline`
+  (avoids an unwanted 6px blur). RED first per step; `npx tsc -b` clean, `npm run lint` clean,
+  `npm test` 2919/2919, `npx vite build` OK. Parent live re-measure (separate tab, theme
+  `instrument`): TEMPLATE/ASIGNADO/Planta/PUBLISHED/Equipo all have a transparent border and 3px
+  radius.
+
 ## Next step
 
-User's live check (P4), then merge to main. Tags in the theme engine only if the user asks after
+User's live check (P4, including the Instrumento theme), then merge to main. Tags in the theme engine only if the user asks after
 exploring them in the lab.
