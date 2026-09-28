@@ -295,3 +295,69 @@ describe('index.css button theme engine', () => {
         expect(bareBody).toContain('border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);');
     });
 });
+
+describe('index.css icon-only button engine (P1, user decision 2026-09-28)', () => {
+    it('registers --button-icon-base-strength as an animatable percentage custom property', () => {
+        expect(indexCss).toMatch(/@property --button-icon-base-strength\s*{\s*\n\s*syntax:\s*'<percentage>';\s*\n\s*inherits: true;\s*\n\s*initial-value: 100%;/);
+    });
+
+    it('defaults --button-icon-* to today\'s icon-toolbar look, independent from the shared --button-* tokens', () => {
+        const rootBlock = indexCss.match(/:root\s*{([^}]*--button-icon-radius-rest[^}]*)}/s);
+        expect(rootBlock).not.toBeNull();
+        const root = rootBlock?.[1] ?? '';
+
+        expect(root).toContain('--button-icon-radius-rest: 0.375rem;');
+        expect(root).toContain('--button-icon-radius-hover: 0.375rem;');
+        expect(root).toContain('--button-icon-fill-rest: 0%;');
+        expect(root).toContain('--button-icon-fill-hover: 0%;');
+        expect(root).toContain('--button-icon-border-rest: 0%;');
+        expect(root).toContain('--button-icon-border-hover: 0%;');
+        expect(root).toContain('--button-icon-base-strength: 100%;');
+    });
+
+    it('drives .theme-button-icon-neutral shape and color from --button-icon-* tokens, not the shared --button-*-rest ones', () => {
+        const restRule = indexCss.match(/\.theme-button-icon-neutral\s*{([\s\S]*?)\n {2}}/);
+        expect(restRule).not.toBeNull();
+        const restBody = restRule?.[1] ?? '';
+
+        expect(restBody).toContain('--button-radius: var(--button-icon-radius-rest);');
+        expect(restBody).toContain('--button-fill: var(--button-icon-fill-rest);');
+        expect(restBody).toContain('--button-border: var(--button-icon-border-rest);');
+        expect(restBody).toContain('--button-accent-opacity: var(--button-icon-accent-opacity-rest);');
+        expect(restBody).not.toMatch(/var\(--button-fill-rest\)/);
+        expect(restBody).not.toMatch(/var\(--button-border-rest\)/);
+
+        const hoverRule = indexCss.match(/\.theme-button-icon-neutral:hover:not\(:disabled\)\s*{([\s\S]*?)\n {2}}/);
+        expect(hoverRule).not.toBeNull();
+        const hoverBody = hoverRule?.[1] ?? '';
+
+        expect(hoverBody).toContain('--button-radius: var(--button-icon-radius-hover);');
+        expect(hoverBody).toContain('--button-fill: var(--button-icon-fill-hover);');
+        expect(hoverBody).toContain('--button-border: var(--button-icon-border-hover);');
+        expect(hoverBody).toContain('var(--button-icon-base-strength)');
+        expect(hoverBody).not.toMatch(/var\(--button-fill-hover\)/);
+        expect(hoverBody).not.toMatch(/var\(--button-base-strength\)/);
+    });
+
+    it('leaves text buttons and segmented controls wired to the shared --button-* tokens, untouched by the icon-only recipe (P1 regression lock)', () => {
+        for (const variantSelector of [
+            '.theme-button-neutral',
+            '.theme-button-hmi-secondary',
+            '.theme-button-critical',
+            '.theme-button-segment-active',
+            '.theme-button-bare',
+        ]) {
+            const escaped = variantSelector.replace(/[.]/g, '\\.');
+            const restRule = indexCss.match(new RegExp(`${escaped}\\s*{([\\s\\S]*?)\\n {2}}`));
+            expect(restRule, `${variantSelector} rest rule not found`).not.toBeNull();
+            const restBody = restRule?.[1] ?? '';
+            expect(restBody, `${variantSelector} must keep reading --button-fill-rest`).toContain('--button-fill: var(--button-fill-rest);');
+            expect(restBody, `${variantSelector} must keep reading --button-border-rest`).toContain('--button-border: var(--button-border-rest);');
+            expect(restBody, `${variantSelector} must not read the icon-only tokens`).not.toMatch(/--button-icon-/);
+        }
+
+        const ghostRestRule = indexCss.match(/\.admin-accent-ghost\s*{\s*\n\s*--button-fill:([\s\S]*?)\n {2}}/);
+        expect(ghostRestRule).not.toBeNull();
+        expect(ghostRestRule?.[1] ?? '').not.toMatch(/--button-icon-/);
+    });
+});

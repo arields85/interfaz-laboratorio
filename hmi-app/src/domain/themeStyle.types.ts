@@ -76,6 +76,27 @@ export interface ThemeButtonStyle {
      * (Contorno's flat outline recipe, uniform across every button group).
      */
     readonly baseStrengthPercent: number;
+    /**
+     * Icon-only button recipe (AdminIconToolbarButton: catalog rail, builder
+     * view toolbar, undo/redo -- every themed button with an icon and no
+     * visible text), completely independent from `rest`/`hover`/
+     * `baseStrengthPercent` above. User decision (2026-09-28): only
+     * icon-only buttons go borderless like Clasico under a theme like
+     * Contorno (own color at full strength, radius still follows the
+     * theme); every button WITH visible text (AdminActionButton, HmiButton,
+     * `.admin-accent-ghost`) and the segmented controls
+     * (WidgetHeaderTemporalControls) keep their current bordered Contorno
+     * look untouched, driven entirely by `rest`/`hover`/
+     * `baseStrengthPercent` above.
+     */
+    readonly icon: ThemeButtonIconStyle;
+}
+
+/** Icon-only button visual recipe -- see `ThemeButtonStyle.icon`. */
+export interface ThemeButtonIconStyle {
+    readonly rest: ThemeSurfaceStateStyle;
+    readonly hover: ThemeSurfaceStateStyle;
+    readonly baseStrengthPercent: number;
 }
 
 /** A complete theme: widget frame + button visual style. */

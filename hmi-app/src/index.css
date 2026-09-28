@@ -497,6 +497,17 @@ h1, h2, h3, h4, h5, h6 {
   initial-value: 100%;
 }
 
+/* Icon-only buttons (AdminIconToolbarButton: catalog rail, builder view
+ * toolbar, undo/redo) read their own --button-icon-* token set instead of
+ * the shared --button-* one above, so they can go borderless under Contorno
+ * without touching text buttons or the segmented controls (P1, user
+ * decision 2026-09-28). Same Houdini pattern as --button-base-strength. */
+@property --button-icon-base-strength {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 100%;
+}
+
 :root {
   /* "Clasico": overlay 0%/0% en ambos estados reproduce exactamente el
    * color propio de cada variante (ver --button-base-strength arriba); el
@@ -516,6 +527,24 @@ h1, h2, h3, h4, h5, h6 {
   --button-accent-opacity-rest: 0%;
   --button-accent-opacity-hover: 0%;
   --button-base-strength: 100%;
+  /* Icon-only recipe: identical numbers to the block above today, so
+   * Clasico stays pixel-identical; Contorno overrides only these via
+   * `themeStyle.service.ts` (see OUTLINE_THEME_STYLE.button.icon). */
+  --button-icon-radius-rest: 0.375rem;
+  --button-icon-radius-hover: 0.375rem;
+  --button-icon-fill-rest: 0%;
+  --button-icon-fill-hover: 0%;
+  --button-icon-border-rest: 0%;
+  --button-icon-border-hover: 0%;
+  --button-icon-accent-length-rest: 8px;
+  --button-icon-accent-length-hover: 8px;
+  --button-icon-accent-thickness-rest: 1px;
+  --button-icon-accent-thickness-hover: 1px;
+  --button-icon-accent-color-rest: #ffffff;
+  --button-icon-accent-color-hover: #ffffff;
+  --button-icon-accent-opacity-rest: 0%;
+  --button-icon-accent-opacity-hover: 0%;
+  --button-icon-base-strength: 100%;
 }
 
 /* ── Scrollbar delgado y discreto para paneles scrolleables ───────────────
@@ -873,11 +902,20 @@ h1, h2, h3, h4, h5, h6 {
     border-color: color-mix(in srgb, #fff var(--button-border), color-mix(in srgb, rgba(255, 255, 255, 0.2) var(--button-base-strength), transparent));
   }
 
-  /* Variante icon-neutral (AdminIconToolbarButton): sin borde propio hoy,
-   * solo un fondo hover white/5; en Contorno gana el outline parejo. */
+  /* Variante icon-neutral (AdminIconToolbarButton): shape/fill/border/base-
+   * strength vienen de sus propios tokens --button-icon-*, independientes
+   * de los --button-* compartidos que usan los otros 4 primitivos -- P1
+   * (2026-09-28): solo los botones de solo-ícono (sin texto visible) van
+   * sin borde como Clasico bajo Contorno; los botones CON texto y los
+   * controles segmentados conservan su look actual con borde. */
   .theme-button-icon-neutral {
-    --button-fill: var(--button-fill-rest);
-    --button-border: var(--button-border-rest);
+    --button-radius: var(--button-icon-radius-rest);
+    --button-fill: var(--button-icon-fill-rest);
+    --button-border: var(--button-icon-border-rest);
+    --button-accent-length: var(--button-icon-accent-length-rest);
+    --button-accent-thickness: var(--button-icon-accent-thickness-rest);
+    --button-accent-color: var(--button-icon-accent-color-rest);
+    --button-accent-opacity: var(--button-icon-accent-opacity-rest);
     background: color-mix(in srgb, #fff var(--button-fill), transparent);
     border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);
     /* Transition lives on the shared `.theme-button` base (see above) --
@@ -885,9 +923,14 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   .theme-button-icon-neutral:hover:not(:disabled) {
-    --button-fill: var(--button-fill-hover);
-    --button-border: var(--button-border-hover);
-    background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, rgba(255, 255, 255, 0.05) var(--button-base-strength), transparent));
+    --button-radius: var(--button-icon-radius-hover);
+    --button-fill: var(--button-icon-fill-hover);
+    --button-border: var(--button-icon-border-hover);
+    --button-accent-length: var(--button-icon-accent-length-hover);
+    --button-accent-thickness: var(--button-icon-accent-thickness-hover);
+    --button-accent-color: var(--button-icon-accent-color-hover);
+    --button-accent-opacity: var(--button-icon-accent-opacity-hover);
+    background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, rgba(255, 255, 255, 0.05) var(--button-icon-base-strength), transparent));
     border-color: color-mix(in srgb, #fff var(--button-border), transparent);
   }
 

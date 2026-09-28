@@ -53,6 +53,16 @@ export const CLASSIC_THEME_STYLE: ThemeStyle = {
         // button primitive's own CSS recipe (see index.css `.theme-button-*`)
         // shows through completely unchanged.
         baseStrengthPercent: 100,
+        // Icon-only buttons (AdminIconToolbarButton) already have no border
+        // and a 0.375rem radius at 0%/0% overlay + 100% strength -- same
+        // numbers as `rest`/`hover` above, kept as its own explicit block
+        // (P1, 2026-09-28) so Contorno can diverge here without touching
+        // text buttons or the segmented controls.
+        icon: {
+            rest: { radiusPx: 6, fillPercent: 0, borderPercent: 0, accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 } },
+            hover: { radiusPx: 6, fillPercent: 0, borderPercent: 0, accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 } },
+            baseStrengthPercent: 100,
+        },
     },
 };
 
@@ -96,6 +106,16 @@ export const OUTLINE_THEME_STYLE: ThemeStyle = {
         // fades out entirely, leaving the flat rest/hover outline recipe
         // above (mixed against each variant's own hue) as the only visual.
         baseStrengthPercent: 0,
+        // P1 (2026-09-28, user decision): icon-only buttons go borderless
+        // like Clasico under Contorno (100% own strength, 0% overlay) but
+        // keep the theme's radius (0) -- independent from `rest`/`hover`
+        // above, which stay bordered for text buttons and segmented
+        // controls.
+        icon: {
+            rest: { radiusPx: 0, fillPercent: 0, borderPercent: 0, accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 } },
+            hover: { radiusPx: 0, fillPercent: 0, borderPercent: 0, accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 } },
+            baseStrengthPercent: 100,
+        },
     },
 };
 
@@ -144,6 +164,12 @@ function buttonStyleToCssProperties(button: ThemeButtonStyle): Record<string, st
         ...surfaceStateToCssProperties('button', 'rest', button.rest),
         ...surfaceStateToCssProperties('button', 'hover', button.hover),
         '--button-base-strength': percentToken(button.baseStrengthPercent),
+        // Icon-only buttons read their own token set (see `.theme-button-
+        // icon-neutral` in index.css) so they can go borderless under
+        // Contorno without touching the shared --button-* tokens above.
+        ...surfaceStateToCssProperties('button-icon', 'rest', button.icon.rest),
+        ...surfaceStateToCssProperties('button-icon', 'hover', button.icon.hover),
+        '--button-icon-base-strength': percentToken(button.icon.baseStrengthPercent),
     };
 }
 

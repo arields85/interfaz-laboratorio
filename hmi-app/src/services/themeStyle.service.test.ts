@@ -72,6 +72,47 @@ describe('themeStyle.service presets', () => {
         });
     });
 
+    it('locks text buttons and segmented controls to today\'s bordered Contorno look (P1, user decision 2026-09-28)', () => {
+        // `rest`/`hover`/`baseStrengthPercent` drive AdminActionButton, HmiButton,
+        // `.admin-accent-ghost` and the WidgetHeaderTemporalControls segmented
+        // pill -- these must stay exactly as they were before P1.
+        expect(OUTLINE_THEME_STYLE.button.rest).toEqual({
+            radiusPx: 0,
+            fillPercent: 0,
+            borderPercent: 22,
+            accent: { lengthPx: 8, thicknessPx: 1, color: '#ffffff', opacityPercent: 0 },
+        });
+        expect(OUTLINE_THEME_STYLE.button.hover).toEqual({
+            radiusPx: 0,
+            fillPercent: 3,
+            borderPercent: 50,
+            accent: { lengthPx: 8, thicknessPx: 1, color: '#ffffff', opacityPercent: 0 },
+        });
+        expect(OUTLINE_THEME_STYLE.button.baseStrengthPercent).toBe(0);
+    });
+
+    it('locks icon-only buttons (AdminIconToolbarButton) borderless like Clasico in Contorno, keeping the theme radius (P1)', () => {
+        expect(OUTLINE_THEME_STYLE.button.icon.rest).toEqual({
+            radiusPx: 0,
+            fillPercent: 0,
+            borderPercent: 0,
+            accent: { lengthPx: 8, thicknessPx: 1, color: '#ffffff', opacityPercent: 0 },
+        });
+        expect(OUTLINE_THEME_STYLE.button.icon.hover).toEqual({
+            radiusPx: 0,
+            fillPercent: 0,
+            borderPercent: 0,
+            accent: { lengthPx: 8, thicknessPx: 1, color: '#ffffff', opacityPercent: 0 },
+        });
+        expect(OUTLINE_THEME_STYLE.button.icon.baseStrengthPercent).toBe(100);
+    });
+
+    it('keeps Clasico\'s icon-only recipe pixel-identical to its own text-button recipe', () => {
+        expect(CLASSIC_THEME_STYLE.button.icon.rest).toEqual(CLASSIC_THEME_STYLE.button.rest);
+        expect(CLASSIC_THEME_STYLE.button.icon.hover).toEqual(CLASSIC_THEME_STYLE.button.hover);
+        expect(CLASSIC_THEME_STYLE.button.icon.baseStrengthPercent).toBe(CLASSIC_THEME_STYLE.button.baseStrengthPercent);
+    });
+
     it('sets the button base strength so Clasico keeps every variant\'s own color and Contorno replaces it', () => {
         expect(CLASSIC_THEME_STYLE.button.baseStrengthPercent).toBe(100);
         expect(CLASSIC_THEME_STYLE.button.rest.fillPercent).toBe(0);
@@ -106,6 +147,11 @@ describe('themeStyleToCssProperties', () => {
         expect(properties['--button-radius-rest']).toBe('0px');
         expect(properties['--button-border-hover']).toBe('50%');
         expect(properties['--button-base-strength']).toBe('0%');
+        expect(properties['--button-icon-radius-rest']).toBe('0px');
+        expect(properties['--button-icon-radius-hover']).toBe('0px');
+        expect(properties['--button-icon-border-rest']).toBe('0%');
+        expect(properties['--button-icon-border-hover']).toBe('0%');
+        expect(properties['--button-icon-base-strength']).toBe('100%');
     });
 
     it('maps the Clasico button base strength to 100%', () => {
@@ -129,6 +175,8 @@ describe('applyThemeStyleToDocument / resetThemeStyleOnDocument', () => {
         expect(target.style.getPropertyValue('--frame-radius-rest')).toBe('0px');
         expect(target.style.getPropertyValue('--frame-accent-opacity-hover')).toBe('40%');
         expect(target.style.getPropertyValue('--button-border-hover')).toBe('50%');
+        expect(target.style.getPropertyValue('--button-icon-border-hover')).toBe('0%');
+        expect(target.style.getPropertyValue('--button-icon-base-strength')).toBe('100%');
     });
 
     it('removes every theme custom property, restoring the CSS defaults', () => {
