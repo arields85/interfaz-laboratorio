@@ -183,3 +183,5 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 Merged to main at session close. P8 live check approved (2026-09-28). The P8-review advisories
 (R3-001..R3-003, P9) are done; no open advisories remain on this branch. Pending: user review of
 this branch and merge to main.
+
+- 2026-09-28: RDD assess over `main..85aa136` (committed-only, `.gga` excluded): medium, 307 lines, `review_due` false (`under_budget`); no native review ran. Parent spot check: BuilderCanvas + DashboardBuilderPage tests 147/147.
