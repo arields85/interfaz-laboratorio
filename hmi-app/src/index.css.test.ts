@@ -48,8 +48,8 @@ describe('index.css widget frame theme engine', () => {
         expect(body).toMatch(/border:\s*1px solid color-mix\(in srgb, #fff var\(--frame-border\), transparent\);/);
         expect(body).toMatch(/color-mix\(in srgb, #fff var\(--frame-fill\), transparent\)/);
         expect(body).toContain('var(--frame-base-background)');
+        expect(body).toContain('overflow: hidden;');
         expect(body).toContain('overflow: clip;');
-        expect(body).toContain('overflow-clip-margin:');
         expect(body).toMatch(/transition:[\s\S]*--frame-radius[\s\S]*;/);
     });
 
@@ -96,6 +96,52 @@ describe('index.css widget frame theme engine', () => {
         expect(criticalBody).toContain('border-radius: var(--frame-radius);');
         expect(criticalBody).toContain('backdrop-filter: blur(var(--frame-blur));');
         expect(criticalBody).toMatch(/color-mix\(in srgb, var\(--color-status-critical\)/);
+    });
+
+    it('declares overflow: hidden before overflow: clip as a fallback, with no clip-margin bleed', () => {
+        const panelRule = indexCss.match(/\.glass-panel\s*{([\s\S]*?)\n {2}}/);
+        expect(panelRule).not.toBeNull();
+        const panelBody = panelRule?.[1] ?? '';
+        expect(panelBody).toMatch(/overflow: hidden;\s*\n\s*overflow: clip;/);
+        expect(panelBody).not.toMatch(/overflow-clip-margin/);
+
+        const warningRule = indexCss.match(/\.widget-state-warning\s*{\s*\n\s*--frame-radius: var\(--frame-radius-rest\);([\s\S]*?)\n {2}}/);
+        expect(warningRule).not.toBeNull();
+        const warningBody = warningRule?.[1] ?? '';
+        expect(warningBody).toMatch(/overflow: hidden;\s*\n\s*overflow: clip;/);
+        expect(warningBody).not.toMatch(/overflow-clip-margin/);
+
+        const criticalRule = indexCss.match(/\.widget-state-critical\s*{\s*\n\s*--frame-radius: var\(--frame-radius-rest\);([\s\S]*?)\n {2}}/);
+        expect(criticalRule).not.toBeNull();
+        const criticalBody = criticalRule?.[1] ?? '';
+        expect(criticalBody).toMatch(/overflow: hidden;\s*\n\s*overflow: clip;/);
+        expect(criticalBody).not.toMatch(/overflow-clip-margin/);
+    });
+
+    it('keeps the danger/warning semantic hover intensification untouched by the neutral frame hover swap', () => {
+        // `.glass-panel:hover` must only swap the theme custom properties, never
+        // declare `background`/`border` directly -- otherwise it could tie in
+        // cascade order against `.glass-panel-danger:hover` / `-warning:hover`,
+        // which still own the semantic literal intensification below.
+        const neutralHoverRule = indexCss.match(/\.glass-panel:hover,\s*\n\s*\.group:hover \.glass-panel\s*{([\s\S]*?)}/);
+        expect(neutralHoverRule).not.toBeNull();
+        const neutralHoverBody = neutralHoverRule?.[1] ?? '';
+        expect(neutralHoverBody).not.toMatch(/(?<!-)\bbackground:/);
+        expect(neutralHoverBody).not.toMatch(/(?<!-)\bborder(-color)?:/);
+
+        const dangerHoverRule = indexCss.match(/\.glass-panel-danger:hover,\s*\n\s*\.group:hover \.glass-panel-danger\s*{([\s\S]*?)}/);
+        expect(dangerHoverRule).not.toBeNull();
+        const dangerHoverBody = dangerHoverRule?.[1] ?? '';
+        expect(dangerHoverBody).toContain('color-mix(in srgb, var(--color-status-critical) 14%, transparent) 0%');
+        expect(dangerHoverBody).toContain('color-mix(in srgb, var(--color-status-critical) 4%, transparent) 100%');
+        expect(dangerHoverBody).toContain('border-color: color-mix(in srgb, var(--color-status-critical) 50%, transparent);');
+
+        const warningHoverRule = indexCss.match(/\.glass-panel-warning:hover,\s*\n\s*\.group:hover \.glass-panel-warning\s*{([\s\S]*?)}/);
+        expect(warningHoverRule).not.toBeNull();
+        const warningHoverBody = warningHoverRule?.[1] ?? '';
+        expect(warningHoverBody).toContain('color-mix(in srgb, var(--color-status-warning) 14%, transparent) 0%');
+        expect(warningHoverBody).toContain('color-mix(in srgb, var(--color-status-warning) 4%, transparent) 100%');
+        expect(warningHoverBody).toContain('border-color: color-mix(in srgb, var(--color-status-warning) 50%, transparent);');
     });
 
     it('disables the frame theme transitions under prefers-reduced-motion', () => {

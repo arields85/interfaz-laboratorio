@@ -700,11 +700,16 @@ h1, h2, h3, h4, h5, h6 {
     border: 1px solid color-mix(in srgb, #fff var(--frame-border), transparent);
     border-radius: var(--frame-radius);
     position: relative;
-    /* overflow: clip (not hidden) + overflow-clip-margin lets the corner-accent
-     * ::after below sit exactly on the 1px border without being cut off, while
-     * still clipping widget content to the rounded frame like before. */
+    /* The corner-accent ::after below is `inset: 0`, i.e. flush with the
+     * padding edge (immediately inside the border), so it already reads as
+     * "on" the border without needing any extra clip allowance. `overflow:
+     * hidden` is the fallback for browsers without `overflow: clip` support;
+     * `clip` (when supported) clips at the same padding edge with no scroll
+     * container side effects. Deliberately no extra bleed margin here: that
+     * would let real widget content paint past the rounded frame, not just
+     * the accent. */
+    overflow: hidden;
     overflow: clip;
-    overflow-clip-margin: 2px;
     isolation: isolate;
     transition:
       --frame-radius 0.2s ease, --frame-fill 0.2s ease, --frame-border 0.2s ease,
@@ -840,8 +845,8 @@ h1, h2, h3, h4, h5, h6 {
     -webkit-backdrop-filter: blur(var(--frame-blur));
     box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-status-warning) 20%, transparent);
     position: relative;
+    overflow: hidden;
     overflow: clip;
-    overflow-clip-margin: 2px;
     transition: --frame-radius 0.2s ease, --frame-blur 0.2s ease, --frame-accent-length 0.2s ease,
       --frame-accent-thickness 0.2s ease, --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease,
       border-color 0.2s ease, box-shadow 0.2s ease;
@@ -876,8 +881,8 @@ h1, h2, h3, h4, h5, h6 {
     -webkit-backdrop-filter: blur(var(--frame-blur));
     box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-status-critical) 20%, transparent);
     position: relative;
+    overflow: hidden;
     overflow: clip;
-    overflow-clip-margin: 2px;
     transition: --frame-radius 0.2s ease, --frame-blur 0.2s ease, --frame-accent-length 0.2s ease,
       --frame-accent-thickness 0.2s ease, --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease,
       border-color 0.2s ease, box-shadow 0.2s ease;

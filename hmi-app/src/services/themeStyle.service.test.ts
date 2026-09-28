@@ -146,9 +146,11 @@ describe('theme style persistence', () => {
             throw new Error('storage unavailable');
         });
 
-        expect(readStoredThemeStylePresetId()).toBeNull();
-
-        getItemSpy.mockRestore();
+        try {
+            expect(readStoredThemeStylePresetId()).toBeNull();
+        } finally {
+            getItemSpy.mockRestore();
+        }
     });
 
     it('fails safe when localStorage throws on write', () => {
@@ -156,9 +158,11 @@ describe('theme style persistence', () => {
             throw new Error('storage unavailable');
         });
 
-        expect(() => writeStoredThemeStylePresetId(OUTLINE_THEME_STYLE_ID)).not.toThrow();
-
-        setItemSpy.mockRestore();
+        try {
+            expect(() => writeStoredThemeStylePresetId(OUTLINE_THEME_STYLE_ID)).not.toThrow();
+        } finally {
+            setItemSpy.mockRestore();
+        }
     });
 });
 
