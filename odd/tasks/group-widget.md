@@ -183,6 +183,13 @@ after the user's live check. Slice boundaries are recorded under Progress.
   RED/GREEN: 11 new tests failing first. Writer: `npx tsc -b` clean, `npm run lint` clean,
   `npm test` 2710/2710. Parent spot check: groupWidget + dashboardViews 65/65.
 
+- 2026-09-28: slice review G5b+docs (base `3fb4a73`..`490e035`, 490 lines, medium, user granted):
+  lineage `review-daa0306c8c619b5b` APPROVED, acknowledged, authority burned; boundary advances
+  to `490e035`. Advisory SUGGESTIONs only (kept as optional later work):
+  R3-assign-header-button-path-untested (`DashboardBuilderPage.tsx:864`),
+  R3-assign-header-stale-slots (`:824-839`), R3-resize-preview-grid-snap
+  (`BuilderCanvas.tsx:696-698`).
+
 ## Next step
 
-Slice review (base 3fb4a73), then the user's live check (G6) and the single merge.
+User's live check (G6), then the single merge to `main`.
