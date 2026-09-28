@@ -331,7 +331,12 @@ after the user's live check. Slice boundaries are recorded under Progress.
   occupied + 1 empty slot) at 1920/1600/1440/1280/1100 px: zero overlaps between title, view
   tabs and slots, no slot outside the header. Other slot counts covered by the 0..3 unit tests.
 
+- 2026-09-28: live check 6: header layout OK. G14b (inline, parent — one mechanical file + test):
+  the header widget selection ring (`HeaderSelectionFrame.tsx`) now uses `--color-admin-accent`
+  like the grid frame (gradient defs removed). RED: 2 tests failing on the old gradient tokens;
+  GREEN 3/3; `npx tsc -b` clean, eslint clean, `npm test` 2798/2798.
+
 ## Next step
 
-User's check of the header, then the single merge (group -> main), then theme and visual
+User's check of the header ring color, then the single merge (group -> main), then theme and visual
 defaults rebased and merged in order.
