@@ -203,6 +203,7 @@ function getBuilderCanvasSnapshot() {
         widgetIds: JSON.parse(node.getAttribute('data-widget-ids') ?? '[]') as string[],
         layout: JSON.parse(node.getAttribute('data-layout') ?? '[]') as Array<{ widgetId: string; x: number; y: number; w: number; h: number }>,
         editingGroupId: node.getAttribute('data-editing-group-id') || undefined,
+        placementSourceWidgetId: node.getAttribute('data-placement-source-widget-id') || undefined,
     };
 }
 
@@ -389,6 +390,7 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         onToggleGroupEditMode,
         onExitGroupEditMode,
         onDuplicatePlacementCommit,
+        placementSourceWidgetId,
     }: {
         cols: number;
         rows: number;
@@ -404,6 +406,7 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         onToggleGroupEditMode?: (widgetId: string) => void;
         onExitGroupEditMode?: () => void;
         onDuplicatePlacementCommit?: (target: { x: number; y: number }) => void;
+        placementSourceWidgetId?: string;
     }) => (
         builderCanvasMock({ cols, rows, layout, widgets, onWidgetSelect }),
         <div
@@ -413,6 +416,7 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
             data-layout={JSON.stringify(layout)}
             data-widget-ids={JSON.stringify(widgets.map((widget) => widget.id))}
             data-editing-group-id={editingGroupId ?? ''}
+            data-placement-source-widget-id={placementSourceWidgetId ?? ''}
         >
             {widgets.map((widget) => (
                 <button
@@ -2763,6 +2767,42 @@ describe('DashboardBuilderPage undo/redo', () => {
             await waitFor(() => {
                 expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
             });
+
+            await user.keyboard('{Escape}');
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBeUndefined();
+            });
+        });
+
+        // R3-002 (P8 copy placement review): with BOTH a pending placement and pencil edit mode
+        // active, the first Escape must cancel ONLY the placement (edit mode stays active, no
+        // copy created, no history step), and only the second Escape exits edit mode.
+        it('cancels a pending placement on the first Escape and only exits edit mode on the second, when both are active', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeEditableLockedGroupDashboard());
+
+            await user.click(screen.getByRole('button', { name: 'Alternar edicion group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
+            });
+
+            await user.click(screen.getByRole('button', { name: 'Duplicar group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().placementSourceWidgetId).toBe('group-1');
+            });
+
+            const undoButton = screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' });
+            expect(undoButton).toBeDisabled();
+
+            await user.keyboard('{Escape}');
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().placementSourceWidgetId).toBeUndefined();
+            });
+            // Edit mode survives the first Escape — it only cancelled the placement.
+            expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
+            // No copy was created — the widget count is unchanged and there is no history step.
+            expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(2);
+            expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
 
             await user.keyboard('{Escape}');
             await waitFor(() => {
