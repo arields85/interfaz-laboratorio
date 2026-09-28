@@ -81,6 +81,14 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   belongs to at most one locked group (exclude widgets already in another locked group at lock
   time; sanitize on read); resize preview must match the committed clamp; restore the weakened
   BuilderCanvas test helper.
+- [ ] **G7** — Live check 1 fixes (user, 2026-09-28): (a) the lock action icon is inverted
+  (unlocked shows a closed lock), so the user toggled it the wrong way — icon must show the STATE
+  (LockOpen when unlocked, Lock when locked); (b) containers must ALWAYS paint beneath the other
+  widgets, locked or not, in builder and viewer — root cause: `BuilderCanvas` renders
+  `visibleLayout` order while the G2 reorder only touched `widgets`; (c) clearing the title leaves
+  the container without header text (no 'Contenedor' fallback in `GroupWidget.tsx:81`);
+  (d) integration tests with the REAL `BuilderCanvas` (the page tests mock it, which hid all of
+  this): add container, lock, drag -> members move, render order.
 - [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
@@ -190,6 +198,10 @@ after the user's live check. Slice boundaries are recorded under Progress.
   R3-assign-header-stale-slots (`:824-839`), R3-resize-preview-grid-snap
   (`BuilderCanvas.tsx:696-698`).
 
+- 2026-09-28: live check 1 FAILED on point 2 (lock): container looked locked on creation, lock
+  did not group, container always on top and blurring the widgets below, title could not be
+  cleared. Root causes confirmed in code (see G7).
+
 ## Next step
 
-User's live check (G6), then the single merge to `main`.
+G7 (writer), then the user's live check again, then the single merge to `main`.
