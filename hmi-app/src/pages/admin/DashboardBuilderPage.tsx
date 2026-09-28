@@ -68,7 +68,12 @@ import {
     updateDashboardViewPresentation,
     normalizeDashboardViews,
 } from '../../utils/dashboardViews';
-import { computeGroupMembers, reorderWidgetsWithGroupBeforeMembers } from '../../utils/groupWidget';
+import {
+    computeGroupMembers,
+    duplicateLockedGroup,
+    removeMemberFromGroups,
+    reorderWidgetsWithGroupBeforeMembers,
+} from '../../utils/groupWidget';
 import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
 import {
     DEFAULT_CIRCULAR_ARC_GLOW_INTENSITY,
@@ -1299,11 +1304,45 @@ export default function DashboardBuilderPage() {
             const selectedLayout = activeView.layout.find((layoutItem) => layoutItem.widgetId === targetWidgetId);
             if (!selectedWidget || !selectedLayout) return;
 
+            // D5: duplicating a LOCKED group duplicates the whole group (container + members,
+            // already grouped, new ids) as one copy. Every other case — an unlocked container, or
+            // a plain widget that happens to be a group member — falls through to the regular
+            // single-widget duplicate below.
+            if (isGroupWidget(selectedWidget) && selectedWidget.locked === true) {
+                const headerWidgetIdSet = new Set((draft.headerConfig?.widgetSlots ?? []).map((slot) => slot.widgetId));
+                const groupDuplication = duplicateLockedGroup(
+                    targetWidgetId,
+                    activeView.widgets,
+                    activeView.layout,
+                    draft.cols,
+                    draft.rows,
+                    generateWidgetId,
+                    headerWidgetIdSet,
+                );
+
+                if (groupDuplication) {
+                    setDraft(prev => {
+                        if (!prev) return prev;
+                        return updateSelectedView(prev, (view) => ({
+                            ...view,
+                            widgets: groupDuplication.widgets,
+                            layout: groupDuplication.layout,
+                        }));
+                    }, { coalesce: false });
+
+                    setSelectedWidgetId(groupDuplication.newSelectedWidgetId);
+                    return;
+                }
+            }
+
             const newId = generateWidgetId(selectedWidget.type);
             const duplicatedWidget: WidgetConfig = {
                 ...JSON.parse(JSON.stringify(selectedWidget)),
                 id: newId,
                 title: selectedWidget.title ? `${selectedWidget.title} (Copia)` : undefined,
+                // D5: an unlocked container's copy is always a fresh, empty group — never inherit
+                // a stale/malformed member list or locked flag from the clone.
+                ...(isGroupWidget(selectedWidget) ? { locked: false, memberWidgetIds: [] } : {}),
             };
 
             const newLayout: WidgetLayout = {
@@ -1555,7 +1594,11 @@ export default function DashboardBuilderPage() {
                         return view;
                     }
 
-                    const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, view.widgets, view.layout);
+                    // G4: a widget promoted to the header never lives on the canvas, so it can
+                    // never become a member even if its persisted layout still sits fully inside
+                    // the container's bounds.
+                    const headerWidgetIdSet = new Set((prev.headerConfig?.widgetSlots ?? []).map((slot) => slot.widgetId));
+                    const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, view.widgets, view.layout, headerWidgetIdSet);
                     const lockedWidgets = view.widgets.map((item) => (
                         item.id === widgetId ? { ...item, locked: true, memberWidgetIds } : item
                     ));
@@ -1594,7 +1637,12 @@ export default function DashboardBuilderPage() {
                 const nextHeaderSlots = (prev.headerConfig?.widgetSlots ?? []).filter(slot => slot.widgetId !== targetWidgetId);
                 const nextDashboard = updateSelectedView(prev, (view) => ({
                     ...view,
-                    widgets: view.widgets.filter((widget) => widget.id !== targetWidgetId),
+                    // D5: deleting a member also drops it from its (still locked) group's member
+                    // list, in this same history step; deleting a group container removes only
+                    // the container itself — its members simply stay in place, released, since
+                    // nothing references them as a group anymore.
+                    widgets: removeMemberFromGroups(view.widgets, targetWidgetId)
+                        .filter((widget) => widget.id !== targetWidgetId),
                     layout: view.layout.filter((layoutItem) => layoutItem.widgetId !== targetWidgetId),
                 }));
 

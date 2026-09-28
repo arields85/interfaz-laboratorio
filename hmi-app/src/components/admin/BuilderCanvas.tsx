@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Trash2, ArrowUp, LayoutDashboard, Lock, LockOpen } from 'lucide-react';
-import { isGroupWidget, type WidgetConfig, type WidgetLayout } from '../../domain/admin.types';
+import { isGroupWidget, type GroupWidgetConfig, type WidgetConfig, type WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
@@ -217,15 +217,21 @@ export default function BuilderCanvas({
 }: BuilderCanvasProps) {
     const getWidgetCornerRadius = (type: WidgetConfig['type']) => (type === 'text-title' ? '0px' : '1.5rem');
     const widgetMap = new Map(widgets.map((widget) => [widget.id, widget]));
+    // Sanitized member ids of a locked group, minus any header-promoted id (G4): a widget
+    // promoted to the header never lives on the canvas, so it can never be dragged/resized as
+    // part of the group nor block its own individual interaction.
+    const resolveVisibleGroupMemberIds = useCallback((group: GroupWidgetConfig) => (
+        sanitizeGroupMemberIds(group.memberWidgetIds, group.id, widgets).filter((memberId) => !headerWidgetIds?.has(memberId))
+    ), [widgets, headerWidgetIds]);
     // Ids of widgets that are members of a currently locked group (D1/G2): selectable, but
     // never draggable or resizable individually while their container stays locked.
     const lockedMemberIds = useMemo(() => {
         const ids = new Set<string>();
         widgets.filter(isGroupWidget).filter((widget) => widget.locked).forEach((widget) => {
-            sanitizeGroupMemberIds(widget.memberWidgetIds, widget.id, widgets).forEach((memberId) => ids.add(memberId));
+            resolveVisibleGroupMemberIds(widget).forEach((memberId) => ids.add(memberId));
         });
         return ids;
-    }, [widgets]);
+    }, [widgets, resolveVisibleGroupMemberIds]);
     const rightEdgeUsesMajorLine = cols % GRID_MAJOR_INTERVAL_CELLS === 0;
     const bottomEdgeUsesMajorLine = rows % GRID_MAJOR_INTERVAL_CELLS === 0;
     const isGridVisible = useUIStore((state) => state.isGridVisible);
@@ -295,7 +301,7 @@ export default function BuilderCanvas({
             return baseLayout;
         }
 
-        const memberIds = sanitizeGroupMemberIds(widget.memberWidgetIds, widget.id, widgets);
+        const memberIds = resolveVisibleGroupMemberIds(widget);
         const membersBoundingBox = computeMembersBoundingBox(memberIds, layout);
 
         return clampGroupResizeToMembers(baseLayout, membersBoundingBox);
@@ -353,19 +359,29 @@ export default function BuilderCanvas({
 
         const draggedWidget = widgetMap.get(item.widgetId);
         const isLockedMember = lockedMemberIds.has(item.widgetId);
-        const isLockedGroupContainer = type === 'move'
+        // Narrowed once into a typed variable (rather than a boolean flag) so the group-member
+        // resolution below keeps `GroupWidgetConfig` typing instead of the wider `WidgetConfig`.
+        const draggedLockedGroup: GroupWidgetConfig | undefined = type === 'move'
             && draggedWidget !== undefined
             && isGroupWidget(draggedWidget)
-            && draggedWidget.locked === true;
-        const groupMemberIds = isLockedGroupContainer
-            ? sanitizeGroupMemberIds(draggedWidget.memberWidgetIds, draggedWidget.id, widgets)
+            && draggedWidget.locked === true
+            ? draggedWidget
+            : undefined;
+        // G3/G4: only members that actually resolve to a layout entry ride along with the
+        // container — an id without one (malformed data, or a header-promoted widget slipping
+        // through) is skipped entirely instead of moving a fabricated {w:0,h:0} placeholder.
+        const resolvedGroupMembers = draggedLockedGroup
+            ? resolveVisibleGroupMemberIds(draggedLockedGroup)
+                .map((memberId) => {
+                    const memberLayout = layout.find((entry) => entry.widgetId === memberId);
+                    return memberLayout ? { memberId, memberLayout } : null;
+                })
+                .filter((entry): entry is { memberId: string; memberLayout: WidgetLayout } => entry !== null)
             : [];
-        const groupMemberStartLayouts = groupMemberIds.map((memberId) => {
-            const memberLayout = layout.find((entry) => entry.widgetId === memberId);
-            return memberLayout
-                ? { x: memberLayout.x, y: memberLayout.y, w: memberLayout.w, h: memberLayout.h }
-                : { x: item.x, y: item.y, w: 0, h: 0 };
-        });
+        const groupMemberIds = resolvedGroupMembers.map((entry) => entry.memberId);
+        const groupMemberStartLayouts = resolvedGroupMembers.map((entry) => (
+            { x: entry.memberLayout.x, y: entry.memberLayout.y, w: entry.memberLayout.w, h: entry.memberLayout.h }
+        ));
 
         const startLayout = { x: item.x, y: item.y, w: item.w, h: item.h };
         const startBounds = layoutToPixelBounds(startLayout, metrics);

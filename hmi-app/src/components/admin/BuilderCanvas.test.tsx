@@ -111,6 +111,7 @@ async function renderInteractiveCanvas(overrides?: {
     onLayoutCommit?: (layout: { widgetId: string; x: number; y: number; w: number; h: number }) => void;
     onToggleGroupLock?: (widgetId: string) => void;
     onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void;
+    headerWidgetIds?: Set<string>;
     resizeWidth?: number;
     resizeHeight?: number;
 }) {
@@ -134,6 +135,7 @@ async function renderInteractiveCanvas(overrides?: {
                 onLayoutCommit={overrides?.onLayoutCommit}
                 onToggleGroupLock={overrides?.onToggleGroupLock}
                 onGroupLayoutCommit={overrides?.onGroupLayoutCommit}
+                headerWidgetIds={overrides?.headerWidgetIds}
             />
         </div>,
     );
@@ -1049,7 +1051,12 @@ describe('BuilderCanvas', () => {
     });
 
     describe('locked group container move (G3)', () => {
-        function renderGroupMoveCanvas(overrides?: { onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void }) {
+        function renderGroupMoveCanvas(overrides?: {
+            onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void;
+            widgets?: WidgetConfig[];
+            layout?: WidgetLayout[];
+            headerWidgetIds?: Set<string>;
+        }) {
             return renderInteractiveCanvas({
                 widgets: [
                     makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
@@ -1109,6 +1116,65 @@ describe('BuilderCanvas', () => {
             expect(onGroupLayoutCommit).toHaveBeenCalledWith([
                 { widgetId: 'group-1', x: 30, y: 2, w: 10, h: 10 },
                 { widgetId: 'member-1', x: 31, y: 3, w: 2, h: 2 },
+            ]);
+        });
+
+        it('excludes a header-promoted member from the group move (G4: it never lives on the canvas)', async () => {
+            const user = userEvent.setup();
+            const onGroupLayoutCommit = vi.fn();
+
+            await renderGroupMoveCanvas({
+                onGroupLayoutCommit,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1', 'header-widget'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                    makeWidget({ id: 'header-widget', title: 'Header widget' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 2, y: 2, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 3, y: 3, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'header-widget', x: 4, y: 4, w: 2, h: 2 }),
+                ],
+                headerWidgetIds: new Set(['header-widget']),
+            });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 160, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 160, clientY: 100 });
+
+            expect(onGroupLayoutCommit).toHaveBeenCalledWith([
+                { widgetId: 'group-1', x: 4, y: 2, w: 10, h: 10 },
+                { widgetId: 'member-1', x: 5, y: 3, w: 2, h: 2 },
+            ]);
+        });
+
+        it('skips a member id without a resolvable layout entry instead of moving a {w:0,h:0} placeholder', async () => {
+            const user = userEvent.setup();
+            const onGroupLayoutCommit = vi.fn();
+
+            await renderGroupMoveCanvas({
+                onGroupLayoutCommit,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1', 'ghost-member'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 2, y: 2, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 3, y: 3, w: 2, h: 2 }),
+                ],
+            });
+
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 160, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 160, clientY: 100 });
+
+            expect(onGroupLayoutCommit).toHaveBeenCalledWith([
+                { widgetId: 'group-1', x: 4, y: 2, w: 10, h: 10 },
+                { widgetId: 'member-1', x: 5, y: 3, w: 2, h: 2 },
             ]);
         });
     });

@@ -379,6 +379,8 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         onLayoutCommit,
         onToggleGroupLock,
         onGroupLayoutCommit,
+        onDelete,
+        onDuplicate,
     }: {
         cols: number;
         rows: number;
@@ -388,6 +390,8 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         onLayoutCommit?: (layout: WidgetLayout) => void;
         onToggleGroupLock?: (widgetId: string) => void;
         onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void;
+        onDelete?: (widgetId: string) => void;
+        onDuplicate?: (widgetId: string) => void;
     }) => (
         builderCanvasMock({ cols, rows, layout, widgets, onWidgetSelect }),
         <div
@@ -434,9 +438,31 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
                     Simular mover grupo
                 </button>
             )}
+            {onDuplicate && widgets.map((widget) => (
+                <button
+                    key={`dup-${widget.id}`}
+                    type="button"
+                    onClick={() => onDuplicate(widget.id)}
+                >
+                    Duplicar {widget.id}
+                </button>
+            ))}
+            {onDelete && widgets.map((widget) => (
+                <button
+                    key={`del-${widget.id}`}
+                    type="button"
+                    onClick={() => onDelete(widget.id)}
+                >
+                    Eliminar {widget.id}
+                </button>
+            ))}
         </div>
     ),
 }));
+
+function getLatestBuilderCanvasWidgets(): WidgetConfig[] {
+    return (builderCanvasMock.mock.calls.at(-1)?.[0] as { widgets: WidgetConfig[] } | undefined)?.widgets ?? [];
+}
 
 describe('DashboardBuilderPage', () => {
     beforeEach(() => {
@@ -2205,6 +2231,202 @@ describe('DashboardBuilderPage undo/redo', () => {
             expect(getBuilderCanvasSnapshot().layout).toEqual(originalLayout);
         });
         expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+    });
+
+    it('closing a group lock never captures a header-promoted widget as a member (G4)', async () => {
+        const user = userEvent.setup();
+        await renderBuilderPage(makeDashboard({
+            id: 'dashboard-1',
+            cols: 20,
+            rows: 12,
+            widgets: [
+                makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
+            ],
+            layout: [
+                makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+            ],
+            headerConfig: { widgetSlots: [{ widgetId: 'widget-1', column: 0 }] },
+        }));
+
+        await user.click(screen.getByRole('button', { name: 'Alternar candado group-1' }));
+
+        await waitFor(() => {
+            const group = getLatestBuilderCanvasWidgets().find((widget) => widget.id === 'group-1');
+            expect(group?.type === 'group' ? group.locked : undefined).toBe(true);
+            expect(group?.type === 'group' ? group.memberWidgetIds : undefined).toEqual([]);
+        });
+    });
+
+    describe('D5 copy/delete', () => {
+        it('duplicating a locked group duplicates the container and every member as one new, already-grouped copy, in one undo step', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeDashboard({
+                id: 'dashboard-1',
+                cols: 20,
+                rows: 12,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'], title: 'Contenedor' }),
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            }));
+
+            await user.click(screen.getByRole('button', { name: 'Duplicar group-1' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(4);
+            });
+
+            const widgets = getLatestBuilderCanvasWidgets();
+            const newContainer = widgets.find((widget) => widget.type === 'group' && widget.id !== 'group-1');
+            expect(newContainer?.type === 'group' ? newContainer.locked : undefined).toBe(true);
+            const newMemberId = newContainer?.type === 'group' ? newContainer.memberWidgetIds?.[0] : undefined;
+            expect(newMemberId).toBeDefined();
+            expect(newMemberId).not.toBe('widget-1');
+            expect(widgets.some((widget) => widget.id === newMemberId)).toBe(true);
+
+            // The original group is untouched.
+            const originalGroup = widgets.find((widget) => widget.id === 'group-1');
+            expect(originalGroup?.type === 'group' ? originalGroup.memberWidgetIds : undefined).toEqual(['widget-1']);
+
+            const layout = getBuilderCanvasSnapshot().layout;
+            const newContainerLayout = layout.find((item) => item.widgetId === newContainer?.id);
+            const newMemberLayout = layout.find((item) => item.widgetId === newMemberId);
+            expect(newContainerLayout).toEqual({ widgetId: newContainer?.id, x: 0, y: 4, w: 4, h: 4 });
+            expect(newMemberLayout).toEqual({ widgetId: newMemberId, x: 1, y: 5, w: 1, h: 1 });
+
+            await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1']);
+            });
+            expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+        });
+
+        it('duplicating an unlocked group duplicates only the empty container', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeDashboard({
+                id: 'dashboard-1',
+                cols: 20,
+                rows: 12,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            }));
+
+            await user.click(screen.getByRole('button', { name: 'Duplicar group-1' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(3);
+            });
+
+            const widgets = getLatestBuilderCanvasWidgets();
+            const newContainer = widgets.find((widget) => widget.type === 'group' && widget.id !== 'group-1');
+            expect(newContainer?.type === 'group' ? newContainer.locked : undefined).toBe(false);
+            expect(newContainer?.type === 'group' ? newContainer.memberWidgetIds : undefined).toEqual([]);
+        });
+
+        it('duplicating a member of a locked group duplicates just that widget, and the copy is not a member', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeDashboard({
+                id: 'dashboard-1',
+                cols: 20,
+                rows: 12,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            }));
+
+            await user.click(screen.getByRole('button', { name: 'Duplicar widget-1' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(3);
+            });
+
+            const widgets = getLatestBuilderCanvasWidgets();
+            const group = widgets.find((widget) => widget.id === 'group-1');
+            expect(group?.type === 'group' ? group.memberWidgetIds : undefined).toEqual(['widget-1']);
+
+            const newWidgetId = getBuilderCanvasSnapshot().widgetIds.find((id) => id !== 'group-1' && id !== 'widget-1');
+            expect(newWidgetId).toBeDefined();
+            expect(group?.type === 'group' ? group.memberWidgetIds?.includes(newWidgetId as string) : undefined).toBe(false);
+        });
+
+        it("deleting a member removes it and drops it from its group's member list, in one undo step", async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeDashboard({
+                id: 'dashboard-1',
+                cols: 20,
+                rows: 12,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1', 'widget-2'] }),
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                    makeWidget({ id: 'widget-2', title: 'Widget 2' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                    makeLayout({ widgetId: 'widget-2', x: 2, y: 2, w: 1, h: 1 }),
+                ],
+            }));
+
+            await user.click(screen.getByRole('button', { name: 'Eliminar widget-1' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-2']);
+            });
+
+            const group = getLatestBuilderCanvasWidgets().find((widget) => widget.id === 'group-1');
+            expect(group?.type === 'group' ? group.locked : undefined).toBe(true);
+            expect(group?.type === 'group' ? group.memberWidgetIds : undefined).toEqual(['widget-2']);
+
+            await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1', 'widget-2']);
+            });
+            const restoredGroup = getLatestBuilderCanvasWidgets().find((widget) => widget.id === 'group-1');
+            expect(restoredGroup?.type === 'group' ? restoredGroup.memberWidgetIds : undefined).toEqual(['widget-1', 'widget-2']);
+            expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+        });
+
+        it('deleting a group container removes only the container; members stay in place and released', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeDashboard({
+                id: 'dashboard-1',
+                cols: 20,
+                rows: 12,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            }));
+
+            await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-1']);
+            });
+        });
     });
 
     it('rapid consecutive property edits coalesce into a single undo step', async () => {
