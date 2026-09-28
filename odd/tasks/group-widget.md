@@ -318,7 +318,20 @@ after the user's live check. Slice boundaries are recorded under Progress.
   covered by a test), R3-g12-class-only-assertions (SUGGESTION), R3-task-doc-garbled-next-step
   (SUGGESTION, this section — fixed here). The WARNING is queued for the next writer run.
 
+- 2026-09-28: live check 5: G13 (smooth locked resize, handles outside), G14 (selection color
+  from Acento Admin) OK; G11 point 5-3 OK -> G11 closed; G12 still overlapping.
+- 2026-09-28: G12b (route: delegated writer) — parent measured the live builder via CDP: slot
+  canvas fixed `w-72` capped by `max-w-full` (235px) held 312px of slots and overflowed left onto
+  the view tabs. User rule: the title is never truncated and nothing wraps; the slot area takes
+  exactly the space its slots occupy. `138c00a` fix(header): size the header widget slots to
+  their content (`w-auto`, no `max-w-full`, `w-0` only for viewer with zero widgets);
+  `bac8766` test(builder): locked container px floor on the NW handle (closes the last review
+  WARNING). RED 4 / GREEN 99 focused; `npx tsc -b` clean, `npm run lint` clean, `npm test`
+  2795/2795. Parent live verification (separate control-Chrome tab, same dashboard with 2
+  occupied + 1 empty slot) at 1920/1600/1440/1280/1100 px: zero overlaps between title, view
+  tabs and slots, no slot outside the header. Other slot counts covered by the 0..3 unit tests.
+
 ## Next step
 
-User's live check (G11 repro attempt with immediate CDP state capture, G12, G13, G14); then the
-single merge.
+User's check of the header, then the single merge (group -> main), then theme and visual
+defaults rebased and merged in order.
