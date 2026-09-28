@@ -144,6 +144,40 @@ function toGridPosition(rect: Pick<WidgetLayout, 'x' | 'y'>): { x: number; y: nu
     return { x: rect.x, y: rect.y };
 }
 
+/**
+ * P8/R3-001: the ONE place that turns a raw pointer client position into the clamped grid cell
+ * the placement ghost occupies. Shared by the continuous pointermove tracking and the pointerdown
+ * commit so both always agree on the same cell — a click/tap with no prior move (touch, pen, or a
+ * pointerdown at a new location) must land where the pointer actually is, not wherever the ghost
+ * was last drawn.
+ */
+function resolvePointerGridCell(args: {
+    clientX: number;
+    clientY: number;
+    container: Element;
+    // Kept as separate primitives (not one `metrics` object) so a caller's `useEffect` can list
+    // exactly `cellWidth`/`rowHeight` in its dependency array, matching the granular deps it
+    // already tracks instead of forcing the whole (per-render-new) metrics object in.
+    cellWidth: number;
+    rowHeight: number;
+    size: { w: number; h: number };
+    cols: number;
+    rows: number;
+}): { x: number; y: number } {
+    const rect = args.container.getBoundingClientRect();
+    const zoom = getEffectiveZoom();
+    const localX = visualToLayoutPx(args.clientX - rect.left, zoom);
+    const localY = visualToLayoutPx(args.clientY - rect.top, zoom);
+    const gridX = Math.floor(localX / args.cellWidth);
+    const gridY = Math.floor(localY / args.rowHeight);
+
+    return toGridPosition(clampWidgetBounds(
+        { x: gridX, y: gridY, w: args.size.w, h: args.size.h },
+        args.cols,
+        args.rows,
+    ));
+}
+
 function resolveCommittedLayout(args: {
     interaction: InteractionState;
     metrics: WidgetInteractionMetrics;
@@ -433,18 +467,16 @@ export default function BuilderCanvas({
                 return;
             }
 
-            const rect = container.getBoundingClientRect();
-            const zoom = getEffectiveZoom();
-            const localX = visualToLayoutPx(event.clientX - rect.left, zoom);
-            const localY = visualToLayoutPx(event.clientY - rect.top, zoom);
-            const gridX = Math.floor(localX / metrics.cellWidth);
-            const gridY = Math.floor(localY / metrics.rowHeight);
-
-            setPlacementGridPosition(toGridPosition(clampWidgetBounds(
-                { x: gridX, y: gridY, w: placementSource.w, h: placementSource.h },
+            setPlacementGridPosition(resolvePointerGridCell({
+                clientX: event.clientX,
+                clientY: event.clientY,
+                container,
+                cellWidth: metrics.cellWidth,
+                rowHeight: metrics.rowHeight,
+                size: { w: placementSource.w, h: placementSource.h },
                 cols,
                 rows,
-            )));
+            }));
         };
 
         window.addEventListener('pointermove', handlePointerMove);
@@ -454,14 +486,33 @@ export default function BuilderCanvas({
     // A click anywhere on the canvas — empty space, or on top of any widget, overlap is allowed —
     // drops the pending copy instead of selecting/dragging whatever was clicked. Returns whether
     // it consumed the pointerdown, so callers skip their normal handling when it did.
+    //
+    // R3-001: commits the cell under THIS pointerdown's own clientX/clientY (via the same
+    // `resolvePointerGridCell` helper the pointermove tracking uses), never the last-tracked
+    // `placementGridPosition` state — a click/tap with no prior pointermove (touch, pen, or a
+    // pointerdown at a new location) would otherwise drop the copy at a stale cell.
     const commitPlacementAt = (event: React.PointerEvent<HTMLDivElement>): boolean => {
-        if (!placementSourceWidgetId || !placementGridPosition || event.button !== 0) {
+        if (!placementSourceWidgetId || !placementSource || event.button !== 0) {
+            return false;
+        }
+
+        const container = containerRef.current;
+        if (!container || metrics.cellWidth <= 0 || metrics.rowHeight <= 0) {
             return false;
         }
 
         event.preventDefault();
         event.stopPropagation();
-        onDuplicatePlacementCommit?.(placementGridPosition);
+        onDuplicatePlacementCommit?.(resolvePointerGridCell({
+            clientX: event.clientX,
+            clientY: event.clientY,
+            container,
+            cellWidth: metrics.cellWidth,
+            rowHeight: metrics.rowHeight,
+            size: { w: placementSource.w, h: placementSource.h },
+            cols,
+            rows,
+        }));
         return true;
     };
 

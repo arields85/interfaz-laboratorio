@@ -2643,10 +2643,13 @@ describe('BuilderCanvas', () => {
 
             const otherItem = screen.getByTestId('builder-canvas-item-widget-2');
             // Inside widget-2's own cells (x=10..11, y=5..6): clientX=650 -> floor(650/60)=10.
+            // No prior pointermove — R3-001: the commit must use THIS pointerdown's own
+            // clientX/clientY, not a stale `placementGridPosition` left over from the seed.
             await pressPointer(user, otherItem, { clientX: 650, clientY: 320 });
             await releasePointer(user, otherItem, { clientX: 650, clientY: 320 });
 
             expect(onDuplicatePlacementCommit).toHaveBeenCalledTimes(1);
+            expect(onDuplicatePlacementCommit).toHaveBeenCalledWith({ x: 10, y: 5 });
             expect(onWidgetSelect).not.toHaveBeenCalled();
             expect(onLayoutCommit).not.toHaveBeenCalled();
         });
