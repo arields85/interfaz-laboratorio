@@ -33,9 +33,10 @@ import {
     DEFAULT_STATUS_LABELS,
     EQUIPMENT_STATUS_VALUES,
     normalizeSimulatedEquipmentStatus,
+    type StatusTextOptionKey,
 } from '../../utils/statusWidget';
 import { DEFAULT_CONTRACT_STATUS_LABELS } from '../../utils/connectionWidget';
-import { isHeaderCompatibleWidgetType } from '../../utils/headerWidgets';
+import { getWidgetFrameOption } from '../../utils/headerWidgets';
 import {
     ADMIN_SIDEBAR_INPUT_CLS,
     ADMIN_SIDEBAR_HINT_CLS,
@@ -329,13 +330,7 @@ const parseActivityAnalyticsHexCode = (value: string): string | null => {
     return `#${normalizedValue}`;
 };
 
-// Only the string-valued StatusDisplayOptions keys -- narrower than
-// `keyof StatusDisplayOptions` on purpose, since that interface also
-// carries `showFrame: boolean` (P2, 2026-09-28); widening this would make
-// the `value={...displayOptions?.[key]}` read below resolve to `string | boolean`.
-type StatusTextFieldKey = 'runningText' | 'idleText' | 'warningText' | 'criticalText' | 'offlineText' | 'maintenanceText' | 'unknownText';
-
-const STATUS_TEXT_FIELDS: Array<{ key: StatusTextFieldKey; label: string; placeholder: string }> = [
+const STATUS_TEXT_FIELDS: Array<{ key: StatusTextOptionKey; label: string; placeholder: string }> = [
     { key: 'runningText', label: 'Running', placeholder: DEFAULT_STATUS_LABELS.running },
     { key: 'idleText', label: 'Idle', placeholder: DEFAULT_STATUS_LABELS.idle },
     { key: 'warningText', label: 'Warning', placeholder: DEFAULT_STATUS_LABELS.warning },
@@ -429,9 +424,7 @@ export default function PropertyDock(props: PropertyDockProps) {
     // ConnectionStatusWidget renderers and HeaderWidgetCanvas for how the value
     // is consumed. Rendered once via this helper from each type's own section
     // below, instead of duplicating the control's markup per type.
-    const currentShowFrame = selectedWidget && isHeaderCompatibleWidgetType(selectedWidget.type)
-        ? (selectedWidget.displayOptions as { showFrame?: boolean } | undefined)?.showFrame
-        : undefined;
+    const currentShowFrame = selectedWidget ? getWidgetFrameOption(selectedWidget) : undefined;
 
     const renderFrameToggle = () => (
         <DockToggleField
