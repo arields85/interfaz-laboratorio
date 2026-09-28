@@ -253,7 +253,9 @@ export default function BuilderCanvas({
     cols = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
 }: BuilderCanvasProps) {
-    const getWidgetCornerRadius = (type: WidgetConfig['type']) => (type === 'text-title' ? '0px' : '1.5rem');
+    // TextTitle no tiene frame (sin .glass-panel); el resto sigue el radio de tema activo
+    // (--frame-radius-rest, ver services/themeStyle.service.ts) en vez de un valor fijo.
+    const getWidgetCornerRadius = (type: WidgetConfig['type']) => (type === 'text-title' ? '0px' : 'var(--frame-radius-rest)');
     const widgetMap = new Map(widgets.map((widget) => [widget.id, widget]));
     // Sanitized member ids of a locked group, minus any header-promoted id (G4): a widget
     // promoted to the header never lives on the canvas, so it can never be dragged/resized as

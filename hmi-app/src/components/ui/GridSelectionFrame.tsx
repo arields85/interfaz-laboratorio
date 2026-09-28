@@ -1,7 +1,11 @@
 interface GridSelectionFrameProps {
     isSelected: boolean;
     isHighlighted?: boolean;
-    /** Border-radius del widget subyacente. Debe coincidir con .glass-panel en index.css. */
+    /**
+     * Border-radius del widget subyacente, como longitud CSS. Por defecto el token de tema activo
+     * `--frame-radius-rest` (ver `services/themeStyle.service.ts` / `.glass-panel` en index.css);
+     * un widget sin frame (p.ej. TextTitle) pasa un literal `'0px'`.
+     */
     radius?: string;
     className?: string;
     /**
@@ -17,27 +21,32 @@ const GRID_RADIUS_DELTA_PX = 0;
 // Grosor visual del anillo de foco seleccionado (en px).
 const GRID_BORDER_WIDTH_PX = 2;
 
-// Convierte un valor CSS de radio a px para atributos SVG (rx, ry).
-// Solo maneja rem y px — suficiente para los valores que pasan los callers actuales.
-function radiusToPx(value: string): number {
-    if (value.endsWith('rem')) return parseFloat(value) * 16;
-    if (value.endsWith('px'))  return parseFloat(value);
-    return parseFloat(value);
+// Radio del outer edge del frame, expresado con calc() para quedar "vivo" con el custom property
+// de tema en vez de un número calculado una vez en JS: si el tema cambia (o transiciona entre
+// rest/hover en el propio elemento), el navegador recalcula esta longitud solo.
+function outerRingRadius(radius: string, deltaPx: number): string {
+    return `calc(${radius} + ${deltaPx}px)`;
 }
 
-// Debe mantenerse sincronizado con `.glass-panel { border-radius: 1.5rem }` en hmi-app/src/index.css
+// Radio del centro del stroke SVG (rx/ry): outer edge menos la mitad del grosor del trazo.
+// max(0px, ...) evita un radio negativo cuando el tema activo tiene radio 0 (p.ej. "Contorno")
+// y el offset de concentricidad no alcanza a compensar el grosor del trazo.
+function strokeCenterRadius(radius: string, deltaPx: number, halfStrokePx: number): string {
+    return `max(0px, calc(${radius} + ${deltaPx}px - ${halfStrokePx}px))`;
+}
+
 export default function GridSelectionFrame({
     isSelected,
     isHighlighted = false,
-    radius = '1.5rem',
+    radius = 'var(--frame-radius-rest)',
     className = '',
     inset = 'var(--widget-spacing)',
 }: GridSelectionFrameProps) {
-    const radiusPx = radiusToPx(radius);
-    // Radio del outer edge del frame: widget_radius + delta de concentricidad
-    const outerRadiusPx = radiusPx + GRID_RADIUS_DELTA_PX;
-    // Radio del centro del stroke SVG: outer - mitad del grosor
-    const rectRxPx = outerRadiusPx - GRID_BORDER_WIDTH_PX / 2;
+    const outerRadius = outerRingRadius(radius, GRID_RADIUS_DELTA_PX);
+    // rx/ry del hover-rect (trazo de 1px, centrado 0.5px hacia adentro del outer edge).
+    const hoverRingRadius = strokeCenterRadius(radius, GRID_RADIUS_DELTA_PX, 0.5);
+    // rx/ry del focus-rect (trazo de GRID_BORDER_WIDTH_PX, centrado a la mitad de su grosor).
+    const focusRingRadius = strokeCenterRadius(radius, GRID_RADIUS_DELTA_PX, GRID_BORDER_WIDTH_PX / 2);
 
     // ─── Árbol DOM estable ──────────────────────────────────────────────────────
     // Un único div + SVG siempre montados. El estado visual cambia solo via
@@ -54,11 +63,12 @@ export default function GridSelectionFrame({
             className={`pointer-events-none absolute z-10 ${className}`}
             style={{
                 inset,
-                borderRadius: `${outerRadiusPx}px`,
+                borderRadius: outerRadius,
                 // Limitar transiciones a las propiedades reales que cambian.
                 // transition-all anima 'display' y otras propiedades no interpolables,
-                // causando frames intermedios blancos.
-                transition: 'opacity 150ms ease',
+                // causando frames intermedios blancos. border-radius transiciona junto con
+                // --frame-radius del widget para que el anillo siga su cambio de tema.
+                transition: 'opacity 150ms ease, border-radius 0.2s ease',
             }}
         >
             <svg
@@ -78,13 +88,15 @@ export default function GridSelectionFrame({
                     y={0.5}
                     width="calc(100% - 1px)"
                     height="calc(100% - 1px)"
-                    rx={outerRadiusPx - 0.5}
-                    ry={outerRadiusPx - 0.5}
                     fill={isHighlighted ? 'color-mix(in srgb, var(--color-admin-accent) 10%, transparent)' : 'none'}
                     stroke="white"
                     strokeWidth={1}
                     strokeOpacity={isHighlighted ? 0.18 : 0}
-                    style={{ transition: 'stroke-opacity 120ms ease, fill-opacity 120ms ease' }}
+                    style={{
+                        rx: hoverRingRadius,
+                        ry: hoverRingRadius,
+                        transition: 'stroke-opacity 120ms ease, fill-opacity 120ms ease, rx 0.2s ease, ry 0.2s ease',
+                    }}
                 />
 
                 {/* focus-rect: anillo al seleccionar, en el color de acento admin editable desde
@@ -98,14 +110,14 @@ export default function GridSelectionFrame({
                     y={GRID_BORDER_WIDTH_PX / 2}
                     width={`calc(100% - ${GRID_BORDER_WIDTH_PX}px)`}
                     height={`calc(100% - ${GRID_BORDER_WIDTH_PX}px)`}
-                    rx={rectRxPx}
-                    ry={rectRxPx}
                     fill="none"
                     stroke="var(--color-admin-accent)"
                     strokeWidth={GRID_BORDER_WIDTH_PX}
                     strokeOpacity={isSelected ? 1 : 0}
                     style={{
-                        transition: 'stroke-opacity 150ms ease, filter 150ms ease',
+                        rx: focusRingRadius,
+                        ry: focusRingRadius,
+                        transition: 'stroke-opacity 150ms ease, filter 150ms ease, rx 0.2s ease, ry 0.2s ease',
                         filter: isSelected
                             ? [
                                 'drop-shadow(0 0 8px color-mix(in srgb, var(--color-admin-accent) 40%, transparent))',

@@ -237,7 +237,10 @@ export default function HeaderWidgetCanvas({
 }: HeaderWidgetCanvasProps) {
     void hierarchyContext;
     const isPreview = mode === 'preview';
-    const widgetCornerRadius = '1.5rem';
+    // Sigue el radio de tema activo (--frame-radius-rest, ver services/themeStyle.service.ts) en
+    // vez de un valor fijo, para que la caja del widget, el slot vacío y el anillo de selección
+    // (HeaderSelectionFrame) queden en sincronía con el resto de la HMI.
+    const widgetCornerRadius = 'var(--frame-radius-rest)';
     const headerSlotSize = `${HEADER_WIDGET_SLOT_HEIGHT_PX}px`;
 
     // Construir un mapa columna → widget para el renderizado explícito por columna.

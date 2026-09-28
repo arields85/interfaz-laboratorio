@@ -1202,8 +1202,10 @@ describe('BuilderCanvas', () => {
 
         expect(dashboardTitleItem).toHaveClass('rounded-none');
         expect(metricCardItem).toHaveClass('rounded-xl');
-        expect(dashboardTitleFrame?.style.borderRadius).toBe('0px');
-        expect(metricCardFrame?.style.borderRadius).toBe('24px');
+        // TH6: text-title stays frameless (radius 0px, literal — it has no .glass-panel);
+        // the rest follow the theme's live frame radius token instead of a hardcoded rem/px.
+        expect(dashboardTitleFrame?.style.borderRadius).toBe('calc(0px)');
+        expect(metricCardFrame?.style.borderRadius).toBe('calc(var(--frame-radius-rest) + 0px)');
     });
 
     describe('group widget lock', () => {
