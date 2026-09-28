@@ -96,6 +96,10 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   `instrument`): TEMPLATE/ASIGNADO/Planta/PUBLISHED/Equipo all have a transparent border and 3px
   radius.
 
+- 2026-09-28: slice review P5/P6 (base `95a733b`..`0065623`, 978 lines, medium, user granted):
+  lineage `review-1cac84b786bdde95` APPROVED, acknowledged, authority burned. Advisory
+  SUGGESTIONs only (R3-001 style lab line 990, R3-002 `index.css:993-994`).
+
 ## Next step
 
 User's live check (P4, including the Instrumento theme), then merge to main. Tags in the theme engine only if the user asks after
