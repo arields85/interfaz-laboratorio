@@ -199,6 +199,20 @@ describe('Dashboard page layout', () => {
         expect(canvasShell).toHaveClass('overflow-hidden');
     });
 
+    it('does not draw a frame around the viewer canvas (user request 2026-09-28)', async () => {
+        renderDashboard();
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        });
+
+        const canvasShell = screen.getByTestId('dashboard-viewer-root').parentElement;
+
+        expect(canvasShell).not.toBeNull();
+        expect(canvasShell?.className ?? '').not.toMatch(/(^|\s)border(-|\s|$)/);
+        expect(canvasShell?.className ?? '').not.toMatch(/(^|\s)rounded(-|\s|$)/);
+    });
+
     it('provides the current dashboard view and visible widget IDs to production presentation paths', async () => {
         const dashboardWidget = makeWidget({ id: 'current-view-widget' });
         const headerWidget = makeWidget({ id: 'current-header-widget', type: 'status' as never });

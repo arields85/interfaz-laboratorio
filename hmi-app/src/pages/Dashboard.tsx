@@ -458,7 +458,7 @@ export default function Dashboard() {
              />
 
             {/* GRID DEL DASHBOARD — widgets del header excluidos */}
-            <div className="flex-1 bg-[url('/grid.svg')] bg-center rounded-xl border border-white/5 overflow-hidden">
+            <div className="flex-1 bg-[url('/grid.svg')] bg-center overflow-hidden">
                 <DashboardViewer 
                     widgets={activeDashboard.widgets}
                     layout={activeDashboard.layout}
