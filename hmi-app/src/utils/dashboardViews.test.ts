@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { getDashboardVisualStatus, type Dashboard } from '../domain/admin.types';
-import { makeDashboard, makeLayout, makeWidget } from '../test/fixtures/dashboard.fixture';
+import { makeDashboard, makeGroupWidget, makeLayout, makeWidget } from '../test/fixtures/dashboard.fixture';
 import {
     createDashboardView,
     canDeleteDashboardView,
@@ -103,6 +103,62 @@ describe('dashboardViews', () => {
         expect(cloned.views[1]?.layout).toEqual([
             expect.objectContaining({ widgetId: 'widget-shared-dup-001-view-b', x: 4, y: 0, w: 4, h: 4 }),
         ]);
+    });
+
+    it('remaps a group widget\'s memberWidgetIds through the same map and drops ids missing from the view', () => {
+        const cloned = cloneDashboardViewsWithRemappedIds([
+            {
+                id: 'view-a',
+                name: 'Production',
+                order: 0,
+                widgets: [
+                    makeWidget({ id: 'widget-member-1', title: 'Member one' }),
+                    makeWidget({ id: 'widget-member-2', title: 'Member two' }),
+                    makeGroupWidget({
+                        id: 'group-1',
+                        memberWidgetIds: ['widget-member-1', 'widget-member-2', 'widget-missing'],
+                        locked: true,
+                    }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'widget-member-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-member-2', x: 4, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 8, h: 4 }),
+                ],
+            },
+        ], 'dup-001');
+
+        const clonedGroup = cloned.views[0]?.widgets.find((widget) => widget.type === 'group');
+        const clonedMemberOneId = cloned.views[0]?.widgets.find((widget) => widget.title === 'Member one')?.id;
+        const clonedMemberTwoId = cloned.views[0]?.widgets.find((widget) => widget.title === 'Member two')?.id;
+
+        expect(clonedGroup?.type === 'group' ? clonedGroup.memberWidgetIds : undefined).toEqual([
+            clonedMemberOneId,
+            clonedMemberTwoId,
+        ]);
+        expect(clonedGroup?.type === 'group' ? clonedGroup.locked : undefined).toBe(true);
+    });
+
+    it('normalizes a legacy group widget missing memberWidgetIds/locked into safe defaults', () => {
+        const legacyDashboard = makeDashboard({
+            id: 'dashboard-legacy-group',
+            widgets: [
+                {
+                    id: 'group-legacy',
+                    type: 'group',
+                    title: 'Contenedor viejo',
+                    position: { x: 0, y: 0 },
+                    size: { w: 8, h: 8 },
+                } as unknown as ReturnType<typeof makeGroupWidget>,
+            ],
+            layout: [makeLayout({ widgetId: 'group-legacy', x: 0, y: 0, w: 8, h: 8 })],
+        });
+
+        const normalized = normalizeDashboardViews(legacyDashboard);
+        const normalizedGroup = normalized.widgets.find((widget) => widget.type === 'group');
+
+        expect(normalizedGroup?.type === 'group' ? normalizedGroup.memberWidgetIds : undefined).toEqual([]);
+        expect(normalizedGroup?.type === 'group' ? normalizedGroup.locked : undefined).toBe(false);
     });
 
     it('compares normalized views when deriving dashboard visual status', () => {

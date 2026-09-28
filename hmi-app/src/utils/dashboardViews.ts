@@ -275,11 +275,28 @@ export function cloneDashboardViewsWithRemappedIds(views: DashboardView[], suffi
 
         widgetIdMapByView.set(view.id, widgetIdMap);
 
+        // Segunda pasada: remapear memberWidgetIds de widgets 'group' con el
+        // mapa ya completo (un miembro puede aparecer antes o después del
+        // grupo en el array). Los ids de miembros que ya no existen en la
+        // vista se descartan.
+        const remappedWidgets = clonedWidgets.map((clonedWidget) => {
+            if (clonedWidget.type !== 'group' || !clonedWidget.memberWidgetIds) {
+                return clonedWidget;
+            }
+
+            return {
+                ...clonedWidget,
+                memberWidgetIds: clonedWidget.memberWidgetIds
+                    .map((memberId) => widgetIdMap.get(memberId))
+                    .filter((remappedId): remappedId is string => remappedId !== undefined),
+            };
+        });
+
         return {
             ...clone(view),
             id: nextViewId,
             order: view.order ?? viewIndex,
-            widgets: clonedWidgets,
+            widgets: remappedWidgets,
             layout: view.layout.map((item) => ({
                 ...clone(item),
                 widgetId: widgetIdMap.get(item.widgetId) ?? item.widgetId,
@@ -415,13 +432,23 @@ function normalizeWidget(widget: WidgetConfig): WidgetConfig {
         };
     }
 
-    return normalized.type === 'prod-trend'
-        ? {
+    if (normalized.type === 'prod-trend') {
+        return {
             ...normalized,
             displayOptions: {
                 ...normalized.displayOptions,
                 dataMode: resolveProdTrendConfiguredMode(normalized.displayOptions?.dataMode),
             },
-        }
-        : normalized;
+        };
+    }
+
+    if (normalized.type === 'group') {
+        return {
+            ...normalized,
+            memberWidgetIds: normalized.memberWidgetIds ?? [],
+            locked: normalized.locked ?? false,
+        };
+    }
+
+    return normalized;
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatalogVariable } from '../domain';
 import {
     makeDashboard,
+    makeGroupWidget,
     makeInfoCardWidget,
     makeLayout,
     makeWidget,
@@ -546,6 +547,54 @@ describe('dashboardPortabilityService.exportDashboard', () => {
         expect(importResult.dashboard.headerConfig?.widgetSlots).toEqual([
             { widgetId: importedTechnicalHeaderWidget?.id, column: 2 },
         ]);
+    });
+
+    it('round-trips a locked group and remaps its memberWidgetIds to the imported member ids, dropping stale ones', async () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-portable-group',
+            name: 'Portable group',
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-machines',
+                    name: 'Machines',
+                    order: 0,
+                    widgets: [
+                        makeWidget({ id: 'widget-member-1', title: 'Member one', type: 'status' as const }),
+                        makeWidget({ id: 'widget-member-2', title: 'Member two', type: 'status' as const }),
+                        makeGroupWidget({
+                            id: 'group-machine-1',
+                            title: 'Máquina 1',
+                            memberWidgetIds: ['widget-member-1', 'widget-member-2', 'widget-gone'],
+                            locked: true,
+                        }),
+                    ],
+                    layout: [
+                        makeLayout({ widgetId: 'widget-member-1', x: 0, y: 0, w: 4, h: 4 }),
+                        makeLayout({ widgetId: 'widget-member-2', x: 4, y: 0, w: 4, h: 4 }),
+                        makeLayout({ widgetId: 'group-machine-1', x: 0, y: 0, w: 8, h: 4 }),
+                    ],
+                }),
+            ],
+        });
+
+        const exportPromise = dashboardPortabilityService.exportDashboard(dashboard);
+        await vi.advanceTimersByTimeAsync(200);
+        const exportResult = await exportPromise;
+
+        const importPromise = dashboardPortabilityService.importDashboard(exportResult.json);
+        await vi.advanceTimersByTimeAsync(1000);
+        const importResult = await importPromise;
+
+        const importedWidgets = importResult.dashboard.views?.[0]?.widgets ?? [];
+        const importedGroup = importedWidgets.find((widget) => widget.type === 'group');
+        const importedMemberOneId = importedWidgets.find((widget) => widget.title === 'Member one')?.id;
+        const importedMemberTwoId = importedWidgets.find((widget) => widget.title === 'Member two')?.id;
+
+        expect(importedGroup?.type === 'group' ? importedGroup.memberWidgetIds : undefined).toEqual([
+            importedMemberOneId,
+            importedMemberTwoId,
+        ]);
+        expect(importedGroup?.type === 'group' ? importedGroup.locked : undefined).toBe(true);
     });
 });
 
