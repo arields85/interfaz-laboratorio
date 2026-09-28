@@ -78,37 +78,25 @@ export function computeGroupMembers(
 }
 
 /**
- * Reorders `widgets` so the group widget precedes all of its members
- * (stacking = array/DOM order — see G1 note), while keeping the relative
- * order of every other widget stable. The group is placed right before the
- * earliest member index, which is enough to guarantee it precedes every
- * member since that index is the minimum among them.
+ * G7(b): render order for any list of items keyed by `widgetId` (a `WidgetLayout[]`, most
+ * commonly) — every group-widget item comes first, in its original relative order, followed by
+ * every other item, also in its original relative order. This is the single source of truth for
+ * stacking: a group container ALWAYS paints beneath every non-group widget, locked or not,
+ * independent of `widgets`/`layout` array order or drag/authoring history. Every renderer of the
+ * dashboard grid (BuilderCanvas, DashboardViewer) must derive its render/DOM order from this
+ * helper instead of using `layout` (or `widgets`) order directly, and pointer hit-testing follows
+ * the same DOM order for free (later siblings paint — and receive pointer events — on top).
  */
-export function reorderWidgetsWithGroupBeforeMembers<T extends { id: string }>(
-    widgets: readonly T[],
-    groupWidgetId: string,
-    memberWidgetIds: readonly string[],
+export function orderRenderItemsWithGroupsFirst<T extends { widgetId: string }>(
+    items: readonly T[],
+    widgets: readonly WidgetConfig[],
 ): T[] {
-    const groupIndex = widgets.findIndex((widget) => widget.id === groupWidgetId);
+    const groupWidgetIds = new Set(widgets.filter(isGroupWidget).map((widget) => widget.id));
 
-    if (groupIndex === -1 || memberWidgetIds.length === 0) {
-        return [...widgets];
-    }
+    const groupItems = items.filter((item) => groupWidgetIds.has(item.widgetId));
+    const otherItems = items.filter((item) => !groupWidgetIds.has(item.widgetId));
 
-    const memberIdSet = new Set(memberWidgetIds);
-    const groupWidget = widgets[groupIndex];
-    const rest = widgets.filter((widget) => widget.id !== groupWidgetId);
-    const firstMemberIndex = rest.findIndex((widget) => memberIdSet.has(widget.id));
-
-    if (firstMemberIndex === -1) {
-        return [...widgets];
-    }
-
-    return [
-        ...rest.slice(0, firstMemberIndex),
-        groupWidget,
-        ...rest.slice(firstMemberIndex),
-    ];
+    return [...groupItems, ...otherItems];
 }
 
 /** Union bounding box of the given members' layout rects, or null if none resolve. */
@@ -376,11 +364,10 @@ export function duplicateLockedGroup(
     }));
 
     return {
-        widgets: reorderWidgetsWithGroupBeforeMembers(
-            [...widgets, newContainer, ...newMembers],
-            newContainerId,
-            newContainer.memberWidgetIds ?? [],
-        ),
+        // The new container is appended right before its new members, which already stacks it
+        // beneath them in `widgets` order; actual render/stacking order is independently owned by
+        // `orderRenderItemsWithGroupsFirst` (G7b), so no extra reordering is needed here.
+        widgets: [...widgets, newContainer, ...newMembers],
         layout: [...layout, newContainerLayout, ...newMemberLayouts],
         newSelectedWidgetId: newContainerId,
     };

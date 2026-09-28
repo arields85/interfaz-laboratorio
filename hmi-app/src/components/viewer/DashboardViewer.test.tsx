@@ -500,6 +500,52 @@ describe('DashboardViewer', () => {
         });
     });
 
+    describe('G7b group container stacking', () => {
+        it('always renders the group container before every other widget, regardless of the layout array order', async () => {
+            const dashboard = makeDashboard({
+                widgets: [
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                    makeWidget({ id: 'widget-2', title: 'Widget 2' }),
+                    // Unlocked: the render-order rule applies regardless of lock state.
+                    makeGroupWidget({ id: 'group-1', locked: false }),
+                ],
+                layout: [
+                    // The container's layout entry is authored/positioned LAST — this is the
+                    // exact shape that reproduced "the container always paints on top".
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'widget-2', x: 4, y: 1, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                ],
+            });
+
+            const { container } = render(
+                <div style={{ width: '1200px', height: '675px' }}>
+                    <DashboardViewer
+                        widgets={dashboard.widgets}
+                        layout={dashboard.layout}
+                        equipmentMap={new Map()}
+                        cols={dashboard.cols}
+                        rows={dashboard.rows}
+                    />
+                </div>,
+            );
+
+            const observedContainer = container.querySelector('[data-testid="dashboard-viewer-root"]');
+            emitResize(observedContainer as Element, 1200, 675);
+
+            await waitFor(() => {
+                expect(screen.getByTestId('dashboard-viewer-item-group-1')).toBeInTheDocument();
+            });
+
+            const itemIds = screen.getAllByTestId(/^dashboard-viewer-item-(?!surface-)/).map((el) => el.getAttribute('data-testid'));
+            expect(itemIds).toEqual([
+                'dashboard-viewer-item-group-1',
+                'dashboard-viewer-item-widget-1',
+                'dashboard-viewer-item-widget-2',
+            ]);
+        });
+    });
+
     it('keeps the viewer root as a neutral shell until the first valid canvas measurement arrives', () => {
         const dashboard = makeDashboard({
             widgets: [makeWidget({ id: 'widget-1', title: 'Origin' })],

@@ -73,7 +73,6 @@ import {
     computeGroupMembers,
     duplicateLockedGroup,
     removeMemberFromGroups,
-    reorderWidgetsWithGroupBeforeMembers,
 } from '../../utils/groupWidget';
 import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
 import {
@@ -1582,9 +1581,11 @@ export default function DashboardBuilderPage() {
         };
 
         // G2: lock/unlock is exactly one history step. Closing the lock computes D1 membership
-        // (widgets fully inside the container's current rect, never another group) and reorders
-        // the container to precede its members so stacking (array order) puts it below them.
-        // Opening the lock releases all members without touching the rest of the layout.
+        // (widgets fully inside the container's current rect, never another group). Stacking is
+        // NOT owned here (G7): BuilderCanvas/DashboardViewer independently guarantee the
+        // container renders beneath every other widget via `orderRenderItemsWithGroupsFirst`, so
+        // `widgets` array order is left as authored. Opening the lock releases all members
+        // without touching the rest of the layout.
         const handleToggleGroupLock = (widgetId: string) => {
             setDraft(prev => {
                 if (!prev) return prev;
@@ -1625,7 +1626,7 @@ export default function DashboardBuilderPage() {
 
                     return {
                         ...view,
-                        widgets: reorderWidgetsWithGroupBeforeMembers(lockedWidgets, widgetId, memberWidgetIds),
+                        widgets: lockedWidgets,
                     };
                 });
             }, { coalesce: false });

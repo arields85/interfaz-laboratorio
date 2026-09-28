@@ -7,8 +7,8 @@ import {
     computeMembersBoundingBox,
     duplicateLockedGroup,
     isRectFullyInside,
+    orderRenderItemsWithGroupsFirst,
     removeMemberFromGroups,
-    reorderWidgetsWithGroupBeforeMembers,
     resolveEffectiveNavigationTarget,
     resolveHoveredGroupId,
     sanitizeGroupMemberIds,
@@ -139,23 +139,83 @@ describe('computeGroupMembers', () => {
     });
 });
 
-describe('reorderWidgetsWithGroupBeforeMembers', () => {
-    it('moves the group widget to precede its earliest member, keeping other relative order stable', () => {
+describe('orderRenderItemsWithGroupsFirst', () => {
+    it('moves every group-widget item before every other item, regardless of the input order', () => {
         const widgets = [
-            { id: 'a' }, { id: 'member-1' }, { id: 'group-1' }, { id: 'b' }, { id: 'member-2' },
+            makeWidget({ id: 'a' }),
+            makeWidget({ id: 'b' }),
+            makeGroup({ id: 'group-1' }),
+            makeWidget({ id: 'c' }),
+        ];
+        const items = [
+            { widgetId: 'a' }, { widgetId: 'b' }, { widgetId: 'group-1' }, { widgetId: 'c' },
         ];
 
-        const result = reorderWidgetsWithGroupBeforeMembers(widgets, 'group-1', ['member-1', 'member-2']);
+        const result = orderRenderItemsWithGroupsFirst(items, widgets);
 
-        expect(result.map((w) => w.id)).toEqual(['a', 'group-1', 'member-1', 'b', 'member-2']);
+        expect(result.map((item) => item.widgetId)).toEqual(['group-1', 'a', 'b', 'c']);
     });
 
-    it('is a no-op when there are no members', () => {
-        const widgets = [{ id: 'a' }, { id: 'group-1' }, { id: 'b' }];
+    it('keeps a group first even when it is authored/laid out AFTER its members (G7 stacking bug)', () => {
+        const widgets = [
+            makeWidget({ id: 'member-1' }),
+            makeWidget({ id: 'member-2' }),
+            makeGroup({ id: 'group-1' }),
+        ];
+        // The container's layout entry is LAST — this is exactly the shape that reproduced the
+        // "container always paints on top" bug, since the array/DOM order used to be `layout`
+        // order untouched.
+        const items = [
+            { widgetId: 'member-1' }, { widgetId: 'member-2' }, { widgetId: 'group-1' },
+        ];
 
-        const result = reorderWidgetsWithGroupBeforeMembers(widgets, 'group-1', []);
+        const result = orderRenderItemsWithGroupsFirst(items, widgets);
 
-        expect(result.map((w) => w.id)).toEqual(['a', 'group-1', 'b']);
+        expect(result.map((item) => item.widgetId)).toEqual(['group-1', 'member-1', 'member-2']);
+    });
+
+    it('preserves the relative order within each partition (groups, then everything else)', () => {
+        const widgets = [
+            makeGroup({ id: 'group-a' }),
+            makeGroup({ id: 'group-b' }),
+            makeWidget({ id: 'x' }),
+            makeWidget({ id: 'y' }),
+        ];
+        const items = [
+            { widgetId: 'y' }, { widgetId: 'group-b' }, { widgetId: 'x' }, { widgetId: 'group-a' },
+        ];
+
+        const result = orderRenderItemsWithGroupsFirst(items, widgets);
+
+        expect(result.map((item) => item.widgetId)).toEqual(['group-b', 'group-a', 'y', 'x']);
+    });
+
+    it('applies the rule regardless of the group container being locked or unlocked', () => {
+        const widgets = [
+            makeWidget({ id: 'widget-1' }),
+            makeGroup({ id: 'group-1', locked: false }),
+        ];
+        const items = [{ widgetId: 'widget-1' }, { widgetId: 'group-1' }];
+
+        expect(orderRenderItemsWithGroupsFirst(items, widgets).map((item) => item.widgetId))
+            .toEqual(['group-1', 'widget-1']);
+    });
+
+    it('is a no-op when there are no group widgets', () => {
+        const widgets = [makeWidget({ id: 'a' }), makeWidget({ id: 'b' })];
+        const items = [{ widgetId: 'b' }, { widgetId: 'a' }];
+
+        expect(orderRenderItemsWithGroupsFirst(items, widgets).map((item) => item.widgetId))
+            .toEqual(['b', 'a']);
+    });
+
+    it('does not mutate the input array', () => {
+        const widgets = [makeWidget({ id: 'a' }), makeGroup({ id: 'group-1' })];
+        const items = [{ widgetId: 'a' }, { widgetId: 'group-1' }];
+
+        orderRenderItemsWithGroupsFirst(items, widgets);
+
+        expect(items.map((item) => item.widgetId)).toEqual(['a', 'group-1']);
     });
 });
 

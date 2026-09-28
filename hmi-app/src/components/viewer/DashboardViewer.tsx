@@ -5,7 +5,7 @@ import type { ContractMachine, ConnectionHealth } from '../../domain/dataContrac
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import { useCanvasReference } from '../../utils/useCanvasReference';
 import { DEFAULT_COLS, DEFAULT_ROWS, getGridTemplateStyle } from '../../utils/gridConfig';
-import { resolveEffectiveNavigationTarget, resolveHoveredGroupId } from '../../utils/groupWidget';
+import { orderRenderItemsWithGroupsFirst, resolveEffectiveNavigationTarget, resolveHoveredGroupId } from '../../utils/groupWidget';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 interface DashboardViewerProps {
@@ -74,6 +74,10 @@ export default function DashboardViewer({
     // fresh mouseenter on another item is never clobbered by a stale mouseleave.
     const [hoveredGroup, setHoveredGroup] = useState<{ groupId: string; sourceWidgetId: string } | null>(null);
 
+    // G7(b): render order is owned by `orderRenderItemsWithGroupsFirst`, not by `layout` array
+    // order — a group container must ALWAYS paint beneath every other widget, locked or not.
+    const orderedLayout = orderRenderItemsWithGroupsFirst(layout, widgets);
+
     return (
         <div
             ref={containerRef}
@@ -92,7 +96,7 @@ export default function DashboardViewer({
                         gap: 0,
                     }}
                 >
-                    {layout.map((item) => {
+                    {orderedLayout.map((item) => {
                         if (headerWidgetIds?.has(item.widgetId)) return null;
 
                         const widget = widgetMap.get(item.widgetId);

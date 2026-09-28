@@ -2157,7 +2157,7 @@ describe('DashboardBuilderPage undo/redo', () => {
         expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
     });
 
-    it('closing a group lock computes D1 membership and reorders the group before its member, as one undo step', async () => {
+    it('closing a group lock computes D1 membership, as one undo step (stacking is BuilderCanvas render order, not `widgets` array order — G7)', async () => {
         const user = userEvent.setup();
         await renderBuilderPage(makeDashboard({
             id: 'dashboard-1',
@@ -2176,9 +2176,12 @@ describe('DashboardBuilderPage undo/redo', () => {
         await user.click(screen.getByRole('button', { name: 'Alternar candado group-1' }));
 
         await waitFor(() => {
-            // The container was authored after its future member; locking must reorder it to
-            // precede the member so stacking (array order) puts the container below it.
-            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1']);
+            // G7: `widgets` array order is authored order and is no longer reordered on lock —
+            // BuilderCanvas/DashboardViewer independently guarantee the group renders beneath
+            // every other widget via `orderRenderItemsWithGroupsFirst` at render time (see
+            // BuilderCanvas.test.tsx "group container render order (G7b)" and the real-canvas
+            // integration test), so `widgets` order carries no stacking meaning any more.
+            expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-1', 'group-1']);
         });
 
         await user.click(screen.getByRole('button', { name: 'Seleccionar Contenedor' }));

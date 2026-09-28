@@ -31,6 +31,7 @@ import {
     clampGroupMoveDelta,
     clampGroupResizeToMembers,
     computeMembersBoundingBox,
+    orderRenderItemsWithGroupsFirst,
     sanitizeGroupMemberIds,
     type LayoutRect,
 } from '../../utils/groupWidget';
@@ -522,7 +523,12 @@ export default function BuilderCanvas({
         ? interaction.widgetId
         : null;
 
-    const visibleLayout = layout.filter((item) => !headerWidgetIds?.has(item.widgetId));
+    // G7(b): render order is owned by `orderRenderItemsWithGroupsFirst`, not by `layout` array
+    // order — a group container must ALWAYS paint beneath every other widget, locked or not.
+    const visibleLayout = orderRenderItemsWithGroupsFirst(
+        layout.filter((item) => !headerWidgetIds?.has(item.widgetId)),
+        widgets,
+    );
 
     return (
         <div
@@ -752,8 +758,11 @@ export default function BuilderCanvas({
                                             : []),
                                         ...(isGroupWidget(widget)
                                             ? [{
+                                                // G7(a): the icon shows the current STATE, not the
+                                                // action the click performs — locked -> closed
+                                                // lock, unlocked -> open lock.
                                                 label: widget.locked ? 'Desagrupar widgets' : 'Agrupar widgets',
-                                                icon: widget.locked ? LockOpen : Lock,
+                                                icon: widget.locked ? Lock : LockOpen,
                                                 onClick: () => onToggleGroupLock?.(widget.id),
                                               }]
                                             : []),

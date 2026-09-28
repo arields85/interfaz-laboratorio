@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -8,7 +9,8 @@ import BuilderCanvas from './BuilderCanvas';
 import DashboardViewer from '../viewer/DashboardViewer';
 import { makeDashboard, makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { useUIStore } from '../../store/ui.store';
-import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
+import { isGroupWidget, type WidgetConfig, type WidgetLayout } from '../../domain/admin.types';
+import { collectWidgetIdsInOtherLockedGroups, computeGroupMembers } from '../../utils/groupWidget';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -1010,6 +1012,78 @@ describe('BuilderCanvas', () => {
             expect(screen.queryByRole('button', { name: 'Agrupar widgets' })).not.toBeInTheDocument();
             expect(screen.queryByRole('button', { name: 'Desagrupar widgets' })).not.toBeInTheDocument();
         });
+
+        // G7(a): the icon must show the STATE, not the action to perform — an unlocked
+        // container (click = lock it) shows the OPEN lock; a locked one (click = unlock it)
+        // shows the CLOSED lock. The previous code had these two icons swapped.
+        it('shows the OPEN lock icon (LockOpen) for an unlocked group container', async () => {
+            await renderInteractiveCanvas({
+                widgets: [makeGroupWidget({ id: 'group-1', locked: false })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+                cols: 16,
+            });
+
+            const lockButton = screen.getByRole('button', { name: 'Agrupar widgets' });
+            expect(lockButton.querySelector('.lucide-lock-open')).toBeInTheDocument();
+            expect(lockButton.querySelector('.lucide-lock')).not.toBeInTheDocument();
+        });
+
+        it('shows the CLOSED lock icon (Lock) for a locked group container', async () => {
+            await renderInteractiveCanvas({
+                widgets: [makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: [] })],
+                layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
+                cols: 16,
+            });
+
+            const lockButton = screen.getByRole('button', { name: 'Desagrupar widgets' });
+            expect(lockButton.querySelector('.lucide-lock')).toBeInTheDocument();
+            expect(lockButton.querySelector('.lucide-lock-open')).not.toBeInTheDocument();
+        });
+    });
+
+    describe('group container render order (G7b)', () => {
+        it('always renders the group container before every other widget, regardless of layout array order', async () => {
+            // The container's layout entry is authored LAST — reproduces the exact shape that
+            // hid the "container always on top" bug (stacking used to follow `layout` order
+            // untouched, with no group-first rule at all).
+            await renderInteractiveCanvas({
+                widgets: [
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                    makeWidget({ id: 'widget-2', title: 'Widget 2' }),
+                    makeGroupWidget({ id: 'group-1', locked: false }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'widget-2', x: 4, y: 1, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                ],
+                cols: 16,
+            });
+
+            const itemIds = screen.getAllByTestId(/^builder-canvas-item-(?!surface-)/).map((el) => el.getAttribute('data-testid'));
+            expect(itemIds).toEqual([
+                'builder-canvas-item-group-1',
+                'builder-canvas-item-widget-1',
+                'builder-canvas-item-widget-2',
+            ]);
+        });
+
+        it('keeps the container beneath every widget even while LOCKED', async () => {
+            await renderInteractiveCanvas({
+                widgets: [
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                ],
+                cols: 16,
+            });
+
+            const itemIds = screen.getAllByTestId(/^builder-canvas-item-(?!surface-)/).map((el) => el.getAttribute('data-testid'));
+            expect(itemIds).toEqual(['builder-canvas-item-group-1', 'builder-canvas-item-widget-1']);
+        });
     });
 
     describe('locked group members', () => {
@@ -1292,6 +1366,174 @@ describe('BuilderCanvas', () => {
             await releasePointer(user, document.body, { clientX: 0, clientY: 0 });
 
             expect(onLayoutCommit).toHaveBeenCalledWith({ widgetId: 'group-1', x: 0, y: 0, w: 1, h: 1 });
+        });
+    });
+
+    // G7(d): the page tests mock BuilderCanvas entirely, which hid the lock-icon inversion, the
+    // stacking bug and the title fallback from the user's first live check. This harness renders
+    // the REAL BuilderCanvas and wires its callbacks through the SAME pure lock/move logic
+    // DashboardBuilderPage uses in production (`computeGroupMembers`,
+    // `collectWidgetIdsInOtherLockedGroups`) instead of a mock, so membership, stacking and drag
+    // behavior are all proven against real DOM output.
+    function GroupWorkflowHarness({
+        initialWidgets,
+        initialLayout,
+        cols,
+        rows,
+    }: {
+        initialWidgets: WidgetConfig[];
+        initialLayout: WidgetLayout[];
+        cols: number;
+        rows: number;
+    }) {
+        const [widgets, setWidgets] = useState<WidgetConfig[]>(initialWidgets);
+        const [layout, setLayout] = useState<WidgetLayout[]>(initialLayout);
+
+        const handleToggleGroupLock = (widgetId: string) => {
+            setWidgets((prevWidgets) => {
+                const widget = prevWidgets.find((item) => item.id === widgetId);
+                if (!widget || !isGroupWidget(widget)) {
+                    return prevWidgets;
+                }
+
+                if (widget.locked) {
+                    return prevWidgets.map((item) => (
+                        item.id === widgetId ? { ...item, locked: false, memberWidgetIds: [] } : item
+                    ));
+                }
+
+                const containerLayout = layout.find((item) => item.widgetId === widgetId);
+                if (!containerLayout) {
+                    return prevWidgets;
+                }
+
+                const otherLockedGroupMemberIds = collectWidgetIdsInOtherLockedGroups(prevWidgets, widgetId);
+                const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, prevWidgets, layout, otherLockedGroupMemberIds);
+
+                return prevWidgets.map((item) => (
+                    item.id === widgetId ? { ...item, locked: true, memberWidgetIds } : item
+                ));
+            });
+        };
+
+        const handleLayoutCommit = (updated: WidgetLayout) => {
+            setLayout((prev) => prev.map((item) => (item.widgetId === updated.widgetId ? updated : item)));
+        };
+
+        const handleGroupLayoutCommit = (updates: WidgetLayout[]) => {
+            setLayout((prev) => prev.map((item) => updates.find((update) => update.widgetId === item.widgetId) ?? item));
+        };
+
+        return (
+            <div style={{ width: '1200px', height: '900px' }}>
+                <BuilderCanvas
+                    widgets={widgets}
+                    layout={layout}
+                    equipmentMap={new Map()}
+                    cols={cols}
+                    rows={rows}
+                    onLayoutCommit={handleLayoutCommit}
+                    onToggleGroupLock={handleToggleGroupLock}
+                    onGroupLayoutCommit={handleGroupLayoutCommit}
+                />
+            </div>
+        );
+    }
+
+    describe('real group workflow: lock, drag, stacking, unlock (G7d)', () => {
+        async function renderGroupWorkflowHarness() {
+            const widgets: WidgetConfig[] = [
+                makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
+                makeWidget({ id: 'member-1', title: 'Member 1' }),
+                makeWidget({ id: 'member-2', title: 'Member 2' }),
+                makeWidget({ id: 'partial-1', title: 'Partial' }),
+            ];
+            const layout: WidgetLayout[] = [
+                makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                makeLayout({ widgetId: 'member-2', x: 5, y: 5, w: 2, h: 2 }),
+                // Right edge (8+5=13) overshoots the container (10): partially inside, not a
+                // membership candidate (D1).
+                makeLayout({ widgetId: 'partial-1', x: 8, y: 8, w: 5, h: 5 }),
+            ];
+
+            const view = render(
+                <GroupWorkflowHarness initialWidgets={widgets} initialLayout={layout} cols={40} rows={24} />,
+            );
+
+            const builderRoot = view.container.querySelector('[data-testid="builder-canvas-root"]');
+            if (!builderRoot) {
+                throw new Error('Builder root was not rendered.');
+            }
+
+            await syncCanvasMetrics(builderRoot, 1200, 900);
+
+            return view;
+        }
+
+        it('locks only the fully-inside widgets, keeps stacking, moves members with the container, then releases them on unlock', async () => {
+            const user = userEvent.setup();
+            await renderGroupWorkflowHarness();
+
+            // Stacking (G7b) already holds before lock: the container never paints on top.
+            expect(screen.getAllByTestId(/^builder-canvas-item-(?!surface-)/).map((el) => el.getAttribute('data-testid'))).toEqual([
+                'builder-canvas-item-group-1',
+                'builder-canvas-item-member-1',
+                'builder-canvas-item-member-2',
+                'builder-canvas-item-partial-1',
+            ]);
+
+            // Lock via the hover action, by its accessible name (G7a).
+            const lockButton = screen.getByRole('button', { name: 'Agrupar widgets' });
+            expect(lockButton.querySelector('.lucide-lock-open')).toBeInTheDocument();
+            await user.click(lockButton);
+
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: 'Desagrupar widgets' })).toBeInTheDocument();
+            });
+            expect(screen.getByRole('button', { name: 'Desagrupar widgets' }).querySelector('.lucide-lock')).toBeInTheDocument();
+
+            // Drag the container. cellWidth = 1200/40 = 30px, rowHeight = 900/24 = 37.5px;
+            // a 90px rightward drag is exactly 3 cells.
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 190, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 190, clientY: 100 });
+
+            await waitFor(() => {
+                expect(screen.getByTestId('builder-canvas-item-group-1').style.gridColumnStart).toBe('4');
+            });
+            // The two fully-inside widgets moved by the same delta as the container...
+            expect(screen.getByTestId('builder-canvas-item-member-1').style.gridColumnStart).toBe('5');
+            expect(screen.getByTestId('builder-canvas-item-member-2').style.gridColumnStart).toBe('9');
+            // ...but the partially-overlapping widget was never a member, so it never moved.
+            expect(screen.getByTestId('builder-canvas-item-partial-1').style.gridColumnStart).toBe('9');
+
+            // Stacking still holds after the move.
+            expect(screen.getAllByTestId(/^builder-canvas-item-(?!surface-)/).map((el) => el.getAttribute('data-testid'))).toEqual([
+                'builder-canvas-item-group-1',
+                'builder-canvas-item-member-1',
+                'builder-canvas-item-member-2',
+                'builder-canvas-item-partial-1',
+            ]);
+
+            // Unlock: members move independently again.
+            await user.click(screen.getByRole('button', { name: 'Desagrupar widgets' }));
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: 'Agrupar widgets' })).toBeInTheDocument();
+            });
+
+            const memberItem = screen.getByTestId('builder-canvas-item-member-1');
+            await pressPointer(user, memberItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 190, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 190, clientY: 100 });
+
+            await waitFor(() => {
+                expect(screen.getByTestId('builder-canvas-item-member-1').style.gridColumnStart).toBe('8');
+            });
+            // The container and the other member did NOT ride along this time.
+            expect(screen.getByTestId('builder-canvas-item-group-1').style.gridColumnStart).toBe('4');
+            expect(screen.getByTestId('builder-canvas-item-member-2').style.gridColumnStart).toBe('9');
         });
     });
 });
