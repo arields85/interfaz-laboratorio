@@ -80,24 +80,43 @@ describe('HeaderWidgetCanvas', () => {
         expect((surface as HTMLElement).style.background).toBe('');
     });
 
-    // G12: the canvas root claims a fixed `w-72`/`w-0` width and right-justifies its slot content
-    // (`justify-end`). As a plain flex child of the header actions row it would otherwise shrink
-    // under space pressure while its content keeps its full width, overflowing LEFT onto the
-    // view-tab buttons rendered to its left (live check 3 screenshot: the tabs stacked over an
-    // empty slot's "+" trigger). `shrink-0` is the structural, jsdom-assertable guarantee that
-    // this box always renders at its declared width and never overflows into a sibling.
-    it('never shrinks below its fixed width, so its right-justified slots cannot overflow into a sibling (G12)', () => {
-        const { container: previewContainer } = renderPreviewCanvas();
-        expect(previewContainer.querySelector('[data-header-widget-canvas="true"]')).toHaveClass('shrink-0');
+    // G12b: the G12 fix (`shrink-0` + a fixed `w-72`/`w-0` width) did NOT fix the live bug — a
+    // fixed 288px width capped by `max-w-full` could still resolve narrower than the slots'
+    // actual combined content (e.g. two occupied slots + one empty one measured ~312px of real
+    // content squeezed into ~235px), so the right-justified row still overflowed LEFT onto the
+    // view-tab buttons (live check 3 screenshot). The real fix drops the fixed width AND the
+    // `max-w-full` cap entirely: the canvas sizes to exactly what its slots occupy (`w-auto`),
+    // whatever their count and widths, so there is never a mismatch between the box and its
+    // content to overflow from. `shrink-0` still guarantees the box itself is never compressed
+    // smaller than that content by its flex siblings. This is the structural, jsdom-assertable
+    // contract; the parent verifies the resulting layout live via CDP at several widths.
+    it.each([0, 1, 2, 3])('sizes the slot canvas to its content instead of a fixed width, with %i occupied slot(s) (G12b)', (occupied) => {
+        const allWidgets = [
+            makeWidget({ id: 'header-status', type: 'status', title: 'Status widget' }),
+            makeWidget({ id: 'header-connection', type: 'connection-status', title: 'Connection widget' }),
+            makeWidget({ id: 'header-status-2', type: 'status', title: 'Status widget 2' }),
+        ];
+        const widgets = allWidgets.slice(0, occupied);
+
+        const { container: previewContainer } = renderPreviewCanvas({ widgets });
+        const previewCanvas = previewContainer.querySelector('[data-header-widget-canvas="true"]');
+
+        expect(previewCanvas).not.toHaveClass('w-72');
+        expect(previewCanvas).not.toHaveClass('max-w-full');
+        expect(previewCanvas).toHaveClass('w-auto');
+        expect(previewCanvas).toHaveClass('shrink-0');
 
         const { container: viewerContainer } = render(
-            <HeaderWidgetCanvas
-                widgets={[makeWidget({ id: 'header-status', type: 'status', title: 'Status widget' })]}
-                equipmentMap={new Map()}
-                mode="viewer"
-            />,
+            <HeaderWidgetCanvas widgets={widgets} equipmentMap={new Map()} mode="viewer" />,
         );
-        expect(viewerContainer.querySelector('[data-header-widget-canvas="true"]')).toHaveClass('shrink-0');
+        const viewerCanvas = viewerContainer.querySelector('[data-header-widget-canvas="true"]');
+
+        expect(viewerCanvas).not.toHaveClass('w-72');
+        expect(viewerCanvas).not.toHaveClass('max-w-full');
+        // Viewer with zero widgets deliberately collapses to no width (nothing to show); any
+        // occupied slot count sizes to its real content, same as preview.
+        expect(viewerCanvas).toHaveClass(occupied > 0 ? 'w-auto' : 'w-0');
+        expect(viewerCanvas).toHaveClass('shrink-0');
     });
 
     it('animates viewer widgets in logical left-to-right slot order without transitioning canvas width', () => {
