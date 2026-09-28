@@ -558,11 +558,11 @@ h1, h2, h3, h4, h5, h6 {
  * (ver AdminTag.tsx); el color de texto lo pone cada variante directamente,
  * sin verse afectado por --tag-tint (igual que hoy).
  * Los valores por defecto reproducen el look actual de AdminTag exactamente
- * para las variantes cyan/green/amber/red/pink/purple. "muted" y "admin" no
- * encajan en el eje compartido (usan un color u porcentaje propio distinto)
- * y se resuelven con una anulacion local en `.theme-tag-muted`/
- * `.theme-tag-admin` -- mismo patron que el 20%/30% fijo de
- * `.admin-accent-ghost` entre las variantes de boton. */
+ * para las ocho variantes: cyan/green/amber/red/pink/purple usan --tc a
+ * escala 1 (sin anulacion); "muted" y "admin" usan su propio --tc mas un
+ * factor de escala (`--tag-fill-scale`/`--tag-border-scale`, ver
+ * `.theme-tag-muted`/`.theme-tag-admin` abajo) para reproducir su
+ * proporcion de hoy sin dejar de seguir el tema activo. */
 :root {
   --tag-radius: 0.25rem;
   --tag-fill: 5%;
@@ -961,9 +961,23 @@ h1, h2, h3, h4, h5, h6 {
 
   /* Motor de tema de tags: forma + fondo compartidos, sin hover (ver
    * comentario del bloque `:root --tag-*` arriba). Cada variante define
-   * `--tc` (color propio) via una propiedad arbitraria de Tailwind en
-   * AdminTag.tsx; el texto lo colorea la propia variante por separado. */
+   * `--tc` (color propio); el texto lo colorea la propia variante por
+   * separado. "muted" y "admin" no comparten el mismo color/porcentaje que
+   * cyan/green/amber/red/pink/purple (bug fix, 2026-09-28: antes tenian un
+   * porcentaje fijo que ignoraba --tag-fill/--tag-border, por lo que dejaban
+   * de reaccionar a un tema nuevo -- ver Instrumento, borde/relleno 0%). En
+   * vez de eso, cada variante define su propio `--tc` y, cuando su
+   * proporcion de hoy no coincide con el eje compartido, un factor de escala
+   * (`--tag-fill-scale`/`--tag-border-scale`) que sigue multiplicando el
+   * `--tag-fill`/`--tag-border` vivo del tema en vez de reemplazarlo: el 40%
+   * de borde de Clasico por 0.25 da el 10% blanco de "muted" hoy, y por 0.75
+   * da el 30% de "admin"; el 5% de relleno de Clasico por 4 da el 20% de
+   * "admin". Con esto, un tema nuevo (radio/relleno/borde/tinte distintos)
+   * sigue afectando a las ocho variantes por igual. */
   .theme-tag {
+    --tag-fill-color: #fff;
+    --tag-fill-scale: 1;
+    --tag-border-scale: 1;
     border-radius: var(--tag-radius);
     background:
       linear-gradient(
@@ -971,29 +985,33 @@ h1, h2, h3, h4, h5, h6 {
         color-mix(in srgb, var(--tc, transparent) var(--tag-tint), transparent)
       ),
       linear-gradient(
-        color-mix(in srgb, #fff var(--tag-fill), transparent),
-        color-mix(in srgb, #fff var(--tag-fill), transparent)
+        color-mix(in srgb, var(--tag-fill-color) calc(var(--tag-fill) * var(--tag-fill-scale)), transparent),
+        color-mix(in srgb, var(--tag-fill-color) calc(var(--tag-fill) * var(--tag-fill-scale)), transparent)
       ),
       var(--tag-base-background);
-    border: 1px solid color-mix(in srgb, var(--tc, transparent) var(--tag-border), transparent);
+    border: 1px solid color-mix(in srgb, var(--tc, transparent) calc(var(--tag-border) * var(--tag-border-scale)), transparent);
     backdrop-filter: blur(var(--tag-blur));
     -webkit-backdrop-filter: blur(var(--tag-blur));
   }
 
-  /* "muted" no sigue el eje --tag-border compartido: hoy es un borde blanco
-   * neutro al 10%, no su propio color al 40% -- anulacion local fija, no
-   * theme-driven (ver comentario del bloque `:root --tag-*` arriba). */
+  /* "muted": su propio color es blanco (no un acento); el borde blanco/10 de
+   * hoy es el --tag-border compartido (40% en Clasico/Contorno) escalado a
+   * 0.25 -- sigue el tema en vez de quedar fijo. */
   .theme-tag-muted {
-    border-color: color-mix(in srgb, #fff 10%, transparent);
+    --tc: #fff;
+    --tag-border-scale: 0.25;
   }
 
-  /* "admin" tampoco sigue --tag-fill/--tag-tint/--tag-border: conserva su
-   * propio 20%/30% mezclado con su propio color -- misma logica que el
-   * 20%/30% fijo de `.admin-accent-ghost` entre los botones, anulacion
-   * local fija, no theme-driven. */
+  /* "admin": su propio color es el acento admin, usado tambien para la capa
+   * de relleno (en vez del blanco compartido) -- el 20%/30% de hoy es
+   * --tag-fill/--tag-border (5%/40% en Clasico/Contorno) escalados a 4 y
+   * 0.75. Misma idea que `.admin-accent-ghost` entre los botones, pero
+   * theme-driven en vez de un porcentaje fijo. */
   .theme-tag-admin {
-    background: color-mix(in srgb, var(--color-admin-accent) 20%, transparent);
-    border-color: color-mix(in srgb, var(--color-admin-accent) 30%, transparent);
+    --tc: var(--color-admin-accent);
+    --tag-fill-color: var(--tc);
+    --tag-fill-scale: 4;
+    --tag-border-scale: 0.75;
   }
 
   /* Variante hmi-secondary (HmiButton "secondary"): hoy border-industrial-

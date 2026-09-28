@@ -23,11 +23,11 @@ const VARIANT_CLS: Record<AdminTagProps['variant'], string> = {
     green: 'text-accent-green [--tc:var(--color-accent-green)]',
     amber: 'text-accent-amber [--tc:var(--color-accent-amber)]',
     red: 'text-accent-ruby [--tc:var(--color-accent-ruby)]',
-    // "muted" and "admin" don't fit the shared --tc/--tag-border overlay
-    // (muted's border is a neutral white/10, not its own color at the
-    // theme's border %; admin's fill/border use its own color at 20%/30%,
-    // not white/the theme's %) -- `.theme-tag-muted`/`.theme-tag-admin` in
-    // index.css hold their fixed local overrides.
+    // "muted" and "admin" set their own --tc plus a per-variant fill/border
+    // scale instead of the default 1x (`.theme-tag-muted`/`.theme-tag-admin`
+    // in index.css) so today's proportions (white/10 border for muted,
+    // 20%/30% accent for admin) still track the theme's live --tag-fill/
+    // --tag-border instead of a frozen percentage.
     muted: 'theme-tag-muted text-industrial-muted',
     pink: 'text-accent-pink [--tc:var(--color-accent-pink)]',
     purple: 'text-accent-purple [--tc:var(--color-accent-purple)]',

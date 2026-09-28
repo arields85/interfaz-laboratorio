@@ -23,7 +23,12 @@ const WHITE = '#ffffff';
  * `ThemeButtonStyle.icon`'s fallback pattern).
  */
 export const CLASSIC_TAG_STYLE: ThemeTagStyle = {
-    style: 'glass',
+    // "outline", not "glass": AdminTag never had a backdrop blur, and
+    // "glass" maps to a 6px blur (see `TAG_STYLE_BLUR_PX` below). Bug fix,
+    // 2026-09-28: Contorno reuses this same object and writes its properties
+    // explicitly (it doesn't reset to the :root default like Clasico does),
+    // so it had picked up a blur Clasico's tags never had.
+    style: 'outline',
     radiusPx: 4,
     fillPercent: 5,
     borderPercent: 40,

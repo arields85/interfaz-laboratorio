@@ -376,15 +376,15 @@ describe('index.css tag theme engine (P5, 2026-09-28)', () => {
         expect(root).toContain('--tag-blur: 0px;');
     });
 
-    it('drives .theme-tag radius/background/border/blur from the live theme tokens', () => {
+    it('drives .theme-tag radius/background/border/blur from the live theme tokens, with per-variant fill-color and scale hooks', () => {
         const rule = indexCss.match(/(?<!-)\.theme-tag\s*{([\s\S]*?)\n {2}}/);
         expect(rule).not.toBeNull();
         const body = rule?.[1] ?? '';
 
         expect(body).toContain('border-radius: var(--tag-radius);');
-        expect(body).toMatch(/border:\s*1px solid color-mix\(in srgb, var\(--tc[^)]*\) var\(--tag-border\), transparent\);/);
+        expect(body).toMatch(/border:\s*1px solid color-mix\(in srgb, var\(--tc[^)]*\) calc\(var\(--tag-border\) \* var\(--tag-border-scale[^)]*\)\), transparent\);/);
         expect(body).toMatch(/color-mix\(in srgb, var\(--tc[^)]*\) var\(--tag-tint\), transparent\)/);
-        expect(body).toMatch(/color-mix\(in srgb, #fff var\(--tag-fill\), transparent\)/);
+        expect(body).toMatch(/color-mix\(in srgb, var\(--tag-fill-color[^)]*\) calc\(var\(--tag-fill\) \* var\(--tag-fill-scale[^)]*\)\), transparent\)/);
         expect(body).toContain('var(--tag-base-background)');
         expect(body).toContain('backdrop-filter: blur(var(--tag-blur));');
     });
@@ -393,20 +393,40 @@ describe('index.css tag theme engine (P5, 2026-09-28)', () => {
         expect(indexCss).not.toMatch(/\.theme-tag[^{]*:hover/);
     });
 
-    it('keeps the "muted" tag border a neutral white/10, independent of the shared --tag-border axis', () => {
-        const rule = indexCss.match(/\.theme-tag-muted\s*{([\s\S]*?)\n {2}}/);
-        expect(rule).not.toBeNull();
-        const body = rule?.[1] ?? '';
+    it('drives "muted" and "admin" from the shared --tag-* tokens too, via their own color and a per-variant scale -- not a hardcoded percentage (bug fix, 2026-09-28)', () => {
+        const mutedRule = indexCss.match(/\.theme-tag-muted\s*{([\s\S]*?)\n {2}}/);
+        expect(mutedRule).not.toBeNull();
+        const mutedBody = mutedRule?.[1] ?? '';
+        // Today's white/10 border = the theme's 40% border scaled by 0.25.
+        expect(mutedBody).toContain('--tc: #fff;');
+        expect(mutedBody).toContain('--tag-border-scale: 0.25;');
+        // No literal percentage: proves the border is theme-driven, not frozen.
+        expect(mutedBody).not.toMatch(/\d+%/);
+        expect(mutedBody).not.toMatch(/(?<!-)\bbackground:/);
+        expect(mutedBody).not.toMatch(/(?<!-)\bborder(-color)?:/);
 
-        expect(body).toContain('color-mix(in srgb, #fff 10%, transparent)');
+        const adminRule = indexCss.match(/\.theme-tag-admin\s*{([\s\S]*?)\n {2}}/);
+        expect(adminRule).not.toBeNull();
+        const adminBody = adminRule?.[1] ?? '';
+        // Today's 20%/30% admin-accent mix = the theme's 5% fill / 40% border
+        // scaled by 4 and 0.75, using the admin accent as its own fill color
+        // instead of white.
+        expect(adminBody).toContain('--tc: var(--color-admin-accent);');
+        expect(adminBody).toContain('--tag-fill-color: var(--tc);');
+        expect(adminBody).toContain('--tag-fill-scale: 4;');
+        expect(adminBody).toContain('--tag-border-scale: 0.75;');
+        expect(adminBody).not.toMatch(/\d+%/);
+        expect(adminBody).not.toMatch(/(?<!-)\bbackground:/);
+        expect(adminBody).not.toMatch(/(?<!-)\bborder(-color)?:/);
     });
 
-    it('keeps the "admin" tag its own accent-color fill (20%) and border (30%), independent of the shared --tag-* axis', () => {
-        const rule = indexCss.match(/\.theme-tag-admin\s*{([\s\S]*?)\n {2}}/);
+    it('gives every variant a default fill-color/fill-scale/border-scale on .theme-tag so an unscaled variant (cyan, green, ...) is unaffected', () => {
+        const rule = indexCss.match(/(?<!-)\.theme-tag\s*{([\s\S]*?)\n {2}}/);
         expect(rule).not.toBeNull();
         const body = rule?.[1] ?? '';
 
-        expect(body).toContain('color-mix(in srgb, var(--color-admin-accent) 20%, transparent)');
-        expect(body).toContain('color-mix(in srgb, var(--color-admin-accent) 30%, transparent)');
+        expect(body).toContain('--tag-fill-color: #fff;');
+        expect(body).toContain('--tag-fill-scale: 1;');
+        expect(body).toContain('--tag-border-scale: 1;');
     });
 });

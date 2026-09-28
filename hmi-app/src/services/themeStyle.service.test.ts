@@ -145,9 +145,13 @@ describe('themeStyle.service presets', () => {
 });
 
 describe('themeStyle.service tags (P5, 2026-09-28)', () => {
-    it('reproduces today\'s AdminTag look exactly for Clasico (radius 4px, fill 5%, border 40%, no tint)', () => {
+    it('reproduces today\'s AdminTag look exactly for Clasico (radius 4px, fill 5%, border 40%, no tint, no blur)', () => {
+        // "outline", not "glass": AdminTag never had a backdrop blur, and
+        // "glass" maps to a 6px blur (bug fix, 2026-09-28 -- Contorno writes
+        // this value explicitly instead of resetting to the :root default,
+        // so it would have picked up a blur Clasico never had).
         expect(CLASSIC_THEME_STYLE.tag).toEqual({
-            style: 'glass',
+            style: 'outline',
             radiusPx: 4,
             fillPercent: 5,
             borderPercent: 40,
@@ -210,7 +214,7 @@ describe('themeStyleToCssProperties', () => {
         expect(Object.keys(properties).sort()).toEqual(Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort());
     });
 
-    it('maps the tag recipe to --tag-* custom properties', () => {
+    it('maps the tag recipe to --tag-* custom properties, with no blur for the "outline" style (bug fix: Clasico never had one)', () => {
         const properties = themeStyleToCssProperties(CLASSIC_THEME_STYLE);
 
         expect(properties['--tag-radius']).toBe('4px');
@@ -218,7 +222,7 @@ describe('themeStyleToCssProperties', () => {
         expect(properties['--tag-border']).toBe('40%');
         expect(properties['--tag-tint']).toBe('0%');
         expect(properties['--tag-base-background']).toBe('transparent');
-        expect(properties['--tag-blur']).toBe('6px');
+        expect(properties['--tag-blur']).toBe('0px');
     });
 
     it('maps a flat tag style to an opaque base background and no blur', () => {
