@@ -98,7 +98,7 @@ masked to four corner squares whose size is the length variable; radius inherite
   (`GridSelectionFrame`, `HeaderSelectionFrame`) hardcode a 1.5rem radius, so with "Contorno"
   (radius 0) the selection ring stays rounded around square widgets; they must follow the live
   theme frame radius (rest/hover). Route: delegated writer.
-- [ ] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
+- [x] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
 
 ## Delivery
 
@@ -206,9 +206,5 @@ live check).
 
 ## Next step
 
-Slice review, then merge to main (user wants to test the theme on main with the group widget);
-previous: Live check (TH5) from the main checkout after the group widget merge: rebase `feat/theme-tab`
-onto the new `main`, then the single merge to `main`.
- live check after the group widget merge (the dashboards
-live in the 5173 origin's localStorage, so the theme is tested from the main checkout once
-`feat/theme-tab` is rebased onto the new `main`).
+Feature complete: merged to main (2026-09-28) and validated live by the user on main together with
+the group widget; follow-up work continued in `odd/tasks/theme-polish.md`.

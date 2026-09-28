@@ -189,4 +189,4 @@ Only overrides are stored; keys absent or null already equal the code defaults.
 
 ## Next step
 
-Merge after the group widget and theme merges (rebase onto the new main); previous: V2 live check on a fresh origin; merge after the group widget and theme merges (rebase).
+Merged to main 2026-09-28 (rebased onto main with the theme polish; `npm test` 2949/2949). Feature complete. on a fresh origin; merge after the group widget and theme merges (rebase).
