@@ -182,6 +182,10 @@ describe('TemporalSettingsTab', () => {
         expect(settingsHeading).toHaveClass('text-industrial-text');
         expect(shiftsHeading).toHaveClass('text-industrial-text');
         expect(addShiftButton).toHaveClass('admin-accent-ghost');
+        // `.admin-accent-ghost` declares its own transition for this
+        // standalone (non theme-button) use; a Tailwind `transition-colors`
+        // utility here would collide with it in the cascade (TH4a).
+        expect(addShiftButton).not.toHaveClass('transition-colors');
         expect(removeShiftButton).toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
         expect(alert).toHaveClass('text-status-critical');
 

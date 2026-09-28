@@ -103,6 +103,10 @@ describe('WidgetHeaderTemporalControls', () => {
 
         expect(activeButton).toHaveClass('group/control', 'theme-button', 'theme-button-segment-active', 'px-2', 'py-1');
         expect(activeButton).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        // The pill variant's transition comes solely from the shared
+        // `.theme-button` engine; a Tailwind `transition-colors` utility here
+        // would collide with it in the cascade (TH4a).
+        expect(activeButton).not.toHaveClass('transition-colors');
         expect(activeLabel).toHaveClass('translate-y-[1.5px]');
         expect(activeIndicator).toHaveClass('h-[1.5px]', 'w-1/4', 'min-w-[0.45rem]', 'bg-transparent');
         expect(activeIndicator).not.toHaveClass('bg-current', 'group-hover/control:bg-current', 'group-focus-visible/control:bg-current');
@@ -128,6 +132,7 @@ describe('WidgetHeaderTemporalControls', () => {
         const inactiveButton = screen.getByRole('button', { name: '1s' });
 
         expect(inactiveButton).toHaveClass('group/control', 'theme-button', 'theme-button-bare', 'px-2', 'py-1');
+        expect(inactiveButton).not.toHaveClass('transition-colors');
     });
 
     it('applies the underline selected visual contract with local hover group classes and indicator geometry', () => {
@@ -155,6 +160,9 @@ describe('WidgetHeaderTemporalControls', () => {
 
         expect(activeButton).toHaveClass('group/control', 'px-2', 'py-1', 'text-industrial-text');
         expect(activeButton).not.toHaveClass('rounded-md', 'bg-admin-accent/10', 'border-admin-accent/30', 'text-admin-accent');
+        // The underline variant has no theme-button engine of its own, so it
+        // still needs its own Tailwind transition for the text-color swap.
+        expect(activeButton).toHaveClass('transition-colors');
         expect(activeIndicator).toHaveClass('h-[1.5px]', 'w-1/4', 'min-w-[0.45rem]', 'bg-current', 'group-hover/control:bg-current', 'group-focus-visible/control:bg-current');
         expect(inactiveIndicator).toHaveClass('bg-transparent', 'group-hover/control:bg-current', 'group-focus-visible/control:bg-current');
     });

@@ -797,10 +797,20 @@ h1, h2, h3, h4, h5, h6 {
     overflow: hidden;
     overflow: clip;
     isolation: isolate;
+    /* Every property any combined `.theme-button-*` color variant (or
+     * `.admin-accent-ghost`) needs to animate lives in this ONE transition
+     * list. `transition` is a single non-additive property: when two
+     * classes on the same element both declare it, the one later in source
+     * order wins wholesale and silently drops the other's list -- that
+     * collision (R3-button-transition-cascade-collision) used to make the
+     * color mix snap instantly on the "primary" variant while the shape
+     * tokens below transitioned, or vice versa on every other variant. The
+     * variant rules below no longer declare their own `transition`. */
     transition:
-      --button-radius 0.2s ease, --button-accent-length 0.2s ease,
-      --button-accent-thickness 0.2s ease, --button-accent-color 0.2s ease,
-      --button-accent-opacity 0.2s ease;
+      --button-radius 0.2s ease, --button-fill 0.2s ease, --button-border 0.2s ease,
+      --button-accent-length 0.2s ease, --button-accent-thickness 0.2s ease,
+      --button-accent-color 0.2s ease, --button-accent-opacity 0.2s ease,
+      background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   }
 
   .theme-button:hover:not(:disabled) {
@@ -852,7 +862,8 @@ h1, h2, h3, h4, h5, h6 {
     --button-border: var(--button-border-rest);
     background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, rgba(255, 255, 255, 0.05) var(--button-base-strength), transparent));
     border: 1px solid color-mix(in srgb, #fff var(--button-border), color-mix(in srgb, rgba(255, 255, 255, 0.1) var(--button-base-strength), transparent));
-    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    /* Transition lives on the shared `.theme-button` base (see above) --
+     * a duplicate here would collide with it in the cascade. */
   }
 
   .theme-button-neutral:hover:not(:disabled) {
@@ -869,7 +880,8 @@ h1, h2, h3, h4, h5, h6 {
     --button-border: var(--button-border-rest);
     background: color-mix(in srgb, #fff var(--button-fill), transparent);
     border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);
-    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    /* Transition lives on the shared `.theme-button` base (see above) --
+     * a duplicate here would collide with it in the cascade. */
   }
 
   .theme-button-icon-neutral:hover:not(:disabled) {
@@ -887,7 +899,8 @@ h1, h2, h3, h4, h5, h6 {
     --button-border: var(--button-border-rest);
     background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, var(--color-industrial-hover) var(--button-base-strength), transparent));
     border: 1px solid color-mix(in srgb, #fff var(--button-border), color-mix(in srgb, var(--color-industrial-border) var(--button-base-strength), transparent));
-    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    /* Transition lives on the shared `.theme-button` base (see above) --
+     * a duplicate here would collide with it in the cascade. */
   }
 
   .theme-button-hmi-secondary:hover:not(:disabled) {
@@ -905,7 +918,8 @@ h1, h2, h3, h4, h5, h6 {
     --button-border: var(--button-border-rest);
     background: color-mix(in srgb, var(--color-status-critical) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-status-critical) 10%, transparent) var(--button-base-strength), transparent));
     border: 1px solid color-mix(in srgb, var(--color-status-critical) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-status-critical) 40%, transparent) var(--button-base-strength), transparent));
-    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    /* Transition lives on the shared `.theme-button` base (see above) --
+     * a duplicate here would collide with it in the cascade. */
   }
 
   .theme-button-critical:hover:not(:disabled) {
@@ -924,7 +938,8 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--color-admin-accent);
     background: color-mix(in srgb, var(--color-admin-accent) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 10%, transparent) var(--button-base-strength), transparent));
     border: 1px solid color-mix(in srgb, var(--color-admin-accent) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 30%, transparent) var(--button-base-strength), transparent));
-    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    /* Transition lives on the shared `.theme-button` base (see above) --
+     * a duplicate here would collide with it in the cascade. */
   }
 
   .theme-button-segment-active:hover:not(:disabled) {
@@ -941,7 +956,8 @@ h1, h2, h3, h4, h5, h6 {
     --button-border: var(--button-border-rest);
     background: color-mix(in srgb, #fff var(--button-fill), transparent);
     border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);
-    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    /* Transition lives on the shared `.theme-button` base (see above) --
+     * a duplicate here would collide with it in the cascade. */
   }
 
   .theme-button-bare:hover:not(:disabled) {

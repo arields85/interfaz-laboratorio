@@ -37,7 +37,10 @@ type TemporalSettingsDraft = {
 };
 
 const SHIFT_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
-const TEMPORAL_SETTINGS_ACTION_BUTTON_CLS = 'rounded-md px-3 py-2 text-sm transition-colors admin-accent-ghost';
+// No Tailwind `transition-colors` here: `.admin-accent-ghost` already
+// declares its own `transition` for this standalone (non theme-button) use,
+// and a second `transition` would collide with it in the cascade (TH4a).
+const TEMPORAL_SETTINGS_ACTION_BUTTON_CLS = 'rounded-md px-3 py-2 text-sm admin-accent-ghost';
 const TEMPORAL_SETTINGS_SHIFT_CARD_CLS = 'rounded-md border border-industrial-border bg-industrial-hover p-3';
 const WEEKDAY_LABELS: Record<WeekdayKey, string> = {
     mon: 'Lunes',

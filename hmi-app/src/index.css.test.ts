@@ -253,6 +253,36 @@ describe('index.css button theme engine', () => {
         expect(hoverBody).toContain('color-mix(in srgb, var(--color-status-critical) 60%, transparent) var(--button-base-strength)');
     });
 
+    it('merges shape and color transitions onto .theme-button so no combined variant class can drop the other in the cascade', () => {
+        const rule = indexCss.match(/\.theme-button\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toMatch(/transition:[\s\S]*--button-radius[\s\S]*--button-fill[\s\S]*--button-border[\s\S]*--button-accent-length[\s\S]*--button-accent-thickness[\s\S]*--button-accent-color[\s\S]*--button-accent-opacity[\s\S]*background[\s\S]*border-color[\s\S]*color[\s\S]*;/);
+
+        // A variant class combined with `.theme-button` on the same element must
+        // not declare its own `transition`: same specificity + later source
+        // order means it would win the cascade wholesale and silently drop
+        // `.theme-button`'s shape/accent transitions (see TH4a advisory
+        // R3-button-transition-cascade-collision).
+        for (const variantSelector of [
+            '.theme-button-neutral',
+            '.theme-button-icon-neutral',
+            '.theme-button-hmi-secondary',
+            '.theme-button-critical',
+            '.theme-button-segment-active',
+            '.theme-button-bare',
+        ]) {
+            const escaped = variantSelector.replace(/[.]/g, '\\.');
+            const variantRule = indexCss.match(new RegExp(`${escaped}\\s*{([\\s\\S]*?)\\n {2}}`));
+            expect(variantRule, `${variantSelector} rest rule not found`).not.toBeNull();
+            expect(
+                variantRule?.[1] ?? '',
+                `${variantSelector} must not declare its own transition`,
+            ).not.toMatch(/(?<!-)\btransition:/);
+        }
+    });
+
     it('keeps the icon-toolbar variant borderless today and the segmented inactive variant boxless today (fully transparent own base)', () => {
         const iconRule = indexCss.match(/\.theme-button-icon-neutral\s*{([\s\S]*?)\n {2}}/);
         expect(iconRule).not.toBeNull();

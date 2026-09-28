@@ -85,23 +85,28 @@ function getTemporalControlButtonClass({
     isActive: boolean;
     isDisabled: boolean;
 }) {
-    const baseClassName = 'group/control px-2 py-1 uppercase transition-colors';
+    const baseClassName = 'group/control px-2 py-1 uppercase';
 
     if (isDisabled) {
         return `${baseClassName} cursor-default text-industrial-muted/50`;
     }
 
     if (variant === 'pill') {
-        // Shape + color driven by the shared theme-button engine (index.css):
-        // Clasico reproduces today's rounded-md/accent-10%/accent-30% active
-        // look and the boxless inactive look exactly; other themes apply the
-        // same outline recipe uniformly to both states.
+        // Shape + color + transition driven entirely by the shared
+        // theme-button engine (index.css): Clasico reproduces today's
+        // rounded-md/accent-10%/accent-30% active look and the boxless
+        // inactive look exactly; other themes apply the same outline recipe
+        // uniformly to both states. No Tailwind `transition-colors` here --
+        // it would collide with `.theme-button`'s own `transition` in the
+        // cascade (TH4a).
         return `${baseClassName} ${isActive
             ? 'theme-button theme-button-segment-active'
             : 'theme-button theme-button-bare text-industrial-muted hover:text-industrial-text focus-visible:text-industrial-text'}`;
     }
 
-    return `${baseClassName} ${isActive
+    // The underline variant has no theme-button engine of its own, so it
+    // keeps its own Tailwind transition for the text-color swap.
+    return `${baseClassName} transition-colors ${isActive
         ? 'text-industrial-text'
         : 'text-industrial-muted hover:text-industrial-text focus-visible:text-industrial-text'}`;
 }
