@@ -77,7 +77,10 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
 - [x] **G5** — Viewer: D3 click priority for members without their own link; group hover (the
   container shows its hover while the pointer is anywhere over the group; members keep their own).
 - [ ] **G5b** — Promoting a member of a locked group to the header releases it from the group
-  (today it is only filtered at read time). One history step.
+  (today it is only filtered at read time). One history step. Plus review follow-ups: a widget
+  belongs to at most one locked group (exclude widgets already in another locked group at lock
+  time; sanitize on read); resize preview must match the committed clamp; restore the weakened
+  BuilderCanvas test helper.
 - [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
@@ -164,6 +167,12 @@ after the user's live check. Slice boundaries are recorded under Progress.
   Follow-up G5b (gap reported by the writer): promoting a locked member to the header after
   locking leaves it in `memberWidgetIds`; parent decision: promotion releases membership.
 
+- 2026-09-28: slice review G2–G5 (base `7fc7893`..`7371f57`, 2060 lines, medium, user granted):
+  lineage `review-c8a17332c8ab136e` APPROVED, acknowledged, authority burned; reviewed boundary
+  advances to `7371f57`. Advisory: R3-group-double-membership (WARNING, `groupWidget.ts:57-78`),
+  R3-resize-preview-commit-mismatch (SUGGESTION, `BuilderCanvas.tsx:292-307`),
+  R3-test-helper-weakened (SUGGESTION, `BuilderCanvas.test.tsx:154`) — folded into G5b.
+
 ## Next step
 
-Slice review G2–G5 (base 7fc7893, consent), then G5b + G6.
+G5b + G6 (one writer), then the user's live check and the single merge.
