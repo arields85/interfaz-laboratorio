@@ -49,6 +49,7 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   group copy too. Also fixes the current bug where a duplicate can land outside the grid.
 - [x] **P4** — Docs (DESIGN_SYSTEM themes section, WIDGET_AUTHORING/ADMIN_CONVENTIONS as needed) and
   the user's live check.
+- [x] **P9** — Copy placement review advisories R3-001..R3-003 (last P8 review, 2026-09-28).
 
 ## Constraints
 
@@ -136,13 +137,49 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   finished at session close and still needs its live check (next session).
 - 2026-09-28: user approved the copy placement mode (P8) in the live check.
 
-## Next step
-
-Merged to main at session close. P8 live check approved (2026-09-28). Pending: the last
-review's advisories.
-
 - 2026-09-28: final slice review (base `dacde8c`..`2159aa6`, 1167 lines, medium, user granted):
   lineage `review-2cb306d00888f75a` APPROVED, acknowledged, authority burned. Advisory, pending
   for the next session: R3-001 WARNING `BuilderCanvas.tsx:1015-1023` (placement commit on a
   widget's onPointerDown), R3-002 WARNING `DashboardBuilderPage.tsx:252-256` (Escape handling
   order for placement vs edit mode), R3-003 SUGGESTION `BuilderCanvas.tsx:1170-1193`.
+
+- 2026-09-28: P9 done (route: delegated writer) — the three P8-review advisories:
+  - **R3-001** (confirmed bug): `commitPlacementAt` committed `placementGridPosition`, updated
+    only by a window `pointermove` listener, so a click/tap with no prior move landed the copy at
+    the stale last-tracked cell instead of the cell under the pointer. RED: extended the existing
+    "drops the copy on top of an existing widget…" test (`BuilderCanvas.test.tsx`) to assert the
+    committed position — pressing on widget-2 at (650, 320) with no prior move committed
+    `{x: 2, y: 1}` (widget-1's seeded position) instead of `{x: 10, y: 5}`, confirmed via plain
+    `userEvent.pointer` (no `fireEvent` fallback needed — it did not mask the bug). Fix: both the
+    pointermove tracking and `commitPlacementAt` now resolve the clamped grid cell through one
+    shared helper, `resolvePointerGridCell`, off the event's own `clientX`/`clientY`. GREEN
+    11/11 (P8 suite), 79/79 (full file). Commit `1f8097f`.
+  - **R3-002** (coverage-only, no bug): added a `DashboardBuilderPage.test.tsx` test with a
+    locked group in D6 pencil edit mode AND a pending placement both active — asserts the first
+    Escape cancels only the placement (undo stays disabled, no history step, edit mode stays
+    active) and the second Escape exits edit mode. Passed immediately against the existing
+    source; verified the test was not vacuous by temporarily swapping the two `if` branches'
+    order (fault injection) — the test then failed as expected — before reverting. Mock updated
+    to expose `placementSourceWidgetId` as a data attribute. Commit `33a00d9`.
+  - **R3-003** (confirmed bug + suggestion applied): the placement ghost's container rect passed
+    `radius={getWidgetCornerRadius(type)}` to `GridSelectionFrame`, but a member ghost omitted
+    `radius`, so e.g. a square `text-title` member showed a rounded ghost. RED: new test asserted
+    a text-title member's ghost frame had `borderRadius: 'calc(0px)'`; it received
+    `'calc(var(--frame-radius-rest) + 0px)'` instead. Fix: extracted the duplicated
+    container/member ghost-rect markup into one `PlacementGhostRect` helper that always resolves
+    radius from the member's own type, hoisted `getWidgetCornerRadius` to module scope. Also
+    added a test for a header-promoted (hidden) member producing no ghost — passed immediately,
+    `resolveVisibleGroupMemberIds` already filtered it. Follow-up polish from the pre-commit
+    review: `px` prop typed as the existing `WidgetPixelBounds` instead of an inline duplicate.
+    GREEN 81/81 (full file). Commit `f4c3b49` (includes the polish, amended).
+  - Verification: `npx vitest run BuilderCanvas.test.tsx DashboardBuilderPage.test.tsx` 147/147;
+    `npx tsc -b` clean; `npm run lint` clean (0 warnings — the pointermove effect's dependency
+    array was kept granular, `cellWidth`/`rowHeight`, to avoid a new exhaustive-deps warning from
+    passing the whole `metrics` object into the shared helper); `npm test` 2952/2952 (233 files).
+  - Docs: removed the PW-016 row from `docs/PENDING_WORK.md` (resolved; Git keeps history).
+
+## Next step
+
+Merged to main at session close. P8 live check approved (2026-09-28). The P8-review advisories
+(R3-001..R3-003, P9) are done; no open advisories remain on this branch. Pending: user review of
+this branch and merge to main.
