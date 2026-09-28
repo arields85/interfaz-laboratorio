@@ -160,6 +160,14 @@ function frameStyleToCssProperties(frame: ThemeFrameStyle): Record<string, strin
 }
 
 function buttonStyleToCssProperties(button: ThemeButtonStyle): Record<string, string> {
+    // A theme without its own icon-only block reuses the shared button recipe,
+    // so every theme always emits the full --button-icon-* token set.
+    const icon = button.icon ?? {
+        rest: button.rest,
+        hover: button.hover,
+        baseStrengthPercent: button.baseStrengthPercent,
+    };
+
     return {
         ...surfaceStateToCssProperties('button', 'rest', button.rest),
         ...surfaceStateToCssProperties('button', 'hover', button.hover),
@@ -167,9 +175,9 @@ function buttonStyleToCssProperties(button: ThemeButtonStyle): Record<string, st
         // Icon-only buttons read their own token set (see `.theme-button-
         // icon-neutral` in index.css) so they can go borderless under
         // Contorno without touching the shared --button-* tokens above.
-        ...surfaceStateToCssProperties('button-icon', 'rest', button.icon.rest),
-        ...surfaceStateToCssProperties('button-icon', 'hover', button.icon.hover),
-        '--button-icon-base-strength': percentToken(button.icon.baseStrengthPercent),
+        ...surfaceStateToCssProperties('button-icon', 'rest', icon.rest),
+        ...surfaceStateToCssProperties('button-icon', 'hover', icon.hover),
+        '--button-icon-base-strength': percentToken(icon.baseStrengthPercent),
     };
 }
 

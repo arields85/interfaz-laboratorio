@@ -158,6 +158,25 @@ describe('themeStyleToCssProperties', () => {
         expect(themeStyleToCssProperties(CLASSIC_THEME_STYLE)['--button-base-strength']).toBe('100%');
     });
 
+    it('falls back to the shared button recipe when a theme has no icon-only block', () => {
+        const themeWithoutIcon = {
+            ...OUTLINE_THEME_STYLE,
+            button: {
+                rest: OUTLINE_THEME_STYLE.button.rest,
+                hover: OUTLINE_THEME_STYLE.button.hover,
+                baseStrengthPercent: OUTLINE_THEME_STYLE.button.baseStrengthPercent,
+            },
+        };
+
+        const properties = themeStyleToCssProperties(themeWithoutIcon);
+
+        expect(properties['--button-icon-radius-rest']).toBe(properties['--button-radius-rest']);
+        expect(properties['--button-icon-border-hover']).toBe(properties['--button-border-hover']);
+        expect(properties['--button-icon-fill-hover']).toBe(properties['--button-fill-hover']);
+        expect(properties['--button-icon-base-strength']).toBe(properties['--button-base-strength']);
+        expect(Object.keys(properties).sort()).toEqual(Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort());
+    });
+
     it('produces the same set of keys for every preset', () => {
         const classicKeys = Object.keys(themeStyleToCssProperties(CLASSIC_THEME_STYLE)).sort();
         const outlineKeys = Object.keys(themeStyleToCssProperties(OUTLINE_THEME_STYLE)).sort();
@@ -187,6 +206,8 @@ describe('applyThemeStyleToDocument / resetThemeStyleOnDocument', () => {
 
         expect(target.style.getPropertyValue('--frame-radius-rest')).toBe('');
         expect(target.style.getPropertyValue('--frame-accent-opacity-hover')).toBe('');
+        expect(target.style.getPropertyValue('--button-icon-border-hover')).toBe('');
+        expect(target.style.getPropertyValue('--button-icon-base-strength')).toBe('');
     });
 });
 

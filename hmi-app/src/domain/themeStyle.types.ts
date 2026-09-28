@@ -88,8 +88,11 @@ export interface ThemeButtonStyle {
      * (WidgetHeaderTemporalControls) keep their current bordered Contorno
      * look untouched, driven entirely by `rest`/`hover`/
      * `baseStrengthPercent` above.
+     *
+     * Optional: a theme without it renders icon-only buttons with the shared
+     * `rest`/`hover`/`baseStrengthPercent` recipe above.
      */
-    readonly icon: ThemeButtonIconStyle;
+    readonly icon?: ThemeButtonIconStyle;
 }
 
 /** Icon-only button visual recipe -- see `ThemeButtonStyle.icon`. */
