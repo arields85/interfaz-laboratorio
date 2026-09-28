@@ -41,6 +41,12 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   - Icon-only buttons: rest radius 6, fill 0 %, border 0 %, accent hidden (origin 16 px x 1 px
     white); hover radius 3, fill 5 %, border 0 %, accent 5 px x 1 px white at 60 %.
   - Tags (flat): radius 3, fill 0 %, border 0 %, color tint 14 %.
+- [ ] **P8** — Builder copy placement (user decision 2026-09-28; builder UX found during this
+  live session, kept on this branch): clicking copy starts a placement mode — a ghost of the copy
+  follows the mouse snapped to the grid; one click drops it there; Escape cancels (nothing
+  created); OVERLAP IS ALLOWED (no invalid state); the ghost is clamped inside the grid bounds so
+  a copy can never land outside; the copy ends selected; one history step; works for a locked
+  group copy too. Also fixes the current bug where a duplicate can land outside the grid.
 - [ ] **P4** — Docs (DESIGN_SYSTEM themes section, WIDGET_AUTHORING/ADMIN_CONVENTIONS as needed) and
   the user's live check.
 
@@ -122,6 +128,7 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 
 ## Next step
 
+P8 (writer), then the user's live check (P4), then merge to main.
  user's live check (P4, including the Instrumento theme);
 then merge to main. Tags in the theme engine only if the user asks after
 exploring them in the lab.
