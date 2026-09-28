@@ -356,6 +356,86 @@ h1, h2, h3, h4, h5, h6 {
   --viewport-width: calc(100vw / var(--viewport-zoom));
 }
 
+/* ── Motor de tema: marco de widgets (glass-panel, widget-state-*) ────────
+ * Cada eje visual (radio, relleno, borde, blur, acento de esquina) es un
+ * custom property registrado con @property para poder animar la transición
+ * rest -> hover (Houdini-style: el navegador interpola el valor tipado y
+ * recalcula cualquier declaracion que lo referencie, p.ej. `background` via
+ * `color-mix()`). El tema activo (ver `services/themeStyle.service.ts`) solo
+ * sobrescribe los tokens "-rest"/"-hover" de abajo; `.glass-panel` y
+ * `.widget-state-*` copian el valor "rest" en la propiedad viva en reposo y
+ * el valor "hover" en :hover, que es lo que efectivamente transiciona.
+ * Los valores por defecto reproducen el look "Clasico" actual sin cambios.
+ * ────────────────────────────────────────────────────────────────────── */
+@property --frame-radius {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 1.5rem;
+}
+
+@property --frame-fill {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --frame-border {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 8%;
+}
+
+@property --frame-blur {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 12px;
+}
+
+@property --frame-accent-length {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 18px;
+}
+
+@property --frame-accent-thickness {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 1px;
+}
+
+@property --frame-accent-color {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #ffffff;
+}
+
+@property --frame-accent-opacity {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+:root {
+  /* "Clasico" (default theme): reproduce exactamente el .glass-panel actual */
+  --frame-base-background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
+  --frame-radius-rest: 1.5rem;
+  --frame-radius-hover: 1.5rem;
+  --frame-fill-rest: 0%;
+  --frame-fill-hover: 4%;
+  --frame-border-rest: 8%;
+  --frame-border-hover: 20%;
+  --frame-blur-rest: 12px;
+  --frame-blur-hover: 12px;
+  --frame-accent-length-rest: 18px;
+  --frame-accent-length-hover: 18px;
+  --frame-accent-thickness-rest: 1px;
+  --frame-accent-thickness-hover: 1px;
+  --frame-accent-color-rest: #ffffff;
+  --frame-accent-color-hover: #ffffff;
+  --frame-accent-opacity-rest: 0%;
+  --frame-accent-opacity-hover: 0%;
+}
+
 /* ── Scrollbar delgado y discreto para paneles scrolleables ───────────────
  * Usa únicamente CSS Scrollbar Styling Level 1 para evitar conflictos con
  * pseudo-elementos webkit en Chromium moderno.
@@ -516,6 +596,13 @@ h1, h2, h3, h4, h5, h6 {
     animation: none;
     transform: none;
   }
+
+  .glass-panel,
+  .glass-panel::after,
+  .widget-state-warning,
+  .widget-state-critical {
+    transition: none;
+  }
 }
 
 @layer base {
@@ -593,19 +680,42 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   .glass-panel {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--color-industrial-border);
-    border-radius: 1.5rem;
+    --frame-radius: var(--frame-radius-rest);
+    --frame-fill: var(--frame-fill-rest);
+    --frame-border: var(--frame-border-rest);
+    --frame-blur: var(--frame-blur-rest);
+    --frame-accent-length: var(--frame-accent-length-rest);
+    --frame-accent-thickness: var(--frame-accent-thickness-rest);
+    --frame-accent-color: var(--frame-accent-color-rest);
+    --frame-accent-opacity: var(--frame-accent-opacity-rest);
+    background:
+      linear-gradient(
+        0deg,
+        color-mix(in srgb, #fff var(--frame-fill), transparent),
+        color-mix(in srgb, #fff var(--frame-fill), transparent)
+      ),
+      var(--frame-base-background);
+    backdrop-filter: blur(var(--frame-blur));
+    -webkit-backdrop-filter: blur(var(--frame-blur));
+    border: 1px solid color-mix(in srgb, #fff var(--frame-border), transparent);
+    border-radius: var(--frame-radius);
     position: relative;
-    overflow: hidden;
+    /* overflow: clip (not hidden) + overflow-clip-margin lets the corner-accent
+     * ::after below sit exactly on the 1px border without being cut off, while
+     * still clipping widget content to the rounded frame like before. */
+    overflow: clip;
+    overflow-clip-margin: 2px;
     isolation: isolate;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    transition:
+      --frame-radius 0.2s ease, --frame-fill 0.2s ease, --frame-border 0.2s ease,
+      --frame-blur 0.2s ease, --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
+      --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease,
+      border-color 0.2s ease, background 0.2s ease;
   }
 
   /* Hover sutil sobre glass-panel: mismo lenguaje visual que CatalogSidebar.
-   * Aclara el borde (white/20) y el fondo (white/[0.04]) sin cambiar semántica.
+   * Solo intercambia los tokens de tema a sus valores de hover; `background`
+   * y `border` de arriba ya los referencian y se recalculan solos.
    * `[data-group-hover-target="true"]` (G5, viewer): un grupo bloqueado y sus
    * miembros son grid items hermanos, no padre/hijo en el DOM, así que el
    * contenedor no puede alcanzarse con `.group:hover`; DashboardViewer marca
@@ -614,10 +724,50 @@ h1, h2, h3, h4, h5, h6 {
   .glass-panel:hover,
   .group:hover .glass-panel,
   [data-group-hover-target="true"] .glass-panel {
-    background:
-      linear-gradient(0deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.04)),
-      linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
-    border-color: rgba(255, 255, 255, 0.20);
+    --frame-radius: var(--frame-radius-hover);
+    --frame-fill: var(--frame-fill-hover);
+    --frame-border: var(--frame-border-hover);
+    --frame-blur: var(--frame-blur-hover);
+    --frame-accent-length: var(--frame-accent-length-hover);
+    --frame-accent-thickness: var(--frame-accent-thickness-hover);
+    --frame-accent-color: var(--frame-accent-color-hover);
+    --frame-accent-opacity: var(--frame-accent-opacity-hover);
+  }
+
+  /* Acento de esquina: overlay ::after enmascarado a los 4 corners, controlado
+   * por los mismos tokens de tema. Se combina con .glass-panel-danger/-warning
+   * en el mismo elemento sin conflicto (esas variantes no declaran ::after). */
+  .glass-panel::after,
+  .widget-state-warning::after,
+  .widget-state-critical::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    --frame-accent-tint: color-mix(in srgb, var(--frame-accent-color) var(--frame-accent-opacity), transparent);
+    background-repeat: no-repeat;
+    background-image:
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint));
+    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+    background-size:
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length),
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length),
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length),
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length);
+    transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
+      --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;
   }
 
   .glass-panel-danger {
@@ -673,37 +823,73 @@ h1, h2, h3, h4, h5, h6 {
    * Aplicar a cualquier card/widget que deba colorizar su fondo según MetricStatus.
    * El token --color-status-* garantiza coherencia con el resto del sistema. */
   .widget-state-warning {
+    --frame-radius: var(--frame-radius-rest);
+    --frame-blur: var(--frame-blur-rest);
+    --frame-accent-length: var(--frame-accent-length-rest);
+    --frame-accent-thickness: var(--frame-accent-thickness-rest);
+    --frame-accent-color: var(--frame-accent-color-rest);
+    --frame-accent-opacity: var(--frame-accent-opacity-rest);
     background: linear-gradient(
       135deg,
       color-mix(in srgb, var(--color-status-warning) 12%, transparent) 0%,
       color-mix(in srgb, var(--color-status-warning) 2%, transparent) 100%
     );
     border: 2px solid color-mix(in srgb, var(--color-status-warning) 35%, transparent);
-    border-radius: 1.5rem;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    border-radius: var(--frame-radius);
+    backdrop-filter: blur(var(--frame-blur));
+    -webkit-backdrop-filter: blur(var(--frame-blur));
     box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-status-warning) 20%, transparent);
+    position: relative;
+    overflow: clip;
+    overflow-clip-margin: 2px;
+    transition: --frame-radius 0.2s ease, --frame-blur 0.2s ease, --frame-accent-length 0.2s ease,
+      --frame-accent-thickness 0.2s ease, --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease,
+      border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
   .widget-state-warning:hover {
+    --frame-radius: var(--frame-radius-hover);
+    --frame-blur: var(--frame-blur-hover);
+    --frame-accent-length: var(--frame-accent-length-hover);
+    --frame-accent-thickness: var(--frame-accent-thickness-hover);
+    --frame-accent-color: var(--frame-accent-color-hover);
+    --frame-accent-opacity: var(--frame-accent-opacity-hover);
     border-color: color-mix(in srgb, var(--color-status-warning) 55%, transparent);
     box-shadow: 0 0 18px 3px color-mix(in srgb, var(--color-status-warning) 28%, transparent);
   }
 
   .widget-state-critical {
+    --frame-radius: var(--frame-radius-rest);
+    --frame-blur: var(--frame-blur-rest);
+    --frame-accent-length: var(--frame-accent-length-rest);
+    --frame-accent-thickness: var(--frame-accent-thickness-rest);
+    --frame-accent-color: var(--frame-accent-color-rest);
+    --frame-accent-opacity: var(--frame-accent-opacity-rest);
     background: linear-gradient(
       135deg,
       color-mix(in srgb, var(--color-status-critical) 12%, transparent) 0%,
       color-mix(in srgb, var(--color-status-critical) 2%, transparent) 100%
     );
     border: 2px solid color-mix(in srgb, var(--color-status-critical) 35%, transparent);
-    border-radius: 1.5rem;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    border-radius: var(--frame-radius);
+    backdrop-filter: blur(var(--frame-blur));
+    -webkit-backdrop-filter: blur(var(--frame-blur));
     box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-status-critical) 20%, transparent);
+    position: relative;
+    overflow: clip;
+    overflow-clip-margin: 2px;
+    transition: --frame-radius 0.2s ease, --frame-blur 0.2s ease, --frame-accent-length 0.2s ease,
+      --frame-accent-thickness 0.2s ease, --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease,
+      border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
   .widget-state-critical:hover {
+    --frame-radius: var(--frame-radius-hover);
+    --frame-blur: var(--frame-blur-hover);
+    --frame-accent-length: var(--frame-accent-length-hover);
+    --frame-accent-thickness: var(--frame-accent-thickness-hover);
+    --frame-accent-color: var(--frame-accent-color-hover);
+    --frame-accent-opacity: var(--frame-accent-opacity-hover);
     border-color: color-mix(in srgb, var(--color-status-critical) 55%, transparent);
     box-shadow: 0 0 18px 3px color-mix(in srgb, var(--color-status-critical) 28%, transparent);
   }

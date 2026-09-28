@@ -287,7 +287,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
 
     if (isLoadingData) {
         return (
-            <div className={`p-5 rounded-3xl bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
+            <div className={`p-5 rounded-[var(--frame-radius-rest)] bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
                 <WidgetHeader title={widget.title ?? 'KPI'} dataMode={dataMode} className="mb-2" />
                 <div className="h-20 w-full bg-industrial-hover rounded-full" />
             </div>
