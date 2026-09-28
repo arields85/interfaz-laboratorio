@@ -125,6 +125,15 @@ live check).
   Parent spot check: 23/23. Note: Clásico button values are placeholders (radius 6, fill 0,
   border 0) — TH3 must derive them from today's real button styles.
 
+- 2026-09-28: slice review TH1–TH2 (base `3790cbd`..`cf1c892`, 1949 lines incl. the lab, medium,
+  user granted): lineage `review-028de1d211ce1728` APPROVED, acknowledged, authority burned;
+  boundary advances to `cf1c892`. Advisory: R3-hover-no-longer-overrides-variants (WARNING,
+  `index.css:721-728` — check danger/warning hover still intensifies as before),
+  R3-overflow-clip-margin-bleed (WARNING, `index.css:703-707` — content may paint 2 px outside
+  the frame), R3-overflow-clip-no-fallback (WARNING, `index.css:706` — add `overflow: hidden`
+  fallback before `overflow: clip`), R3-spy-restore-not-guaranteed (SUGGESTION,
+  `themeStyle.service.test.ts:144-162`). Folded into TH3 as TH3a.
+
 ## Next step
 
-TH3 (writer) — button theme engine on the three groups.
+TH3a review fixes + TH3 button engine (one writer).
