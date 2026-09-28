@@ -144,7 +144,7 @@ Only overrides are stored; keys absent or null already equal the code defaults.
 - [x] **V1** — Update all defaults to the captured values (shader store, CSS tokens + Design tab
   default maps, orb defaults), adjust tests that pin old defaults, update docs that list them.
   Route: delegated writer.
-- [ ] **V3** — Fresh install creates NO example data (user decision 2026-09-28): stop seeding
+- [x] **V3** — Fresh install creates NO example data (user decision 2026-09-28): stop seeding
   `mockDashboards` (DashboardStorageService), the example hierarchy tree `mockHierarchyNodes`
   (Steigen, areas, compressors, sector, line, folder, group — HierarchyStorageService), the 4
   invented catalog variables `mockVariableCatalog` (VariableCatalogStorageService) and
@@ -171,6 +171,15 @@ Only overrides are stored; keys absent or null already equal the code defaults.
   `review-de9cc5293f91865d` APPROVED, acknowledged, authority burned. Advisory SUGGESTIONs only
   (optional later): R3-css-token-regex-comment-shadowing, R3-reset-test-no-persistence-assertion
   (`DesignSettingsTab.test.tsx`).
+
+- 2026-09-28: V3 done (route: delegated writer) — `8337cd0` feat(storage): the four services seed
+  `[]` when their key is absent (existing installs untouched, migrations kept); node types still
+  seeded; `hierarchy.mock.ts` and `variableCatalog.mock.ts` deleted (no consumers left),
+  `mockDashboards` kept as a test fixture, `mockTemplates` kept (template migration uses it);
+  `DEFAULT_DASHBOARD_ROWS` now reuses `gridConfig.DEFAULT_ROWS`; ARCHITECTURE tree updated.
+  Empty screens checked (manager, templates, builder entry, viewer home, hierarchy, catalog
+  selector, topbar): all already had empty states. RED 4 / GREEN 72 focused. Writer: `npx tsc -b`
+  clean, `npm run lint` clean, `npm test` 2619/2620 (Topbar flake, 16/16 isolated), build OK.
 
 ## Next step
 
