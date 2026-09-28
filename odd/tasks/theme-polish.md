@@ -107,11 +107,13 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   background and "Fondo" overlay) with a container holding two overlapping mini widgets
   (`ef34f87`, artifact v10). Next: the user tunes it; then the group background becomes theme tokens
   (P7).
-- [ ] **P7** (pending the user's lab values) — group container background opacity as theme
-  tokens (rest/hover), so the container stays subtle under its member widgets.
+- [ ] **P7** — group container background as theme tokens (user values 2026-09-28): rest base
+  20 %, fill 0 %; hover base 40 %, fill 0 % ("base" = opacity of the frame's own background,
+  "fill" = white overlay); every other container parameter follows the widget frame. Applied to
+  the three presets (the group widget has no legacy look to preserve in Clásico/Contorno).
 
 ## Next step
 
-User tunes the container in the lab; user's live check (P4, including the Instrumento theme);
+P7 (writer); user's live check (P4, including the Instrumento theme);
 then merge to main. Tags in the theme engine only if the user asks after
 exploring them in the lab.
