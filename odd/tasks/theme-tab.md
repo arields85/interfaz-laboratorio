@@ -64,8 +64,9 @@ masked to four corner squares whose size is the length variable; radius inherite
 
 - Q1 ANSWERED (user, 2026-09-28): preset selector only for now. The style lab stays as a separate
   dev tool to keep improving (`tools/style-lab/`), not inside the HMI.
-- Q2 (to ask): which buttons the theme restyles (admin actions, viewer buttons, widget segmented
-  controls).
+- Q2 ANSWERED (user, 2026-09-28): all three button groups — admin actions (`AdminActionButton`,
+  `AdminIconToolbarButton`, `.admin-accent-ghost`), viewer buttons (`HmiButton`) and widget
+  segmented controls (`WidgetHeaderTemporalControls`).
 
 ## Constraints
 
@@ -85,7 +86,9 @@ masked to four corner squares whose size is the length variable; radius inherite
   defaults = today's look; Kpi skeleton radius on the token. Route: delegated writer.
 - [ ] **TH2** — Theme model, built-in presets ("Clásico" = current, "Contorno" = user's),
   persistence and boot re-apply (mirrors `applyThemeOverrides`). Route: same writer as TH1.
-- [ ] **TH3** — Button theme engine on the primitives chosen in Q2.
+- [ ] **TH3** — Button theme engine on all three groups (Q2): `AdminActionButton`,
+  `AdminIconToolbarButton`, `.admin-accent-ghost`, `HmiButton`, `WidgetHeaderTemporalControls`;
+  defaults = today's look; primary/accent semantics preserved.
 - [ ] **TH4** — "Tema" tab UI in `GlobalSettingsDialog`: preset selector only (Q1), with a preview
   of each preset if an existing primitive fits; dirty/save/revert like the other tabs.
 - [ ] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
