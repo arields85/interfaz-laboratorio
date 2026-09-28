@@ -112,8 +112,11 @@ the group widget itself.
 - 2026-09-27: T3 done — section 2.0 "Historial del builder" in
   `hmi-app/src/components/admin/ADMIN_CONVENTIONS.md` (docs commit below).
 
+- 2026-09-27: live check by the user PASSED — add/delete/duplicate/move/resize undo and redo
+  (buttons and shortcuts), title typing as one step, Ctrl+Z inside a text field undoes the text,
+  undoing to the saved state clears the dirty indicator. All acceptance criteria met.
+
 ## Next step
 
-Live check by the user in the builder (branch `feat/builder-undo-redo`); then merge/push decision
-(user). Group widget (Engram `decision/group-widget-design`) builds on this history: one group
+Feature complete. Merge/push decision belongs to the user. Group widget (Engram `decision/group-widget-design`) builds on this history: one group
 operation = one `set`.
