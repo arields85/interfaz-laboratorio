@@ -22,6 +22,12 @@ export interface LayoutRect {
  * (malformed legacy or imported data) is treated as an empty member list; the
  * group's own id and the ids of any other group widget are always dropped —
  * a container is never a member of itself nor of another group (no nesting).
+ * A repeated id (also malformed/imported data — see `duplicateLockedGroup`'s
+ * doc comment, G8) is kept only on its first occurrence: every other caller
+ * (`normalizeWidget`, `duplicateLockedGroup`, the view-duplication remap,
+ * `findOwningLockedGroup`) treats this as the single point of truth for a
+ * group's membership, so deduplicating here is what keeps a duplicated
+ * member id from ever producing more than one copy of that member.
  */
 export function sanitizeGroupMemberIds(
     memberWidgetIds: unknown,
@@ -33,10 +39,18 @@ export function sanitizeGroupMemberIds(
     }
 
     const otherGroupWidgetIds = new Set(widgets.filter(isGroupWidget).map((widget) => widget.id));
+    const seenMemberIds = new Set<string>();
 
-    return memberWidgetIds.filter(
-        (id): id is string => typeof id === 'string' && id !== groupWidgetId && !otherGroupWidgetIds.has(id),
-    );
+    return memberWidgetIds.filter((id): id is string => {
+        if (typeof id !== 'string' || id === groupWidgetId || otherGroupWidgetIds.has(id)) {
+            return false;
+        }
+        if (seenMemberIds.has(id)) {
+            return false;
+        }
+        seenMemberIds.add(id);
+        return true;
+    });
 }
 
 /** True when `inner` is completely contained within `outer` (D1 membership rule). */

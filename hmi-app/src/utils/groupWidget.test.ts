@@ -65,6 +65,16 @@ describe('sanitizeGroupMemberIds', () => {
         const widgets = [makeGroup({ id: 'group-1' }), makeWidget({ id: 'widget-1' })];
         expect(sanitizeGroupMemberIds(['widget-1', 42, null], 'group-1', widgets)).toEqual(['widget-1']);
     });
+
+    // G8: a malformed/imported member list (e.g. propagated through view duplication or a
+    // hand-edited export) can repeat the same id; a repeated id must resolve to exactly one
+    // membership entry, otherwise a locked-group copy duplicates that member several times
+    // (`duplicateLockedGroup` maps one new id per member — a repeated old id would otherwise
+    // produce several widget/layout entries all sharing that single new id).
+    it('deduplicates a repeated member id, keeping only its first occurrence', () => {
+        const widgets = [makeGroup({ id: 'group-1' }), makeWidget({ id: 'widget-1' }), makeWidget({ id: 'widget-2' })];
+        expect(sanitizeGroupMemberIds(['widget-1', 'widget-2', 'widget-1'], 'group-1', widgets)).toEqual(['widget-1', 'widget-2']);
+    });
 });
 
 describe('isRectFullyInside', () => {
@@ -555,5 +565,39 @@ describe('duplicateLockedGroup', () => {
         const newContainer = result!.widgets.find((widget) => widget.id === 'new-group-1') as GroupWidgetConfig;
         expect(newContainer.memberWidgetIds).toEqual(['new-metric-card-2']);
         expect(result!.widgets.some((widget) => widget.title === 'header-widget' && widget.id !== 'header-widget')).toBe(false);
+    });
+
+    // G8 (copy bug, live check 2): a group whose `memberWidgetIds` already lists the same member
+    // id more than once (malformed/imported data) must still duplicate that member exactly once —
+    // not "several times". Before the `sanitizeGroupMemberIds` dedup fix, `idByOldMemberId` (a Map
+    // keyed by the OLD member id) collapsed the repeated id to a single NEW id, but `members`/
+    // `newMembers`/`newMemberLayouts` stayed unmapped over the repeated entries, producing several
+    // widget/layout entries that all shared that one new id.
+    it('duplicates a repeated member id exactly once, not several times', () => {
+        idCounter = 0;
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['member-1', 'member-1', 'member-2'] }),
+            makeWidget({ id: 'member-1', title: 'Member 1' }),
+            makeWidget({ id: 'member-2', title: 'Member 2' }),
+        ];
+        const layout = [
+            makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 4 }),
+            makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+            makeLayout({ widgetId: 'member-2', x: 5, y: 1, w: 2, h: 2 }),
+        ];
+
+        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId);
+
+        expect(result).not.toBeNull();
+        const newContainer = result!.widgets.find((widget) => widget.id === 'new-group-1') as GroupWidgetConfig;
+        expect(newContainer.memberWidgetIds).toHaveLength(2);
+
+        const newMemberOneCopies = result!.widgets.filter((widget) => widget.title === 'Member 1 (Copia)');
+        const newMemberTwoCopies = result!.widgets.filter((widget) => widget.title === 'Member 2 (Copia)');
+        expect(newMemberOneCopies).toHaveLength(1);
+        expect(newMemberTwoCopies).toHaveLength(1);
+
+        const newMemberOneLayouts = result!.layout.filter((item) => item.widgetId === newMemberOneCopies[0].id);
+        expect(newMemberOneLayouts).toHaveLength(1);
     });
 });
