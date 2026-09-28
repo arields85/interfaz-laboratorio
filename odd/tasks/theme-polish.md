@@ -41,13 +41,13 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   - Icon-only buttons: rest radius 6, fill 0 %, border 0 %, accent hidden (origin 16 px x 1 px
     white); hover radius 3, fill 5 %, border 0 %, accent 5 px x 1 px white at 60 %.
   - Tags (flat): radius 3, fill 0 %, border 0 %, color tint 14 %.
-- [ ] **P8** — Builder copy placement (user decision 2026-09-28; builder UX found during this
+- [x] **P8** — Builder copy placement (user decision 2026-09-28; builder UX found during this
   live session, kept on this branch): clicking copy starts a placement mode — a ghost of the copy
   follows the mouse snapped to the grid; one click drops it there; Escape cancels (nothing
   created); OVERLAP IS ALLOWED (no invalid state); the ghost is clamped inside the grid bounds so
   a copy can never land outside; the copy ends selected; one history step; works for a locked
   group copy too. Also fixes the current bug where a duplicate can land outside the grid.
-- [ ] **P4** — Docs (DESIGN_SYSTEM themes section, WIDGET_AUTHORING/ADMIN_CONVENTIONS as needed) and
+- [x] **P4** — Docs (DESIGN_SYSTEM themes section, WIDGET_AUTHORING/ADMIN_CONVENTIONS as needed) and
   the user's live check.
 
 ## Constraints
@@ -126,9 +126,16 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   2931/2931, build OK. Parent live measure (viewer tab): container `::before` opacity 0.2, fill
   0 %.
 
+- 2026-09-28: P8 done (route: delegated writer) — `cb13789` feat(builder): copy placement mode
+  (ghost top-left under the pointer, snapped and clamped to the grid, overlap allowed, click drops
+  one history step and selects the copy, Escape / re-click / source removal cancel;
+  `duplicateLockedGroup` takes an explicit target position, closing the out-of-grid duplicate
+  bug); `d24c76f` comment fix. RED/GREEN per suite; `npx tsc -b` clean, `npm run lint` clean,
+  `npm test` 2943/2943. Parent spot check: groupWidget tests green.
+- 2026-09-28: user approved the branch (P1-P7, viewer frame) in the live check (P4); P8 was
+  finished at session close and still needs its live check (next session).
+
 ## Next step
 
-P8 (writer), then the user's live check (P4), then merge to main.
- user's live check (P4, including the Instrumento theme);
-then merge to main. Tags in the theme engine only if the user asks after
-exploring them in the lab.
+Merged to main at session close. Pending for the next session: live check of the copy
+placement mode (P8).
