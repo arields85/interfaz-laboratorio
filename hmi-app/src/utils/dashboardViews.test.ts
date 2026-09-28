@@ -205,6 +205,29 @@ describe('dashboardViews', () => {
         expect(outerGroup?.type === 'group' ? outerGroup.memberWidgetIds : undefined).toEqual(['widget-member']);
     });
 
+    it('keeps a widget only in the first group that lists it (view order) when two groups claim it on normalize (G5b)', () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-double-membership',
+            widgets: [
+                makeGroupWidget({ id: 'group-first', locked: true, memberWidgetIds: ['widget-member'] }),
+                makeGroupWidget({ id: 'group-second', locked: true, memberWidgetIds: ['widget-member'] }),
+                makeWidget({ id: 'widget-member' }),
+            ],
+            layout: [
+                makeLayout({ widgetId: 'group-first', x: 0, y: 0, w: 8, h: 8 }),
+                makeLayout({ widgetId: 'group-second', x: 0, y: 0, w: 8, h: 8 }),
+                makeLayout({ widgetId: 'widget-member', x: 1, y: 1, w: 1, h: 1 }),
+            ],
+        });
+
+        const normalized = normalizeDashboardViews(dashboard);
+        const firstGroup = normalized.widgets.find((widget) => widget.id === 'group-first');
+        const secondGroup = normalized.widgets.find((widget) => widget.id === 'group-second');
+
+        expect(firstGroup?.type === 'group' ? firstGroup.memberWidgetIds : undefined).toEqual(['widget-member']);
+        expect(secondGroup?.type === 'group' ? secondGroup.memberWidgetIds : undefined).toEqual([]);
+    });
+
     it('sanitizes a malformed or self-referencing memberWidgetIds when remapping ids across a view clone', () => {
         const cloned = cloneDashboardViewsWithRemappedIds([
             {
@@ -256,6 +279,32 @@ describe('dashboardViews', () => {
         const clonedMemberId = cloned.views[0]?.widgets.find((widget) => widget.id.startsWith('widget-member-'))?.id;
 
         expect(clonedOuterGroup?.type === 'group' ? clonedOuterGroup.memberWidgetIds : undefined).toEqual([clonedMemberId]);
+    });
+
+    it('keeps a widget only in the first group that lists it (view order) when two groups claim it after remapping ids across a view clone (G5b)', () => {
+        const cloned = cloneDashboardViewsWithRemappedIds([
+            {
+                id: 'view-a',
+                name: 'Production',
+                order: 0,
+                widgets: [
+                    makeGroupWidget({ id: 'group-first', locked: true, memberWidgetIds: ['widget-member'] }),
+                    makeGroupWidget({ id: 'group-second', locked: true, memberWidgetIds: ['widget-member'] }),
+                    makeWidget({ id: 'widget-member' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-first', x: 0, y: 0, w: 8, h: 8 }),
+                    makeLayout({ widgetId: 'group-second', x: 0, y: 0, w: 8, h: 8 }),
+                    makeLayout({ widgetId: 'widget-member', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            },
+        ], 'dup-004');
+
+        const clonedFirstGroup = cloned.views[0]?.widgets.find((widget) => widget.id === 'group-first-dup-004-view-a');
+        const clonedSecondGroup = cloned.views[0]?.widgets.find((widget) => widget.id === 'group-second-dup-004-view-a');
+
+        expect(clonedFirstGroup?.type === 'group' ? clonedFirstGroup.memberWidgetIds : undefined).toEqual(['widget-member-dup-004-view-a']);
+        expect(clonedSecondGroup?.type === 'group' ? clonedSecondGroup.memberWidgetIds : undefined).toEqual([]);
     });
 
     it('compares normalized views when deriving dashboard visual status', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     clampGroupMoveDelta,
     clampGroupResizeToMembers,
+    collectWidgetIdsInOtherLockedGroups,
     computeGroupMembers,
     computeMembersBoundingBox,
     duplicateLockedGroup,
@@ -11,6 +12,7 @@ import {
     resolveEffectiveNavigationTarget,
     resolveHoveredGroupId,
     sanitizeGroupMemberIds,
+    sanitizeGroupMembershipAcrossWidgets,
 } from './groupWidget';
 import type { GroupWidgetConfig, WidgetConfig, WidgetLayout } from '../domain/admin.types';
 
@@ -247,6 +249,74 @@ describe('removeMemberFromGroups', () => {
         const widgets = [makeWidget({ id: 'widget-1' })];
 
         expect(removeMemberFromGroups(widgets, 'widget-1')).toEqual(widgets);
+    });
+});
+
+describe('collectWidgetIdsInOtherLockedGroups', () => {
+    it('collects the sanitized members of every OTHER currently locked group', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+            makeGroup({ id: 'group-2', locked: true, memberWidgetIds: ['widget-2'] }),
+            makeWidget({ id: 'widget-1' }),
+            makeWidget({ id: 'widget-2' }),
+        ];
+
+        expect(collectWidgetIdsInOtherLockedGroups(widgets, 'group-2')).toEqual(new Set(['widget-1']));
+    });
+
+    it('ignores unlocked groups', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: false, memberWidgetIds: ['widget-1'] }),
+            makeGroup({ id: 'group-2', locked: true, memberWidgetIds: [] }),
+            makeWidget({ id: 'widget-1' }),
+        ];
+
+        expect(collectWidgetIdsInOtherLockedGroups(widgets, 'group-2')).toEqual(new Set());
+    });
+
+    it('excludes the group itself even if locked', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+            makeWidget({ id: 'widget-1' }),
+        ];
+
+        expect(collectWidgetIdsInOtherLockedGroups(widgets, 'group-1')).toEqual(new Set());
+    });
+});
+
+describe('sanitizeGroupMembershipAcrossWidgets', () => {
+    it('keeps a widget only in the first group that lists it, in widgets order', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+            makeGroup({ id: 'group-2', locked: true, memberWidgetIds: ['widget-1'] }),
+            makeWidget({ id: 'widget-1' }),
+        ];
+
+        const result = sanitizeGroupMembershipAcrossWidgets(widgets);
+        const group1 = result.find((widget) => widget.id === 'group-1') as GroupWidgetConfig;
+        const group2 = result.find((widget) => widget.id === 'group-2') as GroupWidgetConfig;
+
+        expect(group1.memberWidgetIds).toEqual(['widget-1']);
+        expect(group2.memberWidgetIds).toEqual([]);
+    });
+
+    it('leaves non-conflicting membership untouched', () => {
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+            makeGroup({ id: 'group-2', locked: true, memberWidgetIds: ['widget-2'] }),
+            makeWidget({ id: 'widget-1' }),
+            makeWidget({ id: 'widget-2' }),
+        ];
+
+        const result = sanitizeGroupMembershipAcrossWidgets(widgets);
+
+        expect(result).toEqual(widgets);
+    });
+
+    it('leaves non-group widgets untouched', () => {
+        const widgets = [makeWidget({ id: 'widget-1' })];
+
+        expect(sanitizeGroupMembershipAcrossWidgets(widgets)).toEqual(widgets);
     });
 });
 

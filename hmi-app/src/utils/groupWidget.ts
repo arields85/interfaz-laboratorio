@@ -201,6 +201,50 @@ export function removeMemberFromGroups(widgets: readonly WidgetConfig[], removed
     });
 }
 
+/**
+ * G5b (R3-group-double-membership): union of every OTHER currently locked group's sanitized
+ * member ids. Used to exclude a widget from candidacy when locking a NEW container: a widget
+ * belongs to at most one locked group, so one already claimed by a different locked group can
+ * never become a member of this one, even if it now sits fully inside its bounds.
+ */
+export function collectWidgetIdsInOtherLockedGroups(
+    widgets: readonly WidgetConfig[],
+    excludeGroupId: string,
+): Set<string> {
+    const ids = new Set<string>();
+
+    widgets
+        .filter(isGroupWidget)
+        .filter((group) => group.id !== excludeGroupId && group.locked === true)
+        .forEach((group) => {
+            sanitizeGroupMemberIds(group.memberWidgetIds, group.id, widgets).forEach((id) => ids.add(id));
+        });
+
+    return ids;
+}
+
+/**
+ * G5b (R3-group-double-membership): resolves cross-group duplicate membership already present in
+ * `widgets` — a widget belongs to at most one locked group. When the same id is listed by more
+ * than one group, it is kept only in the first group encountered in `widgets` order
+ * (deterministic); every later group drops it. Used on read (normalize/load/import), where
+ * malformed or hand-edited data could otherwise list the same member under two groups.
+ */
+export function sanitizeGroupMembershipAcrossWidgets(widgets: readonly WidgetConfig[]): WidgetConfig[] {
+    const claimedWidgetIds = new Set<string>();
+
+    return widgets.map((widget) => {
+        if (!isGroupWidget(widget)) {
+            return widget;
+        }
+
+        const memberWidgetIds = (widget.memberWidgetIds ?? []).filter((id) => !claimedWidgetIds.has(id));
+        memberWidgetIds.forEach((id) => claimedWidgetIds.add(id));
+
+        return { ...widget, memberWidgetIds };
+    });
+}
+
 /** The locked group that currently lists `widgetId` as a sanitized member, or undefined. */
 export function findOwningLockedGroup(
     widgetId: string,

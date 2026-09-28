@@ -69,6 +69,7 @@ import {
     normalizeDashboardViews,
 } from '../../utils/dashboardViews';
 import {
+    collectWidgetIdsInOtherLockedGroups,
     computeGroupMembers,
     duplicateLockedGroup,
     removeMemberFromGroups,
@@ -817,6 +818,30 @@ export default function DashboardBuilderPage() {
             };
         };
 
+        // G5b: promoting a widget to the header releases it from any locked group that still
+        // lists it as a member — a header widget never lives on the canvas, so it can never stay
+        // a member — in the very same history step as the promotion (one `set`, one undo step).
+        const assignWidgetToHeaderSlot = (widgetId: string, column: number, currentSlots: DashboardHeaderConfig['widgetSlots']) => {
+            setDraft(prev => {
+                if (!prev) return prev;
+
+                const nextDashboard = updateSelectedView(prev, (view) => ({
+                    ...view,
+                    widgets: removeMemberFromGroups(view.widgets, widgetId),
+                }));
+
+                return {
+                    ...nextDashboard,
+                    headerConfig: {
+                        ...(nextDashboard.headerConfig ?? {}),
+                        widgetSlots: [...(currentSlots ?? []), { widgetId, column }],
+                    },
+                };
+            }, { coalesce: false });
+
+            setSelectedWidgetId(widgetId);
+        };
+
         const handleAssignWidgetToHeader = (widgetId: string) => {
             const widget = activeView.widgets.find((item) => item.id === widgetId);
 
@@ -836,12 +861,7 @@ export default function DashboardBuilderPage() {
                 return;
             }
 
-            handleUpdateHeaderConfig({
-                ...(draft.headerConfig ?? {}),
-                widgetSlots: [...currentSlots, { widgetId, column: targetColumn }],
-            }, { coalesce: false });
-
-            setSelectedWidgetId(widgetId);
+            assignWidgetToHeaderSlot(widgetId, targetColumn, currentSlots);
         };
 
         const handleRemoveWidgetFromHeader = (widgetId: string) => {
@@ -1281,12 +1301,7 @@ export default function DashboardBuilderPage() {
                 return;
             }
 
-            handleUpdateHeaderConfig({
-                ...(draft.headerConfig ?? {}),
-                widgetSlots: [...currentSlots, { widgetId, column: slotIndex }],
-            }, { coalesce: false });
-
-            setSelectedWidgetId(widgetId);
+            assignWidgetToHeaderSlot(widgetId, slotIndex, currentSlots);
         };
 
         const handlePromoteToHeader = (widgetId: string) => {
@@ -1596,9 +1611,14 @@ export default function DashboardBuilderPage() {
 
                     // G4: a widget promoted to the header never lives on the canvas, so it can
                     // never become a member even if its persisted layout still sits fully inside
-                    // the container's bounds.
+                    // the container's bounds. G5b (R3-group-double-membership): a widget already
+                    // claimed by a DIFFERENT currently locked group can never become a member of
+                    // this one either — excluded from candidacy here, at lock time, rather than
+                    // arbitrated after the fact.
                     const headerWidgetIdSet = new Set((prev.headerConfig?.widgetSlots ?? []).map((slot) => slot.widgetId));
-                    const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, view.widgets, view.layout, headerWidgetIdSet);
+                    const otherLockedGroupMemberIds = collectWidgetIdsInOtherLockedGroups(view.widgets, widgetId);
+                    const excludedWidgetIds = new Set([...headerWidgetIdSet, ...otherLockedGroupMemberIds]);
+                    const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, view.widgets, view.layout, excludedWidgetIds);
                     const lockedWidgets = view.widgets.map((item) => (
                         item.id === widgetId ? { ...item, locked: true, memberWidgetIds } : item
                     ));

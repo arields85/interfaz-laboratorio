@@ -8,7 +8,7 @@ import type {
 } from '../domain/admin.types';
 import { resolveProdTrendConfiguredMode } from './prodTrendDataMode';
 import { resolveAnalyticsDataMode } from './analyticsDataMode';
-import { sanitizeGroupMemberIds } from './groupWidget';
+import { sanitizeGroupMemberIds, sanitizeGroupMembershipAcrossWidgets } from './groupWidget';
 
 export const DEFAULT_DASHBOARD_VIEW_ID = 'view-default';
 export const DEFAULT_DASHBOARD_VIEW_NAME = 'Default view';
@@ -303,7 +303,9 @@ export function cloneDashboardViewsWithRemappedIds(views: DashboardView[], suffi
             ...clone(view),
             id: nextViewId,
             order: view.order ?? viewIndex,
-            widgets: remappedWidgets,
+            // G5b (R3-group-double-membership): a malformed source could list the same member
+            // under two groups; keep it only in the first group in view order.
+            widgets: sanitizeGroupMembershipAcrossWidgets(remappedWidgets),
             layout: view.layout.map((item) => ({
                 ...clone(item),
                 widgetId: widgetIdMap.get(item.widgetId) ?? item.widgetId,
@@ -421,7 +423,11 @@ function normalizeDashboardView(view: DashboardView, fallbackOrder: number): Das
         id: view.id || (fallbackOrder === 0 ? DEFAULT_DASHBOARD_VIEW_ID : `view-${fallbackOrder + 1}`),
         name: view.name || (fallbackOrder === 0 ? DEFAULT_DASHBOARD_VIEW_NAME : `View ${fallbackOrder + 1}`),
         order: view.order ?? fallbackOrder,
-        widgets: (view.widgets ?? []).map((widget) => normalizeWidget(widget, view.widgets ?? [])),
+        // G5b (R3-group-double-membership): after per-widget sanitation, resolve any widget still
+        // listed by more than one group — keep it only in the first group in view order.
+        widgets: sanitizeGroupMembershipAcrossWidgets(
+            (view.widgets ?? []).map((widget) => normalizeWidget(widget, view.widgets ?? [])),
+        ),
         layout: clone(view.layout ?? []),
     };
 }
