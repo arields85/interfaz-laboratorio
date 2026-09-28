@@ -91,6 +91,9 @@ masked to four corner squares whose size is the length variable; radius inherite
   defaults = today's look; primary/accent semantics preserved.
 - [x] **TH4** — "Tema" tab UI in `GlobalSettingsDialog`: preset selector only (Q1), with a preview
   of each preset if an existing primitive fits; dirty/save/revert like the other tabs.
+- [ ] **TH4b** — Review follow-ups on the Tema tab: dirty must clear when the selection returns
+  to the saved theme; an unsaved preview must not leak when the tab unmounts; the mini-preview
+  span must not reintroduce the transition collision.
 - [ ] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
 
 ## Delivery
@@ -168,8 +171,14 @@ live check).
 - 2026-09-28: TH5 docs — section "Temas visuales" in `docs/DESIGN_SYSTEM.md` (model, service,
   frame and button tokens, accent semantics, rules, style lab). Live check still pending.
 
+- 2026-09-28: slice review TH4+docs (base `c1807af`..`724ab41`, 650 lines, medium, user granted):
+  lineage `review-b0462f8f29f39663` APPROVED, acknowledged, authority burned; boundary advances to
+  `724ab41`. Advisory: R3-theme-dirty-not-cleared-on-return-to-saved (WARNING,
+  `ThemeSettingsTab.tsx:69-78`), R3-theme-preview-leaks-on-unmount (WARNING, `:73`),
+  R3-preview-span-reintroduces-transition-collision (SUGGESTION, `:162`) -> TH4b.
+
 ## Next step
 
-Slice review TH4+TH5 docs (base c1807af); live check after the group widget merge (the dashboards
+TH4b (writer); live check after the group widget merge (the dashboards
 live in the 5173 origin's localStorage, so the theme is tested from the main checkout once
 `feat/theme-tab` is rebased onto the new `main`).
