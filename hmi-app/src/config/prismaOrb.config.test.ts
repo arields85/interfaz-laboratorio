@@ -15,6 +15,17 @@ describe('prismaOrb.config', () => {
         localStorage.clear();
     });
 
+    it('pins the tuned orb visual defaults captured from the reference setup', () => {
+        expect(PRISMA_ORB_VISUAL_DEFAULTS).toEqual({
+            rays: 0.45,
+            speed: 1.85,
+            intensity: 0.8,
+            size: 290,
+            core: '#1b6ee0',
+            glow: '#8ff0ff',
+        });
+    });
+
     it('returns independent HMI defaults for empty or corrupt storage', () => {
         expect(readPrismaOrbVisualConfig()).toEqual(PRISMA_ORB_VISUAL_DEFAULTS);
 

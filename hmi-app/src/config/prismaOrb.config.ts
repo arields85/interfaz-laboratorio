@@ -15,8 +15,8 @@ export const PRISMA_ORB_GLOW_OPTIONS = ['#8ff0ff', '#bfe9ff', '#5fd2ff', '#dff6f
 
 export const PRISMA_ORB_VISUAL_DEFAULTS: Readonly<PrismaOrbVisualConfig> = {
     rays: 0.45,
-    speed: 1,
-    intensity: 1,
+    speed: 1.85,
+    intensity: 0.8,
     size: 290,
     core: '#1b6ee0',
     glow: '#8ff0ff',

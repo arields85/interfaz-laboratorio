@@ -36,7 +36,7 @@ export const SYSTEM_FONT_SIZE_RANGE = {
     max: 20,
 } as const;
 
-export const DEFAULT_MONO_FONT_SIZE_PX = 10;
+export const DEFAULT_MONO_FONT_SIZE_PX = 11;
 
 export const DEFAULT_CHART_FONT_SIZE_PX = 10;
 export const CHART_FONT_SIZE_RANGE = {

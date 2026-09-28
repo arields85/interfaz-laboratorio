@@ -143,7 +143,7 @@ const COLOR_GROUPS = [
             { key: '--color-accent-pink', label: 'Rosa', defaultValue: '#ec4899' },
             { key: '--color-accent-blue', label: 'Azul', defaultValue: '#3b82f6' },
             { key: '--color-accent-blue-glow', label: 'Azul Glow', defaultValue: '#60a5fa' },
-            { key: '--color-accent-green', label: 'Verde', defaultValue: '#10b981' },
+            { key: '--color-accent-green', label: 'Verde', defaultValue: '#26c5aa' },
             { key: '--color-accent-green-glow', label: 'Verde Glow', defaultValue: '#22d3ee' },
             { key: '--color-accent-amber', label: 'Ambar', defaultValue: '#f59e0b' },
             { key: '--color-accent-ruby', label: 'Rojo Ruby', defaultValue: '#ef4444' },
@@ -152,22 +152,22 @@ const COLOR_GROUPS = [
     {
         title: 'Admin',
         colors: [
-            { key: '--color-admin-accent', label: 'Acento Admin', defaultValue: '#a48dff' },
+            { key: '--color-admin-accent', label: 'Acento Admin', defaultValue: '#dee8f7' },
         ],
     },
     {
         title: 'Widgets',
         colors: [
             { key: '--color-widget-gradient-from', label: 'Gradiente Desde', defaultValue: '#3b82f6' },
-            { key: '--color-widget-gradient-to', label: 'Gradiente Hasta', defaultValue: '#a855f7' },
-            { key: '--color-widget-icon', label: 'Icono Widget', defaultValue: '#927bec' },
+            { key: '--color-widget-gradient-to', label: 'Gradiente Hasta', defaultValue: '#29dde0' },
+            { key: '--color-widget-icon', label: 'Icono Widget', defaultValue: '#dee8f7' },
         ],
     },
     {
         title: 'Umbrales Dinamicos',
         colors: [
-            { key: '--color-dynamic-normal-from', label: 'Normal Desde', defaultValue: '#22d3ee' },
-            { key: '--color-dynamic-normal-to', label: 'Normal Hasta', defaultValue: '#10b981' },
+            { key: '--color-dynamic-normal-from', label: 'Normal Desde', defaultValue: '#29dde0' },
+            { key: '--color-dynamic-normal-to', label: 'Normal Hasta', defaultValue: '#229191' },
             { key: '--color-dynamic-warning-from', label: 'Alerta Desde', defaultValue: '#f59e0b' },
             { key: '--color-dynamic-warning-to', label: 'Alerta Hasta', defaultValue: '#ef4444' },
             { key: '--color-dynamic-critical-from', label: 'Critico Desde', defaultValue: '#ef4444' },
@@ -177,7 +177,7 @@ const COLOR_GROUPS = [
     {
         title: 'Estado',
         colors: [
-            { key: '--color-status-normal', label: 'Estado Normal', defaultValue: '#10b981' },
+            { key: '--color-status-normal', label: 'Estado Normal', defaultValue: '#29dde0' },
             { key: '--color-status-warning', label: 'Estado Alerta', defaultValue: '#f59e0b' },
             { key: '--color-status-critical', label: 'Estado Critico', defaultValue: '#ef4444' },
         ],

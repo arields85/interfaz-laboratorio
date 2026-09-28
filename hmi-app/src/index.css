@@ -234,7 +234,7 @@ h1, h2, h3, h4, h5, h6 {
   --color-accent-pink: #ec4899;
   --color-accent-blue: #3b82f6;
   --color-accent-blue-glow: #60a5fa;
-  --color-accent-green: #10b981;
+  --color-accent-green: #26c5aa;
   --color-accent-green-glow: #22d3ee;
   --color-accent-amber: #f59e0b;
   --color-accent-ruby: #ef4444;
@@ -243,7 +243,7 @@ h1, h2, h3, h4, h5, h6 {
   /* Cambiar estos valores actualiza TODA la UI administrativa */
 
   /* Acento estructural (badges, sidebar, botones, texto, íconos) */
-  --color-admin-accent: #a48dff;
+  --color-admin-accent: #dee8f7;
   
   /* Borde de selección de widgets en el canvas */
   --color-admin-selection-from: #60a5fa;
@@ -255,12 +255,12 @@ h1, h2, h3, h4, h5, h6 {
   /* Degradado base de métricas (KPI, barras, arcos sin colorizado dinámico) */
   /*--color-widget-gradient-from: #3b82f6;*/
   --color-widget-gradient-from: #3b82f6;
-  --color-widget-gradient-to: #a855f7;
+  --color-widget-gradient-to: #29dde0;
 
   /* Degradados de colorizado dinámico (umbrales) */
   /* Normal: estado operativo dentro de parámetros */
-  --color-dynamic-normal-from: #22d3ee;
-  --color-dynamic-normal-to: #10b981;
+  --color-dynamic-normal-from: #29dde0;
+  --color-dynamic-normal-to: #229191;
   /* Warning: estado de alerta */
   --color-dynamic-warning-from: #f59e0b;
   --color-dynamic-warning-to: #ef4444;
@@ -269,10 +269,10 @@ h1, h2, h3, h4, h5, h6 {
   --color-dynamic-critical-to: #ef4444;
 
   /* Color de ícono/subtexto de widgets (sin colorizado dinámico) */
-  --color-widget-icon: #927bec;
+  --color-widget-icon: #dee8f7;
 
   /* Color de ícono/subtexto según estado dinámico */
-  --color-status-normal: #10b981;
+  --color-status-normal: #29dde0;
   --color-status-warning: #f59e0b;
   --color-status-critical: #ef4444;
 
@@ -308,7 +308,7 @@ h1, h2, h3, h4, h5, h6 {
   --font-weight-widget-value-activity-analytics: 400;
   --font-weight-widget-value-activity-analytics-prod-trend: var(--font-weight-chart);
   --font-size-system: 11px;
-  --font-size-mono: 10px;
+  --font-size-mono: 11px;
   --font-size-chart: 10px;
   --font-size-dashboard-title: 48px;
   --font-size-widget-value: 35px;

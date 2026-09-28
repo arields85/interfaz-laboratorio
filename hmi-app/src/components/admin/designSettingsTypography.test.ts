@@ -1,4 +1,5 @@
 import {
+    DEFAULT_MONO_FONT_SIZE_PX,
     getAvailableWeightOptions,
     getClosestAvailableWeight,
     normalizeStoredFontOverrides,
@@ -6,6 +7,10 @@ import {
 } from './designSettingsTypography';
 
 describe('designSettingsTypography', () => {
+    it('pins the tuned mono font size default captured from the reference setup', () => {
+        expect(DEFAULT_MONO_FONT_SIZE_PX).toBe(11);
+    });
+
     it('returns only the weights registered for each font family', () => {
         expect(getAvailableWeightOptions('Plus Jakarta Sans').map((option) => option.value)).toEqual([
             '300',

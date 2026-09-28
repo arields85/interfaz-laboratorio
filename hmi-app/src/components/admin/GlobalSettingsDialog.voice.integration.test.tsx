@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PRISMA_ORB_STORAGE_KEY } from '../../config/prismaOrb.config';
+import { PRISMA_ORB_STORAGE_KEY, PRISMA_ORB_VISUAL_DEFAULTS } from '../../config/prismaOrb.config';
 import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
 import { adminAuthClient, AdminAuthClient } from '../../services/adminAuth.service';
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
@@ -303,7 +303,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await user.click(screen.getByRole('button', { name: 'Reopen' }));
 
         await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('42'));
-        expect(screen.getByRole('slider', { name: 'Velocidad' })).toHaveValue('1');
+        expect(screen.getByRole('slider', { name: 'Velocidad' })).toHaveValue(String(PRISMA_ORB_VISUAL_DEFAULTS.speed));
         expect(screen.getByRole('slider', { name: 'Penetración de haces' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
     });

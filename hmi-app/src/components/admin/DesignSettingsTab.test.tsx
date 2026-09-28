@@ -1,6 +1,22 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { vi } from 'vitest';
 import DesignSettingsTab, { applyThemeOverrides } from './DesignSettingsTab';
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+
+function readIndexCssTokenValue(tokenName: string): string {
+    const indexCss = fs.readFileSync(path.resolve(currentDir, '../../index.css'), 'utf-8');
+    const match = indexCss.match(new RegExp(`${tokenName}:\\s*([^;]+);`));
+
+    if (!match) {
+        throw new Error(`Token ${tokenName} not found in index.css`);
+    }
+
+    return match[1].trim();
+}
 
 function getTypographyGroup(...contents: string[]) {
     const group = Array.from(document.querySelectorAll('section.rounded-lg')).find((section) => (
@@ -506,5 +522,86 @@ describe('DesignSettingsTab save status projection', () => {
 
         expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
         expect(handleDirtyChange).toHaveBeenLastCalledWith(true);
+    });
+});
+
+describe('DesignSettingsTab tuned visual defaults', () => {
+    const COLOR_TOKENS: Array<[token: string, label: string]> = [
+        ['--color-accent-green', 'Verde'],
+        ['--color-admin-accent', 'Acento Admin'],
+        ['--color-widget-gradient-to', 'Gradiente Hasta'],
+        ['--color-widget-icon', 'Icono Widget'],
+        ['--color-dynamic-normal-from', 'Normal Desde'],
+        ['--color-dynamic-normal-to', 'Normal Hasta'],
+        ['--color-status-normal', 'Estado Normal'],
+    ];
+
+    beforeEach(() => {
+        localStorage.clear();
+        document.documentElement.removeAttribute('style');
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('renders the fresh mono font size and tuned color defaults in sync with the index.css tokens', () => {
+        render(<DesignSettingsTab />);
+
+        const monoGroup = getTypographyGroup('TEXTOS TÉCNICOS', 'IBMPlexMono');
+        const [monoSizeInput] = within(monoGroup).getAllByRole('textbox');
+
+        expect(monoSizeInput).toHaveValue(readIndexCssTokenValue('--font-size-mono').replace('px', ''));
+
+        for (const [token, label] of COLOR_TOKENS) {
+            const input = screen.getByLabelText(`Elegir color para ${label}`) as HTMLInputElement;
+            expect(input.value.toLowerCase()).toBe(readIndexCssTokenValue(token).toLowerCase());
+        }
+    });
+
+    it('pins the mono font size and color tokens captured from the reference setup', () => {
+        render(<DesignSettingsTab />);
+
+        const monoGroup = getTypographyGroup('TEXTOS TÉCNICOS', 'IBMPlexMono');
+        const [monoSizeInput] = within(monoGroup).getAllByRole('textbox');
+
+        expect(monoSizeInput).toHaveValue('11');
+
+        const EXPECTED_COLORS: Record<string, string> = {
+            'Elegir color para Verde': '#26c5aa',
+            'Elegir color para Acento Admin': '#dee8f7',
+            'Elegir color para Gradiente Hasta': '#29dde0',
+            'Elegir color para Icono Widget': '#dee8f7',
+            'Elegir color para Normal Desde': '#29dde0',
+            'Elegir color para Normal Hasta': '#229191',
+            'Elegir color para Estado Normal': '#29dde0',
+        };
+
+        for (const [label, expectedHex] of Object.entries(EXPECTED_COLORS)) {
+            const input = screen.getByLabelText(label) as HTMLInputElement;
+            expect(input.value.toLowerCase()).toBe(expectedHex);
+        }
+    });
+
+    it('resets the mono font size and tuned color tokens back to the captured defaults', () => {
+        render(<DesignSettingsTab />);
+
+        const monoGroup = getTypographyGroup('TEXTOS TÉCNICOS', 'IBMPlexMono');
+        const [monoSizeInput] = within(monoGroup).getAllByRole('textbox');
+        fireEvent.change(monoSizeInput, { target: { value: '18' } });
+
+        for (const [, label] of COLOR_TOKENS) {
+            fireEvent.change(screen.getByLabelText(`Elegir color para ${label}`), { target: { value: '#000000' } });
+        }
+
+        fireEvent.click(screen.getByRole('button', { name: 'Restaurar paleta original' }));
+
+        expect(within(getTypographyGroup('TEXTOS TÉCNICOS', 'IBMPlexMono')).getAllByRole('textbox')[0])
+            .toHaveValue(readIndexCssTokenValue('--font-size-mono').replace('px', ''));
+
+        for (const [token, label] of COLOR_TOKENS) {
+            const input = screen.getByLabelText(`Elegir color para ${label}`) as HTMLInputElement;
+            expect(input.value.toLowerCase()).toBe(readIndexCssTokenValue(token).toLowerCase());
+        }
     });
 });
