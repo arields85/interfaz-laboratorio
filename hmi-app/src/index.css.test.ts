@@ -54,7 +54,7 @@ describe('index.css widget frame theme engine', () => {
     });
 
     it('swaps every frame custom property to its hover value on :hover', () => {
-        const rule = indexCss.match(/\.glass-panel:hover,\s*\n\s*\.group:hover \.glass-panel\s*{([\s\S]*?)}/);
+        const rule = indexCss.match(/\.glass-panel:hover,\s*\n\s*\.group:hover \.glass-panel,\s*\n\s*\[data-group-hover-target="true"\] \.glass-panel\s*{([\s\S]*?)}/);
         expect(rule).not.toBeNull();
         const body = rule?.[1] ?? '';
 
@@ -123,7 +123,7 @@ describe('index.css widget frame theme engine', () => {
         // declare `background`/`border` directly -- otherwise it could tie in
         // cascade order against `.glass-panel-danger:hover` / `-warning:hover`,
         // which still own the semantic literal intensification below.
-        const neutralHoverRule = indexCss.match(/\.glass-panel:hover,\s*\n\s*\.group:hover \.glass-panel\s*{([\s\S]*?)}/);
+        const neutralHoverRule = indexCss.match(/\.glass-panel:hover,\s*\n\s*\.group:hover \.glass-panel,\s*\n\s*\[data-group-hover-target="true"\] \.glass-panel\s*{([\s\S]*?)}/);
         expect(neutralHoverRule).not.toBeNull();
         const neutralHoverBody = neutralHoverRule?.[1] ?? '';
         expect(neutralHoverBody).not.toMatch(/(?<!-)\bbackground:/);
