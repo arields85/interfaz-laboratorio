@@ -1,5 +1,3 @@
-import { useId } from 'react';
-
 interface HeaderSelectionFrameProps {
     isSelected: boolean;
     /** Border-radius del widget subyacente. Debe coincidir con .glass-panel en index.css. */
@@ -26,9 +24,6 @@ export default function HeaderSelectionFrame({
     radius = '1.5rem',
     className = '',
 }: HeaderSelectionFrameProps) {
-    // useId garantiza un ID de gradiente único por instancia — evita colisiones de <defs> SVG en el DOM.
-    const gradientId = useId();
-
     const radiusPx = radiusToPx(radius);
     // Radio del outer edge del frame: widget_radius + delta de concentricidad
     const outerRadiusPx = radiusPx + HEADER_RADIUS_DELTA_PX;
@@ -63,15 +58,9 @@ export default function HeaderSelectionFrame({
                     overflow: 'visible',
                 }}
             >
-                <defs>
-                    {/* stopColor vía style para respetar los tokens CSS del sistema de diseño */}
-                    <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%"   style={{ stopColor: 'var(--color-admin-selection-from)' }} />
-                        <stop offset="100%" style={{ stopColor: 'var(--color-admin-selection-to)' }} />
-                    </linearGradient>
-                </defs>
-
-                {/* focus-rect: anillo de gradiente al seleccionar.
+                {/* focus-rect: selection ring in the Design tab admin accent
+                    (--color-admin-accent), the same token as GridSelectionFrame and the
+                    primary buttons, so every builder selection follows one editable color.
                     stroke centrado sobre el borde del rect; x/y = BORDER/2 para no recortar. */}
                 <rect
                     x={HEADER_BORDER_WIDTH_PX / 2}
@@ -81,15 +70,15 @@ export default function HeaderSelectionFrame({
                     rx={rectRxPx}
                     ry={rectRxPx}
                     fill="none"
-                    stroke={`url(#${gradientId})`}
+                    stroke="var(--color-admin-accent)"
                     strokeWidth={HEADER_BORDER_WIDTH_PX}
                     strokeOpacity={isSelected ? 1 : 0}
                     style={{
                         transition: 'stroke-opacity 150ms ease, filter 150ms ease',
                         filter: isSelected
                             ? [
-                                'drop-shadow(0 0 6px color-mix(in srgb, var(--color-admin-selection-to) 38%, transparent))',
-                                'drop-shadow(0 0 2px color-mix(in srgb, var(--color-admin-selection-from) 28%, transparent))',
+                                'drop-shadow(0 0 6px color-mix(in srgb, var(--color-admin-accent) 38%, transparent))',
+                                'drop-shadow(0 0 2px color-mix(in srgb, var(--color-admin-accent) 28%, transparent))',
                               ].join(' ')
                             : 'none',
                     }}
