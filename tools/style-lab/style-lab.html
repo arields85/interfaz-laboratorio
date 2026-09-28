@@ -513,8 +513,16 @@
     border: 1px solid color-mix(in srgb, var(--tc) var(--t-border), transparent);
     background:
       linear-gradient(color-mix(in srgb, var(--tc) var(--t-tint), transparent), color-mix(in srgb, var(--tc) var(--t-tint), transparent)),
-      linear-gradient(color-mix(in srgb, #fff var(--t-fill), transparent), color-mix(in srgb, #fff var(--t-fill), transparent));
+      linear-gradient(color-mix(in srgb, #fff var(--t-fill), transparent), color-mix(in srgb, #fff var(--t-fill), transparent)),
+      var(--t-base, linear-gradient(transparent, transparent));
   }
+  [data-tag="glass"] .tag {
+    --t-base: linear-gradient(transparent, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  [data-tag="flat"] .tag { --t-base: linear-gradient(#1a2029, #1a2029); }
+  [data-tag="outline"] .tag { --t-base: linear-gradient(transparent, transparent); }
   .tag.cyan { --tc: var(--cyan); }
   .tag.green { --tc: var(--green); }
   .tag.muted { --tc: var(--muted); }
@@ -735,6 +743,14 @@
     <div class="ctl-group">
       <p class="ctl-head">Tags</p>
       <p class="hint">Etiquetas de estado (ASIGNADO, PLANTA, PUBLISHED...). No tienen hover.</p>
+      <div>
+        <p class="ctl-title">Estilo</p>
+        <div class="seg three" data-group="tag">
+          <button type="button" data-value="glass">Vidrio</button>
+          <button type="button" data-value="flat">Plano</button>
+          <button type="button" data-value="outline">Contorno</button>
+        </div>
+      </div>
       <div class="range-row">
         <label for="t-radius">Radio</label>
         <input class="range" id="t-radius" type="range" min="0" max="12" step="1">
@@ -904,6 +920,7 @@
 
     const FRAME_LABELS = { glass: 'vidrio', flat: 'plano', line: 'contorno' };
     const BUTTON_LABELS = { glass: 'vidrio', flat: 'plano', outline: 'contorno' };
+    const TAG_LABELS = BUTTON_LABELS;
     const COLOR_VALUES = { white: '#ffffff', cyan: '#22d3ee', violet: '#927bec' };
     const COLOR_LABELS = { white: 'blanco', cyan: 'cian', violet: 'violeta' };
     const PHASES = ['rest', 'hover'];
@@ -914,6 +931,12 @@
       glass: { rest: { fill: 0, border: 8 },  hover: { fill: 4, border: 20 } },
       flat:  { rest: { fill: 0, border: 8 },  hover: { fill: 3, border: 20 } },
       line:  { rest: { fill: 0, border: 16 }, hover: { fill: 2, border: 40 } },
+    };
+    // Tag style defaults (single state: tags have no hover).
+    const TAG_STATES = {
+      glass:   { fill: 5, border: 40, tint: 0 },
+      flat:    { fill: 0, border: 0, tint: 14 },
+      outline: { fill: 0, border: 60, tint: 0 },
     };
     const BUTTON_STATES = {
       glass:   { rest: { fill: 6, border: 8 },  hover: { fill: 10, border: 20 } },
@@ -940,14 +963,14 @@
 
     const PRESETS = {
       current: {
-        frame: 'glass', button: 'glass',
+        frame: 'glass', button: 'glass', tag: 'glass',
         w: { rest: wState({}), hover: wState({ fill: 4, border: 20 }) },
         b: { rest: bState({}), hover: bState({ fill: 10, border: 20 }) },
         i: { rest: iState({}), hover: iState({ fill: 5 }) },
         t: tState({}),
       },
       glassCorners: {
-        frame: 'glass', button: 'glass',
+        frame: 'glass', button: 'glass', tag: 'glass',
         w: { rest: wState({ radius: 12, cOn: true, cLen: 16, cW: 1.5, cAlpha: 45 }),
              hover: wState({ radius: 12, fill: 4, border: 20, cOn: true, cLen: 28, cW: 1.5, cAlpha: 100 }) },
         b: { rest: bState({ radius: 6, cOn: true, cLen: 6, cAlpha: 50 }),
@@ -956,15 +979,15 @@
         t: tState({ radius: 4 }),
       },
       industrial: {
-        frame: 'flat', button: 'flat',
+        frame: 'flat', button: 'flat', tag: 'flat',
         w: { rest: wState({ radius: 2, blurOn: false, cOn: true, cLen: 12, cW: 2, cAlpha: 40 }),
              hover: wState({ radius: 2, fill: 3, border: 20, blurOn: false, cOn: true, cLen: 22, cW: 2, cAlpha: 90, cColor: 'cyan' }) },
         b: { rest: bState({ radius: 2, fill: 0, border: 0 }), hover: bState({ radius: 2, fill: 5, border: 0 }) },
         i: { rest: iState({ radius: 2 }), hover: iState({ radius: 2, fill: 5 }) },
-        t: tState({ radius: 2 }),
+        t: tState({ radius: 2, fill: 0, border: 0, tint: 14 }),
       },
       minimal: {
-        frame: 'line', button: 'outline',
+        frame: 'line', button: 'outline', tag: 'glass',
         w: { rest: wState({ radius: 0, border: 15, blurOn: true, blur: 2, cOn: false, cLen: 18, cW: 1 }),
              hover: wState({ radius: 0, fill: 4, border: 25, blurOn: true, blur: 2, cOn: true, cLen: 8, cW: 1, cAlpha: 40 }) },
         b: { rest: bState({ radius: 0, fill: 0, border: 22 }), hover: bState({ radius: 0, fill: 3, border: 50 }) },
@@ -1033,6 +1056,7 @@
     function render() {
       lab.dataset.frame = state.frame;
       lab.dataset.button = state.button;
+      lab.dataset.tag = state.tag;
       lab.classList.toggle('force-w', editing.w === 'hover');
       lab.classList.toggle('force-b', editing.b === 'hover');
       lab.classList.toggle('force-i', editing.i === 'hover');
@@ -1091,7 +1115,7 @@
         ' | hover: ' + describe(state.b.hover, false) +
         ' · Botones de ícono | reposo: ' + describe(state.i.rest, false) +
         ' | hover: ' + describe(state.i.hover, false) +
-        ' · Tags | radio ' + state.t.radius + ' px, fondo ' + state.t.fill + ' %, borde ' + state.t.border +
+        ' · Tags (' + TAG_LABELS[state.tag] + ') | radio ' + state.t.radius + ' px, fondo ' + state.t.fill + ' %, borde ' + state.t.border +
         ' %, color ' + state.t.tint + ' %';
     }
 
@@ -1102,9 +1126,13 @@
         if (!b) return;
         const key = group.dataset.group;
         state[key] = b.dataset.value;
-        const table = key === 'frame' ? FRAME_STATES : BUTTON_STATES;
-        const scope = key === 'frame' ? 'w' : 'b';
-        PHASES.forEach(function (p) { Object.assign(state[scope][p], table[b.dataset.value][p]); });
+        if (key === 'tag') {
+          Object.assign(state.t, TAG_STATES[b.dataset.value]);
+        } else {
+          const table = key === 'frame' ? FRAME_STATES : BUTTON_STATES;
+          const scope = key === 'frame' ? 'w' : 'b';
+          PHASES.forEach(function (p) { Object.assign(state[scope][p], table[b.dataset.value][p]); });
+        }
         render();
       });
     });
