@@ -71,7 +71,7 @@ describe('index.css widget frame theme engine', () => {
         expect(indexCss).not.toMatch(/\.glass-panel-danger::(before|after)/);
         expect(indexCss).not.toMatch(/\.glass-panel-warning::(before|after)/);
 
-        const rule = indexCss.match(/\.glass-panel::after,[\s\S]*?{\s*\n\s*content: '';([\s\S]*?)\n {2}}/);
+        const rule = indexCss.match(/\.glass-panel::after,\s*\n\s*\.widget-state-warning::after,\s*\n\s*\.widget-state-critical::after\s*{\s*\n\s*content: '';([\s\S]*?)\n {2}}/);
         expect(rule).not.toBeNull();
         const body = rule?.[1] ?? '';
 
@@ -149,6 +149,119 @@ describe('index.css widget frame theme engine', () => {
         expect(reducedMotionBlock).not.toBeNull();
         const body = reducedMotionBlock?.[1] ?? '';
 
-        expect(body).toMatch(/\.glass-panel,[\s\S]*\.widget-state-warning,[\s\S]*\.widget-state-critical\s*{\s*transition: none;\s*}/);
+        expect(body).toMatch(/\.glass-panel,[\s\S]*\.widget-state-warning,[\s\S]*\.widget-state-critical,[\s\S]*\.theme-button,[\s\S]*\.admin-accent-ghost\s*{\s*transition: none;\s*}/);
+    });
+});
+
+describe('index.css button theme engine', () => {
+    it('registers the animatable button custom properties with @property, including --button-base-strength', () => {
+        expect(indexCss).toMatch(/@property --button-radius\s*{\s*syntax:\s*'<length>';/);
+        expect(indexCss).toMatch(/@property --button-fill\s*{\s*syntax:\s*'<percentage>';/);
+        expect(indexCss).toMatch(/@property --button-border\s*{\s*syntax:\s*'<percentage>';/);
+        expect(indexCss).toMatch(/@property --button-accent-length\s*{\s*syntax:\s*'<length>';/);
+        expect(indexCss).toMatch(/@property --button-accent-thickness\s*{\s*syntax:\s*'<length>';/);
+        expect(indexCss).toMatch(/@property --button-accent-color\s*{\s*syntax:\s*'<color>';/);
+        expect(indexCss).toMatch(/@property --button-accent-opacity\s*{\s*syntax:\s*'<percentage>';/);
+        expect(indexCss).toMatch(/@property --button-base-strength\s*{\s*syntax:\s*'<percentage>';\s*\n\s*inherits: true;\s*\n\s*initial-value: 100%;/);
+    });
+
+    it('defaults reproduce today\'s look exactly: 0%/0% overlay at full (100%) own-color strength, rounded-md radius', () => {
+        const rootBlock = indexCss.match(/:root\s*{([^}]*--button-radius-rest[^}]*)}/s);
+        expect(rootBlock).not.toBeNull();
+        const root = rootBlock?.[1] ?? '';
+
+        expect(root).toContain('--button-radius-rest: 0.375rem;');
+        expect(root).toContain('--button-radius-hover: 0.375rem;');
+        expect(root).toContain('--button-fill-rest: 0%;');
+        expect(root).toContain('--button-fill-hover: 0%;');
+        expect(root).toContain('--button-border-rest: 0%;');
+        expect(root).toContain('--button-border-hover: 0%;');
+        expect(root).toContain('--button-base-strength: 100%;');
+    });
+
+    it('drives .theme-button radius/accent shape from the live theme tokens, without touching color', () => {
+        const rule = indexCss.match(/\.theme-button\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('border-radius: var(--button-radius);');
+        expect(body).not.toMatch(/(?<!-)\bbackground:/);
+        expect(body).not.toMatch(/(?<!-)\bborder(-color)?:/);
+        expect(body).toContain('overflow: hidden;');
+        expect(body).toContain('overflow: clip;');
+        expect(body).toMatch(/transition:[\s\S]*--button-radius[\s\S]*;/);
+    });
+
+    it('swaps the button shape tokens to their hover value on :hover, guarded against :disabled', () => {
+        const rule = indexCss.match(/\.theme-button:hover:not\(:disabled\)\s*{([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('--button-radius: var(--button-radius-hover);');
+        expect(body).toContain('--button-accent-opacity: var(--button-accent-opacity-hover);');
+    });
+
+    it('paints the button corner accent from an ::after masked to the four corners, reusing the frame technique', () => {
+        const rule = indexCss.match(/\.theme-button::after\s*{\s*\n\s*content: '';([\s\S]*?)\n {2}}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('--button-accent-tint: color-mix(in srgb, var(--button-accent-color) var(--button-accent-opacity), transparent);');
+        expect(body).toContain('background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;');
+    });
+
+    it('reproduces admin-accent-ghost\'s current 20%/30% rest and 35%/45% hover exactly through --button-base-strength', () => {
+        const restRule = indexCss.match(/\.admin-accent-ghost\s*{\s*\n\s*--button-fill:([\s\S]*?)\n {2}}/);
+        expect(restRule).not.toBeNull();
+        const restBody = restRule?.[1] ?? '';
+        expect(restBody).toContain('color-mix(in srgb, var(--color-admin-accent) 20%, transparent) var(--button-base-strength)');
+        expect(restBody).toContain('color-mix(in srgb, var(--color-admin-accent) 30%, transparent) var(--button-base-strength)');
+
+        const hoverRule = indexCss.match(/\.admin-accent-ghost:hover\s*{\s*\n\s*--button-fill:([\s\S]*?)\n {2}}/);
+        expect(hoverRule).not.toBeNull();
+        const hoverBody = hoverRule?.[1] ?? '';
+        expect(hoverBody).toContain('color-mix(in srgb, var(--color-admin-accent) 35%, transparent) var(--button-base-strength)');
+        expect(hoverBody).toContain('color-mix(in srgb, var(--color-admin-accent) 45%, transparent) var(--button-base-strength)');
+    });
+
+    it('reproduces the neutral secondary\'s current white/5-white/10 rest and white/10-white/20 hover exactly', () => {
+        const restRule = indexCss.match(/\.theme-button-neutral\s*{([\s\S]*?)\n {2}}/);
+        expect(restRule).not.toBeNull();
+        const restBody = restRule?.[1] ?? '';
+        expect(restBody).toContain('rgba(255, 255, 255, 0.05) var(--button-base-strength)');
+        expect(restBody).toContain('rgba(255, 255, 255, 0.1) var(--button-base-strength)');
+
+        const hoverRule = indexCss.match(/\.theme-button-neutral:hover:not\(:disabled\)\s*{([\s\S]*?)\n {2}}/);
+        expect(hoverRule).not.toBeNull();
+        const hoverBody = hoverRule?.[1] ?? '';
+        expect(hoverBody).toContain('rgba(255, 255, 255, 0.1) var(--button-base-strength)');
+        expect(hoverBody).toContain('rgba(255, 255, 255, 0.2) var(--button-base-strength)');
+    });
+
+    it('reproduces the critical/danger variant\'s current 10%/40% rest and 20%/60% hover exactly, mixed toward status-critical', () => {
+        const restRule = indexCss.match(/\.theme-button-critical\s*{([\s\S]*?)\n {2}}/);
+        expect(restRule).not.toBeNull();
+        const restBody = restRule?.[1] ?? '';
+        expect(restBody).toContain('color-mix(in srgb, var(--color-status-critical) var(--button-fill)');
+        expect(restBody).toContain('color-mix(in srgb, var(--color-status-critical) 10%, transparent) var(--button-base-strength)');
+        expect(restBody).toContain('color-mix(in srgb, var(--color-status-critical) 40%, transparent) var(--button-base-strength)');
+
+        const hoverRule = indexCss.match(/\.theme-button-critical:hover:not\(:disabled\)\s*{([\s\S]*?)\n {2}}/);
+        expect(hoverRule).not.toBeNull();
+        const hoverBody = hoverRule?.[1] ?? '';
+        expect(hoverBody).toContain('color-mix(in srgb, var(--color-status-critical) 20%, transparent) var(--button-base-strength)');
+        expect(hoverBody).toContain('color-mix(in srgb, var(--color-status-critical) 60%, transparent) var(--button-base-strength)');
+    });
+
+    it('keeps the icon-toolbar variant borderless today and the segmented inactive variant boxless today (fully transparent own base)', () => {
+        const iconRule = indexCss.match(/\.theme-button-icon-neutral\s*{([\s\S]*?)\n {2}}/);
+        expect(iconRule).not.toBeNull();
+        expect(iconRule?.[1] ?? '').toContain('border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);');
+
+        const bareRule = indexCss.match(/\.theme-button-bare\s*{([\s\S]*?)\n {2}}/);
+        expect(bareRule).not.toBeNull();
+        const bareBody = bareRule?.[1] ?? '';
+        expect(bareBody).toContain('background: color-mix(in srgb, #fff var(--button-fill), transparent);');
+        expect(bareBody).toContain('border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);');
     });
 });

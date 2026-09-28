@@ -49,6 +49,10 @@ export const CLASSIC_THEME_STYLE: ThemeStyle = {
             borderPercent: 0,
             accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 },
         },
+        // 0% fill/border overlay + full (100%) own-color strength: every
+        // button primitive's own CSS recipe (see index.css `.theme-button-*`)
+        // shows through completely unchanged.
+        baseStrengthPercent: 100,
     },
 };
 
@@ -88,6 +92,10 @@ export const OUTLINE_THEME_STYLE: ThemeStyle = {
             borderPercent: 50,
             accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 },
         },
+        // 0% own-color strength: every button primitive's own base color
+        // fades out entirely, leaving the flat rest/hover outline recipe
+        // above (mixed against each variant's own hue) as the only visual.
+        baseStrengthPercent: 0,
     },
 };
 
@@ -135,6 +143,7 @@ function buttonStyleToCssProperties(button: ThemeButtonStyle): Record<string, st
     return {
         ...surfaceStateToCssProperties('button', 'rest', button.rest),
         ...surfaceStateToCssProperties('button', 'hover', button.hover),
+        '--button-base-strength': percentToken(button.baseStrengthPercent),
     };
 }
 

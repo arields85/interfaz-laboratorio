@@ -14,7 +14,8 @@ describe('HmiButton', () => {
         const button = screen.getByRole('button', { name: 'Guardar' });
 
         expect(button).toHaveAttribute('type', 'button');
-        expect(button).toHaveClass('admin-accent-ghost', 'w-full');
+        expect(button).toHaveClass('theme-button', 'admin-accent-ghost', 'w-full');
+        expect(button).not.toHaveClass('rounded-md');
     });
 
     it('renders the secondary variant with disabled styling', () => {
@@ -27,7 +28,8 @@ describe('HmiButton', () => {
         const button = screen.getByRole('button', { name: 'Cerrar' });
 
         expect(button).toBeDisabled();
-        expect(button).toHaveClass('border-industrial-border', 'bg-industrial-hover', 'text-industrial-muted', 'px-3', 'py-1');
+        expect(button).toHaveClass('theme-button', 'theme-button-hmi-secondary', 'text-industrial-muted', 'px-3', 'py-1');
+        expect(button).not.toHaveClass('border-industrial-border', 'bg-industrial-hover');
     });
 
     it('supports the danger variant and custom submit type', () => {
@@ -40,6 +42,7 @@ describe('HmiButton', () => {
         const button = screen.getByRole('button', { name: 'Eliminar' });
 
         expect(button).toHaveAttribute('type', 'submit');
-        expect(button).toHaveClass('border-status-critical/40', 'bg-status-critical/10', 'text-status-critical');
+        expect(button).toHaveClass('theme-button', 'theme-button-critical', 'text-status-critical');
+        expect(button).not.toHaveClass('bg-status-critical/10');
     });
 });

@@ -72,6 +72,18 @@ describe('themeStyle.service presets', () => {
         });
     });
 
+    it('sets the button base strength so Clasico keeps every variant\'s own color and Contorno replaces it', () => {
+        expect(CLASSIC_THEME_STYLE.button.baseStrengthPercent).toBe(100);
+        expect(CLASSIC_THEME_STYLE.button.rest.fillPercent).toBe(0);
+        expect(CLASSIC_THEME_STYLE.button.rest.borderPercent).toBe(0);
+        expect(CLASSIC_THEME_STYLE.button.hover.fillPercent).toBe(0);
+        expect(CLASSIC_THEME_STYLE.button.hover.borderPercent).toBe(0);
+        expect(CLASSIC_THEME_STYLE.button.rest.radiusPx).toBe(6);
+        expect(CLASSIC_THEME_STYLE.button.hover.radiusPx).toBe(6);
+
+        expect(OUTLINE_THEME_STYLE.button.baseStrengthPercent).toBe(0);
+    });
+
     it('falls back to Clasico for an unknown preset id', () => {
         expect(getThemeStylePreset('does-not-exist')).toBe(CLASSIC_THEME_STYLE);
         expect(getThemeStylePreset(OUTLINE_THEME_STYLE_ID)).toBe(OUTLINE_THEME_STYLE);
@@ -93,6 +105,11 @@ describe('themeStyleToCssProperties', () => {
         expect(properties['--frame-accent-opacity-hover']).toBe('40%');
         expect(properties['--button-radius-rest']).toBe('0px');
         expect(properties['--button-border-hover']).toBe('50%');
+        expect(properties['--button-base-strength']).toBe('0%');
+    });
+
+    it('maps the Clasico button base strength to 100%', () => {
+        expect(themeStyleToCssProperties(CLASSIC_THEME_STYLE)['--button-base-strength']).toBe('100%');
     });
 
     it('produces the same set of keys for every preset', () => {

@@ -436,6 +436,88 @@ h1, h2, h3, h4, h5, h6 {
   --frame-accent-opacity-hover: 0%;
 }
 
+/* ── Motor de tema: botones (AdminActionButton, AdminIconToolbarButton,
+ * HmiButton, .admin-accent-ghost, WidgetHeaderTemporalControls pill) ─────
+ * Mismo patron Houdini que el marco de arriba. La diferencia: un boton no
+ * tiene un unico "base" compartido por todas las variantes -- hoy cada una
+ * (neutral, accent, critical) tiene su propio color/alpha -- asi que
+ * --button-fill/-border solo controlan un overlay ADICIONAL sobre el color
+ * propio de cada variante (ver `.theme-button-*` en @layer utilities),
+ * atenuado por --button-base-strength (ver `ThemeButtonStyle.
+ * baseStrengthPercent` en themeStyle.types.ts): 100% en Clasico (overlay
+ * 0%/0% => el color propio se ve exacto, cero cambio visual), 0% en
+ * Contorno (el color propio desaparece y el overlay -- mezclado con el
+ * color de cada variante -- pasa a ser el 100% del look, dando el mismo
+ * outline plano parejo para las tres familias de botones). */
+@property --button-radius {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0.375rem;
+}
+
+@property --button-fill {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --button-border {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --button-accent-length {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 8px;
+}
+
+@property --button-accent-thickness {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 1px;
+}
+
+@property --button-accent-color {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #ffffff;
+}
+
+@property --button-accent-opacity {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --button-base-strength {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 100%;
+}
+
+:root {
+  /* "Clasico": overlay 0%/0% en ambos estados reproduce exactamente el
+   * color propio de cada variante (ver --button-base-strength arriba); el
+   * radio 0.375rem es el mismo `rounded-md` que usan hoy los 5 primitivos. */
+  --button-radius-rest: 0.375rem;
+  --button-radius-hover: 0.375rem;
+  --button-fill-rest: 0%;
+  --button-fill-hover: 0%;
+  --button-border-rest: 0%;
+  --button-border-hover: 0%;
+  --button-accent-length-rest: 8px;
+  --button-accent-length-hover: 8px;
+  --button-accent-thickness-rest: 1px;
+  --button-accent-thickness-hover: 1px;
+  --button-accent-color-rest: #ffffff;
+  --button-accent-color-hover: #ffffff;
+  --button-accent-opacity-rest: 0%;
+  --button-accent-opacity-hover: 0%;
+  --button-base-strength: 100%;
+}
+
 /* ── Scrollbar delgado y discreto para paneles scrolleables ───────────────
  * Usa únicamente CSS Scrollbar Styling Level 1 para evitar conflictos con
  * pseudo-elementos webkit en Chromium moderno.
@@ -600,7 +682,16 @@ h1, h2, h3, h4, h5, h6 {
   .glass-panel,
   .glass-panel::after,
   .widget-state-warning,
-  .widget-state-critical {
+  .widget-state-critical,
+  .theme-button,
+  .theme-button::after,
+  .theme-button-neutral,
+  .theme-button-icon-neutral,
+  .theme-button-hmi-secondary,
+  .theme-button-critical,
+  .theme-button-segment-active,
+  .theme-button-bare,
+  .admin-accent-ghost {
     transition: none;
   }
 }
@@ -666,17 +757,198 @@ h1, h2, h3, h4, h5, h6 {
     letter-spacing: var(--tracking-system);
   }
 
-  /* ── Admin ghost button/badge ── */
-  /* Un solo color para texto, borde, SVG y fondo translúcido */
+  /* ── Admin ghost button/badge ──
+   * Un solo color para texto, borde, SVG y fondo translúcido. También sirve
+   * de badge standalone (PropertyDock), por eso no toca border-radius: solo
+   * fondo/borde quedan theme-driven, la forma (radio) la da `.theme-button`
+   * cuando esta clase se combina con ella en un boton real. El 20%/30%
+   * rest y 35%/45% hover de hoy son el "color propio" de esta variante (ver
+   * --button-base-strength junto a @property --button-radius); a 0%/0% de
+   * overlay (Clasico) se reproducen exactos. */
   .admin-accent-ghost {
+    --button-fill: var(--button-fill-rest);
+    --button-border: var(--button-border-rest);
     color: var(--color-admin-accent);
-    background: color-mix(in srgb, var(--color-admin-accent) 20%, transparent);
-    border: 1px solid color-mix(in srgb, var(--color-admin-accent) 30%, transparent);
+    background: color-mix(in srgb, var(--color-admin-accent) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 20%, transparent) var(--button-base-strength), transparent));
+    border: 1px solid color-mix(in srgb, var(--color-admin-accent) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 30%, transparent) var(--button-base-strength), transparent));
+    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease;
   }
 
   .admin-accent-ghost:hover {
-    background: color-mix(in srgb, var(--color-admin-accent) 35%, transparent);
-    border-color: color-mix(in srgb, var(--color-admin-accent) 45%, transparent);
+    --button-fill: var(--button-fill-hover);
+    --button-border: var(--button-border-hover);
+    background: color-mix(in srgb, var(--color-admin-accent) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 35%, transparent) var(--button-base-strength), transparent));
+    border-color: color-mix(in srgb, var(--color-admin-accent) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 45%, transparent) var(--button-base-strength), transparent));
+  }
+
+  /* ── Motor de tema de botones: forma ──
+   * `.theme-button` da radio + acento de esquina + transiciones,
+   * compartido por los 5 primitivos. El color (fondo/borde) es propio de
+   * cada variante `.theme-button-*` / `.admin-accent-ghost` de abajo, para
+   * poder reproducir exactamente el look actual de cada una. */
+  .theme-button {
+    --button-radius: var(--button-radius-rest);
+    --button-accent-length: var(--button-accent-length-rest);
+    --button-accent-thickness: var(--button-accent-thickness-rest);
+    --button-accent-color: var(--button-accent-color-rest);
+    --button-accent-opacity: var(--button-accent-opacity-rest);
+    position: relative;
+    border-radius: var(--button-radius);
+    overflow: hidden;
+    overflow: clip;
+    isolation: isolate;
+    transition:
+      --button-radius 0.2s ease, --button-accent-length 0.2s ease,
+      --button-accent-thickness 0.2s ease, --button-accent-color 0.2s ease,
+      --button-accent-opacity 0.2s ease;
+  }
+
+  .theme-button:hover:not(:disabled) {
+    --button-radius: var(--button-radius-hover);
+    --button-accent-length: var(--button-accent-length-hover);
+    --button-accent-thickness: var(--button-accent-thickness-hover);
+    --button-accent-color: var(--button-accent-color-hover);
+    --button-accent-opacity: var(--button-accent-opacity-hover);
+  }
+
+  /* Acento de esquina de boton: mismo truco de 8 gradientes enmascarados
+   * que `.glass-panel::after`, sobre los tokens --button-accent-*. Ambos
+   * presets actuales lo dejan en opacidad 0 (oculto) en los dos estados. */
+  .theme-button::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    --button-accent-tint: color-mix(in srgb, var(--button-accent-color) var(--button-accent-opacity), transparent);
+    background-repeat: no-repeat;
+    background-image:
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint)),
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint)),
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint)),
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint)),
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint)),
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint)),
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint)),
+      linear-gradient(var(--button-accent-tint), var(--button-accent-tint));
+    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+    background-size:
+      var(--button-accent-length) var(--button-accent-thickness),
+      var(--button-accent-thickness) var(--button-accent-length),
+      var(--button-accent-length) var(--button-accent-thickness),
+      var(--button-accent-thickness) var(--button-accent-length),
+      var(--button-accent-length) var(--button-accent-thickness),
+      var(--button-accent-thickness) var(--button-accent-length),
+      var(--button-accent-length) var(--button-accent-thickness),
+      var(--button-accent-thickness) var(--button-accent-length);
+    transition: --button-accent-length 0.2s ease, --button-accent-thickness 0.2s ease,
+      --button-accent-color 0.2s ease, --button-accent-opacity 0.2s ease;
+  }
+
+  /* Variante neutral (AdminActionButton "secondary"): hoy border-white/10
+   * bg-white/5 en reposo, border-white/20 bg-white/10 en hover. */
+  .theme-button-neutral {
+    --button-fill: var(--button-fill-rest);
+    --button-border: var(--button-border-rest);
+    background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, rgba(255, 255, 255, 0.05) var(--button-base-strength), transparent));
+    border: 1px solid color-mix(in srgb, #fff var(--button-border), color-mix(in srgb, rgba(255, 255, 255, 0.1) var(--button-base-strength), transparent));
+    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  .theme-button-neutral:hover:not(:disabled) {
+    --button-fill: var(--button-fill-hover);
+    --button-border: var(--button-border-hover);
+    background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, rgba(255, 255, 255, 0.1) var(--button-base-strength), transparent));
+    border-color: color-mix(in srgb, #fff var(--button-border), color-mix(in srgb, rgba(255, 255, 255, 0.2) var(--button-base-strength), transparent));
+  }
+
+  /* Variante icon-neutral (AdminIconToolbarButton): sin borde propio hoy,
+   * solo un fondo hover white/5; en Contorno gana el outline parejo. */
+  .theme-button-icon-neutral {
+    --button-fill: var(--button-fill-rest);
+    --button-border: var(--button-border-rest);
+    background: color-mix(in srgb, #fff var(--button-fill), transparent);
+    border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);
+    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  .theme-button-icon-neutral:hover:not(:disabled) {
+    --button-fill: var(--button-fill-hover);
+    --button-border: var(--button-border-hover);
+    background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, rgba(255, 255, 255, 0.05) var(--button-base-strength), transparent));
+    border-color: color-mix(in srgb, #fff var(--button-border), transparent);
+  }
+
+  /* Variante hmi-secondary (HmiButton "secondary"): hoy border-industrial-
+   * border bg-industrial-hover en reposo, border-admin-accent/30
+   * bg-industrial-surface en hover. */
+  .theme-button-hmi-secondary {
+    --button-fill: var(--button-fill-rest);
+    --button-border: var(--button-border-rest);
+    background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, var(--color-industrial-hover) var(--button-base-strength), transparent));
+    border: 1px solid color-mix(in srgb, #fff var(--button-border), color-mix(in srgb, var(--color-industrial-border) var(--button-base-strength), transparent));
+    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  .theme-button-hmi-secondary:hover:not(:disabled) {
+    --button-fill: var(--button-fill-hover);
+    --button-border: var(--button-border-hover);
+    background: color-mix(in srgb, #fff var(--button-fill), color-mix(in srgb, var(--color-industrial-surface) var(--button-base-strength), transparent));
+    border-color: color-mix(in srgb, #fff var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 30%, transparent) var(--button-base-strength), transparent));
+  }
+
+  /* Variante critical (AdminActionButton "critical" y HmiButton "danger",
+   * mismos numeros hoy): border-status-critical/40 bg-status-critical/10 en
+   * reposo, /60 /20 en hover. */
+  .theme-button-critical {
+    --button-fill: var(--button-fill-rest);
+    --button-border: var(--button-border-rest);
+    background: color-mix(in srgb, var(--color-status-critical) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-status-critical) 10%, transparent) var(--button-base-strength), transparent));
+    border: 1px solid color-mix(in srgb, var(--color-status-critical) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-status-critical) 40%, transparent) var(--button-base-strength), transparent));
+    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  .theme-button-critical:hover:not(:disabled) {
+    --button-fill: var(--button-fill-hover);
+    --button-border: var(--button-border-hover);
+    background: color-mix(in srgb, var(--color-status-critical) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-status-critical) 20%, transparent) var(--button-base-strength), transparent));
+    border-color: color-mix(in srgb, var(--color-status-critical) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-status-critical) 60%, transparent) var(--button-base-strength), transparent));
+  }
+
+  /* Variante segment-active (WidgetHeaderTemporalControls, segmento "pill"
+   * seleccionado): hoy border-admin-accent/30 bg-admin-accent/10, estatico
+   * (sin intensificar mas al hover). */
+  .theme-button-segment-active {
+    --button-fill: var(--button-fill-rest);
+    --button-border: var(--button-border-rest);
+    color: var(--color-admin-accent);
+    background: color-mix(in srgb, var(--color-admin-accent) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 10%, transparent) var(--button-base-strength), transparent));
+    border: 1px solid color-mix(in srgb, var(--color-admin-accent) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 30%, transparent) var(--button-base-strength), transparent));
+    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  }
+
+  .theme-button-segment-active:hover:not(:disabled) {
+    --button-fill: var(--button-fill-hover);
+    --button-border: var(--button-border-hover);
+    background: color-mix(in srgb, var(--color-admin-accent) var(--button-fill), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 10%, transparent) var(--button-base-strength), transparent));
+    border-color: color-mix(in srgb, var(--color-admin-accent) var(--button-border), color-mix(in srgb, color-mix(in srgb, var(--color-admin-accent) 30%, transparent) var(--button-base-strength), transparent));
+  }
+
+  /* Variante bare (WidgetHeaderTemporalControls, segmento "pill" inactivo):
+   * hoy sin fondo/borde propio, solo cambia el color de texto al hover. */
+  .theme-button-bare {
+    --button-fill: var(--button-fill-rest);
+    --button-border: var(--button-border-rest);
+    background: color-mix(in srgb, #fff var(--button-fill), transparent);
+    border: 1px solid color-mix(in srgb, #fff var(--button-border), transparent);
+    transition: --button-fill 0.2s ease, --button-border 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  .theme-button-bare:hover:not(:disabled) {
+    --button-fill: var(--button-fill-hover);
+    --button-border: var(--button-border-hover);
+    background: color-mix(in srgb, #fff var(--button-fill), transparent);
+    border-color: color-mix(in srgb, #fff var(--button-border), transparent);
   }
 
   .glass-panel {

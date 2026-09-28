@@ -549,11 +549,11 @@ describe('ProdTrendWidget', () => {
         expect(getGroupButton('MES')).toBeDisabled();
         expect(getGroupButton('SEMANA')).toHaveClass('cursor-default');
         expect(getGroupButton('SEMANA')).not.toHaveClass('disabled:cursor-not-allowed');
-        expect(initialRangeButton).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(initialRangeButton).toHaveClass('group/control', 'theme-button', 'theme-button-segment-active');
         expect(initialRangeButton).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expect(initialRangeLabel).toHaveClass('translate-y-[1.5px]');
         expectRuntimeControlIndicator(initialRangeButton, ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
-        expect(getGroupButton('DÍA')).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(getGroupButton('DÍA')).toHaveClass('group/control', 'theme-button', 'theme-button-segment-active');
         expect(getGroupButton('DÍA')).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expect(initialGroupLabel).toHaveClass('translate-y-[1.5px]');
         expectRuntimeControlIndicator(getGroupButton('DÍA'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
@@ -561,11 +561,11 @@ describe('ProdTrendWidget', () => {
         await user.click(screen.getByRole('button', { name: '30d' }));
 
         expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: '30d' })).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(screen.getByRole('button', { name: '30d' })).toHaveClass('theme-button-segment-active');
         expect(screen.getByRole('button', { name: '30d' })).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expectRuntimeControlIndicator(screen.getByRole('button', { name: '30d' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(screen.getByRole('button', { name: '7d' })).toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expect(screen.getByRole('button', { name: '7d' })).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(screen.getByRole('button', { name: '7d' })).not.toHaveClass('theme-button-segment-active');
         expectRuntimeControlIndicator(screen.getByRole('button', { name: '7d' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current']);
         expect(vi.mocked(useActivitySeries)).toHaveBeenCalledTimes(2);
         expect(getGroupButton('DÍA')).toHaveAttribute('aria-pressed', 'true');
@@ -573,12 +573,12 @@ describe('ProdTrendWidget', () => {
         await user.click(screen.getByRole('button', { name: '12m' }));
 
         expect(screen.getByRole('button', { name: '12m' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: '12m' })).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(screen.getByRole('button', { name: '12m' })).toHaveClass('theme-button-segment-active');
         expect(screen.getByRole('button', { name: '12m' })).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expectRuntimeControlIndicator(screen.getByRole('button', { name: '12m' }), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(vi.mocked(useActivitySeries)).toHaveBeenCalledTimes(2);
         expect(getGroupButton('TURNO')).toHaveAttribute('aria-pressed', 'true');
-        expect(getGroupButton('TURNO')).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(getGroupButton('TURNO')).toHaveClass('theme-button-segment-active');
         expect(getGroupButton('TURNO')).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expectRuntimeControlIndicator(getGroupButton('TURNO'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(getGroupButton('SEMANA')).toBeDisabled();
@@ -589,11 +589,11 @@ describe('ProdTrendWidget', () => {
         await user.click(getGroupButton('MES'));
 
         expect(getGroupButton('MES')).toHaveAttribute('aria-pressed', 'true');
-        expect(getGroupButton('MES')).toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(getGroupButton('MES')).toHaveClass('theme-button-segment-active');
         expect(getGroupButton('MES')).not.toHaveClass('text-industrial-text', 'text-industrial-muted', 'hover:text-industrial-text');
         expectRuntimeControlIndicator(getGroupButton('MES'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current', 'bg-industrial-muted']);
         expect(getGroupButton('TURNO')).toHaveClass('text-industrial-muted', 'hover:text-industrial-text');
-        expect(getGroupButton('TURNO')).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
+        expect(getGroupButton('TURNO')).not.toHaveClass('theme-button-segment-active');
         expectRuntimeControlIndicator(getGroupButton('TURNO'), ['bg-transparent'], ['bg-current', 'group-hover/control:bg-current', 'group-hover:bg-current']);
     });
 

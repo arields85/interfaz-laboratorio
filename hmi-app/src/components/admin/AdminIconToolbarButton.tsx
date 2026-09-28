@@ -3,7 +3,10 @@ import type { LucideIcon, LucideProps } from 'lucide-react';
 import { clsx } from 'clsx';
 import HoverTooltip, { type HoverTooltipProps } from '../ui/HoverTooltip';
 
-const ADMIN_ICON_TOOLBAR_BUTTON_CLS = 'inline-flex h-9 w-9 items-center justify-center rounded-md text-industrial-muted transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-50';
+// Shape + fill/border come from the shared `theme-button`/`theme-button-
+// icon-neutral` engine (index.css): Clasico keeps today's borderless
+// look (a hover-only white/5 wash), other themes gain the uniform outline.
+const ADMIN_ICON_TOOLBAR_BUTTON_CLS = 'theme-button theme-button-icon-neutral inline-flex h-9 w-9 items-center justify-center text-industrial-muted hover:text-white disabled:cursor-not-allowed disabled:opacity-50';
 
 interface AdminIconToolbarButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label' | 'children'> {
     label: string;

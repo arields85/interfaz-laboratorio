@@ -22,6 +22,8 @@ describe('AdminIconToolbarButton', () => {
 
         expect(button).toBeInTheDocument();
         expect(button).not.toHaveTextContent('Nueva vista');
+        expect(button).toHaveClass('theme-button', 'theme-button-icon-neutral');
+        expect(button).not.toHaveClass('rounded-md', 'hover:bg-white/5');
         expect(button.querySelector('.lucide-plus')).toHaveAttribute('width', '18');
         expect(button.querySelector('.lucide-plus')).toHaveAttribute('height', '18');
 

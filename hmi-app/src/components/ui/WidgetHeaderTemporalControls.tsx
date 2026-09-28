@@ -92,9 +92,13 @@ function getTemporalControlButtonClass({
     }
 
     if (variant === 'pill') {
+        // Shape + color driven by the shared theme-button engine (index.css):
+        // Clasico reproduces today's rounded-md/accent-10%/accent-30% active
+        // look and the boxless inactive look exactly; other themes apply the
+        // same outline recipe uniformly to both states.
         return `${baseClassName} ${isActive
-            ? 'rounded-md border border-admin-accent/30 bg-admin-accent/10 text-admin-accent'
-            : 'text-industrial-muted hover:text-industrial-text focus-visible:text-industrial-text'}`;
+            ? 'theme-button theme-button-segment-active'
+            : 'theme-button theme-button-bare text-industrial-muted hover:text-industrial-text focus-visible:text-industrial-text'}`;
     }
 
     return `${baseClassName} ${isActive

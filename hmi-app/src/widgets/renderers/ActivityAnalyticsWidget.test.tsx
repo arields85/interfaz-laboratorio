@@ -2069,12 +2069,12 @@ describe('ActivityAnalyticsWidget', () => {
         const activeRangeLabel = within(activeRangeButton).getByText('7d');
         const activeGroupLabel = within(activeGroupButton).getByText('DÍA');
 
-        expect(activeRangeButton).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'px-2', 'py-1', 'text-admin-accent');
+        expect(activeRangeButton).toHaveClass('group/control', 'theme-button', 'theme-button-segment-active', 'px-2', 'py-1');
         expect(activeRangeButton).not.toHaveClass('text-industrial-text', 'text-industrial-muted');
         expect(activeRangeLabel).toHaveClass('translate-y-[1.5px]');
         expect(activeRangeIndicator).toHaveClass('h-[1.5px]', 'w-1/4', 'min-w-[0.45rem]', 'bg-transparent');
         expect(activeRangeIndicator).not.toHaveClass('bg-current', 'group-hover/control:bg-current', 'group-focus-visible/control:bg-current');
-        expect(activeGroupButton).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'px-2', 'py-1', 'text-admin-accent');
+        expect(activeGroupButton).toHaveClass('group/control', 'theme-button', 'theme-button-segment-active', 'px-2', 'py-1');
         expect(activeGroupButton).not.toHaveClass('text-industrial-text', 'text-industrial-muted');
         expect(activeGroupLabel).toHaveClass('translate-y-[1.5px]');
         expect(activeGroupIndicator).toHaveClass('bg-transparent');

@@ -101,10 +101,33 @@ describe('WidgetHeaderTemporalControls', () => {
         const activeLabel = within(activeButton).getByText('10s');
         const activeIndicator = within(activeButton).getByTestId('temporal-indicator');
 
-        expect(activeButton).toHaveClass('group/control', 'rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'px-2', 'py-1', 'text-admin-accent');
+        expect(activeButton).toHaveClass('group/control', 'theme-button', 'theme-button-segment-active', 'px-2', 'py-1');
+        expect(activeButton).not.toHaveClass('rounded-md', 'border-admin-accent/30', 'bg-admin-accent/10', 'text-admin-accent');
         expect(activeLabel).toHaveClass('translate-y-[1.5px]');
         expect(activeIndicator).toHaveClass('h-[1.5px]', 'w-1/4', 'min-w-[0.45rem]', 'bg-transparent');
         expect(activeIndicator).not.toHaveClass('bg-current', 'group-hover/control:bg-current', 'group-focus-visible/control:bg-current');
+    });
+
+    it('drives the inactive pill segment from the theme-button-bare engine', () => {
+        render(
+            <WidgetHeaderTemporalControls
+                variant="pill"
+                groups={[
+                    {
+                        selectedValue: '10s',
+                        onSelect: vi.fn(),
+                        options: [
+                            { value: '1s', label: '1s' },
+                            { value: '10s', label: '10s' },
+                        ],
+                    },
+                ]}
+            />,
+        );
+
+        const inactiveButton = screen.getByRole('button', { name: '1s' });
+
+        expect(inactiveButton).toHaveClass('group/control', 'theme-button', 'theme-button-bare', 'px-2', 'py-1');
     });
 
     it('applies the underline selected visual contract with local hover group classes and indicator geometry', () => {

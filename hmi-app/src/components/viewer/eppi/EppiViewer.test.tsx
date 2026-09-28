@@ -114,7 +114,7 @@ describe('EppiViewer', () => {
         const createButton = screen.getByRole('button', { name: 'Crear nuevo' });
         expect(sortButton.querySelector('.lucide-arrow-down-up')).toBeInTheDocument();
         expect(createButton.querySelector('.lucide-plus')).toBeInTheDocument();
-        expect(sortButton).toHaveClass('border-industrial-border', 'bg-industrial-hover', 'hover:bg-industrial-surface');
+        expect(sortButton).toHaveClass('theme-button', 'theme-button-hmi-secondary');
         expect(createButton).toHaveClass('admin-accent-ghost');
         expect(createButton).toHaveAttribute('aria-disabled', 'true');
         expect(createButton).toHaveAttribute('data-unavailable', 'true');
@@ -254,7 +254,7 @@ describe('EppiViewer', () => {
         expect(sort.querySelector('.lucide-arrow-down-up')).toBeInTheDocument();
         expect(exportButton.querySelector('.lucide-download')).toBeInTheDocument();
         expect(createButton.querySelector('.lucide-plus')).toBeInTheDocument();
-        expect(sort).toHaveClass('border-industrial-border', 'bg-industrial-hover', 'hover:bg-industrial-surface');
+        expect(sort).toHaveClass('theme-button', 'theme-button-hmi-secondary');
         expect(createButton).toHaveClass('admin-accent-ghost');
         for (const unavailableButton of [exportButton, createButton]) {
             expect(unavailableButton).toHaveAttribute('aria-disabled', 'true');
@@ -372,7 +372,7 @@ describe('EppiViewer', () => {
         expect(viewAllButtons[1]?.querySelector('.lucide-external-link')).toBeInTheDocument();
         expect(equipmentButton.querySelector('.lucide-plus')).toBeInTheDocument();
         expect(toolButton.querySelector('.lucide-plus')).toBeInTheDocument();
-        expect(viewAllButtons[0]).toHaveClass('border-white/10', 'bg-white/5', 'hover:bg-white/10');
+        expect(viewAllButtons[0]).toHaveClass('theme-button', 'theme-button-neutral');
         expect(equipmentButton).toHaveClass('admin-accent-ghost');
 
         expect(within(panels[0]!).getAllByRole('button').map((button) => button.textContent?.trim())).toEqual(['Ver todo', 'Equipo']);

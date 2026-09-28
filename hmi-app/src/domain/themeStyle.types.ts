@@ -57,6 +57,24 @@ export interface ThemeFrameStyle {
 export interface ThemeButtonStyle {
     readonly rest: ThemeSurfaceStateStyle;
     readonly hover: ThemeSurfaceStateStyle;
+    /**
+     * 0-100. How much each button primitive's own pre-theme color (e.g.
+     * today's admin-accent-ghost 20%/30% mix, or the neutral secondary's
+     * white/5 background) still shows through under the shared `rest`/
+     * `hover` fill/border overlay above -- the button equivalent of
+     * `ThemeFrameStyle.baseBackground`, needed because unlike the frame
+     * (one shared base for every widget), buttons keep several different
+     * "own" bases (neutral, accent, critical) that a single shared overlay
+     * percentage cannot reproduce on its own.
+     *
+     * 100 keeps every variant's own color exactly as it is today (Clasico:
+     * combined with `fillPercent`/`borderPercent` at 0, the overlay
+     * contributes nothing and the variant's own CSS recipe shows through
+     * unchanged). 0 replaces the own color entirely with the shared
+     * neutral/accent/critical mix at this theme's fill/border percentages
+     * (Contorno's flat outline recipe, uniform across every button group).
+     */
+    readonly baseStrengthPercent: number;
 }
 
 /** A complete theme: widget frame + button visual style. */
