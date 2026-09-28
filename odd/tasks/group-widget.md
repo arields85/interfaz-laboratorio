@@ -311,8 +311,14 @@ after the user's live check. Slice boundaries are recorded under Progress.
   (possible follow-up). Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test` 2791/2791.
   Parent spot check: BuilderCanvas + groupWidget 140/140.
 
+- 2026-09-28: slice review G11-G14 (base `e89e44d`..`febe6a5`, 656 lines, medium, user granted):
+  lineage `review-7ebfa07c4a29ba36` APPROVED, acknowledged, authority burned; boundary advances
+  to `febe6a5`. Advisory: R3-locked-resize-px-floor-untested-shrink (WARNING,
+  `BuilderCanvas.tsx:786-798` — shrinking a locked container below its members in px is not
+  covered by a test), R3-g12-class-only-assertions (SUGGESTION), R3-task-doc-garbled-next-step
+  (SUGGESTION, this section — fixed here). The WARNING is queued for the next writer run.
+
 ## Next step
 
-Slice review, then the user's live check (G11 repro attempt with CDP capture, G12, G13, G14),
-then the single merge., then the user's live check, then the single
-merge.
+User's live check (G11 repro attempt with immediate CDP state capture, G12, G13, G14); then the
+single merge.
