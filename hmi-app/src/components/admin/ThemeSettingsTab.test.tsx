@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ThemeSettingsTab from './ThemeSettingsTab';
 import {
+    INSTRUMENT_THEME_STYLE_ID,
     OUTLINE_THEME_STYLE_ID,
     resetThemeStyleOnDocument,
     THEME_STYLE_STORAGE_KEY,
@@ -25,16 +26,19 @@ describe('ThemeSettingsTab', () => {
         localStorage.clear();
     });
 
-    it('renders a radiogroup with both built-in presets, Clasico selected by default', () => {
+    it('renders a radiogroup with all three built-in presets, Clasico selected by default', () => {
         render(<ThemeSettingsTab />);
 
         const group = screen.getByRole('radiogroup', { name: /tema/i });
         const classicOption = screen.getByRole('radio', { name: /Clásico/ });
         const outlineOption = screen.getByRole('radio', { name: /Contorno/ });
+        const instrumentOption = screen.getByRole('radio', { name: /Instrumento/ });
 
         expect(group).toBeInTheDocument();
+        expect(screen.getAllByRole('radio')).toHaveLength(3);
         expect(classicOption).toHaveAttribute('aria-checked', 'true');
         expect(outlineOption).toHaveAttribute('aria-checked', 'false');
+        expect(instrumentOption).toHaveAttribute('aria-checked', 'false');
     });
 
     it('shows a Spanish, usted-register one-line description for each preset', () => {
@@ -42,9 +46,31 @@ describe('ThemeSettingsTab', () => {
 
         expect(screen.getByText(/efecto vidrio y brillo suave/i)).toBeInTheDocument();
         expect(screen.getByText(/bordes finos y relleno transparente/i)).toBeInTheDocument();
+        expect(screen.getByText(/vidrio sobrio con esquinas apenas redondeadas/i)).toBeInTheDocument();
         // usted register: no "tu"/"vos" second-person forms in the visible copy.
         const region = screen.getByRole('radiogroup', { name: /tema/i });
         expect(region.textContent).not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
+    });
+
+    it('selects and previews the Instrumento preset', async () => {
+        const user = userEvent.setup();
+
+        render(<ThemeSettingsTab />);
+
+        await user.click(screen.getByRole('radio', { name: /Instrumento/ }));
+
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('3px');
+        expect(document.documentElement.style.getPropertyValue('--tag-tint')).toBe('14%');
+        expect(screen.getByRole('radio', { name: /Instrumento/ })).toHaveAttribute('aria-checked', 'true');
+    });
+
+    it('starts from the persisted Instrumento preset when it was already saved', () => {
+        writeStoredThemeStylePresetId(INSTRUMENT_THEME_STYLE_ID);
+
+        render(<ThemeSettingsTab />);
+
+        expect(screen.getByRole('radio', { name: /Instrumento/ })).toHaveAttribute('aria-checked', 'true');
+        expect(screen.getByRole('radio', { name: /Clásico/ })).toHaveAttribute('aria-checked', 'false');
     });
 
     it('starts from the persisted preset when one was already saved', () => {

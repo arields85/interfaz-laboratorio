@@ -6,6 +6,8 @@ import {
     CLASSIC_THEME_STYLE,
     CLASSIC_THEME_STYLE_ID,
     getThemeStylePreset,
+    INSTRUMENT_THEME_STYLE,
+    INSTRUMENT_THEME_STYLE_ID,
     OUTLINE_THEME_STYLE,
     OUTLINE_THEME_STYLE_ID,
     readStoredThemeStylePresetId,
@@ -131,6 +133,15 @@ describe('themeStyle.service presets', () => {
         expect(getThemeStylePreset('does-not-exist')).toBe(CLASSIC_THEME_STYLE);
         expect(getThemeStylePreset(OUTLINE_THEME_STYLE_ID)).toBe(OUTLINE_THEME_STYLE);
     });
+
+    it('lists every built-in preset, including the third one (Instrumento, P6)', () => {
+        expect(THEME_STYLE_PRESETS.map((preset) => preset.id)).toEqual([
+            CLASSIC_THEME_STYLE_ID,
+            OUTLINE_THEME_STYLE_ID,
+            INSTRUMENT_THEME_STYLE_ID,
+        ]);
+        expect(getThemeStylePreset(INSTRUMENT_THEME_STYLE_ID)).toBe(INSTRUMENT_THEME_STYLE);
+    });
 });
 
 describe('themeStyle.service tags (P5, 2026-09-28)', () => {
@@ -247,6 +258,57 @@ describe('themeStyleToCssProperties', () => {
     });
 });
 
+describe('themeStyle.service "Instrumento" preset (P6, user decision 2026-09-28)', () => {
+    it('matches the user\'s "Instrumento" values from the theme-polish task', () => {
+        expect(INSTRUMENT_THEME_STYLE.id).toBe(INSTRUMENT_THEME_STYLE_ID);
+        expect(INSTRUMENT_THEME_STYLE.frame.rest).toEqual({
+            radiusPx: 3,
+            fillPercent: 0,
+            borderPercent: 8,
+            blurPx: 3,
+            accent: { lengthPx: 20, thicknessPx: 1.5, color: '#ffffff', opacityPercent: 0 },
+        });
+        expect(INSTRUMENT_THEME_STYLE.frame.hover).toEqual({
+            radiusPx: 3,
+            fillPercent: 4,
+            borderPercent: 20,
+            blurPx: 12,
+            accent: { lengthPx: 8, thicknessPx: 1, color: '#ffffff', opacityPercent: 60 },
+        });
+        expect(INSTRUMENT_THEME_STYLE.button.rest).toEqual({
+            radiusPx: 3,
+            fillPercent: 0,
+            borderPercent: 22,
+            accent: { lengthPx: 8, thicknessPx: 1, color: '#ffffff', opacityPercent: 0 },
+        });
+        expect(INSTRUMENT_THEME_STYLE.button.hover).toEqual({
+            radiusPx: 3,
+            fillPercent: 3,
+            borderPercent: 50,
+            accent: { lengthPx: 8, thicknessPx: 1, color: '#ffffff', opacityPercent: 0 },
+        });
+        expect(INSTRUMENT_THEME_STYLE.button.baseStrengthPercent).toBe(0);
+    });
+
+    it('locks the icon-only recipe: own color at full strength, borderless in both states', () => {
+        expect(INSTRUMENT_THEME_STYLE.button.icon).toEqual({
+            rest: { radiusPx: 6, fillPercent: 0, borderPercent: 0, accent: { lengthPx: 16, thicknessPx: 1, color: '#ffffff', opacityPercent: 0 } },
+            hover: { radiusPx: 3, fillPercent: 5, borderPercent: 0, accent: { lengthPx: 5, thicknessPx: 1, color: '#ffffff', opacityPercent: 60 } },
+            baseStrengthPercent: 100,
+        });
+    });
+
+    it('locks the tag recipe: flat style, radius 3, no fill/border, 14% tint', () => {
+        expect(INSTRUMENT_THEME_STYLE.tag).toEqual({
+            style: 'flat',
+            radiusPx: 3,
+            fillPercent: 0,
+            borderPercent: 0,
+            tintPercent: 14,
+        });
+    });
+});
+
 describe('applyThemeStyleToDocument / resetThemeStyleOnDocument', () => {
     it('sets every mapped custom property on the target element', () => {
         const target = makeTarget();
@@ -287,6 +349,12 @@ describe('theme style persistence', () => {
 
         expect(localStorage.getItem(THEME_STYLE_STORAGE_KEY)).toBe(OUTLINE_THEME_STYLE_ID);
         expect(readStoredThemeStylePresetId()).toBe(OUTLINE_THEME_STYLE_ID);
+    });
+
+    it('round-trips the Instrumento preset id through localStorage', () => {
+        writeStoredThemeStylePresetId(INSTRUMENT_THEME_STYLE_ID);
+
+        expect(readStoredThemeStylePresetId()).toBe(INSTRUMENT_THEME_STYLE_ID);
     });
 
     it('returns null when nothing is stored', () => {
@@ -368,6 +436,15 @@ describe('applyThemeStyleOverrides (boot re-apply)', () => {
         applyThemeStyleOverrides();
 
         expect(document.documentElement.style.getPropertyValue('--frame-border-hover')).toBe('25%');
+    });
+
+    it('re-applies the persisted Instrumento preset on boot', () => {
+        writeStoredThemeStylePresetId(INSTRUMENT_THEME_STYLE_ID);
+
+        applyThemeStyleOverrides();
+
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('3px');
+        expect(document.documentElement.style.getPropertyValue('--tag-tint')).toBe('14%');
     });
 
     it('ignores a corrupt stored preset id and leaves the defaults untouched', () => {

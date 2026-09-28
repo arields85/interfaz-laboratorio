@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     applyThemeStyleToDocument,
     CLASSIC_THEME_STYLE_ID,
+    INSTRUMENT_THEME_STYLE_ID,
     OUTLINE_THEME_STYLE_ID,
     previewThemeStyleOnDocument,
     readStoredThemeStylePresetId,
@@ -26,6 +27,10 @@ const THEME_PRESET_COPY: Record<string, { name: string; description: string }> =
     [OUTLINE_THEME_STYLE_ID]: {
         name: 'Contorno',
         description: 'Bordes finos y relleno transparente para los marcos de widgets y botones.',
+    },
+    [INSTRUMENT_THEME_STYLE_ID]: {
+        name: 'Instrumento',
+        description: 'Vidrio sobrio con esquinas apenas redondeadas y detalles finos, como un tablero de medición.',
     },
 };
 

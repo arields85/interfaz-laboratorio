@@ -10,6 +10,7 @@ export const THEME_STYLE_STORAGE_KEY = 'hmi-theme-style';
 
 export const CLASSIC_THEME_STYLE_ID = 'classic';
 export const OUTLINE_THEME_STYLE_ID = 'outline';
+export const INSTRUMENT_THEME_STYLE_ID = 'instrument';
 
 const WHITE = '#ffffff';
 
@@ -141,7 +142,67 @@ export const OUTLINE_THEME_STYLE: ThemeStyle = {
     tag: CLASSIC_TAG_STYLE,
 };
 
-export const THEME_STYLE_PRESETS: readonly ThemeStyle[] = [CLASSIC_THEME_STYLE, OUTLINE_THEME_STYLE];
+/**
+ * "Instrumento": the user's third style from the lab (2026-09-28, P6 in
+ * odd/tasks/theme-polish.md). Sober glass widgets with barely-rounded
+ * corners and fine detail, an outline recipe for text buttons (like
+ * Contorno) and Clasico-strength icon-only buttons, plus a flat tag look.
+ */
+export const INSTRUMENT_THEME_STYLE: ThemeStyle = {
+    id: INSTRUMENT_THEME_STYLE_ID,
+    frame: {
+        baseBackground: 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%)',
+        rest: {
+            radiusPx: 3,
+            fillPercent: 0,
+            borderPercent: 8,
+            blurPx: 3,
+            accent: { lengthPx: 20, thicknessPx: 1.5, color: WHITE, opacityPercent: 0 },
+        },
+        hover: {
+            radiusPx: 3,
+            fillPercent: 4,
+            borderPercent: 20,
+            blurPx: 12,
+            accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 60 },
+        },
+    },
+    button: {
+        rest: {
+            radiusPx: 3,
+            fillPercent: 0,
+            borderPercent: 22,
+            accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 },
+        },
+        hover: {
+            radiusPx: 3,
+            fillPercent: 3,
+            borderPercent: 50,
+            accent: { lengthPx: 8, thicknessPx: 1, color: WHITE, opacityPercent: 0 },
+        },
+        // Outline recipe for text buttons, same base-strength handling as
+        // Contorno's text buttons: the shared fill/border overlay above
+        // replaces each variant's own color entirely.
+        baseStrengthPercent: 0,
+        // Icon-only buttons keep their own color at full strength (like
+        // Contorno's icon block), only the shape (radius/fill/border/accent)
+        // is themed.
+        icon: {
+            rest: { radiusPx: 6, fillPercent: 0, borderPercent: 0, accent: { lengthPx: 16, thicknessPx: 1, color: WHITE, opacityPercent: 0 } },
+            hover: { radiusPx: 3, fillPercent: 5, borderPercent: 0, accent: { lengthPx: 5, thicknessPx: 1, color: WHITE, opacityPercent: 60 } },
+            baseStrengthPercent: 100,
+        },
+    },
+    tag: {
+        style: 'flat',
+        radiusPx: 3,
+        fillPercent: 0,
+        borderPercent: 0,
+        tintPercent: 14,
+    },
+};
+
+export const THEME_STYLE_PRESETS: readonly ThemeStyle[] = [CLASSIC_THEME_STYLE, OUTLINE_THEME_STYLE, INSTRUMENT_THEME_STYLE];
 
 export function getThemeStylePreset(id: string): ThemeStyle {
     return THEME_STYLE_PRESETS.find((preset) => preset.id === id) ?? CLASSIC_THEME_STYLE;
