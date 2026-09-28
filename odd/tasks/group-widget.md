@@ -76,7 +76,7 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
 - [x] **G4** — Copy/delete semantics (D5) and no nesting.
 - [x] **G5** — Viewer: D3 click priority for members without their own link; group hover (the
   container shows its hover while the pointer is anywhere over the group; members keep their own).
-- [ ] **G5b** — Promoting a member of a locked group to the header releases it from the group
+- [x] **G5b** — Promoting a member of a locked group to the header releases it from the group
   (today it is only filtered at read time). One history step. Plus review follow-ups: a widget
   belongs to at most one locked group (exclude widgets already in another locked group at lock
   time; sanitize on read); resize preview must match the committed clamp; restore the weakened
@@ -173,6 +173,16 @@ after the user's live check. Slice boundaries are recorded under Progress.
   R3-resize-preview-commit-mismatch (SUGGESTION, `BuilderCanvas.tsx:292-307`),
   R3-test-helper-weakened (SUGGESTION, `BuilderCanvas.test.tsx:154`) — folded into G5b.
 
+- 2026-09-28: G5b + G6 docs done (route: delegated writer) — `e5002f9` fix(builder): keep each
+  widget in a single group and release promoted members; `1a7bb4a` fix(builder): only let a
+  LOCKED group claim cross-group membership; `9aa936a` fix(builder): match the locked-group
+  resize preview to its commit clamp; `3bc917e` docs(widgets): document the group container
+  widget (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`). Header promotion releases membership in
+  the same step; lock excludes widgets of other locked groups; normalize/clone dedup keeps the
+  first locked group in view order; BuilderCanvas test helper restored to fail-fast.
+  RED/GREEN: 11 new tests failing first. Writer: `npx tsc -b` clean, `npm run lint` clean,
+  `npm test` 2710/2710. Parent spot check: groupWidget + dashboardViews 65/65.
+
 ## Next step
 
-G5b + G6 (one writer), then the user's live check and the single merge.
+Slice review (base 3fb4a73), then the user's live check (G6) and the single merge.
