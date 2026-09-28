@@ -560,6 +560,69 @@ describe('PropertyDock text-title', () => {
     });
 });
 
+describe('PropertyDock group', () => {
+    it('renders header text and icon controls, keeps Navegación, and hides Datos/Umbrales', () => {
+        renderPropertyDock({
+            type: 'group',
+            title: 'Área compresión',
+            displayOptions: { icon: 'Group' },
+        });
+
+        expect(screen.getByRole('button', { name: /general/i })).toBeInTheDocument();
+        expect(getInputInSection('General', 'Título')).toHaveValue('Área compresión');
+        expect(getFieldButtonInSection('General', 'Ícono')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /navegación/i })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^datos$/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^umbrales$/i })).not.toBeInTheDocument();
+        expect(screen.queryByText('Variable')).not.toBeInTheDocument();
+        expect(screen.queryByText('Fuente')).not.toBeInTheDocument();
+    });
+
+    it('persists icon selection edits in displayOptions', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'group',
+            title: 'Área compresión',
+            displayOptions: { icon: 'Group' },
+        });
+
+        await user.click(getFieldButtonInSection('General', 'Ícono'));
+        await user.click(screen.getByRole('button', { name: 'Sin ícono' }));
+
+        expect(updates.at(-1)).toEqual(expect.objectContaining({
+            displayOptions: expect.objectContaining({ icon: null }),
+        }));
+    });
+
+    it('exposes the Navegación link selector for a group widget', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'group',
+            title: 'Área compresión',
+            availableDashboards: [
+                {
+                    id: 'dashboard-compresion',
+                    name: 'Compresión',
+                    dashboardType: 'free',
+                    aspect: '16:9',
+                    cols: 40,
+                    rows: 24,
+                    layout: [],
+                    widgets: [],
+                    isTemplate: false,
+                    version: 1,
+                    status: 'published',
+                },
+            ],
+        });
+
+        await user.click(getFieldButtonInSection('Navegación', 'Enlace'));
+        await user.click(screen.getByRole('button', { name: 'Compresión' }));
+
+        expect(updates.at(-1)).toEqual(expect.objectContaining({
+            navigationTargetDashboardId: 'dashboard-compresion',
+        }));
+    });
+});
+
 describe('PropertyDock info-card', () => {
     it('renders static info-card editing controls without catalog-variable binding controls', () => {
         renderPropertyDock({

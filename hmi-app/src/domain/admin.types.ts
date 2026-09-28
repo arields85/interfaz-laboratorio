@@ -211,7 +211,8 @@ export type WidgetType =
     | 'info-card'
     | 'machine-activity'
     | 'activity-analytics'
-    | 'prod-trend';
+    | 'prod-trend'
+    | 'group';
 
 // --- AGREGACIÓN JERÁRQUICA ---
 
@@ -642,6 +643,11 @@ export interface InfoCardDisplayOptions {
     fields: InfoCardField[];
 }
 
+/** Opciones de visualización del widget contenedor (`group`): solo el ícono del header. */
+export interface GroupDisplayOptions {
+    icon?: string | null;
+}
+
 // =============================================================================
 // WIDGET CONFIG — Unión discriminada por tipo
 //
@@ -763,9 +769,30 @@ export interface InfoCardWidgetConfig extends WidgetConfigBase {
     displayOptions?: InfoCardDisplayOptions;
 }
 
+/**
+ * Widget contenedor: agrupa otros widgets bajo un marco clickeable único.
+ *
+ * `memberWidgetIds` y `locked` son estado estructural/de comportamiento del
+ * builder (qué widgets están agrupados y si el contenedor está cerrado),
+ * no opciones de presentación — por eso viven en la config del widget, igual
+ * que `binding`/`hierarchyMode` en `WidgetConfigBase`, y no en `displayOptions`
+ * (reservado a apariencia: ícono del header). Son opcionales para que un
+ * grupo persistido antes de agregar estos campos siga siendo un
+ * `GroupWidgetConfig` válido; `normalizeWidget` (`utils/dashboardViews.ts`)
+ * les aplica `[]`/`false` como default seguro al cargar.
+ */
+export interface GroupWidgetConfig extends WidgetConfigBase {
+    type: 'group';
+    /** Ids de los widgets agrupados mientras el contenedor está `locked`. Vacío/undefined si no hay grupo cerrado. */
+    memberWidgetIds?: string[];
+    /** Si el contenedor está cerrado alrededor de sus miembros (ver decisión D1 del feature). */
+    locked?: boolean;
+    displayOptions?: GroupDisplayOptions;
+}
+
 /** Variante genérica para todos los tipos de widget sin displayOptions específicos. */
 export interface GenericWidgetConfig extends WidgetConfigBase {
-    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'activity-analytics' | 'prod-trend' | 'text-title' | 'info-card'>;
+    type: Exclude<WidgetType, 'kpi' | 'metric-card' | 'trend-chart' | 'trend-chart-v2' | 'prod-history' | 'alert-history' | 'connection-status' | 'status' | 'machine-activity' | 'activity-analytics' | 'prod-trend' | 'text-title' | 'info-card' | 'group'>;
     displayOptions?: BaseDisplayOptions;
 }
 
@@ -787,6 +814,7 @@ export type WidgetConfig =
     | ProdTrendWidgetConfig
     | TextTitleWidgetConfig
     | InfoCardWidgetConfig
+    | GroupWidgetConfig
     | GenericWidgetConfig;
 
 // =============================================================================
@@ -823,6 +851,10 @@ export function isProdTrendWidget(w: WidgetConfig): w is ProdTrendWidgetConfig {
 
 export function isInfoCardWidget(w: WidgetConfig): w is InfoCardWidgetConfig {
     return w.type === 'info-card';
+}
+
+export function isGroupWidget(w: WidgetConfig): w is GroupWidgetConfig {
+    return w.type === 'group';
 }
 
 // --- TEMPLATE ---

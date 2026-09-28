@@ -101,6 +101,21 @@ describe('widgetCapabilities', () => {
         expect(getDefaultSize('info-card')).toEqual({ w: 6, h: 5 });
     });
 
+    it('marks group as a static container without catalog, hierarchy or nested navigation', () => {
+        const widgetType: WidgetType = 'group';
+
+        expect(getWidgetCapabilities(widgetType)).toEqual({
+            catalogVariable: false,
+            hierarchy: false,
+            nestedInteractiveNavigation: false,
+            defaultSize: { w: 10, h: 10 },
+            defaultIcon: 'Group',
+        });
+        expect(hasNestedInteractiveNavigation(widgetType)).toBe(false);
+        expect(supportsCatalogVariable(widgetType)).toBe(false);
+        expect(supportsHierarchy(widgetType)).toBe(false);
+    });
+
     it('falls back to 4×3 for unknown widget types', () => {
         expect(getDefaultSize('unknown-widget')).toEqual({ w: 4, h: 3 });
     });

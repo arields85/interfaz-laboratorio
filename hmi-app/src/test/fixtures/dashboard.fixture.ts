@@ -1,5 +1,6 @@
 import type {
     Dashboard,
+    GroupWidgetConfig,
     InfoCardWidgetConfig,
     MetricCardWidgetConfig,
     Template,
@@ -49,6 +50,22 @@ export function makeInfoCardWidget(overrides: Partial<InfoCardWidgetConfig> = {}
                 { id: 'field-2', label: 'Operator', value: 'Ada' },
             ],
             ...overrides.displayOptions,
+        },
+        ...overrides,
+    };
+}
+
+export function makeGroupWidget(overrides: Partial<GroupWidgetConfig> = {}): GroupWidgetConfig {
+    return {
+        id: 'group-1',
+        type: 'group',
+        title: 'Contenedor',
+        position: { x: 0, y: 0 },
+        size: { w: 10, h: 10 },
+        memberWidgetIds: [],
+        locked: false,
+        displayOptions: {
+            icon: 'Group',
         },
         ...overrides,
     };

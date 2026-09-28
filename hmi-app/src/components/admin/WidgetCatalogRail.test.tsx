@@ -79,4 +79,18 @@ describe('WidgetCatalogRail', () => {
 
         expect(onAddWidget).toHaveBeenCalledWith('info-card');
     });
+
+    it('shows Contenedor in the catalog and dispatches the group widget type on click', async () => {
+        const user = userEvent.setup();
+        const onAddWidget = vi.fn();
+
+        render(<WidgetCatalogRail onAddWidget={onAddWidget} />);
+
+        const button = screen.getByRole('button', { name: 'Contenedor' });
+        expect(button).toBeInTheDocument();
+
+        await user.click(button);
+
+        expect(onAddWidget).toHaveBeenCalledWith('group');
+    });
 });

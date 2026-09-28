@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeInfoCardWidget } from './dashboard.fixture';
+import { makeGroupWidget, makeInfoCardWidget } from './dashboard.fixture';
 
 describe('dashboard fixture info-card helpers', () => {
     it('creates a renderable static info-card fixture without catalog-variable binding', () => {
@@ -34,5 +34,31 @@ describe('dashboard fixture info-card helpers', () => {
         expect(widget.displayOptions?.fields).toEqual([
             { id: 'field-1', label: 'Line', value: 'A-01' },
         ]);
+    });
+});
+
+describe('dashboard fixture group helpers', () => {
+    it('creates an unlocked, member-less group fixture without a data binding', () => {
+        const widget = makeGroupWidget();
+
+        expect(widget).toMatchObject({
+            type: 'group',
+            title: 'Contenedor',
+            memberWidgetIds: [],
+            locked: false,
+            displayOptions: { icon: 'Group' },
+        });
+        expect(widget.binding).toBeUndefined();
+    });
+
+    it('allows overriding members and lock state while preserving group type safety', () => {
+        const widget = makeGroupWidget({
+            memberWidgetIds: ['widget-a', 'widget-b'],
+            locked: true,
+        });
+
+        expect(widget.type).toBe('group');
+        expect(widget.memberWidgetIds).toEqual(['widget-a', 'widget-b']);
+        expect(widget.locked).toBe(true);
     });
 });

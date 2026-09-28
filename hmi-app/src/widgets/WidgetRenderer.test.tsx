@@ -7,6 +7,7 @@ import type { ContractMachine, DataHistoryResponseV2 } from '../domain/dataContr
 import type {
     ActivityAnalyticsWidgetConfig,
     AlertHistoryWidgetConfig,
+    GroupWidgetConfig,
     InfoCardWidgetConfig,
     MachineActivityWidgetConfig,
     MetricCardWidgetConfig,
@@ -1023,5 +1024,52 @@ describe('WidgetRenderer', () => {
         expect(screen.queryByText('Widget no soportado')).not.toBeInTheDocument();
         expect(screen.queryByRole('button')).not.toBeInTheDocument();
         expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('routes group widgets to the container renderer with header chrome and an empty body', () => {
+        const groupWidget: GroupWidgetConfig = {
+            id: 'group-renderer-1',
+            type: 'group',
+            title: 'Área compresión',
+            position: { x: 0, y: 0 },
+            size: { w: 10, h: 10 },
+            memberWidgetIds: ['member-1', 'member-2'],
+            locked: true,
+            displayOptions: { icon: 'Group' },
+        };
+
+        const { container } = render(<WidgetRenderer widget={groupWidget} equipmentMap={equipmentMap} />);
+
+        expect(screen.getByText('Área compresión')).toBeInTheDocument();
+        expect(container.querySelector('.glass-panel')).toBeInTheDocument();
+        expect(screen.queryByText('Widget no soportado')).not.toBeInTheDocument();
+    });
+
+    it('wraps a navigable group widget in the shared click-to-navigate frame', async () => {
+        const user = userEvent.setup();
+        const onNavigateDashboard = vi.fn();
+        const groupWidget: GroupWidgetConfig = {
+            id: 'group-renderer-nav',
+            type: 'group',
+            title: 'Área compresión',
+            position: { x: 0, y: 0 },
+            size: { w: 10, h: 10 },
+            memberWidgetIds: [],
+            locked: false,
+            navigationTargetDashboardId: 'dashboard-compresion',
+        };
+
+        render(
+            <WidgetRenderer
+                widget={groupWidget}
+                equipmentMap={equipmentMap}
+                onNavigateDashboard={onNavigateDashboard}
+            />,
+        );
+
+        const wrapper = screen.getByRole('button', { name: 'Área compresión' });
+        await user.click(wrapper);
+
+        expect(onNavigateDashboard).toHaveBeenCalledWith('dashboard-compresion');
     });
 });

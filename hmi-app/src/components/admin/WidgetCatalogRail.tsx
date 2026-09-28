@@ -1,4 +1,4 @@
-import { Activity, BarChart2, Gauge, HeartPulse, Info, LineChart, Siren, TrendingUp, Type, Wifi } from 'lucide-react';
+import { Activity, BarChart2, Gauge, Group, HeartPulse, Info, LineChart, Siren, TrendingUp, Type, Wifi } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { WidgetType } from '../../domain/admin.types';
 import AdminIconToolbarButton from './AdminIconToolbarButton';
@@ -27,6 +27,7 @@ const ACTIONS: RailAction[] = [
     { type: 'alert-history', label: 'Histórico de Alertas', icon: Siren },
     { type: 'text-title', label: 'Título de Texto', icon: Type },
     { type: 'info-card', label: 'INFO-CARD', icon: Info },
+    { type: 'group', label: 'Contenedor', icon: Group },
 ];
 
 export default function WidgetCatalogRail({ onAddWidget }: WidgetCatalogRailProps) {

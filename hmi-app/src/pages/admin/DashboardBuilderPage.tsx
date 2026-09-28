@@ -1141,6 +1141,19 @@ export default function DashboardBuilderPage() {
                                         ],
                                     },
                                 }
+                            : type === 'group'
+                                ? {
+                                    id: newId,
+                                    type,
+                                    title: 'Contenedor',
+                                    position: { x: 0, y: 0 },
+                                    size: { w: defaultWidth, h: defaultHeight },
+                                    memberWidgetIds: [],
+                                    locked: false,
+                                    displayOptions: {
+                                        icon: defaultIcon,
+                                    },
+                                }
                             : {
                                     id: newId,
                                     type,

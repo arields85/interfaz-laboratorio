@@ -17,6 +17,7 @@ import AlertHistoryWidget from './renderers/AlertHistoryWidget';
 import ProdHistoryWidget from './renderers/ProduccionHistoricaWidget';
 import TextTitleWidget from './renderers/TextTitleWidget';
 import InfoCardWidget from './renderers/InfoCardWidget';
+import GroupWidget from './renderers/GroupWidget';
 import type { TrendChartV2RenderContext } from './renderers/trendChartV2RenderContext';
 import { hasNestedInteractiveNavigationForConfig } from '../utils/widgetCapabilities';
 import WidgetRuntimeState from '../components/ui/WidgetRuntimeState';
@@ -264,6 +265,10 @@ export default function WidgetRenderer({
 
         case 'info-card':
             renderedWidget = <InfoCardWidget widget={widget} className={className} presentationData={presentationEntry?.payload} />;
+            break;
+
+        case 'group':
+            renderedWidget = <GroupWidget widget={widget} className={className} />;
             break;
 
         // -----------------------------------------------------------------------

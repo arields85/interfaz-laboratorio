@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart, Info, Pencil } from 'lucide-react';
+import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart, Info, Pencil, Group } from 'lucide-react';
 import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape, InfoCardDisplayOptions, InfoCardField, TextAlign } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
@@ -1828,6 +1828,10 @@ export default function PropertyDock(props: PropertyDockProps) {
                                                 ? [{ value: 'Info', label: 'Info', icon: <Info size={12} /> }]
                                                 : []
                                             ),
+                                            ...(selectedWidget.type === 'group'
+                                                ? [{ value: 'Group', label: 'Contenedor', icon: <Group size={12} /> }]
+                                                : []
+                                            ),
                                             { value: 'Gauge', label: 'Medidor', icon: <Gauge size={12} /> },
                                             { value: 'Activity', label: 'Actividad', icon: <Activity size={12} /> },
                                             { value: 'Thermometer', label: 'Termómetro', icon: <Thermometer size={12} /> },
@@ -2121,7 +2125,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                         )}
 
                         {/* ─── DATOS — no aplica para alert-history ni prod-history (datos mock propios) ─── */}
-                        {selectedWidget.type !== 'alert-history' && selectedWidget.type !== 'prod-history' && selectedWidget.type !== 'text-title' && selectedWidget.type !== 'info-card' && (
+                        {selectedWidget.type !== 'alert-history' && selectedWidget.type !== 'prod-history' && selectedWidget.type !== 'text-title' && selectedWidget.type !== 'info-card' && selectedWidget.type !== 'group' && (
                             <DockSection icon={<Database size={11} />} title="Datos">
                                 {hasHierarchySupport && (
                                     <DockFieldRow label="Fuente">

@@ -34,6 +34,7 @@ const WIDGET_CAPABILITIES: Partial<Record<WidgetType, WidgetCapabilities>> = {
     'alert-history': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: true, defaultSize: { w: 8, h: 8 }, defaultIcon: 'Siren' },
     'text-title': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 5, h: 2 }, defaultIcon: null },
     'info-card': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 6, h: 5 }, defaultIcon: 'Info' },
+    'group': { catalogVariable: false, hierarchy: false, nestedInteractiveNavigation: false, defaultSize: { w: 10, h: 10 }, defaultIcon: 'Group' },
 };
 
 const WIDGET_PRESENTATION_CAPABILITIES: Record<WidgetType, PresentationCapability | undefined> = {
@@ -42,7 +43,7 @@ const WIDGET_PRESENTATION_CAPABILITIES: Record<WidgetType, PresentationCapabilit
     'prod-history': 'production-history', 'machine-activity': 'machine-activity', 'activity-analytics': 'activity-analytics',
     'prod-trend': 'prod-trend', 'alert-history': 'alert-history',
     'badge': undefined, 'sparkline': undefined, 'table': undefined, 'alert-list': undefined, 'text-summary': undefined,
-    'multi-metric': undefined, 'ai-summary': undefined, 'section-title': undefined,
+    'multi-metric': undefined, 'ai-summary': undefined, 'section-title': undefined, 'group': undefined,
 };
 
 export function getWidgetPresentationCapability(widgetType: string): PresentationCapability | undefined {
