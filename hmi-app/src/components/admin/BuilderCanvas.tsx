@@ -178,6 +178,47 @@ function resolvePointerGridCell(args: {
     ));
 }
 
+// TextTitle no tiene frame (sin .glass-panel); el resto sigue el radio de tema activo
+// (--frame-radius-rest, ver services/themeStyle.service.ts) en vez de un valor fijo.
+function getWidgetCornerRadius(type: WidgetConfig['type']): string {
+    return type === 'text-title' ? '0px' : 'var(--frame-radius-rest)';
+}
+
+/**
+ * P8/R3-003: one placement-ghost rect — the container's own ghost and each member's ghost are
+ * otherwise identical markup (an absolutely positioned box holding a `GridSelectionFrame` sized
+ * and rounded to its OWN widget type), so this is the single place that draws either.
+ */
+function PlacementGhostRect({
+    testId,
+    px,
+    widgetType,
+}: {
+    testId: string;
+    px: WidgetPixelBounds;
+    widgetType: WidgetConfig['type'];
+}) {
+    return (
+        <div
+            data-testid={testId}
+            className="absolute"
+            style={{
+                left: `${px.left}px`,
+                top: `${px.top}px`,
+                width: `${px.width}px`,
+                height: `${px.height}px`,
+            }}
+        >
+            <GridSelectionFrame
+                isSelected={false}
+                isHighlighted
+                radius={getWidgetCornerRadius(widgetType)}
+                inset={resolveWidgetSurfaceInset({ type: widgetType })}
+            />
+        </div>
+    );
+}
+
 function resolveCommittedLayout(args: {
     interaction: InteractionState;
     metrics: WidgetInteractionMetrics;
@@ -335,9 +376,6 @@ export default function BuilderCanvas({
     cols = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
 }: BuilderCanvasProps) {
-    // TextTitle no tiene frame (sin .glass-panel); el resto sigue el radio de tema activo
-    // (--frame-radius-rest, ver services/themeStyle.service.ts) en vez de un valor fijo.
-    const getWidgetCornerRadius = (type: WidgetConfig['type']) => (type === 'text-title' ? '0px' : 'var(--frame-radius-rest)');
     const widgetMap = new Map(widgets.map((widget) => [widget.id, widget]));
     // Sanitized member ids of a locked group, minus any header-promoted id (G4): a widget
     // promoted to the header never lives on the canvas, so it can never be dragged/resized as
@@ -1199,23 +1237,11 @@ export default function BuilderCanvas({
                                 aria-hidden="true"
                                 className="pointer-events-none absolute inset-0 z-30"
                             >
-                                <div
-                                    data-testid="builder-canvas-placement-ghost-source"
-                                    className="absolute"
-                                    style={{
-                                        left: `${containerPx.left}px`,
-                                        top: `${containerPx.top}px`,
-                                        width: `${containerPx.width}px`,
-                                        height: `${containerPx.height}px`,
-                                    }}
-                                >
-                                    <GridSelectionFrame
-                                        isSelected={false}
-                                        isHighlighted
-                                        radius={getWidgetCornerRadius(placementSource.type)}
-                                        inset={resolveWidgetSurfaceInset({ type: placementSource.type })}
-                                    />
-                                </div>
+                                <PlacementGhostRect
+                                    testId="builder-canvas-placement-ghost-source"
+                                    px={containerPx}
+                                    widgetType={placementSource.type}
+                                />
                                 {placementSource.memberGhosts.map((member) => {
                                     const memberPx = layoutToPixelBounds(
                                         {
@@ -1227,19 +1253,12 @@ export default function BuilderCanvas({
                                         metrics,
                                     );
                                     return (
-                                        <div
+                                        <PlacementGhostRect
                                             key={member.id}
-                                            data-testid={`builder-canvas-placement-ghost-member-${member.id}`}
-                                            className="absolute"
-                                            style={{
-                                                left: `${memberPx.left}px`,
-                                                top: `${memberPx.top}px`,
-                                                width: `${memberPx.width}px`,
-                                                height: `${memberPx.height}px`,
-                                            }}
-                                        >
-                                            <GridSelectionFrame isSelected={false} isHighlighted inset={resolveWidgetSurfaceInset({ type: member.type })} />
-                                        </div>
+                                            testId={`builder-canvas-placement-ghost-member-${member.id}`}
+                                            px={memberPx}
+                                            widgetType={member.type}
+                                        />
                                     );
                                 })}
                             </div>

@@ -2697,6 +2697,63 @@ describe('BuilderCanvas', () => {
             expect(onDuplicatePlacementCommit).toHaveBeenCalledWith({ x: 5, y: 4 });
         });
 
+        // R3-003 (P8 copy placement review): a member ghost must use ITS OWN widget type's
+        // corner radius, not the container's — otherwise a square widget (e.g. text-title) shows
+        // rounded corners on its ghost while the real widget stays square.
+        it('gives a member ghost its own widget type\'s corner radius, not the container\'s', async () => {
+            const textTitleMember: WidgetConfig = {
+                id: 'member-1',
+                type: 'text-title',
+                title: 'Sector A',
+                position: { x: 0, y: 0 },
+                size: { w: 2, h: 2 },
+                displayOptions: { fontSize: 48 },
+            };
+
+            await renderPlacementCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    textTitleMember,
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 6, h: 4 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                ],
+                placementSourceWidgetId: 'group-1',
+            });
+
+            const memberGhost = screen.getByTestId('builder-canvas-placement-ghost-member-member-1');
+            const memberFrame = within(memberGhost).getByTestId('grid-selection-frame');
+            // 'group' (the container's own type) is not text-title, so the container ghost keeps
+            // the rounded default — the text-title member's ghost must be square regardless.
+            // jsdom's CSSOM normalizes `calc(0px + 0px)` down to `calc(0px)` (same as the
+            // existing text-title assertion above for the plain, non-placement selection frame).
+            expect(memberFrame.style.borderRadius).toBe('calc(0px)');
+        });
+
+        // R3-003: a member hidden from the canvas (header-promoted, G4) must not get a ghost —
+        // the ghost list is built from `resolveVisibleGroupMemberIds`, same as the live drag/
+        // resize preview.
+        it('excludes a header-promoted (hidden) member from the placement ghost', async () => {
+            await renderPlacementCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1', 'member-2'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                    makeWidget({ id: 'member-2', title: 'Member 2' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 6, h: 4 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'member-2', x: 3, y: 1, w: 2, h: 2 }),
+                ],
+                headerWidgetIds: new Set(['member-2']),
+                placementSourceWidgetId: 'group-1',
+            });
+
+            expect(screen.getByTestId('builder-canvas-placement-ghost-member-member-1')).toBeInTheDocument();
+            expect(screen.queryByTestId('builder-canvas-placement-ghost-member-member-2')).toBeNull();
+        });
+
         // Review follow-up: a resize handle sits above the ghost's own pointer-events-none
         // overlay, so without a placement guard on it too, clicking it while placing started a
         // resize instead of dropping the copy.
