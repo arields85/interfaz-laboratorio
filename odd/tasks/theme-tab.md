@@ -94,7 +94,7 @@ masked to four corner squares whose size is the length variable; radius inherite
 - [x] **TH4b** — Review follow-ups on the Tema tab: dirty must clear when the selection returns
   to the saved theme; an unsaved preview must not leak when the tab unmounts; the mini-preview
   span must not reintroduce the transition collision.
-- [ ] **TH6** — Integration with the group widget (now on main): the builder selection frames
+- [x] **TH6** — Integration with the group widget (now on main): the builder selection frames
   (`GridSelectionFrame`, `HeaderSelectionFrame`) hardcode a 1.5rem radius, so with "Contorno"
   (radius 0) the selection ring stays rounded around square widgets; they must follow the live
   theme frame radius (rest/hover). Route: delegated writer.
@@ -196,9 +196,17 @@ live check).
   clean, `npm run lint` clean, `npm test` 2856 (2 contract failures fixed by `06e92da`).
   Found TH6 while checking the combination.
 
+- 2026-09-28: TH6 done (route: delegated writer) — `96bdd8a` fix(theme): selection frames derive
+  their ring from `--frame-radius-rest` with CSS `calc()`/`max()` (outer border-radius and SVG
+  rx/ry via style), keeping the concentric offsets; Clásico pixel-identical (24px / 25.5px);
+  tracks the rest radius because the ring is a sibling overlay (both presets have equal
+  rest/hover radius); `radiusToPx` removed; BuilderCanvas/HeaderWidgetCanvas pass
+  `var(--frame-radius-rest)`. RED 6 against the old literals; GREEN 115 focused; `npx tsc -b`
+  clean, `npm run lint` clean, `npm test` 2861/2861, `npx vite build` OK.
+
 ## Next step
 
-TH6 (writer), then merge to main (user wants to test the theme on main with the group widget);
+Slice review, then merge to main (user wants to test the theme on main with the group widget);
 previous: Live check (TH5) from the main checkout after the group widget merge: rebase `feat/theme-tab`
 onto the new `main`, then the single merge to `main`.
  live check after the group widget merge (the dashboards
