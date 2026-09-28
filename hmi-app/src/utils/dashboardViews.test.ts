@@ -161,6 +161,103 @@ describe('dashboardViews', () => {
         expect(normalizedGroup?.type === 'group' ? normalizedGroup.locked : undefined).toBe(false);
     });
 
+    it('normalizes a malformed non-array memberWidgetIds into an empty list instead of throwing', () => {
+        const malformedDashboard = makeDashboard({
+            id: 'dashboard-malformed-group',
+            widgets: [
+                makeGroupWidget({
+                    id: 'group-malformed',
+                    memberWidgetIds: 'not-an-array' as unknown as string[],
+                }),
+            ],
+            layout: [makeLayout({ widgetId: 'group-malformed', x: 0, y: 0, w: 8, h: 8 })],
+        });
+
+        expect(() => normalizeDashboardViews(malformedDashboard)).not.toThrow();
+
+        const normalized = normalizeDashboardViews(malformedDashboard);
+        const normalizedGroup = normalized.widgets.find((widget) => widget.type === 'group');
+
+        expect(normalizedGroup?.type === 'group' ? normalizedGroup.memberWidgetIds : undefined).toEqual([]);
+    });
+
+    it('drops a group\'s own id and other group ids from memberWidgetIds on normalize', () => {
+        const dashboard = makeDashboard({
+            id: 'dashboard-self-and-nested-group',
+            widgets: [
+                makeWidget({ id: 'widget-member' }),
+                makeGroupWidget({ id: 'group-inner' }),
+                makeGroupWidget({
+                    id: 'group-outer',
+                    memberWidgetIds: ['group-outer', 'group-inner', 'widget-member'],
+                }),
+            ],
+            layout: [
+                makeLayout({ widgetId: 'widget-member', x: 0, y: 0, w: 2, h: 2 }),
+                makeLayout({ widgetId: 'group-inner', x: 2, y: 0, w: 2, h: 2 }),
+                makeLayout({ widgetId: 'group-outer', x: 0, y: 0, w: 8, h: 8 }),
+            ],
+        });
+
+        const normalized = normalizeDashboardViews(dashboard);
+        const outerGroup = normalized.widgets.find((widget) => widget.id === 'group-outer');
+
+        expect(outerGroup?.type === 'group' ? outerGroup.memberWidgetIds : undefined).toEqual(['widget-member']);
+    });
+
+    it('sanitizes a malformed or self-referencing memberWidgetIds when remapping ids across a view clone', () => {
+        const cloned = cloneDashboardViewsWithRemappedIds([
+            {
+                id: 'view-a',
+                name: 'Production',
+                order: 0,
+                widgets: [
+                    makeWidget({ id: 'widget-member' }),
+                    makeGroupWidget({
+                        id: 'group-1',
+                        memberWidgetIds: 'not-an-array' as unknown as string[],
+                    }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'widget-member', x: 0, y: 0, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 8, h: 8 }),
+                ],
+            },
+        ], 'dup-002');
+
+        const clonedGroup = cloned.views[0]?.widgets.find((widget) => widget.type === 'group');
+
+        expect(clonedGroup?.type === 'group' ? clonedGroup.memberWidgetIds : undefined).toEqual([]);
+    });
+
+    it('drops self and other-group ids from memberWidgetIds when remapping ids across a view clone', () => {
+        const cloned = cloneDashboardViewsWithRemappedIds([
+            {
+                id: 'view-a',
+                name: 'Production',
+                order: 0,
+                widgets: [
+                    makeWidget({ id: 'widget-member' }),
+                    makeGroupWidget({ id: 'group-inner' }),
+                    makeGroupWidget({
+                        id: 'group-outer',
+                        memberWidgetIds: ['group-outer', 'group-inner', 'widget-member'],
+                    }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'widget-member', x: 0, y: 0, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'group-inner', x: 2, y: 0, w: 2, h: 2 }),
+                    makeLayout({ widgetId: 'group-outer', x: 0, y: 0, w: 8, h: 8 }),
+                ],
+            },
+        ], 'dup-003');
+
+        const clonedOuterGroup = cloned.views[0]?.widgets.find((widget) => widget.id === `group-outer-dup-003-view-a`);
+        const clonedMemberId = cloned.views[0]?.widgets.find((widget) => widget.id.startsWith('widget-member-'))?.id;
+
+        expect(clonedOuterGroup?.type === 'group' ? clonedOuterGroup.memberWidgetIds : undefined).toEqual([clonedMemberId]);
+    });
+
     it('compares normalized views when deriving dashboard visual status', () => {
         const dashboard = normalizeDashboardViews({
             ...makeDashboard({

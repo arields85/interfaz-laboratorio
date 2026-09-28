@@ -8,6 +8,7 @@ import type {
 } from '../domain/admin.types';
 import { resolveProdTrendConfiguredMode } from './prodTrendDataMode';
 import { resolveAnalyticsDataMode } from './analyticsDataMode';
+import { sanitizeGroupMemberIds } from './groupWidget';
 
 export const DEFAULT_DASHBOARD_VIEW_ID = 'view-default';
 export const DEFAULT_DASHBOARD_VIEW_NAME = 'Default view';
@@ -278,17 +279,23 @@ export function cloneDashboardViewsWithRemappedIds(views: DashboardView[], suffi
         // Segunda pasada: remapear memberWidgetIds de widgets 'group' con el
         // mapa ya completo (un miembro puede aparecer antes o después del
         // grupo en el array). Los ids de miembros que ya no existen en la
-        // vista se descartan.
+        // vista se descartan; un memberWidgetIds mal formado (no array) se
+        // trata como vacío en vez de romper el remap (R3-group-member-ids-shape).
         const remappedWidgets = clonedWidgets.map((clonedWidget) => {
-            if (clonedWidget.type !== 'group' || !clonedWidget.memberWidgetIds) {
+            if (clonedWidget.type !== 'group') {
                 return clonedWidget;
             }
 
+            const rawMemberIds = Array.isArray(clonedWidget.memberWidgetIds) ? clonedWidget.memberWidgetIds : [];
+            const remappedMemberIds = rawMemberIds
+                .map((memberId) => widgetIdMap.get(memberId))
+                .filter((remappedId): remappedId is string => remappedId !== undefined);
+
+            // Descarta auto-membresía y otros grupos (no hay anidamiento) ya en
+            // el dominio de ids remapeados (R3-group-self-membership).
             return {
                 ...clonedWidget,
-                memberWidgetIds: clonedWidget.memberWidgetIds
-                    .map((memberId) => widgetIdMap.get(memberId))
-                    .filter((remappedId): remappedId is string => remappedId !== undefined),
+                memberWidgetIds: sanitizeGroupMemberIds(remappedMemberIds, clonedWidget.id, clonedWidgets),
             };
         });
 
@@ -414,12 +421,12 @@ function normalizeDashboardView(view: DashboardView, fallbackOrder: number): Das
         id: view.id || (fallbackOrder === 0 ? DEFAULT_DASHBOARD_VIEW_ID : `view-${fallbackOrder + 1}`),
         name: view.name || (fallbackOrder === 0 ? DEFAULT_DASHBOARD_VIEW_NAME : `View ${fallbackOrder + 1}`),
         order: view.order ?? fallbackOrder,
-        widgets: (view.widgets ?? []).map(normalizeWidget),
+        widgets: (view.widgets ?? []).map((widget) => normalizeWidget(widget, view.widgets ?? [])),
         layout: clone(view.layout ?? []),
     };
 }
 
-function normalizeWidget(widget: WidgetConfig): WidgetConfig {
+function normalizeWidget(widget: WidgetConfig, siblingWidgets: WidgetConfig[]): WidgetConfig {
     const normalized = clone(widget);
 
     if (normalized.type === 'activity-analytics') {
@@ -445,7 +452,7 @@ function normalizeWidget(widget: WidgetConfig): WidgetConfig {
     if (normalized.type === 'group') {
         return {
             ...normalized,
-            memberWidgetIds: normalized.memberWidgetIds ?? [],
+            memberWidgetIds: sanitizeGroupMemberIds(normalized.memberWidgetIds, normalized.id, siblingWidgets),
             locked: normalized.locked ?? false,
         };
     }
