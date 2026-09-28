@@ -252,6 +252,15 @@ after the user's live check. Slice boundaries are recorded under Progress.
   groupWidget + BuilderCanvas 115/115.
   New user request queued as G9 (grid snap).
 
+- 2026-09-28: slice review G8 (base `d704e87`..`4ac3a21`, 1105 lines, medium, user granted):
+  lineage `review-bdbce8d82d426c7b` APPROVED, acknowledged, authority burned; boundary advances
+  to `4ac3a21`. Advisory -> folded into G9: R3-clamp-resize-translates-member (WARNING,
+  `groupWidget.ts:281-288` — clamping a member RESIZE translates it instead of limiting its
+  size), R3-editmode-exit-paths-untested (WARNING, `DashboardBuilderPage.tsx:277-286`),
+  R3-delete-count-includes-dangling-ids (SUGGESTION, `:1768-1777`), R3-member-resize-clamp-
+  uncovered (SUGGESTION, `BuilderCanvas.tsx:329-334`).
+
 ## Next step
 
-Slice review G8, then G9 (writer) while the user retests from point 4; then the single merge.
+G9 + the G8 review follow-ups (writer) while the user retests from point 4; then the single
+merge.
