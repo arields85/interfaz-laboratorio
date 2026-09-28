@@ -28,6 +28,19 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 - [x] **P1** — Contorno button preset = Clásico look (no border, hover fill) with the theme radius.
 - [x] **P2** — Frame/background toggle for header-capable widgets (panel + renderers + header).
 - [x] **P3** — Resize handle offset independent of the theme radius.
+- [ ] **P5** — Tags in the theme engine: `AdminTag` driven by theme tokens (style base glass/flat/
+  outline, radius, fill, border and color tint using each tag's own color); Clásico and Contorno
+  keep today's tag look exactly. Needed for the user's third style (below).
+- [ ] **P6** — The user's new style from the lab (2026-09-28) as a theme preset (name/placement
+  pending the user's answer):
+  - Widgets (glass): rest radius 3, fill 0 %, border 8 %, blur 3 px, accent hidden (origin 20 px
+    x 1.5 px white); hover radius 3, fill 4 %, border 20 %, blur 12 px, accent 8 px x 1 px white at
+    60 %.
+  - Buttons with text (outline): rest radius 3, fill 0 %, border 22 %, accent hidden (8 x 1 white);
+    hover radius 3, fill 3 %, border 50 %, accent hidden (8 x 1 white).
+  - Icon-only buttons: rest radius 6, fill 0 %, border 0 %, accent hidden (origin 16 px x 1 px
+    white); hover radius 3, fill 5 %, border 0 %, accent 5 px x 1 px white at 60 %.
+  - Tags (flat): radius 3, fill 0 %, border 0 %, color tint 14 %.
 - [ ] **P4** — Docs (DESIGN_SYSTEM themes section, WIDGET_AUTHORING/ADMIN_CONVENTIONS as needed) and
   the user's live check.
 
