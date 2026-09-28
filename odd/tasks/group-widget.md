@@ -36,6 +36,18 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   grouped, new ids); copy while unlocked duplicates only the empty container; deleting the
   container deletes only the container (members stay in place, released); deleting a member
   removes it from the group; no nesting (a container is never a member of another group).
+- **D6 (user, 2026-09-28, live check 2) — locked group acts as ONE widget; pencil edit mode;
+  delete confirmation.** Supersedes the "members stay selectable" part of D4 and the container
+  delete rule of D5:
+  - Locked: a click anywhere in the group (container or any member) selects the CONTAINER; a drag
+    from anywhere in the group moves the whole group.
+  - New pencil action "Editar contenido" next to copy/delete/lock, shown only when locked; it
+    toggles edit mode for that group: members become selectable and editable (property panel)
+    and can be moved/resized but never leave the container bounds. Exit edit mode with the pencil
+    again, a click outside the group, or Escape.
+  - Delete while locked: confirmation dialog stating that the container AND its N widgets will be
+    deleted; confirm deletes all of them in one history step. Delete while unlocked: deletes only
+    the container, no dialog.
 - **Undo:** every group operation is exactly one history step (one `set` on `useHistoryState`;
   see `ADMIN_CONVENTIONS.md` section 2.0).
 
@@ -89,6 +101,8 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   the container without header text (no 'Contenedor' fallback in `GroupWidget.tsx:81`);
   (d) integration tests with the REAL `BuilderCanvas` (the page tests mock it, which hid all of
   this): add container, lock, drag -> members move, render order.
+- [ ] **G8** — D6 (locked group = one widget, pencil edit mode, delete confirmation) + bug from
+  live check 2: copying a locked group duplicated the inner widgets several times.
 - [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
@@ -216,6 +230,9 @@ after the user's live check. Slice boundaries are recorded under Progress.
   lineage `review-856f7947e14bf16e` APPROVED with no findings, acknowledged, authority burned;
   boundary advances to `d704e87`.
 
+- 2026-09-28: live check 2: points 2 (lock) and 3 (move/resize) OK. Point 4 FAILED: copying a
+  locked group duplicates the inner widgets several times. New user decisions D6.
+
 ## Next step
 
-User's live check again (from point 2), then the single merge to `main`.
+G8 (writer), then the user's live check from point 4, then the single merge to `main`.
