@@ -284,7 +284,12 @@ after the user's live check. Slice boundaries are recorded under Progress.
   icon (G10). RED-first per fix. Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test`
   2779/2779.
 
+- 2026-09-28: slice review G9/G10 (base `4ac3a21`..`e89e44d`, 697 lines, medium, user granted):
+  lineage `review-ed0bfe613ec71e63` APPROVED, acknowledged, authority burned; boundary advances
+  to `e89e44d`. Advisory SUGGESTION: R3-resize-clamp-corner-only-direction-mapping
+  (`groupWidget.ts:321-322`, the resize clamp only maps corner handles) — folded into G11/G12.
+
 ## Next step
 
-Slice review (G9/G10), then G11 + G12 (writer), then the user's live check, then the single
+G11 + G12 (writer), then the user's live check, then the single
 merge.
