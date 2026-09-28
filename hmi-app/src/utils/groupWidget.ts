@@ -312,6 +312,15 @@ export function clampRectInsideContainer(rect: LayoutRect, container: LayoutRect
  * inside), this function never translates the anchor corner — it only shrinks the rect, so a
  * resize dragged past the container edge stops there instead of the whole member jumping to a
  * different position.
+ *
+ * G11 review follow-up (R3-resize-clamp-corner-only-direction-mapping): `ResizeDirection` is a
+ * closed union of the four CORNER handles only (`'nw' | 'ne' | 'sw' | 'se'`, `utils/widgetInteraction.ts`)
+ * — BuilderCanvas renders exactly those four handles and no edge-only (n/s/e/w) handle exists
+ * anywhere in the canvas. The two booleans below are an exhaustive 2x2 mapping over that same
+ * closed union (`fixesLeftEdge`/`fixesTopEdge`, one per axis), so every possible `ResizeDirection`
+ * is already covered; `clampResizeRectInsideContainer (G9 review fix...)` below asserts this for
+ * all four values. If an edge-only handle is ever added to the canvas, `ResizeDirection` must grow
+ * a new member first, which would make this mapping incomplete and worth revisiting then.
  */
 export function clampResizeRectInsideContainer(
     rect: LayoutRect,

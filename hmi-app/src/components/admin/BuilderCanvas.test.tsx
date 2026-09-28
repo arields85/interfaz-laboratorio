@@ -10,9 +10,10 @@ import DashboardViewer from '../viewer/DashboardViewer';
 import { makeDashboard, makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import { useUIStore } from '../../store/ui.store';
 import { isGroupWidget, type WidgetConfig, type WidgetLayout } from '../../domain/admin.types';
-import { collectWidgetIdsInOtherLockedGroups, computeGroupMembers, duplicateLockedGroup } from '../../utils/groupWidget';
+import { collectWidgetIdsInOtherLockedGroups, computeGroupMembers, duplicateLockedGroup, removeMemberFromGroups } from '../../utils/groupWidget';
 import { useHistoryState } from '../../hooks/useHistoryState';
 import { generateWidgetId } from '../../utils/idGenerator';
+import { createDefaultStatusDisplayOptions } from '../../utils/statusWidget';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -1727,6 +1728,202 @@ describe('BuilderCanvas', () => {
             });
             // The container and the other member did NOT ride along this time.
             expect(screen.getByTestId('builder-canvas-item-group-1').style.gridColumnStart).toBe('4');
+            expect(screen.getByTestId('builder-canvas-item-member-2').style.gridColumnStart).toBe('9');
+        });
+    });
+
+    // G11: promoting one member of a locked group to the header must release ONLY that member —
+    // the rest must stay members and still ride along on a container drag. This harness wires the
+    // REAL header-promotion + edit-mode + lock logic (`removeMemberFromGroups`,
+    // `computeGroupMembers`, `collectWidgetIdsInOtherLockedGroups`) — the same helpers
+    // DashboardBuilderPage uses in production — against the real BuilderCanvas, reproducing the
+    // live-check-3 bug where the group lost ALL its members after one promotion.
+    describe('real group workflow: promote a member to the header (G11)', () => {
+        interface HeaderPromotionDraft {
+            widgets: WidgetConfig[];
+            layout: WidgetLayout[];
+            headerWidgetSlots: { widgetId: string; column?: number }[];
+        }
+
+        function HeaderPromotionWorkflowHarness({
+            initialWidgets,
+            initialLayout,
+            cols,
+            rows,
+        }: {
+            initialWidgets: WidgetConfig[];
+            initialLayout: WidgetLayout[];
+            cols: number;
+            rows: number;
+        }) {
+            const [draft, setDraft] = useState<HeaderPromotionDraft>({
+                widgets: initialWidgets,
+                layout: initialLayout,
+                headerWidgetSlots: [],
+            });
+            const [editingGroupId, setEditingGroupId] = useState<string | undefined>(undefined);
+
+            const headerWidgetIds = new Set(draft.headerWidgetSlots.map((slot) => slot.widgetId));
+
+            const handleToggleGroupLock = (widgetId: string) => {
+                setDraft((prev) => {
+                    const widget = prev.widgets.find((item) => item.id === widgetId);
+                    if (!widget || !isGroupWidget(widget)) {
+                        return prev;
+                    }
+
+                    if (widget.locked) {
+                        return {
+                            ...prev,
+                            widgets: prev.widgets.map((item) => (
+                                item.id === widgetId ? { ...item, locked: false, memberWidgetIds: [] } : item
+                            )),
+                        };
+                    }
+
+                    const containerLayout = prev.layout.find((item) => item.widgetId === widgetId);
+                    if (!containerLayout) {
+                        return prev;
+                    }
+
+                    const headerWidgetIdSet = new Set(prev.headerWidgetSlots.map((slot) => slot.widgetId));
+                    const otherLockedGroupMemberIds = collectWidgetIdsInOtherLockedGroups(prev.widgets, widgetId);
+                    const excludedWidgetIds = new Set([...headerWidgetIdSet, ...otherLockedGroupMemberIds]);
+                    const memberWidgetIds = computeGroupMembers(widgetId, containerLayout, prev.widgets, prev.layout, excludedWidgetIds);
+
+                    return {
+                        ...prev,
+                        widgets: prev.widgets.map((item) => (
+                            item.id === widgetId ? { ...item, locked: true, memberWidgetIds } : item
+                        )),
+                    };
+                });
+            };
+
+            const handleLayoutCommit = (updated: WidgetLayout) => {
+                setDraft((prev) => ({
+                    ...prev,
+                    layout: prev.layout.map((item) => (item.widgetId === updated.widgetId ? updated : item)),
+                }));
+            };
+
+            const handleGroupLayoutCommit = (updates: WidgetLayout[]) => {
+                setDraft((prev) => ({
+                    ...prev,
+                    layout: prev.layout.map((item) => updates.find((update) => update.widgetId === item.widgetId) ?? item),
+                }));
+            };
+
+            // Mirrors `assignWidgetToHeaderSlot` in DashboardBuilderPage.tsx: releases the widget
+            // from any locked group that still lists it, in the SAME update as adding it to the
+            // header slot — one state transition, matching production's one history step.
+            const handlePromoteToHeader = (widgetId: string) => {
+                setDraft((prev) => ({
+                    ...prev,
+                    widgets: removeMemberFromGroups(prev.widgets, widgetId),
+                    headerWidgetSlots: [...prev.headerWidgetSlots, { widgetId, column: prev.headerWidgetSlots.length }],
+                }));
+            };
+
+            return (
+                <div style={{ width: '1200px', height: '900px' }}>
+                    <BuilderCanvas
+                        widgets={draft.widgets}
+                        layout={draft.layout}
+                        equipmentMap={new Map()}
+                        cols={cols}
+                        rows={rows}
+                        onLayoutCommit={handleLayoutCommit}
+                        onToggleGroupLock={handleToggleGroupLock}
+                        onGroupLayoutCommit={handleGroupLayoutCommit}
+                        headerWidgetIds={headerWidgetIds}
+                        headerOccupiedSlotCount={headerWidgetIds.size}
+                        onPromoteToHeader={handlePromoteToHeader}
+                        editingGroupId={editingGroupId}
+                        onToggleGroupEditMode={(id) => setEditingGroupId((current) => (current === id ? undefined : id))}
+                        onExitGroupEditMode={() => setEditingGroupId(undefined)}
+                    />
+                </div>
+            );
+        }
+
+        it('keeps the other members in the group after one member is promoted to the header', async () => {
+            const user = userEvent.setup();
+            const widgets: WidgetConfig[] = [
+                makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
+                {
+                    id: 'member-1',
+                    type: 'status',
+                    title: 'Member 1',
+                    position: { x: 1, y: 1 },
+                    size: { w: 2, h: 2 },
+                    binding: { mode: 'simulated_value', simulatedValue: 'running' },
+                    displayOptions: createDefaultStatusDisplayOptions(),
+                },
+                makeWidget({ id: 'member-2', title: 'Member 2' }),
+            ];
+            const layout: WidgetLayout[] = [
+                makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                makeLayout({ widgetId: 'member-2', x: 5, y: 5, w: 2, h: 2 }),
+            ];
+
+            const view = render(
+                <StrictMode>
+                    <HeaderPromotionWorkflowHarness initialWidgets={widgets} initialLayout={layout} cols={40} rows={24} />
+                </StrictMode>,
+            );
+
+            const builderRoot = view.container.querySelector('[data-testid="builder-canvas-root"]');
+            if (!builderRoot) {
+                throw new Error('Builder root was not rendered.');
+            }
+            await syncCanvasMetrics(builderRoot, 1200, 900);
+
+            // Lock the group: both member-1 and member-2 become members.
+            await user.click(screen.getByRole('button', { name: 'Agrupar widgets' }));
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: 'Desagrupar widgets' })).toBeInTheDocument();
+            });
+
+            // Enter edit mode and promote member-1 to the header.
+            await user.click(screen.getByRole('button', { name: 'Editar contenido' }));
+            await waitFor(() => {
+                expect(
+                    within(screen.getByTestId('builder-canvas-item-member-1')).getByRole('button', { name: 'Subir al header' }),
+                ).toBeInTheDocument();
+            });
+            await user.click(
+                within(screen.getByTestId('builder-canvas-item-member-1')).getByRole('button', { name: 'Subir al header' }),
+            );
+
+            // member-1 no longer renders on the canvas — it now lives in the header.
+            await waitFor(() => {
+                expect(screen.queryByTestId('builder-canvas-item-member-1')).not.toBeInTheDocument();
+            });
+
+            // Exit edit mode (pencil again).
+            await user.click(screen.getByRole('button', { name: 'Editar contenido' }));
+
+            // Unlock, then lock again — re-capturing membership from scratch.
+            await user.click(screen.getByRole('button', { name: 'Desagrupar widgets' }));
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: 'Agrupar widgets' })).toBeInTheDocument();
+            });
+            await user.click(screen.getByRole('button', { name: 'Agrupar widgets' }));
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: 'Desagrupar widgets' })).toBeInTheDocument();
+            });
+
+            // Drag the container: member-2 (still a member) must move with it.
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+            await pressPointer(user, containerItem, { clientX: 100, clientY: 100 });
+            await movePointer(user, document.body, { clientX: 190, clientY: 100 });
+            await releasePointer(user, document.body, { clientX: 190, clientY: 100 });
+
+            await waitFor(() => {
+                expect(screen.getByTestId('builder-canvas-item-group-1').style.gridColumnStart).toBe('4');
+            });
             expect(screen.getByTestId('builder-canvas-item-member-2').style.gridColumnStart).toBe('9');
         });
     });

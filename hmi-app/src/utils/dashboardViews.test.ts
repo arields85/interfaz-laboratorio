@@ -17,6 +17,7 @@ import {
     updateDashboardView,
     updateDashboardViewPresentation,
 } from './dashboardViews';
+import { collectWidgetIdsInOtherLockedGroups, computeGroupMembers, removeMemberFromGroups } from './groupWidget';
 
 describe('dashboardViews', () => {
     it('normalizes a legacy dashboard into one default internal view without losing widgets or layout', () => {
@@ -528,6 +529,74 @@ describe('dashboardViews', () => {
         expect(getActiveDashboardView(updated, 'view-technical')).toEqual(expect.objectContaining({
             widgets: expect.arrayContaining([expect.objectContaining({ id: 'widget-maintenance', title: 'Maintenance widget' })]),
         }));
+    });
+
+    // G11: promoting one member of a locked group to the header releases ONLY that member — the
+    // other member(s) must survive both the promotion itself AND a later unlock/relock through
+    // the FULL production view-update pipeline (`updateDashboardView`, which re-normalizes on
+    // every step), not just the bare pure helpers in isolation.
+    it('keeps the other locked member through promote-to-header, then unlock, then relock (G11)', () => {
+        const dashboard = normalizeDashboardViews(makeDashboard({
+            views: [
+                createDefaultDashboardView({
+                    id: 'view-1',
+                    name: 'View 1',
+                    widgets: [
+                        makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1', 'member-2'] }),
+                        makeWidget({ id: 'member-1', title: 'Member 1' }),
+                        makeWidget({ id: 'member-2', title: 'Member 2' }),
+                    ],
+                    layout: [
+                        makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                        makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                        makeLayout({ widgetId: 'member-2', x: 5, y: 5, w: 2, h: 2 }),
+                    ],
+                }),
+            ],
+            activeViewId: 'view-1',
+        }));
+
+        // Step A: promote member-1 (mirrors assignWidgetToHeaderSlot exactly).
+        const afterPromote = updateDashboardView(dashboard, 'view-1', (view) => ({
+            ...view,
+            widgets: removeMemberFromGroups(view.widgets, 'member-1'),
+        }));
+        const dashboardAfterPromote = {
+            ...afterPromote,
+            headerConfig: {
+                ...(afterPromote.headerConfig ?? {}),
+                widgetSlots: [{ widgetId: 'member-1', column: 0 }],
+            },
+        };
+        expect(
+            getActiveDashboardView(dashboardAfterPromote, 'view-1').widgets.find((w) => w.id === 'group-1'),
+        ).toEqual(expect.objectContaining({ memberWidgetIds: ['member-2'] }));
+
+        // Step B: unlock (mirrors handleToggleGroupLock's unlock branch).
+        const afterUnlock = updateDashboardView(dashboardAfterPromote, 'view-1', (view) => ({
+            ...view,
+            widgets: view.widgets.map((item) => (
+                item.id === 'group-1' ? { ...item, locked: false, memberWidgetIds: [] } : item
+            )),
+        }));
+
+        // Step C: lock again (mirrors handleToggleGroupLock's lock branch exactly).
+        const afterRelock = updateDashboardView(afterUnlock, 'view-1', (view) => {
+            const containerLayout = view.layout.find((item) => item.widgetId === 'group-1')!;
+            const headerWidgetIdSet = new Set((afterUnlock.headerConfig?.widgetSlots ?? []).map((slot) => slot.widgetId));
+            const otherLockedGroupMemberIds = collectWidgetIdsInOtherLockedGroups(view.widgets, 'group-1');
+            const excludedWidgetIds = new Set([...headerWidgetIdSet, ...otherLockedGroupMemberIds]);
+            const memberWidgetIds = computeGroupMembers('group-1', containerLayout, view.widgets, view.layout, excludedWidgetIds);
+            return {
+                ...view,
+                widgets: view.widgets.map((item) => (
+                    item.id === 'group-1' ? { ...item, locked: true, memberWidgetIds } : item
+                )),
+            };
+        });
+
+        const group = getActiveDashboardView(afterRelock, 'view-1').widgets.find((w) => w.id === 'group-1');
+        expect(group).toEqual(expect.objectContaining({ memberWidgetIds: ['member-2'] }));
     });
 
     it('maps widgets across every view without leaking one view into another', () => {
