@@ -80,11 +80,11 @@ masked to four corner squares whose size is the length variable; radius inherite
 
 ## Tasks
 
-- [ ] **TH1** — Frame theme engine: widget frame visuals (radius, fill, border, blur, corner
+- [x] **TH1** — Frame theme engine: widget frame visuals (radius, fill, border, blur, corner
   accent) driven by rest/hover theme tokens with registered `@property` transitions, applied to
   `.glass-panel` and `.widget-state-*` without breaking semantic warning/critical colors;
   defaults = today's look; Kpi skeleton radius on the token. Route: delegated writer.
-- [ ] **TH2** — Theme model, built-in presets ("Clásico" = current, "Contorno" = user's),
+- [x] **TH2** — Theme model, built-in presets ("Clásico" = current, "Contorno" = user's),
   persistence and boot re-apply (mirrors `applyThemeOverrides`). Route: same writer as TH1.
 - [ ] **TH3** — Button theme engine on all three groups (Q2): `AdminActionButton`,
   `AdminIconToolbarButton`, `.admin-accent-ghost`, `HmiButton`, `WidgetHeaderTemporalControls`;
@@ -110,6 +110,21 @@ live check).
 - 2026-09-28: Q1 answered (selector only). Style lab source saved to `tools/style-lab/` with a
   README (user asked to keep it and keep improving it).
 
+- 2026-09-28: TH1+TH2 done (route: delegated writer) — `877a0c3` feat(theme): drive widget
+  frames from rest and hover theme tokens (registered `--frame-radius/-fill/-border/-blur/
+  -accent-length/-thickness/-color/-opacity` on `.glass-panel` and `.widget-state-*`, rest/hover
+  pairs `--frame-*-rest/-hover`, base token `--frame-base-background`, accent `::after` drawn with
+  8 L-segment gradients on the 4 corners, `overflow: clip` + `overflow-clip-margin: 2px` instead
+  of `overflow: hidden`, semantic danger/warning untouched, defaults in `:root` = today's look,
+  Kpi skeleton on the radius token, reduced-motion respected); `04f6e6f` feat(theme): add theme
+  presets with persistence and boot apply (`domain/themeStyle.types.ts`, presets `classic` /
+  `outline`, `services/themeStyle.service.ts` maps to `--frame-*`/`--button-*`, localStorage
+  `hmi-theme-style`, `applyThemeStyleOverrides()` at boot in `main.tsx`).
+  RED/GREEN: service + CSS-contract tests failing first, then 23/23. Writer: `npx tsc -b` clean,
+  `npm run lint` clean, `npm test` 2637/2637, `npx vite build` OK (CSS contains the tokens).
+  Parent spot check: 23/23. Note: Clásico button values are placeholders (radius 6, fill 0,
+  border 0) — TH3 must derive them from today's real button styles.
+
 ## Next step
 
-Delegate TH1+TH2 (independent of Q1/Q2).
+TH3 (writer) — button theme engine on the three groups.
