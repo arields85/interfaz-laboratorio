@@ -13,6 +13,7 @@ import {
     isHeaderCompatibleWidget,
 } from '../../utils/headerWidgets';
 import AdminEmptyState from './AdminEmptyState';
+import { CLASSIC_THEME_STYLE } from '../../services/themeStyle.service';
 import { useCanvasReference } from '../../utils/useCanvasReference';
 import { clampWidgetBounds, DEFAULT_COLS, DEFAULT_ROWS, getGridTemplateStyle } from '../../utils/gridConfig';
 import { useUIStore } from '../../store/ui.store';
@@ -185,6 +186,21 @@ const RESIZE_HANDLE_CONFIGS: Record<ResizeDirection, {
 };
 
 /**
+ * Radius Clasico uses, read from its single source of truth (`CLASSIC_THEME_STYLE.frame.rest
+ * .radiusPx` in themeStyle.service.ts) instead of a copied literal, so this stays correct if that
+ * preset's radius ever changes — the reference the P3 radius compensation below keeps
+ * pixel-identical: today's Clasico look must not change.
+ */
+const CLASSIC_FRAME_RADIUS = `${CLASSIC_THEME_STYLE.frame.rest.radiusPx}px`;
+
+/**
+ * A rounded corner of radius R visually recedes from the box's exact geometric corner by
+ * R * (1 - cos 45deg) along the diagonal a resize handle sits on. `1 - Math.SQRT1_2` derives that
+ * ratio exactly instead of a manually rounded literal.
+ */
+const CORNER_RECESSION_RATIO = (1 - Math.SQRT1_2).toFixed(4);
+
+/**
  * G13(b) (live check 4): a resize handle must sit OUTSIDE the widget's own visible frame, at the
  * same visual offset for every widget type — the gap between the outer grid-cell box (where the
  * handle is positioned, `top/left/bottom/right: 0`) and the frame drawn inset from it by
@@ -194,10 +210,23 @@ const RESIZE_HANDLE_CONFIGS: Record<ResizeDirection, {
  * edge lands it ON the frame instead of outside it. Pushing the handle out by
  * `--widget-spacing - inset` restores the same visual relationship for every widget: 0 for a
  * normal widget (unchanged), and a full `--widget-spacing` PAST the grid line for a group.
+ *
+ * P3 (2026-09-28): that inset-only offset keeps the same RAW pixel gap to the frame's bounding
+ * box in any theme, but it ignores the frame's own corner radius. Clasico's default 1.5rem radius
+ * visually recedes the frame's actual rounded corner further inward from that bounding box — that
+ * recession is what already makes the handle look clear of the corner in Clasico today. A theme
+ * with a smaller/0 radius (Contorno) has no such recession, so the same raw gap left the handle
+ * glued to the sharp corner. Adding back exactly the recession Clasico's own radius contributes —
+ * `max(0px, ...)` guards against a future theme with a LARGER radius pulling the handle inward —
+ * keeps the same apparent gap in every theme while leaving Clasico's own computed offset (radius
+ * = Clasico's own, term = 0px) unchanged. The whole expression stays a live `calc()` referencing
+ * `var(--frame-radius-rest)` (not a value computed once in JS) so it recomputes automatically on
+ * a theme switch, the same technique `GridSelectionFrame` already uses.
  */
 function resolveResizeHandlePosition(direction: ResizeDirection, widgetInset: string): React.CSSProperties {
     const { verticalEdge, horizontalEdge } = RESIZE_HANDLE_CONFIGS[direction];
-    const offset = `calc(${widgetInset} - var(--widget-spacing))`;
+    const radiusCompensation = `max(0px, calc((${CLASSIC_FRAME_RADIUS} - var(--frame-radius-rest)) * ${CORNER_RECESSION_RATIO}))`;
+    const offset = `calc(${widgetInset} - var(--widget-spacing) + ${radiusCompensation})`;
 
     return { [verticalEdge]: offset, [horizontalEdge]: offset };
 }

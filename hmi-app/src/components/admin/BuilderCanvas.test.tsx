@@ -947,6 +947,13 @@ describe('BuilderCanvas', () => {
         expect(onLayoutCommit).toHaveBeenCalledWith({ widgetId: 'widget-1', x: 2, y: 1, w: 5, h: 3 });
     });
 
+    // P3 (2026-09-28): the radius-compensation term (see the describe block further below) is
+    // additive on top of the G13b inset term, so both expected strings below share the same
+    // trailing `+ max(0px, ...)` clause.
+    const RESIZE_HANDLE_RADIUS_COMPENSATION = 'max(0px, calc((24px - var(--frame-radius-rest)) * 0.2929))';
+    const RESIZE_HANDLE_NORMAL_OFFSET = `calc(var(--widget-spacing) - var(--widget-spacing) + ${RESIZE_HANDLE_RADIUS_COMPENSATION})`;
+    const RESIZE_HANDLE_GROUP_OFFSET = `calc(0px - var(--widget-spacing) + ${RESIZE_HANDLE_RADIUS_COMPENSATION})`;
+
     // G13(b) (live check 4): a group container's frame has no inset since G9 (it reaches the
     // grid line), but its resize handles kept the old fixed `0` offset, landing them ON the
     // frame instead of outside it like every other widget's handles. The handle must sit at the
@@ -962,8 +969,8 @@ describe('BuilderCanvas', () => {
             });
 
             const normalHandle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
-            expect(normalHandle.style.bottom).toBe('calc(var(--widget-spacing) - var(--widget-spacing))');
-            expect(normalHandle.style.right).toBe('calc(var(--widget-spacing) - var(--widget-spacing))');
+            expect(normalHandle.style.bottom).toBe(RESIZE_HANDLE_NORMAL_OFFSET);
+            expect(normalHandle.style.right).toBe(RESIZE_HANDLE_NORMAL_OFFSET);
 
             await renderInteractiveCanvas({
                 selectedWidgetId: 'group-1',
@@ -972,8 +979,8 @@ describe('BuilderCanvas', () => {
             });
 
             const groupHandle = screen.getByTestId('builder-canvas-resize-handle-se-group-1');
-            expect(groupHandle.style.bottom).toBe('calc(0px - var(--widget-spacing))');
-            expect(groupHandle.style.right).toBe('calc(0px - var(--widget-spacing))');
+            expect(groupHandle.style.bottom).toBe(RESIZE_HANDLE_GROUP_OFFSET);
+            expect(groupHandle.style.right).toBe(RESIZE_HANDLE_GROUP_OFFSET);
         });
 
         it('offsets every corner handle of a locked group container the same way as its unlocked handles', async () => {
@@ -983,12 +990,34 @@ describe('BuilderCanvas', () => {
                 layout: [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })],
             });
 
-            expect(screen.getByTestId('builder-canvas-resize-handle-nw-group-1').style.top).toBe('calc(0px - var(--widget-spacing))');
-            expect(screen.getByTestId('builder-canvas-resize-handle-nw-group-1').style.left).toBe('calc(0px - var(--widget-spacing))');
-            expect(screen.getByTestId('builder-canvas-resize-handle-ne-group-1').style.top).toBe('calc(0px - var(--widget-spacing))');
-            expect(screen.getByTestId('builder-canvas-resize-handle-ne-group-1').style.right).toBe('calc(0px - var(--widget-spacing))');
-            expect(screen.getByTestId('builder-canvas-resize-handle-sw-group-1').style.bottom).toBe('calc(0px - var(--widget-spacing))');
-            expect(screen.getByTestId('builder-canvas-resize-handle-sw-group-1').style.left).toBe('calc(0px - var(--widget-spacing))');
+            expect(screen.getByTestId('builder-canvas-resize-handle-nw-group-1').style.top).toBe(RESIZE_HANDLE_GROUP_OFFSET);
+            expect(screen.getByTestId('builder-canvas-resize-handle-nw-group-1').style.left).toBe(RESIZE_HANDLE_GROUP_OFFSET);
+            expect(screen.getByTestId('builder-canvas-resize-handle-ne-group-1').style.top).toBe(RESIZE_HANDLE_GROUP_OFFSET);
+            expect(screen.getByTestId('builder-canvas-resize-handle-ne-group-1').style.right).toBe(RESIZE_HANDLE_GROUP_OFFSET);
+            expect(screen.getByTestId('builder-canvas-resize-handle-sw-group-1').style.bottom).toBe(RESIZE_HANDLE_GROUP_OFFSET);
+            expect(screen.getByTestId('builder-canvas-resize-handle-sw-group-1').style.left).toBe(RESIZE_HANDLE_GROUP_OFFSET);
+        });
+    });
+
+    // P3 (2026-09-28): the offset above kept the SAME raw pixel gap (widget-spacing) between a
+    // handle and its frame's bounding box in every theme, but Clasico's default 1.5rem radius
+    // visually recedes the frame's actual rounded corner further inward from that bounding box --
+    // that recession is what made the handle look clear of the corner in Clasico. A theme with a
+    // smaller/0 radius (Contorno) has no such recession, so the SAME raw gap left the handle
+    // sitting glued to the sharp corner. The offset must add back exactly the recession Clasico's
+    // own 1.5rem radius contributes, so every theme keeps the same apparent gap Clasico has today
+    // (and Clasico itself renders byte-for-byte the same computed pixel value as before).
+    describe('resize handle offset accounts for the frame radius (P3)', () => {
+        it('keeps the formula\'s live var(--frame-radius-rest) term so it recomputes with the active theme, anchored to Clasico\'s own preset radius (CLASSIC_THEME_STYLE.frame.rest.radiusPx)', () => {
+            expect(RESIZE_HANDLE_NORMAL_OFFSET).toContain('var(--frame-radius-rest)');
+            expect(RESIZE_HANDLE_NORMAL_OFFSET).toContain('24px');
+            expect(RESIZE_HANDLE_GROUP_OFFSET).toContain('var(--frame-radius-rest)');
+            expect(RESIZE_HANDLE_GROUP_OFFSET).toContain('24px');
+        });
+
+        it('never produces a negative radius-compensation term, clamped with max(0px, ...)', () => {
+            expect(RESIZE_HANDLE_NORMAL_OFFSET).toContain('max(0px,');
+            expect(RESIZE_HANDLE_GROUP_OFFSET).toContain('max(0px,');
         });
     });
 
