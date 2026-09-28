@@ -89,7 +89,7 @@ masked to four corner squares whose size is the length variable; radius inherite
 - [x] **TH3** — Button theme engine on all three groups (Q2): `AdminActionButton`,
   `AdminIconToolbarButton`, `.admin-accent-ghost`, `HmiButton`, `WidgetHeaderTemporalControls`;
   defaults = today's look; primary/accent semantics preserved.
-- [ ] **TH4** — "Tema" tab UI in `GlobalSettingsDialog`: preset selector only (Q1), with a preview
+- [x] **TH4** — "Tema" tab UI in `GlobalSettingsDialog`: preset selector only (Q1), with a preview
   of each preset if an existing primitive fits; dirty/save/revert like the other tabs.
 - [ ] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
 
@@ -153,6 +153,20 @@ live check).
   later `transition` declaration on a button class/utility can override the theme token
   transitions); folded into TH4.
 
+- 2026-09-28: TH4a + TH4 done (route: delegated writer) — `e9e8b7c` fix(theme): keep color and
+  token transitions together on buttons (single merged `transition` on `.theme-button`, variant
+  transitions and conflicting `transition-colors` utilities removed); `6351be2` feat(theme): add
+  the Tema tab to pick a visual theme (`ThemeSettingsTab`, SwatchBook icon next to Diseño,
+  radiogroup of Clásico/Contorno cards with scoped mini-preview, live app preview via
+  `previewThemeStyleOnDocument`, Guardar -> `setActiveThemeStyle`, revert to the last saved id,
+  dirty/status wiring, tab-order test = 6); `7af70bd` comment fix.
+  RED/GREEN per test. Writer: `npx tsc -b` clean, `npm run lint` clean, `npx vite build` OK,
+  `npm test` 2666/2667 — the failure is `Topbar.test.tsx` (admin navigation timing), outside the
+  change and passing in isolation. Parent spot check: ThemeSettingsTab + CSS contract + Topbar
+  isolated 44/44.
+
 ## Next step
 
-TH4 tab UI + the transition-collision fix (writer).
+Slice review TH4 (base c1807af); TH5 docs; live check after the group widget merge (the dashboards
+live in the 5173 origin's localStorage, so the theme is tested from the main checkout once
+`feat/theme-tab` is rebased onto the new `main`).
