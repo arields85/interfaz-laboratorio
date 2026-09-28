@@ -94,6 +94,10 @@ masked to four corner squares whose size is the length variable; radius inherite
 - [x] **TH4b** — Review follow-ups on the Tema tab: dirty must clear when the selection returns
   to the saved theme; an unsaved preview must not leak when the tab unmounts; the mini-preview
   span must not reintroduce the transition collision.
+- [ ] **TH6** — Integration with the group widget (now on main): the builder selection frames
+  (`GridSelectionFrame`, `HeaderSelectionFrame`) hardcode a 1.5rem radius, so with "Contorno"
+  (radius 0) the selection ring stays rounded around square widgets; they must follow the live
+  theme frame radius (rest/hover). Route: delegated writer.
 - [ ] **TH5** — Docs (`docs/DESIGN_SYSTEM.md`) and live check by the user.
 
 ## Delivery
@@ -185,9 +189,17 @@ live check).
 
   Review assess (base 724ab41): medium, 131 lines, `under_budget` — pending in the slice.
 
+- 2026-09-28: group widget merged to main (`1859cd1`); `feat/theme-tab` rebased onto it. One
+  conflict in `index.css` (the group hover selector `[data-group-hover-target="true"]
+  .glass-panel` vs the theme's token-swap hover): resolved keeping the theme hover body plus the
+  group selector; CSS contract test regex updated (`06e92da`). Rebased branch: `npx tsc -b`
+  clean, `npm run lint` clean, `npm test` 2856 (2 contract failures fixed by `06e92da`).
+  Found TH6 while checking the combination.
+
 ## Next step
 
-Live check (TH5) from the main checkout after the group widget merge: rebase `feat/theme-tab`
+TH6 (writer), then merge to main (user wants to test the theme on main with the group widget);
+previous: Live check (TH5) from the main checkout after the group widget merge: rebase `feat/theme-tab`
 onto the new `main`, then the single merge to `main`.
  live check after the group widget merge (the dashboards
 live in the 5173 origin's localStorage, so the theme is tested from the main checkout once
