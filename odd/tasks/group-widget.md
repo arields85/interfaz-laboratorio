@@ -69,7 +69,8 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   duplication and portable export/import.
 - [ ] **G2** — Builder lock: lock/unlock action next to copy/delete; D1 membership (fully inside,
   never other groups); container moved below its members in stacking order; locked members not
-  draggable/resizable; one history step.
+  draggable/resizable; one history step. Plus membership sanitation (review follow-ups): non-array
+  `memberWidgetIds` treated as empty, no self-membership, no group as member.
 - [ ] **G3** — Group move and resize: dragging a locked container moves all members in one commit;
   resize clamped to the members' bounding box.
 - [ ] **G4** — Copy/delete semantics (D5) and no nesting.
@@ -114,7 +115,12 @@ after the user's live check. Slice boundaries are recorded under Progress.
   clean, `npm run lint` clean, `npm test` 2633/2633 (one unrelated flaky Topbar/AdminLayout run,
   clean on rerun). Parent spot check: GroupWidget + dashboardViews tests 20/20.
   Note for G2: stacking is DOM order, the group must precede its members in `view.widgets`.
+  Slice review (base 3790cbd..0f85192, 686 lines, medium, user granted): native lineage
+  `review-437d0c4d0ddc189c` APPROVED, acknowledged, authority burned; reviewed boundary advances to
+  `0f85192`. Advisory: R3-group-member-ids-shape (WARNING, `dashboardViews.ts:289` — a malformed
+  imported `memberWidgetIds` that is not an array would throw), R3-group-self-membership
+  (SUGGESTION — a group listing itself). Both folded into G2 as membership sanitation.
 
 ## Next step
 
-Slice review for G1, then delegate G2+G3 (builder lock, group move/resize).
+Delegate G2+G3 (builder lock, group move/resize) to one writer.
