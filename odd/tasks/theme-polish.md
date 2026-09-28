@@ -53,6 +53,12 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   clean, `npx vite build` OK, `npm test` 2891/2892 (Topbar flake, 16/16 isolated). Parent spot
   check: CSS contract + frame visibility + HeaderWidgetCanvas 48/48.
 
+- 2026-09-28: slice review (base `821373b`..`95a733b`, 724 lines, medium, user granted): lineage
+  `review-784eef22f2a0d14c` APPROVED, acknowledged, authority burned. Advisory:
+  R3-icon-style-required-shape (WARNING, `themeStyle.service.ts:170-172` — a theme object without
+  the `icon` block would throw; today only built-in presets exist, so latent), SUGGESTIONs
+  R3-reset-icon-tokens-unasserted and R3-tautological-p3-tests. Queued with the live-check fixes.
+
 ## Next step
 
-Slice review, then the user's live check (P4), then merge to main.
+User's live check (P4), then the queued review follow-ups, then merge to main.
