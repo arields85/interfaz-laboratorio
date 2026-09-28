@@ -202,6 +202,7 @@ function getBuilderCanvasSnapshot() {
         rows: Number(node.getAttribute('data-rows')),
         widgetIds: JSON.parse(node.getAttribute('data-widget-ids') ?? '[]') as string[],
         layout: JSON.parse(node.getAttribute('data-layout') ?? '[]') as Array<{ widgetId: string; x: number; y: number; w: number; h: number }>,
+        editingGroupId: node.getAttribute('data-editing-group-id') || undefined,
     };
 }
 
@@ -381,6 +382,9 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         onGroupLayoutCommit,
         onDelete,
         onDuplicate,
+        editingGroupId,
+        onToggleGroupEditMode,
+        onExitGroupEditMode,
     }: {
         cols: number;
         rows: number;
@@ -392,6 +396,9 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         onGroupLayoutCommit?: (layouts: WidgetLayout[]) => void;
         onDelete?: (widgetId: string) => void;
         onDuplicate?: (widgetId: string) => void;
+        editingGroupId?: string;
+        onToggleGroupEditMode?: (widgetId: string) => void;
+        onExitGroupEditMode?: () => void;
     }) => (
         builderCanvasMock({ cols, rows, layout, widgets, onWidgetSelect }),
         <div
@@ -400,6 +407,7 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
             data-rows={rows}
             data-layout={JSON.stringify(layout)}
             data-widget-ids={JSON.stringify(widgets.map((widget) => widget.id))}
+            data-editing-group-id={editingGroupId ?? ''}
         >
             {widgets.map((widget) => (
                 <button
@@ -456,6 +464,20 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
                     Eliminar {widget.id}
                 </button>
             ))}
+            {onToggleGroupEditMode && widgets.filter((widget) => widget.type === 'group').map((widget) => (
+                <button
+                    key={`edit-mode-${widget.id}`}
+                    type="button"
+                    onClick={() => onToggleGroupEditMode(widget.id)}
+                >
+                    Alternar edicion {widget.id}
+                </button>
+            ))}
+            {onExitGroupEditMode && (
+                <button type="button" onClick={() => onExitGroupEditMode()}>
+                    Salir modo edicion
+                </button>
+            )}
         </div>
     ),
 }));
@@ -2628,6 +2650,108 @@ describe('DashboardBuilderPage undo/redo', () => {
                     expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1', 'widget-2']);
                 });
                 expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
+            });
+        });
+    });
+
+    // G9 review fix (R3-editmode-exit-paths-untested): every path that resets `editingGroupId`
+    // (DashboardBuilderPage.tsx ~245-286) — the pencil toggling itself off, BuilderCanvas reporting
+    // an outside click/Escape, and the two automatic exits (unlock, delete) — had zero coverage at
+    // the page level, since BuilderCanvas is mocked here and these effects live in the page itself.
+    describe('D6 pencil edit mode exit paths (G9 review fix)', () => {
+        function makeEditableLockedGroupDashboard() {
+            return makeDashboard({
+                id: 'dashboard-1',
+                cols: 20,
+                rows: 12,
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                    makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                ],
+            });
+        }
+
+        it('toggling the pencil action enters, then exits, edit mode', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeEditableLockedGroupDashboard());
+
+            expect(getBuilderCanvasSnapshot().editingGroupId).toBeUndefined();
+
+            await user.click(screen.getByRole('button', { name: 'Alternar edicion group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
+            });
+
+            await user.click(screen.getByRole('button', { name: 'Alternar edicion group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBeUndefined();
+            });
+        });
+
+        it('exits when BuilderCanvas reports an outside click/empty-canvas click', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeEditableLockedGroupDashboard());
+
+            await user.click(screen.getByRole('button', { name: 'Alternar edicion group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
+            });
+
+            await user.click(screen.getByRole('button', { name: 'Salir modo edicion' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBeUndefined();
+            });
+        });
+
+        it('exits on Escape', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeEditableLockedGroupDashboard());
+
+            await user.click(screen.getByRole('button', { name: 'Alternar edicion group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
+            });
+
+            await user.keyboard('{Escape}');
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBeUndefined();
+            });
+        });
+
+        it('exits automatically when the group being edited gets unlocked', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeEditableLockedGroupDashboard());
+
+            await user.click(screen.getByRole('button', { name: 'Alternar edicion group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
+            });
+
+            await user.click(screen.getByRole('button', { name: 'Alternar candado group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBeUndefined();
+            });
+        });
+
+        it('exits automatically when the group being edited gets deleted', async () => {
+            const user = userEvent.setup();
+            await renderBuilderPage(makeEditableLockedGroupDashboard());
+
+            await user.click(screen.getByRole('button', { name: 'Alternar edicion group-1' }));
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBe('group-1');
+            });
+
+            await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
+            await screen.findByRole('dialog');
+            await user.click(screen.getByRole('button', { name: 'Eliminar' }));
+
+            await waitFor(() => {
+                expect(getBuilderCanvasSnapshot().editingGroupId).toBeUndefined();
             });
         });
     });
