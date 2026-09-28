@@ -1,4 +1,5 @@
 import { isGroupWidget, type GroupWidgetConfig, type WidgetConfig, type WidgetLayout } from '../domain/admin.types';
+import type { ResizeDirection } from './widgetInteraction';
 
 // =============================================================================
 // groupWidget — pure logic for the `group` container widget (builder-only).
@@ -283,6 +284,49 @@ export function clampRectInsideContainer(rect: LayoutRect, container: LayoutRect
     const h = Math.min(rect.h, container.h);
     const x = Math.min(Math.max(rect.x, container.x), container.x + container.w - w);
     const y = Math.min(Math.max(rect.y, container.y), container.y + container.h - h);
+
+    return { x, y, w, h };
+}
+
+/**
+ * D6 pencil edit mode, RESIZE (G9 review fix — R3-clamp-resize-translates-member): limits a
+ * member's tentative resize rect to the container's bounds by shrinking it from whichever edge
+ * the resize handle actually drags — the opposite corner (the same anchor `resolveCommittedLayout`
+ * in `BuilderCanvas` already keeps fixed against the canvas edges) stays exactly where it was.
+ * Unlike `clampRectInsideContainer` (used for MOVE, which repositions the whole rect to stay
+ * inside), this function never translates the anchor corner — it only shrinks the rect, so a
+ * resize dragged past the container edge stops there instead of the whole member jumping to a
+ * different position.
+ */
+export function clampResizeRectInsideContainer(
+    rect: LayoutRect,
+    container: LayoutRect,
+    direction: ResizeDirection,
+): LayoutRect {
+    const fixesLeftEdge = direction === 'se' || direction === 'ne';
+    const fixesTopEdge = direction === 'se' || direction === 'sw';
+
+    let x: number;
+    let w: number;
+    if (fixesLeftEdge) {
+        x = Math.max(rect.x, container.x);
+        w = Math.max(1, Math.min(rect.w, container.x + container.w - x));
+    } else {
+        const rightEdge = Math.min(rect.x + rect.w, container.x + container.w);
+        w = Math.max(1, Math.min(rect.w, rightEdge - container.x));
+        x = rightEdge - w;
+    }
+
+    let y: number;
+    let h: number;
+    if (fixesTopEdge) {
+        y = Math.max(rect.y, container.y);
+        h = Math.max(1, Math.min(rect.h, container.y + container.h - y));
+    } else {
+        const bottomEdge = Math.min(rect.y + rect.h, container.y + container.h);
+        h = Math.max(1, Math.min(rect.h, bottomEdge - container.y));
+        y = bottomEdge - h;
+    }
 
     return { x, y, w, h };
 }

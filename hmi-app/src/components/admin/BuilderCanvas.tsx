@@ -31,6 +31,7 @@ import {
     clampGroupMoveDelta,
     clampGroupResizeToMembers,
     clampRectInsideContainer,
+    clampResizeRectInsideContainer,
     computeMembersBoundingBox,
     findOwningLockedGroup,
     orderRenderItemsWithGroupsFirst,
@@ -330,7 +331,16 @@ export default function BuilderCanvas({
         if (widget && editingGroupMemberIds.has(widget.id)) {
             const containerLayout = layout.find((item) => item.widgetId === editingGroupId);
             if (containerLayout) {
-                return clampRectInsideContainer(baseLayout, containerLayout);
+                // G9 review fix (R3-clamp-resize-translates-member): a RESIZE must shrink the
+                // member from the edge the handle actually drags, keeping the opposite corner
+                // fixed — `clampRectInsideContainer` (translate-based) is for MOVE only.
+                return isResizeInteraction(currentInteraction.type)
+                    ? clampResizeRectInsideContainer(
+                        baseLayout,
+                        containerLayout,
+                        currentInteraction.type.slice('resize-'.length) as ResizeDirection,
+                    )
+                    : clampRectInsideContainer(baseLayout, containerLayout);
             }
         }
 

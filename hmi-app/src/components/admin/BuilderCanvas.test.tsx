@@ -616,6 +616,74 @@ describe('BuilderCanvas', () => {
         });
     });
 
+    describe('G9 review fix (R3-clamp-resize-translates-member): member RESIZE clamp in edit mode never translates', () => {
+        function renderEditingGroupWithMember(onLayoutCommit: (layout: WidgetLayout) => void) {
+            return renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 2, y: 2, w: 2, h: 2 }),
+                ],
+                cols: 16,
+                rows: 12,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+                editingGroupId: 'group-1',
+                selectedWidgetId: 'member-1',
+                onLayoutCommit,
+            });
+        }
+
+        it('shrinks a member resized past the container edge from the dragged (se) corner, keeping its top-left anchor fixed', async () => {
+            const user = userEvent.setup();
+            const onLayoutCommit = vi.fn();
+
+            await renderEditingGroupWithMember(onLayoutCommit);
+
+            // cellWidth = 1200/16 = 75px; member-1 starts at grid (2,2) w=2 h=2. Its 'se' resize
+            // handle is dragged far past the container's right/bottom edge (grid x=10, y=10).
+            const resizeHandle = screen.getByTestId('builder-canvas-resize-handle-se-member-1');
+            await pressPointer(user, resizeHandle, { clientX: 300, clientY: 300 });
+            await movePointer(user, document.body, { clientX: 2000, clientY: 2000 });
+            await releasePointer(user, document.body, { clientX: 2000, clientY: 2000 });
+
+            expect(onLayoutCommit).toHaveBeenCalledTimes(1);
+            const committed = onLayoutCommit.mock.calls[0][0] as WidgetLayout;
+
+            // The anchor (top-left corner) must stay exactly where the resize started — a
+            // translate-based clamp would have moved x/y instead of just capping w/h.
+            expect(committed.x).toBe(2);
+            expect(committed.y).toBe(2);
+            expect(committed.x + committed.w).toBeLessThanOrEqual(10);
+            expect(committed.y + committed.h).toBeLessThanOrEqual(10);
+        });
+
+        it('the live resize preview matches what gets committed (no jump on release)', async () => {
+            const user = userEvent.setup();
+            const onLayoutCommit = vi.fn();
+
+            await renderEditingGroupWithMember(onLayoutCommit);
+
+            const resizeHandle = screen.getByTestId('builder-canvas-resize-handle-se-member-1');
+            await pressPointer(user, resizeHandle, { clientX: 300, clientY: 300 });
+            await movePointer(user, document.body, { clientX: 2000, clientY: 2000 });
+
+            const previewItem = screen.getByTestId('builder-canvas-item-member-1');
+            const previewWidth = Number.parseFloat(previewItem.style.width);
+            const previewLeft = Number.parseFloat(previewItem.style.left);
+
+            await releasePointer(user, document.body, { clientX: 2000, clientY: 2000 });
+
+            const committed = onLayoutCommit.mock.calls[0][0] as WidgetLayout;
+            const cellWidth = 1200 / 16;
+            expect(previewLeft).toBeCloseTo(committed.x * cellWidth, 0);
+            expect(previewWidth).toBeCloseTo(committed.w * cellWidth, 0);
+        });
+    });
+
     it('fills the measured builder pane even when the local builder pane is narrower', async () => {
         const dashboard = makeDashboard({
             cols: 20,

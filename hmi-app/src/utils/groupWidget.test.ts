@@ -3,6 +3,7 @@ import {
     clampGroupMoveDelta,
     clampGroupResizeToMembers,
     clampRectInsideContainer,
+    clampResizeRectInsideContainer,
     collectWidgetIdsInOtherLockedGroups,
     computeGroupMembers,
     computeMembersBoundingBox,
@@ -557,6 +558,72 @@ describe('clampRectInsideContainer (D6, G8)', () => {
         const rect = { x: 0, y: 0, w: 14, h: 14 };
 
         expect(clampRectInsideContainer(rect, container)).toEqual({ x: 0, y: 0, w: 10, h: 10 });
+    });
+});
+
+describe('clampResizeRectInsideContainer (G9 review fix: R3-clamp-resize-translates-member)', () => {
+    const container = { x: 2, y: 2, w: 10, h: 10 };
+
+    it('leaves a rect already fully inside the container untouched, for every direction', () => {
+        const rect = { x: 4, y: 4, w: 2, h: 2 };
+
+        (['se', 'ne', 'nw', 'sw'] as const).forEach((direction) => {
+            expect(clampResizeRectInsideContainer(rect, container, direction)).toEqual(rect);
+        });
+    });
+
+    it('se: shrinks width/height from the bottom-right, keeping the top-left anchor fixed (never translates)', () => {
+        // Anchor (top-left) is x:4,y:4; the tentative rect grew past the container's right/bottom edge.
+        const rect = { x: 4, y: 4, w: 20, h: 20 };
+
+        expect(clampResizeRectInsideContainer(rect, container, 'se')).toEqual({ x: 4, y: 4, w: 8, h: 8 });
+    });
+
+    it('ne: shrinks from the top, keeping the bottom-left anchor (x, bottom edge) fixed', () => {
+        // Anchor: x=4 (left), bottom edge = 4+4=8 (unchanged). Growing upward past the container's
+        // top edge (y=2) must shrink height from the top, not move x.
+        const rect = { x: 4, y: -10, w: 2, h: 18 };
+
+        const result = clampResizeRectInsideContainer(rect, container, 'ne');
+        expect(result.x).toBe(4);
+        expect(result.y + result.h).toBe(8);
+        expect(result.y).toBeGreaterThanOrEqual(container.y);
+    });
+
+    it('nw: shrinks from the top-left, keeping the bottom-right anchor fixed', () => {
+        // Anchor: right edge = 6+2=8, bottom edge = 6+2=8 (unchanged).
+        const rect = { x: -20, y: -20, w: 28, h: 28 };
+
+        const result = clampResizeRectInsideContainer(rect, container, 'nw');
+        expect(result.x + result.w).toBe(8);
+        expect(result.y + result.h).toBe(8);
+        expect(result.x).toBeGreaterThanOrEqual(container.x);
+        expect(result.y).toBeGreaterThanOrEqual(container.y);
+    });
+
+    it('sw: shrinks from the bottom-left, keeping the top-right anchor (right edge, y) fixed', () => {
+        // Anchor: right edge = 4+2=6, y=4 (unchanged).
+        const rect = { x: -18, y: 4, w: 24, h: 20 };
+
+        const result = clampResizeRectInsideContainer(rect, container, 'sw');
+        expect(result.x + result.w).toBe(6);
+        expect(result.y).toBe(4);
+        expect(result.x).toBeGreaterThanOrEqual(container.x);
+    });
+
+    it('never grows a rect that is already smaller than the container', () => {
+        const rect = { x: 4, y: 4, w: 1, h: 1 };
+
+        expect(clampResizeRectInsideContainer(rect, container, 'se')).toEqual(rect);
+    });
+
+    it('never shrinks below 1 grid unit even against a tiny container', () => {
+        const tinyContainer = { x: 0, y: 0, w: 1, h: 1 };
+        const rect = { x: 0, y: 0, w: 5, h: 5 };
+
+        const result = clampResizeRectInsideContainer(rect, tinyContainer, 'se');
+        expect(result.w).toBeGreaterThanOrEqual(1);
+        expect(result.h).toBeGreaterThanOrEqual(1);
     });
 });
 
