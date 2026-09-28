@@ -138,4 +138,10 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 ## Next step
 
 Merged to main at session close. Pending for the next session: live check of the copy
-placement mode (P8).
+placement mode (P8) and the last review's advisories.
+
+- 2026-09-28: final slice review (base `dacde8c`..`2159aa6`, 1167 lines, medium, user granted):
+  lineage `review-2cb306d00888f75a` APPROVED, acknowledged, authority burned. Advisory, pending
+  for the next session: R3-001 WARNING `BuilderCanvas.tsx:1015-1023` (placement commit on a
+  widget's onPointerDown), R3-002 WARNING `DashboardBuilderPage.tsx:252-256` (Escape handling
+  order for placement vs edit mode), R3-003 SUGGESTION `BuilderCanvas.tsx:1170-1193`.
