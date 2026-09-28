@@ -10,10 +10,10 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 
 ## Decisions (user, 2026-09-28)
 
-- **P1 buttons:** in "Contorno" the buttons must look like "Clásico": NO border; the hover
-  background uses the theme radius (0 in Contorno). Applies to every themed button group
-  (admin actions, icon toolbar buttons, catalog rail buttons, viewer buttons, widget segmented
-  controls) for consistency — the user may exempt the segmented controls later.
+- **P1 buttons (final scope after two user corrections):** in "Contorno" ONLY icon-only buttons
+  (no visible text) become borderless like "Clásico", with the hover background using the theme
+  radius. Buttons with text keep the current Contorno bordered look; widget segmented selectors
+  (7D/30D, TURNO/DÍA) keep their current look in every theme.
 - **P2 frame toggle:** every widget type that can be placed in a header slot
   (`isHeaderCompatibleWidgetType`) gets a property-panel option to show/hide its background and
   frame, built with the project skill `.opencode/skills/widget-property-panel/SKILL.md`. It
@@ -25,9 +25,9 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 
 ## Tasks
 
-- [ ] **P1** — Contorno button preset = Clásico look (no border, hover fill) with the theme radius.
-- [ ] **P2** — Frame/background toggle for header-capable widgets (panel + renderers + header).
-- [ ] **P3** — Resize handle offset independent of the theme radius.
+- [x] **P1** — Contorno button preset = Clásico look (no border, hover fill) with the theme radius.
+- [x] **P2** — Frame/background toggle for header-capable widgets (panel + renderers + header).
+- [x] **P3** — Resize handle offset independent of the theme radius.
 - [ ] **P4** — Docs (DESIGN_SYSTEM themes section, WIDGET_AUTHORING/ADMIN_CONVENTIONS as needed) and
   the user's live check.
 
@@ -40,6 +40,19 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
 
 - 2026-09-28: document created, branch created.
 
+- 2026-09-28: P1–P3 done (route: delegated writer; P1 scope corrected twice mid-run) —
+  `7c3b6ab` P1: `ThemeButtonStyle.icon` + `--button-icon-*` tokens consumed only by
+  `.theme-button-icon-neutral` (`AdminIconToolbarButton`: catalog rail, view toolbar,
+  undo/redo); text buttons and segmented controls untouched; Clásico identical. `e9b3012` +
+  `8ced9d1` P2: `displayOptions.showFrame?: boolean` on `status` and `connection-status` (the only
+  header-compatible types), shared `resolveWidgetFrameVisible` (`utils/widgetFrameVisibility.ts`)
+  + `getWidgetFrameOption`, used by both renderers and `HeaderWidgetCanvas`; PropertyDock toggle
+  "Mostrar fondo y marco" via `DockToggleField`. `72d5ee3` P3: handle offset adds
+  `max(0px, (classic radius - --frame-radius-rest) * (1 - cos45°))`, anchored to the Clásico
+  preset value; groups included. RED first per task. Writer: `npx tsc -b` clean, `npm run lint`
+  clean, `npx vite build` OK, `npm test` 2891/2892 (Topbar flake, 16/16 isolated). Parent spot
+  check: CSS contract + frame visibility + HeaderWidgetCanvas 48/48.
+
 ## Next step
 
-Delegate P1–P3 (one writer).
+Slice review, then the user's live check (P4), then merge to main.
