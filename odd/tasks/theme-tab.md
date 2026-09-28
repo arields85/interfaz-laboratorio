@@ -86,7 +86,7 @@ masked to four corner squares whose size is the length variable; radius inherite
   defaults = today's look; Kpi skeleton radius on the token. Route: delegated writer.
 - [x] **TH2** — Theme model, built-in presets ("Clásico" = current, "Contorno" = user's),
   persistence and boot re-apply (mirrors `applyThemeOverrides`). Route: same writer as TH1.
-- [ ] **TH3** — Button theme engine on all three groups (Q2): `AdminActionButton`,
+- [x] **TH3** — Button theme engine on all three groups (Q2): `AdminActionButton`,
   `AdminIconToolbarButton`, `.admin-accent-ghost`, `HmiButton`, `WidgetHeaderTemporalControls`;
   defaults = today's look; primary/accent semantics preserved.
 - [ ] **TH4** — "Tema" tab UI in `GlobalSettingsDialog`: preset selector only (Q1), with a preview
@@ -134,6 +134,19 @@ live check).
   fallback before `overflow: clip`), R3-spy-restore-not-guaranteed (SUGGESTION,
   `themeStyle.service.test.ts:144-162`). Folded into TH3 as TH3a.
 
+- 2026-09-28: TH3a + TH3 done (route: delegated writer) — `98c3f7d` fix(theme): keep semantic
+  frame hovers and clip content inside the frame (removed `overflow-clip-margin`, `overflow:
+  hidden` fallback before `clip`, semantic hover locked by a CSS-contract test, spy restore in
+  try/finally); `b56ff0a` feat(theme): drive buttons and segmented controls from theme tokens
+  (`--button-*` registered tokens + `--button-base-strength`: Clásico 100 % keeps each variant's
+  own color exactly, Contorno 0 % fades it so the shared outline recipe shows; shared
+  `.theme-button` class + color-only variant classes; applied in `AdminActionButton`,
+  `AdminIconToolbarButton`, `HmiButton`, `WidgetHeaderTemporalControls` pill segments incl.
+  `aria-pressed`; primary/critical mix toward their own hue); `f07d611` docs comment follow-up.
+  Only pixel deviation in Clásico: `AdminIconToolbarButton` gains a 1px transparent border.
+  RED/GREEN per file. Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test` 2655/2655,
+  `npx vite build` OK. Parent spot check: service + CSS contract 36/36.
+
 ## Next step
 
-TH3a review fixes + TH3 button engine (one writer).
+Slice review TH3 (base cf1c892), then TH4 tab UI (writer).
