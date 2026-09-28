@@ -103,9 +103,17 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   this): add container, lock, drag -> members move, render order.
 - [x] **G8** — D6 (locked group = one widget, pencil edit mode, delete confirmation) + bug from
   live check 2: copying a locked group duplicated the inner widgets several times.
-- [ ] **G9** — Container snaps exactly to the grid lines (user, live check 2): its frame must not
+- [x] **G9** — Container snaps exactly to the grid lines (user, live check 2): its frame must not
   use the widget inset/gutter, so members keep a breathing margin inside it and the frames never
   overlap; builder and viewer. (Engram `odd/group-widget/g9-grid-snap`.)
+- [x] **G10** — New containers start with NO title and NO icon (user, live check 3).
+- [ ] **G11** — Bug (live check 3, point 5): promoting a member of a locked group to the header
+  makes the group lose ALL its members (dragging the container afterwards moves only the
+  container); unlock -> demote -> lock restores it. Expected: only the promoted widget leaves the
+  group.
+- [ ] **G12** — Bug (live check 3, builder header): the dashboard view tab buttons overlap the
+  header widget slots (screenshot: view icons stacked over the empty slot's "+" trigger). Not
+  group-specific; fixed on this branch because it is found in the same builder live session.
 - [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
@@ -260,7 +268,23 @@ after the user's live check. Slice boundaries are recorded under Progress.
   R3-delete-count-includes-dangling-ids (SUGGESTION, `:1768-1777`), R3-member-resize-clamp-
   uncovered (SUGGESTION, `BuilderCanvas.tsx:329-334`).
 
+- 2026-09-28: live check 3: points 4, 4b, 6, 7, 8 OK; point 5 part 3 FAILED (G11); new
+  builder header overlap bug (G12); new request G10.
+- 2026-09-28: G9 + G10 + G8 review follow-ups done in worktree `group-g9` (branch
+  `feat/group-widget-g9`, delegated writer, isolated so the user's live dev server was not
+  reloaded mid-test), fast-forwarded into `feat/group-widget`: `99b2c01` fix(widgets): snap the
+  group container frame to the grid lines (grid `gap: 0`, the only inset is the surface padding
+  `var(--widget-spacing)`; `resolveWidgetSurfaceInset` returns 0 for groups, used by builder
+  and viewer surfaces, `GridSelectionFrame` inset and `WidgetHoverActions` top; `BUILDER_GAP`/
+  `VIEWER_GAP` are dead constants); `400996c` fix(widgets): align group hover actions with the
+  grid-snapped frame; `024b7b0` fix(builder): limit member resize at the container edge
+  (`clampResizeRectInsideContainer`); `8a15c5d` fix(builder): count only existing group members
+  in the delete confirmation; `b38cedd` test(builder): cover every group edit-mode exit path
+  (coverage only, no bug); `478e362` fix(builder): create group containers without title or
+  icon (G10). RED-first per fix. Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test`
+  2779/2779.
+
 ## Next step
 
-G9 + the G8 review follow-ups (writer) while the user retests from point 4; then the single
+Slice review (G9/G10), then G11 + G12 (writer), then the user's live check, then the single
 merge.
