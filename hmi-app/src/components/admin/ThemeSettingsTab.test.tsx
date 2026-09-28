@@ -153,6 +153,89 @@ describe('ThemeSettingsTab', () => {
         expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('0px');
     });
 
+    it('clears dirty and the save status when the selection returns to the saved theme', async () => {
+        const user = userEvent.setup();
+        const onDirtyChange = vi.fn();
+        const onSaveStatusChange = vi.fn();
+
+        render(<ThemeSettingsTab onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+
+        await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+        expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+
+        await user.click(screen.getByRole('radio', { name: /Clásico/ }));
+
+        expect(screen.getByRole('radio', { name: /Clásico/ })).toHaveAttribute('aria-checked', 'true');
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('');
+        // Nothing was persisted by clicking back to the saved theme, so the
+        // status is a plain not-dirty clear, not a claimed `Guardado`.
+        expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith(null);
+    });
+
+    it('restores the saved theme on the whole app when the tab unmounts with an unsaved preview', async () => {
+        const user = userEvent.setup();
+
+        const { unmount } = render(<ThemeSettingsTab />);
+
+        await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('0px');
+
+        unmount();
+
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('');
+    });
+
+    it('does not reapply the saved theme on unmount after an explicit save (no double-apply)', async () => {
+        const user = userEvent.setup();
+        const saveRef = createRef<() => void>();
+
+        const { unmount } = render(<ThemeSettingsTab saveRef={saveRef} />);
+
+        await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+        act(() => {
+            saveRef.current?.();
+        });
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('0px');
+
+        unmount();
+
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('0px');
+    });
+
+    it('does not reapply anything on unmount after an explicit revert (no double-apply)', async () => {
+        const user = userEvent.setup();
+        const revertRef = createRef<() => void>();
+
+        const { unmount } = render(<ThemeSettingsTab revertRef={revertRef} />);
+
+        await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+        act(() => {
+            revertRef.current?.();
+        });
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('');
+
+        unmount();
+
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('');
+    });
+
+    it('does not put a Tailwind transition utility on the mini-preview span, which would override the merged .theme-button transition', () => {
+        render(<ThemeSettingsTab />);
+
+        const previewSpans = screen.getAllByText('Vista previa');
+        expect(previewSpans.length).toBeGreaterThan(0);
+
+        for (const previewSpan of previewSpans) {
+            expect(previewSpan).toHaveClass('theme-button', 'admin-accent-ghost');
+
+            for (const token of previewSpan.className.split(/\s+/)) {
+                expect(token === 'transition' || token.startsWith('transition-')).toBe(false);
+            }
+        }
+    });
+
     it('is keyboard accessible: each option is a real button reachable and activatable from the keyboard', async () => {
         const user = userEvent.setup();
         const onDirtyChange = vi.fn();

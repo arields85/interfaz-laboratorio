@@ -47,6 +47,11 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
     const snapshotIdRef = useRef(initialId);
+    // Mirrors whether the current selection differs from `snapshotIdRef`,
+    // updated synchronously alongside every state change below (select,
+    // save, revert) so the unmount cleanup can read it without waiting for
+    // an effect to catch up with the latest render.
+    const dirtyRef = useRef(false);
     const cardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
     useEffect(() => {
@@ -73,9 +78,29 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setSelectedId(id);
         previewThemeStyleOnDocument(id);
-        setSaveStatus('dirty');
-        onDirtyChange?.(true);
+
+        // Selecting a theme different from the saved one is dirty; clicking
+        // back onto the saved theme itself is a not-dirty clear, not a
+        // persisted `Guardado` -- nothing was written to storage.
+        const isDirty = id !== snapshotIdRef.current;
+        dirtyRef.current = isDirty;
+        setSaveStatus(isDirty ? 'dirty' : null);
+        onDirtyChange?.(isDirty);
     };
+
+    // If the tab unmounts (dialog closed/unmounted) while an unsaved
+    // selection is still being previewed on the whole document, the preview
+    // must not leak past the tab's lifetime: restore the last saved theme.
+    // `dirtyRef` is updated synchronously by every handler below (select,
+    // save, revert), so after an explicit save or revert it is already
+    // false and this never double-applies on top of that outcome.
+    useEffect(() => {
+        return () => {
+            if (dirtyRef.current) {
+                previewThemeStyleOnDocument(snapshotIdRef.current);
+            }
+        };
+    }, []);
 
     useEffect(() => {
         if (!saveRef) {
@@ -85,6 +110,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         saveRef.current = () => {
             setActiveThemeStyle(selectedId);
             snapshotIdRef.current = selectedId;
+            dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
         };
@@ -103,6 +129,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             const snapshotId = snapshotIdRef.current;
             setSelectedId(snapshotId);
             previewThemeStyleOnDocument(snapshotId);
+            dirtyRef.current = false;
             // The revert only restores state and document styles without
             // touching storage, so it reports no status: a persistence that
             // did not happen must not be claimed as `Guardado`.
