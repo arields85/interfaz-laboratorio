@@ -107,7 +107,7 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   use the widget inset/gutter, so members keep a breathing margin inside it and the frames never
   overlap; builder and viewer. (Engram `odd/group-widget/g9-grid-snap`.)
 - [x] **G10** — New containers start with NO title and NO icon (user, live check 3).
-- [ ] **G11** — Bug (live check 3, point 5): promoting a member of a locked group to the header
+- [x] **G11** — Bug (live check 3, point 5): promoting a member of a locked group to the header
   makes the group lose ALL its members (dragging the container afterwards moves only the
   container); unlock -> demote -> lock restores it. Expected: only the promoted widget leaves the
   group.
@@ -119,7 +119,7 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   frame like other widgets.
 - [x] **G14** — (user) builder selection frame and resize handles of every widget take the
   Design tab "Acento Admin" color (`--color-admin-accent`).
-- [ ] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
+- [x] **G6** — Docs (`WIDGET_AUTHORING.md`, `ADMIN_CONVENTIONS.md`) and live check by the user.
 
 ## Delivery forecast
 
@@ -336,7 +336,11 @@ after the user's live check. Slice boundaries are recorded under Progress.
   like the grid frame (gradient defs removed). RED: 2 tests failing on the old gradient tokens;
   GREEN 3/3; `npx tsc -b` clean, eslint clean, `npm test` 2798/2798.
 
+- 2026-09-28: final live check PASSED (user: "todo terminado") — all acceptance criteria met.
+  Merged to `main` by fast-forward (user request). The last slice after `febe6a5` (G12b +
+  header ring, under the review budget) stays pending in the slice per policy.
+
 ## Next step
 
-User's check of the header ring color, then the single merge (group -> main), then theme and visual
+Feature complete. Previous plan: User's check of the header ring color, then the single merge (group -> main), then theme and visual
 defaults rebased and merged in order.
