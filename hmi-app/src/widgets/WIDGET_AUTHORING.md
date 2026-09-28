@@ -214,8 +214,10 @@ en vez de depender de un widget de título individual.
   completamente contenido en el área del contenedor pasan a ser sus miembros (`memberWidgetIds`);
   el contenedor nunca se agrupa a sí mismo ni a otro contenedor `group` (no hay anidamiento), y un
   widget pertenece como máximo a un grupo bloqueado a la vez.
-- **Apilamiento = orden del array**: no existe z-index; el contenedor siempre precede a sus
-  miembros en `view.widgets` para quedar debajo de ellos visualmente.
+- **Apilamiento**: no existe z-index; el orden de render define qué queda encima. Todo renderer
+  de la grilla del dashboard (builder y viewer) ordena los ítems con
+  `orderRenderItemsWithGroupsFirst` (`utils/groupWidget.ts`), que pone los contenedores primero
+  para que queden siempre debajo del resto.
 - **Navegación efectiva de los miembros**: un miembro sin `navigationTargetDashboardId` propio
   hereda el del contenedor bloqueado que lo agrupa; si el miembro define su propio target, ese
   gana siempre. Resuelto por la función pura `resolveEffectiveNavigationTarget` en

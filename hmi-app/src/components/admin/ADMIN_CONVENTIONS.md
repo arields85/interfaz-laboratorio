@@ -94,8 +94,9 @@ junto a copiar/eliminar en `WidgetHoverActions`) alterna entre cerrado (`locked:
 - El contenedor se puede redimensionar, pero nunca por debajo del cuadro delimitador (bounding
   box) de sus miembros; la vista previa en vivo del resize respeta el mismo límite que el commit
   final, para que no haya un salto visual al soltar.
-- El contenedor siempre precede a sus miembros en el orden del array (apilamiento = orden de
-  `view.widgets`), sin importar el orden en que se crearon.
+- Los contenedores se dibujan siempre debajo de todos los demás widgets, agrupados o no, en el
+  builder y en el viewer: el orden de render lo resuelve `orderRenderItemsWithGroupsFirst`
+  (`utils/groupWidget.ts`), sin depender del orden en que se crearon.
 
 ### Copiar y eliminar (D5)
 

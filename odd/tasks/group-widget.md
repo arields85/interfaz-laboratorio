@@ -81,7 +81,7 @@ widget, because it is the only one with `navigationTargetDashboardId` set. That 
   belongs to at most one locked group (exclude widgets already in another locked group at lock
   time; sanitize on read); resize preview must match the committed clamp; restore the weakened
   BuilderCanvas test helper.
-- [ ] **G7** — Live check 1 fixes (user, 2026-09-28): (a) the lock action icon is inverted
+- [x] **G7** — Live check 1 fixes (user, 2026-09-28): (a) the lock action icon is inverted
   (unlocked shows a closed lock), so the user toggled it the wrong way — icon must show the STATE
   (LockOpen when unlocked, Lock when locked); (b) containers must ALWAYS paint beneath the other
   widgets, locked or not, in builder and viewer — root cause: `BuilderCanvas` renders
@@ -202,6 +202,16 @@ after the user's live check. Slice boundaries are recorded under Progress.
   did not group, container always on top and blurring the widgets below, title could not be
   cleared. Root causes confirmed in code (see G7).
 
+- 2026-09-28: G7 done (route: delegated writer) — `8eb9f87` fix(builder): show the group lock
+  state and keep containers beneath widgets (icon = state; pure `orderRenderItemsWithGroupsFirst`
+  used by `BuilderCanvas` and `DashboardViewer` as the single stacking source; the dead
+  `reorderWidgetsWithGroupBeforeMembers` removed); `e41e58b` fix(widgets): let a group container
+  have no title (no fallback; header row hidden when there is neither title nor icon).
+  Integration tests now use the real canvas. RED: 16 tests failing for the stated reasons;
+  GREEN 169/169 touched. Writer: `npx tsc -b` clean, `npm run lint` clean, `npm test`
+  2722/2722. Parent spot check: groupWidget + BuilderCanvas + GroupWidget 99/99. Docs updated
+  (stacking section in `ADMIN_CONVENTIONS.md` and `WIDGET_AUTHORING.md`).
+
 ## Next step
 
-G7 (writer), then the user's live check again, then the single merge to `main`.
+User's live check again (from point 2), then the single merge to `main`.
