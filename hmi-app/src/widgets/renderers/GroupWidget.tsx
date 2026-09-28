@@ -12,12 +12,13 @@ import {
     Settings,
     Siren,
     Thermometer,
+    TrendingUp,
     Wifi,
     Wind,
     Zap,
     type LucideIcon,
 } from 'lucide-react';
-import type { GroupDisplayOptions, GroupWidgetConfig } from '../../domain/admin.types';
+import type { GroupWidgetConfig } from '../../domain/admin.types';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 
 // =============================================================================
@@ -25,8 +26,9 @@ import WidgetHeader from '../../components/ui/WidgetHeader';
 // Renderer para widgets de tipo 'group': un contenedor visual que agrupa
 // otros widgets bajo el mismo marco/hover que cualquier widget, con header
 // (texto + ícono) y cuerpo vacío — el contenedor solo enmarca a los widgets
-// que se colocan encima. La pertenencia (`memberWidgetIds`) y el estado de
-// bloqueo (`locked`) son responsabilidad del builder (G2-G5), no del render.
+// que se colocan encima. Qué widgets están agrupados (`memberWidgetIds`) y
+// si el contenedor está cerrado (`locked`) es estado de edición del builder;
+// este renderer no lee ni necesita esos campos.
 // =============================================================================
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -40,6 +42,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
     Settings,
     Fan,
     FoldVertical,
+    TrendingUp,
     HeartPulse,
     Siren,
     Wifi,
@@ -53,7 +56,7 @@ interface GroupWidgetProps {
 }
 
 export default function GroupWidget({ widget, className }: GroupWidgetProps) {
-    const displayOptions = widget.displayOptions as GroupDisplayOptions | undefined;
+    const displayOptions = widget.displayOptions;
 
     // Ícono: mismo patrón que los demás widgets.
     // undefined -> selección pendiente (HelpCircle gris) | null -> sin ícono | string -> ícono configurado.

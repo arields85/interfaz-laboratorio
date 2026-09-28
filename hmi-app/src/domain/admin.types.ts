@@ -785,7 +785,11 @@ export interface GroupWidgetConfig extends WidgetConfigBase {
     type: 'group';
     /** Ids de los widgets agrupados mientras el contenedor está `locked`. Vacío/undefined si no hay grupo cerrado. */
     memberWidgetIds?: string[];
-    /** Si el contenedor está cerrado alrededor de sus miembros (ver decisión D1 del feature). */
+    /**
+     * Si el contenedor está cerrado alrededor de sus miembros. Al cerrar,
+     * los widgets completamente contenidos en el área del contenedor pasan a
+     * ser sus miembros; al abrir, todos los miembros se liberan.
+     */
     locked?: boolean;
     displayOptions?: GroupDisplayOptions;
 }
