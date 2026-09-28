@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -2491,14 +2491,15 @@ describe('DashboardBuilderPage undo/redo', () => {
             expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
         });
 
-        it('deleting a group container removes only the container; members stay in place and released', async () => {
+        // D6 keeps the D5 unlocked-delete behavior: no confirmation dialog, container only.
+        it('deleting an UNLOCKED group container removes only the container, with no dialog; members stay in place and released', async () => {
             const user = userEvent.setup();
             await renderBuilderPage(makeDashboard({
                 id: 'dashboard-1',
                 cols: 20,
                 rows: 12,
                 widgets: [
-                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1'] }),
+                    makeGroupWidget({ id: 'group-1', locked: false, memberWidgetIds: [] }),
                     makeWidget({ id: 'widget-1', title: 'Widget 1' }),
                 ],
                 layout: [
@@ -2511,6 +2512,74 @@ describe('DashboardBuilderPage undo/redo', () => {
 
             await waitFor(() => {
                 expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['widget-1']);
+            });
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        });
+
+        // D6: deleting a LOCKED container asks for confirmation naming the container and its N
+        // widgets, deletes container + members in one step on confirm, and does nothing on cancel.
+        describe('D6 locked group delete confirmation', () => {
+            function makeLockedGroupDashboard() {
+                return makeDashboard({
+                    id: 'dashboard-1',
+                    cols: 20,
+                    rows: 12,
+                    widgets: [
+                        makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['widget-1', 'widget-2'], title: 'Contenedor' }),
+                        makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                        makeWidget({ id: 'widget-2', title: 'Widget 2' }),
+                    ],
+                    layout: [
+                        makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 4, h: 4 }),
+                        makeLayout({ widgetId: 'widget-1', x: 1, y: 1, w: 1, h: 1 }),
+                        makeLayout({ widgetId: 'widget-2', x: 2, y: 2, w: 1, h: 1 }),
+                    ],
+                });
+            }
+
+            it('opens a confirmation dialog naming the container and its member count, without deleting yet', async () => {
+                const user = userEvent.setup();
+                await renderBuilderPage(makeLockedGroupDashboard());
+
+                await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
+
+                const dialog = await screen.findByRole('dialog');
+                expect(within(dialog).getByText(/sus 2 widgets/)).toBeInTheDocument();
+                // Nothing was deleted yet.
+                expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1', 'widget-2']);
+            });
+
+            it('cancel does nothing', async () => {
+                const user = userEvent.setup();
+                await renderBuilderPage(makeLockedGroupDashboard());
+
+                await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
+                await screen.findByRole('dialog');
+                await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+
+                await waitFor(() => {
+                    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+                });
+                expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1', 'widget-2']);
+            });
+
+            it('confirming deletes the container and all its members in one undo step', async () => {
+                const user = userEvent.setup();
+                await renderBuilderPage(makeLockedGroupDashboard());
+
+                await user.click(screen.getByRole('button', { name: 'Eliminar group-1' }));
+                await screen.findByRole('dialog');
+                await user.click(screen.getByRole('button', { name: 'Eliminar' }));
+
+                await waitFor(() => {
+                    expect(getBuilderCanvasSnapshot().widgetIds).toEqual([]);
+                });
+
+                await user.click(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' }));
+                await waitFor(() => {
+                    expect(getBuilderCanvasSnapshot().widgetIds).toEqual(['group-1', 'widget-1', 'widget-2']);
+                });
+                expect(screen.getByRole('button', { name: 'Deshacer (Ctrl+Z)' })).toBeDisabled();
             });
         });
     });

@@ -73,6 +73,7 @@ import {
     computeGroupMembers,
     duplicateLockedGroup,
     removeMemberFromGroups,
+    sanitizeGroupMemberIds,
 } from '../../utils/groupWidget';
 import { resolveDashboardViewIconKey } from '../../utils/dashboardViewPresentation';
 import {
@@ -147,6 +148,9 @@ export default function DashboardBuilderPage() {
     const [viewIconDraft, setViewIconDraft] = useState<DashboardViewIconSelection>(AUTO_VIEW_ICON_SELECTION);
     const [variableDeletionState, setVariableDeletionState] = useState<VariableDeletionState | null>(null);
     const [, setNodeTypeLabelsVersion] = useState(0);
+    // D6: pencil edit mode is UI-only state — never persisted, never a history step.
+    const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
+    const [groupDeleteConfirmation, setGroupDeleteConfirmation] = useState<GroupDeleteConfirmationState | null>(null);
 
     const isGridVisible = useUIStore((state) => state.isGridVisible);
     const toggleGrid = useUIStore((state) => state.toggleGrid);
@@ -197,6 +201,7 @@ export default function DashboardBuilderPage() {
         || isRenameViewDialogOpen
         || Boolean(dialogMessage)
         || Boolean(variableDeletionState)
+        || Boolean(groupDeleteConfirmation)
         || blocker.state === 'blocked';
 
     // Atajos de teclado del historial (T2): Ctrl+Z deshace; Ctrl+Y y Ctrl+Shift+Z rehacen
@@ -220,6 +225,15 @@ export default function DashboardBuilderPage() {
                 return;
             }
 
+            // D6: Escape exits pencil edit mode for a locked group, if one is active.
+            if (event.key === 'Escape') {
+                if (editingGroupId) {
+                    event.preventDefault();
+                    setEditingGroupId(undefined);
+                }
+                return;
+            }
+
             const isCtrlOrMeta = event.ctrlKey || event.metaKey;
 
             if (!isCtrlOrMeta) {
@@ -239,7 +253,20 @@ export default function DashboardBuilderPage() {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isAnyDialogOpen, isSaving, undoDraft, redoDraft]);
+    }, [isAnyDialogOpen, isSaving, undoDraft, redoDraft, editingGroupId]);
+
+    // D6: pencil edit mode exits automatically when its group gets unlocked or deleted — a
+    // later re-lock of the same container must NOT silently resume it.
+    useEffect(() => {
+        if (!editingGroupId || !draft) {
+            return;
+        }
+        const view = getActiveDashboardView(draft, selectedViewId);
+        const widget = view.widgets.find((item) => item.id === editingGroupId);
+        if (!widget || !isGroupWidget(widget) || widget.locked !== true) {
+            setEditingGroupId(undefined);
+        }
+    }, [editingGroupId, draft, selectedViewId]);
 
     // 4. Mapeo de equipos simulado (para resolver bindings de la F3)
     const equipmentMap = useMemo(() => {
@@ -630,6 +657,9 @@ export default function DashboardBuilderPage() {
     let sidePanel: ReactNode;
     let contextBar: ReactNode;
     let content: ReactNode;
+    // D6: assigned inside the `draft` branch below, where `performDeleteLockedGroupWithMembers`
+    // (needing `activeView`) lives; rendered unconditionally alongside the other dialogs.
+    let groupDeleteConfirmationDialog: ReactNode = null;
 
     if (isLoading) {
         contextBar = renderContextBarState(
@@ -1647,21 +1677,16 @@ export default function DashboardBuilderPage() {
             }, { coalesce: false });
         };
 
-        const handleDeleteWidget = (widgetId?: string) => {
-            const targetWidgetId = widgetId ?? selectedWidgetId;
-
-            if (!targetWidgetId) return;
-
+        // D5 (unlocked container, and any non-group widget or member): removes only
+        // `targetWidgetId` — a member also drops out of its (still locked) group's member list in
+        // this same step; an unlocked container's members simply stay in place, released.
+        const performDeleteWidget = (targetWidgetId: string) => {
             setDraft(prev => {
                 if (!prev) return prev;
 
                 const nextHeaderSlots = (prev.headerConfig?.widgetSlots ?? []).filter(slot => slot.widgetId !== targetWidgetId);
                 const nextDashboard = updateSelectedView(prev, (view) => ({
                     ...view,
-                    // D5: deleting a member also drops it from its (still locked) group's member
-                    // list, in this same history step; deleting a group container removes only
-                    // the container itself — its members simply stay in place, released, since
-                    // nothing references them as a group anymore.
                     widgets: removeMemberFromGroups(view.widgets, targetWidgetId)
                         .filter((widget) => widget.id !== targetWidgetId),
                     layout: view.layout.filter((layoutItem) => layoutItem.widgetId !== targetWidgetId),
@@ -1676,6 +1701,96 @@ export default function DashboardBuilderPage() {
                 };
             }, { coalesce: false });
             setSelectedWidgetId(current => current === targetWidgetId ? undefined : current);
+        };
+
+        // D6: deletes a LOCKED container together with every one of its members, in ONE history
+        // step (supersedes D5's "container only" rule for the locked case — confirmed by the
+        // user via `groupDeleteConfirmation` first).
+        const performDeleteLockedGroupWithMembers = (groupWidgetId: string) => {
+            const group = activeView.widgets.find((widget) => widget.id === groupWidgetId);
+            const memberIds = group && isGroupWidget(group)
+                ? sanitizeGroupMemberIds(group.memberWidgetIds, group.id, activeView.widgets)
+                : [];
+            const idsToRemove = new Set([groupWidgetId, ...memberIds]);
+
+            setDraft(prev => {
+                if (!prev) return prev;
+
+                const nextHeaderSlots = (prev.headerConfig?.widgetSlots ?? []).filter(slot => !idsToRemove.has(slot.widgetId));
+                const nextDashboard = updateSelectedView(prev, (view) => ({
+                    ...view,
+                    widgets: view.widgets.filter((widget) => !idsToRemove.has(widget.id)),
+                    layout: view.layout.filter((layoutItem) => !idsToRemove.has(layoutItem.widgetId)),
+                }));
+
+                return {
+                    ...nextDashboard,
+                    headerConfig: {
+                        ...(nextDashboard.headerConfig ?? {}),
+                        widgetSlots: nextHeaderSlots,
+                    },
+                };
+            }, { coalesce: false });
+
+            setSelectedWidgetId(current => (current && idsToRemove.has(current) ? undefined : current));
+            setEditingGroupId(current => (current === groupWidgetId ? undefined : current));
+        };
+
+        // D6: deleting a LOCKED container asks for confirmation first (container + its N
+        // widgets, in one step on confirm); an unlocked container keeps the D5 behavior —
+        // deletes immediately, container only, no dialog. A member or plain widget also deletes
+        // immediately (existing behavior, unaffected).
+        const handleDeleteWidget = (widgetId?: string) => {
+            const targetWidgetId = widgetId ?? selectedWidgetId;
+
+            if (!targetWidgetId) return;
+
+            const targetWidget = activeView.widgets.find((widget) => widget.id === targetWidgetId);
+
+            if (targetWidget && isGroupWidget(targetWidget) && targetWidget.locked === true) {
+                const memberIds = sanitizeGroupMemberIds(targetWidget.memberWidgetIds, targetWidget.id, activeView.widgets);
+                setGroupDeleteConfirmation({
+                    groupWidgetId: targetWidgetId,
+                    groupTitle: targetWidget.title?.trim() || 'el contenedor',
+                    affectedMembers: memberIds.map((id) => {
+                        const member = activeView.widgets.find((widget) => widget.id === id);
+                        return { id, name: member?.title?.trim() || id };
+                    }),
+                });
+                return;
+            }
+
+            performDeleteWidget(targetWidgetId);
+        };
+
+        groupDeleteConfirmationDialog = (
+            <AdminDestructiveDialog
+                open={Boolean(groupDeleteConfirmation)}
+                title="Eliminar contenedor"
+                onClose={() => setGroupDeleteConfirmation(null)}
+                onConfirm={() => {
+                    if (!groupDeleteConfirmation) return;
+                    performDeleteLockedGroupWithMembers(groupDeleteConfirmation.groupWidgetId);
+                    setGroupDeleteConfirmation(null);
+                }}
+                warningMessage={groupDeleteConfirmation
+                    ? `Se van a eliminar el contenedor "${groupDeleteConfirmation.groupTitle}" y sus ${groupDeleteConfirmation.affectedMembers.length} widgets.`
+                    : ''}
+                affectedLabel="Widgets agrupados"
+                affectedItems={groupDeleteConfirmation?.affectedMembers ?? []}
+                confirmMessage="Esta acción elimina el contenedor y todos sus widgets agrupados en un solo paso. ¿Confirmar?"
+                disabled={isSaving}
+            />
+        );
+
+        // D6: toggles pencil edit mode for a locked group container (UI-only, not a history step).
+        const handleToggleGroupEditMode = (widgetId: string) => {
+            setEditingGroupId(current => (current === widgetId ? undefined : widgetId));
+        };
+
+        // D6: exits pencil edit mode (click outside the group, Escape, unlock/delete).
+        const handleExitGroupEditMode = () => {
+            setEditingGroupId(undefined);
         };
 
         mainScrollable = true;
@@ -1898,6 +2013,9 @@ export default function DashboardBuilderPage() {
                             onDuplicate={handleDuplicateWidget}
                             onToggleGroupLock={handleToggleGroupLock}
                             onGroupLayoutCommit={handleGroupLayoutCommit}
+                            editingGroupId={editingGroupId}
+                            onToggleGroupEditMode={handleToggleGroupEditMode}
+                            onExitGroupEditMode={handleExitGroupEditMode}
                             onWidgetDragChange={(payload) => {
                                 setDraggedWidget(payload);
 
@@ -2048,6 +2166,8 @@ export default function DashboardBuilderPage() {
                 disabled={isSaving}
             />
 
+            {groupDeleteConfirmationDialog}
+
             <AdminDialog
                 open={blocker.state === 'blocked'}
                 title="Cambios sin guardar"
@@ -2079,4 +2199,11 @@ interface VariableDeletionState {
         id: string;
         name: string;
     }>;
+}
+
+/** D6: pending confirmation to delete a LOCKED group container together with its members. */
+interface GroupDeleteConfirmationState {
+    groupWidgetId: string;
+    groupTitle: string;
+    affectedMembers: Array<{ id: string; name: string }>;
 }
