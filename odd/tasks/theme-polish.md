@@ -59,6 +59,18 @@ Fix three things the user found testing the "Contorno" theme on main (2026-09-28
   the `icon` block would throw; today only built-in presets exist, so latent), SUGGESTIONs
   R3-reset-icon-tokens-unasserted and R3-tautological-p3-tests. Queued with the live-check fixes.
 
+- 2026-09-28: review follow-up (inline, parent — two mechanical files + test):
+  `ThemeButtonStyle.icon` optional; `buttonStyleToCssProperties` falls back to the shared
+  rest/hover/base strength so every theme still emits the full `--button-icon-*` set; reset test
+  now asserts the icon tokens are removed (closes R3-icon-style-required-shape and
+  R3-reset-icon-tokens-unasserted). RED: `Cannot read properties of undefined (reading 'rest')`;
+  GREEN 22/22; `npx tsc -b` clean, `npm run lint` clean, `npm test` 2893/2893.
+- 2026-09-28: style lab extended (user request): icon-only buttons section (rest/hover, radius,
+  fill, border, accent) with a catalog rail and builder view toolbar preview, and a tags section
+  (radius, fill, border, color tint) with ASIGNADO/PLANTA/EQUIPO/PUBLISHED/DRAFT; preset
+  "Contorno (HMI)" = the current Contorno theme. `fba6610`; artifact republished (v8).
+
 ## Next step
 
-User's live check (P4), then the queued review follow-ups, then merge to main.
+User's live check (P4), then merge to main. Tags in the theme engine only if the user asks after
+exploring them in the lab.
