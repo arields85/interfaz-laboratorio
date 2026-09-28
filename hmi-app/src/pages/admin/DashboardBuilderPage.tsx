@@ -102,6 +102,17 @@ const AUTO_VIEW_ICON_SELECTION = '__auto__';
 
 type DashboardViewIconSelection = DashboardViewIconKey | typeof AUTO_VIEW_ICON_SELECTION;
 
+/** D6: grammatically correct member count for the locked-group delete confirmation. */
+function describeGroupDeleteMemberCount(memberCount: number): string {
+    if (memberCount === 0) {
+        return 'ningún widget agrupado';
+    }
+    if (memberCount === 1) {
+        return 'su widget agrupado';
+    }
+    return `sus ${memberCount} widgets agrupados`;
+}
+
 // =============================================================================
 // DashboardBuilderPage
 // Editor visual del dashboard. Composición de canvas central con sidebars
@@ -1774,7 +1785,7 @@ export default function DashboardBuilderPage() {
                     setGroupDeleteConfirmation(null);
                 }}
                 warningMessage={groupDeleteConfirmation
-                    ? `Se van a eliminar el contenedor "${groupDeleteConfirmation.groupTitle}" y sus ${groupDeleteConfirmation.affectedMembers.length} widgets.`
+                    ? `Se van a eliminar el contenedor "${groupDeleteConfirmation.groupTitle}" y ${describeGroupDeleteMemberCount(groupDeleteConfirmation.affectedMembers.length)}.`
                     : ''}
                 affectedLabel="Widgets agrupados"
                 affectedItems={groupDeleteConfirmation?.affectedMembers ?? []}
