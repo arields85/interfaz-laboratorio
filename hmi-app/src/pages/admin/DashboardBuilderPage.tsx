@@ -119,6 +119,7 @@ export default function DashboardBuilderPage() {
     const canRedoDraft = draftHistory.canRedo;
     const resetDraftHistory = draftHistory.reset;
     const replaceDraftHistory = draftHistory.replaceCurrent;
+    const mapAllDraftHistory = draftHistory.mapAll;
     const [allDashboards, setAllDashboards] = useState<Dashboard[]>([]);
     const [allNodes, setAllNodes] = useState<HierarchyNode[]>([]);
     const [catalogVariables, setCatalogVariables] = useState<CatalogVariable[]>([]);
@@ -576,13 +577,17 @@ export default function DashboardBuilderPage() {
             setAllDashboards(refreshedDashboards);
             setCatalogVariables(refreshedCatalog);
             setStagedVariables((prev) => prev.filter((catalogVariable) => catalogVariable.id !== variableId));
-            setDraft((prev) => {
-                if (!prev) {
-                    return prev;
+            // The deletion is persisted and irreversible on the storage side, so it cannot be an
+            // undoable step: `mapAll` scrubs the deleted binding out of every existing history
+            // entry (past, current and future) in place, instead of `setDraft` recording a new
+            // step that would leave the rest of the stack (and redo) still pointing at it.
+            mapAllDraftHistory((dashboardValue) => {
+                if (!dashboardValue) {
+                    return dashboardValue;
                 }
 
                 return {
-                    ...mapDashboardWidgets(prev, (widget) => {
+                    ...mapDashboardWidgets(dashboardValue, (widget) => {
                         if (widget.binding?.catalogVariableId !== variableId) {
                             return widget;
                         }
@@ -596,7 +601,7 @@ export default function DashboardBuilderPage() {
                         };
                     }),
                 };
-            }, { coalesce: false });
+            });
             setOriginalConfig((prev) => {
                 if (!prev) {
                     return prev;

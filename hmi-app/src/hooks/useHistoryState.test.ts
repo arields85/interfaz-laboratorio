@@ -227,4 +227,36 @@ describe('useHistoryState', () => {
         expect(result.current.value).toBe(initial);
         expect(result.current.canUndo).toBe(false);
     });
+
+    it('mapAll() transforms every past, current and future entry without recording a step', () => {
+        const { result } = renderHook(() => useHistoryState({ count: 0, tag: 'a' }));
+
+        act(() => result.current.set({ count: 1, tag: 'a' }, { coalesce: false }));
+        act(() => result.current.set({ count: 2, tag: 'a' }, { coalesce: false }));
+        act(() => result.current.undo());
+
+        // Now: past = [{count:0,tag:'a'}], current = {count:1,tag:'a'}, future = [{count:2,tag:'a'}]
+        act(() => result.current.mapAll((entry) => ({ ...entry, tag: 'b' })));
+
+        expect(result.current.value).toEqual({ count: 1, tag: 'b' });
+        expect(result.current.canUndo).toBe(true);
+        expect(result.current.canRedo).toBe(true);
+
+        act(() => result.current.undo());
+        expect(result.current.value).toEqual({ count: 0, tag: 'b' });
+
+        act(() => result.current.redo());
+        act(() => result.current.redo());
+        expect(result.current.value).toEqual({ count: 2, tag: 'b' });
+    });
+
+    it('mapAll() does not create an undo step for the transform itself', () => {
+        const { result } = renderHook(() => useHistoryState({ count: 0 }));
+
+        act(() => result.current.mapAll((entry) => ({ ...entry, count: entry.count + 1 })));
+
+        expect(result.current.value).toEqual({ count: 1 });
+        expect(result.current.canUndo).toBe(false);
+        expect(result.current.canRedo).toBe(false);
+    });
 });

@@ -55,6 +55,13 @@ export interface HistoryStateApi<T> {
      * which must keep history intact).
      */
     replaceCurrent: (value: T) => void;
+    /**
+     * Applies `fn` to every entry of the history — past, current and future — without
+     * recording a step and without changing how many steps exist. Use this for a side effect
+     * that is itself not undoable (e.g. scrubbing a reference to something just deleted from
+     * storage) but that must not leave a stale reference reachable through undo or redo.
+     */
+    mapAll: (fn: (value: T) => T) => void;
 }
 
 interface TransientBase<T> {
@@ -198,6 +205,18 @@ export function useHistoryState<T>(
         }));
     }, []);
 
+    const mapAll = useCallback((fn: (value: T) => T) => {
+        setState((prevState) => ({
+            ...prevState,
+            past: prevState.past.map(fn),
+            current: fn(prevState.current),
+            future: prevState.future.map(fn),
+            transientBase: prevState.transientBase
+                ? { value: fn(prevState.transientBase.value) }
+                : null,
+        }));
+    }, []);
+
     return {
         value: state.current,
         set,
@@ -207,5 +226,6 @@ export function useHistoryState<T>(
         canRedo: state.future.length > 0,
         reset,
         replaceCurrent,
+        mapAll,
     };
 }
