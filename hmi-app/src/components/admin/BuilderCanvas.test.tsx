@@ -1662,6 +1662,51 @@ describe('BuilderCanvas', () => {
 
             await releasePointer(user, document.body, { clientX: 307, clientY: 382 });
         });
+
+        // R3-locked-resize-px-floor-untested-shrink (review WARNING, BuilderCanvas.tsx:786-798):
+        // the shrink coverage above only presses the SE handle (bottom-right anchor fixed at the
+        // container's top-left). This proves the same live-preview pixel floor holds from the
+        // OPPOSITE corner (NW: the bottom-right corner is the fixed anchor instead) — a locked
+        // container's resize preview can never shrink past its members' exact pixel bounding box,
+        // not just "close enough" to it.
+        it('floors the NW-handle live shrink preview exactly at the members pixel bounding box', async () => {
+            const user = userEvent.setup();
+
+            await renderInteractiveCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 }),
+                    makeLayout({ widgetId: 'member-1', x: 6, y: 6, w: 3, h: 3 }),
+                ],
+                selectedWidgetId: 'group-1',
+                cols: 40,
+                rows: 24,
+                resizeWidth: 1200,
+                resizeHeight: 900,
+            });
+
+            const handle = screen.getByTestId('builder-canvas-resize-handle-nw-group-1');
+            const containerItem = screen.getByTestId('builder-canvas-item-group-1');
+
+            // cellWidth = 1200/40 = 30px, rowHeight = 900/24 = 37.5px. member-1's pixel bounding
+            // box is left=180, top=225, right=270, bottom=337.5. The NW handle starts at the
+            // container's top-left corner (0,0); dragging it to (299,374) — almost onto the fixed
+            // bottom-right anchor (300,375) — tries to shrink the container down to ~1x1px.
+            await pressPointer(user, handle, { clientX: 0, clientY: 0 });
+            await movePointer(user, document.body, { clientX: 299, clientY: 374 });
+
+            // The bottom-right anchor stays exactly at (300, 375); left/top can never cross past
+            // the member's top-left corner (180, 225) — an exact floor, not an inequality.
+            expect(Number.parseFloat(containerItem.style.left)).toBe(180);
+            expect(Number.parseFloat(containerItem.style.top)).toBe(225);
+            expect(Number.parseFloat(containerItem.style.width)).toBe(120);
+            expect(Number.parseFloat(containerItem.style.height)).toBe(150);
+
+            await releasePointer(user, document.body, { clientX: 299, clientY: 374 });
+        });
     });
 
     // G7(d): the page tests mock BuilderCanvas entirely, which hid the lock-icon inversion, the
