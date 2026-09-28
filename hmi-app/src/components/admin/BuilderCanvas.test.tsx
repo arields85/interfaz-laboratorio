@@ -122,6 +122,9 @@ async function renderInteractiveCanvas(overrides?: {
     editingGroupId?: string;
     onToggleGroupEditMode?: (widgetId: string) => void;
     onExitGroupEditMode?: () => void;
+    onDuplicate?: (widgetId: string) => void;
+    placementSourceWidgetId?: string;
+    onDuplicatePlacementCommit?: (target: { x: number; y: number }) => void;
 }) {
     const widgets = overrides?.widgets ?? [makeWidget({ id: 'widget-1', title: 'Widget 1' })];
     const dashboard = makeDashboard({
@@ -148,6 +151,9 @@ async function renderInteractiveCanvas(overrides?: {
                 editingGroupId={overrides?.editingGroupId}
                 onToggleGroupEditMode={overrides?.onToggleGroupEditMode}
                 onExitGroupEditMode={overrides?.onExitGroupEditMode}
+                onDuplicate={overrides?.onDuplicate}
+                placementSourceWidgetId={overrides?.placementSourceWidgetId}
+                onDuplicatePlacementCommit={overrides?.onDuplicatePlacementCommit}
             />
         </div>,
     );
@@ -2142,6 +2148,14 @@ describe('BuilderCanvas', () => {
                     return;
                 }
 
+                // P8: this harness reproduces the pre-P8 immediate-duplicate wiring (still
+                // needed to prove the StrictMode double-invocation fix below), so it targets the
+                // SAME "offset below" spot `handleDuplicateWidget` used to pick by default.
+                const containerLayout = draft.layout.find((item) => item.widgetId === widgetId);
+                if (!containerLayout) {
+                    return;
+                }
+
                 const groupDuplication = duplicateLockedGroup(
                     widgetId,
                     draft.widgets,
@@ -2149,6 +2163,7 @@ describe('BuilderCanvas', () => {
                     cols,
                     rows,
                     generateWidgetId,
+                    { x: containerLayout.x, y: containerLayout.y + containerLayout.h },
                 );
 
                 if (!groupDuplication) {
@@ -2455,6 +2470,253 @@ describe('BuilderCanvas', () => {
             await releasePointer(user, memberItem, { clientX: 100, clientY: 100 });
 
             expect(onExitGroupEditMode).not.toHaveBeenCalled();
+        });
+    });
+
+    // P8: clicking the copy action starts a placement mode instead of duplicating immediately —
+    // a ghost (same look as the selection/drag preview, `GridSelectionFrame`'s `isHighlighted`)
+    // follows the pointer snapped to the grid, clamped inside it, and a click on the canvas
+    // (empty space or on top of any widget — overlap allowed) drops it. `placementSourceWidgetId`/
+    // `onDuplicatePlacementCommit` are controlled by the parent (see DashboardBuilderPage), so
+    // these tests drive them directly, exactly like `editingGroupId` above.
+    describe('P8: copy placement mode', () => {
+        // cellWidth = 1200 / 20 = 60px; rowHeight = 720 / 12 = 60px — a square grid keeps the
+        // pixel math in these tests exact (no floating rowHeight from an odd resize height).
+        function renderPlacementCanvas(overrides?: Parameters<typeof renderInteractiveCanvas>[0]) {
+            return renderInteractiveCanvas({
+                cols: 20,
+                rows: 12,
+                resizeWidth: 1200,
+                resizeHeight: 720,
+                layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+                ...overrides,
+            });
+        }
+
+        it('calls onDuplicate with the widget id when its copy action is clicked', async () => {
+            const user = userEvent.setup();
+            const onDuplicate = vi.fn();
+
+            await renderPlacementCanvas({ selectedWidgetId: 'widget-1', onDuplicate });
+
+            await user.click(screen.getByRole('button', { name: 'Duplicar widget' }));
+
+            expect(onDuplicate).toHaveBeenCalledWith('widget-1');
+        });
+
+        it('shows the copy action pressed only while its own widget is the one being placed', async () => {
+            const { rerender } = await renderPlacementCanvas({ selectedWidgetId: 'widget-1' });
+
+            expect(screen.getByRole('button', { name: 'Duplicar widget' })).toHaveAttribute('aria-pressed', 'false');
+
+            rerender(
+                <div style={{ width: '1200px', height: '720px' }}>
+                    <BuilderCanvas
+                        widgets={[makeWidget({ id: 'widget-1', title: 'Widget 1' })]}
+                        layout={[makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })]}
+                        equipmentMap={new Map()}
+                        cols={20}
+                        rows={12}
+                        selectedWidgetId="widget-1"
+                        placementSourceWidgetId="widget-1"
+                    />
+                </div>,
+            );
+
+            expect(screen.getByRole('button', { name: 'Duplicar widget' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        it('seeds the ghost at the source widget\'s own position before the pointer ever moves', async () => {
+            await renderPlacementCanvas({ placementSourceWidgetId: 'widget-1' });
+
+            const ghost = screen.getByTestId('builder-canvas-placement-ghost-source');
+            // widget-1 layout: x=2,y=1,w=3,h=2 -> left=120,top=60,width=180,height=120.
+            expect(ghost.style.left).toBe('120px');
+            expect(ghost.style.top).toBe('60px');
+            expect(ghost.style.width).toBe('180px');
+            expect(ghost.style.height).toBe('120px');
+        });
+
+        it('announces placement via an aria-live region while active, and clears it when not', async () => {
+            const { rerender } = await renderPlacementCanvas({});
+
+            expect(screen.getByTestId('builder-canvas-placement-hint')).toHaveTextContent('');
+
+            rerender(
+                <div style={{ width: '1200px', height: '720px' }}>
+                    <BuilderCanvas
+                        widgets={[makeWidget({ id: 'widget-1', title: 'Widget 1' })]}
+                        layout={[makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })]}
+                        equipmentMap={new Map()}
+                        cols={20}
+                        rows={12}
+                        placementSourceWidgetId="widget-1"
+                    />
+                </div>,
+            );
+
+            const hint = screen.getByTestId('builder-canvas-placement-hint');
+            expect(hint).toHaveAttribute('role', 'status');
+            expect(hint).toHaveAttribute('aria-live', 'polite');
+            expect(hint).toHaveTextContent('Haga clic para ubicar la copia. Escape para cancelar.');
+        });
+
+        it('moves the ghost to the grid cell under the pointer as it moves', async () => {
+            const user = userEvent.setup();
+            const { builderRoot } = await renderPlacementCanvas({ placementSourceWidgetId: 'widget-1' });
+
+            await movePointer(user, builderRoot, { clientX: 305, clientY: 245 });
+
+            const ghost = screen.getByTestId('builder-canvas-placement-ghost-source');
+            // floor(305/60)=5 -> left=300; floor(245/60)=4 -> top=240. Size unchanged (w=3,h=2).
+            expect(ghost.style.left).toBe('300px');
+            expect(ghost.style.top).toBe('240px');
+            expect(ghost.style.width).toBe('180px');
+            expect(ghost.style.height).toBe('120px');
+        });
+
+        it('clamps the ghost inside the grid bounds — never past the negative edge', async () => {
+            const user = userEvent.setup();
+            const { builderRoot } = await renderPlacementCanvas({ placementSourceWidgetId: 'widget-1' });
+
+            await movePointer(user, builderRoot, { clientX: -500, clientY: -500 });
+
+            const ghost = screen.getByTestId('builder-canvas-placement-ghost-source');
+            expect(ghost.style.left).toBe('0px');
+            expect(ghost.style.top).toBe('0px');
+        });
+
+        // The pre-existing bug this closes: a duplicate could previously be inserted outside/
+        // below the grid (a fixed "y += own height" offset never re-clamped against the bottom
+        // edge). The ghost — and therefore the drop position — is now always clamped.
+        it('clamps the ghost inside the grid bounds — never past the far edge', async () => {
+            const user = userEvent.setup();
+            const { builderRoot } = await renderPlacementCanvas({ placementSourceWidgetId: 'widget-1' });
+
+            await movePointer(user, builderRoot, { clientX: 5000, clientY: 5000 });
+
+            const ghost = screen.getByTestId('builder-canvas-placement-ghost-source');
+            // cols=20, w=3 -> max x = 17 -> left = 17*60 = 1020. rows=12, h=2 -> max y = 10 -> top = 600.
+            expect(ghost.style.left).toBe('1020px');
+            expect(ghost.style.top).toBe('600px');
+        });
+
+        it('drops the copy on empty canvas space at the clamped grid position, without selecting or deselecting', async () => {
+            const user = userEvent.setup();
+            const onDuplicatePlacementCommit = vi.fn();
+            const onWidgetSelect = vi.fn();
+            const { builderRoot } = await renderPlacementCanvas({
+                placementSourceWidgetId: 'widget-1',
+                onDuplicatePlacementCommit,
+                onWidgetSelect,
+            });
+
+            await movePointer(user, builderRoot, { clientX: 305, clientY: 245 });
+            await pressPointer(user, builderRoot, { clientX: 305, clientY: 245 });
+            await releasePointer(user, builderRoot, { clientX: 305, clientY: 245 });
+
+            expect(onDuplicatePlacementCommit).toHaveBeenCalledTimes(1);
+            expect(onDuplicatePlacementCommit).toHaveBeenCalledWith({ x: 5, y: 4 });
+            expect(onWidgetSelect).not.toHaveBeenCalled();
+        });
+
+        it('drops the copy on top of an existing widget instead of selecting or dragging it (overlap allowed)', async () => {
+            const user = userEvent.setup();
+            const onDuplicatePlacementCommit = vi.fn();
+            const onWidgetSelect = vi.fn();
+            const onLayoutCommit = vi.fn();
+
+            await renderPlacementCanvas({
+                widgets: [
+                    makeWidget({ id: 'widget-1', title: 'Widget 1' }),
+                    makeWidget({ id: 'widget-2', title: 'Widget 2' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 }),
+                    makeLayout({ widgetId: 'widget-2', x: 10, y: 5, w: 2, h: 2 }),
+                ],
+                placementSourceWidgetId: 'widget-1',
+                onDuplicatePlacementCommit,
+                onWidgetSelect,
+                onLayoutCommit,
+            });
+
+            const otherItem = screen.getByTestId('builder-canvas-item-widget-2');
+            // Inside widget-2's own cells (x=10..11, y=5..6): clientX=650 -> floor(650/60)=10.
+            await pressPointer(user, otherItem, { clientX: 650, clientY: 320 });
+            await releasePointer(user, otherItem, { clientX: 650, clientY: 320 });
+
+            expect(onDuplicatePlacementCommit).toHaveBeenCalledTimes(1);
+            expect(onWidgetSelect).not.toHaveBeenCalled();
+            expect(onLayoutCommit).not.toHaveBeenCalled();
+        });
+
+        it('renders the container plus one ghost per visible member as one rigid group, and commits the container\'s target', async () => {
+            const user = userEvent.setup();
+            const onDuplicatePlacementCommit = vi.fn();
+
+            const { builderRoot } = await renderPlacementCanvas({
+                widgets: [
+                    makeGroupWidget({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+                    makeWidget({ id: 'member-1', title: 'Member 1' }),
+                ],
+                layout: [
+                    makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 6, h: 4 }),
+                    makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
+                ],
+                placementSourceWidgetId: 'group-1',
+                onDuplicatePlacementCommit,
+            });
+
+            // Container ghost seeded at its own position: left=0,top=0,width=360(6*60),height=240(4*60).
+            const containerGhost = screen.getByTestId('builder-canvas-placement-ghost-source');
+            expect(containerGhost.style.left).toBe('0px');
+            expect(containerGhost.style.top).toBe('0px');
+
+            // Member ghost keeps its offset relative to the container (relX=1, relY=1 cells).
+            const memberGhost = screen.getByTestId('builder-canvas-placement-ghost-member-member-1');
+            expect(memberGhost.style.left).toBe('60px');
+            expect(memberGhost.style.top).toBe('60px');
+            expect(memberGhost.style.width).toBe('120px');
+            expect(memberGhost.style.height).toBe('120px');
+
+            // Move the whole rigid ghost by (5,4) cells and drop it — the member ghost must move
+            // by the SAME delta, and the commit target is the container's own top-left.
+            await movePointer(user, builderRoot, { clientX: 305, clientY: 245 });
+            expect(containerGhost.style.left).toBe('300px');
+            expect(containerGhost.style.top).toBe('240px');
+            expect(memberGhost.style.left).toBe('360px');
+            expect(memberGhost.style.top).toBe('300px');
+
+            await pressPointer(user, builderRoot, { clientX: 305, clientY: 245 });
+            await releasePointer(user, builderRoot, { clientX: 305, clientY: 245 });
+
+            expect(onDuplicatePlacementCommit).toHaveBeenCalledWith({ x: 5, y: 4 });
+        });
+
+        // Review follow-up: a resize handle sits above the ghost's own pointer-events-none
+        // overlay, so without a placement guard on it too, clicking it while placing started a
+        // resize instead of dropping the copy.
+        it('drops the copy instead of resizing when a selected widget\'s resize handle is clicked while placing', async () => {
+            const user = userEvent.setup();
+            const onDuplicatePlacementCommit = vi.fn();
+            const onLayoutCommit = vi.fn();
+
+            const { builderRoot } = await renderPlacementCanvas({
+                selectedWidgetId: 'widget-1',
+                placementSourceWidgetId: 'widget-1',
+                onDuplicatePlacementCommit,
+                onLayoutCommit,
+            });
+            await movePointer(user, builderRoot, { clientX: 305, clientY: 245 });
+
+            const handle = screen.getByTestId('builder-canvas-resize-handle-se-widget-1');
+            await pressPointer(user, handle, { clientX: 305, clientY: 245 });
+            await releasePointer(user, handle, { clientX: 305, clientY: 245 });
+
+            expect(onDuplicatePlacementCommit).toHaveBeenCalledTimes(1);
+            expect(onDuplicatePlacementCommit).toHaveBeenCalledWith({ x: 5, y: 4 });
+            expect(onLayoutCommit).not.toHaveBeenCalled();
         });
     });
 });

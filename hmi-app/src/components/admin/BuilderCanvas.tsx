@@ -72,6 +72,18 @@ interface BuilderCanvasProps {
     onToggleGroupEditMode?: (widgetId: string) => void;
     /** D6: exits pencil edit mode (click outside the group, Escape, unlock/delete). */
     onExitGroupEditMode?: () => void;
+    /**
+     * P8: the id of the widget currently being placed (its copy is following the pointer,
+     * snapped to the grid, waiting for a click to drop it). `undefined` when no placement is
+     * active. Controlled by the parent so the SAME placement can also be started from
+     * PropertyDock's duplicate action, not only this canvas's own hover action.
+     */
+    placementSourceWidgetId?: string;
+    /**
+     * P8: fired when a click on the canvas (empty space, or on top of any widget — overlap is
+     * allowed) drops the pending copy at this already-clamped grid position.
+     */
+    onDuplicatePlacementCommit?: (target: { x: number; y: number }) => void;
     cols?: number;
     rows?: number;
 }
@@ -125,6 +137,11 @@ function buildGroupMemberPixelBounds(
 
 function isFiniteLayout(layout: Pick<WidgetLayout, 'x' | 'y' | 'w' | 'h'>): boolean {
     return [layout.x, layout.y, layout.w, layout.h].every((value) => Number.isFinite(value));
+}
+
+/** P8: strips a clamped rect down to its top-left — the contract `onDuplicatePlacementCommit` expects. */
+function toGridPosition(rect: Pick<WidgetLayout, 'x' | 'y'>): { x: number; y: number } {
+    return { x: rect.x, y: rect.y };
 }
 
 function resolveCommittedLayout(args: {
@@ -279,6 +296,8 @@ export default function BuilderCanvas({
     editingGroupId,
     onToggleGroupEditMode,
     onExitGroupEditMode,
+    placementSourceWidgetId,
+    onDuplicatePlacementCommit,
     cols = DEFAULT_COLS,
     rows = DEFAULT_ROWS,
 }: BuilderCanvasProps) {
@@ -330,6 +349,122 @@ export default function BuilderCanvas({
     const interactionRef = useRef<InteractionState | null>(null);
     const interactionCleanupRef = useRef<(() => void) | null>(null);
 
+    // P8: click-to-place duplicate. `placementPointer` is the raw (real/visual px) pointer
+    // position, used only to anchor the visible cursor hint; `placementGridPosition` is the
+    // already-clamped grid cell the ghost (and an eventual drop) sits at — the single source of
+    // truth for both rendering the ghost and committing the copy.
+    const [placementPointer, setPlacementPointer] = useState<{ x: number; y: number } | null>(null);
+    const [placementGridPosition, setPlacementGridPosition] = useState<{ x: number; y: number } | null>(null);
+    // Tracks the PREVIOUS `placementSourceWidgetId` as state (not a ref — refs may not be read or
+    // written during render) so the seeding below can detect a genuine transition.
+    const [previousPlacementSourceWidgetId, setPreviousPlacementSourceWidgetId] = useState<string | undefined>(undefined);
+
+    // Resolves what the ghost looks like: the source widget's own size, plus — for a locked
+    // group — every visible member's rect expressed as an offset RELATIVE to the container, so
+    // the whole thing translates together as one rigid ghost (D5/D6). An unlocked group (D5: its
+    // copy is an empty container) or a plain widget never has member ghosts.
+    const placementSource = useMemo(() => {
+        if (!placementSourceWidgetId) {
+            return null;
+        }
+
+        const sourceWidget = widgets.find((item) => item.id === placementSourceWidgetId);
+        const sourceLayout = layout.find((item) => item.widgetId === placementSourceWidgetId);
+
+        if (!sourceWidget || !sourceLayout) {
+            return null;
+        }
+
+        const memberGhosts = isGroupWidget(sourceWidget) && sourceWidget.locked
+            ? resolveVisibleGroupMemberIds(sourceWidget)
+                .map((memberId) => {
+                    const memberLayout = layout.find((item) => item.widgetId === memberId);
+                    const memberWidget = widgets.find((item) => item.id === memberId);
+                    return memberLayout && memberWidget ? { memberLayout, memberWidget } : null;
+                })
+                .filter((entry): entry is { memberLayout: WidgetLayout; memberWidget: WidgetConfig } => entry !== null)
+                .map(({ memberLayout, memberWidget }) => ({
+                    id: memberLayout.widgetId,
+                    type: memberWidget.type,
+                    relX: memberLayout.x - sourceLayout.x,
+                    relY: memberLayout.y - sourceLayout.y,
+                    w: memberLayout.w,
+                    h: memberLayout.h,
+                }))
+            : [];
+
+        return { type: sourceWidget.type, w: sourceLayout.w, h: sourceLayout.h, memberGhosts };
+    }, [placementSourceWidgetId, widgets, layout, resolveVisibleGroupMemberIds]);
+
+    // Seeds the ghost at the SOURCE WIDGET'S OWN position the instant placement starts (or a
+    // different widget's placement replaces it), so it never flashes at (0,0) before the first
+    // pointer move. This is the React-documented "adjust state when a prop changes" pattern
+    // (https://react.dev/reference/react/useState#storing-information-from-previous-renders) —
+    // a synchronous derived-state adjustment during render, guarded by the previous-id state so it
+    // only runs on a genuine transition, NOT an effect (which would cascade an extra render for
+    // no benefit here, since there is no external system to synchronize with).
+    if (placementSourceWidgetId !== previousPlacementSourceWidgetId) {
+        setPreviousPlacementSourceWidgetId(placementSourceWidgetId);
+
+        if (!placementSourceWidgetId) {
+            setPlacementPointer(null);
+            setPlacementGridPosition(null);
+        }
+        else {
+            const sourceLayout = layout.find((item) => item.widgetId === placementSourceWidgetId);
+            setPlacementGridPosition(sourceLayout ? toGridPosition(clampWidgetBounds(sourceLayout, cols, rows)) : null);
+        }
+    }
+
+    // Tracks the pointer the whole time placement is active (no button needs to stay held — this
+    // is a MODE, not a drag) and snaps the ghost's top-left to the grid cell under it, clamped
+    // inside the grid bounds (P8: also the fix for the pre-existing bug where a duplicate could
+    // land outside/below the grid).
+    useEffect(() => {
+        if (!placementSourceWidgetId || !placementSource) {
+            return;
+        }
+
+        const handlePointerMove = (event: PointerEvent) => {
+            setPlacementPointer({ x: event.clientX, y: event.clientY });
+
+            const container = containerRef.current;
+            if (!container || metrics.cellWidth <= 0 || metrics.rowHeight <= 0) {
+                return;
+            }
+
+            const rect = container.getBoundingClientRect();
+            const zoom = getEffectiveZoom();
+            const localX = visualToLayoutPx(event.clientX - rect.left, zoom);
+            const localY = visualToLayoutPx(event.clientY - rect.top, zoom);
+            const gridX = Math.floor(localX / metrics.cellWidth);
+            const gridY = Math.floor(localY / metrics.rowHeight);
+
+            setPlacementGridPosition(toGridPosition(clampWidgetBounds(
+                { x: gridX, y: gridY, w: placementSource.w, h: placementSource.h },
+                cols,
+                rows,
+            )));
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        return () => window.removeEventListener('pointermove', handlePointerMove);
+    }, [placementSourceWidgetId, placementSource, cols, rows, metrics.cellWidth, metrics.rowHeight, containerRef]);
+
+    // A click anywhere on the canvas — empty space, or on top of any widget, overlap is allowed —
+    // drops the pending copy instead of selecting/dragging whatever was clicked. Returns whether
+    // it consumed the pointerdown, so callers skip their normal handling when it did.
+    const commitPlacementAt = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+        if (!placementSourceWidgetId || !placementGridPosition || event.button !== 0) {
+            return false;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        onDuplicatePlacementCommit?.(placementGridPosition);
+        return true;
+    };
+
     const clearInteraction = useCallback(() => {
         interactionCleanupRef.current?.();
         interactionCleanupRef.current = null;
@@ -338,11 +473,15 @@ export default function BuilderCanvas({
         setBodyCursor(null);
     }, []);
 
+    // P8: while placing a copy (and no other interaction — e.g. a resize — is overriding the
+    // cursor already), the body cursor shows the 'copy' feedback instead of the default arrow.
+    const effectiveBodyCursor = bodyCursor ?? (placementSourceWidgetId ? 'copy' : null);
+
     useEffect(() => {
         const previousCursor = document.body.style.getPropertyValue('cursor');
 
-        if (bodyCursor) {
-            document.body.style.setProperty('cursor', bodyCursor);
+        if (effectiveBodyCursor) {
+            document.body.style.setProperty('cursor', effectiveBodyCursor);
         }
         else {
             document.body.style.removeProperty('cursor');
@@ -356,7 +495,7 @@ export default function BuilderCanvas({
                 document.body.style.removeProperty('cursor');
             }
         };
-    }, [bodyCursor]);
+    }, [effectiveBodyCursor]);
 
     useEffect(() => () => {
         clearInteraction();
@@ -638,6 +777,9 @@ export default function BuilderCanvas({
             data-testid="builder-canvas-root"
             tabIndex={0}
             onPointerDown={(event) => {
+                if (commitPlacementAt(event)) {
+                    return;
+                }
                 if (event.button === 0 && !(event.target as Element).closest('[data-testid^="builder-canvas-item-"]')) {
                     event.currentTarget.focus();
                     onWidgetSelect?.(undefined);
@@ -870,7 +1012,15 @@ export default function BuilderCanvas({
                                 data-testid={`builder-canvas-item-${widget.id}`}
                                 className={`relative group cursor-grab transition-opacity duration-200 ${widget.type === 'text-title' ? 'rounded-none' : 'rounded-xl'}`}
                                 style={itemStyle}
-                                onPointerDown={(event) => beginInteraction(event, item, 'move')}
+                                onPointerDown={(event) => {
+                                    // P8: overlap is allowed while placing — a click on top of an
+                                    // existing widget drops the copy there instead of
+                                    // selecting/dragging that widget.
+                                    if (commitPlacementAt(event)) {
+                                        return;
+                                    }
+                                    beginInteraction(event, item, 'move');
+                                }}
                             >
                                 <GridSelectionFrame
                                     isSelected={isSelected}
@@ -920,6 +1070,11 @@ export default function BuilderCanvas({
                                             label: 'Duplicar widget',
                                             icon: Copy,
                                             onClick: () => onDuplicate?.(widget.id),
+                                            // P8: pressed while THIS widget's copy is the one
+                                            // currently being placed — clicking it again is one
+                                            // of the documented cancel paths (the parent toggles
+                                            // it off when the id matches).
+                                            isActive: placementSourceWidgetId === widget.id,
                                         },
                                         {
                                             label: 'Eliminar widget',
@@ -936,7 +1091,16 @@ export default function BuilderCanvas({
                                             widgetId={widget.id}
                                             direction={dir}
                                             widgetInset={resolveWidgetSurfaceInset(widget)}
-                                            onPointerDown={(event) => beginInteraction(event, item, `resize-${dir}`)}
+                                            onPointerDown={(event) => {
+                                                // P8: a resize handle sits above the ghost's own
+                                                // pointer-events-none overlay, so without this
+                                                // guard it would start a resize instead of
+                                                // dropping the copy while placing.
+                                                if (commitPlacementAt(event)) {
+                                                    return;
+                                                }
+                                                beginInteraction(event, item, `resize-${dir}`);
+                                            }}
                                         />
                                     ))
                                 )}
@@ -963,6 +1127,74 @@ export default function BuilderCanvas({
                         })}
                     </div>
 
+                    {/* P8: the placement ghost — same look as the selection/drag preview
+                        (GridSelectionFrame's existing `isHighlighted` look, previously unused in
+                        the builder), snapped to the grid, clamped inside it. For a locked group
+                        it is the container plus one rect per visible member, translated together
+                        as one rigid ghost. */}
+                    {placementSourceWidgetId && placementSource && placementGridPosition && (() => {
+                        const containerPx = layoutToPixelBounds(
+                            {
+                                x: placementGridPosition.x,
+                                y: placementGridPosition.y,
+                                w: placementSource.w,
+                                h: placementSource.h,
+                            },
+                            metrics,
+                        );
+                        return (
+                            <div
+                                data-testid="builder-canvas-placement-ghost"
+                                aria-hidden="true"
+                                className="pointer-events-none absolute inset-0 z-30"
+                            >
+                                <div
+                                    data-testid="builder-canvas-placement-ghost-source"
+                                    className="absolute"
+                                    style={{
+                                        left: `${containerPx.left}px`,
+                                        top: `${containerPx.top}px`,
+                                        width: `${containerPx.width}px`,
+                                        height: `${containerPx.height}px`,
+                                    }}
+                                >
+                                    <GridSelectionFrame
+                                        isSelected={false}
+                                        isHighlighted
+                                        radius={getWidgetCornerRadius(placementSource.type)}
+                                        inset={resolveWidgetSurfaceInset({ type: placementSource.type })}
+                                    />
+                                </div>
+                                {placementSource.memberGhosts.map((member) => {
+                                    const memberPx = layoutToPixelBounds(
+                                        {
+                                            x: placementGridPosition.x + member.relX,
+                                            y: placementGridPosition.y + member.relY,
+                                            w: member.w,
+                                            h: member.h,
+                                        },
+                                        metrics,
+                                    );
+                                    return (
+                                        <div
+                                            key={member.id}
+                                            data-testid={`builder-canvas-placement-ghost-member-${member.id}`}
+                                            className="absolute"
+                                            style={{
+                                                left: `${memberPx.left}px`,
+                                                top: `${memberPx.top}px`,
+                                                width: `${memberPx.width}px`,
+                                                height: `${memberPx.height}px`,
+                                            }}
+                                        >
+                                            <GridSelectionFrame isSelected={false} isHighlighted inset={resolveWidgetSurfaceInset({ type: member.type })} />
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })()}
+
                     {resizeTooltipLayout && interaction && (() => {
                         const isLeftHandle = interaction.type === 'resize-nw' || interaction.type === 'resize-sw';
                         const isTopHandle = interaction.type === 'resize-nw' || interaction.type === 'resize-ne';
@@ -981,6 +1213,19 @@ export default function BuilderCanvas({
                             />
                         );
                     })()}
+
+                    {/* P8: visible copy of the aria-live hint above, purely decorative (the
+                        sr-only region already owns the accessible announcement). */}
+                    {placementSourceWidgetId && placementPointer && (
+                        <CursorTooltip
+                            data-testid="builder-canvas-placement-cursor-hint"
+                            aria-hidden="true"
+                            label="Haga clic para ubicar la copia. Escape para cancelar."
+                            x={visualToLayoutPx(placementPointer.x)}
+                            y={visualToLayoutPx(placementPointer.y)}
+                            anchor="se"
+                        />
+                    )}
                 </div>
             ) : null}
 
@@ -992,6 +1237,13 @@ export default function BuilderCanvas({
                     />
                 </div>
             )}
+
+            {/* P8: always mounted (last child, so it never disturbs `firstElementChild`-based
+                measurement assertions) so screen readers announce the moment placement starts,
+                not only once the ghost has a first pointer position to render at. */}
+            <div data-testid="builder-canvas-placement-hint" role="status" aria-live="polite" className="sr-only">
+                {placementSourceWidgetId ? 'Haga clic para ubicar la copia. Escape para cancelar.' : ''}
+            </div>
         </div>
     );
 }

@@ -51,7 +51,7 @@ import { getAncestors } from '../../utils/hierarchyTree';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
 import { migrateLegacyBindings } from '../../utils/catalogMigration';
 import { supportsCatalogVariable, getDefaultIcon, getDefaultSize } from '../../utils/widgetCapabilities';
-import { DEFAULT_COLS, DEFAULT_ROWS } from '../../utils/gridConfig';
+import { clampWidgetBounds, DEFAULT_COLS, DEFAULT_ROWS } from '../../utils/gridConfig';
 import { buildCatalogVariableId } from '../../utils/catalogVariableId';
 import { getUsedCatalogVariableIdsForWidget, hasDuplicateCatalogBindings } from '../../utils/catalogBindingIdentity';
 import { useUIStore } from '../../store/ui.store';
@@ -167,6 +167,9 @@ export default function DashboardBuilderPage() {
     const [, setNodeTypeLabelsVersion] = useState(0);
     // D6: pencil edit mode is UI-only state — never persisted, never a history step.
     const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
+    // P8: click-to-place duplicate. UI-only state (mirrors editingGroupId) — a placement that is
+    // never committed creates nothing and leaves no history step.
+    const [duplicatePlacementSourceWidgetId, setDuplicatePlacementSourceWidgetId] = useState<string | undefined>();
     const [groupDeleteConfirmation, setGroupDeleteConfirmation] = useState<GroupDeleteConfirmationState | null>(null);
 
     const isGridVisible = useUIStore((state) => state.isGridVisible);
@@ -242,8 +245,16 @@ export default function DashboardBuilderPage() {
                 return;
             }
 
-            // D6: Escape exits pencil edit mode for a locked group, if one is active.
+            // P8: Escape cancels a pending duplicate placement first (nothing created, no history
+            // step) — checked before D6's pencil edit mode, since placement is the more transient
+            // of the two and the documented cancel path takes priority.
             if (event.key === 'Escape') {
+                if (duplicatePlacementSourceWidgetId) {
+                    event.preventDefault();
+                    setDuplicatePlacementSourceWidgetId(undefined);
+                    return;
+                }
+                // D6: Escape exits pencil edit mode for a locked group, if one is active.
                 if (editingGroupId) {
                     event.preventDefault();
                     setEditingGroupId(undefined);
@@ -270,7 +281,21 @@ export default function DashboardBuilderPage() {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isAnyDialogOpen, isSaving, undoDraft, redoDraft, editingGroupId]);
+    }, [isAnyDialogOpen, isSaving, undoDraft, redoDraft, editingGroupId, duplicatePlacementSourceWidgetId]);
+
+    // P8: a pending placement exits automatically if its source widget disappears from the
+    // active view — deleted mid-placement, or the user switched to a different view — mirroring
+    // the same safety net D6 already applies to pencil edit mode above.
+    useEffect(() => {
+        if (!duplicatePlacementSourceWidgetId || !draft) {
+            return;
+        }
+        const view = getActiveDashboardView(draft, selectedViewId);
+        const stillExists = view.widgets.some((widget) => widget.id === duplicatePlacementSourceWidgetId);
+        if (!stillExists) {
+            setDuplicatePlacementSourceWidgetId(undefined);
+        }
+    }, [duplicatePlacementSourceWidgetId, draft, selectedViewId]);
 
     // D6: pencil edit mode exits automatically when its group gets unlocked or deleted — a
     // later re-lock of the same container must NOT silently resume it.
@@ -1360,14 +1385,45 @@ export default function DashboardBuilderPage() {
             handleDropWidgetAtSlot(widgetId, targetSlot);
         };
 
-        const handleDuplicateWidget = (widgetId?: string) => {
+        // P8: clicking the copy action no longer inserts the copy immediately — it starts (or, if
+        // this same widget's copy is already being placed, cancels — one of the three documented
+        // cancel paths) a placement mode: BuilderCanvas shows a ghost following the pointer, and a
+        // click on the canvas commits it (`handleCommitDuplicatePlacement` below). Called from
+        // BOTH the canvas's own "Duplicar widget" hover action AND PropertyDock's duplicate
+        // action, so a widget id explicitly resolves the target the same way the old immediate
+        // duplicate did (defaulting to the current selection).
+        const handleStartDuplicatePlacement = (widgetId?: string) => {
             const targetWidgetId = widgetId ?? selectedWidgetId;
 
             if (!targetWidgetId) return;
 
+            const targetWidget = activeView.widgets.find((widget) => widget.id === targetWidgetId);
+            const targetLayout = activeView.layout.find((layoutItem) => layoutItem.widgetId === targetWidgetId);
+            if (!targetWidget || !targetLayout) return;
+
+            setDuplicatePlacementSourceWidgetId((current) => (current === targetWidgetId ? undefined : targetWidgetId));
+        };
+
+        // P8: a click on the canvas dropped the pending copy at `target` (already clamped inside
+        // the grid bounds by BuilderCanvas, reusing `clampWidgetBounds` — re-clamped here too as a
+        // defensive final guard, cheap and correct regardless of what the caller computed). Ends
+        // the placement and selects the new copy, all as ONE history step.
+        const handleCommitDuplicatePlacement = (target: { x: number; y: number }) => {
+            const targetWidgetId = duplicatePlacementSourceWidgetId;
+            if (!targetWidgetId) return;
+
             const selectedWidget = activeView.widgets.find((widget) => widget.id === targetWidgetId);
             const selectedLayout = activeView.layout.find((layoutItem) => layoutItem.widgetId === targetWidgetId);
-            if (!selectedWidget || !selectedLayout) return;
+            if (!selectedWidget || !selectedLayout) {
+                setDuplicatePlacementSourceWidgetId(undefined);
+                return;
+            }
+
+            const clampedTarget = clampWidgetBounds(
+                { x: target.x, y: target.y, w: selectedLayout.w, h: selectedLayout.h },
+                draft.cols,
+                draft.rows,
+            );
 
             // D5: duplicating a LOCKED group duplicates the whole group (container + members,
             // already grouped, new ids) as one copy. Every other case — an unlocked container, or
@@ -1382,6 +1438,7 @@ export default function DashboardBuilderPage() {
                     draft.cols,
                     draft.rows,
                     generateWidgetId,
+                    clampedTarget,
                     headerWidgetIdSet,
                 );
 
@@ -1396,6 +1453,7 @@ export default function DashboardBuilderPage() {
                     }, { coalesce: false });
 
                     setSelectedWidgetId(groupDuplication.newSelectedWidgetId);
+                    setDuplicatePlacementSourceWidgetId(undefined);
                     return;
                 }
             }
@@ -1413,7 +1471,8 @@ export default function DashboardBuilderPage() {
             const newLayout: WidgetLayout = {
                 ...JSON.parse(JSON.stringify(selectedLayout)),
                 widgetId: newId,
-                y: selectedLayout.y + selectedLayout.h,
+                x: clampedTarget.x,
+                y: clampedTarget.y,
             };
 
             setDraft(prev => {
@@ -1426,6 +1485,7 @@ export default function DashboardBuilderPage() {
             }, { coalesce: false });
 
             setSelectedWidgetId(newId);
+            setDuplicatePlacementSourceWidgetId(undefined);
         };
 
         // Las ediciones desde PropertyDock pueden ser tipeo continuo (título, etc.) — se dejan
@@ -1974,7 +2034,7 @@ export default function DashboardBuilderPage() {
                 onCreateVariable={handleCreateVariable}
                 onDeleteVariable={handleRequestVariableDeletion}
                 onDelete={handleDeleteWidget}
-                onDuplicate={handleDuplicateWidget}
+                onDuplicate={handleStartDuplicatePlacement}
                 onDeselect={() => setSelectedWidgetId(undefined)}
             />
         );
@@ -2036,12 +2096,14 @@ export default function DashboardBuilderPage() {
                             onResize={handleResizeLayout}
                             onLayoutCommit={handleUpdateLayout}
                             onDelete={handleDeleteWidget}
-                            onDuplicate={handleDuplicateWidget}
+                            onDuplicate={handleStartDuplicatePlacement}
                             onToggleGroupLock={handleToggleGroupLock}
                             onGroupLayoutCommit={handleGroupLayoutCommit}
                             editingGroupId={editingGroupId}
                             onToggleGroupEditMode={handleToggleGroupEditMode}
                             onExitGroupEditMode={handleExitGroupEditMode}
+                            placementSourceWidgetId={duplicatePlacementSourceWidgetId}
+                            onDuplicatePlacementCommit={handleCommitDuplicatePlacement}
                             onWidgetDragChange={(payload) => {
                                 setDraggedWidget(payload);
 

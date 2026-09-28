@@ -413,13 +413,14 @@ export interface GroupDuplicationResult {
  * D5 copy: duplicating a LOCKED group duplicates the container and every one of its members as
  * one new, already-grouped copy — new ids throughout, `memberWidgetIds` remapped to the new
  * member ids, `locked: true`, stacking (container before members) preserved. The whole group
- * offsets the same way a single-widget duplicate does (`y += own height`), applied as one rigid
- * body and clamped to the grid like a group move (G3). `excludedWidgetIds` (defensive, mirrors
- * G4's membership exclusion) keeps a header-promoted id out of the copy even if it were still
- * listed. Returns `null` when `groupWidgetId` is not a currently locked group with a resolvable
- * container layout — callers duplicate an unlocked container or a plain member widget (including
- * one that happens to be a group member) through the regular single-widget duplicate path
- * instead, since D5 only special-cases a locked group's own copy.
+ * moves as one rigid body to `targetContainerPosition` (P8: the container's target top-left, from
+ * BuilderCanvas's click-to-place ghost — no longer a fixed "offset below" the original), clamped
+ * to the grid like a group move (G3) so the copy can never land outside it. `excludedWidgetIds`
+ * (defensive, mirrors G4's membership exclusion) keeps a header-promoted id out of the copy even
+ * if it were still listed. Returns `null` when `groupWidgetId` is not a currently locked group
+ * with a resolvable container layout — callers duplicate an unlocked container or a plain member
+ * widget (including one that happens to be a group member) through the regular single-widget
+ * duplicate path instead, since D5 only special-cases a locked group's own copy.
  */
 export function duplicateLockedGroup(
     groupWidgetId: string,
@@ -428,6 +429,7 @@ export function duplicateLockedGroup(
     cols: number,
     rows: number,
     generateId: (type: string) => string,
+    targetContainerPosition: { x: number; y: number },
     excludedWidgetIds: ReadonlySet<string> = new Set(),
 ): GroupDuplicationResult | null {
     const group = widgets.find((widget) => widget.id === groupWidgetId);
@@ -451,8 +453,15 @@ export function duplicateLockedGroup(
         .filter((entry): entry is { widget: WidgetConfig; layout: WidgetLayout } => entry !== null);
 
     const groupRects: LayoutRect[] = [containerLayout, ...members.map((member) => member.layout)];
-    // Same offset a single-widget duplicate uses (y += own height), clamped as one rigid body.
-    const { dx, dy } = clampGroupMoveDelta(groupRects, 0, containerLayout.h, cols, rows);
+    // The rigid group moves from the container's CURRENT position to its requested target,
+    // clamped as one body (never shrinks it, only keeps it fully inside the grid).
+    const { dx, dy } = clampGroupMoveDelta(
+        groupRects,
+        targetContainerPosition.x - containerLayout.x,
+        targetContainerPosition.y - containerLayout.y,
+        cols,
+        rows,
+    );
 
     const newContainerId = generateId(group.type);
     const idByOldMemberId = new Map(members.map((member) => [member.widget.id, generateId(member.widget.type)]));
@@ -502,7 +511,12 @@ export function duplicateLockedGroup(
  * exactly on the grid lines instead of stopping short like a normal widget. A member placed inside
  * the container still keeps its own `--widget-spacing` inset, so its frame never coincides with or
  * overlaps the container's — the container simply reaches all the way out to the shared grid line.
+ *
+ * Takes only `type` (not a full `WidgetConfig`) so P8's placement ghost — which only knows the
+ * source widget's and each member's TYPE, not a full config — can call this exact same rule
+ * instead of re-deriving it, keeping the ghost's inset a single source of truth with the real,
+ * already-placed widget.
  */
-export function resolveWidgetSurfaceInset(widget: WidgetConfig): string {
-    return isGroupWidget(widget) ? '0px' : 'var(--widget-spacing)';
+export function resolveWidgetSurfaceInset(widget: Pick<WidgetConfig, 'type'>): string {
+    return widget.type === 'group' ? '0px' : 'var(--widget-spacing)';
 }

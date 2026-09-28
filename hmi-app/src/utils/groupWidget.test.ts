@@ -672,9 +672,13 @@ describe('duplicateLockedGroup', () => {
         const widgets = [makeGroup({ id: 'group-1', locked: false, memberWidgetIds: [] })];
         const layout = [makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 10 })];
 
-        expect(duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId)).toBeNull();
+        expect(duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId, { x: 0, y: 4 })).toBeNull();
     });
 
+    // P8: the caller now resolves WHERE the copy lands (click-to-place on the canvas) instead of
+    // this helper picking a fixed offset — but the offset-below target used across these tests
+    // ({x: containerLayout.x, y: containerLayout.y + containerLayout.h}) still reproduces the old
+    // "y += own height" default exactly, so the rest of each assertion is unchanged.
     it('duplicates the container and every member with new, remapped ids as one new grouped copy', () => {
         idCounter = 0;
         const widgets = [
@@ -686,7 +690,7 @@ describe('duplicateLockedGroup', () => {
             makeLayout({ widgetId: 'member-1', x: 1, y: 1, w: 2, h: 2 }),
         ];
 
-        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId);
+        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId, { x: 0, y: 4 });
 
         expect(result).not.toBeNull();
         const newContainer = result!.widgets.find((widget) => widget.id === 'new-group-1') as GroupWidgetConfig;
@@ -726,7 +730,9 @@ describe('duplicateLockedGroup', () => {
             makeLayout({ widgetId: 'member-1', x: 1, y: 21, w: 2, h: 2 }),
         ];
 
-        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId);
+        // Target (0, 24) is past the bottom edge (rows=24) — the rigid group must clamp back to
+        // the closest in-bounds position instead of the caller's raw target.
+        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId, { x: 0, y: 24 });
 
         const newContainerLayout = result!.layout.find((item) => item.widgetId === 'new-group-1');
         expect(newContainerLayout).toEqual({ widgetId: 'new-group-1', x: 0, y: 20, w: 10, h: 4 });
@@ -745,7 +751,7 @@ describe('duplicateLockedGroup', () => {
             makeLayout({ widgetId: 'header-widget', x: 3, y: 1, w: 2, h: 2 }),
         ];
 
-        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId, new Set(['header-widget']));
+        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId, { x: 0, y: 4 }, new Set(['header-widget']));
 
         const newContainer = result!.widgets.find((widget) => widget.id === 'new-group-1') as GroupWidgetConfig;
         expect(newContainer.memberWidgetIds).toEqual(['new-metric-card-2']);
@@ -771,7 +777,7 @@ describe('duplicateLockedGroup', () => {
             makeLayout({ widgetId: 'member-2', x: 5, y: 1, w: 2, h: 2 }),
         ];
 
-        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId);
+        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId, { x: 0, y: 4 });
 
         expect(result).not.toBeNull();
         const newContainer = result!.widgets.find((widget) => widget.id === 'new-group-1') as GroupWidgetConfig;
@@ -784,6 +790,28 @@ describe('duplicateLockedGroup', () => {
 
         const newMemberOneLayouts = result!.layout.filter((item) => item.widgetId === newMemberOneCopies[0].id);
         expect(newMemberOneLayouts).toHaveLength(1);
+    });
+
+    // P8: the copy lands exactly where the caller (BuilderCanvas placement mode) says to drop it,
+    // not at a fixed "offset below" — members keep their relative offset from the container.
+    it('duplicates the whole rigid group at the exact target position the caller requests', () => {
+        idCounter = 0;
+        const widgets = [
+            makeGroup({ id: 'group-1', locked: true, memberWidgetIds: ['member-1'] }),
+            makeWidget({ id: 'member-1' }),
+        ];
+        const layout = [
+            makeLayout({ widgetId: 'group-1', x: 0, y: 0, w: 10, h: 4 }),
+            makeLayout({ widgetId: 'member-1', x: 3, y: 1, w: 2, h: 2 }),
+        ];
+
+        const result = duplicateLockedGroup('group-1', widgets, layout, 40, 24, nextId, { x: 12, y: 8 });
+
+        const newContainerLayout = result!.layout.find((item) => item.widgetId === 'new-group-1');
+        const newMemberLayout = result!.layout.find((item) => item.widgetId === 'new-metric-card-2');
+        expect(newContainerLayout).toEqual({ widgetId: 'new-group-1', x: 12, y: 8, w: 10, h: 4 });
+        // Member kept its relative offset from the container (x: 3-0=3, y: 1-0=1) applied at the new spot.
+        expect(newMemberLayout).toEqual({ widgetId: 'new-metric-card-2', x: 15, y: 9, w: 2, h: 2 });
     });
 });
 

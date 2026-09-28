@@ -388,6 +388,7 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         editingGroupId,
         onToggleGroupEditMode,
         onExitGroupEditMode,
+        onDuplicatePlacementCommit,
     }: {
         cols: number;
         rows: number;
@@ -402,6 +403,7 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
         editingGroupId?: string;
         onToggleGroupEditMode?: (widgetId: string) => void;
         onExitGroupEditMode?: () => void;
+        onDuplicatePlacementCommit?: (target: { x: number; y: number }) => void;
     }) => (
         builderCanvasMock({ cols, rows, layout, widgets, onWidgetSelect }),
         <div
@@ -458,6 +460,11 @@ vi.mock('../../components/admin/BuilderCanvas', () => ({
                     Duplicar {widget.id}
                 </button>
             ))}
+            {onDuplicatePlacementCommit && (
+                <button type="button" onClick={() => onDuplicatePlacementCommit({ x: 0, y: 4 })}>
+                    Confirmar ubicación de copia
+                </button>
+            )}
             {onDelete && widgets.map((widget) => (
                 <button
                     key={`del-${widget.id}`}
@@ -1772,9 +1779,12 @@ describe('DashboardBuilderPage', () => {
         });
 
         await user.click(screen.getByRole('button', { name: 'Seleccionar Technical widget' }));
+        // P8: PropertyDock's duplicate action only STARTS placement now — a click on the canvas
+        // (simulated here via the mock's commit trigger) drops the copy.
         await act(async () => {
             getLatestPropertyDockProps()?.onDuplicate?.();
         });
+        await user.click(screen.getByRole('button', { name: 'Confirmar ubicación de copia' }));
 
         await waitFor(() => {
             expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(3);
@@ -2417,6 +2427,10 @@ describe('DashboardBuilderPage undo/redo', () => {
             }));
 
             await user.click(screen.getByRole('button', { name: 'Duplicar group-1' }));
+            // P8: starts placement; the mock's commit trigger simulates a click on the canvas at
+            // (0, 4) — the same "offset below" spot the old immediate duplicate used, so the
+            // layout assertions below stay unchanged.
+            await user.click(screen.getByRole('button', { name: 'Confirmar ubicación de copia' }));
 
             await waitFor(() => {
                 expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(4);
@@ -2465,6 +2479,7 @@ describe('DashboardBuilderPage undo/redo', () => {
             }));
 
             await user.click(screen.getByRole('button', { name: 'Duplicar group-1' }));
+            await user.click(screen.getByRole('button', { name: 'Confirmar ubicación de copia' }));
 
             await waitFor(() => {
                 expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(3);
@@ -2493,6 +2508,7 @@ describe('DashboardBuilderPage undo/redo', () => {
             }));
 
             await user.click(screen.getByRole('button', { name: 'Duplicar widget-1' }));
+            await user.click(screen.getByRole('button', { name: 'Confirmar ubicación de copia' }));
 
             await waitFor(() => {
                 expect(getBuilderCanvasSnapshot().widgetIds).toHaveLength(3);

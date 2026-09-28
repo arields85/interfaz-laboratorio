@@ -126,10 +126,25 @@ Cada contenedor **bloqueado** ofrece una acción adicional "Editar contenido" (L
 
 ### Copiar y eliminar (D5, con la excepción D6 para eliminar bloqueado)
 
+- Copiar (cualquier widget, no solo un contenedor) ya NO inserta la copia al instante: entra en
+  **modo de ubicación** (P8). Clic en la acción "Duplicar widget" (o en el botón de duplicar del
+  `PropertyDock`) muestra un fantasma del tamaño del original — un contenedor bloqueado se ve como
+  UN fantasma rígido (contenedor + miembros, cada uno con su offset relativo) — que sigue el
+  puntero, siempre encastrado a la grilla y clampeado dentro de sus límites (reutiliza
+  `clampWidgetBounds`: una copia ya nunca puede caer fuera o debajo de la grilla). Un clic en
+  cualquier parte del canvas — espacio vacío o encima de otro widget, la superposición está
+  permitida — la ubica ahí; termina SELECCIONADA y es un único paso de historial
+  (`{ coalesce: false }`). El fantasma reutiliza el look de selección/drag existente
+  (`GridSelectionFrame` con `isHighlighted`), sin estilos nuevos.
+- Cancelar (nada se crea, ningún paso de historial): Escape, volver a hacer clic en la misma
+  acción de copiar, o salir del builder. El estado de ubicación es UI-only
+  (`duplicatePlacementSourceWidgetId` en `DashboardBuilderPage`), como `editingGroupId` — nunca se
+  persiste ni entra al historial de undo/redo, y se cancela solo si su widget fuente desaparece de
+  la vista activa (eliminado, o cambio de vista).
 - Copiar un contenedor **cerrado** duplica el grupo completo (contenedor + miembros, ya
-  agrupados, con ids nuevos); `sanitizeGroupMemberIds` deduplica la lista de miembros antes de
-  copiar, para que un `memberWidgetIds` corrupto (con un id repetido) nunca duplique ese miembro
-  varias veces.
+  agrupados, con ids nuevos) en la posición donde se soltó el fantasma; `sanitizeGroupMemberIds`
+  deduplica la lista de miembros antes de copiar, para que un `memberWidgetIds` corrupto (con un
+  id repetido) nunca duplique ese miembro varias veces.
 - Copiar un contenedor **abierto** duplica solo el contenedor vacío.
 - Eliminar un contenedor **abierto** elimina únicamente el contenedor, sin diálogo de
   confirmación; los miembros permanecen en su lugar y quedan liberados (comportamiento D5 sin
