@@ -144,6 +144,12 @@ Only overrides are stored; keys absent or null already equal the code defaults.
 - [x] **V1** — Update all defaults to the captured values (shader store, CSS tokens + Design tab
   default maps, orb defaults), adjust tests that pin old defaults, update docs that list them.
   Route: delegated writer.
+- [ ] **V3** — Fresh install creates NO example data (user decision 2026-09-28): stop seeding
+  `mockDashboards` (DashboardStorageService), the example hierarchy tree `mockHierarchyNodes`
+  (Steigen, areas, compressors, sector, line, folder, group — HierarchyStorageService), the 4
+  invented catalog variables `mockVariableCatalog` (VariableCatalogStorageService) and
+  `mockTemplates` (TemplateStorageService). KEEP the 9 default node types (NodeTypeStorageService
+  `DEFAULT_NODE_TYPES`). Existing installs keep their data untouched. Route: delegated writer.
 - [ ] **V2** — Live check by the user on a fresh origin (e.g. 5174 or `localhost`).
 
 ## Progress
