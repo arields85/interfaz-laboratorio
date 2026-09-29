@@ -25,7 +25,7 @@ without losing speed.
 - It works as a preload: data queries start immediately exactly as today; the animation runs in
   parallel, CSS-only. If a value is already there, it grows once its frame appears; if it arrives
   mid-animation, it grows when it arrives.
-- KPI numbers counting up from zero: out of scope for now (possible later addition).
+- KPI numbers counting up from zero: initially out of scope; requested by the user on 2026-09-29 (V8).
 - `prefers-reduced-motion`: no entrance animation.
 
 ## Scope
@@ -65,6 +65,14 @@ without losing speed.
   (WARNING: a view switch remounts every widget subtree — check widget-local state and mount-time
   fetches, add a test), R3-orders-frozen-per-key, R3-unscoped-guard-partial, R3-dashboard-wiring-untested
   (SUGGESTIONS). Evaluate after V4 so tuning and fixes share one pass.
+- [ ] **V6** — Frame background flash (user feedback 2026-09-29 after the first live look: "mucho mejor,
+  más dinamismo"): on entrance each frame's background flashes/blinks — a brightness overlay above the
+  fill peaks and decays to the theme's rest look; visible in all three presets (Instrumento has 0 % fill).
+- [ ] **V7** — Frame outline draw-in: a line traces the frame perimeter (following its corner radius) and
+  then blends into the theme's own border; in Instrumento (0 % border) it traces and fades out.
+- [ ] **V8** — Numbers count up from zero to their value on entrance (main values of `kpi`, `metric-card`,
+  `machine-activity`, keeping each widget's decimals and unit); viewer-only, entry-only (refreshes keep
+  today's behavior), reduced motion shows the value directly. Reverses the earlier "out of scope" note.
 
 ## Acceptance criteria
 
@@ -117,4 +125,5 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
 ## Next step
 
 V4: live tuning with the user (timings/easing in the single `:root` block of `index.css`) and live acceptance
-in all three theme presets; then V5 (review advisories).
+in all three theme presets. V6–V8 (flash, outline draw-in, count-up) via one delegated writer first, then
+the live look again; V5 (review advisories) after tuning.
