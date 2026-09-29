@@ -64,13 +64,15 @@ without losing speed.
 - [ ] **V5** — Review advisories (lineage `review-e44eea326a8f700c`, non-blocking): R3-frame-key-remount
   (WARNING: a view switch remounts every widget subtree — check widget-local state and mount-time
   fetches, add a test), R3-orders-frozen-per-key, R3-unscoped-guard-partial, R3-dashboard-wiring-untested
-  (SUGGESTIONS). Evaluate after V4 so tuning and fixes share one pass.
-- [ ] **V6** — Frame background flash (user feedback 2026-09-29 after the first live look: "mucho mejor,
+  (SUGGESTIONS). Evaluate after V4 so tuning and fixes share one pass. PARTIALLY CLOSED 2026-09-29:
+  R3-unscoped-guard-partial (the builder-safety guard now covers every `.hmi-viewer-*` rule, see V6-V8
+  progress); the other three advisories stay open.
+- [x] **V6** — Frame background flash (user feedback 2026-09-29 after the first live look: "mucho mejor,
   más dinamismo"): on entrance each frame's background flashes/blinks — a brightness overlay above the
   fill peaks and decays to the theme's rest look; visible in all three presets (Instrumento has 0 % fill).
-- [ ] **V7** — Frame outline draw-in: a line traces the frame perimeter (following its corner radius) and
+- [x] **V7** — Frame outline draw-in: a line traces the frame perimeter (following its corner radius) and
   then blends into the theme's own border; in Instrumento (0 % border) it traces and fades out.
-- [ ] **V8** — Numbers count up from zero to their value on entrance (main values of `kpi`, `metric-card`,
+- [x] **V8** — Numbers count up from zero to their value on entrance (main values of `kpi`, `metric-card`,
   `machine-activity`, keeping each widget's decimals and unit); viewer-only, entry-only (refreshes keep
   today's behavior), reduced motion shows the value directly. Reverses the earlier "out of scope" note.
 
@@ -122,8 +124,47 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
   lineage `review-e44eea326a8f700c` APPROVED, acknowledged, authority burned. Reviewed boundary is now
   `c0bbaee`. Four non-blocking advisories recorded as V5.
 
+- 2026-09-29 V6 + V7 (route: delegated writer; commit `77a8bcd`, one work unit because both share the
+  overlay component): design choice = a `ViewerEntranceFrameOverlays` component rendered by
+  `DashboardViewer` INSIDE the item surface, after the widget (so it paints above the frame fill and is
+  contained in the surface stacking context), instead of per-renderer markup or pseudo-elements: it cannot
+  collide with `.glass-panel::after` (corner accents) or `.glass-panel-group::before` (group fill), covers
+  every widget type in one place, and gets the exact frame box from `resolveWidgetSurfaceInset(widget)`
+  (same value as the surface padding; group = 0px) and the radius from `--frame-radius-rest`. Flash = a
+  `div` with a gradient of `--viewer-entrance-flash-color`, opacity 0 -> peak (18 % of the duration) -> 0.
+  Outline = a `div` (carries the inset, because a replaced `svg` does not stretch between insets) holding
+  an `svg` with `<rect pathLength="1" width/height 100 %>`; `rx/ry` come from CSS
+  (`rx: var(--frame-radius-rest)`), `stroke-dashoffset` 1 -> 0 then an opacity fade over the theme's own
+  border (Instrumento traces and disappears). Neither animates the `--frame-*` tokens. `text-title`
+  (frameless) gets no overlays. Reduced motion: both `animation: none` (base opacity 0 = invisible).
+  RED: `DashboardViewer.entrance.test.tsx` 6 failing (overlays missing, tokens/keyframes/rules/reduced
+  motion absent); GREEN: 19/19 at that point. Guard test: every selector mentioning `.hmi-viewer-` (comments and
+  keyframes stripped) must carry `[data-viewer-entrance='true']`; it already passed on the existing
+  gauge/chart classes and now also protects the new ones (R3-unscoped-guard-partial closed).
+- 2026-09-29 V8 (route: delegated writer; commit `78694c6`): `ViewerEntranceContext` (per-item stagger order,
+  provided by `DashboardViewer`, `null` outside the viewer) + `useViewerEntranceCountUp(hasValue)` in
+  `hooks/` return a 0..1 progress; widgets scale only their main value text with
+  `resolveViewerCountUpValue` (rounded to the value's own decimals mid-count, the untouched value at the
+  end, so the final text is exactly today's). Timing has one source of truth: spread, value offset,
+  `--viewer-entrance-count-duration` and the `--viewer-entrance-ease` cubic-bezier are read from the
+  `:root` tokens via `getComputedStyle` (a pre-commit review flagged a private JS easing; replaced with the
+  shared curve evaluated by `resolveCubicBezierProgress`). Start = item delay + value offset, i.e. together
+  with the gauge fill. One-shot per mount: the grid remounts per entry (`entranceKey`), a refresh keeps the
+  mount and the hook is settled, so no replay; existing rAF tweens in `KpiWidget`/`MachineActivityWidget`
+  are untouched (they animate refreshes; the KPI glide value still feeds the gauge). Late data: first
+  value inside the window counts from its arrival; after the window it shows directly. Reduced motion,
+  missing tokens or no provider (builder) -> progress 1. RED: `viewerEntrance.test.ts` (10 failing),
+  `useViewerEntranceCountUp.test.tsx` (module missing), `viewerEntranceCountUp.test.tsx` (5 failing on
+  the initial-zero assertions), `DashboardViewer.entrance.test.tsx` (2 failing); later RED for the shared
+  ease (8 failing). GREEN: all pass (70 tests in the four touched suites). Test clock in
+  `test/entranceClock.ts`.
+- 2026-09-29 verification V6-V8 (in `hmi-app/`): `npx tsc -b` clean; `npm run lint` clean; `npm test`
+  239 files / 3033 tests passed (an earlier full run had one `Topbar.test.tsx` failure under parallel load,
+  16/16 twice alone and green on the next full run); `npm run build` OK. Not verified: real browser
+  rendering per theme preset (jsdom cannot run CSS animations).
+
 ## Next step
 
-V4: live tuning with the user (timings/easing in the single `:root` block of `index.css`) and live acceptance
-in all three theme presets. V6–V8 (flash, outline draw-in, count-up) via one delegated writer first, then
-the live look again; V5 (review advisories) after tuning.
+V4: live look and tuning with the user of V6-V8 (flash, outline draw-in, count-up; tokens in the single
+`:root` block of `index.css`) in all three theme presets; check `rx/ry` CSS geometry properties on the
+outline rect in the target browsers. V5 (the remaining three review advisories) after tuning.
