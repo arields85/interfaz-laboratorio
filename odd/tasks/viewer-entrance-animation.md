@@ -61,6 +61,10 @@ without losing speed.
 - [x] **V3** — Chart draw-in for the five SVG chart widgets (left-to-right reveal of lines, areas and
   bars), same timing tokens.
 - [ ] **V4** — Live tuning with the user (timings/easing) and live acceptance.
+- [ ] **V5** — Review advisories (lineage `review-e44eea326a8f700c`, non-blocking): R3-frame-key-remount
+  (WARNING: a view switch remounts every widget subtree — check widget-local state and mount-time
+  fetches, add a test), R3-orders-frozen-per-key, R3-unscoped-guard-partial, R3-dashboard-wiring-untested
+  (SUGGESTIONS). Evaluate after V4 so tuning and fixes share one pass.
 
 ## Acceptance criteria
 
@@ -104,8 +108,13 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
   4/4 and the new ActivityAnalytics test failing. GREEN: all pass.
 - 2026-09-29 verification (in `hmi-app/`): `npx tsc -b` clean; `npm run lint` clean; `npm test` 237 files /
   2981 tests passed; `npm run build` OK. Not verified: real browser rendering (jsdom cannot run CSS animations).
+- 2026-09-29 parent spot check: `DashboardViewer.entrance.test.tsx` + `GaugeDisplay.entrance.test.tsx`
+  16/16. RDD assess `b18cb82..c0bbaee` (committed-only, `.gga` excluded): medium, 913 lines,
+  `review_due` (`slice_budget_reached`); user GRANTED consent; one lens (reliability), in-process capture;
+  lineage `review-e44eea326a8f700c` APPROVED, acknowledged, authority burned. Reviewed boundary is now
+  `c0bbaee`. Four non-blocking advisories recorded as V5.
 
 ## Next step
 
 V4: live tuning with the user (timings/easing in the single `:root` block of `index.css`) and live acceptance
-in all three theme presets.
+in all three theme presets; then V5 (review advisories).
