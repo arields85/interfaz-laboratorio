@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import { parseCssLengthPx } from '../utils/tabFramePath';
-import { resolveTabFrameIconPlacement, type TabFrameIconPlacement } from '../utils/tabFrameIcon';
+import { resolveTabFrameIconPlacement, TAB_FRAME_ICON_SIZE_PX, type TabFrameIconPlacement } from '../utils/tabFrameIcon';
 
 function isSamePlacement(a: TabFrameIconPlacement | null, b: TabFrameIconPlacement | null): boolean {
     if (a === null || b === null) {
@@ -34,6 +34,9 @@ export function useTabFrameIconPlacement(
             const style = window.getComputedStyle(element);
             const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
             const token = (name: string) => parseCssLengthPx(style.getPropertyValue(name), rootFontSize);
+            // The host scales the icon toward its top-right corner, so the rule uses the drawn size.
+            const scale = Number.parseFloat(style.getPropertyValue('--tab-frame-icon-scale'));
+            const iconSize = TAB_FRAME_ICON_SIZE_PX * (Number.isFinite(scale) && scale > 0 ? scale : 1);
             const next = resolveTabFrameIconPlacement({
                 tabHeight: token('--tab-frame-height'),
                 bodyCut: token('--tab-frame-body-cut'),
@@ -42,7 +45,7 @@ export function useTabFrameIconPlacement(
                 clearance: token('--tab-frame-icon-clearance'),
                 minTop: token('--tab-frame-icon-min-top'),
                 tabGap: token('--tab-frame-icon-tab-gap'),
-            });
+            }, iconSize);
 
             setPlacement((current) => (isSamePlacement(current, next) ? current : next));
         };

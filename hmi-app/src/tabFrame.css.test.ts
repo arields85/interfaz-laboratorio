@@ -34,10 +34,11 @@ describe('index.css tab frame shape', () => {
         expect(root).toContain('--tab-frame-glow-blur-hover: 9px;');
         expect(root).toContain('--tab-frame-glow-spread: 2px;');
         expect(root).toContain('--tab-frame-pad-end:');
-        expect(root).toContain('--tab-frame-icon-right: 7px;');
+        expect(root).toContain('--tab-frame-icon-right: 0px;');
         expect(root).toContain('--tab-frame-icon-gap: 4px;');
         expect(root).toContain('--tab-frame-icon-clearance: 3px;');
-        expect(root).toContain('--tab-frame-icon-min-top: 1px;');
+        expect(root).toContain('--tab-frame-icon-min-top: 0px;');
+        expect(root).toContain('--tab-frame-icon-scale: 0.9;');
         expect(root).toContain('--tab-frame-icon-tab-gap: 8px;');
         expect(root).not.toContain('--tab-frame-icon-shift');
     });
@@ -164,6 +165,9 @@ describe('index.css tab frame shape', () => {
         expect(body).toContain('position: absolute;');
         expect(body).toContain('top: var(--tab-frame-icon-top, var(--tab-frame-icon-min-top));');
         expect(body).toContain('right: var(--tab-frame-icon-right);');
+        // Scaled toward the top-right corner, so a zero margin keeps it flush with that corner.
+        expect(body).toContain('transform: scale(var(--tab-frame-icon-scale));');
+        expect(body).toContain('transform-origin: top right;');
         expect(indexCss).not.toContain('--tab-frame-icon-shift');
     });
 

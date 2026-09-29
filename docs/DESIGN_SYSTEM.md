@@ -68,11 +68,12 @@ Configuración general → Tema → "Forma del marco" elige entre **Estándar** 
 | `--tab-frame-pad-start` / `--tab-frame-pad-end` | `0.625rem` / `0.3rem` | Relleno horizontal de la pestaña (el inicio deja el punto y el título más a la izquierda) |
 | `--tab-frame-gap` | `0.375rem` | Separación entre el punto de modo de dato y el título |
 | `--tab-frame-glow-blur` / `-hover` / `--tab-frame-glow-spread` | `7px` / `9px` / `2px` | Brillo de alerta: desenfoque en reposo y hover, y expansión de la silueta |
-| `--tab-frame-icon-right` | `7px` | Distancia fija del ícono del header al borde derecho del widget |
+| `--tab-frame-icon-right` | `0px` | Distancia fija del ícono del header al borde derecho del widget (sin margen) |
 | `--tab-frame-icon-gap` | `4px` | Separación preferida del ícono bajo la línea superior del cuerpo |
 | `--tab-frame-icon-clearance` | `3px` | Holgura del ícono respecto de la diagonal del corte |
-| `--tab-frame-icon-min-top` | `1px` | Tope superior del ícono (nunca sube más arriba del borde del widget) |
+| `--tab-frame-icon-min-top` | `0px` | Tope superior del ícono (nunca sube más arriba del borde del widget; sin margen) |
 | `--tab-frame-icon-tab-gap` | `8px` | Separación entre el final de la pestaña y el ícono cuando este ocupa la franja |
+| `--tab-frame-icon-scale` | `0.9` | Escala del ícono hacia la esquina superior derecha (la regla de ubicación usa el tamaño escalado) |
 
 La altura de la pestaña, el recorte, el chaflán del cuerpo, el relleno, el color del texto y los tokens del ícono son la elección del laboratorio de estilos del 2026-09-29 (con el marco de Instrumento: radio de 5 px); se afinan desde `index.css`.
 

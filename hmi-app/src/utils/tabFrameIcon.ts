@@ -47,9 +47,14 @@ export function resolveTabFrameIconPlacement(
     const preferred = tabHeight + gap;
     // Inside the cut triangle: (x - (W - bodyCut)) >= (y - tabHeight) + clearance at the icon's bottom-left.
     const maxTop = tabHeight + bodyCut - right - 2 * iconSize - clearance;
-    const top = Math.max(minTop, Math.min(preferred, maxTop));
+    const top = roundPx(Math.max(minTop, Math.min(preferred, maxTop)));
     const inStrip = top < tabHeight;
-    const reserve = inStrip ? Math.max(bodyCut, right + iconSize + tabGap) : bodyCut;
+    const reserve = roundPx(inStrip ? Math.max(bodyCut, right + iconSize + tabGap) : bodyCut);
 
     return { top, right, inStrip, reserve };
+}
+
+/** A scaled icon size (e.g. 24 x 0.9) carries float noise; the CSS values keep two decimals. */
+function roundPx(value: number): number {
+    return Math.round(value * 100) / 100;
 }

@@ -397,11 +397,12 @@ describe('WidgetFrame', () => {
             '--tab-frame-tab-cut': '19px',
             '--tab-frame-body-cut': '0px',
             '--tab-frame-glow-spread': '2px',
-            '--tab-frame-icon-right': '7px',
+            '--tab-frame-icon-right': '0px',
             '--tab-frame-icon-gap': '4px',
             '--tab-frame-icon-clearance': '3px',
-            '--tab-frame-icon-min-top': '1px',
+            '--tab-frame-icon-min-top': '0px',
             '--tab-frame-icon-tab-gap': '8px',
+            '--tab-frame-icon-scale': '0.9',
         };
 
         function mockTokens(overrides: Record<string, string> = {}) {
@@ -447,9 +448,9 @@ describe('WidgetFrame', () => {
             const { container } = renderFramed();
 
             const shell = container.firstElementChild as HTMLElement;
-            expect(shell.style.getPropertyValue('--tab-frame-icon-top')).toBe('1px');
-            // right 7 + icon 24 + gap 8
-            expect(shell.style.getPropertyValue('--tab-frame-icon-reserve')).toBe('39px');
+            expect(shell.style.getPropertyValue('--tab-frame-icon-top')).toBe('0px');
+            // right 0 + icon 24 x 0.9 + gap 8
+            expect(shell.style.getPropertyValue('--tab-frame-icon-reserve')).toBe('29.6px');
         });
 
         it('with a large body chamfer the icon sits just below the body top line and the tab only clears the chamfer', () => {
@@ -469,7 +470,8 @@ describe('WidgetFrame', () => {
 
             const { container } = renderFramed();
 
-            expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-icon-top')).toBe('17px');
+            // maxTop = 25 + 50 - 0 - 2 x 21.6 - 3 = 28.8, just above the preferred 29
+            expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-icon-top')).toBe('28.8px');
         });
 
         it('publishes no icon placement in the standard shape', () => {

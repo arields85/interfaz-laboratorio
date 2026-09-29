@@ -454,8 +454,9 @@ h1, h2, h3, h4, h5, h6 {
  *   --tab-frame-glow-*       brillo de alerta: desenfoque (reposo/hover) y expansión, iguales al
  *                            box-shadow de `.widget-state-warning/-critical`
  *   --tab-frame-icon-*       ícono del header: distancia fija al borde derecho, separación preferida bajo la
- *                            línea superior del cuerpo, holgura respecto de la diagonal, tope superior y
- *                            separación entre el final de la pestaña y el ícono (ver `utils/tabFrameIcon.ts`)
+ *                            línea superior del cuerpo, holgura respecto de la diagonal, tope superior,
+ *                            separación entre el final de la pestaña y el ícono, y escala del ícono (hacia la
+ *                            esquina superior derecha) (ver `utils/tabFrameIcon.ts`)
  * ────────────────────────────────────────────────────────────────────── */
 :root {
   --tab-frame-height: 25px;
@@ -471,11 +472,12 @@ h1, h2, h3, h4, h5, h6 {
   --tab-frame-glow-blur: 7px;
   --tab-frame-glow-blur-hover: 9px;
   --tab-frame-glow-spread: 2px;
-  --tab-frame-icon-right: 7px;
+  --tab-frame-icon-right: 0px;
   --tab-frame-icon-gap: 4px;
   --tab-frame-icon-clearance: 3px;
-  --tab-frame-icon-min-top: 1px;
+  --tab-frame-icon-min-top: 0px;
   --tab-frame-icon-tab-gap: 8px;
+  --tab-frame-icon-scale: 0.9;
 }
 
 /* ── Motor de tema: fondo propio del contenedor de grupo (GroupWidget) ────
@@ -1913,6 +1915,8 @@ h1, h2, h3, h4, h5, h6 {
     z-index: 2;
     top: var(--tab-frame-icon-top, var(--tab-frame-icon-min-top));
     right: var(--tab-frame-icon-right);
+    transform: scale(var(--tab-frame-icon-scale));
+    transform-origin: top right;
   }
 
   /* Con ícono, la pestaña (y su título truncado) se detiene antes de él cuando ocupa la franja. */
