@@ -728,6 +728,27 @@ h1, h2, h3, h4, h5, h6 {
   animation-fill-mode: backwards;
 }
 
+/* Gráficos SVG (trend-chart, trend-chart-v2, prod-history, prod-trend y activity-analytics):
+ * revelado de izquierda a derecha. Los dos extremos son insets explícitos porque `clip-path: none`
+ * no se interpola con una forma; los insets negativos dejan pasar el glow que sobresale. */
+@keyframes hmi-viewer-chart-reveal {
+  from {
+    clip-path: inset(-100% 100% -100% 0);
+  }
+
+  to {
+    clip-path: inset(-100% -100% -100% 0);
+  }
+}
+
+[data-viewer-entrance='true'] .hmi-viewer-chart-reveal {
+  animation-name: hmi-viewer-chart-reveal;
+  animation-duration: var(--viewer-entrance-value-duration);
+  animation-timing-function: var(--viewer-entrance-ease);
+  animation-delay: calc(var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-value-offset));
+  animation-fill-mode: backwards;
+}
+
 @keyframes widget-runtime-state-caret-blink {
   0%,
   49% {
@@ -841,7 +862,8 @@ h1, h2, h3, h4, h5, h6 {
   [data-viewer-entrance='true'] > .hmi-viewer-entrance-item,
   [data-viewer-entrance='true'] .hmi-viewer-gauge-bar-fill,
   [data-viewer-entrance='true'] .hmi-viewer-gauge-ring-segment,
-  [data-viewer-entrance='true'] .hmi-viewer-gauge-ring-cap {
+  [data-viewer-entrance='true'] .hmi-viewer-gauge-ring-cap,
+  [data-viewer-entrance='true'] .hmi-viewer-chart-reveal {
     animation: none;
   }
 

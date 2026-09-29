@@ -12,6 +12,9 @@ interface WidgetChartLayoutProps {
     renderOverlay?: (layout: WidgetChartLayoutMetrics) => ReactNode;
 }
 
+// Hook for the viewer entrance draw-in (left-to-right reveal); inert outside the viewer scope.
+const CHART_REVEAL_CLASS = 'hmi-viewer-chart-reveal';
+
 export default function WidgetChartLayout({ layout, svgTestId, overlaySvgTestId, svgProps, renderMain, renderOverlay }: WidgetChartLayoutProps) {
     const overlayContent = renderOverlay?.(layout);
 
@@ -19,6 +22,7 @@ export default function WidgetChartLayout({ layout, svgTestId, overlaySvgTestId,
         <>
             <svg
                 {...svgProps}
+                className={[CHART_REVEAL_CLASS, svgProps?.className].filter(Boolean).join(' ')}
                 data-testid={svgTestId}
                 width={layout.dimensions.width}
                 height={layout.dimensions.height}
@@ -43,7 +47,7 @@ export default function WidgetChartLayout({ layout, svgTestId, overlaySvgTestId,
                     width={layout.overlay.width}
                     height={layout.overlay.height}
                     viewBox={layout.overlay.viewBox}
-                    className="pointer-events-none absolute left-0"
+                    className={`pointer-events-none absolute left-0 ${CHART_REVEAL_CLASS}`}
                     style={{ top: `${layout.overlay.top}px`, overflow: 'visible' }}
                     aria-hidden="true"
                     data-testid={overlaySvgTestId}

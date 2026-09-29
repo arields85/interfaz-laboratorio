@@ -1681,6 +1681,7 @@ function ProdTrendChart({
     return (
         <>
             <svg
+                className="hmi-viewer-chart-reveal"
                 width={width}
                 height={height}
                 viewBox={`0 0 ${width} ${height}`}
@@ -2008,7 +2009,7 @@ function ProdTrendChart({
                     width={width}
                     height={overlayHeight}
                     viewBox={overlayViewBox}
-                    className="pointer-events-none absolute left-0"
+                    className="pointer-events-none absolute left-0 hmi-viewer-chart-reveal"
                     style={{ top: `-${PROD_TREND_OVERLAY_TOP_PADDING_PX}px`, overflow: 'visible' }}
                     aria-hidden="true"
                     data-testid="activity-analytics-prod-trend-overlay-svg"
@@ -3779,7 +3780,7 @@ function GroupedStackedBarsChart({
 
     return (
         <div className="relative shrink-0 self-end" style={{ width: `${chartWidth}px` }}>
-            <svg width={chartWidth} height={height} viewBox={`0 0 ${chartWidth} ${height}`} data-testid="activity-analytics-groups-chart">
+            <svg className="hmi-viewer-chart-reveal" width={chartWidth} height={height} viewBox={`0 0 ${chartWidth} ${height}`} data-testid="activity-analytics-groups-chart">
                 <defs>
                     {renderSurfaceEffectsFilter({
                         id: groupedGlowFilterId,

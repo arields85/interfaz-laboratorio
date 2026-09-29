@@ -2453,6 +2453,44 @@ describe('ActivityAnalyticsWidget', () => {
         expect(Number(summaryChart.getAttribute('width'))).toBeLessThan(640);
     });
 
+    it('tags the % PROD trend, its overlay and the groups chart for the viewer chart draw-in', () => {
+        vi.mocked(useActivitySeries).mockReturnValue({
+            data: POPULATED_ACTIVITY_SERIES,
+            isLoading: false,
+            isError: false,
+            error: null,
+            isEnabled: true,
+        });
+        mockComputedAnalytics([
+            buildGroupedBucket({ bucketKey: 'day-1', label: '18/06', productivityRatio: 0.8, productivityLabel: '80%' }),
+            buildGroupedBucket({ bucketKey: 'day-2', label: '19/06', productivityRatio: 0.55, productivityLabel: '55%' }),
+            buildGroupedBucket({ bucketKey: 'day-3', label: '20/06', productivityRatio: 0.7, productivityLabel: '70%' }),
+        ]);
+
+        render(
+            <ActivityAnalyticsWidget
+                widget={makeWidget({
+                    displayOptions: {
+                        ...makeWidget().displayOptions,
+                        range: '7d',
+                        groupBy: 'day',
+                    },
+                })}
+                machines={MACHINES}
+            />,
+        );
+
+        act(() => {
+            emitActivityAnalyticsLayoutSize({ bodyWidth: 640, bodyHeight: 420 });
+        });
+
+        expect(screen.getByTestId('activity-analytics-prod-trend-chart')).toHaveClass('hmi-viewer-chart-reveal');
+        expect(screen.getByTestId('activity-analytics-prod-trend-overlay-svg')).toHaveClass('hmi-viewer-chart-reveal');
+        expect(screen.getByTestId('activity-analytics-groups-chart')).toHaveClass('hmi-viewer-chart-reveal');
+        // The donut summary is not a series chart: it keeps no draw-in.
+        expect(screen.getByTestId('activity-analytics-summary-chart')).not.toHaveClass('hmi-viewer-chart-reveal');
+    });
+
     it('renders the % PROD trend with a fixed 0-100 domain and keeps groups below it', () => {
         vi.mocked(useActivitySeries).mockReturnValue({
             data: POPULATED_ACTIVITY_SERIES,
