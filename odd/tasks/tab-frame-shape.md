@@ -69,21 +69,42 @@ header") and wants to TRY it, so it must be switchable and reversible with one c
   viewer entrance flash + outline.
 - [ ] **F4** — Live look with the user and tuning. First live look 2026-09-29: "se ve todo muy bien", with
   the corrections in F5.
-- [ ] **F5** — Corrections from the first live look (user, 2026-09-29):
-  - Tab colors, normal widgets: tab fill WHITE at 40 % opacity; title text white at 70 %, 100 % while the
-    widget is hovered (interpretation: text shares the tab's hue, by analogy with the alert case).
-  - Tab colors, metric-card in warning/critical (any alert state): tab fill = the alert color at 40 %; title
-    text = the alert color at 100 %.
-  - The data-mode dot keeps its meaning (dark simulated / green real).
-  - Dot + title start further left inside the tab (less start padding) so longer titles fit.
-  - One unified silhouette (tab + body): EVERY corner gets the same radius as the widget's corners
-    (`--frame-radius-rest` of the active preset) — the tab's free corners, both vertices of the body's
-    diagonal cut, and the junction where the tab meets the body top (concave fillet). The rest border keeps
-    following the body as today unless the unified path makes it natural to include the tab (report).
-  - The viewer entrance outline draws that unified rounded silhouette, never a rectangle (the user saw a
-    rectangle — verify where the rect is still used and fix).
-  - Recover the warning/critical glow (lost to the clip-path) following the unified silhouette (e.g. a
-    `filter: drop-shadow` on an unclipped shell or an SVG glow), including its hover growth.
+- [x] **F5** — Corrections from the first live look (user, 2026-09-29). Outcome per item (commits `3febe44`,
+  `e8a01c0`, `e4a07ef`):
+  - [x] Tab colors, normal widgets. Decision history: first "white 40 % fill + title white 70 % / 100 % on hover";
+    then user correction 1: reuse EXACTLY the standard title classes (`text-industrial-muted group-hover:text-white
+    transition-colors`), no new opacity rule; then user correction 2 (final): tab FILL = white at 20 %
+    (`--tab-frame-fill: color-mix(in srgb, #fff 20%, transparent)`), title keeps the standard behavior but through
+    the tokens `--tab-frame-text` (`var(--color-industrial-muted)`) / `--tab-frame-text-hover` (`#fff`), applied
+    with the same utilities (`text-(color:--tab-frame-text) group-hover:text-(color:--tab-frame-text-hover)
+    transition-colors`), so the user can pick the final text color in the style lab in one place.
+  - [x] Tab colors, metric-card in warning/critical: `data-alert-state` on the shell (from the `widget-state-*`
+    class, follows the state live) sets `--tab-frame-fill` to the state color at `--tab-frame-alert-fill-opacity`
+    (40 %); the title takes `text-status-warning|critical` (100 %, no hover change) through `TabFrameContext.alertState`.
+  - [x] The data-mode dot keeps its meaning: real green (`text-status-normal`), simulated inherits the tab color
+    (`--tab-frame-text`, the muted gray of the standard dot; visible on the 20 % tab and on the alert tab).
+  - [x] Dot + title start further left: `--tab-frame-pad-start` 1.25rem -> 0.625rem, new `--tab-frame-gap` 0.375rem
+    (was 0.5rem); vertical centering unchanged.
+  - [x] One unified silhouette: `buildTabFramePath` rounds EVERY vertex (tab free corners, concave junction with the
+    opposite arc sweep, both vertices of the body cut, bottom corners) with `--frame-radius-rest`; radius capped to
+    half the shortest adjacent edge; inset (stroke rings) and outset (glow spread). Used by the surface clip
+    (`clip-path: path()` inline, measured; the CSS polygon is only the pre-measure fallback), the border, the glow,
+    the builder rings/ghosts and the entrance flash + outline. Rest border: kept on the BODY only (the tab strip is
+    skipped with `clip-path: inset(var(--tab-frame-height) 0 0 0)`), as in the user's screenshot; it is an SVG
+    stroke of the same path at 2x width under the surface clip. Limits: the radius is the rest radius (a preset
+    whose hover radius differs does not animate the silhouette).
+  - [x] Entrance outline never a rectangle. Root cause: the outline drew a `<rect>` (and the flash a full rounded
+    rectangle) whenever the widget had not yet reported a tab width or the outline box had not been measured — the
+    frame reported the width from a passive effect after the title-host ref state commit, then the geometry was
+    measured in a second effect, so the first frames of every entrance (and any moment the width read as `null`)
+    were the standard rect. Fix: `WidgetFrame` reports from the first layout pass (`0` = tab shape, width pending;
+    `null` only for the standard shape/unmount); overlays and `GridSelectionFrame` draw NOTHING for a tab-shape
+    widget until the unified path is measured; the polygon flash rule was replaced by the inline path clip.
+  - [x] Warning/critical glow recovered: sibling layer BEHIND the surface (a `filter` on an ancestor would break
+    the glass `backdrop-filter`): silhouette grown by `--tab-frame-glow-spread` (2px), `filter: blur(7px)` (= half
+    the 14px box-shadow blur), state color at 20 % (28 % and blur 9px on hover), and an inline even-odd clip-path
+    punches the silhouette out so only the outside survives, like a box-shadow. Approximation: the hover spread
+    growth (2px -> 3px) is done with more blur/opacity, not a new path.
 
 ## Acceptance criteria
 
@@ -150,7 +171,43 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
   candidates (e.g. one per commit: F1 `cc1450b`, F2 `9e9c187`, F3 `5d98403`, fix `84ee23d`) after the live
   tuning, so it covers the final code.
 
+- 2026-09-29 (F5, delegated writer, strict TDD, Vitest; RED observed before each GREEN). Route: delegated writer
+  (writer trigger: 2+ non-trivial files). User corrections received during F5 are recorded under the F5 items above
+  (item 1 changed twice).
+  - `3febe44` feat(theme): round every corner of the unified tab frame silhouette path (118+/56-). RED: 5/11
+    `tabFramePath.test.ts` failing (old polygon output), then GREEN 11/11; consumers' tests stayed green because
+    they compare against the generator.
+  - `e8a01c0` feat(theme): unify the tab frame silhouette with rounded corners, alert glow and tab colors
+    (450+/99-, over the ~400 heuristic: frame clip, border, fill, glow, colors and title share `WidgetFrame`,
+    `index.css` and their tests, so they could not be split). RED: `tabFramePath` glow clip helper missing,
+    `WidgetFrame.test.tsx` 7 failing (pending width, clip path, border svg, fill, glow, alert title), then
+    `tabFrame.css.test.ts` 11 failing (tokens, surface, border, fill, alert fill, glow, tab), then the title
+    classes 2 failing; GREEN for all after each step.
+  - `e4a07ef` fix(theme): draw the rounded silhouette, never a rectangle, in the entrance and builder layers
+    (164+/72-). RED: `ViewerEntranceFrameOverlays.tabFrame.test.tsx` 4 failing (flash path clip, no rect when
+    the width is pending, no rect when the box is unmeasured, rect-to-path swap), `tabFrame.css.test.ts` 1 failing
+    (polygon flash rule still present), `GridSelectionFrame.tabFrame.test.tsx` 1 failing (observed by stashing the
+    implementation); GREEN afterwards; `tabFrame.silhouette.test.tsx` asserts the frame clip, border, flash,
+    outline and rings all derive from the same generator and geometry.
+  - GGA passed all three commits (advice only: header comment of `tabFramePath.ts` fixed, nested ternary in the
+    overlays noted, a pre-existing informal-Spanish comment in `WidgetHeader.tsx` left).
+  - Final commands (in `hmi-app/`): `npx tsc -b` clean; `npm run lint` clean; `npm test` 253 files / 3218 tests
+    passed; `npm run build` ok (Tailwind emitted `text-(color:--tab-frame-text*)`; run after `e4a07ef`).
+  - Not verifiable without a browser (needs the second live look): the visual rounding at the real preset radius
+    (`1.5rem` on the default preset vs the ~4 px of the reference), the border gap where the body meets the tab
+    (border starts at the tab base by design), the `blur` glow intensity vs the box-shadow of the standard alert
+    card, the 20 % tab legibility with the muted title, the dot on the alert tab, and the entrance sequence.
+
+- 2026-09-29 current token list after F5 (`index.css` `:root`): `--tab-frame-height: 25px`, `--tab-frame-tab-cut:
+  var(--tab-frame-height)`, `--tab-frame-body-cut: 50px`, `--tab-frame-fill: color-mix(in srgb, #fff 20%,
+  transparent)`, `--tab-frame-alert-fill-opacity: 40%`, `--tab-frame-text: var(--color-industrial-muted)`,
+  `--tab-frame-text-hover: #fff`, `--tab-frame-pad-start: 0.625rem`, `--tab-frame-pad-end: 0.3rem`,
+  `--tab-frame-gap: 0.375rem`, `--tab-frame-glow-blur: 7px`, `--tab-frame-glow-blur-hover: 9px`,
+  `--tab-frame-glow-spread: 2px`, `--tab-frame-icon-shift-x: 1.25rem`, `--tab-frame-icon-shift-y: 0.5rem`
+  (`--tab-frame-height/-tab-cut/-body-cut` still to be confirmed live, see the scale check).
+
 ## Next step
 
-F4 live look with the user and tuning (see the token table above; tab height/cut values to be confirmed live,
-see the scale check). Then the native review in smaller slices (the whole branch exceeds the reviewer budget).
+Second live look (F4) with the user on the rounded unified silhouette, the tab colors, the alert glow and the
+entrance (tokens above are the tuning knobs). Then the native review in smaller slices (the whole branch exceeds
+the reviewer budget): one candidate per work-unit commit, from the F1 boundary `40ad436`.
