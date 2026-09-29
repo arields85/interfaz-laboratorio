@@ -271,6 +271,18 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
   `--tab-frame-gap: 0.375rem`, `--tab-frame-glow-blur: 7px`, `--tab-frame-glow-blur-hover: 9px`,
   `--tab-frame-glow-spread: 2px`, `--tab-frame-icon-shift-x: 1.25rem`, `--tab-frame-icon-shift-y: 0.5rem`
   (`--tab-frame-height/-tab-cut/-body-cut` still to be confirmed live, see the scale check).
+- 2026-09-29 F4 live tuning (route: parent inline, 1-2 files each, TDD):
+  - The user found the header icon slightly too big and touching the body line: pinned to the top-right
+    corner with no margin (`--tab-frame-icon-right: 0px`, `--tab-frame-icon-min-top: 0px`) and scaled to 90 %
+    toward that corner (new `--tab-frame-icon-scale: 0.9`, `transform-origin: top right`; the placement rule uses
+    the scaled size, values rounded to 2 decimals). RED 4 (`tabFrame.css.test.ts`, `WidgetFrame.test.tsx`) ->
+    GREEN 64/64; `npm test` 3237/3237. Commit `692f5ba`. User: "perfecto".
+  - Entrance animation defaults set to the user's live values (outline 0.5 px at 40 %, flash 6 %):
+    `DEFAULT_VIEWER_ENTRANCE_SETTINGS` + `index.css` tokens + `docs/DESIGN_SYSTEM.md`; tests that hardcoded the
+    old saved flash value now use the constant. RED 2 -> GREEN 76/76; `npx tsc -b` clean, `npm run lint` clean,
+    `npm test` 3238/3238. Commit `917cb83`.
+  - Observed in the user's screenshot of Tema → "Animación de entrada": the three controls sit in narrow columns and
+    the numeric inputs overlap their labels ("Grosor del cont[0.5]rno") — pending the user's OK to fix.
 
 ## Next step
 
